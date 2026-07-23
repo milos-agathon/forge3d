@@ -30,17 +30,16 @@ pub(crate) fn report_device(py: Python<'_>) -> PyResult<Py<PyDict>> {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn c5_build_framegraph_report(py: Python<'_>) -> PyResult<Py<PyDict>> {
-    let plan = crate::core::framegraph_impl::compile_renderer_graph(&[
-        "diagnostic.g_buffer",
-        "diagnostic.lighting",
-        "diagnostic.post",
-    ])?;
-    let alias_reuse = plan.metrics.aliased_count > 0;
-    let barrier_ok = plan.labels.len() == 3;
+    let report = crate::core::framegraph_impl::last_renderer_graph_report();
+    let alias_reuse = report.metrics.aliased_count > 0;
+    let barrier_ok = !report.labels.is_empty() && report.barrier_count > 0;
 
     let d = PyDict::new_bound(py);
     d.set_item("alias_reuse", alias_reuse)?;
     d.set_item("barrier_ok", barrier_ok)?;
+    d.set_item("labels", report.labels)?;
+    d.set_item("barrier_count", report.barrier_count)?;
+    d.set_item("cache_disabled_passes", report.cache_disabled_passes)?;
     Ok(d.into())
 }
 
@@ -407,6 +406,18 @@ pub(crate) fn capabilities(py: Python<'_>) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
     d.set_item("requested", ctx.capabilities.wanted_names())?;
     d.set_item("granted", ctx.capabilities.granted_names())?;
+    d.set_item(
+        "backend",
+        format!("{:?}", ctx.adapter.get_info().backend).to_lowercase(),
+    )?;
+    d.set_item("dx12_compiler", ctx.dx12_compiler)?;
+    d.set_item(
+        "naga_capabilities",
+        vec![format!(
+            "wgpu-validation-default@naga-{}",
+            env!("FORGE3D_NAGA_VERSION")
+        )],
+    )?;
 
     let lim = PyDict::new_bound(py);
     lim.set_item("max_texture_dimension_2d", limits.max_texture_dimension_2d)?;

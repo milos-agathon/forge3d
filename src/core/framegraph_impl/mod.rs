@@ -30,6 +30,9 @@ impl PassBuilder {
                 reads: Vec::new(),
                 writes: Vec::new(),
                 can_parallelize: false,
+                pipeline_descriptor_bytes: Vec::new(),
+                uniform_bytes: Vec::new(),
+                cache_disabled_reason: None,
                 pass_key: None,
             },
         }
@@ -50,6 +53,24 @@ impl PassBuilder {
     /// Allow this pass to run in parallel with others
     pub fn allow_parallel(&mut self) -> &mut Self {
         self.desc.can_parallelize = true;
+        self
+    }
+
+    /// Declare the canonical complete pipeline/copy descriptor.
+    pub fn pipeline_descriptor(&mut self, bytes: impl Into<Vec<u8>>) -> &mut Self {
+        self.desc.pipeline_descriptor_bytes = bytes.into();
+        self
+    }
+
+    /// Declare the exact uploaded bytes, including initialized padding.
+    pub fn uniform_bytes(&mut self, bytes: impl Into<Vec<u8>>) -> &mut Self {
+        self.desc.uniform_bytes = bytes.into();
+        self
+    }
+
+    /// Disable cache reuse when any pixel-affecting declaration is incomplete.
+    pub fn disable_cache(&mut self, reason: impl Into<String>) -> &mut Self {
+        self.desc.cache_disabled_reason = Some(reason.into());
         self
     }
 
@@ -98,10 +119,10 @@ impl FrameGraph {
         self.next_resource_id += 1;
 
         let info = ResourceInfo {
+            is_transient: desc.is_transient,
             desc,
             first_use: None,
             last_use: None,
-            is_transient: true,
             aliased_with: None,
         };
 
@@ -124,6 +145,30 @@ impl FrameGraph {
 
         let mut builder = PassBuilder::new(name.to_string(), pass_type);
         setup(&mut builder)?;
+        if builder.desc.pipeline_descriptor_bytes.is_empty() {
+            return Err(RenderError::render(format!(
+                "framegraph pass {name:?} omitted its pipeline descriptor"
+            )));
+        }
+        if builder
+            .desc
+            .cache_disabled_reason
+            .as_ref()
+            .is_some_and(|reason| reason.trim().is_empty())
+        {
+            return Err(RenderError::render(format!(
+                "framegraph pass {name:?} has an empty cache-disabled reason"
+            )));
+        }
+        if self
+            .passes
+            .values()
+            .any(|pass| pass.desc.name == builder.desc.name)
+        {
+            return Err(RenderError::render(format!(
+                "duplicate framegraph pass label {name:?}"
+            )));
+        }
 
         // Update resource usage information
         for &resource_handle in &builder.desc.reads {
@@ -433,7 +478,11 @@ mod tests {
         let mut graph = FrameGraph::new();
         for label in order {
             graph
-                .add_pass(label, PassType::Compute, |_| Ok(()))
+                .add_pass(label, PassType::Compute, |pass| {
+                    pass.pipeline_descriptor(format!("test:{label}"));
+                    pass.uniform_bytes(Vec::new());
+                    Ok(())
+                })
                 .unwrap();
         }
         graph.compile().unwrap();
@@ -459,6 +508,91 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn dependent_compile_order_is_stable_across_one_hundred_shuffles() {
+        let expected = vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+            "gamma".to_string(),
+            "independent".to_string(),
+            "omega".to_string(),
+        ];
+        let mut seed = 0x00A1_1A17_u64;
+        for _ in 0..100 {
+            let mut labels = ["alpha", "beta", "gamma", "omega", "independent"];
+            for index in (1..labels.len()).rev() {
+                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                labels.swap(index, (seed as usize) % (index + 1));
+            }
+            let mut graph = FrameGraph::new();
+            let alpha_output = graph.add_resource(ResourceDesc {
+                name: "alpha.output".into(),
+                resource_type: ResourceType::StorageBuffer,
+                format: None,
+                extent: None,
+                size: Some(4),
+                usage: None,
+                can_alias: false,
+                is_transient: true,
+            });
+            let beta_output = graph.add_resource(ResourceDesc {
+                name: "beta.output".into(),
+                resource_type: ResourceType::StorageBuffer,
+                format: None,
+                extent: None,
+                size: Some(4),
+                usage: None,
+                can_alias: false,
+                is_transient: true,
+            });
+            let gamma_output = graph.add_resource(ResourceDesc {
+                name: "gamma.output".into(),
+                resource_type: ResourceType::StorageBuffer,
+                format: None,
+                extent: None,
+                size: Some(4),
+                usage: None,
+                can_alias: false,
+                is_transient: true,
+            });
+            for label in labels {
+                graph
+                    .add_pass(label, PassType::Compute, |pass| {
+                        pass.pipeline_descriptor(format!("test:{label}"));
+                        match label {
+                            "alpha" => {
+                                pass.write(alpha_output);
+                            }
+                            "beta" => {
+                                pass.read(alpha_output).write(beta_output);
+                            }
+                            "gamma" => {
+                                pass.read(alpha_output).write(gamma_output);
+                            }
+                            "omega" => {
+                                pass.read(beta_output).read(gamma_output);
+                            }
+                            "independent" => {}
+                            _ => unreachable!(),
+                        }
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            graph.compile().unwrap();
+            assert_eq!(graph.execution_labels().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn pass_declaration_requires_pipeline_material() {
+        let mut graph = FrameGraph::new();
+        let error = graph
+            .add_pass("incomplete", PassType::Compute, |_| Ok(()))
+            .unwrap_err();
+        assert!(error.to_string().contains("pipeline descriptor"));
+    }
 }
 
 impl Default for FrameGraph {
@@ -467,23 +601,98 @@ impl Default for FrameGraph {
     }
 }
 
-/// Compiled declaration plan shared by every offline renderer path and the C5
-/// diagnostic. Keeping construction here gives the crate one production
-/// `FrameGraph::new()` path instead of a renderer graph plus a fake diagnostic
-/// graph that can drift.
+/// The sole production construction path for an offline framegraph.
+///
+/// Diagnostics read the most recently compiled renderer report; they never
+/// instantiate a synthetic graph.
+pub struct RendererGraphBuilder {
+    graph: FrameGraph,
+}
+
+impl RendererGraphBuilder {
+    pub fn new() -> Self {
+        Self {
+            graph: FrameGraph::new(),
+        }
+    }
+
+    pub fn add_resource(&mut self, desc: ResourceDesc) -> ResourceHandle {
+        self.graph.add_resource(desc)
+    }
+
+    pub fn add_pass<F>(
+        &mut self,
+        label: &str,
+        pass_type: PassType,
+        setup: F,
+    ) -> RenderResult<PassHandle>
+    where
+        F: FnOnce(&mut PassBuilder) -> RenderResult<()>,
+    {
+        self.graph.add_pass(label, pass_type, setup)
+    }
+
+    pub fn compile(mut self) -> RenderResult<RendererGraphPlan> {
+        self.graph.compile()?;
+        let (handles, barriers) = self.graph.get_execution_plan()?;
+        let labels = handles
+            .iter()
+            .filter_map(|handle| {
+                self.graph
+                    .pass_info(*handle)
+                    .map(|info| info.desc.name.clone())
+            })
+            .collect::<Vec<_>>();
+        let passes = handles
+            .iter()
+            .filter_map(|handle| {
+                self.graph
+                    .pass_info(*handle)
+                    .map(|info| (info.desc.name.clone(), info.desc.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let pass_handles = handles
+            .iter()
+            .filter_map(|handle| {
+                self.graph
+                    .pass_info(*handle)
+                    .map(|info| (info.desc.name.clone(), *handle))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let plan = RendererGraphPlan {
+            labels,
+            passes,
+            pass_handles,
+            resources: self.graph.resources.clone(),
+            metrics: self.graph.metrics().clone(),
+            barriers,
+            next_pass: 0,
+        };
+        record_renderer_graph(&plan);
+        Ok(plan)
+    }
+}
+
+impl Default for RendererGraphBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Compiled real-resource declaration plan shared by offline renderer paths.
 #[derive(Clone, Debug)]
 pub struct RendererGraphPlan {
     pub labels: Vec<String>,
+    passes: BTreeMap<String, PassDesc>,
+    pass_handles: BTreeMap<String, PassHandle>,
+    resources: BTreeMap<ResourceHandle, ResourceInfo>,
     pub metrics: FrameGraphMetrics,
-    pub barrier_count: usize,
+    pub barriers: Vec<ResourceBarrier>,
     next_pass: usize,
 }
 
 impl RendererGraphPlan {
-    /// Advance the production encoder through the compiled graph. Renderers
-    /// call this immediately before recording the named phase; a hand-rolled
-    /// phase cannot silently drift from the dependency plan.
-    pub fn enter(&mut self, label: &str) -> RenderResult<()> {
+    fn advance(&mut self, label: &str) -> RenderResult<()> {
         let expected = self.labels.get(self.next_pass).ok_or_else(|| {
             RenderError::render(format!(
                 "renderer executed undeclared pass {label:?} after graph completion"
@@ -498,6 +707,40 @@ impl RendererGraphPlan {
         Ok(())
     }
 
+    /// Execute one declared production phase through the compiled plan.
+    pub fn execute<T, E, F>(&mut self, label: &str, execute: F) -> Result<T, E>
+    where
+        E: From<RenderError>,
+        F: FnOnce() -> Result<T, E>,
+    {
+        self.advance(label).map_err(E::from)?;
+        execute()
+    }
+
+    pub fn pass(&self, label: &str) -> Option<&PassDesc> {
+        self.passes.get(label)
+    }
+
+    pub fn resource(&self, handle: ResourceHandle) -> Option<&ResourceInfo> {
+        self.resources.get(&handle)
+    }
+
+    pub fn ordered_passes(&self) -> impl Iterator<Item = &PassDesc> {
+        self.labels
+            .iter()
+            .filter_map(|label| self.passes.get(label))
+    }
+
+    pub fn barriers_before(&self, label: &str) -> Vec<&ResourceBarrier> {
+        let Some(handle) = self.pass_handles.get(label).copied() else {
+            return Vec::new();
+        };
+        self.barriers
+            .iter()
+            .filter(|barrier| barrier.before_pass == handle)
+            .collect()
+    }
+
     pub fn finish(self) -> RenderResult<()> {
         if self.next_pass != self.labels.len() {
             return Err(RenderError::render(format!(
@@ -510,54 +753,40 @@ impl RendererGraphPlan {
     }
 }
 
-pub fn compile_renderer_graph(labels: &[&str]) -> RenderResult<RendererGraphPlan> {
-    if labels.is_empty() {
-        return Err(RenderError::render(
-            "offline renderer graph requires at least one pass",
-        ));
-    }
-    let mut graph = FrameGraph::new();
-    let mut previous = None;
-    for (index, label) in labels.iter().enumerate() {
-        if label.trim().is_empty() {
-            return Err(RenderError::render(
-                "offline renderer pass labels must be non-empty",
-            ));
-        }
-        let output = graph.add_resource(ResourceDesc {
-            name: format!("{label}.output"),
-            resource_type: ResourceType::ColorAttachment,
-            format: Some(wgpu::TextureFormat::Rgba32Float),
-            extent: Some(wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            }),
-            size: None,
-            usage: Some(
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            ),
-            can_alias: index + 1 < labels.len(),
-        });
-        graph.add_pass(label, PassType::Graphics, |pass| {
-            if let Some(input) = previous {
-                pass.read(input);
-            }
-            pass.write(output);
-            Ok(())
-        })?;
-        previous = Some(output);
-    }
-    graph.compile()?;
-    let (handles, barriers) = graph.get_execution_plan()?;
-    let labels = handles
-        .into_iter()
-        .filter_map(|handle| graph.pass_info(handle).map(|info| info.desc.name.clone()))
+#[derive(Clone, Debug, Default)]
+pub struct RendererGraphReport {
+    pub labels: Vec<String>,
+    pub metrics: FrameGraphMetrics,
+    pub barrier_count: usize,
+    pub cache_disabled_passes: Vec<String>,
+}
+
+fn renderer_report_slot() -> &'static std::sync::Mutex<RendererGraphReport> {
+    static SLOT: std::sync::OnceLock<std::sync::Mutex<RendererGraphReport>> =
+        std::sync::OnceLock::new();
+    SLOT.get_or_init(|| std::sync::Mutex::new(RendererGraphReport::default()))
+}
+
+fn record_renderer_graph(plan: &RendererGraphPlan) {
+    let cache_disabled_passes = plan
+        .passes
+        .iter()
+        .filter(|(_, pass)| pass.cache_disabled_reason.is_some())
+        .map(|(label, _)| label.clone())
         .collect();
-    Ok(RendererGraphPlan {
-        labels,
-        metrics: graph.metrics().clone(),
-        barrier_count: barriers.len(),
-        next_pass: 0,
-    })
+    if let Ok(mut slot) = renderer_report_slot().lock() {
+        *slot = RendererGraphReport {
+            labels: plan.labels.clone(),
+            metrics: plan.metrics.clone(),
+            barrier_count: plan.barriers.len(),
+            cache_disabled_passes,
+        };
+    }
+}
+
+pub fn last_renderer_graph_report() -> RendererGraphReport {
+    renderer_report_slot()
+        .lock()
+        .map(|report| report.clone())
+        .unwrap_or_default()
 }

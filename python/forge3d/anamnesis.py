@@ -42,9 +42,7 @@ _LEAF_DOMAIN = b"forge3d.anamnesis/1/leaf"
 _DEFAULT_MAX_BYTES = 10 * 1024 * 1024 * 1024
 _META_NAME = "meta.json"
 _BLOB_NAME = "blob"
-_LAST_RECIPE = "last_recipe.json"
-_FAST_PACK = "fastpack.json"
-_FAST_PACK_MAX_BYTES = 64 * 1024 * 1024
+_LAST_MANIFEST = "last_manifest.json"
 
 
 def _segment(tag: bytes, value: bytes) -> bytes:
@@ -73,7 +71,7 @@ def pass_key(
     label: str,
     pipeline_descriptor: bytes,
     uniform_bytes: bytes,
-    input_keys: Sequence[str],
+    input_keys: Sequence[str | tuple[str, str]],
     capability_fingerprint_bytes: bytes,
     engine_fingerprint_bytes: bytes,
 ) -> str:
@@ -84,14 +82,22 @@ def pass_key(
     seed, accumulation frame, backend and DX12 compiler. The function refuses
     malformed input keys and hashes exact uniform bytes including padding.
     """
-    normalized_inputs = sorted(str(key).lower() for key in input_keys)
-    for key in normalized_inputs:
+    normalized_inputs: list[tuple[str, str]] = []
+    for index, item in enumerate(input_keys):
+        if isinstance(item, tuple) and len(item) == 2:
+            binding, key = str(item[0]), str(item[1]).lower()
+        else:
+            binding, key = f"input@{index}", str(item).lower()
+        if not binding:
+            raise ValueError("ANAMNESIS input binding identities must be non-empty")
         if len(key) != 64:
             raise ValueError(f"invalid ANAMNESIS input key: {key!r}")
         try:
             bytes.fromhex(key)
         except ValueError as exc:
             raise ValueError(f"invalid ANAMNESIS input key: {key!r}") from exc
+        normalized_inputs.append((binding, key))
+    normalized_inputs.sort()
     native = get_native_module()
     if native is not None and hasattr(native, "anamnesis_pass_key"):
         return str(
@@ -112,7 +118,8 @@ def pass_key(
         hashlib.sha256(pipeline_descriptor).digest(),
     )
     payload += _segment(b"uniform_bytes", uniform_bytes)
-    for key in normalized_inputs:
+    for binding, key in normalized_inputs:
+        payload += _segment(b"input_binding", binding.encode("utf-8"))
         payload += _segment(b"input_key", bytes.fromhex(key))
     payload += _segment(b"capability_fingerprint", capability_fingerprint_bytes)
     payload += _segment(b"engine_fingerprint", engine_fingerprint_bytes)
@@ -132,7 +139,10 @@ def engine_fingerprint() -> bytes:
     return canonical_json_bytes(
         {
             "crate_version": __version__,
-            "git_sha": os.environ.get("FORGE3D_GIT_SHA", "unknown"),
+            "git_sha": os.environ.get(
+                "FORGE3D_GIT_SHA_FULL",
+                os.environ.get("FORGE3D_GIT_SHA", "unknown"),
+            ),
             "naga_version": "0.19.2",
             "wgsl_tree_sha256": "unknown",
         },
@@ -174,7 +184,14 @@ def capability_fingerprint(
             if dx12_compiler is not None
             else value.get("dx12_compiler", "fxc" if os.environ.get("FORGE3D_DETERMINISTIC") else "default")
         ).lower(),
-        "naga_capabilities": sorted(str(item) for item in naga_capabilities),
+        "naga_capabilities": sorted(
+            str(item)
+            for item in (
+                naga_capabilities
+                if naga_capabilities
+                else value.get("naga_capabilities", ())
+            )
+        ),
     }
     return canonical_json_bytes(payload, error_context="ANAMNESIS capability fingerprint")
 
@@ -204,10 +221,23 @@ class SequenceResult:
     predicted_recompute: list[tuple[int, str]]
     observed_recompute: list[tuple[int, str]]
     elapsed_seconds: float
+    pass_keys: dict[str, str] = field(default_factory=dict)
 
     @property
     def prediction_matches(self) -> bool:
         return set(self.predicted_recompute) == set(self.observed_recompute)
+
+
+@dataclass(frozen=True)
+class _PlannedPass:
+    instance: str
+    label: str
+    frame: int
+    pipeline: bytes
+    uniforms: bytes
+    inputs: tuple[tuple[str, str], ...]
+    key: str
+    state_value: Any
 
 
 class _Store:
@@ -219,78 +249,39 @@ class _Store:
         self.verify_reads = bool(verify_reads)
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "quarantine").mkdir(exist_ok=True)
-        self._fast: dict[str, dict[str, Any]] = {}
-        self._fast_pack_bytes = 0
-        fast_path = self.root / _FAST_PACK
-        if not self.verify_reads and fast_path.is_file():
-            try:
-                self._fast_pack_bytes = fast_path.stat().st_size
-                packed = json.loads(fast_path.read_text(encoding="utf-8"))
-                if packed.get("schema") == "forge3d.anamnesis.fastpack/1":
-                    entries = dict(packed.get("entries", {}))
-                    total = 0
-                    for key, item in entries.items():
-                        blob = bytes.fromhex(str(item["blob_hex"]))
-                        meta = dict(item["meta"])
-                        if not (
-                            meta.get("key") == key
-                            and int(meta.get("byte_length", -1)) == len(blob)
-                            and meta.get("self_hash") == _sha256(blob)
-                        ):
-                            raise ValueError("invalid ANAMNESIS fast-pack entry")
-                        total += len(blob)
-                    if {path.name for path in self.entries()} == set(entries):
-                        self._fast = entries
-                        self._current_bytes = total
-            except (KeyError, OSError, TypeError, ValueError):
-                self._fast = {}
-                self._fast_pack_bytes = 0
-        if not self._fast:
-            self._current_bytes = self._inventory_bytes()
-        if self._current_bytes + self._fast_pack_bytes > self.max_bytes:
-            fast_path.unlink(missing_ok=True)
-            self._fast.clear()
-            self._fast_pack_bytes = 0
+        self._current_bytes = self.disk_bytes()
+        if self._current_bytes > self.max_bytes:
             self.gc(self.max_bytes)
+        if self._current_bytes > self.max_bytes:
+            raise ValueError(
+                "ANAMNESIS store control/quarantine footprint exceeds max_bytes"
+            )
 
-    def _inventory_bytes(self) -> int:
-        total = 0
-        for path in self.entries():
-            try:
-                meta = json.loads((path / _META_NAME).read_text(encoding="utf-8"))
-                total += int(meta.get("byte_length", 0))
-            except (OSError, ValueError):
-                continue
+    @staticmethod
+    def _tree_bytes(path: Path) -> int:
+        try:
+            total = path.stat().st_size
+        except OSError:
+            return 0
+        if path.is_dir():
+            for child in path.iterdir():
+                total += _Store._tree_bytes(child)
         return total
+
+    def disk_bytes(self) -> int:
+        """Return the complete footprint, including metadata and directories."""
+        return self._tree_bytes(self.root)
 
     def entry(self, key: str) -> Path:
         return self.root / key[:2] / key
 
-    def peek(self, key: str) -> bool:
-        # Prediction uses the same integrity decision as execution. A corrupt
-        # entry is quarantined now and predicted as a miss, so dry-run and
-        # observed recompute sets cannot diverge on damaged storage.
-        return self.get(key) is not None
-
-    def get(self, key: str, *, touch: bool = True) -> tuple[bytes, dict[str, Any]] | None:
-        packed = self._fast.get(key)
-        if packed is not None:
-            try:
-                blob = bytes.fromhex(str(packed["blob_hex"]))
-                meta = dict(packed["meta"])
-                valid = (
-                    meta.get("key") == key
-                    and int(meta.get("byte_length", -1)) == len(blob)
-                    and meta.get("self_hash") == _sha256(blob)
-                )
-                if valid:
-                    return blob, meta
-            except (KeyError, TypeError, ValueError):
-                pass
-            # A fast-pack is only an I/O optimization, never a relaxation of
-            # the content-addressed integrity boundary. Discard any malformed
-            # or tampered entry and fall through to the self-verifying store.
-            self._fast.pop(key, None)
+    def get(
+        self,
+        key: str,
+        *,
+        touch: bool = True,
+        quarantine: bool = True,
+    ) -> tuple[bytes, dict[str, Any]] | None:
         path = self.entry(key)
         if not path.is_dir():
             return None
@@ -298,47 +289,131 @@ class _Store:
             blob = (path / _BLOB_NAME).read_bytes()
             meta = json.loads((path / _META_NAME).read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            self._quarantine(path, key)
+            if quarantine:
+                self._quarantine(path, key)
             return None
-        valid = (
-            meta.get("key") == key
-            and int(meta.get("byte_length", -1)) == len(blob)
-            and meta.get("self_hash") == _sha256(blob)
-        )
+        valid = self._metadata_valid(key, blob, meta)
         if not valid:
-            self._quarantine(path, key)
+            if quarantine:
+                self._quarantine(path, key)
             return None
-        # Directory mtime is the LRU clock. Updating it avoids rewriting and
-        # fsyncing self-describing JSON on every cache hit.
         if touch:
+            meta_path = path / _META_NAME
+            before = meta_path.stat().st_size
+            meta["last_access_unix_ms"] = time.time_ns() // 1_000_000
+            self._write_meta(path, meta)
+            self._current_bytes += meta_path.stat().st_size - before
             os.utime(path, None)
         return blob, meta
 
-    def put(self, key: str, blob: bytes, meta: Mapping[str, Any]) -> None:
-        if len(blob) > self.max_bytes:
-            raise ValueError("ANAMNESIS blob is larger than the entire store budget")
+    def put_pass(
+        self,
+        key: str,
+        blob: bytes,
+        material: Mapping[str, Any],
+        *,
+        frame: int | None = None,
+        measured_wall_ms: float = 0.0,
+    ) -> None:
+        input_keys = list(material.get("input_keys", ()))
+        self._put(
+            key,
+            blob,
+            pass_label=str(material["label"]),
+            input_keys=input_keys,
+            derivation={"kind": "pass", "material": dict(material)},
+            frame=frame,
+            measured_wall_ms=measured_wall_ms,
+        )
+
+    def put_leaf(self, key: str, blob: bytes, *, label: str) -> None:
+        if leaf_key(blob) != key:
+            raise ValueError("ANAMNESIS leaf key does not match leaf content")
+        self._put(
+            key,
+            blob,
+            pass_label=label,
+            input_keys=[],
+            derivation={"kind": "leaf", "content_sha256": _sha256(blob)},
+            frame=None,
+            measured_wall_ms=0.0,
+        )
+
+    def _put(
+        self,
+        key: str,
+        blob: bytes,
+        *,
+        pass_label: str,
+        input_keys: Sequence[Mapping[str, Any]],
+        derivation: Mapping[str, Any],
+        frame: int | None,
+        measured_wall_ms: float,
+    ) -> None:
         target = self.entry(key)
         if target.is_dir() and self.get(key) is not None:
             return
-        (self.root / _FAST_PACK).unlink(missing_ok=True)
-        self._fast_pack_bytes = 0
-        if self._current_bytes + len(blob) > self.max_bytes:
-            self.gc(self.max_bytes - len(blob))
-        target.parent.mkdir(parents=True, exist_ok=True)
-        now = time.time_ns()
+        prefix = target.parent
+        if not prefix.exists():
+            before_root = self.root.stat().st_size
+            prefix.mkdir(parents=True)
+            self._current_bytes += prefix.stat().st_size
+            self._current_bytes += self.root.stat().st_size - before_root
+        now = time.time_ns() // 1_000_000
+        try:
+            creation_engine = json.loads(
+                bytes.fromhex(
+                    str(
+                        dict(derivation.get("material", {})).get(
+                            "engine_fingerprint_hex", ""
+                        )
+                    )
+                ).decode("utf-8")
+            )
+        except (UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
+            creation_engine = {
+                "crate_version": "unknown",
+                "git_sha": "unknown",
+                "naga_version": "unknown",
+                "wgsl_tree_sha256": "unknown",
+            }
         complete = {
             "schema": "forge3d.anamnesis.store/1",
-            **dict(meta),
             "key": key,
+            "pass_label": pass_label,
+            "input_keys": list(input_keys),
             "byte_length": len(blob),
+            "creation_engine_fingerprint": creation_engine,
             "self_hash": _sha256(blob),
-            "created_ns": now,
-            "last_access_ns": now,
+            "created_unix_ms": now,
+            "last_access_unix_ms": now,
+            "derivation": dict(derivation),
+            "frame": frame,
+            "measured_wall_ms": max(0.0, float(measured_wall_ms)),
         }
-        temp = Path(tempfile.mkdtemp(prefix=f".{key}.", dir=target.parent))
+        before_prefix = prefix.stat().st_size
+        temp = Path(tempfile.mkdtemp(prefix=f".{key}.", dir=prefix))
+        prefix_growth = prefix.stat().st_size - before_prefix
         try:
             (temp / _BLOB_NAME).write_bytes(blob)
             self._write_meta(temp, complete)
+            staged_bytes = self._tree_bytes(temp)
+            if staged_bytes > self.max_bytes:
+                raise ValueError(
+                    f"ANAMNESIS entry requires {staged_bytes} bytes, "
+                    f"exceeding max_bytes={self.max_bytes}"
+                )
+            projected = self._current_bytes + prefix_growth + staged_bytes
+            if projected > self.max_bytes:
+                # This full scan is reserved for the near/full-store path. The
+                # staged temp directory is included in total footprint but is
+                # excluded from active-entry eviction.
+                self._current_bytes = self.disk_bytes()
+                self.gc(self.max_bytes)
+                if self._current_bytes > self.max_bytes:
+                    raise ValueError(
+                        "ANAMNESIS complete on-disk footprint exceeds max_bytes"
+                    )
             try:
                 temp.replace(target)
             except OSError:
@@ -347,33 +422,28 @@ class _Store:
         finally:
             if temp.exists():
                 shutil.rmtree(temp)
-        self._current_bytes += len(blob)
-        if not self.verify_reads and self._current_bytes <= _FAST_PACK_MAX_BYTES:
-            self._fast[key] = {"blob_hex": blob.hex(), "meta": complete}
-
-    def flush_fast_pack(self) -> None:
-        if self.verify_reads or self._current_bytes > _FAST_PACK_MAX_BYTES:
-            return
-        payload = {
-            "schema": "forge3d.anamnesis.fastpack/1",
-            "entries": self._fast,
-        }
-        data = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        if self._current_bytes + len(data.encode("utf-8")) > self.max_bytes:
-            (self.root / _FAST_PACK).unlink(missing_ok=True)
-            return
-        temporary = self.root / f".{_FAST_PACK}.tmp-{os.getpid()}"
-        temporary.write_text(data, encoding="utf-8")
-        temporary.replace(self.root / _FAST_PACK)
-        self._fast_pack_bytes = len(data.encode("utf-8"))
+        if projected <= self.max_bytes:
+            self._current_bytes = projected
+        else:
+            self._current_bytes = self.disk_bytes()
+        if self._current_bytes > self.max_bytes:
+            shutil.rmtree(target, ignore_errors=True)
+            self._current_bytes = self.disk_bytes()
+            raise ValueError("ANAMNESIS complete on-disk footprint exceeds max_bytes")
+        if self._current_bytes >= int(self.max_bytes * 0.95):
+            self._current_bytes = self.disk_bytes()
+            if self._current_bytes > self.max_bytes:
+                shutil.rmtree(target, ignore_errors=True)
+                self._current_bytes = self.disk_bytes()
+                raise ValueError("ANAMNESIS complete on-disk footprint exceeds max_bytes")
 
     def _write_meta(self, path: Path, meta: Mapping[str, Any]) -> None:
         data = json.dumps(
             canonical_json_value(meta, error_context="ANAMNESIS store metadata"),
-            indent=2,
             sort_keys=True,
+            separators=(",", ":"),
             allow_nan=False,
-        ) + "\n"
+        )
         temporary = path / f".{_META_NAME}.tmp-{os.getpid()}"
         temporary.write_text(data, encoding="utf-8")
         temporary.replace(path / _META_NAME)
@@ -384,32 +454,38 @@ class _Store:
             for prefix in self.root.iterdir()
             if prefix.is_dir() and prefix.name != "quarantine" and len(prefix.name) == 2
             for path in prefix.iterdir()
-            if path.is_dir()
+            if path.is_dir() and len(path.name) == 64
         )
 
     def gc(self, target_bytes: int) -> int:
-        (self.root / _FAST_PACK).unlink(missing_ok=True)
-        self._fast_pack_bytes = 0
         records: list[tuple[int, str, int, Path]] = []
-        total = 0
+        total = self.disk_bytes()
         for path in self.entries():
             try:
                 meta = json.loads((path / _META_NAME).read_text(encoding="utf-8"))
-                size = int(meta["byte_length"])
-                accessed = path.stat().st_mtime_ns
+                size = self._tree_bytes(path)
+                accessed = int(meta["last_access_unix_ms"])
             except (OSError, ValueError, KeyError):
-                size, accessed = 0, 0
-            total += size
+                size, accessed = self._tree_bytes(path), 0
             records.append((accessed, path.name, size, path))
+        for path in sorted((self.root / "quarantine").iterdir()):
+            if path.is_dir():
+                records.append(
+                    (
+                        path.stat().st_mtime_ns // 1_000_000,
+                        path.name,
+                        self._tree_bytes(path),
+                        path,
+                    )
+                )
         removed = 0
         for _, _, size, path in sorted(records):
             if total <= max(0, int(target_bytes)):
                 break
             shutil.rmtree(path)
-            self._fast.pop(path.name, None)
-            total -= size
+            total = self.disk_bytes()
             removed += size
-        self._current_bytes = total
+        self._current_bytes = self.disk_bytes()
         return removed
 
     def verify(self) -> dict[str, int]:
@@ -419,12 +495,7 @@ class _Store:
             try:
                 blob = (path / _BLOB_NAME).read_bytes()
                 meta = json.loads((path / _META_NAME).read_text(encoding="utf-8"))
-                valid = (
-                    len(key) == 64
-                    and meta.get("key") == key
-                    and int(meta.get("byte_length", -1)) == len(blob)
-                    and meta.get("self_hash") == _sha256(blob)
-                )
+                valid = len(key) == 64 and self._metadata_valid(key, blob, meta)
             except (OSError, ValueError):
                 blob, valid = b"", False
             result["bytes_checked"] += len(blob)
@@ -433,8 +504,6 @@ class _Store:
             else:
                 self._quarantine(path, key)
                 result["quarantined"] += 1
-        if result["quarantined"]:
-            (self.root / _FAST_PACK).unlink(missing_ok=True)
         return result
 
     def _quarantine(self, path: Path, key: str) -> None:
@@ -442,7 +511,80 @@ class _Store:
             return
         target = self.root / "quarantine" / f"{key}-{time.time_ns()}"
         path.replace(target)
-        self._fast.pop(key, None)
+        # The prior manifest asserted this entry was restorable. Once runtime
+        # integrity rejects it, that manifest is no longer a valid independent
+        # prediction baseline for a retry.
+        (self.root / _LAST_MANIFEST).unlink(missing_ok=True)
+        self._current_bytes = self.disk_bytes()
+
+    @staticmethod
+    def _metadata_valid(key: str, blob: bytes, meta: Mapping[str, Any]) -> bool:
+        if not (
+            meta.get("schema") == "forge3d.anamnesis.store/1"
+            and meta.get("key") == key
+            and int(meta.get("byte_length", -1)) == len(blob)
+            and meta.get("self_hash") == _sha256(blob)
+        ):
+            return False
+        derivation = dict(meta.get("derivation", {}))
+        if derivation.get("kind") == "leaf":
+            return (
+                derivation.get("content_sha256") == _sha256(blob)
+                and leaf_key(blob) == key
+            )
+        if derivation.get("kind") != "pass":
+            return False
+        material = dict(derivation.get("material", {}))
+        try:
+            pipeline = bytes.fromhex(str(material["pipeline_descriptor_hex"]))
+            uniforms = bytes.fromhex(str(material["uniform_hex"]))
+            capabilities = bytes.fromhex(
+                str(material["capability_fingerprint_hex"])
+            )
+            engine = bytes.fromhex(str(material["engine_fingerprint_hex"]))
+            inputs = [
+                (str(item["binding"]), str(item["key"]))
+                for item in material.get("input_keys", ())
+            ]
+            reconstructed = pass_key(
+                str(material["label"]),
+                pipeline,
+                uniforms,
+                inputs,
+                capabilities,
+                engine,
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+        return (
+            reconstructed == key
+            and material.get("pipeline_descriptor_hash") == _sha256(pipeline)
+            and material.get("uniform_sha256") == _sha256(uniforms)
+            and int(material.get("uniform_byte_length", -1)) == len(uniforms)
+            and material.get("capability_fingerprint_sha256")
+            == _sha256(capabilities)
+            and material.get("engine_fingerprint_sha256") == _sha256(engine)
+        )
+
+    def write_control(self, name: str, payload: bytes) -> None:
+        target = self.root / name
+        temporary = self.root / f".{name}.tmp-{os.getpid()}"
+        temporary.write_bytes(payload)
+        projected = self.disk_bytes()
+        self._current_bytes = projected
+        if projected > self.max_bytes:
+            self.gc(self.max_bytes - temporary.stat().st_size)
+        if self.disk_bytes() > self.max_bytes:
+            temporary.unlink(missing_ok=True)
+            raise ValueError(
+                f"ANAMNESIS control file {name!r} exceeds the complete store budget"
+            )
+        temporary.replace(target)
+        self._current_bytes = self.disk_bytes()
+        if self._current_bytes > self.max_bytes:
+            target.unlink(missing_ok=True)
+            self._current_bytes = self.disk_bytes()
+            raise ValueError("ANAMNESIS complete on-disk footprint exceeds max_bytes")
 
 
 def _recipe_payload(recipe: Any) -> dict[str, Any]:
@@ -492,6 +634,15 @@ def _pass_descriptor(label: str, frame: int | None, state: Mapping[str, Any]) ->
     # This is the complete reference pipeline identity. GPU integrations must
     # replace `shader_hashes` with CENSOR's exact preprocessed WGSL hashes and
     # fill the same state categories; absence disables caching at that callsite.
+    structured_fingerprints = dict(
+        state.get("structured_executor_sha256", {}) or {}
+    )
+    if label in structured_fingerprints:
+        executor_kind = "structured-pass"
+    elif label == "frame.output" and state.get("external_renderer_sha256"):
+        executor_kind = "opaque-render-frame"
+    else:
+        executor_kind = "reference"
     descriptor = {
         "label": label,
         "shader_hashes": state.get("shader_hashes", {label: _sha256(label.encode())}),
@@ -508,6 +659,26 @@ def _pass_descriptor(label: str, frame: int | None, state: Mapping[str, Any]) ->
         "accumulation_frame_index": frame,
         "backend": state.get("backend", "reference-cpu"),
         "dx12_compiler": state.get("dx12_compiler", "not-applicable"),
+        "external_renderer_sha256": (
+            state.get("external_renderer_sha256")
+            if label == "frame.output"
+            else None
+        ),
+        "external_renderer_context_sha256": (
+            state.get("external_renderer_context_sha256")
+            if label == "frame.output"
+            else None
+        ),
+        "structured_executor_sha256": structured_fingerprints.get(label),
+        "structured_executor_context_sha256": dict(
+            state.get("structured_executor_context_sha256", {}) or {}
+        ).get(label),
+        "executor_kind": executor_kind,
+        "reference_work_factor": (
+            int(state.get("reference_work_factor", 0))
+            if executor_kind == "reference"
+            else 0
+        ),
     }
     return canonical_json_bytes(descriptor, error_context="ANAMNESIS pipeline descriptor")
 
@@ -531,26 +702,69 @@ def _execute_reference(
     return digest
 
 
-def _derivation(
+def _pass_material(
     label: str,
     pipeline: bytes,
     uniforms: bytes,
-    inputs: Sequence[str],
+    inputs: Sequence[tuple[str, str]],
     capabilities: bytes,
     engine: bytes,
-    frame: int,
 ) -> dict[str, Any]:
     return {
-        "pass_label": label,
-        "frame": frame,
-        "input_keys": sorted(inputs),
+        "label": label,
         "pipeline_descriptor_hash": _sha256(pipeline),
+        "pipeline_descriptor_hex": pipeline.hex(),
         "uniform_sha256": _sha256(uniforms),
         "uniform_byte_length": len(uniforms),
+        "uniform_hex": uniforms.hex(),
+        "input_keys": [
+            {"binding": binding, "key": key}
+            for binding, key in sorted(inputs)
+        ],
         "capability_fingerprint_sha256": _sha256(capabilities),
+        "capability_fingerprint_hex": capabilities.hex(),
         "engine_fingerprint_sha256": _sha256(engine),
-        "creation_engine_fingerprint": json.loads(engine),
+        "engine_fingerprint_hex": engine.hex(),
     }
+
+
+def _pixel_recipe_payload(recipe: Mapping[str, Any]) -> dict[str, Any]:
+    """Canonical pixel-affecting recipe state for opaque render callbacks.
+
+    Destination-only output fields are the only committed irrelevant inputs.
+    Unknown fields remain in the projection: a conservative miss is preferable
+    to a stale hit.
+    """
+    payload = json.loads(
+        canonical_json_bytes(
+            recipe, error_context="ANAMNESIS pixel recipe"
+        ).decode("utf-8")
+    )
+    output = payload.get("output")
+    if isinstance(output, dict):
+        for name in ("path", "directory", "filename"):
+            output.pop(name, None)
+    return payload
+
+
+def _load_manifest(store: _Store | None) -> dict[str, str]:
+    if store is None:
+        return {}
+    path = store.root / _LAST_MANIFEST
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if manifest.get("schema") != "forge3d.anamnesis.manifest/1":
+        return {}
+    entries = manifest.get("entries", {})
+    if not isinstance(entries, Mapping):
+        return {}
+    return {str(name): str(key) for name, key in entries.items()}
+
+
+def _instance_name(frame: int, label: str) -> str:
+    return f"{frame}:{label}"
 
 
 def render_sequence(
@@ -563,6 +777,14 @@ def render_sequence(
     verify_reads: bool = True,
     render_frame: Callable[[Mapping[str, Any], int], bytes | bytearray | memoryview] | None = None,
     render_frame_fingerprint: bytes | None = None,
+    render_frame_context: bytes | None = None,
+    pass_executors: Mapping[
+        str,
+        Callable[[Any, int, Sequence[bytes]], bytes | bytearray | memoryview],
+    ]
+    | None = None,
+    pass_executor_fingerprints: Mapping[str, bytes] | None = None,
+    pass_executor_contexts: Mapping[str, bytes] | None = None,
     capabilities: Mapping[str, Any] | None = None,
     reference_work_factor: int = 0,
 ) -> SequenceResult:
@@ -582,18 +804,51 @@ def render_sequence(
     atmosphere = payload.get("atmosphere", {})
     camera = payload.get("camera", {})
     state = dict(payload.get("anamnesis_state", {}) or {})
+    executors = dict(pass_executors or {})
+    executor_fingerprints = dict(pass_executor_fingerprints or {})
+    executor_contexts = dict(pass_executor_contexts or {})
+    if render_frame is not None and executors:
+        raise ValueError("render_frame and pass_executors are mutually exclusive")
+    if set(executors) != set(executor_fingerprints):
+        raise ValueError(
+            "pass_executor_fingerprints must identify every structured pass executor"
+        )
+    if any(not bytes(value) for value in executor_fingerprints.values()):
+        raise ValueError("structured pass executor fingerprints must be non-empty")
+    if set(executors) != set(executor_contexts):
+        raise ValueError(
+            "pass_executor_contexts must enumerate every captured pixel-affecting input"
+        )
+    if any(not bytes(value) for value in executor_contexts.values()):
+        raise ValueError("structured pass executor contexts must be non-empty")
+    state["structured_executor_sha256"] = {
+        str(label): _sha256(bytes(fingerprint))
+        for label, fingerprint in executor_fingerprints.items()
+    }
+    state["structured_executor_context_sha256"] = {
+        str(label): _sha256(bytes(context))
+        for label, context in executor_contexts.items()
+    }
     if render_frame is not None and not render_frame_fingerprint:
         raise ValueError(
             "render_frame requires render_frame_fingerprint containing the renderer/code identity"
         )
+    if render_frame is not None and not render_frame_context:
+        raise ValueError(
+            "render_frame requires render_frame_context enumerating captured pixel inputs"
+        )
     if render_frame_fingerprint is not None:
         state["external_renderer_sha256"] = _sha256(bytes(render_frame_fingerprint))
+    if render_frame_context is not None:
+        state["external_renderer_context_sha256"] = _sha256(
+            bytes(render_frame_context)
+        )
     if int(reference_work_factor) < 0:
         raise ValueError("reference_work_factor must be non-negative")
     state["reference_work_factor"] = int(reference_work_factor)
     if "backend" not in state:
         detected_backend = None
-        if render_frame is not None and capabilities is None:
+        if (render_frame is not None or executors) and capabilities is None:
             native = get_native_module()
             if native is not None and hasattr(native, "engine_info"):
                 try:
@@ -602,126 +857,220 @@ def render_sequence(
                     detected_backend = None
         state["backend"] = str(
             detected_backend
-            or ("reference-cpu" if render_frame is None else "external-renderer-unknown")
+            or (
+                "reference-cpu"
+                if render_frame is None and not executors
+                else "external-renderer-unknown"
+            )
         )
     capability_source = (
         capabilities
         if capabilities is not None
-        else ({} if render_frame is None else None)
+        else ({} if render_frame is None and not executors else None)
     )
     caps = capability_fingerprint(capability_source, backend=str(state["backend"]))
     engine = engine_fingerprint()
     store = _Store(cache, max_bytes, verify_reads) if cache is not None else None
     report = CacheReport()
-    predicted: list[tuple[int, str]] = []
-    observed: list[tuple[int, str]] = []
-    outputs: list[bytes] = []
-    hashes: list[str] = []
-    memo: dict[str, bytes] = {}
+    previous_manifest = _load_manifest(store)
+    pixel_recipe = _pixel_recipe_payload(payload)
+    plans: list[_PlannedPass] = []
+    plans_by_instance: dict[str, _PlannedPass] = {}
 
-    def run(label: str, frame: int, leaf: Any, inputs: Sequence[tuple[str, bytes]]) -> tuple[str, bytes]:
+    def declare(
+        label: str,
+        frame: int,
+        leaf: Any,
+        inputs: Sequence[tuple[str, str]],
+    ) -> str:
         pipeline = _pass_descriptor(label, None if frame < 0 else frame, state)
+        uniform_state: dict[str, Any] = {"frame": frame, "state": leaf}
+        if label == "frame.output" and render_frame is not None:
+            # An opaque callback may read any recipe field. Key its final
+            # output from the complete pixel projection; structured pass
+            # executors are required for finer invalidation.
+            uniform_state["opaque_pixel_recipe"] = pixel_recipe
         uniforms = canonical_json_bytes(
-            {"frame": frame, "state": leaf},
+            uniform_state,
             error_context=f"ANAMNESIS {label} uniforms",
         )
-        state_key = leaf_key(uniforms)
-        input_keys = [state_key, *(key for key, _ in inputs)]
-        state_hit = store.get(state_key) if store is not None and not dry_run else None
-        if store is not None and not dry_run and state_hit is None:
-            store.put(
-                state_key,
-                uniforms,
-                {
-                    "pass_label": f"leaf:{label}",
-                    "frame": frame,
-                    "input_keys": [],
-                    "content_sha256": _sha256(uniforms),
-                    "creation_engine_fingerprint": json.loads(engine),
-                },
-            )
+        input_keys = [
+            (binding, plans_by_instance[input_instance].key)
+            for binding, input_instance in inputs
+        ]
         key = pass_key(label, pipeline, uniforms, input_keys, caps, engine)
-        if key in memo:
-            report.hits.append(label)
-            return key, memo[key]
-        cached = store.get(key, touch=not dry_run) if store is not None else None
-        predicted_miss = cached is None
-        if predicted_miss:
-            predicted.append((frame, label))
-        if dry_run:
-            blob = b""
-            if cached is not None:
-                blob = cached[0]
-            memo[key] = blob
-            return key, blob
-        if cached is not None:
-            blob = cached[0]
-            report.hits.append(label)
-            report.bytes_read += len(blob)
-            report.wall_ms_saved += max(0.0, float(cached[1].get("measured_wall_ms", 0.0)))
-            memo[key] = blob
-            return key, blob
-        pass_started = time.perf_counter()
-        if label == "frame.output" and render_frame is not None:
-            blob = bytes(render_frame(payload, frame))
-        else:
-            blob = _execute_reference(
-                label,
-                [item for _, item in inputs],
-                pipeline + uniforms + caps + engine,
-                work_factor=reference_work_factor,
-            )
-        elapsed_ms = (time.perf_counter() - pass_started) * 1000.0
-        observed.append((frame, label))
-        report.misses.append(label)
-        report.bytes_written += len(blob)
-        if store is not None:
-            meta = _derivation(label, pipeline, uniforms, input_keys, caps, engine, frame)
-            meta["measured_wall_ms"] = elapsed_ms
-            store.put(key, blob, meta)
-        memo[key] = blob
-        return key, blob
+        instance = _instance_name(frame, label)
+        plan = _PlannedPass(
+            instance=instance,
+            label=label,
+            frame=frame,
+            pipeline=pipeline,
+            uniforms=uniforms,
+            inputs=tuple(inputs),
+            key=key,
+            state_value=leaf,
+        )
+        plans.append(plan)
+        plans_by_instance[instance] = plan
+        return instance
 
-    terrain_key, terrain_blob = run("terrain.geometry", -1, terrain, ())
-    atmosphere_key, atmosphere_blob = run("atmosphere.lut", -1, atmosphere, ())
-    label_key: str | None = None
-    label_blob: bytes | None = None
+    terrain_instance = declare("terrain.geometry", -1, terrain, ())
+    atmosphere_instance = declare("atmosphere.lut", -1, atmosphere, ())
+    label_instance: str | None = None
     if labels:
-        label_key, label_blob = run("label.compile", -1, labels, ())
+        label_instance = declare("label.compile", -1, labels, ())
 
+    output_instances: list[str] = []
     for frame in frame_numbers:
         frame_camera = {"camera": camera, "frame": frame}
-        shadow_key, shadow_blob = run(
-            "shadow.map", frame, {"lighting": lighting, **frame_camera}, ((terrain_key, terrain_blob),)
+        shadow_instance = declare(
+            "shadow.map",
+            frame,
+            {"lighting": lighting, **frame_camera},
+            (("terrain.geometry@0", terrain_instance),),
         )
-        shade_key, shade_blob = run(
+        shade_instance = declare(
             "terrain.shade",
             frame,
             frame_camera,
-            ((terrain_key, terrain_blob), (atmosphere_key, atmosphere_blob), (shadow_key, shadow_blob)),
+            (
+                ("terrain.geometry@0", terrain_instance),
+                ("atmosphere.lut@1", atmosphere_instance),
+                ("shadow.map@2", shadow_instance),
+            ),
         )
-        accum_key, accum_blob = run(
-            "accumulation", frame, {"samples": payload.get("output", {}).get("samples", 1)}, ((shade_key, shade_blob),)
+        accumulation_instance = declare(
+            "accumulation",
+            frame,
+            {"samples": payload.get("output", {}).get("samples", 1)},
+            (("terrain.shade@0", shade_instance),),
         )
-        final_input = (accum_key, accum_blob)
-        if label_key is not None and label_blob is not None and _labels_visible(labels, frame):
-            final_input = run(
-                "label.composite", frame, {"visible": True}, ((accum_key, accum_blob), (label_key, label_blob))
+        final_instance = accumulation_instance
+        if label_instance is not None and _labels_visible(labels, frame):
+            final_instance = declare(
+                "label.composite",
+                frame,
+                {"visible": True},
+                (
+                    ("accumulation@0", accumulation_instance),
+                    ("label.compile@1", label_instance),
+                ),
             )
-        output_key, output_blob = run(
-            "frame.output", frame, {"output": payload.get("output", {})}, (final_input,)
+        output_instance = declare(
+            "frame.output",
+            frame,
+            {"output": _pixel_recipe_payload({"output": payload.get("output", {})})["output"]},
+            (("frame.input@0", final_instance),),
         )
-        outputs.append(output_blob)
-        hashes.append(_sha256(output_blob))
+        output_instances.append(output_instance)
+
+    # Freeze the semantic recipe-diff prediction before inspecting the content
+    # store or executing an encoder. The previous manifest is the independent
+    # build-state contract: changed Merkle keys must execute, unchanged keys
+    # must restore. A missing/corrupt unchanged entry therefore becomes an
+    # explicit prediction mismatch instead of silently redefining prediction
+    # from the same store lookup used by execution.
+    predicted_plans = [
+        plan for plan in plans if previous_manifest.get(plan.instance) != plan.key
+    ]
+    predicted = [(plan.frame, plan.label) for plan in predicted_plans]
+    predicted_instances = {plan.instance for plan in predicted_plans}
+
+    observed: list[tuple[int, str]] = []
+    blobs_by_instance: dict[str, bytes] = {}
+    memo: dict[str, bytes] = {}
+    if not dry_run:
+        for plan in plans:
+            force_recompute = plan.instance in predicted_instances
+            if not force_recompute and plan.key in memo:
+                blob = memo[plan.key]
+                report.hits.append(plan.label)
+                blobs_by_instance[plan.instance] = blob
+                continue
+            cached = (
+                store.get(plan.key)
+                if store is not None and not force_recompute
+                else None
+            )
+            if cached is not None:
+                blob, meta = cached
+                report.hits.append(plan.label)
+                report.bytes_read += len(blob)
+                report.wall_ms_saved += max(
+                    0.0, float(meta.get("measured_wall_ms", 0.0))
+                )
+            else:
+                pass_started = time.perf_counter()
+                if plan.label in executors:
+                    blob = bytes(
+                        executors[plan.label](
+                            plan.state_value,
+                            plan.frame,
+                            [
+                                blobs_by_instance[input_instance]
+                                for _, input_instance in plan.inputs
+                            ],
+                        )
+                    )
+                elif plan.label == "frame.output" and render_frame is not None:
+                    blob = bytes(render_frame(payload, plan.frame))
+                else:
+                    blob = _execute_reference(
+                        plan.label,
+                        [
+                            blobs_by_instance[input_instance]
+                            for _, input_instance in plan.inputs
+                        ],
+                        plan.pipeline + plan.uniforms + caps + engine,
+                        work_factor=reference_work_factor,
+                    )
+                elapsed_ms = (time.perf_counter() - pass_started) * 1000.0
+                observed.append((plan.frame, plan.label))
+                report.misses.append(plan.label)
+                report.bytes_written += len(blob)
+                if store is not None:
+                    material = _pass_material(
+                        plan.label,
+                        plan.pipeline,
+                        plan.uniforms,
+                        [
+                            (binding, plans_by_instance[input_instance].key)
+                            for binding, input_instance in plan.inputs
+                        ],
+                        caps,
+                        engine,
+                    )
+                    store.put_pass(
+                        plan.key,
+                        blob,
+                        material,
+                        frame=plan.frame,
+                        measured_wall_ms=elapsed_ms,
+                    )
+            memo[plan.key] = blob
+            blobs_by_instance[plan.instance] = blob
+
+    outputs = [blobs_by_instance.get(instance, b"") for instance in output_instances]
+    hashes = [_sha256(output) for output in outputs]
+    current_manifest = {plan.instance: plan.key for plan in plans}
 
     if not dry_run and set(predicted) != set(observed):
         difference = sorted(set(predicted).symmetric_difference(observed))
         raise RuntimeError(f"ANAMNESIS prediction mismatch: {difference!r}")
     if store is not None and not dry_run:
-        store.flush_fast_pack()
-        (store.root / _LAST_RECIPE).write_bytes(
-            canonical_json_bytes(payload, error_context="ANAMNESIS last recipe") + b"\n"
+        manifest = canonical_json_bytes(
+            {
+                "schema": "forge3d.anamnesis.manifest/1",
+                "recipe_sha256": _sha256(
+                    canonical_json_bytes(
+                        pixel_recipe, error_context="ANAMNESIS manifest recipe"
+                    )
+                ),
+                "entries": current_manifest,
+            },
+            error_context="ANAMNESIS manifest",
         )
+        store.write_control(_LAST_MANIFEST, manifest)
     return SequenceResult(
         frame_hashes=hashes,
         frame_blobs=outputs,
@@ -729,6 +1078,7 @@ def render_sequence(
         predicted_recompute=predicted,
         observed_recompute=observed,
         elapsed_seconds=time.perf_counter() - started,
+        pass_keys=current_manifest,
     )
 
 
@@ -740,15 +1090,61 @@ def _explain_tree(store: _Store, key: str, seen: set[str]) -> dict[str, Any]:
     if not path.is_file():
         return {"key": key, "status": "missing"}
     meta = json.loads(path.read_text(encoding="utf-8"))
+    derivation = dict(meta.get("derivation", {}))
+    if derivation.get("kind") == "leaf":
+        return {
+            "key": key,
+            "pass_label": meta.get("pass_label"),
+            "kind": "leaf",
+            "content_sha256": derivation.get("content_sha256"),
+            "byte_length": meta.get("byte_length"),
+        }
+    material = dict(derivation.get("material", {}))
+    input_records = list(material.get("input_keys", meta.get("input_keys", ())))
+    reconstructed = None
+    try:
+        reconstructed = pass_key(
+            str(material["label"]),
+            bytes.fromhex(str(material["pipeline_descriptor_hex"])),
+            bytes.fromhex(str(material["uniform_hex"])),
+            [
+                (str(item["binding"]), str(item["key"]))
+                for item in input_records
+            ],
+            bytes.fromhex(str(material["capability_fingerprint_hex"])),
+            bytes.fromhex(str(material["engine_fingerprint_hex"])),
+        )
+    except (KeyError, TypeError, ValueError):
+        pass
     return {
         "key": key,
         "pass_label": meta.get("pass_label"),
         "frame": meta.get("frame"),
-        "pipeline_descriptor_hash": meta.get("pipeline_descriptor_hash"),
-        "uniform_sha256": meta.get("uniform_sha256"),
-        "capability_fingerprint_sha256": meta.get("capability_fingerprint_sha256"),
-        "engine_fingerprint_sha256": meta.get("engine_fingerprint_sha256"),
-        "inputs": [_explain_tree(store, child, seen.copy()) for child in meta.get("input_keys", ())],
+        "kind": "pass",
+        "reconstructed_key": reconstructed,
+        "reconstructs": reconstructed == key,
+        "pipeline_descriptor_hash": material.get("pipeline_descriptor_hash"),
+        "pipeline_descriptor_hex": material.get("pipeline_descriptor_hex"),
+        "uniform_sha256": material.get("uniform_sha256"),
+        "uniform_byte_length": material.get("uniform_byte_length"),
+        "uniform_hex": material.get("uniform_hex"),
+        "capability_fingerprint_sha256": material.get(
+            "capability_fingerprint_sha256"
+        ),
+        "capability_fingerprint_hex": material.get(
+            "capability_fingerprint_hex"
+        ),
+        "engine_fingerprint_sha256": material.get("engine_fingerprint_sha256"),
+        "engine_fingerprint_hex": material.get("engine_fingerprint_hex"),
+        "inputs": [
+            {
+                "binding": item.get("binding"),
+                "derivation": _explain_tree(
+                    store, str(item.get("key")), seen.copy()
+                ),
+            }
+            for item in input_records
+        ],
     }
 
 
@@ -761,15 +1157,32 @@ def explain(key: str, cache: str | os.PathLike[str] = ".forge3d/cache") -> dict[
 
 def gc(max_bytes: int, cache: str | os.PathLike[str] = ".forge3d/cache") -> int:
     """Evict least-recently-used entries until the store fits ``max_bytes``."""
-    store = _Store(cache, max(max_bytes, 1), False)
-    removed = store.gc(max_bytes)
-    store.flush_fast_pack()
+    native = get_native_module()
+    if native is not None and hasattr(native, "anamnesis_store_gc"):
+        removed = int(native.anamnesis_store_gc(os.fspath(cache), int(max_bytes)))
+    else:
+        store = _Store(cache, max(max_bytes, 1), False)
+        removed = store.gc(max_bytes)
+    if removed:
+        (Path(cache) / _LAST_MANIFEST).unlink(missing_ok=True)
     return removed
 
 
 def verify(cache: str | os.PathLike[str] = ".forge3d/cache") -> dict[str, int]:
     """Re-hash all blobs and quarantine any corrupt or incomplete entry."""
-    return _Store(cache, _DEFAULT_MAX_BYTES, True).verify()
+    native = get_native_module()
+    if native is not None and hasattr(native, "anamnesis_store_verify"):
+        result = dict(
+            native.anamnesis_store_verify(
+                os.fspath(cache),
+                _DEFAULT_MAX_BYTES,
+            )
+        )
+    else:
+        result = _Store(cache, _DEFAULT_MAX_BYTES, True).verify()
+    if result.get("quarantined", 0):
+        (Path(cache) / _LAST_MANIFEST).unlink(missing_ok=True)
+    return result
 
 
 def _main(argv: Sequence[str] | None = None) -> int:

@@ -18,23 +18,40 @@ impl TerrainScene {
         water_mask: Option<PyReadonlyArray2<f32>>,
         time_seconds: f32,
     ) -> Result<crate::Frame> {
-        let mut graph = crate::core::framegraph_impl::compile_renderer_graph(&[
-            "terrain.prepare",
-            "terrain.shadow",
-            "terrain.forward",
-            "terrain.resolve",
-        ])?;
+        let (height_height, height_width) = heightmap.as_array().dim();
+        let mut declaration_uniforms = Vec::new();
+        declaration_uniforms.extend_from_slice(&params.size_px.0.to_le_bytes());
+        declaration_uniforms.extend_from_slice(&params.size_px.1.to_le_bytes());
+        declaration_uniforms.extend_from_slice(&(height_width as u64).to_le_bytes());
+        declaration_uniforms.extend_from_slice(&(height_height as u64).to_le_bytes());
+        declaration_uniforms.extend_from_slice(&time_seconds.to_bits().to_le_bytes());
+        declaration_uniforms.extend_from_slice(
+            &params
+                .terrain_data_revision
+                .unwrap_or(u64::MAX)
+                .to_le_bytes(),
+        );
+        let mut graph = super::render_graph::build_terrain_render_graph(
+            params.size_px.0,
+            params.size_px.1,
+            height_width as u32,
+            height_height as u32,
+            self.color_format,
+            false,
+            declaration_uniforms,
+        )?;
         debug_assert_eq!(graph.labels.len(), 4);
-        graph.enter("terrain.prepare")?;
         let (certificate_capture, _allocation_scope) =
             self.begin_certificate_capture("terrain.render_internal");
         let mut timing = self.take_render_timing();
         let decoded = params.decoded();
-        self.prepare_frame_lighting(decoded)?;
-
-        let height_inputs =
-            self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
-        self.prepare_geometry(params)?;
+        let height_inputs = graph.execute("terrain.prepare", || {
+            self.prepare_frame_lighting(decoded)?;
+            let inputs =
+                self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
+            self.prepare_geometry(params)?;
+            Ok::<_, anyhow::Error>(inputs)
+        })?;
         let probe_world_span = if is_mesh_camera_mode(&params.camera_mode)
             || is_clipmap_camera_mode(&params.camera_mode)
         {
@@ -162,17 +179,19 @@ impl TerrainScene {
         )?;
         ts_end(&mut timing, &mut encoder, sun_vis_scope, 0);
 
-        graph.enter("terrain.shadow")?;
-        let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
-        let shadow_setup = self.prepare_shadow_setup(
-            &mut encoder,
-            params,
-            decoded,
-            &height_inputs.heightmap_view,
-            height_inputs.width,
-            height_inputs.height,
-        )?;
-        ts_end(&mut timing, &mut encoder, shadow_scope, 0);
+        let shadow_setup = graph.execute("terrain.shadow", || {
+            let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
+            let setup = self.prepare_shadow_setup(
+                &mut encoder,
+                params,
+                decoded,
+                &height_inputs.heightmap_view,
+                height_inputs.width,
+                height_inputs.height,
+            )?;
+            ts_end(&mut timing, &mut encoder, shadow_scope, 0);
+            Ok::<_, anyhow::Error>(setup)
+        })?;
         let shadow_bind_group = shadow_setup
             .shadow_bind_group
             .as_ref()
@@ -259,21 +278,23 @@ impl TerrainScene {
             ts_end(&mut timing, &mut encoder, bg_scope, 1);
         }
 
-        graph.enter("terrain.forward")?;
-        let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
-        self.run_main_pass(
-            &mut encoder,
-            params,
-            &render_targets,
-            &pass_bind_groups.main,
-            &ibl_bind_group,
-            shadow_bind_group,
-            &pass_bind_groups.fog,
-            &water_reflection_bind_group,
-            &pass_bind_groups.material_layer,
-            sky_texture.is_some(),
-        )?;
-        ts_end(&mut timing, &mut encoder, main_scope, 1);
+        graph.execute("terrain.forward", || {
+            let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
+            self.run_main_pass(
+                &mut encoder,
+                params,
+                &render_targets,
+                &pass_bind_groups.main,
+                &ibl_bind_group,
+                shadow_bind_group,
+                &pass_bind_groups.fog,
+                &water_reflection_bind_group,
+                &pass_bind_groups.material_layer,
+                sky_texture.is_some(),
+            )?;
+            ts_end(&mut timing, &mut encoder, main_scope, 1);
+            Ok::<_, anyhow::Error>(())
+        })?;
 
         #[cfg(feature = "enable-gpu-instancing")]
         {
@@ -296,12 +317,14 @@ impl TerrainScene {
             )?;
         }
 
-        graph.enter("terrain.resolve")?;
-        let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
         let (final_texture, final_width, final_height) =
-            self.resolve_output(&mut encoder, params, decoded, render_targets)?;
-        ts_end(&mut timing, &mut encoder, resolve_scope, 1);
-        self.stage_material_vt_feedback_readback(&mut encoder)?;
+            graph.execute("terrain.resolve", || {
+                let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
+                let output = self.resolve_output(&mut encoder, params, decoded, render_targets)?;
+                ts_end(&mut timing, &mut encoder, resolve_scope, 1);
+                self.stage_material_vt_feedback_readback(&mut encoder)?;
+                Ok::<_, anyhow::Error>(output)
+            })?;
         if let Some(t) = timing.as_mut() {
             t.resolve_queries(&mut encoder);
         }

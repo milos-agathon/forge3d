@@ -10,6 +10,7 @@ from typing import Any, Mapping, Optional
 import sys
 import numpy as np
 
+from .._canonical_json import canonical_json_bytes
 from .._png import encode_png as _encode_png
 from .._png import save_png as _save_png
 from ..path_tracing import render_rgba as _fallback_render_rgba
@@ -104,6 +105,9 @@ def render_offscreen_rgba(
         cache=cache,
         render_frame=lambda _recipe, _frame: np.ascontiguousarray(render_cpu(), dtype=np.uint8).tobytes(),
         render_frame_fingerprint=b"forge3d.path_tracing.render_rgba/v1",
+        render_frame_context=canonical_json_bytes(
+            recipe, error_context="offscreen ANAMNESIS callback context"
+        ),
         capabilities={},
     )
     return np.frombuffer(result.frame_blobs[0], dtype=np.uint8).reshape(h, w, 4).copy()

@@ -1,6 +1,8 @@
 //! Bounded, self-verifying filesystem content store.
 
-use super::key::{sha256, EngineFingerprint, PassKey, PassKeyMaterial};
+use super::key::{
+    reconstruct_pass_key, sha256, EngineFingerprint, InputKey, PassKey, PassKeyMaterial,
+};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Error, ErrorKind, Result};
@@ -11,17 +13,28 @@ const BLOB_NAME: &str = "blob";
 const META_NAME: &str = "meta.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum KeyDerivation {
+    Pass { material: PassKeyMaterial },
+    Leaf { content_sha256: PassKey },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoreMetadata {
     pub schema: String,
     pub key: PassKey,
     pub pass_label: String,
-    pub input_keys: Vec<PassKey>,
+    pub input_keys: Vec<InputKey>,
     pub byte_length: u64,
     pub creation_engine_fingerprint: EngineFingerprint,
     pub self_hash: PassKey,
     pub created_unix_ms: u64,
     pub last_access_unix_ms: u64,
-    pub derivation: PassKeyMaterial,
+    pub derivation: KeyDerivation,
+    #[serde(default)]
+    pub frame: Option<i64>,
+    #[serde(default)]
+    pub measured_wall_ms: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -71,19 +84,71 @@ impl ContentStore {
         blob: &[u8],
         derivation: PassKeyMaterial,
     ) -> Result<StoreMetadata> {
-        if blob.len() as u64 > self.max_bytes {
+        self.put_measured(key, blob, derivation, None, 0.0)
+    }
+
+    pub fn put_measured(
+        &self,
+        key: PassKey,
+        blob: &[u8],
+        derivation: PassKeyMaterial,
+        frame: Option<i64>,
+        measured_wall_ms: f64,
+    ) -> Result<StoreMetadata> {
+        self.put_derivation(
+            key,
+            blob,
+            derivation.label.clone(),
+            derivation.input_keys.clone(),
+            KeyDerivation::Pass {
+                material: derivation,
+            },
+            frame,
+            measured_wall_ms,
+        )
+    }
+
+    pub fn put_leaf(
+        &self,
+        key: PassKey,
+        blob: &[u8],
+        label: impl Into<String>,
+    ) -> Result<StoreMetadata> {
+        if super::key::leaf_key(blob) != key {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                "ANAMNESIS blob is larger than the entire store budget",
+                "ANAMNESIS leaf key does not match leaf content",
             ));
         }
+        self.put_derivation(
+            key,
+            blob,
+            label.into(),
+            Vec::new(),
+            KeyDerivation::Leaf {
+                content_sha256: sha256(blob),
+            },
+            None,
+            0.0,
+        )
+    }
+
+    fn put_derivation(
+        &self,
+        key: PassKey,
+        blob: &[u8],
+        pass_label: String,
+        input_keys: Vec<InputKey>,
+        derivation: KeyDerivation,
+        frame: Option<i64>,
+        measured_wall_ms: f64,
+    ) -> Result<StoreMetadata> {
         let entry = self.entry_dir(key);
         if entry.is_dir() {
             if let Some((_, meta)) = self.get(key)? {
                 return Ok(meta);
             }
         }
-        self.gc_to(self.max_bytes.saturating_sub(blob.len() as u64))?;
         fs::create_dir_all(entry.parent().expect("entry has prefix"))?;
         let temp = entry.with_extension(format!("tmp-{}", now_ms()));
         fs::create_dir_all(&temp)?;
@@ -91,17 +156,31 @@ impl ContentStore {
         let metadata = StoreMetadata {
             schema: "forge3d.anamnesis.store/1".into(),
             key,
-            pass_label: derivation.label.clone(),
-            input_keys: derivation.input_keys.clone(),
+            pass_label,
+            input_keys,
             byte_length: blob.len() as u64,
             creation_engine_fingerprint: EngineFingerprint::current(),
             self_hash: sha256(blob),
             created_unix_ms: now,
             last_access_unix_ms: now,
             derivation,
+            frame,
+            measured_wall_ms: measured_wall_ms.max(0.0),
         };
         fs::write(temp.join(BLOB_NAME), blob)?;
         fs::write(temp.join(META_NAME), json_bytes(&metadata)?)?;
+        let staged_bytes = tree_bytes(&temp)?;
+        if staged_bytes > self.max_bytes {
+            fs::remove_dir_all(&temp)?;
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "ANAMNESIS entry requires {staged_bytes} bytes, exceeding max_bytes={}",
+                    self.max_bytes
+                ),
+            ));
+        }
+        self.gc_for_staged(&temp, staged_bytes)?;
         match fs::rename(&temp, &entry) {
             Ok(()) => {}
             Err(error) if entry.is_dir() => {
@@ -113,6 +192,7 @@ impl ContentStore {
                 return Err(error);
             }
         }
+        self.enforce_bound(Some(entry.as_path()))?;
         Ok(metadata)
     }
 
@@ -135,14 +215,12 @@ impl ContentStore {
                 return Ok(None);
             }
         };
-        let valid = meta.key == key
-            && meta.byte_length == blob.len() as u64
-            && meta.self_hash == sha256(&blob);
+        let valid = metadata_is_valid(&meta, key, &blob);
         if !valid {
             self.quarantine(&entry, key)?;
             return Ok(None);
         }
-        if self.verify_reads && meta.self_hash != sha256(&blob) {
+        if self.verify_reads && !metadata_is_valid(&meta, key, &blob) {
             self.quarantine(&entry, key)?;
             return Ok(None);
         }
@@ -173,11 +251,7 @@ impl ContentStore {
             let blob = fs::read(entry.join(BLOB_NAME)).unwrap_or_default();
             report.bytes_checked += blob.len() as u64;
             let valid = read_meta(&entry)
-                .map(|m| {
-                    m.key == key
-                        && m.byte_length == blob.len() as u64
-                        && m.self_hash == sha256(&blob)
-                })
+                .map(|m| metadata_is_valid(&m, key, &blob))
                 .unwrap_or(false);
             if valid {
                 report.valid += 1;
@@ -195,13 +269,13 @@ impl ContentStore {
 
     fn gc_to(&self, target_bytes: u64) -> Result<u64> {
         let mut entries = Vec::new();
-        let mut total = 0u64;
+        let mut total = tree_bytes(&self.root)?;
         for path in self.entries()? {
             if let Ok(meta) = read_meta(&path) {
-                total = total.saturating_add(meta.byte_length);
-                entries.push((meta.last_access_unix_ms, meta.byte_length, path));
+                entries.push((meta.last_access_unix_ms, tree_bytes(&path)?, path));
             }
         }
+        entries.extend(self.quarantine_entries()?);
         entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
         let mut removed = 0u64;
         for (_, bytes, path) in entries {
@@ -209,10 +283,81 @@ impl ContentStore {
                 break;
             }
             fs::remove_dir_all(path)?;
-            total = total.saturating_sub(bytes);
+            total = tree_bytes(&self.root)?;
             removed = removed.saturating_add(bytes);
         }
         Ok(removed)
+    }
+
+    fn gc_for_staged(&self, temp: &Path, staged_bytes: u64) -> Result<()> {
+        let mut candidates = Vec::new();
+        for path in self.entries()? {
+            if path != temp {
+                let accessed = read_meta(&path)
+                    .map(|meta| meta.last_access_unix_ms)
+                    .unwrap_or_default();
+                candidates.push((accessed, path));
+            }
+        }
+        candidates.extend(
+            self.quarantine_entries()?
+                .into_iter()
+                .map(|(accessed, _, path)| (accessed, path)),
+        );
+        candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, path) in candidates {
+            let current = tree_bytes_excluding(&self.root, temp)?;
+            if current.saturating_add(staged_bytes) <= self.max_bytes {
+                return Ok(());
+            }
+            fs::remove_dir_all(path)?;
+        }
+        let projected = tree_bytes_excluding(&self.root, temp)?.saturating_add(staged_bytes);
+        if projected > self.max_bytes {
+            fs::remove_dir_all(temp)?;
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "ANAMNESIS store overhead plus entry requires {projected} bytes, exceeding max_bytes={}",
+                    self.max_bytes
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn enforce_bound(&self, protected: Option<&Path>) -> Result<()> {
+        if tree_bytes(&self.root)? <= self.max_bytes {
+            return Ok(());
+        }
+        let mut candidates = self
+            .entries()?
+            .into_iter()
+            .filter(|path| Some(path.as_path()) != protected)
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|path| {
+            read_meta(path)
+                .map(|meta| meta.last_access_unix_ms)
+                .unwrap_or_default()
+        });
+        for path in candidates {
+            if tree_bytes(&self.root)? <= self.max_bytes {
+                return Ok(());
+            }
+            fs::remove_dir_all(path)?;
+        }
+        if tree_bytes(&self.root)? > self.max_bytes {
+            if let Some(path) = protected {
+                if path.exists() {
+                    fs::remove_dir_all(path)?;
+                }
+            }
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "ANAMNESIS complete on-disk footprint exceeds max_bytes",
+            ));
+        }
+        Ok(())
     }
 
     fn entries(&self) -> Result<Vec<PathBuf>> {
@@ -234,6 +379,25 @@ impl ContentStore {
         Ok(out)
     }
 
+    fn quarantine_entries(&self) -> Result<Vec<(u64, u64, PathBuf)>> {
+        let root = self.root.join("quarantine");
+        let mut out = Vec::new();
+        for entry in fs::read_dir(root)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                let accessed = path
+                    .metadata()?
+                    .modified()
+                    .ok()
+                    .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+                    .map(|value| value.as_millis() as u64)
+                    .unwrap_or_default();
+                out.push((accessed, tree_bytes(&path)?, path));
+            }
+        }
+        Ok(out)
+    }
+
     fn quarantine(&self, entry: &Path, key: PassKey) -> Result<()> {
         let target = self
             .root
@@ -251,12 +415,53 @@ fn now_ms() -> u64 {
 }
 
 fn json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    serde_json::to_vec_pretty(value).map_err(|e| Error::new(ErrorKind::InvalidData, e))
+    serde_json::to_vec(value).map_err(|e| Error::new(ErrorKind::InvalidData, e))
 }
 
 fn read_meta(entry: &Path) -> Result<StoreMetadata> {
     serde_json::from_slice(&fs::read(entry.join(META_NAME))?)
         .map_err(|e| Error::new(ErrorKind::InvalidData, e))
+}
+
+fn metadata_is_valid(meta: &StoreMetadata, key: PassKey, blob: &[u8]) -> bool {
+    let derivation_key = match &meta.derivation {
+        KeyDerivation::Pass { material } => reconstruct_pass_key(material).ok(),
+        KeyDerivation::Leaf { content_sha256 } => {
+            if *content_sha256 == sha256(blob) {
+                Some(super::key::leaf_key(blob))
+            } else {
+                None
+            }
+        }
+    };
+    meta.schema == "forge3d.anamnesis.store/1"
+        && meta.key == key
+        && meta.byte_length == blob.len() as u64
+        && meta.self_hash == sha256(blob)
+        && derivation_key == Some(key)
+}
+
+fn tree_bytes(path: &Path) -> Result<u64> {
+    let mut total = path.metadata()?.len();
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            total = total.saturating_add(tree_bytes(&entry?.path())?);
+        }
+    }
+    Ok(total)
+}
+
+fn tree_bytes_excluding(path: &Path, excluded: &Path) -> Result<u64> {
+    if path == excluded {
+        return Ok(0);
+    }
+    let mut total = path.metadata()?.len();
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            total = total.saturating_add(tree_bytes_excluding(&entry?.path(), excluded)?);
+        }
+    }
+    Ok(total)
 }
 
 #[cfg(test)]
@@ -273,7 +478,10 @@ mod tests {
             label,
             b"pipeline",
             b"uniform",
-            &[super::super::key::leaf_key(blob)],
+            &[InputKey::new(
+                "fixture@0",
+                super::super::key::leaf_key(blob),
+            )],
             b"caps",
             b"engine",
         )
@@ -282,7 +490,7 @@ mod tests {
     #[test]
     fn corruption_is_quarantined_and_becomes_a_miss() {
         let root = scratch("corrupt");
-        let store = ContentStore::new(&root, 1024, true).unwrap();
+        let store = ContentStore::new(&root, 16 * 1024, true).unwrap();
         let (key, material) = derivation("pass", b"good");
         store.put(key, b"good", material).unwrap();
         fs::write(store.entry_dir(key).join(BLOB_NAME), b"hood").unwrap();
@@ -296,7 +504,7 @@ mod tests {
     #[test]
     fn lru_eviction_respects_bound() {
         let root = scratch("lru");
-        let store = ContentStore::new(&root, 8, false).unwrap();
+        let store = ContentStore::new(&root, 16 * 1024, false).unwrap();
         let (a, da) = derivation("a", b"aaaa");
         store.put(a, b"aaaa", da).unwrap();
         std::thread::sleep(Duration::from_millis(2));
@@ -305,9 +513,26 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         let (c, dc) = derivation("c", b"cccc");
         store.put(c, b"cccc", dc).unwrap();
+        store
+            .gc(tree_bytes(&root).unwrap() - tree_bytes(&store.entry_dir(a)).unwrap())
+            .unwrap();
         assert!(store.get(a).unwrap().is_none());
         assert!(store.get(b).unwrap().is_some());
         assert!(store.get(c).unwrap().is_some());
+        assert!(tree_bytes(&root).unwrap() <= store.max_bytes);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn complete_footprint_never_exceeds_bound() {
+        let root = scratch("hard-bound");
+        let store = ContentStore::new(&root, 16 * 1024, false).unwrap();
+        for index in 0..8 {
+            let blob = vec![index; 256];
+            let (key, material) = derivation(&format!("pass-{index}"), &blob);
+            store.put(key, &blob, material).unwrap();
+            assert!(tree_bytes(&root).unwrap() <= 16 * 1024);
+        }
         fs::remove_dir_all(root).unwrap();
     }
 }

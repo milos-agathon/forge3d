@@ -5,6 +5,7 @@ Renders scale bars with proper distance labels based on geographic bounds.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Literal
 
@@ -129,8 +130,11 @@ class ScaleBar:
         )
         return image
 
-    def render_geometry(self) -> tuple[np.ndarray, str, tuple[int, int]]:
+    def render_geometry(
+        self, *, cache: str | os.PathLike[str] | None = None
+    ) -> tuple[np.ndarray, str, tuple[int, int]]:
         """Return deterministic bar geometry plus native-label placement metadata."""
+        _ = cache  # deterministic CPU helper; accepted for render-surface consistency
         from ._map_scene_render import _text_outline_metrics
 
         cfg = self.config

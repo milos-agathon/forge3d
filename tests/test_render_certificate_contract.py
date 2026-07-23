@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+import sys
 
 import numpy as np
 
@@ -182,6 +183,64 @@ def test_render_surface_sweep_has_no_uncertified_entrypoints() -> None:
     )
 
 
+def _discover_public_render_surface() -> dict[str, object]:
+    """Discover module functions and class methods instead of trusting a list."""
+    modules = (f3d, _native, determinism, geometry, path_tracing, terrain_demo, sdf)
+    candidates: dict[str, object] = {}
+    for module in modules:
+        for name in dir(module):
+            obj = getattr(module, name)
+            if name.startswith("render_") and callable(obj):
+                candidates.setdefault(name, obj)
+    classes = {
+        cls.__name__: cls
+        for cls in (
+            f3d.Scene,
+            f3d.Renderer,
+            f3d.TerrainRenderer,
+            MapScene,
+            MapPlate,
+            Legend,
+            NorthArrow,
+            ScaleBar,
+            path_tracing.PathTracer,
+            HybridRenderer,
+            RestirDI,
+            SmokeDomain,
+            VectorScene,
+            ViewerHandle,
+            ViewerWidget,
+        )
+    }
+    for class_name, cls in classes.items():
+        for method_name in dir(cls):
+            if not method_name.startswith("render"):
+                continue
+            obj = getattr(cls, method_name)
+            if callable(obj):
+                candidates[f"{class_name}.{method_name}"] = obj
+    return candidates
+
+
+def test_render_surface_sweep_has_no_uncached_entrypoints() -> None:
+    """ANAMNESIS API gate: newly added render surfaces cannot evade cache=."""
+    offenders = []
+    for name, obj in sorted(_discover_public_render_surface().items()):
+        if name in DOCUMENTED_EXCLUSIONS or name.rsplit(".", 1)[-1] in DOCUMENTED_EXCLUSIONS:
+            continue
+        try:
+            params = inspect.signature(obj).parameters
+        except (TypeError, ValueError):
+            offenders.append(f"{name} (signature not introspectable)")
+            continue
+        if "cache" not in params:
+            offenders.append(name)
+    assert offenders == [], (
+        "public render callables lack both a cache= contract and a documented "
+        f"non-render exclusion: {offenders}"
+    )
+
+
 def test_documented_exclusions_explain_their_certificate_scope() -> None:
     exclusions = {
         "MapPlate.compose": MapPlate.compose,
@@ -316,7 +375,12 @@ def test_native_smoke_certificate_uses_cpu_identity():
     assert [entry["label"] for entry in cert["passes"]] == ["smoke.cpu_projection"]
     assert cert["adapter"]["backend"] == "cpu"
     assert cert["engine"]["wgsl_module_hashes"] == {}
-    assert cert["degradations"] == []
+    if sys.version_info >= (3, 14):
+        assert {(item["kind"], item["name"]) for item in cert["degradations"]} == {
+            ("cpu_fallback", "smoke.render")
+        }
+    else:
+        assert cert["degradations"] == []
 
 
 def test_fallback_renderer_discloses_cpu_degradation():

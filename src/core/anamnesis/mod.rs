@@ -10,8 +10,9 @@ pub mod scheduler;
 pub mod store;
 
 pub use key::{
-    leaf_key, pass_key, CapabilityFingerprint, EngineFingerprint, PassKey, PassKeyMaterial,
+    leaf_key, pass_key, reconstruct_pass_key, CapabilityFingerprint, EngineFingerprint, InputKey,
+    PassKey, PassKeyMaterial,
 };
 pub use report::CacheReport;
-pub use scheduler::{PassRequest, Scheduler};
+pub use scheduler::{GraphScheduler, PassRequest, Scheduler};
 pub use store::{ContentStore, StoreMetadata, VerifyReport};

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 
+import forge3d
+import pytest
 from forge3d.anamnesis import (
+    _Store,
     capability_fingerprint,
     engine_fingerprint,
+    leaf_key,
     pass_key,
     render_sequence,
     verify,
@@ -55,7 +59,7 @@ def test_corrupt_blob_is_quarantined_then_recomputed(tmp_path):
     assert (0, "frame.output") in rerender.observed_recompute
 
 
-def test_fast_pack_cannot_bypass_blob_integrity(tmp_path):
+def test_corrupt_metadata_cannot_bypass_blob_integrity(tmp_path):
     recipe = {"terrain": {"dem": [2, 3]}, "output": {"samples": 1}}
     render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False)
     output_entry = None
@@ -65,26 +69,24 @@ def test_fast_pack_cannot_bypass_blob_integrity(tmp_path):
             output_entry = meta_path.parent
             break
     assert output_entry is not None
-    output_key = output_entry.name
+    meta_path = output_entry / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["derivation"]["material"]["uniform_hex"] = "00"
+    meta_path.write_text(json.dumps(meta, sort_keys=True), encoding="utf-8")
 
-    blob_path = output_entry / "blob"
-    blob = bytearray(blob_path.read_bytes())
-    blob[0] ^= 0x01
-    blob_path.write_bytes(blob)
-    fast_path = tmp_path / "fastpack.json"
-    fast = json.loads(fast_path.read_text(encoding="utf-8"))
-    fast_blob = bytearray.fromhex(fast["entries"][output_key]["blob_hex"])
-    fast_blob[0] ^= 0x02
-    fast["entries"][output_key]["blob_hex"] = fast_blob.hex()
-    fast_path.write_text(json.dumps(fast, sort_keys=True), encoding="utf-8")
-
+    with pytest.raises(RuntimeError, match="prediction mismatch"):
+        render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False)
     rerender = render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False)
     assert (0, "frame.output") in rerender.observed_recompute
     assert any((tmp_path / "quarantine").iterdir())
 
 
-def test_fast_pack_is_counted_against_store_payload_budget(tmp_path):
-    max_bytes = 1024
+def _complete_footprint(path) -> int:
+    return sum(item.stat().st_size for item in [path, *path.rglob("*")])
+
+
+def test_complete_store_footprint_is_hard_bounded(tmp_path):
+    max_bytes = 64 * 1024
     render_sequence(
         {"terrain": {"dem": list(range(64))}},
         frames=range(8),
@@ -92,7 +94,69 @@ def test_fast_pack_is_counted_against_store_payload_budget(tmp_path):
         max_bytes=max_bytes,
         verify_reads=False,
     )
-    payload_bytes = sum(path.stat().st_size for path in tmp_path.glob("??/*/blob"))
-    fast_pack = tmp_path / "fastpack.json"
-    fast_pack_bytes = fast_pack.stat().st_size if fast_pack.exists() else 0
-    assert payload_bytes + fast_pack_bytes <= max_bytes
+    assert _complete_footprint(tmp_path) <= max_bytes
+
+
+def test_tiny_budget_rejects_unrepresentable_self_describing_entry(tmp_path):
+    try:
+        render_sequence(
+            {"terrain": {"dem": [0, 1]}},
+            frames=[0],
+            cache=tmp_path,
+            max_bytes=1024,
+        )
+    except ValueError as error:
+        assert "max_bytes" in str(error) or "footprint" in str(error)
+    else:
+        assert _complete_footprint(tmp_path) <= 1024
+
+
+def test_semantic_input_role_swap_changes_key():
+    height = "11" * 32
+    water = "22" * 32
+    common = (
+        b"pipeline",
+        b"uniform",
+        capability_fingerprint({}, backend="vulkan"),
+        engine_fingerprint(),
+    )
+    left = pass_key(
+        "terrain.forward",
+        common[0],
+        common[1],
+        [("heightmap@0", height), ("water_mask@1", water)],
+        common[2],
+        common[3],
+    )
+    right = pass_key(
+        "terrain.forward",
+        common[0],
+        common[1],
+        [("heightmap@0", water), ("water_mask@1", height)],
+        common[2],
+        common[3],
+    )
+    assert left != right
+
+
+def test_rust_and_python_share_one_store_schema_bidirectionally(tmp_path):
+    max_bytes = 1024 * 1024
+    native_blob = b"written-by-rust"
+    native_key = forge3d.anamnesis_store_put_leaf(
+        tmp_path, native_blob, "interop.native", max_bytes
+    )
+    python_store = _Store(tmp_path, max_bytes, True)
+    assert python_store.get(native_key)[0] == native_blob
+
+    python_blob = b"written-by-python"
+    python_key = leaf_key(python_blob)
+    python_store.put_leaf(python_key, python_blob, label="interop.python")
+    assert (
+        forge3d.anamnesis_store_get(tmp_path, python_key, max_bytes) == python_blob
+    )
+    report = forge3d.anamnesis_store_verify(tmp_path, max_bytes)
+    assert report == {
+        "valid": 2,
+        "quarantined": 0,
+        "bytes_checked": len(native_blob) + len(python_blob),
+    }

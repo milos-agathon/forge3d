@@ -103,18 +103,21 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
     env_maps = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
     backend = str(f3d.device_probe().get("backend", "unknown")).lower()
 
-    native_cache = [root / "native-warm"]
-    native_reports: list[tuple[str, dict[str, Any]]] = []
     phase = ["warm"]
+    executor_calls: list[tuple[str, str, int]] = []
 
-    def render_frame(recipe: dict[str, Any], frame: int) -> bytes:
+    def render_terrain_shade(
+        state: dict[str, Any], frame: int, _inputs: list[bytes]
+    ) -> bytes:
+        executor_calls.append((phase[0], "terrain.shade", frame))
         if frame % 100 == 0:
             print(f"ANAMNESIS GPU {phase[0]} frame {frame}/600", flush=True)
         config = _canonical_params_config()(64, 64)
-        config.cam_phi_deg = float(recipe["camera"]["phi_start"]) + frame * float(
-            recipe["camera"]["phi_step"]
+        camera = state["camera"]
+        config.cam_phi_deg = float(camera["phi_start"]) + frame * float(
+            camera["phi_step"]
         )
-        config.cam_theta_deg = float(recipe["camera"]["theta"])
+        config.cam_theta_deg = float(camera["theta"])
         params = f3d.TerrainRenderParams(config)
         rendered = renderer.render_terrain_pbr_pom(
             material_set,
@@ -122,14 +125,31 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
             params,
             heightmap,
             time_seconds=frame / 60.0,
-            cache=native_cache[0],
+            cache=None,
         )
-        native_reports.append((phase[0], dict(renderer.last_anamnesis_cache_report)))
-        rgba = np.asarray(rendered.to_numpy())
-        label = recipe["layers"][0]
-        if frame in label["visible_frames"]:
-            rgba = _composite_label(rgba, str(label["text"]))
-        return np.ascontiguousarray(rgba, dtype=np.uint8).tobytes()
+        return np.ascontiguousarray(rendered.to_numpy(), dtype=np.uint8).tobytes()
+
+    def identity(_state: Any, frame: int, inputs: list[bytes]) -> bytes:
+        executor_calls.append((phase[0], "identity", frame))
+        return inputs[0]
+
+    def compile_labels(state: list[dict[str, Any]], frame: int, _inputs: list[bytes]) -> bytes:
+        executor_calls.append((phase[0], "label.compile", frame))
+        return json.dumps(state, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    def composite_label(_state: Any, frame: int, inputs: list[bytes]) -> bytes:
+        executor_calls.append((phase[0], "label.composite", frame))
+        rgba = np.frombuffer(inputs[0], dtype=np.uint8).reshape((64, 64, 4))
+        labels = json.loads(inputs[1].decode("utf-8"))
+        return _composite_label(rgba, str(labels[0]["text"])).tobytes()
+
+    pass_executors = {
+        "terrain.shade": render_terrain_shade,
+        "accumulation": identity,
+        "label.compile": compile_labels,
+        "label.composite": composite_label,
+        "frame.output": identity,
+    }
 
     original = _recipe(
         "Old summit",
@@ -142,29 +162,52 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
     fingerprint = hashlib.sha256(
         Path(__file__).read_bytes() + f3d.__version__.encode("ascii")
     ).digest()
+    pass_fingerprints = {
+        label: hashlib.sha256(fingerprint + label.encode("utf-8")).digest()
+        for label in pass_executors
+    }
+    terrain_context = hashlib.sha256(
+        b"terrain-default/v1\0"
+        + heightmap.tobytes()
+        + hdr_path.read_bytes()
+        + f3d.__version__.encode("ascii")
+    ).digest()
+    pass_contexts = {
+        "terrain.shade": terrain_context,
+        "accumulation": b"identity/no-hidden-inputs/v1",
+        "label.compile": b"canonical-json-label-compiler/v1",
+        "label.composite": json.dumps(
+            {"glyphs": _GLYPHS, "width": 64, "height": 64},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        "frame.output": b"identity/no-hidden-inputs/v1",
+    }
 
     render_sequence(
         original,
         cache=root / "warm",
-        render_frame=render_frame,
-        render_frame_fingerprint=fingerprint,
+        pass_executors=pass_executors,
+        pass_executor_fingerprints=pass_fingerprints,
+        pass_executor_contexts=pass_contexts,
         verify_reads=False,
     )
     phase[0] = "incremental"
     incremental = render_sequence(
         modified,
         cache=root / "warm",
-        render_frame=render_frame,
-        render_frame_fingerprint=fingerprint,
+        pass_executors=pass_executors,
+        pass_executor_fingerprints=pass_fingerprints,
+        pass_executor_contexts=pass_contexts,
         verify_reads=False,
     )
     phase[0] = "cold"
-    native_cache[0] = root / "native-cold-modified"
     cold = render_sequence(
         modified,
         cache=root / "cold-modified",
-        render_frame=render_frame,
-        render_frame_fingerprint=fingerprint,
+        pass_executors=pass_executors,
+        pass_executor_fingerprints=pass_fingerprints,
+        pass_executor_contexts=pass_contexts,
         verify_reads=False,
     )
 
@@ -194,11 +237,10 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
             "hit_rate": incremental.cache_report.hit_rate,
         },
         "backend": backend,
-        "incremental_native_hits": sum(
-            len(report["hits"]) for item_phase, report in native_reports if item_phase == "incremental"
-        ),
-        "incremental_native_misses": sum(
-            len(report["misses"]) for item_phase, report in native_reports if item_phase == "incremental"
+        "incremental_terrain_executions": sum(
+            1
+            for item_phase, label, _ in executor_calls
+            if item_phase == "incremental" and label == "terrain.shade"
         ),
     }
     result_path = os.environ.get("FORGE3D_ANAMNESIS_RESULT_PATH")
@@ -212,7 +254,7 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         raise AssertionError(f"GPU recompute mismatch: {result}")
     if result["pass_labels"] != ["frame.output", "label.compile", "label.composite"]:
         raise AssertionError(f"unexpected GPU recompute labels: {result}")
-    if result["incremental_native_hits"] != 1 or result["incremental_native_misses"] != 0:
+    if result["incremental_terrain_executions"] != 0:
         raise AssertionError(f"incremental label edit re-encoded native terrain: {result}")
     if result["speedup"] < 20.0:
         raise AssertionError(f"GPU speedup below 20x: {result}")

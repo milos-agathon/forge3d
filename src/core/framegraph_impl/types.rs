@@ -45,6 +45,8 @@ pub struct ResourceDesc {
     pub usage: Option<TextureUsages>,
     /// Whether this resource can be aliased with others
     pub can_alias: bool,
+    /// Whether the graph owns the resource for only this execution.
+    pub is_transient: bool,
 }
 
 /// Resource state information
@@ -86,6 +88,14 @@ pub struct PassDesc {
     pub writes: Vec<ResourceHandle>,
     /// Whether this pass can run in parallel with others
     pub can_parallelize: bool,
+    /// Canonical complete pipeline descriptor bytes. Transfer passes use an
+    /// explicit descriptor naming the copy/readback operation.
+    pub pipeline_descriptor_bytes: Vec<u8>,
+    /// Exact bytes uploaded for this pass after deterministic padding.
+    pub uniform_bytes: Vec<u8>,
+    /// Why this pass must conservatively execute instead of using ANAMNESIS.
+    /// `None` means the declaration is eligible once its bottom-up key exists.
+    pub cache_disabled_reason: Option<String>,
     /// Optional ANAMNESIS identity computed from the pass's complete declared
     /// input space. `None` means the pass is deliberately not cacheable.
     pub pass_key: Option<crate::core::anamnesis::PassKey>,

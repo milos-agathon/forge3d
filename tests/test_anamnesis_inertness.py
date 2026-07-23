@@ -37,6 +37,88 @@ def test_callback_requires_explicit_renderer_fingerprint(tmp_path):
         assert "render_frame_fingerprint" in str(error)
     else:
         raise AssertionError("hidden callback code identity must not be cacheable")
+    with pytest.raises(ValueError, match="render_frame_context"):
+        render_sequence(
+            recipe,
+            frames=[0],
+            cache=tmp_path,
+            render_frame=lambda _r, _f: b"x",
+            render_frame_fingerprint=b"renderer",
+        )
+
+
+def test_opaque_renderer_recipe_and_fingerprint_changes_cannot_serve_stale_hits(
+    tmp_path,
+):
+    calls: list[str] = []
+
+    def renderer_a(_recipe, _frame):
+        calls.append("a")
+        return b"A"
+
+    def renderer_b(_recipe, _frame):
+        calls.append("b")
+        return b"B"
+
+    recipe_a = {"scene": {"identity": "A"}, "output": {"format": "png"}}
+    recipe_b = {"scene": {"identity": "B"}, "output": {"format": "png"}}
+    first = render_sequence(
+        recipe_a,
+        frames=[0],
+        cache=tmp_path,
+        render_frame=renderer_a,
+        render_frame_fingerprint=b"renderer-A",
+        render_frame_context=b"captured-output-A",
+    )
+    second = render_sequence(
+        recipe_b,
+        frames=[0],
+        cache=tmp_path,
+        render_frame=renderer_b,
+        render_frame_fingerprint=b"renderer-B",
+        render_frame_context=b"captured-output-B",
+    )
+
+    assert first.frame_blobs == [b"A"]
+    assert second.frame_blobs == [b"B"]
+    assert calls == ["a", "b"]
+    assert (0, "frame.output") in second.observed_recompute
+
+
+def test_output_destination_is_proven_irrelevant_to_pixel_keys(tmp_path):
+    calls: list[str] = []
+
+    def renderer(_recipe, _frame):
+        calls.append("render")
+        return b"same pixels"
+
+    first = {
+        "terrain": {"dem": [0, 1]},
+        "output": {"format": "png", "path": "first/result.png"},
+    }
+    second = {
+        "terrain": {"dem": [0, 1]},
+        "output": {"format": "png", "path": "second/result.png"},
+    }
+    render_sequence(
+        first,
+        frames=[0],
+        cache=tmp_path,
+        render_frame=renderer,
+        render_frame_fingerprint=b"same-renderer",
+        render_frame_context=b"same-captured-inputs",
+    )
+    rerender = render_sequence(
+        second,
+        frames=[0],
+        cache=tmp_path,
+        render_frame=renderer,
+        render_frame_fingerprint=b"same-renderer",
+        render_frame_context=b"same-captured-inputs",
+    )
+    assert calls == ["render"]
+    assert rerender.observed_recompute == []
+    assert rerender.predicted_recompute == []
 
 
 def test_offscreen_helper_cache_is_inert_and_serves_identical_bytes(tmp_path):
@@ -51,7 +133,7 @@ def test_offscreen_helper_cache_is_inert_and_serves_identical_bytes(tmp_path):
     os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1",
     reason="set FORGE3D_RUN_GPU_ANAMNESIS=1 on a hardware-backed runner",
 )
-def test_native_terrain_cache_skips_encoder_and_invalidates_dem(tmp_path):
+def test_native_terrain_incomplete_cache_conservatively_recomputes(tmp_path):
     hdr_path = tmp_path / "environment.hdr"
     write_canonical_hdr(str(hdr_path))
     renderer = f3d.TerrainRenderer(f3d.Session(window=False))
@@ -84,7 +166,13 @@ def test_native_terrain_cache_skips_encoder_and_invalidates_dem(tmp_path):
     changed_report = dict(renderer.last_anamnesis_cache_report)
 
     assert uncached.tobytes() == first.tobytes() == second.tobytes()
-    assert first_report["misses"] == ["terrain.one_shot.final"]
-    assert second_report["hits"] == ["terrain.one_shot.final"]
-    assert changed_report["misses"] == ["terrain.one_shot.final"]
+    assert first_report == {
+        "hits": [],
+        "misses": [],
+        "bytes_read": 0,
+        "bytes_written": 0,
+        "wall_ms_saved": 0.0,
+    }
+    assert second_report == first_report
+    assert changed_report == first_report
     assert changed.tobytes() != second.tobytes()

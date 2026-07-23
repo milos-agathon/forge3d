@@ -41,6 +41,7 @@ mod offline;
 mod pipeline_cache;
 mod probes;
 mod py_api;
+mod render_graph;
 mod resources;
 mod runtime_contract;
 #[cfg(feature = "enable-gpu-instancing")]

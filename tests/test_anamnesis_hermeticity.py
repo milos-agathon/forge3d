@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import random
 
 import pytest
@@ -37,35 +36,8 @@ def _run_mutations(count: int) -> None:
         "engine": b'{"crate_version":"1.33.0","git_sha":"test","naga_version":"0.19.2"}',
     }
 
-    def key_for(inputs: dict[str, bytes]) -> str:
-        pipeline = b"".join(
-            inputs[name]
-            for name in (
-                "wgsl",
-                "sampler",
-                "blend",
-                "depth",
-                "viewport",
-                "scissor",
-                "clear",
-                "texture",
-                "primitive",
-            )
-        )
-        uniform = inputs["uniform"] + inputs["seed"] + inputs["frame_index"]
-        capability = (
-            inputs["capability"] + inputs["backend"] + inputs["dx12_compiler"]
-        )
-        return anamnesis.pass_key(
-            "terrain.forward",
-            pipeline,
-            uniform,
-            [hashlib.sha256(inputs["dem"]).hexdigest()],
-            capability,
-            inputs["engine"],
-        )
-
-    def render_for(inputs: dict[str, bytes]) -> str:
+    def build_for(inputs: dict[str, bytes]) -> tuple[str, str]:
+        frame = int.from_bytes(inputs["frame_index"], "little")
         state = {
             "shader_hashes": {"mutation": inputs["wgsl"].hex()},
             "sampler": inputs["sampler"].hex(),
@@ -91,16 +63,18 @@ def _run_mutations(count: int) -> None:
         try:
             result = anamnesis.render_sequence(
                 recipe,
-                frames=[int.from_bytes(inputs["frame_index"], "little")],
+                frames=[frame],
                 cache=None,
-                capabilities={"granted": [inputs["capability"].hex()]},
+                capabilities={
+                    "granted": [inputs["capability"].hex()],
+                    "naga_capabilities": [inputs["capability"].hex()],
+                },
             )
         finally:
             anamnesis.engine_fingerprint = original_engine
-        return result.frame_hashes[0]
+        return result.pass_keys[f"{frame}:frame.output"], result.frame_hashes[0]
 
-    base_key = key_for(pixel_inputs)
-    base_output = render_for(pixel_inputs)
+    base_key, base_output = build_for(pixel_inputs)
     categories = tuple(pixel_inputs)
     seen = set()
     for index in range(count):
@@ -111,8 +85,7 @@ def _run_mutations(count: int) -> None:
         seen.add(category)
         mutated = dict(pixel_inputs)
         mutated[category] = _mutate(mutated[category], rng)
-        key = key_for(mutated)
-        output = render_for(mutated)
+        key, output = build_for(mutated)
         assert key != base_key, f"mutation escaped key: {category}"
         assert output != base_output, f"pixel-relevant mutation escaped output: {category}"
     assert seen == set(categories)

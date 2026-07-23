@@ -7,6 +7,8 @@ import subprocess
 import sys
 
 import forge3d as f3d
+import numpy as np
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,8 +40,15 @@ def test_engine_wgsl_fingerprint_uses_portable_relative_paths():
 
 
 def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
+    if not f3d.has_gpu():
+        pytest.skip("portable resource rehydration requires a GPU adapter")
     frame_blob = tmp_path / "terra.png"
-    frame_blob.write_bytes(b"actual rendered TERRA golden bytes")
+    rgba = np.zeros((512, 512, 4), dtype=np.uint8)
+    rgba[..., 0] = np.arange(512, dtype=np.uint16)[None, :] % 256
+    rgba[..., 1] = np.arange(512, dtype=np.uint16)[:, None] % 256
+    rgba[..., 2] = 127
+    rgba[..., 3] = 255
+    f3d.numpy_to_png(frame_blob, rgba)
     golden = tmp_path / "terra.sha256"
     golden.write_text(
         hashlib.sha256(frame_blob.read_bytes()).hexdigest() + "  terra.png\n",

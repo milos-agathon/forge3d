@@ -411,7 +411,7 @@ else:
             )
 
         @_captured_cpu_render(
-            "python.smoke.render_projection_rgba", "smoke.python_projection", draw_calls=1
+            "python.smoke.render_projection_rgba", "smoke.cpu_projection", draw_calls=1
         )
         def render_projection_rgba(
             self,

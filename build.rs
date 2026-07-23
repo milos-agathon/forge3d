@@ -48,30 +48,94 @@ fn shader_tree_hash(root: &Path) -> String {
 }
 
 fn main() {
-    let sha = Command::new("git")
-        .args(["rev-parse", "--short=12", "HEAD"])
-        .output()
+    let git_revision = |argument: &str| {
+        Command::new("git")
+            .args(["rev-parse", argument, "HEAD"])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "unknown".to_string())
+    };
+    let sha = git_revision("--short=12");
+    let full_sha = env::var("GITHUB_SHA")
         .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".to_string());
+        .filter(|value| value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .unwrap_or_else(|| {
+            Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .and_then(|out| String::from_utf8(out.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "unknown".to_string())
+        });
 
     println!("cargo:rustc-env=FORGE3D_GIT_SHA={sha}");
+    println!("cargo:rustc-env=FORGE3D_GIT_SHA_FULL={full_sha}");
+    println!(
+        "cargo:rustc-env=FORGE3D_NAGA_VERSION={}",
+        locked_package_version("naga").unwrap_or_else(|| "unknown".into())
+    );
     write_registered_wgsl_modules();
     println!(
         "cargo:rustc-env=FORGE3D_WGSL_TREE_SHA256={}",
         shader_tree_hash(Path::new("src/shaders"))
     );
-    // Re-run when HEAD moves so the embedded SHA stays current. `.git/HEAD`
-    // changes on branch switches; `.git/logs/HEAD` changes on every commit
-    // (including same-branch commits), so watching it refreshes the embedded
-    // SHA after an ordinary `git commit` that leaves HEAD pointing at the same
-    // ref.
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/logs/HEAD");
+    // Re-run when HEAD or its resolved ref moves. `git rev-parse --git-path`
+    // also handles linked worktrees, where the checkout metadata is not stored
+    // in a repository-local `.git` directory.
     println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=Cargo.lock");
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    for git_path in ["HEAD".to_string()].into_iter().chain(
+        Command::new("git")
+            .args(["symbolic-ref", "-q", "HEAD"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|reference| vec![reference.trim().to_string()])
+            .unwrap_or_default(),
+    ) {
+        if let Some(path) = Command::new("git")
+            .args(["rev-parse", "--git-path", &git_path])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|path| path.trim().to_string())
+            .filter(|path| !path.is_empty())
+        {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
+}
+
+fn locked_package_version(package: &str) -> Option<String> {
+    let lock = fs::read_to_string("Cargo.lock").ok()?;
+    for block in lock.split("[[package]]") {
+        let mut name = None;
+        let mut version = None;
+        for line in block.lines() {
+            let Some((field, value)) = line.split_once('=') else {
+                continue;
+            };
+            match field.trim() {
+                "name" => name = Some(value.trim().trim_matches('"')),
+                "version" => version = Some(value.trim().trim_matches('"')),
+                _ => {}
+            }
+        }
+        if name == Some(package) {
+            return version.map(ToString::to_string);
+        }
+    }
+    None
 }
 
 fn write_registered_wgsl_modules() {

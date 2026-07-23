@@ -124,6 +124,11 @@ _NATIVE_ONLY_EXPORTS = (
         "anamnesis_leaf_key",  # ANAMNESIS: native content key primitive
         "anamnesis_pass_key",  # ANAMNESIS: native hermetic pass key
         "anamnesis_engine_fingerprint",  # ANAMNESIS: pinned engine identity
+        "anamnesis_store_verify",  # ANAMNESIS: native unified-store verifier
+        "anamnesis_store_gc",  # ANAMNESIS: native unified-store LRU
+        "anamnesis_store_put_leaf",  # ANAMNESIS: native store interoperability
+        "anamnesis_store_get",  # ANAMNESIS: native store interoperability
+        "anamnesis_restore_rgba8",  # ANAMNESIS: portable GPU resource restore
 )
 
 if _NATIVE_MODULE is not None:

@@ -5640,6 +5640,7 @@ class MapScene:
         )
         if cache_eligible:
             from .anamnesis import render_sequence
+            from ._canonical_json import canonical_json_bytes
 
             rendered: dict[str, ValidationReport] = {}
 
@@ -5658,6 +5659,10 @@ class MapScene:
                 cache=cache,
                 render_frame=render_frame,
                 render_frame_fingerprint=b"forge3d.python.mapscene.render/v1",
+                render_frame_context=canonical_json_bytes(
+                    self.to_dict(),
+                    error_context="MapScene ANAMNESIS callback context",
+                ),
             )
             report = rendered.get("report")
             if report is None:

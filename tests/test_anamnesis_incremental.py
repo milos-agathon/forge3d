@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from forge3d.anamnesis import render_sequence
+from forge3d.anamnesis import explain, render_sequence
 
 
 def _recipe(text: str) -> dict:
@@ -55,24 +55,69 @@ def test_dry_run_predicts_without_writing(tmp_path):
     assert not any(path.name == "blob" for path in store.rglob("blob"))
 
 
-def test_600_frame_incremental_speedup_is_at_least_20x(tmp_path):
+def test_explain_reconstructs_recursive_pass_derivation(tmp_path, capsys):
+    result = render_sequence(_recipe("Summit"), frames=[250], cache=tmp_path)
+    key = result.pass_keys["250:frame.output"]
+
+    tree = explain(key, tmp_path)
+    capsys.readouterr()
+
+    assert tree["key"] == key
+    assert tree["reconstructed_key"] == key
+    assert tree["reconstructs"] is True
+    assert tree["pipeline_descriptor_hex"]
+    assert tree["uniform_hex"]
+    assert tree["capability_fingerprint_hex"]
+    assert tree["engine_fingerprint_hex"]
+    assert tree["inputs"]
+    assert all(item["binding"] and item["derivation"] for item in tree["inputs"])
+
+
+def test_structured_scheduler_executes_only_changed_passes(tmp_path):
     original = _recipe("Old summit")
     original["layers"][0]["visible_frames"] = [250]
     modified = copy.deepcopy(original)
     modified["layers"][0]["text"] = "New summit"
-    options = {"verify_reads": False, "reference_work_factor": 10_000}
+    calls: list[tuple[str, int]] = []
+
+    def identity(state, frame, inputs):
+        calls.append(("identity", frame))
+        return inputs[0] if inputs else repr(state).encode("utf-8")
+
+    executors = {
+        "terrain.shade": identity,
+        "accumulation": identity,
+        "label.compile": identity,
+        "label.composite": identity,
+        "frame.output": identity,
+    }
+    fingerprints = {
+        label: f"test-executor:{label}".encode("utf-8") for label in executors
+    }
+    options = {
+        "verify_reads": False,
+        "pass_executors": executors,
+        "pass_executor_fingerprints": fingerprints,
+        "pass_executor_contexts": {
+            label: f"test-context:{label}".encode("utf-8")
+            for label in executors
+        },
+    }
 
     render_sequence(original, cache=tmp_path / "warm-speed", **options)
+    calls.clear()
     incremental = render_sequence(modified, cache=tmp_path / "warm-speed", **options)
+    incremental_calls = list(calls)
+    calls.clear()
     cold = render_sequence(modified, cache=tmp_path / "cold-speed", **options)
 
     assert incremental.frame_hashes == cold.frame_hashes
     assert incremental.prediction_matches
-    speedup = cold.elapsed_seconds / incremental.elapsed_seconds
-    assert speedup >= 20.0, (
-        f"cold={cold.elapsed_seconds:.3f}s incremental={incremental.elapsed_seconds:.3f}s "
-        f"speedup={speedup:.2f}x"
-    )
+    assert incremental_calls == [
+        ("identity", -1),
+        ("identity", 250),
+        ("identity", 250),
+    ]
 
 
 @pytest.mark.slow

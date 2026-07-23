@@ -74,10 +74,8 @@ impl EngineFingerprint {
     pub fn current() -> Self {
         Self {
             crate_version: env!("CARGO_PKG_VERSION").to_string(),
-            git_sha: env!("FORGE3D_GIT_SHA").to_string(),
-            // Cargo.lock pins this version. It is intentionally explicit: an
-            // engine upgrade must review and update the cache schema surface.
-            naga_version: "0.19.2".to_string(),
+            git_sha: env!("FORGE3D_GIT_SHA_FULL").to_string(),
+            naga_version: env!("FORGE3D_NAGA_VERSION").to_string(),
             wgsl_tree_sha256: env!("FORGE3D_WGSL_TREE_SHA256").to_string(),
         }
     }
@@ -109,15 +107,44 @@ impl CapabilityFingerprint {
 }
 
 /// Self-describing derivation retained in each store entry.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct InputKey {
+    /// Stable semantic binding identity (for example `heightmap@0`).
+    ///
+    /// The binding is part of the pass identity. Sorting bare hashes is
+    /// unsound because swapping two same-shaped resources would preserve the
+    /// multiset while changing the pixels.
+    pub binding: String,
+    pub key: PassKey,
+}
+
+impl InputKey {
+    pub fn new(binding: impl Into<String>, key: PassKey) -> Self {
+        Self {
+            binding: binding.into(),
+            key,
+        }
+    }
+}
+
+/// Self-describing derivation retained in each store entry.
+///
+/// Exact canonical input bytes are stored alongside their hashes so
+/// `explain` and `verify` can reconstruct the key rather than merely display
+/// hashes that cannot be audited.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PassKeyMaterial {
     pub label: String,
     pub pipeline_descriptor_hash: PassKey,
+    pub pipeline_descriptor_hex: String,
     pub uniform_sha256: PassKey,
     pub uniform_byte_length: u64,
-    pub input_keys: Vec<PassKey>,
+    pub uniform_hex: String,
+    pub input_keys: Vec<InputKey>,
     pub capability_fingerprint_sha256: PassKey,
+    pub capability_fingerprint_hex: String,
     pub engine_fingerprint_sha256: PassKey,
+    pub engine_fingerprint_hex: String,
 }
 
 fn add_segment(hasher: &mut Sha256, tag: &[u8], bytes: &[u8]) {
@@ -144,7 +171,7 @@ pub fn pass_key(
     label: &str,
     pipeline_descriptor_bytes: &[u8],
     uniform_bytes: &[u8],
-    input_keys: &[PassKey],
+    input_keys: &[InputKey],
     capability_fingerprint_bytes: &[u8],
     engine_fingerprint_bytes: &[u8],
 ) -> (PassKey, PassKeyMaterial) {
@@ -166,7 +193,8 @@ pub fn pass_key(
     // Hash the exact bytes, not a Rust struct or a logical field projection.
     add_segment(&mut hasher, b"uniform_bytes", uniform_bytes);
     for input in &sorted_inputs {
-        add_segment(&mut hasher, b"input_key", &input.0);
+        add_segment(&mut hasher, b"input_binding", input.binding.as_bytes());
+        add_segment(&mut hasher, b"input_key", &input.key.0);
     }
     add_segment(
         &mut hasher,
@@ -180,13 +208,55 @@ pub fn pass_key(
         PassKeyMaterial {
             label: label.to_string(),
             pipeline_descriptor_hash,
+            pipeline_descriptor_hex: crate::core::provenance::to_hex(pipeline_descriptor_bytes),
             uniform_sha256,
             uniform_byte_length: uniform_bytes.len() as u64,
+            uniform_hex: crate::core::provenance::to_hex(uniform_bytes),
             input_keys: sorted_inputs,
             capability_fingerprint_sha256,
+            capability_fingerprint_hex: crate::core::provenance::to_hex(
+                capability_fingerprint_bytes,
+            ),
             engine_fingerprint_sha256,
+            engine_fingerprint_hex: crate::core::provenance::to_hex(engine_fingerprint_bytes),
         },
     )
+}
+
+/// Recompute a stored derivation. This is the rejecting-power primitive used
+/// by store verification and `explain`.
+pub fn reconstruct_pass_key(material: &PassKeyMaterial) -> Result<PassKey, String> {
+    fn decode(name: &str, value: &str) -> Result<Vec<u8>, String> {
+        if !value.len().is_multiple_of(2) {
+            return Err(format!("{name} contains an odd number of hex characters"));
+        }
+        (0..value.len())
+            .step_by(2)
+            .map(|offset| {
+                u8::from_str_radix(&value[offset..offset + 2], 16)
+                    .map_err(|_| format!("{name} contains non-hexadecimal characters"))
+            })
+            .collect()
+    }
+    let pipeline = decode("pipeline_descriptor_hex", &material.pipeline_descriptor_hex)?;
+    let uniforms = decode("uniform_hex", &material.uniform_hex)?;
+    let capabilities = decode(
+        "capability_fingerprint_hex",
+        &material.capability_fingerprint_hex,
+    )?;
+    let engine = decode("engine_fingerprint_hex", &material.engine_fingerprint_hex)?;
+    let (key, recomputed) = pass_key(
+        &material.label,
+        &pipeline,
+        &uniforms,
+        &material.input_keys,
+        &capabilities,
+        &engine,
+    );
+    if recomputed != *material {
+        return Err("ANAMNESIS derivation hashes do not match stored canonical bytes".into());
+    }
+    Ok(key)
 }
 
 #[cfg(test)]
@@ -242,8 +312,70 @@ mod tests {
         let a = leaf_key(b"a");
         let b = leaf_key(b"b");
         let engine = EngineFingerprint::current().canonical_bytes();
-        let left = pass_key("x", b"p", b"u", &[a, b], b"c", &engine).0;
-        let right = pass_key("x", b"p", b"u", &[b, a], b"c", &engine).0;
+        let left = pass_key(
+            "x",
+            b"p",
+            b"u",
+            &[InputKey::new("a", a), InputKey::new("b", b)],
+            b"c",
+            &engine,
+        )
+        .0;
+        let right = pass_key(
+            "x",
+            b"p",
+            b"u",
+            &[InputKey::new("b", b), InputKey::new("a", a)],
+            b"c",
+            &engine,
+        )
+        .0;
         assert_eq!(left, right);
+    }
+
+    #[test]
+    fn semantic_role_swap_never_aliases() {
+        let same_shape_a = leaf_key(b"aaaa");
+        let same_shape_b = leaf_key(b"bbbb");
+        let engine = EngineFingerprint::current().canonical_bytes();
+        let left = pass_key(
+            "x",
+            b"p",
+            b"u",
+            &[
+                InputKey::new("height@0", same_shape_a),
+                InputKey::new("water@1", same_shape_b),
+            ],
+            b"c",
+            &engine,
+        )
+        .0;
+        let right = pass_key(
+            "x",
+            b"p",
+            b"u",
+            &[
+                InputKey::new("height@0", same_shape_b),
+                InputKey::new("water@1", same_shape_a),
+            ],
+            b"c",
+            &engine,
+        )
+        .0;
+        assert_ne!(left, right);
+    }
+
+    #[test]
+    fn stored_material_reconstructs_the_key() {
+        let engine = EngineFingerprint::current().canonical_bytes();
+        let (key, material) = pass_key(
+            "x",
+            b"pipeline",
+            b"uniform",
+            &[InputKey::new("dem@0", leaf_key(b"dem"))],
+            b"caps",
+            &engine,
+        );
+        assert_eq!(reconstruct_pass_key(&material).unwrap(), key);
     }
 }

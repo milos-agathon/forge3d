@@ -225,6 +225,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact-head checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -267,16 +274,20 @@ jobs:
           set -e
           set +o pipefail
           if [ $status -ne 0 ]; then
-            {
-              echo "ABSENT: no physical Linux/Vulkan adapter for ANAMNESIS portability seed"
-              tail -n 20 anamnesis-render.err || true
-            } > ANAMNESIS.ABSENT
+            if grep -Eq "software rasterizer|hypervisor-virtualized GPU|No suitable GPU adapter" anamnesis-render.err; then
+              {
+                echo "ABSENT: no physical Linux/Vulkan adapter for ANAMNESIS portability seed"
+                tail -n 20 anamnesis-render.err || true
+              } > ANAMNESIS.ABSENT
+            else
+              cat anamnesis-render.err
+              exit $status
+            fi
           else
             FORGE3D_RUN_GPU_ANAMNESIS=1 \
             FORGE3D_ANAMNESIS_RESULT_PATH=anamnesis-gpu-result.json \
               python -m pytest \
                 tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance \
-                tests/test_anamnesis_inertness.py::test_native_terrain_cache_skips_encoder_and_invalidates_dem \
                 -v --tb=short
             python scripts/check_anamnesis_portability.py seed \
               --cache anamnesis-store --record anamnesis-record.json \
@@ -300,6 +311,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact-head checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:

@@ -5,17 +5,20 @@
 //! cached producers are still present in the compiled graph and their output
 //! resources therefore retain the same declared state transitions.
 
-use super::key::{pass_key, PassKey};
+use super::key::{pass_key, InputKey, PassKey};
 use super::report::CacheReport;
 use super::store::ContentStore;
+use crate::core::framegraph_impl::{PassDesc, RendererGraphPlan, ResourceBarrier, ResourceHandle};
+use std::collections::BTreeMap;
 use std::io::Result;
+use std::io::{Error, ErrorKind};
 use std::time::Instant;
 
 pub struct PassRequest<'a> {
     pub label: &'a str,
     pub pipeline_descriptor_bytes: &'a [u8],
     pub uniform_bytes: &'a [u8],
-    pub input_keys: &'a [PassKey],
+    pub input_keys: &'a [InputKey],
     pub capability_fingerprint_bytes: &'a [u8],
     pub engine_fingerprint_bytes: &'a [u8],
     pub estimated_wall_ms: f64,
@@ -24,6 +27,124 @@ pub struct PassRequest<'a> {
 pub struct Scheduler {
     store: ContentStore,
     report: CacheReport,
+}
+
+/// Bottom-up scheduler for a compiled real-resource framegraph.
+///
+/// Both `execute` and `restore` receive the exact barrier list preceding the
+/// pass. A cache hit therefore cannot bypass the transition contract: the
+/// caller must materialize the serialized texture/buffer before dependents
+/// run, under the same barriers as a freshly encoded producer.
+pub struct GraphScheduler {
+    store: ContentStore,
+    report: CacheReport,
+    capability_fingerprint_bytes: Vec<u8>,
+    engine_fingerprint_bytes: Vec<u8>,
+}
+
+impl GraphScheduler {
+    pub fn new(
+        store: ContentStore,
+        capability_fingerprint_bytes: Vec<u8>,
+        engine_fingerprint_bytes: Vec<u8>,
+    ) -> Self {
+        Self {
+            store,
+            report: CacheReport::default(),
+            capability_fingerprint_bytes,
+            engine_fingerprint_bytes,
+        }
+    }
+
+    pub fn execute_graph<F, R>(
+        &mut self,
+        graph: &RendererGraphPlan,
+        leaf_keys: &BTreeMap<ResourceHandle, PassKey>,
+        mut execute: F,
+        mut restore: R,
+    ) -> Result<BTreeMap<ResourceHandle, PassKey>>
+    where
+        F: FnMut(&PassDesc, &[&ResourceBarrier]) -> Result<Vec<u8>>,
+        R: FnMut(&PassDesc, &[u8], &[&ResourceBarrier]) -> Result<()>,
+    {
+        let mut resource_keys = leaf_keys.clone();
+        for pass in graph.ordered_passes() {
+            let inputs = pass
+                .reads
+                .iter()
+                .map(|handle| {
+                    let resource = graph.resource(*handle).ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::InvalidInput,
+                            format!("framegraph pass {:?} reads an unknown resource", pass.name),
+                        )
+                    })?;
+                    let key = resource_keys.get(handle).copied().ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::InvalidInput,
+                            format!(
+                                "framegraph pass {:?} reads resource {:?} before it has a key",
+                                pass.name, resource.desc.name
+                            ),
+                        )
+                    })?;
+                    Ok(InputKey::new(resource.desc.name.clone(), key))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let (key, derivation) = pass_key(
+                &pass.name,
+                &pass.pipeline_descriptor_bytes,
+                &pass.uniform_bytes,
+                &inputs,
+                &self.capability_fingerprint_bytes,
+                &self.engine_fingerprint_bytes,
+            );
+            let barriers = graph.barriers_before(&pass.name);
+            let cacheable = pass.cache_disabled_reason.is_none();
+            let blob = if cacheable {
+                match self.store.get(key)? {
+                    Some((blob, metadata)) => {
+                        restore(pass, &blob, &barriers)?;
+                        self.report.hits.push(pass.name.clone());
+                        self.report.bytes_read += blob.len() as u64;
+                        self.report.wall_ms_saved += metadata.measured_wall_ms.max(0.0);
+                        blob
+                    }
+                    None => {
+                        let started = Instant::now();
+                        let blob = execute(pass, &barriers)?;
+                        self.store.put_measured(
+                            key,
+                            &blob,
+                            derivation,
+                            None,
+                            started.elapsed().as_secs_f64() * 1000.0,
+                        )?;
+                        self.report.misses.push(pass.name.clone());
+                        self.report.bytes_written += blob.len() as u64;
+                        blob
+                    }
+                }
+            } else {
+                let blob = execute(pass, &barriers)?;
+                self.report.misses.push(pass.name.clone());
+                blob
+            };
+            let _ = blob;
+            for output in &pass.writes {
+                resource_keys.insert(*output, key);
+            }
+        }
+        Ok(resource_keys)
+    }
+
+    pub fn report(&self) -> &CacheReport {
+        &self.report
+    }
+
+    pub fn into_report(self) -> CacheReport {
+        self.report
+    }
 }
 
 impl Scheduler {
@@ -46,15 +167,24 @@ impl Scheduler {
             request.capability_fingerprint_bytes,
             request.engine_fingerprint_bytes,
         );
-        if let Some((blob, _)) = self.store.get(key)? {
+        if let Some((blob, metadata)) = self.store.get(key)? {
             self.report.hits.push(request.label.to_string());
             self.report.bytes_read += blob.len() as u64;
-            self.report.wall_ms_saved += request.estimated_wall_ms.max(0.0);
+            self.report.wall_ms_saved += metadata
+                .measured_wall_ms
+                .max(request.estimated_wall_ms)
+                .max(0.0);
             return Ok((key, blob));
         }
         let started = Instant::now();
         let blob = encode()?;
-        self.store.put(key, &blob, derivation)?;
+        self.store.put_measured(
+            key,
+            &blob,
+            derivation,
+            None,
+            started.elapsed().as_secs_f64() * 1000.0,
+        )?;
         self.report.misses.push(request.label.to_string());
         self.report.bytes_written += blob.len() as u64;
         let _elapsed = started.elapsed();
@@ -84,7 +214,7 @@ mod tests {
             .unwrap_or_default()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("forge3d-anamnesis-scheduler-{nonce}"));
-        let store = ContentStore::new(&root, 1024, true).unwrap();
+        let store = ContentStore::new(&root, 16 * 1024, true).unwrap();
         let engine = EngineFingerprint::current().canonical_bytes();
         let encoded = Cell::new(0u32);
         let execute = |scheduler: &mut Scheduler| {
@@ -119,6 +249,95 @@ mod tests {
         assert_eq!(warm.report().bytes_read, 6);
         assert_eq!(warm.report().wall_ms_saved, 4.5);
         assert_eq!(cold_blob, warm_blob);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn graph_hits_restore_resources_under_the_compiled_barriers() {
+        use crate::core::framegraph_impl::{
+            PassType, RendererGraphBuilder, ResourceDesc, ResourceType,
+        };
+        use wgpu::{Extent3d, TextureFormat, TextureUsages};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("forge3d-anamnesis-graph-{nonce}"));
+        let store = ContentStore::new(&root, 64 * 1024, true).unwrap();
+        let mut builder = RendererGraphBuilder::new();
+        let desc = |name: &str, is_transient: bool| ResourceDesc {
+            name: name.into(),
+            resource_type: ResourceType::ColorAttachment,
+            format: Some(TextureFormat::Rgba8Unorm),
+            extent: Some(Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            }),
+            size: None,
+            usage: Some(TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING),
+            can_alias: false,
+            is_transient,
+        };
+        let leaf = builder.add_resource(desc("leaf", false));
+        let middle = builder.add_resource(desc("middle", true));
+        let output = builder.add_resource(desc("output", true));
+        builder
+            .add_pass("first", PassType::Graphics, |pass| {
+                pass.read(leaf)
+                    .write(middle)
+                    .pipeline_descriptor(b"first-pipeline".to_vec())
+                    .uniform_bytes(b"first-uniform".to_vec());
+                Ok(())
+            })
+            .unwrap();
+        builder
+            .add_pass("second", PassType::Graphics, |pass| {
+                pass.read(middle)
+                    .write(output)
+                    .pipeline_descriptor(b"second-pipeline".to_vec())
+                    .uniform_bytes(b"second-uniform".to_vec());
+                Ok(())
+            })
+            .unwrap();
+        let graph = builder.compile().unwrap();
+        let leaf_keys = BTreeMap::from([(leaf, super::super::leaf_key(b"leaf"))]);
+        let engine = EngineFingerprint::current().canonical_bytes();
+
+        let mut cold = GraphScheduler::new(store.clone(), b"caps".to_vec(), engine.clone());
+        let mut cold_barriers = Vec::new();
+        cold.execute_graph(
+            &graph,
+            &leaf_keys,
+            |pass, barriers| {
+                cold_barriers.push((pass.name.clone(), barriers.len()));
+                Ok(pass.name.as_bytes().to_vec())
+            },
+            |_, _, _| panic!("cold graph cannot restore"),
+        )
+        .unwrap();
+        assert_eq!(cold.report().misses, ["first", "second"]);
+
+        let mut warm = GraphScheduler::new(store, b"caps".to_vec(), engine);
+        let mut restored = Vec::new();
+        warm.execute_graph(
+            &graph,
+            &leaf_keys,
+            |_, _| panic!("warm graph cannot execute an encoder"),
+            |pass, blob, barriers| {
+                restored.push((pass.name.clone(), blob.to_vec(), barriers.len()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(warm.report().hits, ["first", "second"]);
+        assert_eq!(restored[0].0, "first");
+        assert_eq!(restored[1].0, "second");
+        assert!(
+            restored[1].2 > 0,
+            "dependent cached resource must retain its transition barrier"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
