@@ -35,10 +35,12 @@ fn pipeline_material(label: &str, color_format: wgpu::TextureFormat, aov: bool) 
     bytes.push(0);
     bytes.extend_from_slice(format!("{color_format:?}").as_bytes());
     bytes.push(u8::from(aov));
-    let hashes = crate::core::shader_registry::shader_hashes_snapshot();
-    bytes.extend_from_slice(
-        &serde_json::to_vec(&hashes).expect("shader hash snapshot is infallibly serializable"),
-    );
+    for (shader_label, shader_hash) in crate::core::shader_registry::shader_hashes_snapshot() {
+        bytes.extend_from_slice(&(shader_label.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(shader_label.as_bytes());
+        bytes.extend_from_slice(&(shader_hash.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(shader_hash.as_bytes());
+    }
     bytes
 }
 

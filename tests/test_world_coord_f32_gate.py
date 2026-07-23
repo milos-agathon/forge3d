@@ -16,7 +16,7 @@ SANCTIONED = "src/camera/anchor.rs"
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
 EXPECTED_CONVERSION_COUNT = 1323
-EXPECTED_CONVERSION_SHA256 = "28d1cc9db71b48c818577782ef697f54a255a6064333cf9870fd6eb1d5ba9bf6"
+EXPECTED_CONVERSION_SHA256 = "02d683c535255d4c3ff8ea2fdd53520d82912f31751e657d7194bf583738d7a3"
 
 # Reviewed TERMINUS transition from the pinned pre-remediation inventory. The
 # conversion count is unchanged: only the statement containing the existing
@@ -37,6 +37,26 @@ REVIEWED_INVENTORY_TRANSITION = {
         "as_f32",
         1,
         "heights.push(f64::from_le_bytes(read_le_bytes8(data, i * 8)) as f32)",
+    ),
+}
+
+# ANAMNESIS retained the exact five adjudication conversions and moved them
+# into the incremental implementation beneath the compatibility wrapper. This
+# transition records that function-only ownership change without relaxing the
+# occurrence count or any normalized conversion statement.
+REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
+    "base_count": 1323,
+    "base_digest": "28d1cc9db71b48c818577782ef697f54a255a6064333cf9870fd6eb1d5ba9bf6",
+    "result_digest": EXPECTED_CONVERSION_SHA256,
+    "path": "src/offscreen/adjudication_raster.rs",
+    "removed_function": "render_raster_reference",
+    "added_function": "render_raster_reference_incremental",
+    "statements": (
+        "let aspect = width as f32 / height as f32",
+        "let aspect = width as f32 / height as f32",
+        "u.misc = [desc.plane_half_extent, i as f32, 1.0, 0.0]",
+        "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5",
+        "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5",
     ),
 }
 
@@ -181,6 +201,30 @@ def test_reviewed_checked_reader_inventory_transition_is_exact():
     assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
     assert transition["added"] in sites
     assert transition["removed"] not in sites
+
+
+def test_reviewed_anamnesis_function_ownership_transition_is_exact():
+    sites = conversion_inventory()
+    transition = REVIEWED_ANAMNESIS_INVENTORY_TRANSITION
+    assert len(sites) == transition["base_count"] == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == transition["result_digest"]
+    for ordinal, statement in enumerate(transition["statements"], start=1):
+        removed = (
+            transition["path"],
+            transition["removed_function"],
+            "as_f32",
+            ordinal,
+            statement,
+        )
+        added = (
+            transition["path"],
+            transition["added_function"],
+            "as_f32",
+            ordinal,
+            statement,
+        )
+        assert removed not in sites
+        assert added in sites
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():

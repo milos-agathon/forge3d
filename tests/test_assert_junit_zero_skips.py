@@ -255,7 +255,9 @@ def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
     checkout_steps = workflow.split("- uses: actions/checkout@v4")[1:]
     exact_ref = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
 
-    assert len(checkout_steps) == 12
+    # Fifteen required jobs own independent checkouts; the exact count keeps a
+    # newly added job from bypassing this provenance review accidentally.
+    assert len(checkout_steps) == 15
     for index, tail in enumerate(checkout_steps, start=1):
         step = tail.split("\n\n", 1)[0]
         assert exact_ref in step, f"checkout step {index} is not exact-head pinned"
