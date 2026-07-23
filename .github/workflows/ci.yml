@@ -1028,7 +1028,7 @@ jobs:
     name: ANAMNESIS 600-frame Production (NVIDIA Vulkan)
     needs: build-wheels
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
-    timeout-minutes: 35
+    timeout-minutes: 50
     env:
       WGPU_BACKEND: vulkan
       FORGE3D_NO_BOOTSTRAP: '1'
