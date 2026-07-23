@@ -992,7 +992,6 @@ jobs:
       FORGE3D_NO_BOOTSTRAP: '1'
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       FORGE3D_RUN_GPU_ANAMNESIS: '1'
-      FORGE3D_ANAMNESIS_RESULT_PATH: ${{ runner.temp }}/anamnesis-production-result.json
 
     steps:
       - uses: actions/checkout@v4
@@ -1021,6 +1020,8 @@ jobs:
           python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan
       - name: Gate 600/600 bytes, exact recompute set, and 20x speedup
         shell: pwsh
+        env:
+          FORGE3D_ANAMNESIS_RESULT_PATH: ${{ runner.temp }}/anamnesis-production-result.json
         run: |
           python -m pytest tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance -v --tb=short
       - name: Upload ANAMNESIS production evidence
