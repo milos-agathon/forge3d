@@ -280,6 +280,11 @@ fn coverage_report_py<'py>(
     report.set_item("tile_rows", output.stats.tile_rows)?;
     report.set_item("tile_capacity", output.stats.tile_capacity)?;
     report.set_item("measured_memberships", output.stats.measured_memberships)?;
+    report.set_item("written_memberships", output.stats.written_memberships)?;
+    report.set_item("populated_tiles", output.stats.populated_tiles)?;
+    report.set_item("active_pixel_count", output.stats.active_pixel_count)?;
+    report.set_item("resolve_pixel_count", output.stats.resolve_pixel_count)?;
+    report.set_item("dispatch_retries", output.stats.dispatch_retries)?;
     report.set_item("allocation_bytes", output.stats.allocation_bytes)?;
     report.set_item("wall_ms", output.stats.wall_ms)?;
     report.set_item("output_sha256", &output.stats.output_sha256)?;

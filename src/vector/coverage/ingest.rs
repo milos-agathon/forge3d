@@ -110,18 +110,32 @@ impl CoverageGeometryBuilder {
             }
             let tangent = delta / length;
             let normal = Vec2::new(-tangent.y, tangent.x) * radius;
+            let bin_bounds = [
+                p0.x.min(p1.x) - radius,
+                p0.y.min(p1.y) - radius,
+                p0.x.max(p1.x) + radius,
+                p0.y.max(p1.y) + radius,
+            ];
 
             // Clockwise capsule boundary.  Nonzero fill is orientation-agnostic
             // as long as every capsule uses the same orientation.
-            self.push_line(layer, p0 + normal, p1 + normal)?;
-            self.push_arc(layer, p1, radius, f64::from(normal.y.atan2(normal.x)), -PI)?;
-            self.push_line(layer, p1 - normal, p0 - normal)?;
+            self.push_line(layer, p0 + normal, p1 + normal, bin_bounds)?;
+            self.push_arc(
+                layer,
+                p1,
+                radius,
+                f64::from(normal.y.atan2(normal.x)),
+                -PI,
+                bin_bounds,
+            )?;
+            self.push_line(layer, p1 - normal, p0 - normal, bin_bounds)?;
             self.push_arc(
                 layer,
                 p0,
                 radius,
                 f64::from((-normal.y).atan2(-normal.x)),
                 -PI,
+                bin_bounds,
             )?;
             emitted += 1;
         }
@@ -200,17 +214,29 @@ impl CoverageGeometryBuilder {
         if (twice_area > 0.0) != should_be_positive {
             ring.reverse();
         }
+        let bin_bounds = component_bounds(&ring);
         for index in 0..ring.len() {
-            self.push_line(layer, ring[index], ring[(index + 1) % ring.len()])?;
+            self.push_line(
+                layer,
+                ring[index],
+                ring[(index + 1) % ring.len()],
+                bin_bounds,
+            )?;
         }
         Ok(())
     }
 
-    fn push_line(&mut self, layer: u32, p0: Vec2, p1: Vec2) -> Result<(), RenderError> {
+    fn push_line(
+        &mut self,
+        layer: u32,
+        p0: Vec2,
+        p1: Vec2,
+        bin_bounds: [f32; 4],
+    ) -> Result<(), RenderError> {
         let stable_id = self.take_id()?;
         if let Some(record) = PrimitiveRecord::line(p0.to_array(), p1.to_array(), layer, stable_id)
         {
-            self.primitives.push(record);
+            self.primitives.push(record.with_bin_bounds(bin_bounds));
         }
         Ok(())
     }
@@ -222,6 +248,7 @@ impl CoverageGeometryBuilder {
         radius: f32,
         start: f64,
         sweep: f64,
+        bin_bounds: [f32; 4],
     ) -> Result<(), RenderError> {
         // Split at every quadrant boundary.  Each emitted record is y-monotone
         // and stays on one x branch, which makes its scanline integral the
@@ -279,7 +306,7 @@ impl CoverageGeometryBuilder {
                 layer,
                 stable_id,
             ) {
-                self.primitives.push(record);
+                self.primitives.push(record.with_bin_bounds(bin_bounds));
             }
         }
         Ok(())
@@ -304,6 +331,25 @@ fn signed_twice_area(ring: &[Vec2]) -> f64 {
         area += a.x * b.y - b.x * a.y;
     }
     area
+}
+
+fn component_bounds(points: &[Vec2]) -> [f32; 4] {
+    points.iter().fold(
+        [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ],
+        |bounds, point| {
+            [
+                bounds[0].min(point.x),
+                bounds[1].min(point.y),
+                bounds[2].max(point.x),
+                bounds[3].max(point.y),
+            ]
+        },
+    )
 }
 
 #[cfg(test)]
@@ -350,6 +396,12 @@ mod tests {
             .collect();
         assert!(signed_twice_area(&exterior) > 0.0);
         assert!(signed_twice_area(&hole) < 0.0);
+        assert!(geometry.primitives[..4]
+            .iter()
+            .all(|record| record.bin_bounds == [4.0, 4.0, 60.0, 60.0]));
+        assert!(geometry.primitives[4..]
+            .iter()
+            .all(|record| record.bin_bounds == [20.0, 20.0, 44.0, 44.0]));
     }
 
     #[test]
@@ -373,6 +425,10 @@ mod tests {
         let arc_count = geometry.primitives.len() - line_count;
         assert_eq!(line_count, 2);
         assert_eq!(arc_count, 4);
+        assert!(geometry
+            .primitives
+            .iter()
+            .all(|primitive| primitive.bin_bounds == [6.0, 22.0, 58.0, 26.0]));
         for arc in geometry
             .primitives
             .iter()

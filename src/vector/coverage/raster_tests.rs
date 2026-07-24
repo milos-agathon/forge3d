@@ -134,7 +134,7 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
         u32::try_from(geometry.primitives.len()).unwrap(),
     );
     rasterizer.encode(&mut encoder, &raster, &geometry);
-    resolver.encode(&mut encoder, &resolved, &geometry);
+    resolver.encode(&mut encoder, &resolved);
     encoder.copy_buffer_to_buffer(&raster.coverage, 0, &readback, 0, raster.coverage_bytes);
     encoder.copy_buffer_to_buffer(&bins.overflow, 0, &error_readback, 0, 16);
     encoder.copy_buffer_to_buffer(

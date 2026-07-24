@@ -12,8 +12,9 @@
 // 1.8e-3 pixel area at r<=100, folded under LIMES's 0.5/255 max-error budget.
 // No boundary is flattened.
 //
-// Atomic tile insertion order is never observed numerically. Crossings are
-// sorted by x and stable primitive ID in every slab, fixing accumulation order.
+// Atomic tile insertion order is never observed numerically. The host derives
+// stable per-pixel component ranges from stable primitive IDs; crossings are
+// then sorted by x and stable ID in every slab, fixing accumulation order.
 
 const PRIMITIVE_LINE: u32 = 0u;
 const FILL_NONZERO: u32 = 0u;
@@ -26,12 +27,14 @@ const RIGHT_BOUNDARY: u32 = 0xfffffffeu;
 struct PrimitiveRecord {
     geometry: vec4<f32>,
     bounds: vec4<f32>,
+    bin_bounds: vec4<f32>,
     metadata: vec4<u32>,
 }
 
 struct RasterParams {
-    extent_tiles: vec4<u32>,
-    layers_capacity: vec4<u32>,
+    extent_layers: vec4<u32>,
+    limits: vec4<u32>,
+    dispatch: vec4<u32>,
 }
 
 struct AtomicWords {
@@ -51,13 +54,14 @@ struct FloatWords {
 }
 
 @group(0) @binding(0) var<storage, read> primitives: array<PrimitiveRecord>;
-@group(0) @binding(1) var<storage, read_write> tile_counts: AtomicWords;
-@group(0) @binding(2) var<storage, read> tile_indices: Words;
-@group(0) @binding(3) var<storage, read> tile_baselines: SignedWords;
-@group(0) @binding(4) var<storage, read> layer_rules: array<vec4<u32>>;
-@group(0) @binding(5) var<uniform> params: RasterParams;
-@group(0) @binding(6) var<storage, read_write> coverage_output: FloatWords;
-@group(0) @binding(7) var<storage, read_write> errors: AtomicWords;
+@group(0) @binding(1) var<storage, read> tile_baselines: SignedWords;
+@group(0) @binding(2) var<storage, read> layer_rules: array<vec4<u32>>;
+@group(0) @binding(3) var<uniform> params: RasterParams;
+@group(0) @binding(4) var<storage, read_write> coverage_output: FloatWords;
+@group(0) @binding(5) var<storage, read_write> errors: AtomicWords;
+@group(0) @binding(6) var<storage, read> pixel_dispatch: array<vec4<u32>>;
+@group(0) @binding(7) var<storage, read> pixel_components: Words;
+@group(0) @binding(8) var<storage, read> components: array<vec4<u32>>;
 
 fn winding(primitive: PrimitiveRecord) -> i32 {
     return bitcast<i32>(primitive.metadata.z);
@@ -300,6 +304,14 @@ fn pair_breaks(values: ptr<function, array<f32, 256>>,
                count: ptr<function, u32>,
                left: PrimitiveRecord, right: PrimitiveRecord,
                pixel: vec4<f32>) {
+    let overlap_min_x = max(max(left.bounds.x, right.bounds.x), pixel.x);
+    let overlap_max_x = min(min(left.bounds.z, right.bounds.z), pixel.y);
+    let overlap_min_y = max(max(left.bounds.y, right.bounds.y), pixel.z);
+    let overlap_max_y = min(min(left.bounds.w, right.bounds.w), pixel.w);
+    if overlap_min_x > overlap_max_x + EPSILON ||
+       overlap_min_y > overlap_max_y + EPSILON {
+        return;
+    }
     if left.metadata.x == PRIMITIVE_LINE && right.metadata.x == PRIMITIVE_LINE {
         line_line_break(values, count, left, right, pixel);
     } else if left.metadata.x == PRIMITIVE_LINE {
@@ -351,54 +363,69 @@ fn interval_area(left: u32, right: u32, a: f32, b: f32, mid: f32,
     return max(right_integral - left_integral, 0.0);
 }
 
-@compute @workgroup_size(8, 8, 1)
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let width = params.extent_tiles.x;
-    let height = params.extent_tiles.y;
-    let layer_count = params.layers_capacity.x;
-    if gid.x >= width || gid.y >= height || gid.z >= layer_count {
+    let width = params.extent_layers.x;
+    let height = params.extent_layers.y;
+    let layer_count = params.extent_layers.z;
+    if gid.x >= params.dispatch.x {
         return;
     }
-    let pixel_offset = (gid.z * height + gid.y) * width + gid.x;
-    let tile_columns = params.extent_tiles.z;
-    let tile_rows = params.extent_tiles.w;
-    let tile_x = gid.x / params.layers_capacity.z;
-    let tile_y = gid.y / params.layers_capacity.z;
-    let tile_count = tile_columns * tile_rows;
-    let tile = gid.z * tile_count + tile_y * tile_columns + tile_x;
-    let capacity = params.layers_capacity.y;
-    let count = min(atomicLoad(&tile_counts.values[tile]), capacity);
-    let tile_base = tile * capacity;
+    let dispatch = pixel_dispatch[gid.x];
+    let pixel_offset = dispatch.x;
+    let pixels_per_layer = params.extent_layers.w;
+    let layer_index = pixel_offset / pixels_per_layer;
+    let layer_pixel = pixel_offset - layer_index * pixels_per_layer;
+    let pixel_y = layer_pixel / width;
+    let pixel_x = layer_pixel - pixel_y * width;
+    if layer_index >= layer_count {
+        return;
+    }
+    atomicOr(&errors.values[3], 1u);
 
     var active_indices: array<u32, 96>;
     var active_count = 0u;
-    let y0 = f32(gid.y);
+    let x0 = f32(pixel_x);
+    let x1 = x0 + 1.0;
+    let y0 = f32(pixel_y);
     let y1 = y0 + 1.0;
-    var slot = 0u;
+    var component_slot = 0u;
     loop {
-        if slot >= count {
+        if component_slot >= dispatch.z {
             break;
         }
-        let primitive_index = tile_indices.values[tile_base + slot];
-        let primitive = primitives[primitive_index];
-        if primitive.bounds.w > y0 && primitive.bounds.y < y1 && winding(primitive) != 0i {
-            if active_count >= MAX_ACTIVE {
-                atomicStore(&errors.values[1], 1u);
-                coverage_output.values[pixel_offset] = 0.0;
-                return;
+        let component_index = pixel_components.values[dispatch.y + component_slot];
+        let component = components[component_index];
+        var primitive_slot = 0u;
+        loop {
+            if primitive_slot >= component.y {
+                break;
             }
-            active_indices[active_count] = primitive_index;
-            active_count += 1u;
+            let primitive_index = component.x + primitive_slot;
+            let primitive = primitives[primitive_index];
+            if primitive.bounds.w > y0 && primitive.bounds.y < y1 &&
+               winding(primitive) != 0i {
+                if active_count >= params.limits.x {
+                    atomicStore(&errors.values[1], 1u);
+                    coverage_output.values[pixel_offset] = 0.0;
+                    return;
+                }
+                active_indices[active_count] = primitive_index;
+                active_count += 1u;
+            }
+            primitive_slot += 1u;
         }
-        slot += 1u;
+        component_slot += 1u;
     }
 
-    let rule = layer_rules[gid.z].x;
-    let x0 = f32(gid.x);
-    let x1 = x0 + 1.0;
-    let tile_left = f32(tile_x * params.layers_capacity.z);
-    let tile_right = min(tile_left + f32(params.layers_capacity.z), f32(width));
+    let rule = layer_rules[layer_index].x;
     let pixel_bounds = vec4<f32>(x0, x1, y0, y1);
+    // One capsule is a simple closed boundary: its line/arc records meet only
+    // at uploaded endpoints, which are already breakpoints. Pair intersection
+    // solving is needed for self-intersecting polygons and overlapping stroke
+    // capsules, but would be pure work for isolated road segments.
+    let only_component = components[pixel_components.values[dispatch.y]];
+    let skip_pair_breaks = dispatch.z == 1u && only_component.w != 0u;
 
     var breaks: array<f32, 256>;
     var break_count = 2u;
@@ -414,16 +441,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         push_break(&breaks, &break_count, primitive.bounds.w, y0, y1);
         side_breaks(&breaks, &break_count, primitive, x0, y0, y1);
         side_breaks(&breaks, &break_count, primitive, x1, y0, y1);
-        side_breaks(&breaks, &break_count, primitive, tile_left, y0, y1);
-        side_breaks(&breaks, &break_count, primitive, tile_right, y0, y1);
-        var j = i + 1u;
-        loop {
-            if j >= active_count {
-                break;
+        if !skip_pair_breaks {
+            var j = i + 1u;
+            loop {
+                if j >= active_count {
+                    break;
+                }
+                pair_breaks(&breaks, &break_count, primitive,
+                            primitives[active_indices[j]], pixel_bounds);
+                j += 1u;
             }
-            pair_breaks(&breaks, &break_count, primitive,
-                        primitives[active_indices[j]], pixel_bounds);
-            j += 1u;
         }
         i += 1u;
     }
@@ -485,7 +512,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let primitive = primitives[primitive_index];
                 if active_at(primitive, mid) {
                     let x = primitive_x(primitive, mid);
-                    if x >= tile_left - EPSILON && x <= tile_right + EPSILON {
+                    if x >= x0 - EPSILON && x <= x1 + EPSILON {
                         // Insertion-sort the crossing immediately. Stable ID is
                         // the tie break, independent of atomic bin order.
                         var position = crossing_count;
@@ -513,12 +540,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 i += 1u;
             }
 
-            let baseline_index = (gid.z * height + gid.y) * tile_columns + tile_x;
+            let baseline_index = pixel_offset;
             var state = tile_baselines.values[baseline_index];
             let row_center = y0 + 0.5;
             // The uploaded baseline is at row center. Adjust it exactly to this
-            // slab midpoint using local boundaries; any boundary capable of
-            // changing state at the tile edge is necessarily in this tile bin.
+            // slab midpoint using the complete closed components intersecting
+            // this pixel. Components outside the pixel have zero net state.
             i = 0u;
             loop {
                 if i >= active_count {
@@ -527,10 +554,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let primitive = primitives[active_indices[i]];
                 let contribution = state_contribution(rule, primitive);
                 if active_at(primitive, row_center) &&
-                   primitive_x(primitive, row_center) < tile_left {
+                   primitive_x(primitive, row_center) < x0 {
                     state -= contribution;
                 }
-                if active_at(primitive, mid) && primitive_x(primitive, mid) < tile_left {
+                if active_at(primitive, mid) && primitive_x(primitive, mid) < x0 {
                     state += contribution;
                 }
                 i += 1u;
@@ -560,13 +587,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     left_boundary = representative;
                 } else if was_inside && !inside {
                     result += interval_area(left_boundary, representative, a, b, mid,
-                                            x0, x1, tile_left, tile_right);
+                                            x0, x1, x0, x1);
                 }
                 cursor = group_end;
             }
             if inside {
                 result += interval_area(left_boundary, RIGHT_BOUNDARY, a, b, mid,
-                                        x0, x1, tile_left, tile_right);
+                                        x0, x1, x0, x1);
             }
         }
         slab_index += 1u;

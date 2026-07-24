@@ -280,6 +280,10 @@ def test_analytic_coverage_meets_committed_reference_gate(case):
         include_records=True,
         certificate=True,
     )
+    report = result["report"]
+    assert report["written_memberships"] == report["measured_memberships"]
+    assert 0 < report["resolve_pixel_count"] <= report["active_pixel_count"]
+    assert report["structured_errors"] == [0, 0, 0, 0]
     actual = np.asarray(result["coverage"], dtype=np.float32)
     reference = supersample_coverage(
         result["records"],

@@ -61,7 +61,7 @@ impl BinLayout {
         ));
 
         for primitive in &geometry.primitives {
-            let [min_x, min_y, max_x, max_y] = primitive.bounds;
+            let [min_x, min_y, max_x, max_y] = primitive.bin_bounds;
             if max_x < 0.0 || max_y < 0.0 || min_x >= extent.x || min_y >= extent.y {
                 continue;
             }
@@ -241,7 +241,7 @@ impl CoverageBinner {
             &wgpu::BufferDescriptor {
                 label: Some("vf.Vector.Coverage.BinOverflow"),
                 // [bin overflow, active-list overflow, breakpoint overflow,
-                // reserved]. Later passes share this structured error block.
+                // dispatch-stage bitset]. Later passes share this block.
                 size: 16,
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_SRC
@@ -397,6 +397,38 @@ mod tests {
         assert!(layout.tile_capacity >= 4);
         assert!(layout.allocated_index_slots >= layout.measured_memberships);
         assert!(layout.allocation_bytes < COVERAGE_MEMORY_BUDGET);
+    }
+
+    #[test]
+    fn closed_component_edges_share_tile_membership_bounds() {
+        let mut builder = CoverageGeometryBuilder::new(32, 16).unwrap();
+        let layer = builder
+            .add_layer("sliver", FillRule::NonZero, [1.0, 1.0, 1.0, 1.0])
+            .unwrap();
+        builder
+            .push_polygon(
+                layer,
+                &PolygonDef {
+                    exterior: vec![
+                        Vec2::new(1.0, 3.0),
+                        Vec2::new(30.0, 3.1),
+                        Vec2::new(30.0, 3.2),
+                        Vec2::new(1.0, 3.1),
+                    ],
+                    holes: vec![],
+                    style: VectorStyle::default(),
+                },
+            )
+            .unwrap();
+        let geometry = builder.finish().unwrap();
+        let layout = BinLayout::measure(&geometry).unwrap();
+
+        assert!(geometry
+            .primitives
+            .iter()
+            .all(|primitive| primitive.bin_bounds == [1.0, 3.0, 30.0, 3.2]));
+        assert_eq!(layout.measured_memberships, 8);
+        assert_eq!(layout.tile_capacity, 4);
     }
 
     #[test]

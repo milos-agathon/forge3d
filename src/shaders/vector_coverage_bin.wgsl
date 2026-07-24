@@ -7,6 +7,7 @@
 struct PrimitiveRecord {
     geometry: vec4<f32>,
     bounds: vec4<f32>,
+    bin_bounds: vec4<f32>,
     metadata: vec4<u32>,
 }
 
@@ -45,8 +46,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let primitive = primitives[primitive_index];
     let width = f32(params.extent_tiles.x);
     let height = f32(params.extent_tiles.y);
-    if primitive.bounds.z < 0.0 || primitive.bounds.w < 0.0 ||
-       primitive.bounds.x >= width || primitive.bounds.y >= height {
+    if primitive.bin_bounds.z < 0.0 || primitive.bin_bounds.w < 0.0 ||
+       primitive.bin_bounds.x >= width || primitive.bin_bounds.y >= height {
         return;
     }
 
@@ -55,10 +56,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let tile_count = tile_columns * tile_rows;
     let layer = primitive.metadata.y;
     let capacity = params.layers_capacity.y;
-    let tx0 = clamped_tile(primitive.bounds.x, tile_columns);
-    let ty0 = clamped_tile(primitive.bounds.y, tile_rows);
-    let tx1 = clamped_tile(primitive.bounds.z, tile_columns);
-    let ty1 = clamped_tile(primitive.bounds.w, tile_rows);
+    let tx0 = clamped_tile(primitive.bin_bounds.x, tile_columns);
+    let ty0 = clamped_tile(primitive.bin_bounds.y, tile_rows);
+    let tx1 = clamped_tile(primitive.bin_bounds.z, tile_columns);
+    let ty1 = clamped_tile(primitive.bin_bounds.w, tile_rows);
 
     var ty = ty0;
     loop {

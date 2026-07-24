@@ -14,6 +14,11 @@ pub struct CoverageRenderStats {
     pub tile_rows: u32,
     pub tile_capacity: u32,
     pub measured_memberships: u64,
+    pub written_memberships: u64,
+    pub populated_tiles: usize,
+    pub active_pixel_count: u32,
+    pub resolve_pixel_count: u32,
+    pub dispatch_retries: u32,
     pub allocation_bytes: u64,
     pub primitive_count: usize,
     pub line_count: usize,
@@ -47,10 +52,25 @@ pub fn render_coverage(
     let resolver = CoverageResolver::new(device);
     let resolved = resolver.prepare(device, geometry, &bins, &raster)?;
 
+    // `prepare` initializes primitive, baseline, rule, color, and parameter
+    // buffers before this dispatch. Commit those staging writes explicitly:
+    // Metal can otherwise begin a later render against zero-filled buffers
+    // even though the command buffer submission is queue-ordered. This matches
+    // the established vector upload boundary in `UploadedVectorScene`.
+    let upload = queue.submit(std::iter::empty());
+    device.poll(wgpu::Maintain::WaitForSubmissionIndex(upload));
+
+    let tile_count_bytes = u64::from(bins.layout.tile_count)
+        .checked_mul(u64::from(bins.layout.layer_count))
+        .and_then(|count| count.checked_mul(4))
+        .ok_or_else(|| {
+            RenderError::Budget("vector_coverage_readback_budget: tile-count overflow".into())
+        })?;
     let readback_bytes = raster
         .coverage_bytes
         .checked_add(resolved.output_bytes)
         .and_then(|bytes| bytes.checked_add(16))
+        .and_then(|bytes| bytes.checked_add(tile_count_bytes))
         .ok_or_else(|| {
             RenderError::Budget("vector_coverage_readback_budget: byte-count overflow".into())
         })?;
@@ -75,48 +95,163 @@ pub fn render_coverage(
         resolved.output_bytes,
     )?;
     let error_readback = readback_buffer(device, "vf.Vector.Coverage.ErrorReadback", 16)?;
+    let tile_count_readback = readback_buffer(
+        device,
+        "vf.Vector.Coverage.TileCountReadback",
+        tile_count_bytes.max(4),
+    )?;
 
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("vf.Vector.Coverage.RenderEncoder"),
-    });
     let mut timing =
         crate::core::gpu_timing::OneShotTiming::for_device(device.clone(), queue.clone());
-    let bin_scope = timing.begin(&mut encoder, "vector.coverage.bin");
+    let mut bin_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("vf.Vector.Coverage.BinEncoder"),
+    });
+    let bin_scope = timing.begin(&mut bin_encoder, "vector.coverage.bin");
     binner.encode(
-        &mut encoder,
+        &mut bin_encoder,
         &bins,
         u32::try_from(geometry.primitives.len()).map_err(|_| {
             RenderError::Budget("vector_coverage_render: primitive count exceeds u32".into())
         })?,
     );
-    timing.end(&mut encoder, bin_scope, 1);
+    timing.end(&mut bin_encoder, bin_scope, 1);
+    let bin_submission = queue.submit(Some(bin_encoder.finish()));
+    device.poll(wgpu::Maintain::WaitForSubmissionIndex(bin_submission));
+    let mut tile_counts =
+        read_bin_counts(device, queue, &bins, &tile_count_readback, tile_count_bytes)?;
+    let mut written_memberships = tile_counts.iter().map(|&count| u64::from(count)).sum();
+    let mut retry_count = 0_u32;
+    while written_memberships != bins.layout.measured_memberships && retry_count < 3 {
+        retry_count += 1;
+        let mut retry_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("vf.Vector.Coverage.BinRetryEncoder"),
+        });
+        binner.encode(
+            &mut retry_encoder,
+            &bins,
+            u32::try_from(geometry.primitives.len()).map_err(|_| {
+                RenderError::Budget("vector_coverage_render: primitive count exceeds u32".into())
+            })?,
+        );
+        let retry_submission = queue.submit(Some(retry_encoder.finish()));
+        device.poll(wgpu::Maintain::WaitForSubmissionIndex(retry_submission));
+        tile_counts =
+            read_bin_counts(device, queue, &bins, &tile_count_readback, tile_count_bytes)?;
+        written_memberships = tile_counts.iter().map(|&count| u64::from(count)).sum();
+    }
+    if written_memberships != bins.layout.measured_memberships {
+        return Err(RenderError::Render(format!(
+            "{{\"status\":\"vector_coverage_bin_dispatch_mismatch\",\
+             \"measured_memberships\":{},\"written_memberships\":{},\"attempts\":{}}}",
+            bins.layout.measured_memberships,
+            written_memberships,
+            retry_count + 1
+        )));
+    }
+    if retry_count != 0 {
+        crate::core::degradation::record_degradation(
+            "dispatch_retry",
+            "vector.coverage.bin",
+            &format!(
+                "adapter required {retry_count} verified retry submission(s) before the measured \
+                 membership count was complete"
+            ),
+        );
+    }
 
-    let raster_scope = timing.begin(&mut encoder, "vector.coverage.raster");
-    rasterizer.encode(&mut encoder, &raster, geometry);
-    timing.end(&mut encoder, raster_scope, 1);
+    let mut raster_retry_count = 0_u32;
+    loop {
+        let mut raster_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("vf.Vector.Coverage.RasterEncoder"),
+        });
+        let raster_scope = (raster_retry_count == 0)
+            .then(|| timing.begin(&mut raster_encoder, "vector.coverage.raster"))
+            .flatten();
+        rasterizer.encode(&mut raster_encoder, &raster, geometry);
+        if raster_retry_count == 0 {
+            timing.end(&mut raster_encoder, raster_scope, 1);
+        }
+        let raster_submission = queue.submit(Some(raster_encoder.finish()));
+        device.poll(wgpu::Maintain::WaitForSubmissionIndex(raster_submission));
+        let stage_words = read_error_words(device, queue, &bins, &error_readback)?;
+        if raster.active_pixel_count == 0 || stage_words[3] & 1 != 0 {
+            break;
+        }
+        raster_retry_count += 1;
+        if raster_retry_count >= 3 {
+            return Err(RenderError::Render(
+                "{\"status\":\"vector_coverage_raster_dispatch_missing\",\"attempts\":3}".into(),
+            ));
+        }
+    }
 
-    let resolve_scope = timing.begin(&mut encoder, "vector.coverage.resolve");
-    resolver.encode(&mut encoder, &resolved, geometry);
-    timing.end(&mut encoder, resolve_scope, 1);
-    timing.resolve(&mut encoder);
+    let mut resolve_retry_count = 0_u32;
+    loop {
+        let mut resolve_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("vf.Vector.Coverage.ResolveEncoder"),
+        });
+        let resolve_scope = (resolve_retry_count == 0)
+            .then(|| timing.begin(&mut resolve_encoder, "vector.coverage.resolve"))
+            .flatten();
+        resolver.encode(&mut resolve_encoder, &resolved);
+        if resolve_retry_count == 0 {
+            timing.end(&mut resolve_encoder, resolve_scope, 1);
+        }
+        let resolve_submission = queue.submit(Some(resolve_encoder.finish()));
+        device.poll(wgpu::Maintain::WaitForSubmissionIndex(resolve_submission));
+        let stage_words = read_error_words(device, queue, &bins, &error_readback)?;
+        if resolved.active_pixel_count == 0 || stage_words[3] & 2 != 0 {
+            break;
+        }
+        resolve_retry_count += 1;
+        if resolve_retry_count >= 3 {
+            return Err(RenderError::Render(
+                "{\"status\":\"vector_coverage_resolve_dispatch_missing\",\"attempts\":3}".into(),
+            ));
+        }
+    }
+    if raster_retry_count != 0 {
+        crate::core::degradation::record_degradation(
+            "dispatch_retry",
+            "vector.coverage.raster",
+            &format!(
+                "adapter required {raster_retry_count} verified retry submission(s) before the \
+                 raster stage marker was observed"
+            ),
+        );
+    }
+    if resolve_retry_count != 0 {
+        crate::core::degradation::record_degradation(
+            "dispatch_retry",
+            "vector.coverage.resolve",
+            &format!(
+                "adapter required {resolve_retry_count} verified retry submission(s) before the \
+                 resolve stage marker was observed"
+            ),
+        );
+    }
 
-    encoder.copy_buffer_to_buffer(
+    let mut readback_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("vf.Vector.Coverage.ReadbackEncoder"),
+    });
+    timing.resolve(&mut readback_encoder);
+    readback_encoder.copy_buffer_to_buffer(
         &raster.coverage,
         0,
         &coverage_readback,
         0,
         raster.coverage_bytes,
     );
-    encoder.copy_buffer_to_buffer(
+    readback_encoder.copy_buffer_to_buffer(
         &resolved.output,
         0,
         &resolved_readback,
         0,
         resolved.output_bytes,
     );
-    encoder.copy_buffer_to_buffer(&bins.overflow, 0, &error_readback, 0, 16);
-    queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    readback_encoder.copy_buffer_to_buffer(&bins.overflow, 0, &error_readback, 0, 16);
+    let readback_submission = queue.submit(Some(readback_encoder.finish()));
+    device.poll(wgpu::Maintain::WaitForSubmissionIndex(readback_submission));
 
     if !timing.record_into_certificate() {
         crate::core::certificate::record_pass("vector.coverage.bin", 0.0, 1);
@@ -129,14 +264,15 @@ pub fn render_coverage(
         .as_slice()
         .try_into()
         .map_err(|_| RenderError::Readback("LIMES error block is not four words".into()))?;
-    if errors != [0; 4] {
+    if errors[..3] != [0; 3] {
         return Err(RenderError::Render(format!(
             "{{\"status\":\"vector_coverage_overflow\",\"bin\":{},\
-             \"active_list\":{},\"breakpoints\":{},\"reserved\":{}}}",
+             \"active_list\":{},\"breakpoints\":{},\"dispatch_stage_bits\":{}}}",
             errors[0], errors[1], errors[2], errors[3]
         )));
     }
 
+    let structured_errors = [errors[0], errors[1], errors[2], 0];
     let coverage = map_buffer::<f32>(device, &coverage_readback)?;
     let linear_rgba = map_buffer::<f32>(device, &resolved_readback)?;
     let rgba8 = linear_to_straight_rgba8(&linear_rgba);
@@ -151,12 +287,17 @@ pub fn render_coverage(
         coverage,
         linear_rgba,
         rgba8,
-        errors,
+        errors: structured_errors,
         stats: CoverageRenderStats {
             tile_columns: bins.layout.tile_columns,
             tile_rows: bins.layout.tile_rows,
             tile_capacity: bins.layout.tile_capacity,
             measured_memberships: bins.layout.measured_memberships,
+            written_memberships,
+            populated_tiles: tile_counts.iter().filter(|&&count| count != 0).count(),
+            active_pixel_count: raster.active_pixel_count,
+            resolve_pixel_count: raster.resolve_pixel_count,
+            dispatch_retries: retry_count + raster_retry_count + resolve_retry_count,
             allocation_bytes,
             primitive_count,
             line_count,
@@ -165,6 +306,39 @@ pub fn render_coverage(
             output_sha256,
         },
     })
+}
+
+fn read_bin_counts(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    bins: &super::CoverageBins,
+    readback: &wgpu::Buffer,
+    byte_count: u64,
+) -> RenderResult<Vec<u32>> {
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("vf.Vector.Coverage.BinVerifyEncoder"),
+    });
+    encoder.copy_buffer_to_buffer(&bins.tile_counts, 0, readback, 0, byte_count);
+    let submission = queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
+    map_buffer::<u32>(device, readback)
+}
+
+fn read_error_words(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    bins: &super::CoverageBins,
+    readback: &wgpu::Buffer,
+) -> RenderResult<[u32; 4]> {
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("vf.Vector.Coverage.StageVerifyEncoder"),
+    });
+    encoder.copy_buffer_to_buffer(&bins.overflow, 0, readback, 0, 16);
+    let submission = queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
+    map_buffer::<u32>(device, readback)?
+        .try_into()
+        .map_err(|_| RenderError::Readback("LIMES stage block is not four words".into()))
 }
 
 fn readback_buffer(

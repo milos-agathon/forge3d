@@ -64,15 +64,17 @@ pub enum PrimitiveKind {
     Arc = 1,
 }
 
-/// GPU ABI shared by the bin and raster kernels (48-byte storage stride).
+/// GPU ABI shared by the bin and raster kernels (64-byte storage stride).
 ///
 /// Line:
 /// - `geometry = [x0, y0, x1, y1]`
 /// - `bounds = [min_x, min_y, max_x, max_y]`
+/// - `bin_bounds` covers the complete closed component containing this edge.
 ///
 /// Y-monotone circular arc:
 /// - `geometry = [center_x, center_y, radius, x_branch]`
 /// - `bounds = [min_x, min_y, max_x, max_y]`
+/// - `bin_bounds` covers the complete closed component containing this arc.
 /// - `x_branch` is -1 for the left and +1 for the right circle branch.
 ///
 /// `meta = [kind, layer, winding_as_bits, stable_primitive_id]`.
@@ -81,6 +83,7 @@ pub enum PrimitiveKind {
 pub struct PrimitiveRecord {
     pub geometry: [f32; 4],
     pub bounds: [f32; 4],
+    pub bin_bounds: [f32; 4],
     pub meta: [u32; 4],
 }
 
@@ -96,14 +99,16 @@ impl PrimitiveRecord {
         } else {
             0_i32
         };
+        let bounds = [
+            p0[0].min(p1[0]),
+            p0[1].min(p1[1]),
+            p0[0].max(p1[0]),
+            p0[1].max(p1[1]),
+        ];
         Some(Self {
             geometry: [p0[0], p0[1], p1[0], p1[1]],
-            bounds: [
-                p0[0].min(p1[0]),
-                p0[1].min(p1[1]),
-                p0[0].max(p1[0]),
-                p0[1].max(p1[1]),
-            ],
+            bounds,
+            bin_bounds: bounds,
             meta: [PrimitiveKind::Line as u32, layer, winding as u32, stable_id],
         })
     }
@@ -130,8 +135,19 @@ impl PrimitiveRecord {
         Some(Self {
             geometry: [center[0], center[1], radius, x_branch.signum()],
             bounds,
+            bin_bounds: bounds,
             meta: [PrimitiveKind::Arc as u32, layer, winding as u32, stable_id],
         })
+    }
+
+    pub fn with_bin_bounds(mut self, bin_bounds: [f32; 4]) -> Self {
+        debug_assert!(bin_bounds.into_iter().all(f32::is_finite));
+        debug_assert!(bin_bounds[0] <= self.bounds[0]);
+        debug_assert!(bin_bounds[1] <= self.bounds[1]);
+        debug_assert!(bin_bounds[2] >= self.bounds[2]);
+        debug_assert!(bin_bounds[3] >= self.bounds[3]);
+        self.bin_bounds = bin_bounds;
+        self
     }
 
     pub fn kind(self) -> PrimitiveKind {
@@ -182,7 +198,7 @@ mod tests {
 
     #[test]
     fn primitive_storage_stride_is_locked() {
-        assert_eq!(std::mem::size_of::<PrimitiveRecord>(), 48);
+        assert_eq!(std::mem::size_of::<PrimitiveRecord>(), 64);
         assert_eq!(std::mem::align_of::<PrimitiveRecord>(), 4);
     }
 

@@ -14,6 +14,7 @@ const COVERAGE_MEMORY_BUDGET: u64 = 512 * 1024 * 1024;
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct ResolveParams {
     extent_layers: [u32; 4],
+    dispatch: [u32; 4],
 }
 
 pub struct CoverageResolveResources {
@@ -21,6 +22,7 @@ pub struct CoverageResolveResources {
     pub output: TrackedBuffer,
     pub output_bytes: u64,
     pub allocation_bytes: u64,
+    pub active_pixel_count: u32,
     _colors: TrackedBuffer,
     _params: TrackedBuffer,
     bind_group: wgpu::BindGroup,
@@ -46,6 +48,8 @@ impl CoverageResolver {
                 storage_entry(1, true),
                 uniform_entry(2),
                 storage_entry(3, false),
+                storage_entry(4, false),
+                storage_entry(5, true),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -128,6 +132,7 @@ impl CoverageResolver {
                     )
                 })?,
             ],
+            dispatch: [raster.resolve_pixel_count, 0, 0, 0],
         };
         let params = tracked_create_buffer_init(
             device,
@@ -156,25 +161,26 @@ impl CoverageResolver {
                 entry(1, &color_buffer),
                 entry(2, &params),
                 entry(3, &output),
+                entry(4, &bins.overflow),
+                entry(5, &raster.resolve_pixels),
             ],
         });
         Ok(CoverageResolveResources {
             output,
             output_bytes,
             allocation_bytes,
+            active_pixel_count: raster.resolve_pixel_count,
             _colors: color_buffer,
             _params: params,
             bind_group,
         })
     }
 
-    pub fn encode(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        resources: &CoverageResolveResources,
-        geometry: &CoverageGeometry,
-    ) {
+    pub fn encode(&self, encoder: &mut wgpu::CommandEncoder, resources: &CoverageResolveResources) {
         encoder.clear_buffer(&resources.output, 0, None);
+        if resources.active_pixel_count == 0 {
+            return;
+        }
         crate::core::shader_registry::record_shader_use("vector_coverage_resolve.wgsl");
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("vf.Vector.Coverage.Resolve.Pass"),
@@ -182,7 +188,7 @@ impl CoverageResolver {
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &resources.bind_group, &[]);
-        pass.dispatch_workgroups(geometry.width.div_ceil(8), geometry.height.div_ceil(8), 1);
+        pass.dispatch_workgroups(resources.active_pixel_count.div_ceil(64), 1, 1);
     }
 }
 

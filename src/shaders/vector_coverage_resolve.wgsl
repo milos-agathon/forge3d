@@ -9,6 +9,7 @@
 
 struct ResolveParams {
     extent_layers: vec4<u32>,
+    dispatch: vec4<u32>,
 }
 
 struct FloatWords {
@@ -19,21 +20,26 @@ struct Float4Words {
     values: array<vec4<f32>>,
 }
 
+struct AtomicWords {
+    values: array<atomic<u32>>,
+}
+
 @group(0) @binding(0) var<storage, read> coverage: FloatWords;
 @group(0) @binding(1) var<storage, read> layer_colors: Float4Words;
 @group(0) @binding(2) var<uniform> params: ResolveParams;
 @group(0) @binding(3) var<storage, read_write> output_rgba: Float4Words;
+@group(0) @binding(4) var<storage, read_write> errors: AtomicWords;
+@group(0) @binding(5) var<storage, read> active_pixels: array<u32>;
 
-@compute @workgroup_size(8, 8, 1)
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let width = params.extent_layers.x;
-    let height = params.extent_layers.y;
     let layer_count = params.extent_layers.z;
     let pixel_count = params.extent_layers.w;
-    if gid.x >= width || gid.y >= height {
+    if gid.x >= params.dispatch.x {
         return;
     }
-    let pixel = gid.y * width + gid.x;
+    atomicOr(&errors.values[3], 2u);
+    let pixel = active_pixels[gid.x];
     var accumulated = vec4<f32>(0.0);
     var layer = 0u;
     loop {
