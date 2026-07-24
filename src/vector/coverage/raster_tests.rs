@@ -1,5 +1,6 @@
 use super::math::rasterize_coverage_cpu;
 use super::raster::{raster_shader_source, CoverageRasterizer};
+use super::resolve::{resolve_coverage_cpu, CoverageResolver};
 use super::types::FillRule;
 use super::{CoverageBinner, CoverageGeometryBuilder};
 use crate::vector::api::{PolygonDef, PolylineDef, VectorStyle};
@@ -70,6 +71,7 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
         .unwrap();
     let geometry = builder.finish().unwrap();
     let cpu = rasterize_coverage_cpu(&geometry);
+    let cpu_resolved = resolve_coverage_cpu(&geometry, &cpu);
 
     context
         .device
@@ -79,6 +81,10 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
     let rasterizer = CoverageRasterizer::new(&context.device);
     let raster = rasterizer
         .prepare(&context.device, &geometry, &bins)
+        .unwrap();
+    let resolver = CoverageResolver::new(&context.device);
+    let resolved = resolver
+        .prepare(&context.device, &geometry, &bins, &raster)
         .unwrap();
     let readback = crate::core::resource_tracker::tracked_create_buffer(
         &context.device,
@@ -100,6 +106,16 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
         },
     )
     .unwrap();
+    let resolved_readback = crate::core::resource_tracker::tracked_create_buffer(
+        &context.device,
+        &wgpu::BufferDescriptor {
+            label: Some("vf.Vector.Coverage.TestResolvedReadback"),
+            size: resolved.output_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )
+    .unwrap();
     let mut encoder = context
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -111,8 +127,16 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
         u32::try_from(geometry.primitives.len()).unwrap(),
     );
     rasterizer.encode(&mut encoder, &raster, &geometry);
+    resolver.encode(&mut encoder, &resolved, &geometry);
     encoder.copy_buffer_to_buffer(&raster.coverage, 0, &readback, 0, raster.coverage_bytes);
     encoder.copy_buffer_to_buffer(&bins.overflow, 0, &error_readback, 0, 16);
+    encoder.copy_buffer_to_buffer(
+        &resolved.output,
+        0,
+        &resolved_readback,
+        0,
+        resolved.output_bytes,
+    );
     context.queue.submit(Some(encoder.finish()));
     context.device.poll(wgpu::Maintain::Wait);
     let validation = pollster::block_on(context.device.pop_error_scope());
@@ -130,6 +154,18 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
     assert!(
         max_error < 5.0e-4,
         "GPU/CPU coverage max error {max_error:e}"
+    );
+    let gpu_resolved = map_floats(&context.device, &resolved_readback);
+    let cpu_resolved_flat: Vec<f32> = cpu_resolved.into_iter().flatten().collect();
+    assert_eq!(gpu_resolved.len(), cpu_resolved_flat.len());
+    let resolve_max_error = gpu_resolved
+        .iter()
+        .zip(&cpu_resolved_flat)
+        .map(|(actual, expected)| (actual - expected).abs())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        resolve_max_error < 1.0e-6,
+        "GPU/CPU resolve max error {resolve_max_error:e}"
     );
 }
 

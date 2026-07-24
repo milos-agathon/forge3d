@@ -27,6 +27,7 @@ struct LayerRuleRecord {
 pub struct CoverageRasterResources {
     pub coverage: TrackedBuffer,
     pub coverage_bytes: u64,
+    pub allocation_bytes: u64,
     _baselines: TrackedBuffer,
     _rules: TrackedBuffer,
     _params: TrackedBuffer,
@@ -198,6 +199,7 @@ impl CoverageRasterizer {
         Ok(CoverageRasterResources {
             coverage,
             coverage_bytes,
+            allocation_bytes: total_bytes,
             _baselines: baseline_buffer,
             _rules: rule_buffer,
             _params: params,
