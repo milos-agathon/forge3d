@@ -4,7 +4,7 @@ use super::{F3dzError, F3dzResult};
 
 pub const SCALE_BITS: u32 = 12;
 pub const SCALE: u32 = 1 << SCALE_BITS;
-const RANS_L: u32 = 1 << 23;
+pub(crate) const RANS_L: u32 = 1 << 23;
 const LAYER_MAGIC: [u8; 4] = *b"RAN2";
 const LAYER_VERSION: u16 = 1;
 const LAYER_HEADER_LEN: usize = 32;

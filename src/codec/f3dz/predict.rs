@@ -71,7 +71,10 @@ pub fn quantize_source(values: &[f32], step: f32, bound: f32) -> F3dzResult<Vec<
         .expect("the nearest lattice code is always present");
         let reconstructed = (code as f32) * step;
         let error = (reconstructed - value).abs();
-        if !reconstructed.is_finite() || error > bound {
+        // The GPU decoder reserves i32::MIN as the "no causal value" marker in
+        // workgroup memory. Preserve such a perfectly finite source through
+        // the RAW escape instead of making the marker ambiguous.
+        if code == i32::MIN || !reconstructed.is_finite() || error > bound {
             quantized.push(QuantizedSample::Raw(value.to_bits()));
             continue;
         }

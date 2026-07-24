@@ -58,7 +58,15 @@ impl HeightMosaic {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST
+                    | if use_rg16f {
+                        TextureUsages::empty()
+                    } else {
+                        // F3DZ compute decode writes R32Float pages straight
+                        // into this atlas, without a CPU height array.
+                        TextureUsages::STORAGE_BINDING
+                    },
                 view_formats: &[],
             },
         )?;
@@ -131,53 +139,7 @@ impl HeightMosaic {
                 sz
             ));
         }
-        // Determine slot
-        let (sx, sy) = if let Some(lod) = self.config.fixed_lod {
-            if id.lod != lod {
-                return Err(format!(
-                    "fixed_lod={} mismatch for tile id.lod={}",
-                    lod, id.lod
-                ));
-            }
-            if id.x >= self.config.tiles_x || id.y >= self.config.tiles_y {
-                return Err("tile id out of mosaic bounds".into());
-            }
-            (id.x, id.y)
-        } else {
-            if let Some(slot) = self.slot_map.get(&id).copied() {
-                slot
-            } else if let Some(slot) = self.find_free_slot() {
-                self.slot_map.insert(id, slot);
-                self.lru.push_back(id);
-                slot
-            } else {
-                // Evict the least recently used; be robust to inconsistent LRU entries
-                if let Some(evicted) = self.lru.pop_front() {
-                    let victim_slot = if let Some((ex, ey)) = self.slot_map.remove(&evicted) {
-                        (ex, ey)
-                    } else if let Some((any_id, &(ex, ey))) = self.slot_map.iter().next() {
-                        // Fallback: evict an arbitrary entry
-                        let any_id = *any_id;
-                        let _ = self.slot_map.remove(&any_id);
-                        (ex, ey)
-                    } else {
-                        return Err("No slots to evict".into());
-                    };
-                    self.slot_map.insert(id, victim_slot);
-                    self.lru.push_back(id);
-                    victim_slot
-                } else if let Some((any_id, &(ex, ey))) = self.slot_map.iter().next() {
-                    // LRU empty but slot_map full; evict arbitrary
-                    let any_id = *any_id;
-                    let _ = self.slot_map.remove(&any_id);
-                    self.slot_map.insert(id, (ex, ey));
-                    self.lru.push_back(id);
-                    (ex, ey)
-                } else {
-                    return Err("No slots and empty LRU".into());
-                }
-            }
-        };
+        let (sx, sy) = self.allocate_slot(id)?;
 
         let offset_x = sx * self.config.tile_size_px;
         let offset_y = sy * self.config.tile_size_px;
@@ -253,6 +215,93 @@ impl HeightMosaic {
                 depth_or_array_layers: 1,
             },
         );
+        Ok((sx, sy))
+    }
+
+    /// Decode an F3DZ stream directly into this height atlas. A failure removes
+    /// the new dynamic mapping, so callers can never observe stale tile bytes
+    /// under the requested id.
+    pub fn upload_f3dz(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &Queue,
+        id: TileId,
+        compressed: &[u8],
+    ) -> Result<(u32, u32), String> {
+        if self.format != TextureFormat::R32Float {
+            return Err("f3dz direct atlas decode requires an R32Float height mosaic".to_string());
+        }
+        let header = crate::codec::f3dz::gpu::validate_stream(compressed)
+            .map_err(|error| error.to_string())?;
+        if header.width != self.config.tile_size_px || header.height != self.config.tile_size_px {
+            return Err(format!(
+                "f3dz tile dimensions {}x{} do not match mosaic tile_size_px={}",
+                header.width, header.height, self.config.tile_size_px
+            ));
+        }
+        let decoder = crate::codec::f3dz::gpu::F3dzGpuDecoder::new(device)
+            .map_err(|error| error.to_string())?;
+        let (sx, sy) = self.allocate_slot(id)?;
+        let origin = (sx * self.config.tile_size_px, sy * self.config.tile_size_px);
+        if let Err(error) =
+            decoder.decode_into_atlas(device, queue, compressed, &self.texture, origin)
+        {
+            if self.config.fixed_lod.is_none() {
+                self.slot_map.remove(&id);
+                self.lru.retain(|candidate| *candidate != id);
+            }
+            return Err(error.to_string());
+        }
+        Ok((sx, sy))
+    }
+
+    fn allocate_slot(&mut self, id: TileId) -> Result<(u32, u32), String> {
+        let (sx, sy) = if let Some(lod) = self.config.fixed_lod {
+            if id.lod != lod {
+                return Err(format!(
+                    "fixed_lod={} mismatch for tile id.lod={}",
+                    lod, id.lod
+                ));
+            }
+            if id.x >= self.config.tiles_x || id.y >= self.config.tiles_y {
+                return Err("tile id out of mosaic bounds".into());
+            }
+            (id.x, id.y)
+        } else {
+            if let Some(slot) = self.slot_map.get(&id).copied() {
+                slot
+            } else if let Some(slot) = self.find_free_slot() {
+                self.slot_map.insert(id, slot);
+                self.lru.push_back(id);
+                slot
+            } else {
+                // Evict the least recently used; be robust to inconsistent LRU entries
+                if let Some(evicted) = self.lru.pop_front() {
+                    let victim_slot = if let Some((ex, ey)) = self.slot_map.remove(&evicted) {
+                        (ex, ey)
+                    } else if let Some((any_id, &(ex, ey))) = self.slot_map.iter().next() {
+                        // Fallback: evict an arbitrary entry
+                        let any_id = *any_id;
+                        let _ = self.slot_map.remove(&any_id);
+                        (ex, ey)
+                    } else {
+                        return Err("No slots to evict".into());
+                    };
+                    self.slot_map.insert(id, victim_slot);
+                    self.lru.push_back(id);
+                    victim_slot
+                } else if let Some((any_id, &(ex, ey))) = self.slot_map.iter().next() {
+                    // LRU empty but slot_map full; evict arbitrary
+                    let any_id = *any_id;
+                    let _ = self.slot_map.remove(&any_id);
+                    self.slot_map.insert(id, (ex, ey));
+                    self.lru.push_back(id);
+                    (ex, ey)
+                } else {
+                    return Err("No slots and empty LRU".into());
+                }
+            }
+        };
         Ok((sx, sy))
     }
 

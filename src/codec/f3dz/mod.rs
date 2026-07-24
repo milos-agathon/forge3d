@@ -3,6 +3,7 @@
 pub mod decode;
 pub mod encode;
 pub mod format;
+pub mod gpu;
 pub mod predict;
 pub mod rans;
 
