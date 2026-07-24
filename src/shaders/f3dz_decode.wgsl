@@ -62,7 +62,10 @@ fn decode_rans(page: u32, layer: u32) {
     let table_offset = desc(page, field + 7u);
     let scratch_offset = desc(page, field + 8u);
     var states = vec2<u32>(state0_initial, state1_initial);
-    var positions = vec2<u32>(0u, 0u);
+    // Keep lane cursors as scalars. Taking a pointer to a vector component
+    // lowers to an illegal non-const reference in Metal Shading Language.
+    var position0 = 0u;
+    var position1 = 0u;
     for (var index = 0u; index < decoded_len; index = index + 1u) {
         let lane = index & 1u;
         let state = select(states.x, states.y, lane == 1u);
@@ -77,18 +80,18 @@ fn decode_rans(page: u32, layer: u32) {
         var next = frequency * (state >> SCALE_BITS) + slot - cumulative;
         if (lane == 0u) {
             while (next < RANS_L) {
-                next = (next << 8u) | lane_byte(lane0_offset, lane0_length, &positions.x, page);
+                next = (next << 8u) | lane_byte(lane0_offset, lane0_length, &position0, page);
             }
             states.x = next;
         } else {
             while (next < RANS_L) {
-                next = (next << 8u) | lane_byte(lane1_offset, lane1_length, &positions.y, page);
+                next = (next << 8u) | lane_byte(lane1_offset, lane1_length, &position1, page);
             }
             states.y = next;
         }
         byte_scratch[scratch_offset + index] = symbol;
     }
-    if (positions.x != lane0_length || positions.y != lane1_length ||
+    if (position0 != lane0_length || position1 != lane1_length ||
         states.x != RANS_L || states.y != RANS_L) {
         fail(page, 4u);
     }
@@ -370,6 +373,14 @@ fn write_result(page: u32, lid: u32, to_atlas: bool) {
 fn decode_page(page: u32, lid: u32, to_atlas: bool) {
     if (lid == 0u) {
         decode_rans(page, 0u);
+    }
+    // rANS publishes byte_scratch through device storage. Synchronize it
+    // before the token parser consumes the bytes, even though invocation 0
+    // owns both serial stages: Metal does not guarantee visibility across the
+    // helper-call boundary without an explicit storage barrier.
+    storageBarrier();
+    workgroupBarrier();
+    if (lid == 0u) {
         parse_tokens(page, 0u);
     }
     // Invocation 0 also publishes RAW/NaN bits to value_bits (storage).
@@ -385,6 +396,10 @@ fn decode_page(page: u32, lid: u32, to_atlas: bool) {
     if (desc(page, 7u) == 0u) {
         if (lid == 0u) {
             decode_rans(page, 1u);
+        }
+        storageBarrier();
+        workgroupBarrier();
+        if (lid == 0u) {
             parse_tokens(page, 1u);
         }
         storageBarrier();

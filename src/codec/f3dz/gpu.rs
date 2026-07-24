@@ -118,7 +118,7 @@ impl F3dzGpuDecoder {
             "f3dz.decode.shader",
             include_str!("../../shaders/f3dz_decode.wgsl"),
         );
-        let buffer_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        let buffer_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
             device,
             &ComputePipelineDescriptor {
                 label: Some("f3dz.decode.to-buffer"),
@@ -126,8 +126,9 @@ impl F3dzGpuDecoder {
                 module: &shader,
                 entry_point: "decode_to_buffer",
             },
-        );
-        let atlas_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        )
+        .map_err(gpu_error)?;
+        let atlas_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
             device,
             &ComputePipelineDescriptor {
                 label: Some("f3dz.decode.to-atlas"),
@@ -135,7 +136,8 @@ impl F3dzGpuDecoder {
                 module: &shader,
                 entry_point: "decode_to_atlas",
             },
-        );
+        )
+        .map_err(gpu_error)?;
         Ok(Self {
             bind_group_layout,
             buffer_pipeline,
@@ -1030,6 +1032,12 @@ mod tests {
     #[test]
     fn decode_shader_synchronizes_storage_between_codec_stages() {
         let source = include_str!("../../shaders/f3dz_decode.wgsl");
+        assert!(
+            source.contains("var position0 = 0u;")
+                && source.contains("var position1 = 0u;")
+                && !source.contains("&positions."),
+            "rANS lane cursors must remain scalar so Naga emits legal Metal references"
+        );
         let base_publish = source
             .find("q_scratch[base_q_offset + index] = work_q[index];")
             .unwrap();
@@ -1039,8 +1047,19 @@ mod tests {
             "q_scratch must be storage-synchronized before refinement consumes it"
         );
         let decode_page = &source[source.find("fn decode_page").unwrap()..];
-        for layer in ["parse_tokens(page, 0u);", "parse_tokens(page, 1u);"] {
+        for (decode, layer) in [
+            ("decode_rans(page, 0u);", "parse_tokens(page, 0u);"),
+            ("decode_rans(page, 1u);", "parse_tokens(page, 1u);"),
+        ] {
+            let entropy_publish = decode_page.find(decode).unwrap();
             let publish = decode_page.find(layer).unwrap();
+            let entropy_to_tokens = &decode_page[entropy_publish + decode.len()..publish];
+            let storage = entropy_to_tokens.find("storageBarrier();").unwrap();
+            let workgroup = entropy_to_tokens.find("workgroupBarrier();").unwrap();
+            assert!(
+                storage < workgroup,
+                "{decode} must publish byte_scratch before {layer}"
+            );
             let suffix = &decode_page[publish + layer.len()..];
             let storage = suffix.find("storageBarrier();").unwrap();
             let workgroup = suffix.find("workgroupBarrier();").unwrap();
