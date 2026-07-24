@@ -152,3 +152,13 @@ def test_toml_fallback_parser_handles_named_tables_and_scalar_arrays():
         "grid_shape": [256, 256],
         "alpine": {"eps_0_1": "635bdde3"},
     }
+
+
+def test_toml_fallback_parser_preserves_hashes_inside_strings():
+    sample = (
+        '[meta] # an actual comment\n'
+        'policy = "excludes #[cfg(test)] modules" # another comment\n'
+    )
+    assert parse_toml_fallback(sample) == {
+        "meta": {"policy": "excludes #[cfg(test)] modules"}
+    }
