@@ -372,9 +372,10 @@ def test_analytic_output_is_byte_identical_across_two_runs():
     )
     first_coverage = np.asarray(first["coverage"], dtype=np.float32)
     second_coverage = np.asarray(second["coverage"], dtype=np.float32)
-    assert deterministic_coverage_hash(first_coverage) == deterministic_coverage_hash(
-        second_coverage
-    )
+    first_hash = deterministic_coverage_hash(first_coverage)
+    second_hash = deterministic_coverage_hash(second_coverage)
+    print(f"LIMES_DETERMINISM first={first_hash} second={second_hash}")
+    assert first_hash == second_hash
     assert np.array_equal(first["rgba"], second["rgba"])
     report = json.loads(second["report"]["execution_report_json"])
     assert set(report["engine"]["wgsl_module_hashes"]) == {
