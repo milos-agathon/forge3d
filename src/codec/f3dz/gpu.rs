@@ -1028,6 +1028,30 @@ mod tests {
     }
 
     #[test]
+    fn decode_shader_synchronizes_storage_between_codec_stages() {
+        let source = include_str!("../../shaders/f3dz_decode.wgsl");
+        let base_publish = source
+            .find("q_scratch[base_q_offset + index] = work_q[index];")
+            .unwrap();
+        let enhancement = source.find("fn reconstruct_enhancement").unwrap();
+        assert!(
+            source[base_publish..enhancement].contains("storageBarrier();"),
+            "q_scratch must be storage-synchronized before refinement consumes it"
+        );
+        let decode_page = &source[source.find("fn decode_page").unwrap()..];
+        for layer in ["parse_tokens(page, 0u);", "parse_tokens(page, 1u);"] {
+            let publish = decode_page.find(layer).unwrap();
+            let suffix = &decode_page[publish + layer.len()..];
+            let storage = suffix.find("storageBarrier();").unwrap();
+            let workgroup = suffix.find("workgroupBarrier();").unwrap();
+            assert!(
+                storage < workgroup,
+                "{layer} must publish storage before releasing the workgroup"
+            );
+        }
+    }
+
+    #[test]
     fn gpu_matches_cpu_bit_for_bit_for_refined_and_base_streams() {
         let source = terrain(67, 65);
         let mut options = EncodeOptions::new(0.1);

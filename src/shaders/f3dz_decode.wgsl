@@ -313,6 +313,11 @@ fn reconstruct_base(page: u32, lid: u32) {
     for (var index = lid; index < count; index = index + 64u) {
         q_scratch[base_q_offset + index] = work_q[index];
     }
+    // q_scratch is storage memory, not workgroup memory. The enhancement
+    // predictor consumes it after this function, so both storage visibility
+    // and workgroup execution must be synchronized explicitly. Metal exposed
+    // stale zero reads when this used only workgroupBarrier().
+    storageBarrier();
     workgroupBarrier();
 }
 
@@ -367,6 +372,8 @@ fn decode_page(page: u32, lid: u32, to_atlas: bool) {
         decode_rans(page, 0u);
         parse_tokens(page, 0u);
     }
+    // Invocation 0 also publishes RAW/NaN bits to value_bits (storage).
+    storageBarrier();
     workgroupBarrier();
     if (atomicLoad(&status[page]) != 0u) {
         return;
@@ -380,6 +387,7 @@ fn decode_page(page: u32, lid: u32, to_atlas: bool) {
             decode_rans(page, 1u);
             parse_tokens(page, 1u);
         }
+        storageBarrier();
         workgroupBarrier();
         if (atomicLoad(&status[page]) != 0u) {
             return;
