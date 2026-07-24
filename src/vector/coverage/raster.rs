@@ -214,6 +214,7 @@ impl CoverageRasterizer {
         geometry: &CoverageGeometry,
     ) {
         encoder.clear_buffer(&resources.coverage, 0, None);
+        crate::core::shader_registry::record_shader_use("vector_coverage_raster.wgsl");
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("vf.Vector.Coverage.Raster.Pass"),
             timestamp_writes: None,

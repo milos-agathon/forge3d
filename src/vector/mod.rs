@@ -26,8 +26,8 @@ pub use api::{
 };
 pub use batch::{Batch, BatchManager, BatchingStats, Frustum, PrimitiveType, AABB};
 pub use coverage::{
-    CoverageBinner, CoverageGeometry, CoverageGeometryBuilder, CoverageLayer, FillRule,
-    PrimitiveRecord, VectorQuality,
+    render_coverage, CoverageBinner, CoverageGeometry, CoverageGeometryBuilder, CoverageLayer,
+    CoverageRenderOutput, CoverageRenderStats, FillRule, PrimitiveRecord, VectorQuality,
 };
 pub use data::{
     pack_lines, validate_point_instances, validate_polygon_vertices, GraphEdge, GraphNode,

@@ -901,6 +901,15 @@ def vector_render_polygons_fill_py(
     certificate: bool | str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...
 
+def vector_render_analytic_py(
+    scene_json: str,
+    include_coverage: bool = ...,
+    include_records: bool = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+) -> Dict[str, Any]: ...
+
+def vector_coverage_primitives_py(scene_json: str) -> Dict[str, Any]: ...
+
 def vector_render_oit_py(
     width: int,
     height: int,

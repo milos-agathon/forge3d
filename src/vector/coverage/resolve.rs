@@ -175,6 +175,7 @@ impl CoverageResolver {
         geometry: &CoverageGeometry,
     ) {
         encoder.clear_buffer(&resources.output, 0, None);
+        crate::core::shader_registry::record_shader_use("vector_coverage_resolve.wgsl");
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("vf.Vector.Coverage.Resolve.Pass"),
             timestamp_writes: None,

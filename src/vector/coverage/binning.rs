@@ -322,6 +322,7 @@ impl CoverageBinner {
         if primitive_count == 0 {
             return;
         }
+        crate::core::shader_registry::record_shader_use("vector_coverage_bin.wgsl");
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("vf.Vector.Coverage.Bin.Pass"),
             timestamp_writes: None,

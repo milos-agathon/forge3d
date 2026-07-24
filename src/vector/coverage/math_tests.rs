@@ -52,6 +52,7 @@ fn circle_pixel_formula_matches_adaptive_quadrature_on_10000_cases() {
         let numeric = adaptive_circle_quadrature(center, radius, 0.0, 1.0, 1.0e-11);
         max_error = max_error.max((exact - numeric).abs());
     }
+    eprintln!("LIMES_ARC_SWEEP_MAX_ERROR={max_error:e}");
     assert!(max_error < 1.0e-6, "arc sweep max error {max_error:e}");
 }
 

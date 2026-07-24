@@ -9,6 +9,7 @@ mod binning;
 mod ingest;
 mod math;
 mod raster;
+mod render;
 mod resolve;
 mod types;
 
@@ -23,6 +24,7 @@ pub use binning::{BinLayout, CoverageBinner, CoverageBins};
 pub use ingest::CoverageGeometryBuilder;
 pub use math::{analytic_coverage_pixel, circle_pixel_intersection_area, rasterize_coverage_cpu};
 pub use raster::{CoverageRasterResources, CoverageRasterizer};
+pub use render::{render_coverage, CoverageRenderOutput, CoverageRenderStats};
 pub use resolve::{CoverageResolveResources, CoverageResolver};
 pub use types::{
     CoverageGeometry, CoverageLayer, FillRule, PrimitiveKind, PrimitiveRecord, VectorQuality,
