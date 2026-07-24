@@ -137,3 +137,18 @@ def test_toml_fallback_parser_handles_array_of_tables():
             "expires": "2099-01-01",
         }
     ]
+
+
+def test_toml_fallback_parser_handles_named_tables_and_scalar_arrays():
+    sample = (
+        'format = "forge3d-f3dz-corpus/1"\n'
+        "grid_shape = [256, 256]\n"
+        "\n"
+        "[alpine]\n"
+        'eps_0_1 = "635bdde3"\n'
+    )
+    assert parse_toml_fallback(sample) == {
+        "format": "forge3d-f3dz-corpus/1",
+        "grid_shape": [256, 256],
+        "alpine": {"eps_0_1": "635bdde3"},
+    }

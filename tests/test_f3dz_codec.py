@@ -11,6 +11,7 @@ import pytest
 
 import forge3d
 from forge3d.codec import compress_dem, decompress_dem, verify_dem
+from _toml_compat import load_toml
 
 
 CORPUS = Path(__file__).parent / "data" / "codec_corpus"
@@ -37,9 +38,7 @@ def _finite_max_error(source: np.ndarray, decoded: np.ndarray) -> float:
 
 
 def test_committed_real_corpus_manifest_and_hashes() -> None:
-    import tomllib
-
-    manifest = tomllib.loads((CORPUS / "MANIFEST.toml").read_text())
+    manifest = load_toml(CORPUS / "MANIFEST.toml")
     assert manifest["format"] == "forge3d-f3dz-corpus/1"
     assert manifest["license"].startswith("Public domain")
     assert [tile["name"] for tile in manifest["tiles"]] == list(TILES)
@@ -180,9 +179,7 @@ def test_gpu_matches_cpu_for_every_corpus_page() -> None:
 
 
 def test_cross_platform_determinism_hashes() -> None:
-    import tomllib
-
-    expected = tomllib.loads((CORPUS / "DETERMINISM.toml").read_text())
+    expected = load_toml(CORPUS / "DETERMINISM.toml")
     for name in TILES:
         source = _source(name)
         for eps in EPSILONS:
