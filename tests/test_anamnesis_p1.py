@@ -109,13 +109,14 @@ def test_p1_portability_and_production_lanes_fail_closed():
         ci, "test-anamnesis-portability", "test-anamnesis-production"
     )
     production = _job(ci, "test-anamnesis-production", "build-docs")
-    physical_runner = (
-        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]"
+    assert (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-producer]"
+        in physical_seed
     )
-    assert physical_runner in physical_seed
-    assert physical_runner in physical_consumer
-    assert "anamnesis-producer" not in physical_seed
-    assert "anamnesis-consumer" not in physical_consumer
+    assert (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-consumer]"
+        in physical_consumer
+    )
     assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in production
     for job in (physical_seed, physical_consumer, production):
         assert "Prove exact-head checkout" in job
