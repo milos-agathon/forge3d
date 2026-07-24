@@ -1,5 +1,6 @@
 pub mod adjudication;
 pub mod brdf;
+pub mod codec;
 pub mod csm;
 pub mod diagnostics;
 pub mod frame;
@@ -14,6 +15,7 @@ pub mod viewer;
 
 pub(crate) use adjudication::*;
 pub(crate) use brdf::*;
+pub(crate) use codec::*;
 pub(crate) use csm::*;
 pub(crate) use diagnostics::*;
 pub(crate) use frame::*;

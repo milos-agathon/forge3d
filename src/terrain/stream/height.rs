@@ -21,6 +21,14 @@ pub struct HeightMosaic {
     // Mapping: TileId -> atlas slot index (sx, sy)
     slot_map: HashMap<TileId, (u32, u32)>,
     lru: VecDeque<TileId>,
+    f3dz_sources: HashMap<TileId, F3dzUsage>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct F3dzUsage {
+    epsilon: f32,
+    page_count: u32,
+    base_quality: bool,
 }
 
 impl HeightMosaic {
@@ -97,6 +105,7 @@ impl HeightMosaic {
             format,
             slot_map: HashMap::new(),
             lru: VecDeque::new(),
+            f3dz_sources: HashMap::new(),
         })
     }
 
@@ -215,6 +224,7 @@ impl HeightMosaic {
                 depth_or_array_layers: 1,
             },
         );
+        self.f3dz_sources.remove(&id);
         Ok((sx, sy))
     }
 
@@ -250,8 +260,17 @@ impl HeightMosaic {
                 self.slot_map.remove(&id);
                 self.lru.retain(|candidate| *candidate != id);
             }
+            self.f3dz_sources.remove(&id);
             return Err(error.to_string());
         }
+        self.f3dz_sources.insert(
+            id,
+            F3dzUsage {
+                epsilon: header.epsilon,
+                page_count: header.page_count,
+                base_quality: header.base_only(),
+            },
+        );
         Ok((sx, sy))
     }
 
@@ -278,11 +297,13 @@ impl HeightMosaic {
                 // Evict the least recently used; be robust to inconsistent LRU entries
                 if let Some(evicted) = self.lru.pop_front() {
                     let victim_slot = if let Some((ex, ey)) = self.slot_map.remove(&evicted) {
+                        self.f3dz_sources.remove(&evicted);
                         (ex, ey)
                     } else if let Some((any_id, &(ex, ey))) = self.slot_map.iter().next() {
                         // Fallback: evict an arbitrary entry
                         let any_id = *any_id;
                         let _ = self.slot_map.remove(&any_id);
+                        self.f3dz_sources.remove(&any_id);
                         (ex, ey)
                     } else {
                         return Err("No slots to evict".into());
@@ -294,6 +315,7 @@ impl HeightMosaic {
                     // LRU empty but slot_map full; evict arbitrary
                     let any_id = *any_id;
                     let _ = self.slot_map.remove(&any_id);
+                    self.f3dz_sources.remove(&any_id);
                     self.slot_map.insert(id, (ex, ey));
                     self.lru.push_back(id);
                     (ex, ey)
@@ -303,6 +325,19 @@ impl HeightMosaic {
             }
         };
         Ok((sx, sy))
+    }
+
+    /// Seed the active render capture with evidence for every resident F3DZ
+    /// tile. This keeps certificates honest even when streaming decode
+    /// completed before the render capture began.
+    pub fn record_certificate_usage(&self) {
+        for usage in self.f3dz_sources.values() {
+            crate::core::certificate::record_f3dz_pages(
+                usage.epsilon,
+                usage.page_count,
+                usage.base_quality,
+            );
+        }
     }
 
     pub fn mark_used(&mut self, id: TileId) {

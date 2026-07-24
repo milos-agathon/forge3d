@@ -134,6 +134,7 @@ pub fn decode_dem(data: &[u8], demanded_epsilon: Option<f32>) -> F3dzResult<Deco
             "terrain heights were decoded from the progressive base layer at a declared 4*epsilon bound",
         );
     }
+    crate::core::certificate::record_f3dz_pages(header.epsilon, header.page_count, base_quality);
     Ok(DecodedDem {
         width: header.width,
         height: header.height,

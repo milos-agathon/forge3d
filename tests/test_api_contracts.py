@@ -267,6 +267,10 @@ class TestNativeModuleSymbols:
         "render_brdf_tile_overrides",
         # PROBATUM: WGSL proof report
         "shader_report",
+        # COMPENDIUM: certified DEM codec
+        "compress_dem",
+        "decompress_dem",
+        "verify_dem",
     ]
 
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)

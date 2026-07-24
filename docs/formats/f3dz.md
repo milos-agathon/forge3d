@@ -104,9 +104,19 @@ flags; it is not an arbitrarily byte-truncated invalid file.
 
 ## GPU execution contract
 
-One workgroup owns one page. The two rANS lanes decode in parallel. Lorenzo
-pages reconstruct in causal row-wave order; plane prediction and progressive
-enhancement allow columns within a row to run in parallel after the entropy
-barrier. The final binary32 values are written directly to the R32Float terrain
-atlas. CPU and GPU use the same integer residuals and one binary32 multiply, so
-their output bytes are required to match exactly.
+One workgroup owns one page. Invocation 0 expands the interleaved two-state
+rANS stream, then Lorenzo pages reconstruct in causal row-wave order; plane
+prediction and progressive enhancement allow columns within a row to run in
+parallel after the entropy barrier. The final binary32 values are written
+directly to the R32Float terrain atlas. CPU and GPU use the same integer
+residuals and one binary32 multiply, so their output bytes are required to
+match exactly.
+
+## TIFF/COG embedding
+
+forge3d reserves private TIFF compression value `65003` for an F3DZ v1 tile.
+The TIFF IFD must still declare one `32`-bit floating-point sample and tile
+dimensions identical to the embedded F3DZ grid. The TIFF horizontal predictor
+is not applied: F3DZ performs its own terrain-aware prediction. Readers decode
+this branch through the same fail-closed CPU decoder and reject mismatched
+dimensions or sample metadata.

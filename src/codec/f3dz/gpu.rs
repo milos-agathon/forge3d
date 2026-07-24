@@ -191,6 +191,11 @@ impl F3dzGpuDecoder {
         if prepared.header.base_only() {
             record_base_quality();
         }
+        crate::core::certificate::record_f3dz_pages(
+            prepared.header.epsilon,
+            prepared.header.page_count,
+            prepared.header.base_only(),
+        );
         Ok((prepared.header, values))
     }
 
@@ -261,6 +266,11 @@ impl F3dzGpuDecoder {
         if prepared.header.base_only() {
             record_base_quality();
         }
+        crate::core::certificate::record_f3dz_pages(
+            prepared.header.epsilon,
+            prepared.header.page_count,
+            prepared.header.base_only(),
+        );
         Ok(prepared.header)
     }
 

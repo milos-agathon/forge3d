@@ -3,8 +3,8 @@
 use super::cache::CogTileCache;
 use super::error::CogError;
 use super::ifd_parser::{
-    parse_cog_header, CogHeader, COMPRESSION_DEFLATE, COMPRESSION_DEFLATE_ALT, COMPRESSION_LZW,
-    COMPRESSION_NONE, SAMPLE_FORMAT_FLOAT, SAMPLE_FORMAT_INT, SAMPLE_FORMAT_UINT,
+    parse_cog_header, CogHeader, COMPRESSION_DEFLATE, COMPRESSION_DEFLATE_ALT, COMPRESSION_F3DZ,
+    COMPRESSION_LZW, COMPRESSION_NONE, SAMPLE_FORMAT_FLOAT, SAMPLE_FORMAT_INT, SAMPLE_FORMAT_UINT,
     TIFF_PREDICTOR_HORIZONTAL, TIFF_PREDICTOR_NONE,
 };
 use super::range_reader::RangeReader;
@@ -184,14 +184,26 @@ impl CogHeightReader {
 
         let heights = self.runtime.block_on(async move {
             let compressed = reader.read_range(offset, byte_count).await?;
-            let decompressed = decompress_tile(&compressed, compression)?;
+            if compression == COMPRESSION_F3DZ
+                && (bits_per_sample != 32 || sample_format != SAMPLE_FORMAT_FLOAT)
+            {
+                return Err(CogError::InvalidIfd(
+                    "F3DZ TIFF tiles require 32-bit floating-point sample metadata".into(),
+                ));
+            }
+            let decompressed =
+                decompress_tile(&compressed, compression, Some((tile_width, tile_height)))?;
             decode_heights(
                 &decompressed,
                 bits_per_sample,
                 sample_format,
                 tile_width,
                 tile_height,
-                predictor,
+                if compression == COMPRESSION_F3DZ {
+                    TIFF_PREDICTOR_NONE
+                } else {
+                    predictor
+                },
             )
         })?;
 
@@ -240,14 +252,29 @@ impl CogHeightReader {
         let byte_count = ifd.tile_byte_counts[tile_idx];
 
         let compressed = self.reader.read_range(offset, byte_count).await?;
-        let decompressed = decompress_tile(&compressed, ifd.compression)?;
+        if ifd.compression == COMPRESSION_F3DZ
+            && (ifd.bits_per_sample != 32 || ifd.sample_format != SAMPLE_FORMAT_FLOAT)
+        {
+            return Err(CogError::InvalidIfd(
+                "F3DZ TIFF tiles require 32-bit floating-point sample metadata".into(),
+            ));
+        }
+        let decompressed = decompress_tile(
+            &compressed,
+            ifd.compression,
+            Some((ifd.tile_width, ifd.tile_height)),
+        )?;
         let heights = decode_heights(
             &decompressed,
             ifd.bits_per_sample,
             ifd.sample_format,
             ifd.tile_width,
             ifd.tile_height,
-            ifd.predictor,
+            if ifd.compression == COMPRESSION_F3DZ {
+                TIFF_PREDICTOR_NONE
+            } else {
+                ifd.predictor
+            },
         )?;
 
         let tile_size = (ifd.tile_width as usize)
@@ -287,7 +314,11 @@ impl HeightReader for CogHeightReader {
     }
 }
 
-fn decompress_tile(data: &[u8], compression: u16) -> Result<Vec<u8>, CogError> {
+fn decompress_tile(
+    data: &[u8],
+    compression: u16,
+    expected_dimensions: Option<(u32, u32)>,
+) -> Result<Vec<u8>, CogError> {
     match compression {
         COMPRESSION_NONE => Ok(data.to_vec()),
         COMPRESSION_DEFLATE | COMPRESSION_DEFLATE_ALT => {
@@ -302,6 +333,23 @@ fn decompress_tile(data: &[u8], compression: u16) -> Result<Vec<u8>, CogError> {
             Ok(decompressed)
         }
         COMPRESSION_LZW => decompress_lzw(data),
+        COMPRESSION_F3DZ => {
+            let decoded = crate::codec::f3dz::decode_dem(data, None)
+                .map_err(|error| CogError::DecompressionError(error.to_string()))?;
+            if let Some((width, height)) = expected_dimensions {
+                if decoded.width != width || decoded.height != height {
+                    return Err(CogError::DecompressionError(format!(
+                        "F3DZ grid {}x{} does not match TIFF tile {}x{}",
+                        decoded.width, decoded.height, width, height
+                    )));
+                }
+            }
+            let mut bytes = Vec::with_capacity(decoded.values.len() * 4);
+            for value in decoded.values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            Ok(bytes)
+        }
         other => Err(CogError::UnsupportedCompression(other)),
     }
 }
@@ -692,5 +740,32 @@ mod tests {
         let err = apply_predictor(&[0, 1, 2], TIFF_PREDICTOR_HORIZONTAL, 2, 2, 1).unwrap_err();
 
         assert!(matches!(err, CogError::InvalidIfd(message) if message.contains("predictor")));
+    }
+
+    #[test]
+    fn private_f3dz_compression_branch_decodes_f32_tile_bytes() {
+        let source = vec![10.0f32, 10.1, f32::NAN, 10.3];
+        let stream = crate::codec::f3dz::encode_dem(
+            &source,
+            2,
+            2,
+            &crate::codec::f3dz::EncodeOptions::new(0.05),
+        )
+        .unwrap();
+        let bytes = decompress_tile(&stream, COMPRESSION_F3DZ, Some((2, 2))).unwrap();
+        let decoded =
+            decode_heights(&bytes, 32, SAMPLE_FORMAT_FLOAT, 2, 2, TIFF_PREDICTOR_NONE).unwrap();
+        assert_eq!(decoded.len(), source.len());
+        assert!(decoded[2].is_nan());
+        assert!(decoded
+            .iter()
+            .zip(source)
+            .filter(|(_, source)| !source.is_nan())
+            .all(|(decoded, source)| (*decoded - source).abs() <= 0.05));
+
+        assert!(matches!(
+            decompress_tile(&stream, COMPRESSION_F3DZ, Some((4, 1))),
+            Err(CogError::DecompressionError(message)) if message.contains("does not match")
+        ));
     }
 }

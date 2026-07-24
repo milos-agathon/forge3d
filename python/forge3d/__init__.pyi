@@ -8,6 +8,7 @@ from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping,
 import os
 import numpy as np
 from . import gis
+from . import codec as codec
 from . import text as text
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
@@ -146,6 +147,10 @@ PathLikeStr = os.PathLike[str] | str
 
 __version__: str
 version: str
+
+def compress_dem(dem: Any, eps: float, progressive: bool = ...) -> bytes: ...
+def decompress_dem(data: bytes | bytearray | memoryview) -> tuple[np.ndarray, dict[str, Any]]: ...
+def verify_dem(data: bytes | bytearray | memoryview, source: Any | None = ...) -> dict[str, Any]: ...
 
 # CENSOR: typed GPU-error exceptions (native when the extension is present,
 # pure-Python RuntimeError subclasses otherwise).
