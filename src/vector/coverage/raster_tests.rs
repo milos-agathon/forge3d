@@ -27,6 +27,13 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
                 context.adapter.get_info().name,
                 context.adapter.get_info().backend
             );
+            if context.software_fallback {
+                eprintln!(
+                    "LIMES_GPU_SKIPPED=software fallback adapters are not an authoritative \
+                     analytic-kernel dispatch lane"
+                );
+                return;
+            }
             context
         }
         Err(error) => {
