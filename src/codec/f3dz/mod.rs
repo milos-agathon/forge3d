@@ -1,6 +1,13 @@
 //! F3DZ v1: deterministic, error-bounded DEM compression.
 
+pub mod decode;
+pub mod encode;
 pub mod format;
+pub mod predict;
+pub mod rans;
+
+pub use decode::{decode_dem, DecodedDem};
+pub use encode::{encode_dem, EncodeOptions};
 
 use std::fmt;
 
