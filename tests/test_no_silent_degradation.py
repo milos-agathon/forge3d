@@ -6,6 +6,7 @@
 #   (d) the wheel ships the features its public APIs need; the built-in CRS
 #       engine is authoritative, while optional PROJ and GEOS remain honest
 #   (e) every tracked tests/test_*.py is either run by a CI lane or UNRUN-listed
+#   (f) ANAMNESIS portability requires distinct physical/runner identities
 # RELEVANT FILES: scripts/ci_pytest_lane.py, tests/UNRUN.toml,
 #   tests/degradation_allowlist.toml, tests/allocation_allowlist.toml,
 #   tests/_toml_compat.py, Cargo.toml, pyproject.toml, .github/workflows/ci.yml
@@ -32,6 +33,29 @@ for _p in (str(TESTS), str(ROOT / "scripts")):
 
 from test_allocation_gate import _raw_sites  # noqa: E402  (reuse the source gate)
 import ci_pytest_lane  # noqa: E402  (the default-lane selection is the source of truth)
+
+
+# ---------------------------------------------------------------------------
+# (f) ANAMNESIS cross-machine honesty
+# ---------------------------------------------------------------------------
+def test_f_anamnesis_portability_requires_distinct_physical_machines():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    driver = (ROOT / "scripts" / "check_anamnesis_portability.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-producer]"
+        in ci
+    )
+    assert (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-consumer]"
+        in ci
+    )
+    assert 'machine_id == record["producer_machine_id"]' in driver
+    assert 'runner_name == record.get("producer_runner_name")' in driver
+    assert '"distinct_machine": True' in driver
+    assert '"distinct_machine": machine_id != record["producer_machine_id"]' not in driver
 
 
 # ---------------------------------------------------------------------------
