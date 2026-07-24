@@ -146,10 +146,6 @@ def main() -> int:
         raise SystemExit("portability record is not a native terrain graph record")
     if record.get("compatibility_profile") != _PORTABLE_PROFILE:
         raise SystemExit("portability record compatibility profile mismatch")
-    if record.get("engine_fingerprint") != json.loads(
-        f3d.anamnesis_engine_fingerprint()
-    ):
-        raise SystemExit("portability record was not produced by this exact engine head")
 
     if args.mode == "check":
         if not args.consumer_frame_blob or not args.consumer_adapter_record:
@@ -158,6 +154,23 @@ def main() -> int:
             )
         machine_id = _machine_id(args.machine_id_file)
         runner_name = _runner_name(args.runner_name)
+        if machine_id == record["producer_machine_id"]:
+            raise SystemExit(
+                "portability requires distinct physical machines; "
+                f"producer and consumer both identify as {machine_id!r}"
+            )
+        if runner_name == record.get("producer_runner_name"):
+            raise SystemExit(
+                "portability requires distinct GitHub runner identities; "
+                f"both jobs ran on {runner_name!r}"
+            )
+
+    if record.get("engine_fingerprint") != json.loads(
+        f3d.anamnesis_engine_fingerprint()
+    ):
+        raise SystemExit("portability record was not produced by this exact engine head")
+
+    if args.mode == "check":
         consumer_png_sha = hashlib.sha256(
             Path(args.consumer_frame_blob).read_bytes()
         ).hexdigest()
@@ -188,7 +201,7 @@ def main() -> int:
             raise SystemExit("native portable restoration differs from producer RGBA")
         result = {
             "mode": "check",
-            "distinct_machine": machine_id != record["producer_machine_id"],
+            "distinct_machine": True,
             "producer_machine_id": record["producer_machine_id"],
             "consumer_machine_id": machine_id,
             "producer_runner_name": record.get("producer_runner_name"),
