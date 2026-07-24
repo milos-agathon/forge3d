@@ -20,6 +20,7 @@ const PRIMITIVE_LINE: u32 = 0u;
 const FILL_NONZERO: u32 = 0u;
 const MAX_ACTIVE: u32 = 96u;
 const MAX_BREAKS: u32 = 256u;
+const SIMPLE_BREAKS: u32 = 40u;
 const EPSILON: f32 = 1.0e-5;
 const LEFT_BOUNDARY: u32 = 0xffffffffu;
 const RIGHT_BOUNDARY: u32 = 0xfffffffeu;
@@ -204,6 +205,56 @@ fn side_breaks(values: ptr<function, array<f32, 256>>,
     }
 }
 
+fn push_simple_break(values: ptr<function, array<f32, 40>>,
+                     count: ptr<function, u32>,
+                     value: f32, y0: f32, y1: f32) {
+    if value != value || abs(value) > 3.4028235e38 ||
+       value <= y0 + EPSILON || value >= y1 - EPSILON {
+        return;
+    }
+    if (*count) >= SIMPLE_BREAKS {
+        atomicStore(&errors.values[2], 1u);
+        return;
+    }
+    (*values)[*count] = value;
+    *count = *count + 1u;
+}
+
+fn simple_side_breaks(values: ptr<function, array<f32, 40>>,
+                      count: ptr<function, u32>,
+                      primitive: PrimitiveRecord, side_x: f32,
+                      y0: f32, y1: f32) {
+    if primitive.metadata.x == PRIMITIVE_LINE {
+        let dx = primitive.geometry.z - primitive.geometry.x;
+        if abs(dx) > EPSILON {
+            let t = det_div(side_x - primitive.geometry.x, dx);
+            if t > 0.0 && t < 1.0 {
+                push_simple_break(values, count,
+                    det_fma(t, primitive.geometry.w - primitive.geometry.y,
+                            primitive.geometry.y), y0, y1);
+            }
+        }
+        return;
+    }
+    let dx = side_x - primitive.geometry.x;
+    if dx * primitive.geometry.w < -EPSILON {
+        return;
+    }
+    let remaining = det_fma(-dx, dx, primitive.geometry.z * primitive.geometry.z);
+    if remaining < 0.0 {
+        return;
+    }
+    let dy = det_sqrt(max(remaining, 0.0));
+    let low = primitive.geometry.y - dy;
+    let high = primitive.geometry.y + dy;
+    if low >= primitive.bounds.y - EPSILON && low <= primitive.bounds.w + EPSILON {
+        push_simple_break(values, count, low, y0, y1);
+    }
+    if high >= primitive.bounds.y - EPSILON && high <= primitive.bounds.w + EPSILON {
+        push_simple_break(values, count, high, y0, y1);
+    }
+}
+
 fn contains_point(primitive: PrimitiveRecord, point: vec2<f32>) -> bool {
     if point.y < primitive.bounds.y - EPSILON || point.y > primitive.bounds.w + EPSILON {
         return false;
@@ -371,7 +422,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if gid.x >= params.dispatch.x {
         return;
     }
-    let dispatch = pixel_dispatch[gid.x];
+    let dispatch = pixel_dispatch[params.dispatch.y + gid.x];
     let pixel_offset = dispatch.x;
     let pixels_per_layer = params.extent_layers.w;
     let layer_index = pixel_offset / pixels_per_layer;
@@ -420,12 +471,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let rule = layer_rules[layer_index].x;
     let pixel_bounds = vec4<f32>(x0, x1, y0, y1);
-    // One capsule is a simple closed boundary: its line/arc records meet only
-    // at uploaded endpoints, which are already breakpoints. Pair intersection
-    // solving is needed for self-intersecting polygons and overlapping stroke
-    // capsules, but would be pure work for isolated road segments.
-    let only_component = components[pixel_components.values[dispatch.y]];
-    let skip_pair_breaks = dispatch.z == 1u && only_component.w != 0u;
 
     var breaks: array<f32, 256>;
     var break_count = 2u;
@@ -441,16 +486,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         push_break(&breaks, &break_count, primitive.bounds.w, y0, y1);
         side_breaks(&breaks, &break_count, primitive, x0, y0, y1);
         side_breaks(&breaks, &break_count, primitive, x1, y0, y1);
-        if !skip_pair_breaks {
-            var j = i + 1u;
-            loop {
-                if j >= active_count {
-                    break;
-                }
-                pair_breaks(&breaks, &break_count, primitive,
-                            primitives[active_indices[j]], pixel_bounds);
-                j += 1u;
+        var j = i + 1u;
+        loop {
+            if j >= active_count {
+                break;
             }
+            pair_breaks(&breaks, &break_count, primitive,
+                        primitives[active_indices[j]], pixel_bounds);
+            j += 1u;
         }
         i += 1u;
     }
@@ -552,6 +595,200 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     break;
                 }
                 let primitive = primitives[active_indices[i]];
+                let contribution = state_contribution(rule, primitive);
+                if active_at(primitive, row_center) &&
+                   primitive_x(primitive, row_center) < x0 {
+                    state -= contribution;
+                }
+                if active_at(primitive, mid) && primitive_x(primitive, mid) < x0 {
+                    state += contribution;
+                }
+                i += 1u;
+            }
+
+            var left_boundary = LEFT_BOUNDARY;
+            var inside = is_inside(rule, state);
+            var cursor = 0u;
+            loop {
+                if cursor >= crossing_count {
+                    break;
+                }
+                let group_x = crossing_x[cursor];
+                let representative = crossing_indices[cursor];
+                let was_inside = inside;
+                var group_end = cursor;
+                loop {
+                    if group_end >= crossing_count ||
+                       abs(crossing_x[group_end] - group_x) > EPSILON {
+                        break;
+                    }
+                    state += state_contribution(rule, primitives[crossing_indices[group_end]]);
+                    group_end += 1u;
+                }
+                inside = is_inside(rule, state);
+                if !was_inside && inside {
+                    left_boundary = representative;
+                } else if was_inside && !inside {
+                    result += interval_area(left_boundary, representative, a, b, mid,
+                                            x0, x1, x0, x1);
+                }
+                cursor = group_end;
+            }
+            if inside {
+                result += interval_area(left_boundary, RIGHT_BOUNDARY, a, b, mid,
+                                        x0, x1, x0, x1);
+            }
+        }
+        slab_index += 1u;
+    }
+    coverage_output.values[pixel_offset] = clamp(det_barrier(result), 0.0, 1.0);
+}
+
+// Exact fast path for one isolated round-capped line segment. The component is
+// locked by the host to two linear sides plus four y-monotone circular arcs
+// (two records per cap). Its boundaries meet only at uploaded endpoints, so the
+// general O(n^2) intersection solver is unnecessary. Fixed six-edge/40-break
+// storage also keeps the common road case in registers instead of spilling the
+// generic 96-edge/256-break workspace.
+@compute @workgroup_size(64, 1, 1)
+fn main_simple_capsule(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= params.dispatch.x {
+        return;
+    }
+    let dispatch = pixel_dispatch[params.dispatch.y + gid.x];
+    let component = components[pixel_components.values[dispatch.y]];
+    let pixel_offset = dispatch.x;
+    let pixels_per_layer = params.extent_layers.w;
+    let layer_index = pixel_offset / pixels_per_layer;
+    if dispatch.z != 1u || component.y != 6u || component.w == 0u ||
+       layer_index >= params.extent_layers.z {
+        atomicStore(&errors.values[1], 1u);
+        coverage_output.values[pixel_offset] = 0.0;
+        return;
+    }
+    atomicOr(&errors.values[3], 1u);
+
+    let width = params.extent_layers.x;
+    let layer_pixel = pixel_offset - layer_index * pixels_per_layer;
+    let pixel_y = layer_pixel / width;
+    let pixel_x = layer_pixel - pixel_y * width;
+    let x0 = f32(pixel_x);
+    let x1 = x0 + 1.0;
+    let y0 = f32(pixel_y);
+    let y1 = y0 + 1.0;
+    let first_primitive = component.x;
+
+    var breaks: array<f32, 40>;
+    var break_count = 2u;
+    breaks[0] = y0;
+    breaks[1] = y1;
+    var i = 0u;
+    loop {
+        if i >= 6u {
+            break;
+        }
+        let primitive = primitives[first_primitive + i];
+        if primitive.bounds.w > y0 && primitive.bounds.y < y1 &&
+           winding(primitive) != 0i {
+            push_simple_break(&breaks, &break_count, primitive.bounds.y, y0, y1);
+            push_simple_break(&breaks, &break_count, primitive.bounds.w, y0, y1);
+            simple_side_breaks(&breaks, &break_count, primitive, x0, y0, y1);
+            simple_side_breaks(&breaks, &break_count, primitive, x1, y0, y1);
+        }
+        i += 1u;
+    }
+    if atomicLoad(&errors.values[2]) != 0u {
+        coverage_output.values[pixel_offset] = 0.0;
+        return;
+    }
+
+    i = 1u;
+    loop {
+        if i >= break_count {
+            break;
+        }
+        let value = breaks[i];
+        var position = i;
+        loop {
+            if position == 0u || breaks[position - 1u] <= value {
+                break;
+            }
+            breaks[position] = breaks[position - 1u];
+            position -= 1u;
+        }
+        breaks[position] = value;
+        i += 1u;
+    }
+    var unique_count = 1u;
+    i = 1u;
+    loop {
+        if i >= break_count {
+            break;
+        }
+        if abs(breaks[i] - breaks[unique_count - 1u]) > EPSILON {
+            breaks[unique_count] = breaks[i];
+            unique_count += 1u;
+        }
+        i += 1u;
+    }
+
+    let rule = layer_rules[layer_index].x;
+    let row_center = y0 + 0.5;
+    var result = 0.0;
+    var slab_index = 0u;
+    loop {
+        if slab_index + 1u >= unique_count {
+            break;
+        }
+        let a = breaks[slab_index];
+        let b = breaks[slab_index + 1u];
+        let mid = 0.5 * (a + b);
+        if b - a > EPSILON {
+            var crossing_indices: array<u32, 6>;
+            var crossing_x: array<f32, 6>;
+            var crossing_count = 0u;
+            i = 0u;
+            loop {
+                if i >= 6u {
+                    break;
+                }
+                let primitive_index = first_primitive + i;
+                let primitive = primitives[primitive_index];
+                if active_at(primitive, mid) {
+                    let x = primitive_x(primitive, mid);
+                    if x >= x0 - EPSILON && x <= x1 + EPSILON {
+                        var position = crossing_count;
+                        loop {
+                            if position == 0u {
+                                break;
+                            }
+                            let previous = position - 1u;
+                            let previous_index = crossing_indices[previous];
+                            let previous_x = crossing_x[previous];
+                            if previous_x < x - EPSILON ||
+                               (abs(previous_x - x) <= EPSILON &&
+                                primitives[previous_index].metadata.w <= primitive.metadata.w) {
+                                break;
+                            }
+                            crossing_indices[position] = previous_index;
+                            crossing_x[position] = previous_x;
+                            position -= 1u;
+                        }
+                        crossing_indices[position] = primitive_index;
+                        crossing_x[position] = x;
+                        crossing_count += 1u;
+                    }
+                }
+                i += 1u;
+            }
+
+            var state = tile_baselines.values[pixel_offset];
+            i = 0u;
+            loop {
+                if i >= 6u {
+                    break;
+                }
+                let primitive = primitives[first_primitive + i];
                 let contribution = state_contribution(rule, primitive);
                 if active_at(primitive, row_center) &&
                    primitive_x(primitive, row_center) < x0 {

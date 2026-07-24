@@ -41,6 +41,7 @@ struct ComponentRecord {
 
 struct PixelDispatchLists {
     dispatch: Vec<PixelDispatchRecord>,
+    simple_dispatch_count: u32,
     component_indices: Vec<u32>,
     components: Vec<ComponentRecord>,
     resolve_pixels: Vec<u32>,
@@ -51,6 +52,8 @@ pub struct CoverageRasterResources {
     pub coverage_bytes: u64,
     pub allocation_bytes: u64,
     pub active_pixel_count: u32,
+    pub simple_pixel_count: u32,
+    pub generic_pixel_count: u32,
     pub resolve_pixel_count: u32,
     pub resolve_pixels: TrackedBuffer,
     _baselines: TrackedBuffer,
@@ -58,12 +61,15 @@ pub struct CoverageRasterResources {
     _component_indices: TrackedBuffer,
     _components: TrackedBuffer,
     _rules: TrackedBuffer,
-    _params: TrackedBuffer,
-    bind_group: wgpu::BindGroup,
+    _simple_params: TrackedBuffer,
+    _generic_params: TrackedBuffer,
+    simple_bind_group: wgpu::BindGroup,
+    generic_bind_group: wgpu::BindGroup,
 }
 
 pub struct CoverageRasterizer {
-    pipeline: wgpu::ComputePipeline,
+    generic_pipeline: wgpu::ComputePipeline,
+    simple_pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 }
 
@@ -94,7 +100,7 @@ impl CoverageRasterizer {
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
-        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        let generic_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
             device,
             &wgpu::ComputePipelineDescriptor {
                 label: Some("vf.Vector.Coverage.Raster.Pipeline"),
@@ -103,8 +109,18 @@ impl CoverageRasterizer {
                 entry_point: "main",
             },
         );
+        let simple_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("vf.Vector.Coverage.Raster.SimpleCapsulePipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "main_simple_capsule",
+            },
+        );
         Self {
-            pipeline,
+            generic_pipeline,
+            simple_pipeline,
             bind_group_layout,
         }
     }
@@ -178,7 +194,7 @@ impl CoverageRasterizer {
             .and_then(|bytes| bytes.checked_add(component_index_bytes.max(4)))
             .and_then(|bytes| bytes.checked_add(component_bytes.max(16)))
             .and_then(|bytes| bytes.checked_add(resolve_pixel_bytes.max(4)))
-            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<RasterParams>() as u64))
+            .and_then(|bytes| bytes.checked_add(2 * std::mem::size_of::<RasterParams>() as u64))
             .ok_or_else(|| {
                 RenderError::Budget("vector_coverage_raster_budget: total-byte overflow".into())
             })?;
@@ -262,6 +278,14 @@ impl CoverageRasterizer {
                 "vector_coverage_raster_budget: active-pixel count exceeds u32".into(),
             )
         })?;
+        let simple_pixel_count = pixel_lists.simple_dispatch_count;
+        let generic_pixel_count = active_pixel_count
+            .checked_sub(simple_pixel_count)
+            .ok_or_else(|| {
+                RenderError::Render(
+                    "vector_coverage_raster_internal: simple dispatch count exceeds total".into(),
+                )
+            })?;
         let resolve_pixel_count =
             u32::try_from(pixel_lists.resolve_pixels.len()).map_err(|_| {
                 RenderError::Budget(
@@ -282,21 +306,35 @@ impl CoverageRasterizer {
                 "vector_coverage_raster_budget: pixels per layer exceeds u32".into(),
             )
         })?;
-        let params_value = RasterParams {
-            extent_layers: [
-                geometry.width,
-                geometry.height,
-                bins.layout.layer_count,
-                pixels_per_layer,
-            ],
-            limits: [MAX_ACTIVE_PRIMITIVES, 0, 0, 0],
-            dispatch: [active_pixel_count, 0, 0, 0],
+        let common_extent = [
+            geometry.width,
+            geometry.height,
+            bins.layout.layer_count,
+            pixels_per_layer,
+        ];
+        let simple_params_value = RasterParams {
+            extent_layers: common_extent,
+            limits: [6, 40, 0, 0],
+            dispatch: [simple_pixel_count, 0, 0, 0],
         };
-        let params = tracked_create_buffer_init(
+        let generic_params_value = RasterParams {
+            extent_layers: common_extent,
+            limits: [MAX_ACTIVE_PRIMITIVES, 0, 0, 0],
+            dispatch: [generic_pixel_count, simple_pixel_count, 0, 0],
+        };
+        let simple_params = tracked_create_buffer_init(
             device,
             &BufferInitDescriptor {
-                label: Some("vf.Vector.Coverage.RasterParams"),
-                contents: bytemuck::bytes_of(&params_value),
+                label: Some("vf.Vector.Coverage.SimpleRasterParams"),
+                contents: bytemuck::bytes_of(&simple_params_value),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
+        let generic_params = tracked_create_buffer_init(
+            device,
+            &BufferInitDescriptor {
+                label: Some("vf.Vector.Coverage.GenericRasterParams"),
+                contents: bytemuck::bytes_of(&generic_params_value),
                 usage: wgpu::BufferUsages::UNIFORM,
             },
         )?;
@@ -311,26 +349,38 @@ impl CoverageRasterizer {
                 mapped_at_creation: false,
             },
         )?;
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("vf.Vector.Coverage.Raster.BindGroup"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                entry(0, &bins.primitive_buffer),
-                entry(1, &baseline_buffer),
-                entry(2, &rule_buffer),
-                entry(3, &params),
-                entry(4, &coverage),
-                entry(5, &bins.overflow),
-                entry(6, &dispatch_buffer),
-                entry(7, &component_index_buffer),
-                entry(8, &component_buffer),
-            ],
-        });
+        let make_bind_group = |label, params: &wgpu::Buffer| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    entry(0, &bins.primitive_buffer),
+                    entry(1, &baseline_buffer),
+                    entry(2, &rule_buffer),
+                    entry(3, params),
+                    entry(4, &coverage),
+                    entry(5, &bins.overflow),
+                    entry(6, &dispatch_buffer),
+                    entry(7, &component_index_buffer),
+                    entry(8, &component_buffer),
+                ],
+            })
+        };
+        let simple_bind_group = make_bind_group(
+            "vf.Vector.Coverage.Raster.SimpleCapsuleBindGroup",
+            &simple_params,
+        );
+        let generic_bind_group = make_bind_group(
+            "vf.Vector.Coverage.Raster.GenericBindGroup",
+            &generic_params,
+        );
         Ok(CoverageRasterResources {
             coverage,
             coverage_bytes,
             allocation_bytes: total_bytes,
             active_pixel_count,
+            simple_pixel_count,
+            generic_pixel_count,
             resolve_pixel_count,
             resolve_pixels: resolve_pixel_buffer,
             _baselines: baseline_buffer,
@@ -338,8 +388,10 @@ impl CoverageRasterizer {
             _component_indices: component_index_buffer,
             _components: component_buffer,
             _rules: rule_buffer,
-            _params: params,
-            bind_group,
+            _simple_params: simple_params,
+            _generic_params: generic_params,
+            simple_bind_group,
+            generic_bind_group,
         })
     }
 
@@ -358,9 +410,16 @@ impl CoverageRasterizer {
             label: Some("vf.Vector.Coverage.Raster.Pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &resources.bind_group, &[]);
-        pass.dispatch_workgroups(resources.active_pixel_count.div_ceil(64), 1, 1);
+        if resources.simple_pixel_count != 0 {
+            pass.set_pipeline(&self.simple_pipeline);
+            pass.set_bind_group(0, &resources.simple_bind_group, &[]);
+            pass.dispatch_workgroups(resources.simple_pixel_count.div_ceil(64), 1, 1);
+        }
+        if resources.generic_pixel_count != 0 {
+            pass.set_pipeline(&self.generic_pipeline);
+            pass.set_bind_group(0, &resources.generic_bind_group, &[]);
+            pass.dispatch_workgroups(resources.generic_pixel_count.div_ceil(64), 1, 1);
+        }
     }
 }
 
@@ -471,10 +530,11 @@ fn build_pixel_dispatch_lists(
             .iter()
             .filter(|record| record.kind() == super::types::PrimitiveKind::Line)
             .count();
-        let is_simple_stroke = line_count == 2
-            && component_primitives
-                .iter()
-                .any(|record| record.kind() == super::types::PrimitiveKind::Arc);
+        let arc_count = component_primitives
+            .iter()
+            .filter(|record| record.kind() == super::types::PrimitiveKind::Arc)
+            .count();
+        let is_simple_stroke = component_primitives.len() == 6 && line_count == 2 && arc_count == 4;
         components.push(ComponentRecord {
             values: [
                 first_primitive,
@@ -615,6 +675,24 @@ fn build_pixel_dispatch_lists(
             }
         }
     }
+    let mut simple_dispatch = Vec::new();
+    let mut generic_dispatch = Vec::new();
+    for record in dispatch {
+        let is_simple = record.values[2] == 1
+            && components[component_indices[record.values[1] as usize] as usize].values[3] != 0;
+        if is_simple {
+            simple_dispatch.push(record);
+        } else {
+            generic_dispatch.push(record);
+        }
+    }
+    let simple_dispatch_count = u32::try_from(simple_dispatch.len()).map_err(|_| {
+        RenderError::Budget(
+            "vector_coverage_raster_budget: simple dispatch count exceeds u32".into(),
+        )
+    })?;
+    simple_dispatch.extend(generic_dispatch);
+    let dispatch = simple_dispatch;
     let resolve_pixels = resolve_active
         .into_iter()
         .enumerate()
@@ -629,6 +707,7 @@ fn build_pixel_dispatch_lists(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PixelDispatchLists {
         dispatch,
+        simple_dispatch_count,
         component_indices,
         components,
         resolve_pixels,
@@ -717,6 +796,7 @@ mod tests {
         assert_eq!(lists.component_indices, vec![0; 4]);
         assert_eq!(lists.resolve_pixels, vec![9, 10, 17, 18]);
         assert_eq!(lists.components[0].values[3], 0);
+        assert_eq!(lists.simple_dispatch_count, 0);
     }
 
     #[test]
@@ -740,8 +820,10 @@ mod tests {
         let lists = build_pixel_dispatch_lists(&builder.finish().unwrap()).unwrap();
 
         assert_eq!(lists.components.len(), 1);
+        assert_eq!(lists.components[0].values[1], 6);
         assert_eq!(lists.components[0].values[3], 1);
         assert_eq!(lists.dispatch.len(), 8);
+        assert_eq!(lists.simple_dispatch_count, 8);
         assert_eq!(lists.component_indices, vec![0; 8]);
         assert_eq!(lists.resolve_pixels.len(), 8);
     }
@@ -765,5 +847,6 @@ mod tests {
 
         assert_eq!(lists.components.len(), 1);
         assert_eq!(lists.components[0].values[3], 0);
+        assert_eq!(lists.simple_dispatch_count, 0);
     }
 }

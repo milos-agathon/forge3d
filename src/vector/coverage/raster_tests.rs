@@ -10,6 +10,13 @@ use glam::Vec2;
 fn raster_shader_and_pinned_math_assemble_as_valid_wgsl() {
     let module = naga::front::wgsl::parse_str(&raster_shader_source())
         .expect("combined LIMES raster shader must parse");
+    let entry_points = module
+        .entry_points
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(entry_points.contains(&"main"));
+    assert!(entry_points.contains(&"main_simple_capsule"));
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
