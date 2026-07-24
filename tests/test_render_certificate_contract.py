@@ -105,6 +105,7 @@ def test_public_render_entrypoints_expose_certificate_keyword() -> None:
         "vector_render_pick_map_py": f3d.vector_render_pick_map_py,
         "vector_render_oit_and_pick_py": f3d.vector_render_oit_and_pick_py,
         "vector_render_polygons_fill_py": f3d.vector_render_polygons_fill_py,
+        "vector_render_analytic_py": f3d.vector_render_analytic_py,
         "vector_oit_and_pick_demo": f3d.vector_oit_and_pick_demo,
     }
     missing = [

@@ -135,6 +135,8 @@ class TestNativeModuleSymbols:
         "tiles3d_traverse_py",
         "decode_pnts_py",
         "vector_render_oit_edl_py",
+        "vector_render_analytic_py",
+        "vector_coverage_primitives_py",
         "read_laz_point_attributes",
         "copc_read_node_points",
         # AEQUITAS: PT-vs-raster adjudication pair

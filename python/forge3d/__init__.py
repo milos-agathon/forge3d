@@ -94,6 +94,8 @@ _NATIVE_ONLY_EXPORTS = (
         "vector_render_pick_map_py",
         "vector_render_oit_and_pick_py",
         "vector_render_polygons_fill_py",
+        "vector_render_analytic_py",
+        "vector_coverage_primitives_py",
         "ClipmapConfig",  # P2.1/M5: Clipmap terrain
         "ClipmapMesh",  # P2.1/M5: Clipmap terrain
         "clipmap_generate_py",  # P2.1/M5: Clipmap generation function
@@ -733,6 +735,8 @@ __all__ = [
     "vector_render_pick_map_py",
     "vector_render_oit_and_pick_py",
     "vector_render_polygons_fill_py",
+    "vector_render_analytic_py",
+    "vector_coverage_primitives_py",
     "memory_metrics",
     "PointBuffer",
     "copc_laz_enabled",

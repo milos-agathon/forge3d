@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "reference_samples_per_axis": 64,
+  "cases": [
+    {
+      "name": "thin_sliver_0_1px",
+      "width": 32,
+      "height": 16,
+      "layers": [
+        {
+          "name": "sliver",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.95, 0.25, 0.1, 1.0],
+          "polygons": [
+            {
+              "exterior": [[1.0, 3.0], [30.0, 8.0], [29.983, 8.0985], [0.983, 3.0985]],
+              "holes": []
+            }
+          ],
+          "polylines": []
+        }
+      ]
+    },
+    {
+      "name": "near_horizontal_slope_1e_4",
+      "width": 32,
+      "height": 16,
+      "layers": [
+        {
+          "name": "near-horizontal",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.1, 0.65, 0.9, 1.0],
+          "polygons": [
+            {
+              "exterior": [[1.0, 7.311], [31.0, 7.314], [31.0, 13.0], [1.0, 13.0]],
+              "holes": []
+            }
+          ],
+          "polylines": []
+        }
+      ]
+    },
+    {
+      "name": "self_intersecting_star_nonzero",
+      "width": 32,
+      "height": 32,
+      "layers": [
+        {
+          "name": "star-nonzero",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.95, 0.75, 0.1, 1.0],
+          "polygons": [
+            {
+              "exterior": [[16.0078125, 2.0], [24.2378125, 27.33], [2.6878125, 11.67], [29.3278125, 11.67], [7.7778125, 27.33]],
+              "holes": []
+            }
+          ],
+          "polylines": []
+        }
+      ]
+    },
+    {
+      "name": "self_intersecting_star_evenodd",
+      "width": 32,
+      "height": 32,
+      "layers": [
+        {
+          "name": "star-evenodd",
+          "quality": "analytic",
+          "fill_rule": "evenodd",
+          "color": [0.95, 0.75, 0.1, 1.0],
+          "polygons": [
+            {
+              "exterior": [[16.0078125, 2.0], [24.2378125, 27.33], [2.6878125, 11.67], [29.3278125, 11.67], [7.7778125, 27.33]],
+              "holes": []
+            }
+          ],
+          "polylines": []
+        }
+      ]
+    },
+    {
+      "name": "subpixel_triangles",
+      "width": 16,
+      "height": 16,
+      "layers": [
+        {
+          "name": "triangles",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.45, 0.9, 0.3, 1.0],
+          "polygons": [
+            {"exterior": [[2.0, 2.0], [2.234375, 2.0], [2.0, 2.234375]], "holes": []},
+            {"exterior": [[7.0, 4.0], [7.21875, 4.0], [7.0, 4.21875]], "holes": []},
+            {"exterior": [[11.0, 10.0], [11.203125, 10.0], [11.0, 10.203125]], "holes": []}
+          ],
+          "polylines": []
+        }
+      ]
+    },
+    {
+      "name": "shared_edge_mosaic_100",
+      "width": 20,
+      "height": 20,
+      "layers": [
+        {
+          "name": "mosaic-background",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.05, 0.1, 0.2, 1.0],
+          "polygons": [
+            {
+              "exterior": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]],
+              "holes": []
+            }
+          ],
+          "polylines": []
+        },
+        {
+          "name": "mosaic",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [1.0, 1.0, 1.0, 1.0],
+          "polygon_grid": {
+            "columns": 10,
+            "rows": 10,
+            "origin": [0.0, 0.0],
+            "cell_size": [2.0, 2.0]
+          },
+          "polygons": [],
+          "polylines": []
+        }
+      ]
+    },
+    {
+      "name": "hairline_stroke_0_5px",
+      "width": 32,
+      "height": 16,
+      "layers": [
+        {
+          "name": "hairline",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.9, 0.15, 0.65, 1.0],
+          "polygons": [],
+          "polylines": [
+            {
+              "path": [[1.0, 13.0], [30.0, 2.0]],
+              "width": 0.5,
+              "cap": "round",
+              "join": "round"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "collinear_round_joins",
+      "width": 32,
+      "height": 16,
+      "layers": [
+        {
+          "name": "collinear",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.2, 0.8, 0.35, 1.0],
+          "polygons": [],
+          "polylines": [
+            {
+              "path": [[2.0, 8.0], [10.0, 8.0], [20.0, 8.0], [30.0, 8.0]],
+              "width": 1.25,
+              "cap": "round",
+              "join": "round"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fold_180_round",
+      "width": 32,
+      "height": 16,
+      "layers": [
+        {
+          "name": "fold",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.15, 0.5, 0.95, 1.0],
+          "polygons": [],
+          "polylines": [
+            {
+              "path": [[3.0, 8.0], [27.0, 8.0], [13.0, 8.0], [29.0, 8.0]],
+              "width": 1.5,
+              "cap": "round",
+              "join": "round"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "spiral_round_joins",
+      "width": 32,
+      "height": 32,
+      "layers": [
+        {
+          "name": "spiral",
+          "quality": "analytic",
+          "fill_rule": "nonzero",
+          "color": [0.8, 0.3, 0.95, 1.0],
+          "polygons": [],
+          "polylines": [
+            {
+              "path": [[16.0, 16.0], [17.4, 17.4], [16.0, 20.0], [11.8, 20.2], [8.0, 16.0], [9.0, 9.0], [16.0, 6.0], [23.8, 8.2], [28.0, 16.0], [25.9, 25.9], [16.0, 30.0]],
+              "width": 1.25,
+              "cap": "round",
+              "join": "round"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

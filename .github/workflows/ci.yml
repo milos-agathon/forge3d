@@ -643,6 +643,7 @@ jobs:
       FORGE3D_NO_BOOTSTRAP: '1'
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       RUN_M06_VIEWER_CI: '1'
+      RUN_LIMES_GPU_CI: '1'
       FORGE3D_VIEWER_BINARY: ${{ github.workspace }}/target/release/interactive_viewer.exe
       FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
 
@@ -796,7 +797,8 @@ jobs:
             'tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression',
             'tests/test_m06_full_geospatial_viewer.py',
             'tests/test_terrain_viewer_pbr.py',
-            'tests/test_vector_overlay_rendering.py'
+            'tests/test_vector_overlay_rendering.py',
+            'tests/test_vector_coverage.py'
           )
           $tests -join "`n" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/pytest-files.txt"
           $started = Get-Date

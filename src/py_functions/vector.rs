@@ -1,6 +1,8 @@
 use super::super::*;
 
 mod basic;
+mod coverage;
+mod coverage_ablation;
 mod demo;
 mod inputs;
 mod oit;
@@ -18,6 +20,8 @@ use render::*;
 use timing::*;
 
 pub(crate) use basic::*;
+pub(crate) use coverage::*;
+pub(crate) use coverage_ablation::*;
 pub(crate) use demo::*;
 pub(crate) use oit::*;
 pub(crate) use pick::*;

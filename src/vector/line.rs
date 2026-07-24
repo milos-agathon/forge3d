@@ -46,6 +46,22 @@ impl LineRenderer {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
     ) -> Result<Self, RenderError> {
+        Self::new_with_sample_count(device, target_format, 1)
+    }
+
+    /// Construct the existing feathered-line pipeline with an explicit sample
+    /// count. Production callers keep the single-sample default; LIMES uses
+    /// four samples only in its numerical ablation.
+    pub(crate) fn new_with_sample_count(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> Result<Self, RenderError> {
+        if !matches!(sample_count, 1 | 4) {
+            return Err(RenderError::Upload(format!(
+                "LineRenderer sample_count must be 1 or 4, got {sample_count}"
+            )));
+        }
         // Load shader
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
@@ -70,8 +86,13 @@ impl LineRenderer {
 
         // Create pipeline layout and render pipeline
         let pipeline_layout = create_pipeline_layout(device, &bind_group_layout);
-        let render_pipeline =
-            create_render_pipeline(device, &shader, &pipeline_layout, target_format);
+        let render_pipeline = create_render_pipeline(
+            device,
+            &shader,
+            &pipeline_layout,
+            target_format,
+            sample_count,
+        );
 
         // H5: Picking resources
         let pick_bind_group_layout = create_pick_bind_group_layout(device);
