@@ -63,24 +63,54 @@ errors.
 
 ## Page payload
 
-Every payload begins with ASCII `F3PG`, page-payload version `1`, flags, predictor
-parameters, and byte lengths for the base and enhancement entropy layers. Each
-entropy layer contains:
+Every payload begins with this 56-byte page header:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 4 | ASCII magic `F3PG` |
+| 4 | 2 | page version (`1`) |
+| 6 | 2 | flags |
+| 8 | 1 | base predictor id |
+| 9 | 1 | enhancement predictor id |
+| 10 | 2 | reserved, zero |
+| 12 | 12 | signed plane x slope, y slope, and intercept |
+| 24 | 4 | base entropy-layer byte length |
+| 28 | 4 | enhancement entropy-layer byte length |
+| 32 | 4 | logical sample count |
+| 36 | 4 | fine lattice step, binary32 bits |
+| 40 | 4 | base lattice step, binary32 bits |
+| 44 | 4 | exact base residual GCD scale |
+| 48 | 4 | exact enhancement residual GCD scale |
+| 52 | 4 | reserved, zero |
+
+The non-zero GCD scales remove a common integer factor before entropy coding
+and are multiplied back with checked integer arithmetic before prediction.
+They do not change any reconstructed lattice value.
+
+Each entropy layer contains:
 
 1. decoded byte count;
 2. two initial 32-bit rANS states;
 3. two byte-stream lengths;
-4. a sparse `(symbol: u8, normalized_frequency: u16)` table whose frequencies
-   sum exactly to `4096`;
+4. a canonical adaptive-static frequency table whose frequencies sum exactly
+   to `4096`: alphabets up to 21 symbols use sorted
+   `(symbol: u8, normalized_frequency: u16)` entries; larger alphabets use a
+   256-bit presence bitmap followed by ascending `(frequency - 1)` values
+   packed at 12 bits each;
 5. lane 0 and lane 1 renormalization bytes.
 
-The two lanes encode alternating bytes of the logical 32-bit token stream. A
-normal texel is one little-endian zig-zag residual word. `0xffffffff` is the
-explicit NaN/nodata escape and `0xfffffffe` is the exact finite-value escape;
-either escape is followed by one word containing the source binary32 bits.
-Escaped samples are excluded from later causal contexts, so neither nodata nor
-a rare high-magnitude exact value contaminates prediction. Pages never
-reference another page.
+The two lanes encode alternating bytes of a canonical variable-width token
+stream. Every logical texel begins with one unsigned LEB128 value: `0` is the
+explicit canonical NaN/nodata escape, `1` is the exact finite-value escape and
+is followed by four little-endian source binary32 bytes, `2` is a run marker,
+and any value `n >= 3` is the normal zig-zag residual `n - 3`. A run marker is
+followed by a sample code (`0` for NaN, or residual `r + 1`) and a run length
+of at least four, both unsigned LEB128. RAW values are never run encoded.
+LEB128 values are minimally encoded and limited to five bytes. NaN therefore
+needs no redundant payload: decode emits the canonical quiet-NaN bits
+`0x7fc00000`. Escaped samples are excluded from later causal contexts, so
+neither nodata nor a rare high-magnitude exact value contaminates prediction.
+Pages never reference another page.
 
 Prediction and reconstruction are defined in integer lattice coordinates.
 For requested error `epsilon`, the refined lattice step is binary32

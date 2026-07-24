@@ -5,7 +5,10 @@ use super::format::{
     crc32, parse_prefix, PAGE_FLAG_BASE_ONLY, PAGE_FLAG_PROGRESSIVE, PAGE_MAGIC, PREDICTOR_LORENZO,
     PREDICTOR_ORDER_ZERO, PREDICTOR_PLANE, PREDICTOR_PREVIOUS_LOD, VERSION,
 };
-use super::predict::{decode_residual_tokens, reconstruct_values, PlaneModel};
+use super::predict::{
+    decode_residual_tokens, denormalize_residual_tokens, reconstruct_values,
+    unpack_residual_tokens, PlaneModel,
+};
 use super::rans::RansEncoded;
 use super::{F3dzError, F3dzResult};
 
@@ -182,7 +185,7 @@ fn decode_page(
     };
     if get_u16(payload, 6) != u16::from(expected_flags)
         || get_u16(payload, 10) != 0
-        || get_u32(payload, 44) != 0
+        || get_u32(payload, 52) != 0
     {
         return Err(F3dzError::InvalidArgument(
             "page payload flags/reserved fields disagree with its container".to_string(),
@@ -207,6 +210,8 @@ fn decode_page(
     }
     let fine_step = f32::from_bits(get_u32(payload, 36));
     let base_step = f32::from_bits(get_u32(payload, 40));
+    let base_scale = get_u32(payload, 44);
+    let enhancement_scale = get_u32(payload, 48);
     if !fine_step.is_finite() || fine_step <= 0.0 || !base_step.is_finite() || base_step <= 0.0 {
         return Err(F3dzError::InvalidArgument(
             "invalid page quantization steps".to_string(),
@@ -222,6 +227,15 @@ fn decode_page(
             base_step.to_bits(),
             expected_base_step.to_bits()
         )));
+    }
+    if base_scale == 0
+        || base_scale > i32::MAX as u32
+        || enhancement_scale == 0
+        || enhancement_scale > i32::MAX as u32
+    {
+        return Err(F3dzError::InvalidArgument(
+            "page residual scales must be in 1..=i32::MAX".to_string(),
+        ));
     }
     let base_layer_len = get_u32(payload, 24) as usize;
     let enhancement_layer_len = get_u32(payload, 28) as usize;
@@ -252,6 +266,7 @@ fn decode_page(
         ));
     }
     let base_tokens = decode_token_layer(&payload[PAGE_HEADER_LEN..base_end], sample_count)?;
+    let base_tokens = denormalize_residual_tokens(&base_tokens, base_scale)?;
     let base_quantized = decode_residual_tokens(&base_tokens, width, predictor_id, plane, None)?;
     if base_quantized.len() != sample_count {
         return Err(F3dzError::InvalidArgument(format!(
@@ -266,6 +281,8 @@ fn decode_page(
             ));
         }
         let enhancement_tokens = decode_token_layer(&payload[base_end..payload_end], sample_count)?;
+        let enhancement_tokens =
+            denormalize_residual_tokens(&enhancement_tokens, enhancement_scale)?;
         let decoded = decode_residual_tokens(
             &enhancement_tokens,
             width,
@@ -302,23 +319,16 @@ fn decode_token_layer(data: &[u8], sample_count: usize) -> F3dzResult<Vec<u32>> 
         ));
     }
     let decoded = layer.decode()?;
-    let minimum_bytes = sample_count
-        .checked_mul(4)
-        .ok_or_else(|| F3dzError::InvalidArgument("page token bytes overflow".to_string()))?;
-    let maximum_bytes = minimum_bytes
-        .checked_mul(2)
+    let maximum_bytes = sample_count
+        .checked_mul(5)
         .ok_or_else(|| F3dzError::InvalidArgument("page escape bytes overflow".to_string()))?;
-    if !decoded.len().is_multiple_of(4) || !(minimum_bytes..=maximum_bytes).contains(&decoded.len())
-    {
+    if !(1..=maximum_bytes).contains(&decoded.len()) {
         return Err(F3dzError::InvalidArgument(format!(
-            "rANS decoded {} bytes, expected {minimum_bytes}..={maximum_bytes} in 4-byte words",
+            "rANS decoded {} bytes, expected 1..={maximum_bytes}",
             decoded.len(),
         )));
     }
-    Ok(decoded
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect())
+    unpack_residual_tokens(&decoded, sample_count)
 }
 
 fn copy_page(

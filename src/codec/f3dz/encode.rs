@@ -6,13 +6,14 @@ use super::format::{
     PREDICTOR_PREVIOUS_LOD, VERSION,
 };
 use super::predict::{
-    decode_residual_tokens, encode_residual_tokens, fit_least_squares_plane, quantize_source,
-    reconstruct_values, PlaneModel, QuantizedSample,
+    decode_residual_tokens, encode_residual_tokens, fit_least_squares_plane,
+    normalize_residual_tokens, pack_residual_tokens, quantize_source, reconstruct_values,
+    PlaneModel, QuantizedSample,
 };
 use super::rans::RansEncoded;
 use super::{F3dzError, F3dzResult};
 
-pub(crate) const PAGE_HEADER_LEN: usize = 48;
+pub(crate) const PAGE_HEADER_LEN: usize = 56;
 
 #[derive(Clone, Debug)]
 pub struct EncodeOptions {
@@ -20,6 +21,9 @@ pub struct EncodeOptions {
     pub progressive: bool,
     pub tile_size: u16,
     pub height_datum: String,
+    /// Diagnostic ablation: bypass adaptive terrain prediction while keeping
+    /// quantization, page structure, token packing, and rANS identical.
+    pub force_order_zero: bool,
 }
 
 impl EncodeOptions {
@@ -29,6 +33,7 @@ impl EncodeOptions {
             progressive: true,
             tile_size: super::format::MAX_GPU_PAGE_SIZE,
             height_datum: String::new(),
+            force_order_zero: false,
         }
     }
 }
@@ -58,9 +63,7 @@ pub fn encode_dem(
     )?;
     let pages_x = width.div_ceil(u32::from(options.tile_size));
     let pages_y = height.div_ceil(u32::from(options.tile_size));
-    let mut payloads = Vec::with_capacity(header.page_count as usize);
-    let mut entries = Vec::with_capacity(header.page_count as usize);
-    let mut payload_offset = header.payload_offset;
+    let mut jobs = Vec::with_capacity(header.page_count as usize);
     for page_y in 0..pages_y {
         for page_x in 0..pages_x {
             let page_width =
@@ -75,46 +78,189 @@ pub fn encode_dem(
                 page_width as usize,
                 page_height as usize,
             );
-            let encoded = encode_page(
-                &source,
-                page_width as usize,
-                page_height as usize,
-                options.epsilon,
-                options.progressive,
-            )?;
-            let payload_len = u32::try_from(encoded.payload.len()).map_err(|_| {
-                F3dzError::InvalidArgument("page payload exceeds u32 length".to_string())
-            })?;
-            let index = PageIndexEntry {
+            jobs.push(PageJob {
                 page_x,
                 page_y,
-                width: page_width as u16,
-                height: page_height as u16,
-                predictor_id: encoded.predictor_id,
-                flags: encoded.flags,
-                payload_offset,
-                payload_len,
-                base_layer_len: encoded.base_layer_len,
-                crc32: crc32(&encoded.payload),
-                max_abs_err: encoded.max_abs_err,
-                base_max_abs_err: encoded.base_max_abs_err,
-                sample_count: page_width * page_height,
+                width: page_width,
+                height: page_height,
                 nan_count: source.iter().filter(|value| value.is_nan()).count() as u32,
-            };
-            payload_offset = payload_offset
-                .checked_add(u64::from(payload_len))
-                .ok_or_else(|| {
-                    F3dzError::InvalidArgument("container payload overflow".to_string())
-                })?;
-            entries.push(index);
-            payloads.push(encoded.payload);
+                source,
+            });
         }
+    }
+    // Pages are independent by format contract. Encode bounded contiguous
+    // chunks in parallel, then join handles in spawn order so the container is
+    // byte-identical regardless of scheduler or host core count.
+    let worker_count = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(jobs.len())
+        .max(1);
+    let chunk_size = jobs.len().div_ceil(worker_count);
+    let encoded_pages = std::thread::scope(|scope| -> F3dzResult<Vec<EncodedPageJob>> {
+        let handles: Vec<_> = jobs
+            .chunks(chunk_size)
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|job| {
+                            Ok(EncodedPageJob {
+                                page_x: job.page_x,
+                                page_y: job.page_y,
+                                width: job.width,
+                                height: job.height,
+                                nan_count: job.nan_count,
+                                encoded: encode_page(
+                                    &job.source,
+                                    job.width as usize,
+                                    job.height as usize,
+                                    options.epsilon,
+                                    options.progressive,
+                                    options.force_order_zero,
+                                )?,
+                            })
+                        })
+                        .collect::<F3dzResult<Vec<_>>>()
+                })
+            })
+            .collect();
+        let mut encoded = Vec::with_capacity(jobs.len());
+        for handle in handles {
+            encoded.extend(handle.join().map_err(|_| {
+                F3dzError::InvalidArgument("F3DZ page encoder thread panicked".to_string())
+            })??);
+        }
+        Ok(encoded)
+    })?;
+
+    let mut payloads = Vec::with_capacity(header.page_count as usize);
+    let mut entries = Vec::with_capacity(header.page_count as usize);
+    let mut payload_offset = header.payload_offset;
+    for page in encoded_pages {
+        let encoded = page.encoded;
+        let payload_len = u32::try_from(encoded.payload.len()).map_err(|_| {
+            F3dzError::InvalidArgument("page payload exceeds u32 length".to_string())
+        })?;
+        let index = PageIndexEntry {
+            page_x: page.page_x,
+            page_y: page.page_y,
+            width: page.width as u16,
+            height: page.height as u16,
+            predictor_id: encoded.predictor_id,
+            flags: encoded.flags,
+            payload_offset,
+            payload_len,
+            base_layer_len: encoded.base_layer_len,
+            crc32: crc32(&encoded.payload),
+            max_abs_err: encoded.max_abs_err,
+            base_max_abs_err: encoded.base_max_abs_err,
+            sample_count: page.width * page.height,
+            nan_count: page.nan_count,
+        };
+        payload_offset = payload_offset
+            .checked_add(u64::from(payload_len))
+            .ok_or_else(|| F3dzError::InvalidArgument("container payload overflow".to_string()))?;
+        entries.push(index);
+        payloads.push(encoded.payload);
     }
     let mut out = write_prefix(&header, &entries)?;
     for payload in payloads {
         out.extend_from_slice(&payload);
     }
     Ok(out)
+}
+
+/// Size of the committed generic baseline: the same independent page index
+/// and 2*epsilon Lorenzo residual grids, stored as little-endian u32 words and
+/// compressed page-by-page with flate2's maximum zlib level.
+#[cfg(feature = "cog_streaming")]
+pub(crate) fn flate2_baseline_size(
+    values: &[f32],
+    width: u32,
+    height: u32,
+    options: &EncodeOptions,
+) -> F3dzResult<usize> {
+    use flate2::{write::ZlibEncoder, Compression};
+    use std::io::Write;
+
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| F3dzError::InvalidArgument("DEM element count overflow".to_string()))?;
+    if values.len() != expected {
+        return Err(F3dzError::InvalidArgument(format!(
+            "DEM contains {} values, expected {expected}",
+            values.len()
+        )));
+    }
+    let header = ContainerHeader::new(
+        width,
+        height,
+        options.tile_size,
+        options.epsilon,
+        false,
+        options.height_datum.clone(),
+    )?;
+    let pages_x = width.div_ceil(u32::from(options.tile_size));
+    let pages_y = height.div_ceil(u32::from(options.tile_size));
+    let mut total = usize::try_from(header.payload_offset)
+        .map_err(|_| F3dzError::InvalidArgument("baseline prefix exceeds usize".to_string()))?;
+    for page_y in 0..pages_y {
+        for page_x in 0..pages_x {
+            let page_width =
+                (width - page_x * u32::from(options.tile_size)).min(u32::from(options.tile_size));
+            let page_height =
+                (height - page_y * u32::from(options.tile_size)).min(u32::from(options.tile_size));
+            let source = extract_page(
+                values,
+                width as usize,
+                page_x as usize * options.tile_size as usize,
+                page_y as usize * options.tile_size as usize,
+                page_width as usize,
+                page_height as usize,
+            );
+            let quantized = quantize_source(&source, options.epsilon * 2.0, options.epsilon)?;
+            let tokens = encode_residual_tokens(
+                &quantized,
+                page_width as usize,
+                PREDICTOR_LORENZO,
+                PlaneModel::default(),
+                None,
+            )?;
+            let mut words = Vec::with_capacity(tokens.len() * 4);
+            for token in tokens {
+                words.extend_from_slice(&token.to_le_bytes());
+            }
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+            encoder.write_all(&words).map_err(|error| {
+                F3dzError::InvalidArgument(format!("baseline zlib write failed: {error}"))
+            })?;
+            let compressed = encoder.finish().map_err(|error| {
+                F3dzError::InvalidArgument(format!("baseline zlib finish failed: {error}"))
+            })?;
+            total = total
+                .checked_add(compressed.len())
+                .ok_or_else(|| F3dzError::InvalidArgument("baseline size overflow".to_string()))?;
+        }
+    }
+    Ok(total)
+}
+
+struct PageJob {
+    page_x: u32,
+    page_y: u32,
+    width: u32,
+    height: u32,
+    nan_count: u32,
+    source: Vec<f32>,
+}
+
+struct EncodedPageJob {
+    page_x: u32,
+    page_y: u32,
+    width: u32,
+    height: u32,
+    nan_count: u32,
+    encoded: EncodedPage,
 }
 
 struct EncodedPage {
@@ -132,6 +278,7 @@ fn encode_page(
     height: usize,
     epsilon: f32,
     progressive: bool,
+    force_order_zero: bool,
 ) -> F3dzResult<EncodedPage> {
     let fine_step = epsilon * 2.0;
     let fine_quantized = quantize_source(source, fine_step, epsilon)?;
@@ -146,33 +293,40 @@ fn encode_page(
     } else {
         fine_quantized.clone()
     };
-    let (predictor_id, selected_plane, base_tokens, base_layer) =
-        select_predictor_layer(&base_quantized, width, height)?;
-    let decoded_base =
-        decode_residual_tokens(&base_tokens, width, predictor_id, selected_plane, None)?;
+    let (predictor_id, selected_plane, base_scale, base_tokens, base_layer) =
+        select_predictor_layer(&base_quantized, width, height, force_order_zero)?;
+    let decoded_base = decode_residual_tokens(
+        &super::predict::denormalize_residual_tokens(&base_tokens, base_scale)?,
+        width,
+        predictor_id,
+        selected_plane,
+        None,
+    )?;
     let base_reconstructed = reconstruct_values(&decoded_base, base_step);
     let base_max_abs_err = checked_max_error(source, &base_reconstructed, base_bound)?;
 
-    let (enhancement_predictor, enhancement_layer, refined_quantized) = if progressive {
-        let enhancement_tokens = encode_residual_tokens(
-            &fine_quantized,
-            width,
-            PREDICTOR_PREVIOUS_LOD,
-            PlaneModel::default(),
-            Some(&decoded_base),
-        )?;
-        let layer = encode_token_layer(&enhancement_tokens)?;
-        let decoded = decode_residual_tokens(
-            &enhancement_tokens,
-            width,
-            PREDICTOR_PREVIOUS_LOD,
-            PlaneModel::default(),
-            Some(&decoded_base),
-        )?;
-        (PREDICTOR_PREVIOUS_LOD, layer, decoded)
-    } else {
-        (predictor_id, Vec::new(), decoded_base.clone())
-    };
+    let (enhancement_predictor, enhancement_scale, enhancement_layer, refined_quantized) =
+        if progressive {
+            let enhancement_tokens = encode_residual_tokens(
+                &fine_quantized,
+                width,
+                PREDICTOR_PREVIOUS_LOD,
+                PlaneModel::default(),
+                Some(&decoded_base),
+            )?;
+            let (scale, enhancement_tokens) = normalize_residual_tokens(&enhancement_tokens)?;
+            let layer = encode_token_layer(&enhancement_tokens)?;
+            let decoded = decode_residual_tokens(
+                &super::predict::denormalize_residual_tokens(&enhancement_tokens, scale)?,
+                width,
+                PREDICTOR_PREVIOUS_LOD,
+                PlaneModel::default(),
+                Some(&decoded_base),
+            )?;
+            (PREDICTOR_PREVIOUS_LOD, scale, layer, decoded)
+        } else {
+            (predictor_id, 1, Vec::new(), decoded_base.clone())
+        };
     let reconstructed = reconstruct_values(&refined_quantized, fine_step);
     let max_abs_err = checked_max_error(source, &reconstructed, epsilon)?;
     let mut payload = vec![0u8; PAGE_HEADER_LEN];
@@ -208,6 +362,8 @@ fn encode_page(
     put_u32(&mut payload, 32, source.len() as u32);
     put_u32(&mut payload, 36, fine_step.to_bits());
     put_u32(&mut payload, 40, base_step.to_bits());
+    put_u32(&mut payload, 44, base_scale);
+    put_u32(&mut payload, 48, enhancement_scale);
     payload.extend_from_slice(&base_layer);
     let base_layer_len = u32::try_from(payload.len())
         .map_err(|_| F3dzError::InvalidArgument("base page prefix too large".to_string()))?;
@@ -230,7 +386,26 @@ fn select_predictor_layer(
     quantized: &[QuantizedSample],
     width: usize,
     height: usize,
-) -> F3dzResult<(u8, PlaneModel, Vec<u32>, Vec<u8>)> {
+    force_order_zero: bool,
+) -> F3dzResult<(u8, PlaneModel, u32, Vec<u32>, Vec<u8>)> {
+    if force_order_zero {
+        let tokens = encode_residual_tokens(
+            quantized,
+            width,
+            super::format::PREDICTOR_ORDER_ZERO,
+            PlaneModel::default(),
+            None,
+        )?;
+        let (scale, tokens) = normalize_residual_tokens(&tokens)?;
+        let layer = encode_token_layer(&tokens)?;
+        return Ok((
+            super::format::PREDICTOR_ORDER_ZERO,
+            PlaneModel::default(),
+            scale,
+            tokens,
+            layer,
+        ));
+    }
     let plane = fit_least_squares_plane(quantized, width, height);
     let lorenzo_tokens = encode_residual_tokens(
         quantized,
@@ -240,14 +415,23 @@ fn select_predictor_layer(
         None,
     )?;
     let plane_tokens = encode_residual_tokens(quantized, width, PREDICTOR_PLANE, plane, None)?;
+    let (lorenzo_scale, lorenzo_tokens) = normalize_residual_tokens(&lorenzo_tokens)?;
+    let (plane_scale, plane_tokens) = normalize_residual_tokens(&plane_tokens)?;
     let lorenzo_layer = encode_token_layer(&lorenzo_tokens)?;
     let plane_layer = encode_token_layer(&plane_tokens)?;
     Ok(if plane_layer.len() < lorenzo_layer.len() {
-        (PREDICTOR_PLANE, plane, plane_tokens, plane_layer)
+        (
+            PREDICTOR_PLANE,
+            plane,
+            plane_scale,
+            plane_tokens,
+            plane_layer,
+        )
     } else {
         (
             PREDICTOR_LORENZO,
             PlaneModel::default(),
+            lorenzo_scale,
             lorenzo_tokens,
             lorenzo_layer,
         )
@@ -329,10 +513,7 @@ pub fn base_only_stream(data: &[u8]) -> F3dzResult<Vec<u8>> {
 }
 
 pub(crate) fn encode_token_layer(tokens: &[u32]) -> F3dzResult<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(tokens.len() * 4);
-    for &token in tokens {
-        bytes.extend_from_slice(&token.to_le_bytes());
-    }
+    let bytes = pack_residual_tokens(tokens)?;
     RansEncoded::encode(&bytes)?.to_bytes()
 }
 

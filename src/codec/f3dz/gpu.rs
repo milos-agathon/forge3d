@@ -45,6 +45,15 @@ pub struct GpuDecodeResult {
     pub values: Vec<f32>,
 }
 
+#[derive(Clone, Debug)]
+pub struct GpuDecodeBenchmark {
+    pub adapter: String,
+    pub iterations: u32,
+    pub pixels_per_iteration: u64,
+    pub elapsed_seconds: f64,
+    pub gigapixels_per_second: f64,
+}
+
 pub struct F3dzGpuDecoder {
     bind_group_layout: BindGroupLayout,
     buffer_pipeline: ComputePipeline,
@@ -402,6 +411,127 @@ pub fn decode_dem_gpu(data: &[u8]) -> F3dzResult<GpuDecodeResult> {
     })
 }
 
+/// Hardware benchmark path. The stream is preflighted and uploaded once, then
+/// the decode kernel is dispatched repeatedly against the same output buffer.
+/// Setup, upload, and readback are deliberately outside the timed interval.
+pub fn benchmark_decode_gpu(data: &[u8], iterations: u32) -> F3dzResult<GpuDecodeBenchmark> {
+    if iterations == 0 {
+        return Err(F3dzError::InvalidArgument(
+            "GPU benchmark iterations must be positive".to_string(),
+        ));
+    }
+    let context = crate::core::gpu::try_ctx().map_err(gpu_error)?;
+    let device = context.device.as_ref();
+    let queue = context.queue.as_ref();
+    let decoder = F3dzGpuDecoder::new(device)?;
+    let prepared = prepare_stream(data)?;
+    if prepared.batches.len() != 1 {
+        return Err(F3dzError::InvalidArgument(format!(
+            "GPU benchmark stream must fit one {}-page batch, got {} pages",
+            MAX_BATCH_PAGES, prepared.header.page_count
+        )));
+    }
+    let batch = &prepared.batches[0];
+    let output_len = checked_output_len(&prepared.header)?;
+    let output = storage_buffer(device, "f3dz.bench.output", output_len)?;
+    let dummy_atlas = tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some("f3dz.bench.dummy-atlas"),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
+        },
+    )
+    .map_err(gpu_error)?;
+    let atlas_view = dummy_atlas.create_view(&TextureViewDescriptor::default());
+    let compressed = init_u32_buffer(
+        device,
+        "f3dz.bench.compressed",
+        &batch.compressed,
+        BufferUsages::STORAGE,
+    )?;
+    let descriptors = init_u32_buffer(
+        device,
+        "f3dz.bench.descriptors",
+        &batch.descriptors,
+        BufferUsages::STORAGE,
+    )?;
+    let tables = init_u32_buffer(
+        device,
+        "f3dz.bench.tables",
+        &batch.tables,
+        BufferUsages::STORAGE,
+    )?;
+    let byte_scratch = storage_buffer(device, "f3dz.bench.byte-scratch", batch.decoded_bytes)?;
+    let q_scratch = storage_buffer(device, "f3dz.bench.q-scratch", batch.samples)?;
+    let value_bits = storage_buffer(device, "f3dz.bench.value-bits", batch.samples)?;
+    let status = init_u32_buffer(
+        device,
+        "f3dz.bench.status",
+        &vec![0u32; batch.page_count],
+        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+    )?;
+    let bind_group = decoder.create_bind_group(
+        device,
+        &compressed,
+        &descriptors,
+        &tables,
+        &byte_scratch,
+        &q_scratch,
+        &value_bits,
+        &output,
+        &status,
+        &atlas_view,
+    );
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("f3dz.bench.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("f3dz.bench.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&decoder.buffer_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        for _ in 0..iterations {
+            pass.dispatch_workgroups(batch.page_count as u32, 1, 1);
+        }
+    }
+    let started = Instant::now();
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::Maintain::Wait);
+    let elapsed_seconds = started.elapsed().as_secs_f64();
+    let status_bytes = read_buffer(device, queue, &status, byte_size(batch.page_count)?)?;
+    for (page, raw) in status_bytes.chunks_exact(4).enumerate() {
+        let code = u32::from_le_bytes(raw.try_into().unwrap());
+        if code != 0 {
+            return Err(F3dzError::CorruptPage {
+                page,
+                reason: format!("GPU benchmark decoder status=0x{code:08x}"),
+            });
+        }
+    }
+    let pixels_per_iteration = output_len as u64;
+    let gigapixels_per_second =
+        pixels_per_iteration as f64 * f64::from(iterations) / elapsed_seconds / 1.0e9;
+    Ok(GpuDecodeBenchmark {
+        adapter: context.adapter.get_info().name,
+        iterations,
+        pixels_per_iteration,
+        elapsed_seconds,
+        gigapixels_per_second,
+    })
+}
+
 /// Validate all container/page metadata, CRCs, and rANS framing without
 /// entropy-decoding. Streaming uses this before it reserves an atlas slot.
 pub fn validate_stream(data: &[u8]) -> F3dzResult<ContainerHeader> {
@@ -598,7 +728,7 @@ fn prepare_page(
     };
     if get_u16(payload, 6) != expected_flags
         || get_u16(payload, 10) != 0
-        || get_u32(payload, 44) != 0
+        || get_u32(payload, 52) != 0
     {
         return corrupt(
             absolute_page,
@@ -625,6 +755,8 @@ fn prepare_page(
     }
     let fine_step = f32::from_bits(get_u32(payload, 36));
     let base_step = f32::from_bits(get_u32(payload, 40));
+    let base_scale = get_u32(payload, 44);
+    let enhancement_scale = get_u32(payload, 48);
     let expected_fine = header.epsilon * 2.0;
     let expected_base = if header.progressive() {
         header.epsilon * 8.0
@@ -638,6 +770,13 @@ fn prepare_page(
             absolute_page,
             "quantization step disagrees with epsilon".to_string(),
         );
+    }
+    if base_scale == 0
+        || base_scale > i32::MAX as u32
+        || enhancement_scale == 0
+        || enhancement_scale > i32::MAX as u32
+    {
+        return corrupt(absolute_page, "invalid residual scale".to_string());
     }
     let plane = [
         get_i32(payload, 12),
@@ -707,7 +846,9 @@ fn prepare_page(
     descriptor[13] = plane[1] as u32;
     descriptor[14] = plane[2] as u32;
     descriptor[33] = batch.samples as u32;
+    descriptor[34] = base_scale;
     descriptor[35] = batch.samples as u32;
+    descriptor[36] = enhancement_scale;
     descriptor[38] = sample_count as u32;
     descriptor[39] = entry.nan_count;
     pack_layer(&base, 15, &mut descriptor, batch)?;
@@ -733,15 +874,11 @@ fn parse_layer(data: &[u8], sample_count: usize, page: usize) -> F3dzResult<Prep
             page,
             reason: error.to_string(),
         })?;
-    let minimum = sample_count
-        .checked_mul(4)
-        .ok_or_else(|| F3dzError::InvalidHeader("token byte count overflow".into()))?;
-    let maximum = minimum
-        .checked_mul(2)
+    let maximum = sample_count
+        .checked_mul(5)
         .ok_or_else(|| F3dzError::InvalidHeader("escape byte count overflow".into()))?;
     if consumed != data.len()
-        || !(minimum..=maximum).contains(&(rans.decoded_len as usize))
-        || !rans.decoded_len.is_multiple_of(4)
+        || !(1..=maximum).contains(&(rans.decoded_len as usize))
         || rans.states.iter().any(|&state| state < RANS_L)
     {
         return corrupt(page, "invalid canonical rANS layer".to_string());

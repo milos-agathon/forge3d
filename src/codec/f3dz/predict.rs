@@ -178,9 +178,8 @@ pub fn encode_residual_tokens(
     let mut tokens = Vec::with_capacity(quantized.len());
     for index in 0..quantized.len() {
         let value = match quantized[index] {
-            QuantizedSample::Nan(bits) => {
+            QuantizedSample::Nan(_) => {
                 tokens.push(NAN_TOKEN);
-                tokens.push(bits);
                 reconstructed[index] = None;
                 continue;
             }
@@ -232,7 +231,13 @@ pub fn decode_residual_tokens(
         let token = tokens[cursor];
         cursor += 1;
         let index = output.len();
-        if token == NAN_TOKEN || token == RAW_TOKEN {
+        if token == NAN_TOKEN {
+            let bits = f32::NAN.to_bits();
+            reconstructed.push(None);
+            output.push(QuantizedSample::Nan(bits));
+            continue;
+        }
+        if token == RAW_TOKEN {
             let bits = *tokens.get(cursor).ok_or_else(|| {
                 F3dzError::InvalidArgument(format!(
                     "escape token at sample {index} is missing its binary32 payload"
@@ -240,22 +245,13 @@ pub fn decode_residual_tokens(
             })?;
             cursor += 1;
             let value = f32::from_bits(bits);
-            if token == NAN_TOKEN && !value.is_nan() {
-                return Err(F3dzError::InvalidArgument(format!(
-                    "NaN escape at sample {index} carries finite bits"
-                )));
-            }
-            if token == RAW_TOKEN && !value.is_finite() {
+            if !value.is_finite() {
                 return Err(F3dzError::InvalidArgument(format!(
                     "raw escape at sample {index} carries non-finite bits"
                 )));
             }
             reconstructed.push(None);
-            output.push(if token == NAN_TOKEN {
-                QuantizedSample::Nan(bits)
-            } else {
-                QuantizedSample::Raw(bits)
-            });
+            output.push(QuantizedSample::Raw(bits));
             continue;
         }
         let predicted = predict(predictor_id, &reconstructed, width, index, plane, previous)?;
@@ -291,6 +287,267 @@ pub fn reconstruct_values(quantized: &[QuantizedSample], step: f32) -> Vec<f32> 
             QuantizedSample::Raw(bits) | QuantizedSample::Nan(bits) => f32::from_bits(*bits),
         })
         .collect()
+}
+
+/// Pack predictor tokens into the byte stream consumed by rANS.
+///
+/// Each logical sample begins with a canonical unsigned LEB128 value:
+/// `0` is canonical NaN, `1` is RAW followed by four little-endian f32 bits,
+/// `2` is a run followed by `(sample_code, run_length)`, and an ordinary
+/// zig-zag residual `r` is encoded as `r + 3`. Run sample code `0` means NaN
+/// and `r + 1` means residual `r`. Runs of four or more non-RAW samples make
+/// the spatial coherence available to an otherwise static entropy model.
+pub(crate) fn pack_residual_tokens(tokens: &[u32]) -> F3dzResult<Vec<u8>> {
+    let mut samples = Vec::with_capacity(tokens.len());
+    let mut cursor = 0usize;
+    while cursor < tokens.len() {
+        let token = tokens[cursor];
+        cursor += 1;
+        match token {
+            NAN_TOKEN => samples.push((NAN_TOKEN, None)),
+            RAW_TOKEN => {
+                let bits = *tokens.get(cursor).ok_or_else(|| {
+                    F3dzError::InvalidArgument(
+                        "RAW token is missing its binary32 payload".to_string(),
+                    )
+                })?;
+                cursor += 1;
+                if !f32::from_bits(bits).is_finite() {
+                    return Err(F3dzError::InvalidArgument(
+                        "RAW token carries non-finite binary32 bits".to_string(),
+                    ));
+                }
+                samples.push((RAW_TOKEN, Some(bits)));
+            }
+            residual => samples.push((residual, None)),
+        }
+    }
+    let mut packed = Vec::with_capacity(samples.len());
+    let mut sample = 0usize;
+    while sample < samples.len() {
+        let (token, bits) = samples[sample];
+        let mut run_length = 1usize;
+        if bits.is_none() {
+            while sample + run_length < samples.len()
+                && samples[sample + run_length] == (token, None)
+            {
+                run_length += 1;
+            }
+        }
+        if run_length >= 4 {
+            write_uleb128(2, &mut packed);
+            write_uleb128(if token == NAN_TOKEN { 0 } else { token + 1 }, &mut packed);
+            write_uleb128(run_length as u32, &mut packed);
+            sample += run_length;
+            continue;
+        }
+        match token {
+            NAN_TOKEN => write_uleb128(0, &mut packed),
+            RAW_TOKEN => {
+                write_uleb128(1, &mut packed);
+                packed
+                    .extend_from_slice(&bits.expect("RAW samples always carry bits").to_le_bytes());
+            }
+            residual => write_uleb128(residual + 3, &mut packed),
+        }
+        sample += 1;
+    }
+    Ok(packed)
+}
+
+pub(crate) fn unpack_residual_tokens(packed: &[u8], sample_count: usize) -> F3dzResult<Vec<u32>> {
+    let mut tokens = Vec::with_capacity(sample_count);
+    let mut cursor = 0usize;
+    let mut sample = 0usize;
+    while sample < sample_count {
+        let mapped = read_uleb128(packed, &mut cursor).map_err(|reason| {
+            F3dzError::InvalidArgument(format!("sample {sample} token: {reason}"))
+        })?;
+        match mapped {
+            0 => {
+                tokens.push(NAN_TOKEN);
+                sample += 1;
+            }
+            1 => {
+                let end = cursor.checked_add(4).ok_or_else(|| {
+                    F3dzError::InvalidArgument("RAW payload range overflow".to_string())
+                })?;
+                let bytes = packed.get(cursor..end).ok_or_else(|| {
+                    F3dzError::InvalidArgument(format!(
+                        "sample {sample} RAW token is missing its binary32 payload"
+                    ))
+                })?;
+                let bits = u32::from_le_bytes(bytes.try_into().unwrap());
+                if !f32::from_bits(bits).is_finite() {
+                    return Err(F3dzError::InvalidArgument(format!(
+                        "sample {sample} RAW token carries non-finite bits"
+                    )));
+                }
+                tokens.push(RAW_TOKEN);
+                tokens.push(bits);
+                cursor = end;
+                sample += 1;
+            }
+            2 => {
+                let run_code = read_uleb128(packed, &mut cursor).map_err(|reason| {
+                    F3dzError::InvalidArgument(format!("sample {sample} run code: {reason}"))
+                })?;
+                let run_length = read_uleb128(packed, &mut cursor).map_err(|reason| {
+                    F3dzError::InvalidArgument(format!("sample {sample} run length: {reason}"))
+                })? as usize;
+                if run_length < 4 || run_length > sample_count - sample {
+                    return Err(F3dzError::InvalidArgument(format!(
+                        "sample {sample} run length {run_length} is invalid"
+                    )));
+                }
+                if run_code >= RAW_TOKEN {
+                    return Err(F3dzError::InvalidArgument(format!(
+                        "sample {sample} run code {run_code} is invalid"
+                    )));
+                }
+                let token = if run_code == 0 {
+                    NAN_TOKEN
+                } else {
+                    run_code - 1
+                };
+                tokens.extend(std::iter::repeat_n(token, run_length));
+                sample += run_length;
+            }
+            value => {
+                tokens.push(value - 3);
+                sample += 1;
+            }
+        }
+    }
+    if cursor != packed.len() {
+        return Err(F3dzError::InvalidArgument(format!(
+            "token stream has {} trailing bytes",
+            packed.len() - cursor
+        )));
+    }
+    Ok(tokens)
+}
+
+/// Divide all finite residuals by their exact per-layer GCD before entropy
+/// coding. The scale is stored in the page header and restored before
+/// prediction, so this changes no reconstructed lattice value. This matters
+/// for fine tolerances: integer-metre DEMs quantized at 0.1 m otherwise carry
+/// a redundant factor of ten in every residual.
+pub(crate) fn normalize_residual_tokens(tokens: &[u32]) -> F3dzResult<(u32, Vec<u32>)> {
+    let mut scale = 0u32;
+    let mut cursor = 0usize;
+    while cursor < tokens.len() {
+        let token = tokens[cursor];
+        cursor += 1;
+        match token {
+            NAN_TOKEN => {}
+            RAW_TOKEN => {
+                if cursor >= tokens.len() {
+                    return Err(F3dzError::InvalidArgument(
+                        "RAW token is missing its binary32 payload".to_string(),
+                    ));
+                }
+                cursor += 1;
+            }
+            residual => {
+                scale = gcd(scale, unzigzag(residual).unsigned_abs());
+            }
+        }
+    }
+    let scale = scale.max(1);
+    let mut normalized = Vec::with_capacity(tokens.len());
+    cursor = 0;
+    while cursor < tokens.len() {
+        let token = tokens[cursor];
+        cursor += 1;
+        match token {
+            NAN_TOKEN => normalized.push(NAN_TOKEN),
+            RAW_TOKEN => {
+                normalized.push(RAW_TOKEN);
+                normalized.push(tokens[cursor]);
+                cursor += 1;
+            }
+            residual => normalized.push(zigzag(unzigzag(residual) / scale as i32)),
+        }
+    }
+    Ok((scale, normalized))
+}
+
+pub(crate) fn denormalize_residual_tokens(tokens: &[u32], scale: u32) -> F3dzResult<Vec<u32>> {
+    if scale == 0 || scale > i32::MAX as u32 {
+        return Err(F3dzError::InvalidArgument(format!(
+            "invalid residual scale {scale}"
+        )));
+    }
+    let mut restored = Vec::with_capacity(tokens.len());
+    let mut cursor = 0usize;
+    while cursor < tokens.len() {
+        let token = tokens[cursor];
+        cursor += 1;
+        match token {
+            NAN_TOKEN => restored.push(NAN_TOKEN),
+            RAW_TOKEN => {
+                let bits = *tokens.get(cursor).ok_or_else(|| {
+                    F3dzError::InvalidArgument(
+                        "RAW token is missing its binary32 payload".to_string(),
+                    )
+                })?;
+                restored.push(RAW_TOKEN);
+                restored.push(bits);
+                cursor += 1;
+            }
+            residual => {
+                let value = i64::from(unzigzag(residual)) * i64::from(scale);
+                let value = i32::try_from(value).map_err(|_| {
+                    F3dzError::InvalidArgument(
+                        "scaled predictor residual overflows i32".to_string(),
+                    )
+                })?;
+                restored.push(zigzag(value));
+            }
+        }
+    }
+    Ok(restored)
+}
+
+fn gcd(mut left: u32, mut right: u32) -> u32 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
+}
+
+fn write_uleb128(mut value: u32, out: &mut Vec<u8>) {
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+fn read_uleb128(data: &[u8], cursor: &mut usize) -> Result<u32, &'static str> {
+    let mut value = 0u32;
+    for byte_index in 0..5 {
+        let byte = *data.get(*cursor).ok_or("truncated unsigned LEB128")?;
+        *cursor += 1;
+        if byte_index == 4 && byte > 0x0f {
+            return Err("unsigned LEB128 overflows u32");
+        }
+        value |= u32::from(byte & 0x7f) << (byte_index * 7);
+        if byte & 0x80 == 0 {
+            if byte_index > 0 && byte == 0 {
+                return Err("unsigned LEB128 is not minimally encoded");
+            }
+            return Ok(value);
+        }
+    }
+    Err("unsigned LEB128 exceeds five bytes")
 }
 
 fn predict(
@@ -507,12 +764,62 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tokens[1], NAN_TOKEN);
-        assert_eq!(tokens[2], nan_bits);
         let decoded =
             decode_residual_tokens(&tokens, 2, PREDICTOR_LORENZO, PlaneModel::default(), None)
                 .unwrap();
-        assert_eq!(decoded, quantized);
+        assert!(matches!(decoded[1], QuantizedSample::Nan(_)));
+        assert_eq!(decoded[0], quantized[0]);
+        assert_eq!(decoded[2..], quantized[2..]);
         assert!(reconstruct_values(&decoded, 1.0)[1].is_nan());
+    }
+
+    #[test]
+    fn packed_tokens_are_canonical_and_round_trip_escapes() {
+        let tokens = [
+            0,
+            1,
+            127,
+            128,
+            16_384,
+            NAN_TOKEN,
+            RAW_TOKEN,
+            12.25f32.to_bits(),
+        ];
+        let packed = pack_residual_tokens(&tokens).unwrap();
+        let decoded = unpack_residual_tokens(&packed, 7).unwrap();
+        assert_eq!(decoded, tokens);
+        let mut overlong = packed;
+        overlong[0..1].copy_from_slice(&[0x82]);
+        overlong.insert(1, 0);
+        assert!(unpack_residual_tokens(&overlong, 7).is_err());
+    }
+
+    #[test]
+    fn packed_tokens_run_length_encode_residuals_and_nodata() {
+        let tokens = [
+            0, 0, 0, 0, NAN_TOKEN, NAN_TOKEN, NAN_TOKEN, NAN_TOKEN, NAN_TOKEN, 9,
+        ];
+        let packed = pack_residual_tokens(&tokens).unwrap();
+        assert!(packed.len() < tokens.len());
+        assert_eq!(unpack_residual_tokens(&packed, 10).unwrap(), tokens);
+    }
+
+    #[test]
+    fn residual_gcd_normalization_is_exact_across_escapes() {
+        let tokens = [
+            zigzag(-30),
+            zigzag(0),
+            NAN_TOKEN,
+            zigzag(90),
+            RAW_TOKEN,
+            12.25f32.to_bits(),
+        ];
+        let (scale, normalized) = normalize_residual_tokens(&tokens).unwrap();
+        assert_eq!(scale, 30);
+        assert_eq!(
+            denormalize_residual_tokens(&normalized, scale).unwrap(),
+            tokens
+        );
     }
 
     #[test]

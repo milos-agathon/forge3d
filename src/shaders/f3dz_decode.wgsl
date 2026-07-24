@@ -94,8 +94,8 @@ fn decode_rans(page: u32, layer: u32) {
     }
 }
 
-fn word_at(byte_offset: u32, word: u32) -> u32 {
-    let start = byte_offset + word * 4u;
+fn word_at(byte_offset: u32) -> u32 {
+    let start = byte_offset;
     return byte_scratch[start] |
         (byte_scratch[start + 1u] << 8u) |
         (byte_scratch[start + 2u] << 16u) |
@@ -110,47 +110,92 @@ fn is_finite_bits(bits: u32) -> bool {
     return (bits & 2139095040u) != 2139095040u;
 }
 
+fn read_uleb128(page: u32, byte_offset: u32, decoded_len: u32, cursor: ptr<function, u32>) -> u32 {
+    var value = 0u;
+    for (var byte_index = 0u; byte_index < 5u; byte_index = byte_index + 1u) {
+        if (*cursor >= decoded_len) {
+            fail(page, 8u);
+            return 0u;
+        }
+        let byte = byte_scratch[byte_offset + *cursor];
+        *cursor = *cursor + 1u;
+        if (byte_index == 4u && byte > 15u) {
+            fail(page, 8u);
+            return 0u;
+        }
+        value = value | ((byte & 127u) << (byte_index * 7u));
+        if ((byte & 128u) == 0u) {
+            if (byte_index > 0u && byte == 0u) {
+                fail(page, 8u);
+            }
+            return value;
+        }
+    }
+    fail(page, 8u);
+    return 0u;
+}
+
 fn parse_tokens(page: u32, layer: u32) {
     let field = select(15u, 24u, layer == 1u);
     let decoded_len = desc(page, field);
     let byte_offset = desc(page, field + 8u);
     let sample_count = desc(page, 38u);
     let values_offset = desc(page, 35u);
-    if ((decoded_len & 3u) != 0u) {
+    if (decoded_len == 0u || decoded_len > sample_count * 5u) {
         fail(page, 8u);
         return;
     }
-    let words = decoded_len / 4u;
     var cursor = 0u;
     var nan_count = 0u;
+    var repeated = 0u;
+    var repeated_code = 0u;
     for (var index = 0u; index < sample_count; index = index + 1u) {
-        if (cursor >= words) {
-            fail(page, 8u);
-            return;
+        var code = 0u;
+        var raw = false;
+        if (repeated > 0u) {
+            code = repeated_code;
+            repeated = repeated - 1u;
+        } else {
+            let mapped = read_uleb128(page, byte_offset, decoded_len, &cursor);
+            if (mapped == 1u) {
+                raw = true;
+            } else if (mapped == 2u) {
+                let run_code = read_uleb128(page, byte_offset, decoded_len, &cursor);
+                let run_length = read_uleb128(page, byte_offset, decoded_len, &cursor);
+                if (run_length < 4u || run_length > sample_count - index ||
+                    run_code >= RAW_TOKEN) {
+                    fail(page, 8u);
+                    return;
+                }
+                code = run_code;
+                repeated_code = run_code;
+                repeated = run_length - 1u;
+            } else if (mapped >= 3u) {
+                code = mapped - 2u;
+            }
         }
-        let token = word_at(byte_offset, cursor);
-        cursor = cursor + 1u;
-        if (token == RAW_TOKEN || token == NAN_TOKEN) {
-            if (cursor >= words) {
+        if (raw) {
+            if (cursor + 4u > decoded_len) {
                 fail(page, 8u);
                 return;
             }
-            let bits = word_at(byte_offset, cursor);
-            cursor = cursor + 1u;
-            if ((token == RAW_TOKEN && !is_finite_bits(bits)) ||
-                (token == NAN_TOKEN && !is_nan_bits(bits))) {
+            let bits = word_at(byte_offset + cursor);
+            cursor = cursor + 4u;
+            if (!is_finite_bits(bits)) {
                 fail(page, 16u);
-            }
-            if (token == NAN_TOKEN) {
-                nan_count = nan_count + 1u;
             }
             work_q[index] = INVALID_Q;
             value_bits[values_offset + index] = bits;
+        } else if (code == 0u) {
+            nan_count = nan_count + 1u;
+            work_q[index] = INVALID_Q;
+            value_bits[values_offset + index] = 2143289344u;
         } else {
+            let token = code - 1u;
             work_q[index] = bitcast<i32>((token >> 1u) ^ (0u - (token & 1u)));
         }
     }
-    if (cursor != words) {
+    if (cursor != decoded_len) {
         fail(page, 8u);
     }
     let final_layer = desc(page, 7u) == 1u || layer == 1u;
@@ -166,6 +211,17 @@ fn add_checked(left: i32, right: i32, page: u32) -> i32 {
         return 0i;
     }
     return result;
+}
+
+fn mul_checked(value: i32, scale: u32, page: u32) -> i32 {
+    let signed_scale = i32(scale);
+    if (value != 0i &&
+        ((value > 0i && (value > 2147483647i / signed_scale)) ||
+         (value < 0i && (value < (-2147483647i - 1i) / signed_scale)))) {
+        fail(page, 32u);
+        return 0i;
+    }
+    return value * signed_scale;
 }
 
 fn add_overflows(left: i32, right: i32) -> bool {
@@ -227,8 +283,9 @@ fn reconstruct_base(page: u32, lid: u32) {
                 let y = diagonal - x;
                 if (y < height) {
                     let index = y * width + x;
-                    let residual = work_q[index];
-                    if (residual != INVALID_Q) {
+                    let encoded_residual = work_q[index];
+                    if (encoded_residual != INVALID_Q) {
+                        let residual = mul_checked(encoded_residual, desc(page, 34u), page);
                         work_q[index] = add_checked(lorenzo_prediction(index, width), residual, page);
                     }
                 }
@@ -237,8 +294,9 @@ fn reconstruct_base(page: u32, lid: u32) {
         }
     } else {
         for (var index = lid; index < count; index = index + 64u) {
-            let residual = work_q[index];
-            if (residual != INVALID_Q) {
+            let encoded_residual = work_q[index];
+            if (encoded_residual != INVALID_Q) {
+                let residual = mul_checked(encoded_residual, desc(page, 34u), page);
                 var predicted = 0i;
                 if (predictor == 1u) {
                     let x = i32(index % width);
@@ -262,8 +320,9 @@ fn reconstruct_enhancement(page: u32, lid: u32) {
     let count = desc(page, 38u);
     let base_q_offset = desc(page, 33u);
     for (var index = lid; index < count; index = index + 64u) {
-        let residual = work_q[index];
-        if (residual != INVALID_Q) {
+        let encoded_residual = work_q[index];
+        if (encoded_residual != INVALID_Q) {
+            let residual = mul_checked(encoded_residual, desc(page, 36u), page);
             let base = q_scratch[base_q_offset + index];
             var predicted = 0i;
             if (base != INVALID_Q) {

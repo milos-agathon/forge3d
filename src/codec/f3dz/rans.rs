@@ -8,6 +8,8 @@ pub(crate) const RANS_L: u32 = 1 << 23;
 const LAYER_MAGIC: [u8; 4] = *b"RAN2";
 const LAYER_VERSION: u16 = 1;
 const LAYER_HEADER_LEN: usize = 32;
+const TABLE_SPARSE: u8 = 0;
+const TABLE_BITMAP_12: u8 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RansEncoded {
@@ -126,6 +128,8 @@ impl RansEncoded {
         out[0..4].copy_from_slice(&LAYER_MAGIC);
         put_u16(&mut out, 4, LAYER_VERSION);
         out[6] = SCALE_BITS as u8;
+        let table_mode = canonical_table_mode(nonzero);
+        out[7] = table_mode;
         put_u16(
             &mut out,
             8,
@@ -148,11 +152,24 @@ impl RansEncoded {
                 F3dzError::InvalidArgument("rANS lane 1 exceeds u32 length".to_string())
             })?,
         );
-        for (symbol, &frequency) in self.frequencies.iter().enumerate() {
-            if frequency != 0 {
-                out.push(symbol as u8);
-                out.extend_from_slice(&frequency.to_le_bytes());
+        if table_mode == TABLE_SPARSE {
+            for (symbol, &frequency) in self.frequencies.iter().enumerate() {
+                if frequency != 0 {
+                    out.push(symbol as u8);
+                    out.extend_from_slice(&frequency.to_le_bytes());
+                }
             }
+        } else {
+            let mut bitmap = [0u8; 32];
+            let mut packed_frequencies = Vec::with_capacity((nonzero * 12).div_ceil(8));
+            for (symbol, &frequency) in self.frequencies.iter().enumerate() {
+                if frequency != 0 {
+                    bitmap[symbol / 8] |= 1 << (symbol % 8);
+                }
+            }
+            pack_12bit_frequencies(&self.frequencies, &mut packed_frequencies);
+            out.extend_from_slice(&bitmap);
+            out.extend_from_slice(&packed_frequencies);
         }
         out.extend_from_slice(&self.lanes[0]);
         out.extend_from_slice(&self.lanes[1]);
@@ -172,7 +189,10 @@ impl RansEncoded {
                 "unsupported rANS layer version {version}"
             )));
         }
-        if data[6] != SCALE_BITS as u8 || data[7] != 0 || get_u16(data, 10) != 0 {
+        if data[6] != SCALE_BITS as u8
+            || !matches!(data[7], TABLE_SPARSE | TABLE_BITMAP_12)
+            || get_u16(data, 10) != 0
+        {
             return Err(F3dzError::InvalidArgument(
                 "invalid rANS scale/reserved fields".to_string(),
             ));
@@ -180,7 +200,7 @@ impl RansEncoded {
         let nonzero = usize::from(get_u16(data, 8));
         if !(1..=256).contains(&nonzero) {
             return Err(F3dzError::InvalidArgument(
-                "rANS sparse table must contain 1..=256 symbols".to_string(),
+                "rANS table must contain 1..=256 symbols".to_string(),
             ));
         }
         if get_u32(data, 12) == 0 {
@@ -188,29 +208,64 @@ impl RansEncoded {
                 "rANS decoded length must be non-zero".to_string(),
             ));
         }
-        let table_end = LAYER_HEADER_LEN
-            .checked_add(nonzero * 3)
-            .ok_or_else(|| F3dzError::InvalidArgument("rANS table overflow".to_string()))?;
-        require_len(data, table_end)?;
+        let table_mode = data[7];
+        if table_mode != canonical_table_mode(nonzero) {
+            return Err(F3dzError::InvalidArgument(
+                "rANS frequency table is not in its canonical compact mode".to_string(),
+            ));
+        }
         let mut frequencies = [0u16; 256];
         let mut offset = LAYER_HEADER_LEN;
-        let mut previous = None;
-        for _ in 0..nonzero {
-            let symbol = data[offset];
-            if previous.is_some_and(|previous| symbol <= previous) {
+        if table_mode == TABLE_SPARSE {
+            let table_end = LAYER_HEADER_LEN
+                .checked_add(nonzero * 3)
+                .ok_or_else(|| F3dzError::InvalidArgument("rANS table overflow".to_string()))?;
+            require_len(data, table_end)?;
+            let mut previous = None;
+            for _ in 0..nonzero {
+                let symbol = data[offset];
+                if previous.is_some_and(|previous| symbol <= previous) {
+                    return Err(F3dzError::InvalidArgument(
+                        "rANS sparse symbols must be strictly increasing".to_string(),
+                    ));
+                }
+                let frequency = get_u16(data, offset + 1);
+                if frequency == 0 {
+                    return Err(F3dzError::InvalidArgument(
+                        "rANS sparse table contains a zero frequency".to_string(),
+                    ));
+                }
+                frequencies[symbol as usize] = frequency;
+                previous = Some(symbol);
+                offset += 3;
+            }
+        } else {
+            let bitmap_end = offset + 32;
+            let packed_len = (nonzero * 12).div_ceil(8);
+            let table_end = bitmap_end
+                .checked_add(packed_len)
+                .ok_or_else(|| F3dzError::InvalidArgument("rANS table overflow".to_string()))?;
+            require_len(data, table_end)?;
+            let bitmap = &data[offset..bitmap_end];
+            if bitmap
+                .iter()
+                .map(|byte| byte.count_ones() as usize)
+                .sum::<usize>()
+                != nonzero
+            {
                 return Err(F3dzError::InvalidArgument(
-                    "rANS sparse symbols must be strictly increasing".to_string(),
+                    "rANS bitmap symbol count disagrees with its header".to_string(),
                 ));
             }
-            let frequency = get_u16(data, offset + 1);
-            if frequency == 0 {
-                return Err(F3dzError::InvalidArgument(
-                    "rANS sparse table contains a zero frequency".to_string(),
-                ));
+            let decoded = unpack_12bit_frequencies(&data[bitmap_end..table_end], nonzero)?;
+            let mut frequency_index = 0usize;
+            for symbol in 0..256 {
+                if bitmap[symbol / 8] & (1 << (symbol % 8)) != 0 {
+                    frequencies[symbol] = decoded[frequency_index];
+                    frequency_index += 1;
+                }
             }
-            frequencies[symbol as usize] = frequency;
-            previous = Some(symbol);
-            offset += 3;
+            offset = table_end;
         }
         validate_frequencies(&frequencies)?;
         let lane0_len = get_u32(data, 24) as usize;
@@ -235,6 +290,56 @@ impl RansEncoded {
             end,
         ))
     }
+}
+
+fn canonical_table_mode(nonzero: usize) -> u8 {
+    let sparse_bytes = nonzero * 3;
+    let bitmap_bytes = 32 + (nonzero * 12).div_ceil(8);
+    if bitmap_bytes < sparse_bytes {
+        TABLE_BITMAP_12
+    } else {
+        TABLE_SPARSE
+    }
+}
+
+fn pack_12bit_frequencies(frequencies: &[u16; 256], out: &mut Vec<u8>) {
+    let mut bits = 0u32;
+    let mut bit_count = 0u32;
+    for &frequency in frequencies.iter().filter(|&&frequency| frequency != 0) {
+        bits |= u32::from(frequency - 1) << bit_count;
+        bit_count += 12;
+        while bit_count >= 8 {
+            out.push(bits as u8);
+            bits >>= 8;
+            bit_count -= 8;
+        }
+    }
+    if bit_count != 0 {
+        out.push(bits as u8);
+    }
+}
+
+fn unpack_12bit_frequencies(data: &[u8], count: usize) -> F3dzResult<Vec<u16>> {
+    let mut frequencies = Vec::with_capacity(count);
+    let mut bits = 0u32;
+    let mut bit_count = 0u32;
+    let mut cursor = 0usize;
+    for _ in 0..count {
+        while bit_count < 12 {
+            bits |= u32::from(data[cursor]) << bit_count;
+            cursor += 1;
+            bit_count += 8;
+        }
+        frequencies.push(((bits & 0x0fff) + 1) as u16);
+        bits >>= 12;
+        bit_count -= 12;
+    }
+    if cursor != data.len() || bits != 0 {
+        return Err(F3dzError::InvalidArgument(
+            "rANS 12-bit frequency table has non-zero padding".to_string(),
+        ));
+    }
+    Ok(frequencies)
 }
 
 fn normalize_frequencies(data: &[u8]) -> F3dzResult<[u16; 256]> {
@@ -393,5 +498,16 @@ mod tests {
         let mut encoded = RansEncoded::encode(&source).unwrap();
         encoded.lanes[0].pop();
         assert!(encoded.decode().is_err());
+    }
+
+    #[test]
+    fn compact_bitmap_frequency_table_round_trips_large_alphabet() {
+        let source: Vec<u8> = (0..65_536).map(|index| (index % 97) as u8).collect();
+        let encoded = RansEncoded::encode(&source).unwrap();
+        let serialized = encoded.to_bytes().unwrap();
+        assert_eq!(serialized[7], TABLE_BITMAP_12);
+        let (parsed, consumed) = RansEncoded::from_bytes(&serialized).unwrap();
+        assert_eq!(consumed, serialized.len());
+        assert_eq!(parsed.decode().unwrap(), source);
     }
 }
