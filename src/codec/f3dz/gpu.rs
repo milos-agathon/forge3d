@@ -426,6 +426,7 @@ impl F3dzGpuDecoder {
 /// Convenience entry point using forge3d's negotiated global GPU context.
 pub fn decode_dem_gpu(data: &[u8]) -> F3dzResult<GpuDecodeResult> {
     let context = crate::core::gpu::try_ctx().map_err(gpu_error)?;
+    ensure_hardware_adapter(context.software_fallback, &context.adapter.get_info())?;
     let decoder = F3dzGpuDecoder::new(context.device.as_ref())?;
     let started = Instant::now();
     let (header, values) =
@@ -451,6 +452,7 @@ pub fn benchmark_decode_gpu(data: &[u8], iterations: u32) -> F3dzResult<GpuDecod
         ));
     }
     let context = crate::core::gpu::try_ctx().map_err(gpu_error)?;
+    ensure_hardware_adapter(context.software_fallback, &context.adapter.get_info())?;
     let device = context.device.as_ref();
     let queue = context.queue.as_ref();
     if !device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
@@ -642,6 +644,17 @@ pub fn benchmark_decode_gpu(data: &[u8], iterations: u32) -> F3dzResult<GpuDecod
 /// entropy-decoding. Streaming uses this before it reserves an atlas slot.
 pub fn validate_stream(data: &[u8]) -> F3dzResult<ContainerHeader> {
     prepare_stream(data).map(|prepared| prepared.header)
+}
+
+fn ensure_hardware_adapter(software_fallback: bool, adapter: &wgpu::AdapterInfo) -> F3dzResult<()> {
+    if software_fallback || adapter.device_type == wgpu::DeviceType::Cpu {
+        return Err(F3dzError::GpuUnavailable(format!(
+            "F3DZ GPU decode refuses software/CPU adapter '{}' ({:?}); \
+             use a physical GPU for codec identity and throughput evidence",
+            adapter.name, adapter.backend
+        )));
+    }
+    Ok(())
 }
 
 fn binding(binding: u32, buffer: &TrackedBuffer) -> BindGroupEntry<'_> {
@@ -1275,16 +1288,15 @@ mod tests {
             }
         };
         let adapter_info = context.adapter.get_info();
-        if adapter_info.device_type == wgpu::DeviceType::Cpu {
+        if let Err(error) = ensure_hardware_adapter(context.software_fallback, &adapter_info) {
             assert_ne!(
                 std::env::var("FORGE3D_REQUIRE_F3DZ_GPU").as_deref(),
                 Ok("1"),
                 "physical F3DZ GPU was required, but wgpu selected software adapter {adapter_info:?}"
             );
             eprintln!(
-                "GPU identity test skipped on software adapter {:?}; \
+                "GPU identity test skipped on software adapter {adapter_info:?}: {error}; \
                  physical adapters remain mandatory in the zero-skip F3DZ CI lane",
-                adapter_info
             );
             return;
         }
@@ -1303,6 +1315,36 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn software_adapters_are_rejected_before_codec_dispatch() {
+        let software = wgpu::AdapterInfo {
+            name: "Microsoft Basic Render Driver".to_string(),
+            vendor: 0x1414,
+            device: 0,
+            device_type: wgpu::DeviceType::Cpu,
+            driver: "WARP".to_string(),
+            driver_info: String::new(),
+            backend: wgpu::Backend::Dx12,
+        };
+        let hardware = wgpu::AdapterInfo {
+            name: "NVIDIA GeForce RTX 3070".to_string(),
+            vendor: 0x10de,
+            device: 0,
+            device_type: wgpu::DeviceType::DiscreteGpu,
+            driver: "NVIDIA".to_string(),
+            driver_info: String::new(),
+            backend: wgpu::Backend::Vulkan,
+        };
+        assert!(matches!(
+            ensure_hardware_adapter(true, &software),
+            Err(F3dzError::GpuUnavailable(message))
+                if message.contains("refuses software/CPU adapter")
+        ));
+        assert!(ensure_hardware_adapter(false, &software).is_err());
+        assert!(ensure_hardware_adapter(true, &hardware).is_err());
+        assert!(ensure_hardware_adapter(false, &hardware).is_ok());
     }
 
     #[test]
