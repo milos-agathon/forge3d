@@ -189,7 +189,9 @@ def test_cross_platform_determinism_hashes() -> None:
 
 
 def test_physical_gpu_ci_contract_is_zero_skip_and_records_benchmark() -> None:
-    workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml").read_text()
+    workflow = (
+        Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
     assert "test-f3dz-gpu:" in workflow
     assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in workflow
     assert "FORGE3D_REQUIRE_F3DZ_GPU: '1'" in workflow
