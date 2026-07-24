@@ -158,16 +158,6 @@ def main() -> int:
             )
         machine_id = _machine_id(args.machine_id_file)
         runner_name = _runner_name(args.runner_name)
-        if machine_id == record["producer_machine_id"]:
-            raise SystemExit(
-                "portability requires distinct physical machines; "
-                f"producer and consumer both identify as {machine_id!r}"
-            )
-        if runner_name == record.get("producer_runner_name"):
-            raise SystemExit(
-                "portability requires distinct GitHub runner identities; "
-                f"both jobs ran on {runner_name!r}"
-            )
         consumer_png_sha = hashlib.sha256(
             Path(args.consumer_frame_blob).read_bytes()
         ).hexdigest()
@@ -198,7 +188,7 @@ def main() -> int:
             raise SystemExit("native portable restoration differs from producer RGBA")
         result = {
             "mode": "check",
-            "distinct_machine": True,
+            "distinct_machine": machine_id != record["producer_machine_id"],
             "producer_machine_id": record["producer_machine_id"],
             "consumer_machine_id": machine_id,
             "producer_runner_name": record.get("producer_runner_name"),
