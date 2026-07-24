@@ -150,7 +150,11 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
     assert!(validation.is_none(), "GPU validation error: {validation:?}");
 
     let errors = map_words(&context.device, &error_readback);
-    assert_eq!(errors, vec![0_u32; 4], "structured GPU error flags");
+    assert_eq!(&errors[..3], &[0_u32; 3], "structured GPU overflow flags");
+    assert_eq!(
+        errors[3], 3,
+        "raster and resolve dispatch-stage markers must both be present"
+    );
     let gpu = map_floats(&context.device, &readback);
     assert_eq!(gpu.len(), cpu.len());
     let max_error = gpu
