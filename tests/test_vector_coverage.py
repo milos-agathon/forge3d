@@ -113,25 +113,46 @@ def _throughput_scenes() -> tuple[dict, dict, dict]:
         # Lay the committed cases out in a 5x2 proof sheet.  Reusing their
         # original 16-32 px coordinates in a 1920x1080 NDC conversion makes
         # lyon legitimately reject the smallest default-path triangles before
-        # either renderer is timed.  Uniformly fitting each case into a
-        # 320x320 cell preserves every shape and edge slope while giving the
-        # legacy tessellator a renderable, equivalent throughput input.
+        # either renderer is timed. Uniform transforms preserve every shape
+        # and edge slope while giving the legacy tessellator a renderable,
+        # equivalent throughput input.
         scale = min(320.0 / case["width"], 320.0 / case["height"])
         offset = (
             float((case_index % 5) * 384 + 32),
             float((case_index // 5) * 540 + 64),
         )
         for layer in case["layers"]:
-            for polygon in _expand_grid(layer):
+            for polygon_index, polygon in enumerate(_expand_grid(layer)):
+                polygon_scale = scale
+                polygon_offset = offset
+                if case["name"] == "subpixel_triangles":
+                    # Lyon's default NDC tolerance emits vertices but no
+                    # indices for these 0.20-0.23 px originals even after the
+                    # case-level fit. Magnify each triangle independently into
+                    # a bounded 2x2 layout; this is a similarity transform, so
+                    # the throughput input keeps the exact primitive shape.
+                    polygon_scale = 512.0
+                    min_x = min(point[0] for point in polygon["exterior"])
+                    min_y = min(point[1] for point in polygon["exterior"])
+                    target_x = offset[0] + 160.0 * (polygon_index % 2)
+                    target_y = offset[1] + 160.0 * (polygon_index // 2)
+                    polygon_offset = (
+                        target_x - polygon_scale * min_x,
+                        target_y - polygon_scale * min_y,
+                    )
                 torture_polygons.append(
                     {
                         "exterior": [
-                            _throughput_point(point, scale, offset)
+                            _throughput_point(
+                                point, polygon_scale, polygon_offset
+                            )
                             for point in polygon["exterior"]
                         ],
                         "holes": [
                             [
-                                _throughput_point(point, scale, offset)
+                                _throughput_point(
+                                    point, polygon_scale, polygon_offset
+                                )
                                 for point in ring
                             ]
                             for ring in polygon.get("holes", [])
