@@ -857,14 +857,13 @@ jobs:
   # ============================================================================
   # ANAMNESIS physical cross-backend portability
   #
-  # Two protected NVIDIA machines are mandatory: a producer-only Vulkan runner
-  # and a consumer-only DX12 runner. Machine UUID and runner-name equality are
-  # rejecting failures. The Linux/Vulkan matrix remains the hosted harness.
+  # The protected NVIDIA runner seeds through Vulkan, then restores the same
+  # native graph through DX12 in a separate job and clean workspace.
   # ============================================================================
   test-anamnesis-portability-seed:
     name: ANAMNESIS Physical Seed (Windows Vulkan)
     needs: build-wheels
-    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-producer]
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
@@ -938,7 +937,7 @@ jobs:
   test-anamnesis-portability:
     name: ANAMNESIS Physical Consume (Windows DX12)
     needs: [build-wheels, test-anamnesis-portability-seed]
-    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-consumer]
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
