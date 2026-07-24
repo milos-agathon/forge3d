@@ -193,6 +193,27 @@ pub fn create_compute_pipeline_scoped(
     with_error_scope(device, label, || device.create_compute_pipeline(descriptor))
 }
 
+/// Create a compute pipeline under a validation error scope and return the
+/// backend compiler error to callers that must fail closed.
+pub fn try_create_compute_pipeline_scoped(
+    device: &wgpu::Device,
+    descriptor: &wgpu::ComputePipelineDescriptor<'_>,
+) -> Result<wgpu::ComputePipeline, String> {
+    let label = descriptor
+        .label
+        .expect("compute pipelines require a stable label");
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let pipeline = device.create_compute_pipeline(descriptor);
+    if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+        let message = error.to_string();
+        record_degradation("validation_error", label, &message);
+        log::error!("wgpu validation error in '{label}': {message}");
+        Err(message)
+    } else {
+        Ok(pipeline)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

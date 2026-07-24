@@ -99,3 +99,13 @@ def test_matrix_rejects_golden_or_pairwise_mismatch(tmp_path, actual):
     result = _run(tmp_path)
     assert result.returncode == 1
     assert "mismatch" in result.stderr
+
+
+def test_f3dz_stream_hashes_run_on_two_hosted_platforms():
+    workflow = WORKFLOW.read_text()
+    assert "f3dz-stream:" in workflow
+    assert "os: [ubuntu-latest, windows-latest]" in workflow
+    assert "tools/f3dz_determinism_report.py" in workflow
+    assert "test_error_bound_stored_page_error_nan_and_determinism" in workflow
+    assert "test_cross_platform_determinism_hashes" in workflow
+    assert "f3dz-determinism-${{ matrix.os }}" in workflow

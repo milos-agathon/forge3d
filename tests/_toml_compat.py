@@ -1,12 +1,12 @@
-"""Minimal TOML-loading shim shared by CENSOR gate tests.
+"""Minimal TOML-loading shim shared by repository gate tests.
 
 Uses the stdlib `tomllib` when available (Python >= 3.11). Falls back to a
-small hand-rolled parser sufficient for the restricted schema used by
-`tests/allocation_allowlist.toml`: a top-level `key = []` assignment plus
-`[[entries]]` array-of-tables blocks containing only `key = "string"` pairs.
+small hand-rolled parser sufficient for the restricted schemas committed under
+`tests/`: scalar assignments, scalar arrays, named tables, and array-of-tables.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +16,31 @@ except ImportError:  # pragma: no cover - exercised on Python < 3.11
     tomllib = None  # type: ignore[assignment]
 
 
+def _strip_comment(raw_line: str) -> str:
+    """Remove a TOML comment without treating `#` inside a string as one."""
+    in_string = False
+    escaped = False
+    for index, char in enumerate(raw_line):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == "#":
+            return raw_line[:index]
+    return raw_line
+
+
 def parse_toml_fallback(text: str) -> dict[str, Any]:
     """Parse the restricted TOML subset without any external dependency."""
     result: dict[str, Any] = {}
     current: dict[str, Any] | None = None
     for raw_line in text.splitlines():
-        line = raw_line.split("#", 1)[0].strip()
+        line = _strip_comment(raw_line).strip()
         if not line:
             continue
         if line.startswith("[[") and line.endswith("]]"):
@@ -30,17 +49,30 @@ def parse_toml_fallback(text: str) -> dict[str, Any]:
             result.setdefault(key, [])
             result[key].append(current)
             continue
+        if line.startswith("[") and line.endswith("]"):
+            key = line[1:-1].strip()
+            current = {}
+            result[key] = current
+            continue
         if "=" not in line:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip()
-        if value == "[]":
-            parsed: Any = []
-        elif value.startswith('"') and value.endswith('"') and len(value) >= 2:
-            parsed = value[1:-1]
+        if value.startswith(('"', "[")):
+            parsed: Any = json.loads(value)
+        elif value == "true":
+            parsed = True
+        elif value == "false":
+            parsed = False
         else:
-            parsed = value
+            try:
+                parsed = int(value)
+            except ValueError:
+                try:
+                    parsed = float(value)
+                except ValueError:
+                    parsed = value
         if current is not None:
             current[key] = parsed
         else:

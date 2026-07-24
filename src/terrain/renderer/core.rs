@@ -324,6 +324,9 @@ impl TerrainScene {
             entry_point,
             &[self.allocation_owner.id()],
         );
+        if let Some(streaming) = &self.height_streaming {
+            streaming.mosaic.record_certificate_usage();
+        }
         (render_capture, allocation_scope)
     }
 

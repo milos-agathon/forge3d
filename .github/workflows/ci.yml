@@ -84,6 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       terrain_goldens: ${{ steps.filter.outputs.terrain_goldens }}
+      f3dz: ${{ steps.filter.outputs.f3dz }}
 
     steps:
       - uses: actions/checkout@v4
@@ -117,6 +118,24 @@ jobs:
               - 'tests/golden/adjudication/**'
               - 'tests/golden/hybrid_terrain/**'
               - 'docs/gallery/**'
+            f3dz:
+              - '.github/workflows/ci.yml'
+              - 'Cargo.toml'
+              - 'benches/f3dz_bench.rs'
+              - 'docs/formats/f3dz.md'
+              - 'python/forge3d/codec.py'
+              - 'python/forge3d/__init__.py'
+              - 'python/forge3d/__init__.pyi'
+              - 'src/codec/**'
+              - 'src/core/certificate.rs'
+              - 'src/core/degradation.rs'
+              - 'src/py_functions/codec.rs'
+              - 'src/shaders/f3dz_decode.wgsl'
+              - 'src/terrain/cog/cog_reader.rs'
+              - 'src/terrain/stream/height.rs'
+              - 'tests/data/codec_corpus/**'
+              - 'tests/test_f3dz_codec.py'
+              - 'tools/f3dz_determinism_report.py'
 
   # ============================================================================
   # Rust Tests (cargo test)
@@ -853,6 +872,84 @@ jobs:
           if-no-files-found: error
 
   # ============================================================================
+  # COMPENDIUM F3DZ physical-GPU acceptance
+  #
+  # This is a required, zero-skip NVIDIA Vulkan lane whenever codec surfaces
+  # change. The pytest gate proves every corpus page is byte-identical between
+  # CPU and GPU decode. The benchmark records hardware throughput without
+  # asserting a machine-dependent number in CI.
+  # ============================================================================
+  test-f3dz-gpu:
+    name: F3DZ Codec (NVIDIA Vulkan)
+    needs: [build-wheels, terrain-golden-paths]
+    if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.f3dz == 'true'
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 30
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_REQUIRE_F3DZ_GPU: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Initialize exact-head evidence
+        shell: pwsh
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "forge3d-f3dz-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "FORGE3D_F3DZ_ARTIFACT_DIR=$artifactDir" | Add-Content $env:GITHUB_ENV
+          $env:FORGE3D_F3DZ_ARTIFACT_DIR = $artifactDir
+          New-Item -ItemType Directory -Force $artifactDir | Out-Null
+          git rev-parse HEAD | Set-Content "$artifactDir/checked-out-head.txt"
+          @{
+            repository = $env:GITHUB_REPOSITORY
+            github_sha = $env:GITHUB_SHA
+            runner_name = $env:RUNNER_NAME
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            required_backend = 'vulkan'
+            required_labels = @('self-hosted', 'Windows', 'X64', 'forge3d-gpu', 'gpu-nvidia')
+          } | ConvertTo-Json -Depth 4 | Set-Content "$artifactDir/run-context.json"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install exact-head wheel and test dependencies
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/wheel-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install pytest numpy *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/dependency-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Require the exact NVIDIA Vulkan adapter
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_F3DZ_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/adapter-probe.log"
+          exit $LASTEXITCODE
+      - name: Run all F3DZ corpus and CPU-GPU identity gates
+        shell: pwsh
+        run: |
+          python -m pytest tests/test_f3dz_codec.py -v --tb=short --junitxml="$env:FORGE3D_F3DZ_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/pytest.log"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_F3DZ_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/junit-verifier.log"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          exit $verifyCode
+      - name: Record F3DZ CPU and GPU throughput
+        shell: pwsh
+        run: |
+          cargo bench --bench f3dz_bench *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/benchmark.log"
+          exit $LASTEXITCODE
+      - name: Upload F3DZ physical-GPU evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f3dz-physical-gpu-evidence
+          path: ${{ runner.temp }}/forge3d-f3dz-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+
+  # ============================================================================
   # Documentation Build
   # ============================================================================
   build-docs:
@@ -897,7 +994,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
+    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -923,6 +1020,7 @@ jobs:
              { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
              { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
              [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
+             { [ "${{ needs.test-f3dz-gpu.result }}" != "success" ] && [ "${{ needs.test-f3dz-gpu.result }}" != "skipped" ]; } || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1

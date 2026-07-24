@@ -2,6 +2,7 @@ use super::super::*;
 use crate::py_functions::*;
 
 mod camera;
+mod codec;
 mod diagnostics;
 mod geodesy;
 mod geometry;
@@ -23,6 +24,7 @@ pub(crate) fn register_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     license::register_license_py_functions(m)?;
     provenance::register_provenance_py_functions(m)?;
     camera::register_camera_py_functions(m)?;
+    codec::register_codec_py_functions(m)?;
     rendering::register_rendering_py_functions(m)?;
     gis::register_gis_py_functions(m)?;
     geodesy::register_geodesy_py_functions(m)?;
