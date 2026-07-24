@@ -1093,6 +1093,20 @@ mod tests {
                 return;
             }
         };
+        let adapter_info = context.adapter.get_info();
+        if adapter_info.device_type == wgpu::DeviceType::Cpu {
+            assert_ne!(
+                std::env::var("FORGE3D_REQUIRE_F3DZ_GPU").as_deref(),
+                Ok("1"),
+                "physical F3DZ GPU was required, but wgpu selected software adapter {adapter_info:?}"
+            );
+            eprintln!(
+                "GPU identity test skipped on software adapter {:?}; \
+                 physical adapters remain mandatory in the zero-skip F3DZ CI lane",
+                adapter_info
+            );
+            return;
+        }
         let decoder = F3dzGpuDecoder::new(context.device.as_ref()).unwrap();
         for stream in [&refined, &base] {
             let cpu = decode_dem(stream, None).unwrap();
