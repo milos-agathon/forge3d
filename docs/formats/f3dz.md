@@ -74,9 +74,13 @@ entropy layer contains:
    sum exactly to `4096`;
 5. lane 0 and lane 1 renormalization bytes.
 
-The two lanes encode alternating bytes of the logical token stream. Each texel
-token is a little-endian 32-bit zig-zag residual; `0xffffffff` is the explicit
-NaN/nodata escape. Pages never reference another page.
+The two lanes encode alternating bytes of the logical 32-bit token stream. A
+normal texel is one little-endian zig-zag residual word. `0xffffffff` is the
+explicit NaN/nodata escape and `0xfffffffe` is the exact finite-value escape;
+either escape is followed by one word containing the source binary32 bits.
+Escaped samples are excluded from later causal contexts, so neither nodata nor
+a rare high-magnitude exact value contaminates prediction. Pages never
+reference another page.
 
 Prediction and reconstruction are defined in integer lattice coordinates.
 For requested error `epsilon`, the refined lattice step is binary32

@@ -7,7 +7,7 @@ pub mod predict;
 pub mod rans;
 
 pub use decode::{decode_dem, DecodedDem};
-pub use encode::{encode_dem, EncodeOptions};
+pub use encode::{base_only_stream, encode_dem, EncodeOptions};
 
 use std::fmt;
 

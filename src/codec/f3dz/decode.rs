@@ -2,8 +2,8 @@
 
 use super::encode::PAGE_HEADER_LEN;
 use super::format::{
-    crc32, parse_prefix, PAGE_MAGIC, PREDICTOR_LORENZO, PREDICTOR_ORDER_ZERO, PREDICTOR_PLANE,
-    VERSION,
+    crc32, parse_prefix, PAGE_FLAG_BASE_ONLY, PAGE_FLAG_PROGRESSIVE, PAGE_MAGIC, PREDICTOR_LORENZO,
+    PREDICTOR_ORDER_ZERO, PREDICTOR_PLANE, PREDICTOR_PREVIOUS_LOD, VERSION,
 };
 use super::predict::{decode_residual_tokens, reconstruct_values, PlaneModel};
 use super::rans::RansEncoded;
@@ -28,11 +28,6 @@ pub fn decode_dem(data: &[u8], demanded_epsilon: Option<f32>) -> F3dzResult<Deco
                 stream_bits: header.epsilon.to_bits(),
             });
         }
-    }
-    if header.progressive() {
-        return Err(F3dzError::InvalidHeader(
-            "progressive decode is implemented by the next codec layer".to_string(),
-        ));
     }
     let output_len = (header.width as usize)
         .checked_mul(header.height as usize)
@@ -81,6 +76,14 @@ pub fn decode_dem(data: &[u8], demanded_epsilon: Option<f32>) -> F3dzResult<Deco
             entry.width as usize,
             entry.height as usize,
             header.epsilon * 2.0,
+            if header.progressive() {
+                header.epsilon * 8.0
+            } else {
+                header.epsilon * 2.0
+            },
+            header.progressive(),
+            header.base_only(),
+            entry.base_layer_len as usize,
         )
         .map_err(|error| F3dzError::CorruptPage {
             page: page_index,
@@ -124,6 +127,13 @@ pub fn decode_dem(data: &[u8], demanded_epsilon: Option<f32>) -> F3dzResult<Deco
         )));
     }
     let base_quality = header.base_only();
+    if base_quality {
+        crate::core::degradation::record_degradation(
+            "base_quality",
+            "f3dz_unrefined_pages",
+            "terrain heights were decoded from the progressive base layer at a declared 4*epsilon bound",
+        );
+    }
     Ok(DecodedDem {
         width: header.width,
         height: header.height,
@@ -144,7 +154,11 @@ fn decode_page(
     payload: &[u8],
     width: usize,
     height: usize,
-    expected_step: f32,
+    expected_fine_step: f32,
+    expected_base_step: f32,
+    progressive: bool,
+    base_only: bool,
+    indexed_base_layer_len: usize,
 ) -> F3dzResult<DecodedPage> {
     let sample_count = width
         .checked_mul(height)
@@ -160,24 +174,29 @@ fn decode_page(
             "page payload version mismatch".to_string(),
         ));
     }
-    if get_u16(payload, 6) != 0
+    let expected_flags = if progressive {
+        PAGE_FLAG_PROGRESSIVE | if base_only { PAGE_FLAG_BASE_ONLY } else { 0 }
+    } else {
+        0
+    };
+    if get_u16(payload, 6) != u16::from(expected_flags)
         || get_u16(payload, 10) != 0
-        || get_u32(payload, 28) != 0
         || get_u32(payload, 44) != 0
     {
         return Err(F3dzError::InvalidArgument(
-            "non-progressive page has invalid flags/reserved fields".to_string(),
+            "page payload flags/reserved fields disagree with its container".to_string(),
         ));
     }
     let predictor_id = payload[8];
-    if predictor_id != payload[9]
-        || !matches!(
-            predictor_id,
-            PREDICTOR_LORENZO | PREDICTOR_PLANE | PREDICTOR_ORDER_ZERO
-        )
+    let enhancement_predictor = payload[9];
+    if !matches!(
+        predictor_id,
+        PREDICTOR_LORENZO | PREDICTOR_PLANE | PREDICTOR_ORDER_ZERO
+    ) || (progressive && enhancement_predictor != PREDICTOR_PREVIOUS_LOD)
+        || (!progressive && enhancement_predictor != predictor_id)
     {
         return Err(F3dzError::InvalidArgument(
-            "invalid non-progressive predictor ids".to_string(),
+            "invalid base/enhancement predictor ids".to_string(),
         ));
     }
     if get_u32(payload, 32) as usize != sample_count {
@@ -185,48 +204,42 @@ fn decode_page(
             "page token count disagrees with page index".to_string(),
         ));
     }
-    let step = f32::from_bits(get_u32(payload, 36));
-    if !step.is_finite() || step <= 0.0 || get_u32(payload, 40) != step.to_bits() {
+    let fine_step = f32::from_bits(get_u32(payload, 36));
+    let base_step = f32::from_bits(get_u32(payload, 40));
+    if !fine_step.is_finite() || fine_step <= 0.0 || !base_step.is_finite() || base_step <= 0.0 {
         return Err(F3dzError::InvalidArgument(
-            "invalid non-progressive quantization step".to_string(),
+            "invalid page quantization steps".to_string(),
         ));
     }
-    if step.to_bits() != expected_step.to_bits() {
+    if fine_step.to_bits() != expected_fine_step.to_bits()
+        || base_step.to_bits() != expected_base_step.to_bits()
+    {
         return Err(F3dzError::InvalidArgument(format!(
-            "page quantization step disagrees with container epsilon: page_bits=0x{:08x} expected_bits=0x{:08x}",
-            step.to_bits(),
-            expected_step.to_bits()
+            "page quantization steps disagree with container epsilon: fine=0x{:08x}/0x{:08x} base=0x{:08x}/0x{:08x}",
+            fine_step.to_bits(),
+            expected_fine_step.to_bits(),
+            base_step.to_bits(),
+            expected_base_step.to_bits()
         )));
     }
-    let layer_len = get_u32(payload, 24) as usize;
-    let layer_end = PAGE_HEADER_LEN
-        .checked_add(layer_len)
-        .ok_or_else(|| F3dzError::InvalidArgument("page layer overflow".to_string()))?;
-    if layer_end != payload.len() {
+    let base_layer_len = get_u32(payload, 24) as usize;
+    let enhancement_layer_len = get_u32(payload, 28) as usize;
+    let base_end = PAGE_HEADER_LEN
+        .checked_add(base_layer_len)
+        .ok_or_else(|| F3dzError::InvalidArgument("base page layer overflow".to_string()))?;
+    let payload_end = base_end
+        .checked_add(enhancement_layer_len)
+        .ok_or_else(|| F3dzError::InvalidArgument("enhancement page layer overflow".to_string()))?;
+    if base_end != indexed_base_layer_len || payload_end != payload.len() {
         return Err(F3dzError::InvalidArgument(
-            "page layer length does not consume the payload".to_string(),
+            "page layer lengths disagree with the index/payload".to_string(),
         ));
     }
-    let (layer, consumed) = RansEncoded::from_bytes(&payload[PAGE_HEADER_LEN..layer_end])?;
-    if consumed != layer_len {
-        return Err(F3dzError::InvalidArgument(
-            "rANS layer contains trailing bytes".to_string(),
-        ));
-    }
-    let decoded = layer.decode()?;
-    let expected_bytes = sample_count
-        .checked_mul(4)
-        .ok_or_else(|| F3dzError::InvalidArgument("page token bytes overflow".to_string()))?;
-    if decoded.len() != expected_bytes {
+    if (base_only || !progressive) && enhancement_layer_len != 0 {
         return Err(F3dzError::InvalidArgument(format!(
-            "rANS decoded {} bytes, expected {expected_bytes}",
-            decoded.len()
+            "page quality mode forbids enhancement bytes: {enhancement_layer_len}"
         )));
     }
-    let tokens = decoded
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect::<Vec<_>>();
     let plane = PlaneModel {
         x_slope: get_i32(payload, 12),
         y_slope: get_i32(payload, 16),
@@ -237,13 +250,74 @@ fn decode_page(
             "non-plane predictor carries non-zero plane coefficients".to_string(),
         ));
     }
-    let quantized = decode_residual_tokens(&tokens, width, predictor_id, plane, None)?;
-    let nan_count = quantized.iter().filter(|value| value.is_none()).count() as u32;
+    let base_tokens = decode_token_layer(&payload[PAGE_HEADER_LEN..base_end], sample_count)?;
+    let base_quantized = decode_residual_tokens(&base_tokens, width, predictor_id, plane, None)?;
+    if base_quantized.len() != sample_count {
+        return Err(F3dzError::InvalidArgument(format!(
+            "base predictor decoded {} samples, expected {sample_count}",
+            base_quantized.len()
+        )));
+    }
+    let quantized = if progressive && !base_only {
+        if enhancement_layer_len == 0 {
+            return Err(F3dzError::InvalidArgument(
+                "refined progressive page is missing its enhancement layer".to_string(),
+            ));
+        }
+        let enhancement_tokens = decode_token_layer(&payload[base_end..payload_end], sample_count)?;
+        let decoded = decode_residual_tokens(
+            &enhancement_tokens,
+            width,
+            enhancement_predictor,
+            PlaneModel::default(),
+            Some(&base_quantized),
+        )?;
+        if decoded.len() != sample_count {
+            return Err(F3dzError::InvalidArgument(format!(
+                "enhancement predictor decoded {} samples, expected {sample_count}",
+                decoded.len()
+            )));
+        }
+        decoded
+    } else {
+        base_quantized
+    };
+    let nan_count = quantized
+        .iter()
+        .filter(|value| matches!(value, super::predict::QuantizedSample::Nan(_)))
+        .count() as u32;
     Ok(DecodedPage {
         predictor_id,
         nan_count,
-        values: reconstruct_values(&quantized, step),
+        values: reconstruct_values(&quantized, if base_only { base_step } else { fine_step }),
     })
+}
+
+fn decode_token_layer(data: &[u8], sample_count: usize) -> F3dzResult<Vec<u32>> {
+    let (layer, consumed) = RansEncoded::from_bytes(data)?;
+    if consumed != data.len() {
+        return Err(F3dzError::InvalidArgument(
+            "rANS layer contains trailing bytes".to_string(),
+        ));
+    }
+    let decoded = layer.decode()?;
+    let minimum_bytes = sample_count
+        .checked_mul(4)
+        .ok_or_else(|| F3dzError::InvalidArgument("page token bytes overflow".to_string()))?;
+    let maximum_bytes = minimum_bytes
+        .checked_mul(2)
+        .ok_or_else(|| F3dzError::InvalidArgument("page escape bytes overflow".to_string()))?;
+    if !decoded.len().is_multiple_of(4) || !(minimum_bytes..=maximum_bytes).contains(&decoded.len())
+    {
+        return Err(F3dzError::InvalidArgument(format!(
+            "rANS decoded {} bytes, expected {minimum_bytes}..={maximum_bytes} in 4-byte words",
+            decoded.len(),
+        )));
+    }
+    Ok(decoded
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect())
 }
 
 fn copy_page(

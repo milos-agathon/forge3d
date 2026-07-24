@@ -6,6 +6,14 @@ use super::format::{
 use super::{F3dzError, F3dzResult};
 
 pub const NAN_TOKEN: u32 = u32::MAX;
+pub const RAW_TOKEN: u32 = u32::MAX - 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuantizedSample {
+    Code(i32),
+    Raw(u32),
+    Nan(u32),
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlaneModel {
@@ -14,7 +22,7 @@ pub struct PlaneModel {
     pub intercept: i32,
 }
 
-pub fn quantize_source(values: &[f32], step: f32, bound: f32) -> F3dzResult<Vec<Option<i32>>> {
+pub fn quantize_source(values: &[f32], step: f32, bound: f32) -> F3dzResult<Vec<QuantizedSample>> {
     if !step.is_finite() || step <= 0.0 || !bound.is_finite() || bound < 0.0 {
         return Err(F3dzError::InvalidArgument(
             "quantization step/bound must be finite and positive".to_string(),
@@ -23,7 +31,7 @@ pub fn quantize_source(values: &[f32], step: f32, bound: f32) -> F3dzResult<Vec<
     let mut quantized = Vec::with_capacity(values.len());
     for (index, &value) in values.iter().enumerate() {
         if value.is_nan() {
-            quantized.push(None);
+            quantized.push(QuantizedSample::Nan(value.to_bits()));
             continue;
         }
         if !value.is_finite() {
@@ -34,25 +42,46 @@ pub fn quantize_source(values: &[f32], step: f32, bound: f32) -> F3dzResult<Vec<
         // Both operands are binary32 dyadic rationals. Compute their ratio and
         // round to nearest, ties-to-even with integer arithmetic so the stream
         // is independent of host floating-point division behavior.
-        let code = round_f32_ratio_ties_even(value, step).ok_or_else(|| {
+        let nearest = round_f32_ratio_ties_even(value, step).ok_or_else(|| {
             F3dzError::InvalidArgument(format!(
                 "height at sample {index} is outside the f3dz v1 i32 lattice"
             ))
         })?;
+        // Binary32 multiplication can move the mathematically nearest lattice
+        // point by one output ULP. Evaluate that code and its adjacent lattice
+        // points against the exact f32 source values, then deterministically
+        // prefer an even code on an exact tie.
+        let code = [
+            nearest.checked_sub(1),
+            Some(nearest),
+            nearest.checked_add(1),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by(|left, right| {
+            let left_value = (*left as f32) * step;
+            let right_value = (*right as f32) * step;
+            let left_error = (f64::from(left_value) - f64::from(value)).abs();
+            let right_error = (f64::from(right_value) - f64::from(value)).abs();
+            left_error
+                .total_cmp(&right_error)
+                .then_with(|| (left & 1).cmp(&(right & 1)))
+                .then_with(|| left.unsigned_abs().cmp(&right.unsigned_abs()))
+        })
+        .expect("the nearest lattice code is always present");
         let reconstructed = (code as f32) * step;
         let error = (reconstructed - value).abs();
         if !reconstructed.is_finite() || error > bound {
-            return Err(F3dzError::InvalidArgument(format!(
-                "height at sample {index} cannot be represented within the declared bound: error={error} bound={bound}"
-            )));
+            quantized.push(QuantizedSample::Raw(value.to_bits()));
+            continue;
         }
-        quantized.push(Some(code));
+        quantized.push(QuantizedSample::Code(code));
     }
     Ok(quantized)
 }
 
 pub fn fit_least_squares_plane(
-    quantized: &[Option<i32>],
+    quantized: &[QuantizedSample],
     width: usize,
     height: usize,
 ) -> PlaneModel {
@@ -70,7 +99,7 @@ pub fn fit_least_squares_plane(
     let mut syz = 0i128;
     for y in 0..height {
         for x in 0..width {
-            let Some(z) = quantized[y * width + x] else {
+            let QuantizedSample::Code(z) = quantized[y * width + x] else {
                 continue;
             };
             let x = x as i128;
@@ -124,11 +153,11 @@ pub fn fit_least_squares_plane(
 }
 
 pub fn encode_residual_tokens(
-    quantized: &[Option<i32>],
+    quantized: &[QuantizedSample],
     width: usize,
     predictor_id: u8,
     plane: PlaneModel,
-    previous: Option<&[Option<i32>]>,
+    previous: Option<&[QuantizedSample]>,
 ) -> F3dzResult<Vec<u32>> {
     if width == 0 || !quantized.len().is_multiple_of(width) {
         return Err(F3dzError::InvalidArgument(
@@ -145,10 +174,20 @@ pub fn encode_residual_tokens(
     let mut reconstructed = vec![None; quantized.len()];
     let mut tokens = Vec::with_capacity(quantized.len());
     for index in 0..quantized.len() {
-        let Some(value) = quantized[index] else {
-            tokens.push(NAN_TOKEN);
-            reconstructed[index] = None;
-            continue;
+        let value = match quantized[index] {
+            QuantizedSample::Nan(bits) => {
+                tokens.push(NAN_TOKEN);
+                tokens.push(bits);
+                reconstructed[index] = None;
+                continue;
+            }
+            QuantizedSample::Raw(bits) => {
+                tokens.push(RAW_TOKEN);
+                tokens.push(bits);
+                reconstructed[index] = None;
+                continue;
+            }
+            QuantizedSample::Code(value) => value,
         };
         // Load-bearing feedback invariant: prediction consults only values
         // already reconstructed by the decoder model (`reconstructed`), never
@@ -160,9 +199,9 @@ pub fn encode_residual_tokens(
             F3dzError::InvalidArgument(format!("predictor residual overflow at sample {index}"))
         })?;
         let token = zigzag(residual);
-        if token == NAN_TOKEN {
+        if token >= RAW_TOKEN {
             return Err(F3dzError::InvalidArgument(format!(
-                "predictor residual at sample {index} collides with the NaN escape"
+                "predictor residual at sample {index} collides with an escape token"
             )));
         }
         tokens.push(token);
@@ -176,42 +215,77 @@ pub fn decode_residual_tokens(
     width: usize,
     predictor_id: u8,
     plane: PlaneModel,
-    previous: Option<&[Option<i32>]>,
-) -> F3dzResult<Vec<Option<i32>>> {
-    if width == 0 || !tokens.len().is_multiple_of(width) {
+    previous: Option<&[QuantizedSample]>,
+) -> F3dzResult<Vec<QuantizedSample>> {
+    if width == 0 {
         return Err(F3dzError::InvalidArgument(
             "invalid predictor grid dimensions".to_string(),
         ));
     }
+    let mut reconstructed: Vec<Option<i32>> = Vec::with_capacity(tokens.len());
+    let mut output = Vec::with_capacity(tokens.len());
+    let mut cursor = 0usize;
+    while cursor < tokens.len() {
+        let token = tokens[cursor];
+        cursor += 1;
+        let index = output.len();
+        if token == NAN_TOKEN || token == RAW_TOKEN {
+            let bits = *tokens.get(cursor).ok_or_else(|| {
+                F3dzError::InvalidArgument(format!(
+                    "escape token at sample {index} is missing its binary32 payload"
+                ))
+            })?;
+            cursor += 1;
+            let value = f32::from_bits(bits);
+            if token == NAN_TOKEN && !value.is_nan() {
+                return Err(F3dzError::InvalidArgument(format!(
+                    "NaN escape at sample {index} carries finite bits"
+                )));
+            }
+            if token == RAW_TOKEN && !value.is_finite() {
+                return Err(F3dzError::InvalidArgument(format!(
+                    "raw escape at sample {index} carries non-finite bits"
+                )));
+            }
+            reconstructed.push(None);
+            output.push(if token == NAN_TOKEN {
+                QuantizedSample::Nan(bits)
+            } else {
+                QuantizedSample::Raw(bits)
+            });
+            continue;
+        }
+        let predicted = predict(predictor_id, &reconstructed, width, index, plane, previous)?;
+        let value = i64::from(predicted) + i64::from(unzigzag(token));
+        let value = i32::try_from(value).map_err(|_| {
+            F3dzError::InvalidArgument(format!(
+                "reconstructed lattice value overflow at sample {index}"
+            ))
+        })?;
+        reconstructed.push(Some(value));
+        output.push(QuantizedSample::Code(value));
+    }
+    if !output.len().is_multiple_of(width) {
+        return Err(F3dzError::InvalidArgument(
+            "decoded predictor grid is not row-aligned".to_string(),
+        ));
+    }
     if predictor_id == PREDICTOR_PREVIOUS_LOD
-        && previous.map(|values| values.len()) != Some(tokens.len())
+        && previous.map(|values| values.len()) != Some(output.len())
     {
         return Err(F3dzError::InvalidArgument(
             "previous-LOD predictor requires a same-sized reconstructed base".to_string(),
         ));
     }
-    let mut reconstructed = vec![None; tokens.len()];
-    for (index, &token) in tokens.iter().enumerate() {
-        if token == NAN_TOKEN {
-            continue;
-        }
-        let predicted = predict(predictor_id, &reconstructed, width, index, plane, previous)?;
-        let value = i64::from(predicted) + i64::from(unzigzag(token));
-        reconstructed[index] = Some(i32::try_from(value).map_err(|_| {
-            F3dzError::InvalidArgument(format!(
-                "reconstructed lattice value overflow at sample {index}"
-            ))
-        })?);
-    }
-    Ok(reconstructed)
+    Ok(output)
 }
 
-pub fn reconstruct_values(quantized: &[Option<i32>], step: f32) -> Vec<f32> {
+pub fn reconstruct_values(quantized: &[QuantizedSample], step: f32) -> Vec<f32> {
     quantized
         .iter()
         .map(|value| match value {
-            Some(value) => (*value as f32) * step,
-            None => f32::from_bits(0x7fc0_0000),
+            QuantizedSample::Code(value) => (*value as f32) * step,
+            QuantizedSample::Raw(bits) | QuantizedSample::Nan(bits) => f32::from_bits(*bits),
         })
         .collect()
 }
@@ -222,7 +296,7 @@ fn predict(
     width: usize,
     index: usize,
     plane: PlaneModel,
-    previous: Option<&[Option<i32>]>,
+    previous: Option<&[QuantizedSample]>,
 ) -> F3dzResult<i32> {
     match predictor_id {
         PREDICTOR_LORENZO => Ok(lorenzo(reconstructed, width, index)),
@@ -238,10 +312,21 @@ fn predict(
                 ))
             })
         }
-        PREDICTOR_PREVIOUS_LOD => Ok(previous
-            .and_then(|values| values[index])
-            .and_then(|value| value.checked_mul(4))
-            .unwrap_or(0)),
+        PREDICTOR_PREVIOUS_LOD => {
+            match previous
+                .and_then(|values| values.get(index))
+                .and_then(|value| match value {
+                    QuantizedSample::Code(value) => Some(*value),
+                    QuantizedSample::Raw(_) | QuantizedSample::Nan(_) => None,
+                }) {
+                Some(value) => value.checked_mul(4).ok_or_else(|| {
+                    F3dzError::InvalidArgument(format!(
+                        "previous-LOD predictor overflows at sample {index}"
+                    ))
+                }),
+                None => Ok(0),
+            }
+        }
         PREDICTOR_ORDER_ZERO => Ok(0),
         other => Err(F3dzError::InvalidArgument(format!(
             "unknown predictor id {other}"
@@ -403,7 +488,13 @@ mod tests {
 
     #[test]
     fn nan_uses_explicit_escape_and_does_not_poison_neighbors() {
-        let quantized = vec![Some(10), None, Some(12), Some(13)];
+        let nan_bits = f32::NAN.to_bits();
+        let quantized = vec![
+            QuantizedSample::Code(10),
+            QuantizedSample::Nan(nan_bits),
+            QuantizedSample::Code(12),
+            QuantizedSample::Code(13),
+        ];
         let tokens = encode_residual_tokens(
             &quantized,
             2,
@@ -413,6 +504,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tokens[1], NAN_TOKEN);
+        assert_eq!(tokens[2], nan_bits);
         let decoded =
             decode_residual_tokens(&tokens, 2, PREDICTOR_LORENZO, PlaneModel::default(), None)
                 .unwrap();
@@ -421,9 +513,31 @@ mod tests {
     }
 
     #[test]
+    fn finite_escape_preserves_bound_when_binary32_lattice_rounding_cannot() {
+        let source = [1206.0, 1214.0, 1222.0, 1230.0];
+        let quantized = quantize_source(&source, 0.8, 0.4).unwrap();
+        assert!(quantized
+            .iter()
+            .any(|value| matches!(value, QuantizedSample::Raw(_))));
+        let tokens = encode_residual_tokens(
+            &quantized,
+            4,
+            PREDICTOR_LORENZO,
+            PlaneModel::default(),
+            None,
+        )
+        .unwrap();
+        assert!(tokens.contains(&RAW_TOKEN));
+        let decoded =
+            decode_residual_tokens(&tokens, 4, PREDICTOR_LORENZO, PlaneModel::default(), None)
+                .unwrap();
+        assert_eq!(reconstruct_values(&decoded, 0.8), source);
+    }
+
+    #[test]
     fn integer_least_squares_plane_is_exact_for_a_plane() {
-        let values: Vec<Option<i32>> = (0..5)
-            .flat_map(|y| (0..7).map(move |x| Some(3 * x - 2 * y + 11)))
+        let values: Vec<QuantizedSample> = (0..5)
+            .flat_map(|y| (0..7).map(move |x| QuantizedSample::Code(3 * x - 2 * y + 11)))
             .collect();
         assert_eq!(
             fit_least_squares_plane(&values, 7, 5),
