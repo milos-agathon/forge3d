@@ -19,6 +19,7 @@ const RANS_L: u32 = 8388608u;
 const RAW_TOKEN: u32 = 4294967294u;
 const NAN_TOKEN: u32 = 4294967295u;
 const INVALID_Q: i32 = -2147483647i - 1i;
+const MAX_PAGE_DIAGONALS: u32 = 127u;
 
 @group(0) @binding(0) var<storage, read> compressed: array<u32>;
 @group(0) @binding(1) var<storage, read> descriptors: array<u32>;
@@ -273,14 +274,17 @@ fn lorenzo_prediction(index: u32, width: u32) -> i32 {
     return 0i;
 }
 
-fn reconstruct_base(page: u32, lid: u32) {
+fn reconstruct_base(page: u32, lid: u32, enabled: bool) {
     let width = desc(page, 0u);
     let height = desc(page, 1u);
     let count = desc(page, 38u);
     let predictor = desc(page, 8u);
-    if (predictor == 0u) {
-        // Anti-diagonal row waves preserve the exact causal Lorenzo order.
-        for (var diagonal = 0u; diagonal < width + height - 1u; diagonal = diagonal + 1u) {
+    // Every invocation executes the maximum 64x64 page wave count. Width,
+    // height, predictor, and status come from storage and FXC cannot prove that
+    // they are workgroup-uniform; putting a barrier under any of those
+    // conditions makes valid WGSL fail D3D11 compilation with X3663.
+    for (var diagonal = 0u; diagonal < MAX_PAGE_DIAGONALS; diagonal = diagonal + 1u) {
+        if (enabled && predictor == 0u && diagonal < width + height - 1u) {
             let x = lid;
             if (x < width && diagonal >= x) {
                 let y = diagonal - x;
@@ -293,9 +297,10 @@ fn reconstruct_base(page: u32, lid: u32) {
                     }
                 }
             }
-            workgroupBarrier();
         }
-    } else {
+        workgroupBarrier();
+    }
+    if (enabled && predictor != 0u) {
         for (var index = lid; index < count; index = index + 64u) {
             let encoded_residual = work_q[index];
             if (encoded_residual != INVALID_Q) {
@@ -310,11 +315,13 @@ fn reconstruct_base(page: u32, lid: u32) {
                 work_q[index] = add_checked(predicted, residual, page);
             }
         }
-        workgroupBarrier();
     }
+    workgroupBarrier();
     let base_q_offset = desc(page, 33u);
-    for (var index = lid; index < count; index = index + 64u) {
-        q_scratch[base_q_offset + index] = work_q[index];
+    if (enabled) {
+        for (var index = lid; index < count; index = index + 64u) {
+            q_scratch[base_q_offset + index] = work_q[index];
+        }
     }
     // q_scratch is storage memory, not workgroup memory. The enhancement
     // predictor consumes it after this function, so both storage visibility
@@ -324,23 +331,25 @@ fn reconstruct_base(page: u32, lid: u32) {
     workgroupBarrier();
 }
 
-fn reconstruct_enhancement(page: u32, lid: u32) {
+fn reconstruct_enhancement(page: u32, lid: u32, enabled: bool) {
     let count = desc(page, 38u);
     let base_q_offset = desc(page, 33u);
-    for (var index = lid; index < count; index = index + 64u) {
-        let encoded_residual = work_q[index];
-        if (encoded_residual != INVALID_Q) {
-            let residual = mul_checked(encoded_residual, desc(page, 36u), page);
-            let base = q_scratch[base_q_offset + index];
-            var predicted = 0i;
-            if (base != INVALID_Q) {
-                if (base < -536870912i || base > 536870911i) {
-                    fail(page, 64u);
-                } else {
-                    predicted = base * 4i;
+    if (enabled) {
+        for (var index = lid; index < count; index = index + 64u) {
+            let encoded_residual = work_q[index];
+            if (encoded_residual != INVALID_Q) {
+                let residual = mul_checked(encoded_residual, desc(page, 36u), page);
+                let base = q_scratch[base_q_offset + index];
+                var predicted = 0i;
+                if (base != INVALID_Q) {
+                    if (base < -536870912i || base > 536870911i) {
+                        fail(page, 64u);
+                    } else {
+                        predicted = base * 4i;
+                    }
                 }
+                work_q[index] = add_checked(predicted, residual, page);
             }
-            work_q[index] = add_checked(predicted, residual, page);
         }
     }
     workgroupBarrier();
@@ -371,6 +380,11 @@ fn write_result(page: u32, lid: u32, to_atlas: bool) {
 }
 
 fn decode_page(page: u32, lid: u32, to_atlas: bool) {
+    let count = desc(page, 38u);
+    for (var index = lid; index < count; index = index + 64u) {
+        work_q[index] = INVALID_Q;
+    }
+    workgroupBarrier();
     if (lid == 0u) {
         decode_rans(page, 0u);
     }
@@ -380,39 +394,28 @@ fn decode_page(page: u32, lid: u32, to_atlas: bool) {
     // helper-call boundary without an explicit storage barrier.
     storageBarrier();
     workgroupBarrier();
-    if (lid == 0u) {
+    if (lid == 0u && atomicLoad(&status[page]) == 0u) {
         parse_tokens(page, 0u);
     }
     // Invocation 0 also publishes RAW/NaN bits to value_bits (storage).
     storageBarrier();
     workgroupBarrier();
-    if (atomicLoad(&status[page]) != 0u) {
-        return;
+    reconstruct_base(page, lid, atomicLoad(&status[page]) == 0u);
+    let refined = desc(page, 7u) == 0u;
+    if (lid == 0u && refined && atomicLoad(&status[page]) == 0u) {
+        decode_rans(page, 1u);
     }
-    reconstruct_base(page, lid);
-    if (atomicLoad(&status[page]) != 0u) {
-        return;
+    storageBarrier();
+    workgroupBarrier();
+    if (lid == 0u && refined && atomicLoad(&status[page]) == 0u) {
+        parse_tokens(page, 1u);
     }
-    if (desc(page, 7u) == 0u) {
-        if (lid == 0u) {
-            decode_rans(page, 1u);
-        }
-        storageBarrier();
-        workgroupBarrier();
-        if (lid == 0u) {
-            parse_tokens(page, 1u);
-        }
-        storageBarrier();
-        workgroupBarrier();
-        if (atomicLoad(&status[page]) != 0u) {
-            return;
-        }
-        reconstruct_enhancement(page, lid);
+    storageBarrier();
+    workgroupBarrier();
+    reconstruct_enhancement(page, lid, refined && atomicLoad(&status[page]) == 0u);
+    if (atomicLoad(&status[page]) == 0u) {
+        write_result(page, lid, to_atlas);
     }
-    if (atomicLoad(&status[page]) != 0u) {
-        return;
-    }
-    write_result(page, lid, to_atlas);
 }
 
 @compute @workgroup_size(64, 1, 1)

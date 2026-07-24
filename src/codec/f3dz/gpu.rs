@@ -1038,6 +1038,15 @@ mod tests {
                 && !source.contains("&positions."),
             "rANS lane cursors must remain scalar so Naga emits legal Metal references"
         );
+        assert!(
+            source.contains(
+                "for (var diagonal = 0u; diagonal < MAX_PAGE_DIAGONALS; diagonal = diagonal + 1u)"
+            ) && source.contains("reconstruct_base(page, lid, atomicLoad(&status[page]) == 0u);")
+                && !source[source.find("fn decode_page").unwrap()
+                    ..source.find("@compute @workgroup_size").unwrap()]
+                    .contains("return;"),
+            "all codec-stage barriers must remain in uniform control flow for FXC/D3D11"
+        );
         let base_publish = source
             .find("q_scratch[base_q_offset + index] = work_q[index];")
             .unwrap();
