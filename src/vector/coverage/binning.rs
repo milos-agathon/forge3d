@@ -108,7 +108,7 @@ impl BinLayout {
             .max(std::mem::size_of::<PrimitiveRecord>() as u64)
             .checked_add((layer_tiles * 4).max(4))
             .and_then(|bytes| bytes.checked_add(allocated_index_slots * 4))
-            .and_then(|bytes| bytes.checked_add(4))
+            .and_then(|bytes| bytes.checked_add(16))
             .and_then(|bytes| bytes.checked_add(std::mem::size_of::<BinParams>() as u64))
             .ok_or_else(|| {
                 RenderError::Budget("vector_coverage_bin_budget: byte-count overflow".into())
@@ -239,7 +239,9 @@ impl CoverageBinner {
             device,
             &wgpu::BufferDescriptor {
                 label: Some("vf.Vector.Coverage.BinOverflow"),
-                size: 4,
+                // [bin overflow, active-list overflow, breakpoint overflow,
+                // reserved]. Later passes share this structured error block.
+                size: 16,
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
@@ -402,6 +404,13 @@ mod tests {
             include_str!("../../shaders/includes/determinism.wgsl"),
             include_str!("../../shaders/vector_coverage_bin.wgsl")
         );
-        naga::front::wgsl::parse_str(&source).expect("combined LIMES bin shader must parse");
+        let module =
+            naga::front::wgsl::parse_str(&source).expect("combined LIMES bin shader must parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("combined LIMES bin shader must validate");
     }
 }
