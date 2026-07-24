@@ -54,14 +54,15 @@ impl BinLayout {
             })?
         ];
         let mut measured_memberships = 0_u64;
+        let extent = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+            f64::from(geometry.width),
+            f64::from(geometry.height),
+            0.0,
+        ));
 
         for primitive in &geometry.primitives {
             let [min_x, min_y, max_x, max_y] = primitive.bounds;
-            if max_x < 0.0
-                || max_y < 0.0
-                || min_x >= geometry.width as f32
-                || min_y >= geometry.height as f32
-            {
+            if max_x < 0.0 || max_y < 0.0 || min_x >= extent.x || min_y >= extent.y {
                 continue;
             }
             let tx0 = pixel_to_tile(min_x, tile_columns);

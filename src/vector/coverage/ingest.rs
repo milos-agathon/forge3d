@@ -249,8 +249,18 @@ impl CoverageGeometryBuilder {
             let a0 = start + sweep * pair[0];
             let a1 = start + sweep * pair[1];
             let mid = 0.5 * (a0 + a1);
-            let e0 = center + Vec2::new((a0 % TAU).cos() as f32, (a0 % TAU).sin() as f32) * radius;
-            let e1 = center + Vec2::new((a1 % TAU).cos() as f32, (a1 % TAU).sin() as f32) * radius;
+            let direction0 = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+                (a0 % TAU).cos(),
+                (a0 % TAU).sin(),
+                0.0,
+            ));
+            let direction1 = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+                (a1 % TAU).cos(),
+                (a1 % TAU).sin(),
+                0.0,
+            ));
+            let e0 = center + direction0.truncate() * radius;
+            let e1 = center + direction1.truncate() * radius;
             let winding = if e1.y > e0.y { 1 } else { -1 };
             let branch = if mid.cos() >= 0.0 { 1.0 } else { -1.0 };
             let bounds = [

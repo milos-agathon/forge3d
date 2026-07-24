@@ -191,8 +191,12 @@ pub fn rasterize_coverage_cpu(geometry: &CoverageGeometry) -> Vec<f32> {
             for x in 0..geometry.width {
                 result[layer_index * pixel_count
                     + y as usize * geometry.width as usize
-                    + x as usize] =
-                    analytic_coverage_pixel(&layer_primitives, layer.fill_rule, x, y) as f32;
+                    + x as usize] = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+                    analytic_coverage_pixel(&layer_primitives, layer.fill_rule, x, y),
+                    0.0,
+                    0.0,
+                ))
+                .x;
             }
         }
     }

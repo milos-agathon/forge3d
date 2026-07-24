@@ -145,8 +145,9 @@ impl CoverageGridInput {
         }
         for row in 0..self.rows {
             for column in 0..self.columns {
-                let x = self.origin[0] + column as f32 * self.cell_size[0];
-                let y = self.origin[1] + row as f32 * self.cell_size[1];
+                let [column, row] = viewport_dims(column, row);
+                let x = self.origin[0] + column * self.cell_size[0];
+                let y = self.origin[1] + row * self.cell_size[1];
                 builder.push_polygon(
                     layer,
                     &PolygonDef {

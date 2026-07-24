@@ -3,10 +3,8 @@ use super::*;
 use crate::vector::api::{PolygonDef, PolylineDef, VectorStyle};
 
 fn point_to_ndc(point: [f32; 2], width: u32, height: u32) -> glam::Vec2 {
-    glam::Vec2::new(
-        2.0 * point[0] / width as f32 - 1.0,
-        1.0 - 2.0 * point[1] / height as f32,
-    )
+    let [width, height] = viewport_dims(width, height);
+    glam::Vec2::new(2.0 * point[0] / width - 1.0, 1.0 - 2.0 * point[1] / height)
 }
 
 fn ablation_polygon(input: CoveragePolygonInput, width: u32, height: u32) -> PolygonDef {
@@ -97,7 +95,9 @@ pub(crate) fn _vector_render_coverage_ablation_py(
             "LIMES ablation accepts exactly one torture-sheet layer",
         ));
     }
-    let layer = input.layers.pop().expect("length checked");
+    let layer = input.layers.pop().ok_or_else(|| {
+        PyValueError::new_err("LIMES ablation requires one decoded torture-sheet layer")
+    })?;
     if layer.polygon_grid.is_some() || (layer.polygons.is_empty() == layer.polylines.is_empty()) {
         return Err(PyValueError::new_err(
             "LIMES ablation layer must contain polygons XOR polylines and no compact grid",

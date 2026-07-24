@@ -62,11 +62,18 @@ fn shader_pinned_math_stays_inside_declared_final_cell_epsilon() {
     let mut max_error = 0.0_f64;
     let mut worst = ([0.0_f32; 2], 0.0_f32);
     for _ in 0..10_000 {
-        let radius = (0.1 + 99.9 * uniform(&mut state)) as f32;
-        let center = [
-            (-f64::from(radius) + (2.0 * f64::from(radius) + 1.0) * uniform(&mut state)) as f32,
-            (-f64::from(radius) + (2.0 * f64::from(radius) + 1.0) * uniform(&mut state)) as f32,
-        ];
+        let radius = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+            0.1 + 99.9 * uniform(&mut state),
+            0.0,
+            0.0,
+        ))
+        .x;
+        let center = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+            -f64::from(radius) + (2.0 * f64::from(radius) + 1.0) * uniform(&mut state),
+            -f64::from(radius) + (2.0 * f64::from(radius) + 1.0) * uniform(&mut state),
+            0.0,
+        ));
+        let center = [center.x, center.y];
         let reference = circle_pixel_intersection_area(
             [f64::from(center[0]), f64::from(center[1])],
             f64::from(radius),

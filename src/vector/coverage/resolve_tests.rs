@@ -39,8 +39,13 @@ fn same_layer_shared_edges_resolve_to_one_without_a_seam() {
         .unwrap();
     for row in 0..10 {
         for column in 0..10 {
-            let x = column as f32;
-            let y = row as f32;
+            let position = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+                f64::from(column),
+                f64::from(row),
+                0.0,
+            ));
+            let x = position.x;
+            let y = position.y;
             builder
                 .push_polygon(
                     layer,

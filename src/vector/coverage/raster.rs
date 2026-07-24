@@ -232,12 +232,15 @@ impl CoverageRasterizer {
 fn build_tile_baselines(geometry: &CoverageGeometry, tile_columns: u32) -> Vec<i32> {
     let row_count = geometry.layers.len() * geometry.height as usize;
     let mut rows: Vec<Vec<(f64, i32, u32)>> = vec![Vec::new(); row_count];
+    let height = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+        f64::from(geometry.height),
+        0.0,
+        0.0,
+    ))
+    .x;
     for primitive in &geometry.primitives {
         let min_row = primitive.bounds[1].floor().max(0.0) as u32;
-        let max_row = primitive.bounds[3]
-            .ceil()
-            .max(0.0)
-            .min(geometry.height as f32) as u32;
+        let max_row = primitive.bounds[3].ceil().max(0.0).min(height) as u32;
         for row in min_row..max_row {
             let y = f64::from(row) + 0.5;
             if primitive_active(primitive, y) {
