@@ -17,6 +17,13 @@ pub const FLAG_PROGRESSIVE: u32 = 1 << 0;
 pub const FLAG_BASE_ONLY: u32 = 1 << 1;
 pub const PAGE_FLAG_PROGRESSIVE: u8 = 1 << 0;
 pub const PAGE_FLAG_BASE_ONLY: u8 = 1 << 1;
+/// The base layer supports the low-barrier GPU path: a proved separable prefix
+/// scan for Lorenzo or independent reconstruction for plane/order-zero. The
+/// GPU still validates every sample, so a forged flag fails closed.
+pub const PAGE_FLAG_GPU_FAST: u8 = 1 << 2;
+/// Both entropy layers contain exactly one canonical single-byte residual token
+/// per sample, allowing workgroup-parallel token parsing.
+pub const PAGE_FLAG_GPU_DIRECT: u8 = 1 << 3;
 pub const PREDICTOR_LORENZO: u8 = 0;
 pub const PREDICTOR_PLANE: u8 = 1;
 pub const PREDICTOR_PREVIOUS_LOD: u8 = 2;
@@ -126,6 +133,14 @@ impl PageIndexEntry {
 
     pub fn base_only(&self) -> bool {
         self.flags & PAGE_FLAG_BASE_ONLY != 0
+    }
+
+    pub fn gpu_fast(&self) -> bool {
+        self.flags & PAGE_FLAG_GPU_FAST != 0
+    }
+
+    pub fn gpu_direct(&self) -> bool {
+        self.flags & PAGE_FLAG_GPU_DIRECT != 0
     }
 }
 
@@ -403,7 +418,10 @@ fn validate_entry(header: &ContainerHeader, entry: &PageIndexEntry) -> F3dzResul
             "page error fields must be finite and non-negative".to_string(),
         ));
     }
-    if entry.flags & !(PAGE_FLAG_PROGRESSIVE | PAGE_FLAG_BASE_ONLY) != 0 {
+    if entry.flags
+        & !(PAGE_FLAG_PROGRESSIVE | PAGE_FLAG_BASE_ONLY | PAGE_FLAG_GPU_FAST | PAGE_FLAG_GPU_DIRECT)
+        != 0
+    {
         return Err(F3dzError::InvalidArgument(
             "unknown page flag bits are set".to_string(),
         ));
@@ -411,6 +429,16 @@ fn validate_entry(header: &ContainerHeader, entry: &PageIndexEntry) -> F3dzResul
     if entry.progressive() != header.progressive() || entry.base_only() != header.base_only() {
         return Err(F3dzError::InvalidArgument(
             "page quality flags disagree with the container header".to_string(),
+        ));
+    }
+    if entry.gpu_fast() && entry.predictor_id == PREDICTOR_LORENZO && entry.nan_count != 0 {
+        return Err(F3dzError::InvalidArgument(
+            "fast-path Lorenzo page cannot contain nodata".to_string(),
+        ));
+    }
+    if entry.gpu_direct() && !entry.gpu_fast() {
+        return Err(F3dzError::InvalidArgument(
+            "direct-token GPU page must also declare the low-barrier path".to_string(),
         ));
     }
     if !entry.progressive() && entry.base_layer_len != entry.payload_len {

@@ -9,8 +9,8 @@
 use super::encode::PAGE_HEADER_LEN;
 use super::format::{
     crc32, parse_prefix, ContainerHeader, PageIndexEntry, PAGE_FLAG_BASE_ONLY,
-    PAGE_FLAG_PROGRESSIVE, PAGE_MAGIC, PREDICTOR_LORENZO, PREDICTOR_ORDER_ZERO, PREDICTOR_PLANE,
-    PREDICTOR_PREVIOUS_LOD, VERSION,
+    PAGE_FLAG_GPU_DIRECT, PAGE_FLAG_GPU_FAST, PAGE_FLAG_PROGRESSIVE, PAGE_MAGIC, PREDICTOR_LORENZO,
+    PREDICTOR_ORDER_ZERO, PREDICTOR_PLANE, PREDICTOR_PREVIOUS_LOD, VERSION,
 };
 use super::rans::{RansEncoded, RANS_L, SCALE};
 use super::{F3dzError, F3dzResult};
@@ -19,7 +19,7 @@ use crate::core::resource_tracker::{
 };
 use futures_intrusive::channel::shared::oneshot_channel;
 use std::num::NonZeroU64;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use wgpu::util::BufferInitDescriptor;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
@@ -30,7 +30,10 @@ use wgpu::{
     TextureViewDimension,
 };
 
-pub const MAX_BATCH_PAGES: usize = 64;
+/// A 512-page batch exposes enough independent entropy streams to saturate
+/// discrete GPUs while bounding worst-case staging below the enforced 512 MiB
+/// host-visible budget (64x64 samples, two five-byte token layers per page).
+pub const MAX_BATCH_PAGES: usize = 512;
 const DESC_STRIDE: usize = 40;
 const TABLE_STRIDE: usize = 4096 + 256 + 256;
 
@@ -50,7 +53,11 @@ pub struct GpuDecodeBenchmark {
     pub adapter: String,
     pub iterations: u32,
     pub pixels_per_iteration: u64,
+    pub fast_path: bool,
+    pub direct_tokens: bool,
     pub elapsed_seconds: f64,
+    pub wall_seconds: f64,
+    pub timing_source: &'static str,
     pub gigapixels_per_second: f64,
 }
 
@@ -58,6 +65,8 @@ pub struct F3dzGpuDecoder {
     bind_group_layout: BindGroupLayout,
     buffer_pipeline: ComputePipeline,
     atlas_pipeline: ComputePipeline,
+    fast_buffer_pipeline: ComputePipeline,
+    fast_atlas_pipeline: ComputePipeline,
 }
 
 impl F3dzGpuDecoder {
@@ -138,10 +147,33 @@ impl F3dzGpuDecoder {
             },
         )
         .map_err(gpu_error)?;
+        let fast_buffer_pipeline =
+            crate::core::shader_registry::try_create_compute_pipeline_scoped(
+                device,
+                &ComputePipelineDescriptor {
+                    label: Some("f3dz.decode.prefix-to-buffer"),
+                    layout: Some(&layout),
+                    module: &shader,
+                    entry_point: "decode_to_buffer_fast",
+                },
+            )
+            .map_err(gpu_error)?;
+        let fast_atlas_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("f3dz.decode.prefix-to-atlas"),
+                layout: Some(&layout),
+                module: &shader,
+                entry_point: "decode_to_atlas_fast",
+            },
+        )
+        .map_err(gpu_error)?;
         Ok(Self {
             bind_group_layout,
             buffer_pipeline,
             atlas_pipeline,
+            fast_buffer_pipeline,
+            fast_atlas_pipeline,
         })
     }
 
@@ -185,14 +217,12 @@ impl F3dzGpuDecoder {
         .map_err(gpu_error)?;
         let dummy_view = dummy_atlas.create_view(&TextureViewDescriptor::default());
         for batch in &prepared.batches {
-            self.dispatch_batch(
-                device,
-                queue,
-                batch,
-                &output,
-                &dummy_view,
-                &self.buffer_pipeline,
-            )?;
+            let pipeline = if batch.gpu_fast {
+                &self.fast_buffer_pipeline
+            } else {
+                &self.buffer_pipeline
+            };
+            self.dispatch_batch(device, queue, batch, &output, &dummy_view, pipeline)?;
         }
         let bytes = read_buffer(device, queue, &output, byte_size(output_len)?)?;
         let values = bytes
@@ -265,14 +295,12 @@ impl F3dzGpuDecoder {
                 descriptor[5] = origin.0;
                 descriptor[6] = origin.1;
             }
-            self.dispatch_batch(
-                device,
-                queue,
-                &batch,
-                &dummy_output,
-                &atlas_view,
-                &self.atlas_pipeline,
-            )?;
+            let pipeline = if batch.gpu_fast {
+                &self.fast_atlas_pipeline
+            } else {
+                &self.atlas_pipeline
+            };
+            self.dispatch_batch(device, queue, &batch, &dummy_output, &atlas_view, pipeline)?;
         }
         if prepared.header.base_only() {
             record_base_quality();
@@ -425,15 +453,13 @@ pub fn benchmark_decode_gpu(data: &[u8], iterations: u32) -> F3dzResult<GpuDecod
     let context = crate::core::gpu::try_ctx().map_err(gpu_error)?;
     let device = context.device.as_ref();
     let queue = context.queue.as_ref();
+    if !device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+        return Err(F3dzError::GpuUnavailable(
+            "F3DZ throughput benchmark requires TIMESTAMP_QUERY".to_string(),
+        ));
+    }
     let decoder = F3dzGpuDecoder::new(device)?;
     let prepared = prepare_stream(data)?;
-    if prepared.batches.len() != 1 {
-        return Err(F3dzError::InvalidArgument(format!(
-            "GPU benchmark stream must fit one {}-page batch, got {} pages",
-            MAX_BATCH_PAGES, prepared.header.page_count
-        )));
-    }
-    let batch = &prepared.batches[0];
     let output_len = checked_output_len(&prepared.header)?;
     let output = storage_buffer(device, "f3dz.bench.output", output_len)?;
     let dummy_atlas = tracked_create_texture(
@@ -455,71 +481,145 @@ pub fn benchmark_decode_gpu(data: &[u8], iterations: u32) -> F3dzResult<GpuDecod
     )
     .map_err(gpu_error)?;
     let atlas_view = dummy_atlas.create_view(&TextureViewDescriptor::default());
-    let compressed = init_u32_buffer(
+    let timestamp_query = device.create_query_set(&wgpu::QuerySetDescriptor {
+        label: Some("f3dz.bench.timestamps"),
+        ty: wgpu::QueryType::Timestamp,
+        count: 2,
+    });
+    let timestamp_resolve = tracked_create_buffer(
         device,
-        "f3dz.bench.compressed",
-        &batch.compressed,
-        BufferUsages::STORAGE,
-    )?;
-    let descriptors = init_u32_buffer(
-        device,
-        "f3dz.bench.descriptors",
-        &batch.descriptors,
-        BufferUsages::STORAGE,
-    )?;
-    let tables = init_u32_buffer(
-        device,
-        "f3dz.bench.tables",
-        &batch.tables,
-        BufferUsages::STORAGE,
-    )?;
-    let byte_scratch = storage_buffer(device, "f3dz.bench.byte-scratch", batch.decoded_bytes)?;
-    let q_scratch = storage_buffer(device, "f3dz.bench.q-scratch", batch.samples)?;
-    let value_bits = storage_buffer(device, "f3dz.bench.value-bits", batch.samples)?;
-    let status = init_u32_buffer(
-        device,
-        "f3dz.bench.status",
-        &vec![0u32; batch.page_count],
-        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-    )?;
-    let bind_group = decoder.create_bind_group(
-        device,
-        &compressed,
-        &descriptors,
-        &tables,
-        &byte_scratch,
-        &q_scratch,
-        &value_bits,
-        &output,
-        &status,
-        &atlas_view,
-    );
+        &BufferDescriptor {
+            label: Some("f3dz.bench.timestamp-resolve"),
+            size: 2 * std::mem::size_of::<u64>() as u64,
+            usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    )
+    .map_err(gpu_error)?;
+    struct BenchBatch {
+        _compressed: TrackedBuffer,
+        _descriptors: TrackedBuffer,
+        _tables: TrackedBuffer,
+        _byte_scratch: TrackedBuffer,
+        _q_scratch: TrackedBuffer,
+        _value_bits: TrackedBuffer,
+        status: TrackedBuffer,
+        bind_group: BindGroup,
+        first_page: usize,
+        page_count: usize,
+        gpu_fast: bool,
+        gpu_direct: bool,
+    }
+    let mut resources = Vec::with_capacity(prepared.batches.len());
+    for batch in &prepared.batches {
+        let compressed = init_u32_buffer(
+            device,
+            "f3dz.bench.compressed",
+            &batch.compressed,
+            BufferUsages::STORAGE,
+        )?;
+        let descriptors = init_u32_buffer(
+            device,
+            "f3dz.bench.descriptors",
+            &batch.descriptors,
+            BufferUsages::STORAGE,
+        )?;
+        let tables = init_u32_buffer(
+            device,
+            "f3dz.bench.tables",
+            &batch.tables,
+            BufferUsages::STORAGE,
+        )?;
+        let byte_scratch = storage_buffer(device, "f3dz.bench.byte-scratch", batch.decoded_bytes)?;
+        let q_scratch = storage_buffer(device, "f3dz.bench.q-scratch", batch.samples)?;
+        let value_bits = storage_buffer(device, "f3dz.bench.value-bits", batch.samples)?;
+        let status = init_u32_buffer(
+            device,
+            "f3dz.bench.status",
+            &vec![0u32; batch.page_count],
+            BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+        )?;
+        let bind_group = decoder.create_bind_group(
+            device,
+            &compressed,
+            &descriptors,
+            &tables,
+            &byte_scratch,
+            &q_scratch,
+            &value_bits,
+            &output,
+            &status,
+            &atlas_view,
+        );
+        resources.push(BenchBatch {
+            _compressed: compressed,
+            _descriptors: descriptors,
+            _tables: tables,
+            _byte_scratch: byte_scratch,
+            _q_scratch: q_scratch,
+            _value_bits: value_bits,
+            status,
+            bind_group,
+            first_page: batch.first_page,
+            page_count: batch.page_count,
+            gpu_fast: batch.gpu_fast,
+            gpu_direct: batch.gpu_direct,
+        });
+    }
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
         label: Some("f3dz.bench.encoder"),
     });
     {
         let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("f3dz.bench.pass"),
-            timestamp_writes: None,
+            timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
+                query_set: &timestamp_query,
+                beginning_of_pass_write_index: Some(0),
+                end_of_pass_write_index: Some(1),
+            }),
         });
-        pass.set_pipeline(&decoder.buffer_pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        for _ in 0..iterations {
-            pass.dispatch_workgroups(batch.page_count as u32, 1, 1);
+        for batch in &resources {
+            let pipeline = if batch.gpu_fast {
+                &decoder.fast_buffer_pipeline
+            } else {
+                &decoder.buffer_pipeline
+            };
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &batch.bind_group, &[]);
+            for _ in 0..iterations {
+                pass.dispatch_workgroups(batch.page_count as u32, 1, 1);
+            }
         }
     }
+    encoder.resolve_query_set(&timestamp_query, 0..2, &timestamp_resolve, 0);
     let started = Instant::now();
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
-    let elapsed_seconds = started.elapsed().as_secs_f64();
-    let status_bytes = read_buffer(device, queue, &status, byte_size(batch.page_count)?)?;
-    for (page, raw) in status_bytes.chunks_exact(4).enumerate() {
-        let code = u32::from_le_bytes(raw.try_into().unwrap());
-        if code != 0 {
-            return Err(F3dzError::CorruptPage {
-                page,
-                reason: format!("GPU benchmark decoder status=0x{code:08x}"),
-            });
+    wait_for_queue(device, queue, Duration::from_secs(60))?;
+    let wall_seconds = started.elapsed().as_secs_f64();
+    let timestamp_bytes = read_buffer(
+        device,
+        queue,
+        &timestamp_resolve,
+        2 * std::mem::size_of::<u64>() as u64,
+    )?;
+    let begin = u64::from_le_bytes(timestamp_bytes[0..8].try_into().unwrap());
+    let end = u64::from_le_bytes(timestamp_bytes[8..16].try_into().unwrap());
+    if begin == 0 || end < begin {
+        return Err(F3dzError::GpuUnavailable(format!(
+            "invalid F3DZ GPU timestamps: begin={begin} end={end}"
+        )));
+    }
+    let elapsed_seconds = (end - begin) as f64 * f64::from(queue.get_timestamp_period()) / 1.0e9;
+    for batch in &resources {
+        let status_bytes = read_buffer(device, queue, &batch.status, byte_size(batch.page_count)?)?;
+        for (page, raw) in status_bytes.chunks_exact(4).enumerate() {
+            let code = u32::from_le_bytes(raw.try_into().unwrap());
+            if code != 0 {
+                return Err(F3dzError::CorruptPage {
+                    page: batch.first_page + page,
+                    reason: format!("GPU benchmark decoder status=0x{code:08x}"),
+                });
+            }
         }
     }
     let pixels_per_iteration = output_len as u64;
@@ -529,7 +629,11 @@ pub fn benchmark_decode_gpu(data: &[u8], iterations: u32) -> F3dzResult<GpuDecod
         adapter: context.adapter.get_info().name,
         iterations,
         pixels_per_iteration,
+        fast_path: resources.iter().all(|batch| batch.gpu_fast),
+        direct_tokens: resources.iter().all(|batch| batch.gpu_direct),
         elapsed_seconds,
+        wall_seconds,
+        timing_source: "gpu_timestamp",
         gigapixels_per_second,
     })
 }
@@ -614,6 +718,33 @@ fn read_buffer(
     Ok(bytes)
 }
 
+fn wait_for_queue(device: &Device, queue: &Queue, timeout: Duration) -> F3dzResult<()> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    queue.on_submitted_work_done(move || {
+        let _ = sender.send(());
+    });
+    let started = Instant::now();
+    loop {
+        device.poll(wgpu::Maintain::Poll);
+        match receiver.try_recv() {
+            Ok(()) => return Ok(()),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return Err(F3dzError::GpuUnavailable(
+                    "F3DZ benchmark completion callback disconnected".to_string(),
+                ));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        if started.elapsed() >= timeout {
+            return Err(F3dzError::GpuUnavailable(format!(
+                "F3DZ benchmark exceeded {:.0}-second GPU timeout",
+                timeout.as_secs_f64()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[derive(Clone)]
 struct PreparedBatch {
     first_page: usize,
@@ -623,6 +754,8 @@ struct PreparedBatch {
     tables: Vec<u32>,
     decoded_bytes: usize,
     samples: usize,
+    gpu_fast: bool,
+    gpu_direct: bool,
 }
 
 struct PreparedStream {
@@ -644,6 +777,8 @@ fn prepare_stream(data: &[u8]) -> F3dzResult<PreparedStream> {
             tables: Vec::new(),
             decoded_bytes: 0,
             samples: 0,
+            gpu_fast: true,
+            gpu_direct: true,
         };
         for (local_page, entry) in chunk.iter().enumerate() {
             let absolute_page = first_page + local_page;
@@ -718,7 +853,7 @@ fn prepare_page(
     {
         return corrupt(absolute_page, "invalid page header".to_string());
     }
-    let expected_flags = if header.progressive() {
+    let expected_flags = (if header.progressive() {
         u16::from(PAGE_FLAG_PROGRESSIVE)
             | if header.base_only() {
                 u16::from(PAGE_FLAG_BASE_ONLY)
@@ -727,7 +862,7 @@ fn prepare_page(
             }
     } else {
         0
-    };
+    }) | u16::from(entry.flags & (PAGE_FLAG_GPU_FAST | PAGE_FLAG_GPU_DIRECT));
     if get_u16(payload, 6) != expected_flags
         || get_u16(payload, 10) != 0
         || get_u32(payload, 52) != 0
@@ -851,6 +986,11 @@ fn prepare_page(
     descriptor[34] = base_scale;
     descriptor[35] = batch.samples as u32;
     descriptor[36] = enhancement_scale;
+    descriptor[37] = if entry.gpu_direct() {
+        2
+    } else {
+        u32::from(entry.gpu_fast())
+    };
     descriptor[38] = sample_count as u32;
     descriptor[39] = entry.nan_count;
     pack_layer(&base, 15, &mut descriptor, batch)?;
@@ -863,6 +1003,8 @@ fn prepare_page(
         .samples
         .checked_add(sample_count)
         .ok_or_else(|| F3dzError::InvalidHeader("batch sample count overflow".into()))?;
+    batch.gpu_fast &= entry.gpu_fast();
+    batch.gpu_direct &= entry.gpu_direct();
     Ok(())
 }
 
@@ -1033,10 +1175,12 @@ mod tests {
     fn decode_shader_synchronizes_storage_between_codec_stages() {
         let source = include_str!("../../shaders/f3dz_decode.wgsl");
         assert!(
-            source.contains("var position0 = 0u;")
-                && source.contains("var position1 = 0u;")
-                && !source.contains("&positions."),
-            "rANS lane cursors must remain scalar so Naga emits legal Metal references"
+            source.contains("fn decode_rans_lane(page: u32, layer: u32, lane: u32)")
+                && source.contains("var position = 0u;")
+                && source
+                    .contains("for (var index = lane; index < decoded_len; index = index + 2u)")
+                && source.contains("if (lid < 2u)"),
+            "the two rANS lanes must decode concurrently with scalar cursors"
         );
         assert!(
             source.contains(
@@ -1046,6 +1190,16 @@ mod tests {
                     ..source.find("@compute @workgroup_size").unwrap()]
                     .contains("return;"),
             "all codec-stage barriers must remain in uniform control flow for FXC/D3D11"
+        );
+        assert!(
+            source.contains("fn reconstruct_base_fast(page: u32, lid: u32)")
+                && source.contains("decode_page_fast(group_id.x, local_id.x, false);")
+                && source.contains("decode_page_fast(group_id.x, local_id.x, true);")
+                && source.contains("value = add_checked(work_q[index - 1u], value, page);")
+                && source.contains(
+                    "work_q[index] = add_checked(work_q[index - width], work_q[index], page);"
+                ),
+            "the proven Lorenzo pipeline must keep checked horizontal/vertical prefix scans"
         );
         let base_publish = source
             .find("q_scratch[base_q_offset + index] = work_q[index];")
@@ -1057,8 +1211,14 @@ mod tests {
         );
         let decode_page = &source[source.find("fn decode_page").unwrap()..];
         for (decode, layer) in [
-            ("decode_rans(page, 0u);", "parse_tokens(page, 0u);"),
-            ("decode_rans(page, 1u);", "parse_tokens(page, 1u);"),
+            (
+                "decode_rans_lane(page, 0u, lid);",
+                "parse_tokens(page, 0u);",
+            ),
+            (
+                "decode_rans_lane(page, 1u, lid);",
+                "parse_tokens(page, 1u);",
+            ),
         ] {
             let entropy_publish = decode_page.find(decode).unwrap();
             let publish = decode_page.find(layer).unwrap();
@@ -1077,15 +1237,36 @@ mod tests {
                 "{layer} must publish storage before releasing the workgroup"
             );
         }
+        assert!(
+            source.contains("fn parse_tokens_direct(page: u32, layer: u32, lid: u32)")
+                && source
+                    .contains("for (var index = lid; index < sample_count; index = index + 64u)")
+                && source.contains("parse_tokens_direct(page, 0u, lid);")
+                && source.contains("parse_tokens_direct(page, 1u, lid);"),
+            "direct-token pages must parse samples across the full workgroup"
+        );
     }
 
     #[test]
     fn gpu_matches_cpu_bit_for_bit_for_refined_and_base_streams() {
         let source = terrain(67, 65);
+        let finite_source: Vec<f32> = source
+            .iter()
+            .map(|&value| if value.is_nan() { 314.0 } else { value })
+            .collect();
         let mut options = EncodeOptions::new(0.1);
         options.tile_size = 64;
         let refined = encode_dem(&source, 67, 65, &options).unwrap();
         let base = base_only_stream(&refined).unwrap();
+        let mut fast_options = options.clone();
+        fast_options.epsilon = 0.125;
+        let fast_refined = encode_dem(&finite_source, 67, 65, &fast_options).unwrap();
+        let fast_base = base_only_stream(&fast_refined).unwrap();
+        assert!(prepare_stream(&fast_refined)
+            .unwrap()
+            .batches
+            .iter()
+            .all(|batch| batch.gpu_fast));
         let context = match crate::core::gpu::try_ctx() {
             Ok(context) => context,
             Err(error) => {
@@ -1108,7 +1289,7 @@ mod tests {
             return;
         }
         let decoder = F3dzGpuDecoder::new(context.device.as_ref()).unwrap();
-        for stream in [&refined, &base] {
+        for stream in [&refined, &base, &fast_refined, &fast_base] {
             let cpu = decode_dem(stream, None).unwrap();
             let (_, gpu) = decoder
                 .decode_to_vec(context.device.as_ref(), context.queue.as_ref(), stream)

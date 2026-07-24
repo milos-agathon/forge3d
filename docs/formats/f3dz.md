@@ -43,7 +43,7 @@ Each page-index record is exactly 64 bytes:
 | 8 | 2 | page width |
 | 10 | 2 | page height |
 | 12 | 1 | selected predictor id |
-| 13 | 1 | flags: bit 0 progressive, bit 1 base-only |
+| 13 | 1 | flags: bit 0 progressive, bit 1 base-only, bit 2 low-barrier GPU safe, bit 3 direct-token GPU safe |
 | 14 | 2 | reserved, zero |
 | 16 | 8 | absolute payload offset |
 | 24 | 4 | payload length |
@@ -69,7 +69,7 @@ Every payload begins with this 56-byte page header:
 |---:|---:|---|
 | 0 | 4 | ASCII magic `F3PG` |
 | 4 | 2 | page version (`1`) |
-| 6 | 2 | flags |
+| 6 | 2 | flags: bit 0 progressive, bit 1 base-only, bit 2 low-barrier GPU safe, bit 3 direct-token GPU safe |
 | 8 | 1 | base predictor id |
 | 9 | 1 | enhancement predictor id |
 | 10 | 2 | reserved, zero |
@@ -134,13 +134,25 @@ flags; it is not an arbitrarily byte-truncated invalid file.
 
 ## GPU execution contract
 
-One workgroup owns one page. Invocation 0 expands the interleaved two-state
-rANS stream, then Lorenzo pages reconstruct in causal row-wave order; plane
-prediction and progressive enhancement allow columns within a row to run in
-parallel after the entropy barrier. The final binary32 values are written
-directly to the R32Float terrain atlas. CPU and GPU use the same integer
-residuals and one binary32 multiply, so their output bytes are required to
-match exactly.
+One workgroup owns one page. Invocations 0 and 1 concurrently expand the two
+interleaved rANS lanes. Pages additionally marked direct-token-safe contain
+exactly one canonical one-byte ordinary residual token per sample in every
+stored layer; all 64 invocations may therefore parse distinct samples without
+changing the CPU-decodable byte stream. The encoder uses this representation
+only when its rANS layer is no larger than the normal canonical stream.
+Lorenzo pages marked low-barrier-safe reconstruct with a checked
+horizontal prefix scan followed by a checked vertical prefix scan. The encoder
+sets that page flag for Lorenzo only after proving there are no escape samples,
+all prefix intermediates fit `i32`, and the result is identical to the canonical
+causal decoder. Plane and order-zero pages are independently reconstructible
+and may use the same low-barrier pipeline. The GPU rechecks the predictor, flag,
+token kind, and every arithmetic operation; a forged flag therefore fails
+closed. Batches containing any unmarked page use the general fixed-wave Lorenzo
+pipeline, which also supports escape samples. Progressive enhancement allows
+columns within a row to run in parallel after the entropy barrier. The final
+binary32 values are written directly to the R32Float terrain atlas. CPU and GPU
+use the same integer residuals and one binary32 multiply, so their output bytes
+are required to match exactly.
 
 ## TIFF/COG embedding
 

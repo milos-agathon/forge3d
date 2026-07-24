@@ -1,10 +1,10 @@
 // F3DZ v1 GPU decoder.
 //
-// One workgroup owns one independent page. Invocation 0 expands the two
-// interleaved rANS states into byte scratch and parses variable-width escape
-// tokens. The 64 invocations then reconstruct predictor values:
-// - Lorenzo advances in row-wave (anti-diagonal) order. Cells on one diagonal
-//   have no dependency on each other, so columns run in parallel.
+// One workgroup owns one independent page. Invocations 0 and 1 expand the two
+// interleaved rANS lanes into byte scratch; invocation 0 parses variable-width
+// escape tokens. The 64 invocations then reconstruct predictor values:
+// - Proven finite Lorenzo lattices use a horizontal prefix scan followed by a
+//   vertical prefix scan. General pages retain the fixed anti-diagonal path.
 // - plane, order-zero, and previous-LOD predictors are independent after token
 //   parsing and run column-parallel.
 //
@@ -51,25 +51,17 @@ fn lane_byte(offset: u32, length: u32, position: ptr<function, u32>, page: u32) 
     return value;
 }
 
-fn decode_rans(page: u32, layer: u32) {
+fn decode_rans_lane(page: u32, layer: u32, lane: u32) {
     let field = select(15u, 24u, layer == 1u);
     let decoded_len = desc(page, field);
-    let state0_initial = desc(page, field + 1u);
-    let state1_initial = desc(page, field + 2u);
-    let lane0_offset = desc(page, field + 3u);
-    let lane0_length = desc(page, field + 4u);
-    let lane1_offset = desc(page, field + 5u);
-    let lane1_length = desc(page, field + 6u);
+    let state_initial = select(desc(page, field + 1u), desc(page, field + 2u), lane == 1u);
+    let lane_offset = select(desc(page, field + 3u), desc(page, field + 5u), lane == 1u);
+    let lane_length = select(desc(page, field + 4u), desc(page, field + 6u), lane == 1u);
     let table_offset = desc(page, field + 7u);
     let scratch_offset = desc(page, field + 8u);
-    var states = vec2<u32>(state0_initial, state1_initial);
-    // Keep lane cursors as scalars. Taking a pointer to a vector component
-    // lowers to an illegal non-const reference in Metal Shading Language.
-    var position0 = 0u;
-    var position1 = 0u;
-    for (var index = 0u; index < decoded_len; index = index + 1u) {
-        let lane = index & 1u;
-        let state = select(states.x, states.y, lane == 1u);
+    var state = state_initial;
+    var position = 0u;
+    for (var index = lane; index < decoded_len; index = index + 2u) {
         let slot = state & SCALE_MASK;
         let symbol = tables[table_offset + slot];
         let frequency = tables[table_offset + 4096u + symbol];
@@ -78,22 +70,13 @@ fn decode_rans(page: u32, layer: u32) {
             fail(page, 2u);
             return;
         }
-        var next = frequency * (state >> SCALE_BITS) + slot - cumulative;
-        if (lane == 0u) {
-            while (next < RANS_L) {
-                next = (next << 8u) | lane_byte(lane0_offset, lane0_length, &position0, page);
-            }
-            states.x = next;
-        } else {
-            while (next < RANS_L) {
-                next = (next << 8u) | lane_byte(lane1_offset, lane1_length, &position1, page);
-            }
-            states.y = next;
+        state = frequency * (state >> SCALE_BITS) + slot - cumulative;
+        while (state < RANS_L) {
+            state = (state << 8u) | lane_byte(lane_offset, lane_length, &position, page);
         }
         byte_scratch[scratch_offset + index] = symbol;
     }
-    if (position0 != lane0_length || position1 != lane1_length ||
-        states.x != RANS_L || states.y != RANS_L) {
+    if (position != lane_length || state != RANS_L) {
         fail(page, 4u);
     }
 }
@@ -204,6 +187,30 @@ fn parse_tokens(page: u32, layer: u32) {
     }
     let final_layer = desc(page, 7u) == 1u || layer == 1u;
     if (final_layer && nan_count != desc(page, 39u)) {
+        fail(page, 128u);
+    }
+}
+
+fn parse_tokens_direct(page: u32, layer: u32, lid: u32) {
+    let field = select(15u, 24u, layer == 1u);
+    let decoded_len = desc(page, field);
+    let byte_offset = desc(page, field + 8u);
+    let sample_count = desc(page, 38u);
+    if (lid == 0u && (decoded_len != sample_count || desc(page, 37u) != 2u)) {
+        fail(page, 128u);
+    }
+    for (var index = lid; index < sample_count; index = index + 64u) {
+        let mapped = byte_scratch[byte_offset + index];
+        if (mapped < 3u || mapped > 127u) {
+            fail(page, 128u);
+            work_q[index] = 0i;
+        } else {
+            let token = mapped - 3u;
+            work_q[index] = bitcast<i32>((token >> 1u) ^ (0u - (token & 1u)));
+        }
+    }
+    let final_layer = desc(page, 7u) == 1u || layer == 1u;
+    if (lid == 0u && final_layer && desc(page, 39u) != 0u) {
         fail(page, 128u);
     }
 }
@@ -331,6 +338,71 @@ fn reconstruct_base(page: u32, lid: u32, enabled: bool) {
     workgroupBarrier();
 }
 
+fn reconstruct_base_fast(page: u32, lid: u32) {
+    let width = desc(page, 0u);
+    let height = desc(page, 1u);
+    let count = desc(page, 38u);
+    let predictor = desc(page, 8u);
+    if (lid == 0u &&
+        (desc(page, 37u) == 0u || (predictor != 0u && predictor != 1u && predictor != 3u))) {
+        fail(page, 128u);
+    }
+    workgroupBarrier();
+
+    // For a complete finite Lorenzo residual lattice, two separable inclusive
+    // scans are the exact inverse. One invocation owns each row/column, so
+    // every intermediate uses the same checked i32 arithmetic as the causal
+    // decoder without 127 cross-workgroup barriers.
+    if (predictor == 0u && lid < height) {
+        let row_start = lid * width;
+        for (var x = 0u; x < width; x = x + 1u) {
+            let index = row_start + x;
+            let encoded_residual = work_q[index];
+            if (encoded_residual == INVALID_Q) {
+                fail(page, 128u);
+                work_q[index] = 0i;
+            } else {
+                var value = mul_checked(encoded_residual, desc(page, 34u), page);
+                if (x > 0u) {
+                    value = add_checked(work_q[index - 1u], value, page);
+                }
+                work_q[index] = value;
+            }
+        }
+    }
+    workgroupBarrier();
+    if (predictor == 0u && lid < width) {
+        for (var y = 1u; y < height; y = y + 1u) {
+            let index = y * width + lid;
+            work_q[index] = add_checked(work_q[index - width], work_q[index], page);
+        }
+    }
+    if (predictor != 0u) {
+        for (var index = lid; index < count; index = index + 64u) {
+            let encoded_residual = work_q[index];
+            if (encoded_residual != INVALID_Q) {
+                let residual = mul_checked(encoded_residual, desc(page, 34u), page);
+                var predicted = 0i;
+                if (predictor == 1u) {
+                    let x = i32(index % width);
+                    let y = i32(index / width);
+                    predicted = bitcast<i32>(desc(page, 12u)) * x +
+                        bitcast<i32>(desc(page, 13u)) * y + bitcast<i32>(desc(page, 14u));
+                }
+                work_q[index] = add_checked(predicted, residual, page);
+            }
+        }
+    }
+    workgroupBarrier();
+
+    let base_q_offset = desc(page, 33u);
+    for (var index = lid; index < count; index = index + 64u) {
+        q_scratch[base_q_offset + index] = work_q[index];
+    }
+    storageBarrier();
+    workgroupBarrier();
+}
+
 fn reconstruct_enhancement(page: u32, lid: u32, enabled: bool) {
     let count = desc(page, 38u);
     let base_q_offset = desc(page, 33u);
@@ -385,13 +457,13 @@ fn decode_page(page: u32, lid: u32, to_atlas: bool) {
         work_q[index] = INVALID_Q;
     }
     workgroupBarrier();
-    if (lid == 0u) {
-        decode_rans(page, 0u);
+    if (lid < 2u) {
+        decode_rans_lane(page, 0u, lid);
     }
     // rANS publishes byte_scratch through device storage. Synchronize it
-    // before the token parser consumes the bytes, even though invocation 0
-    // owns both serial stages: Metal does not guarantee visibility across the
-    // helper-call boundary without an explicit storage barrier.
+    // before the token parser consumes the bytes. Metal does not guarantee
+    // visibility across the helper-call boundary without an explicit storage
+    // barrier.
     storageBarrier();
     workgroupBarrier();
     if (lid == 0u && atomicLoad(&status[page]) == 0u) {
@@ -402,12 +474,50 @@ fn decode_page(page: u32, lid: u32, to_atlas: bool) {
     workgroupBarrier();
     reconstruct_base(page, lid, atomicLoad(&status[page]) == 0u);
     let refined = desc(page, 7u) == 0u;
-    if (lid == 0u && refined && atomicLoad(&status[page]) == 0u) {
-        decode_rans(page, 1u);
+    if (lid < 2u && refined && atomicLoad(&status[page]) == 0u) {
+        decode_rans_lane(page, 1u, lid);
     }
     storageBarrier();
     workgroupBarrier();
     if (lid == 0u && refined && atomicLoad(&status[page]) == 0u) {
+        parse_tokens(page, 1u);
+    }
+    storageBarrier();
+    workgroupBarrier();
+    reconstruct_enhancement(page, lid, refined && atomicLoad(&status[page]) == 0u);
+    if (atomicLoad(&status[page]) == 0u) {
+        write_result(page, lid, to_atlas);
+    }
+}
+
+fn decode_page_fast(page: u32, lid: u32, to_atlas: bool) {
+    let count = desc(page, 38u);
+    for (var index = lid; index < count; index = index + 64u) {
+        work_q[index] = INVALID_Q;
+    }
+    workgroupBarrier();
+    if (lid < 2u) {
+        decode_rans_lane(page, 0u, lid);
+    }
+    storageBarrier();
+    workgroupBarrier();
+    if (desc(page, 37u) == 2u) {
+        parse_tokens_direct(page, 0u, lid);
+    } else if (lid == 0u && atomicLoad(&status[page]) == 0u) {
+        parse_tokens(page, 0u);
+    }
+    storageBarrier();
+    workgroupBarrier();
+    reconstruct_base_fast(page, lid);
+    let refined = desc(page, 7u) == 0u;
+    if (lid < 2u && refined && atomicLoad(&status[page]) == 0u) {
+        decode_rans_lane(page, 1u, lid);
+    }
+    storageBarrier();
+    workgroupBarrier();
+    if (refined && desc(page, 37u) == 2u) {
+        parse_tokens_direct(page, 1u, lid);
+    } else if (lid == 0u && refined && atomicLoad(&status[page]) == 0u) {
         parse_tokens(page, 1u);
     }
     storageBarrier();
@@ -432,4 +542,20 @@ fn decode_to_atlas(
     @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
     decode_page(group_id.x, local_id.x, true);
+}
+
+@compute @workgroup_size(64, 1, 1)
+fn decode_to_buffer_fast(
+    @builtin(workgroup_id) group_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+) {
+    decode_page_fast(group_id.x, local_id.x, false);
+}
+
+@compute @workgroup_size(64, 1, 1)
+fn decode_to_atlas_fast(
+    @builtin(workgroup_id) group_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+) {
+    decode_page_fast(group_id.x, local_id.x, true);
 }

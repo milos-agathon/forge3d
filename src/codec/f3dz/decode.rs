@@ -2,8 +2,9 @@
 
 use super::encode::PAGE_HEADER_LEN;
 use super::format::{
-    crc32, parse_prefix, PAGE_FLAG_BASE_ONLY, PAGE_FLAG_PROGRESSIVE, PAGE_MAGIC, PREDICTOR_LORENZO,
-    PREDICTOR_ORDER_ZERO, PREDICTOR_PLANE, PREDICTOR_PREVIOUS_LOD, VERSION,
+    crc32, parse_prefix, PAGE_FLAG_BASE_ONLY, PAGE_FLAG_GPU_DIRECT, PAGE_FLAG_GPU_FAST,
+    PAGE_FLAG_PROGRESSIVE, PAGE_MAGIC, PREDICTOR_LORENZO, PREDICTOR_ORDER_ZERO, PREDICTOR_PLANE,
+    PREDICTOR_PREVIOUS_LOD, VERSION,
 };
 use super::predict::{
     decode_residual_tokens, denormalize_residual_tokens, reconstruct_values,
@@ -86,6 +87,8 @@ pub fn decode_dem(data: &[u8], demanded_epsilon: Option<f32>) -> F3dzResult<Deco
             },
             header.progressive(),
             header.base_only(),
+            entry.gpu_fast(),
+            entry.gpu_direct(),
             entry.base_layer_len as usize,
         )
         .map_err(|error| F3dzError::CorruptPage {
@@ -162,6 +165,8 @@ fn decode_page(
     expected_base_step: f32,
     progressive: bool,
     base_only: bool,
+    gpu_fast: bool,
+    gpu_direct: bool,
     indexed_base_layer_len: usize,
 ) -> F3dzResult<DecodedPage> {
     let sample_count = width
@@ -178,11 +183,12 @@ fn decode_page(
             "page payload version mismatch".to_string(),
         ));
     }
-    let expected_flags = if progressive {
+    let expected_flags = (if progressive {
         PAGE_FLAG_PROGRESSIVE | if base_only { PAGE_FLAG_BASE_ONLY } else { 0 }
     } else {
         0
-    };
+    }) | if gpu_fast { PAGE_FLAG_GPU_FAST } else { 0 }
+        | if gpu_direct { PAGE_FLAG_GPU_DIRECT } else { 0 };
     if get_u16(payload, 6) != u16::from(expected_flags)
         || get_u16(payload, 10) != 0
         || get_u32(payload, 52) != 0

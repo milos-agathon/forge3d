@@ -355,6 +355,25 @@ pub(crate) fn pack_residual_tokens(tokens: &[u32]) -> F3dzResult<Vec<u8>> {
     Ok(packed)
 }
 
+/// Return the canonical token byte stream when every logical sample is a
+/// single ordinary residual whose unsigned LEB128 representation is one byte.
+/// The stream remains valid for the general CPU decoder; the page flag merely
+/// proves that the GPU may map byte `i` directly to sample `i`.
+pub(crate) fn pack_direct_residual_tokens(tokens: &[u32]) -> Option<Vec<u8>> {
+    let mut packed = Vec::with_capacity(tokens.len());
+    for &token in tokens {
+        if token >= RAW_TOKEN {
+            return None;
+        }
+        let mapped = token.checked_add(3)?;
+        if mapped > 0x7f {
+            return None;
+        }
+        packed.push(mapped as u8);
+    }
+    Some(packed)
+}
+
 pub(crate) fn unpack_residual_tokens(packed: &[u8], sample_count: usize) -> F3dzResult<Vec<u32>> {
     let mut tokens = Vec::with_capacity(sample_count);
     let mut cursor = 0usize;
@@ -508,6 +527,57 @@ pub(crate) fn denormalize_residual_tokens(tokens: &[u32], scale: u32) -> F3dzRes
         }
     }
     Ok(restored)
+}
+
+/// Prove that a Lorenzo page is exactly reconstructible by a horizontal
+/// prefix scan followed by a vertical prefix scan.
+///
+/// This is an integer identity for a complete Lorenzo lattice. We explicitly
+/// reject escape samples and any intermediate i32 overflow, then compare the
+/// result with the canonical causal decoder. The encoder records the result in
+/// the page flags so the GPU can select a low-barrier pipeline without
+/// inspecting or CPU-decoding the entropy stream.
+pub(crate) fn lorenzo_prefix_safe(
+    residual_tokens: &[u32],
+    width: usize,
+    expected: &[QuantizedSample],
+) -> bool {
+    if width == 0
+        || expected.is_empty()
+        || !expected.len().is_multiple_of(width)
+        || residual_tokens.len() != expected.len()
+    {
+        return false;
+    }
+    let mut prefix = Vec::with_capacity(residual_tokens.len());
+    for &token in residual_tokens {
+        if token >= RAW_TOKEN {
+            return false;
+        }
+        prefix.push(unzigzag(token));
+    }
+    let height = expected.len() / width;
+    for y in 0..height {
+        for x in 1..width {
+            let index = y * width + x;
+            let Some(value) = prefix[index].checked_add(prefix[index - 1]) else {
+                return false;
+            };
+            prefix[index] = value;
+        }
+    }
+    for x in 0..width {
+        for y in 1..height {
+            let index = y * width + x;
+            let Some(value) = prefix[index].checked_add(prefix[index - width]) else {
+                return false;
+            };
+            prefix[index] = value;
+        }
+    }
+    prefix.iter().zip(expected).all(
+        |(&actual, expected)| matches!(expected, QuantizedSample::Code(value) if *value == actual),
+    )
 }
 
 fn gcd(mut left: u32, mut right: u32) -> u32 {
@@ -774,6 +844,40 @@ mod tests {
     }
 
     #[test]
+    fn lorenzo_prefix_proof_matches_causal_decode_and_rejects_unsafe_inputs() {
+        let quantized: Vec<QuantizedSample> = (0..6)
+            .flat_map(|y| {
+                (0..8).map(move |x| QuantizedSample::Code(17 + x * 3 - y * 2 + (x * y) % 5))
+            })
+            .collect();
+        let residuals = encode_residual_tokens(
+            &quantized,
+            8,
+            PREDICTOR_LORENZO,
+            PlaneModel::default(),
+            None,
+        )
+        .unwrap();
+        let decoded = decode_residual_tokens(
+            &residuals,
+            8,
+            PREDICTOR_LORENZO,
+            PlaneModel::default(),
+            None,
+        )
+        .unwrap();
+        assert!(lorenzo_prefix_safe(&residuals, 8, &decoded));
+
+        let mut escaped = residuals.clone();
+        escaped[5] = NAN_TOKEN;
+        assert!(!lorenzo_prefix_safe(&escaped, 8, &decoded));
+
+        let overflow = [zigzag(1_500_000_000), zigzag(1_000_000_000)];
+        let expected = [QuantizedSample::Code(0), QuantizedSample::Code(0)];
+        assert!(!lorenzo_prefix_safe(&overflow, 2, &expected));
+    }
+
+    #[test]
     fn packed_tokens_are_canonical_and_round_trip_escapes() {
         let tokens = [
             0,
@@ -792,6 +896,20 @@ mod tests {
         overlong[0..1].copy_from_slice(&[0x82]);
         overlong.insert(1, 0);
         assert!(unpack_residual_tokens(&overlong, 7).is_err());
+    }
+
+    #[test]
+    fn direct_tokens_accept_only_one_byte_ordinary_residuals() {
+        let tokens = [0, 1, 7, 124];
+        let direct = pack_direct_residual_tokens(&tokens).unwrap();
+        assert_eq!(direct, [3, 4, 10, 127]);
+        assert_eq!(
+            unpack_residual_tokens(&direct, tokens.len()).unwrap(),
+            tokens
+        );
+        assert!(pack_direct_residual_tokens(&[125]).is_none());
+        assert!(pack_direct_residual_tokens(&[NAN_TOKEN]).is_none());
+        assert!(pack_direct_residual_tokens(&[RAW_TOKEN, 12.25f32.to_bits()]).is_none());
     }
 
     #[test]

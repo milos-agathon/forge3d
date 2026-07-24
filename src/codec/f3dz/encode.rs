@@ -2,13 +2,13 @@
 
 use super::format::{
     crc32, parse_prefix, write_prefix, ContainerHeader, PageIndexEntry, FLAG_BASE_ONLY,
-    PAGE_FLAG_BASE_ONLY, PAGE_FLAG_PROGRESSIVE, PAGE_MAGIC, PREDICTOR_LORENZO, PREDICTOR_PLANE,
-    PREDICTOR_PREVIOUS_LOD, VERSION,
+    PAGE_FLAG_BASE_ONLY, PAGE_FLAG_GPU_DIRECT, PAGE_FLAG_GPU_FAST, PAGE_FLAG_PROGRESSIVE,
+    PAGE_MAGIC, PREDICTOR_LORENZO, PREDICTOR_PLANE, PREDICTOR_PREVIOUS_LOD, VERSION,
 };
 use super::predict::{
-    decode_residual_tokens, encode_residual_tokens, fit_least_squares_plane,
-    normalize_residual_tokens, pack_residual_tokens, quantize_source, reconstruct_values,
-    PlaneModel, QuantizedSample,
+    decode_residual_tokens, encode_residual_tokens, fit_least_squares_plane, lorenzo_prefix_safe,
+    normalize_residual_tokens, pack_direct_residual_tokens, pack_residual_tokens, quantize_source,
+    reconstruct_values, PlaneModel, QuantizedSample,
 };
 use super::rans::RansEncoded;
 use super::{F3dzError, F3dzResult};
@@ -293,54 +293,84 @@ fn encode_page(
     } else {
         fine_quantized.clone()
     };
-    let (predictor_id, selected_plane, base_scale, base_tokens, base_layer) =
+    let (predictor_id, selected_plane, base_scale, base_tokens, mut base_layer) =
         select_predictor_layer(&base_quantized, width, height, force_order_zero)?;
+    let base_residual_tokens =
+        super::predict::denormalize_residual_tokens(&base_tokens, base_scale)?;
     let decoded_base = decode_residual_tokens(
-        &super::predict::denormalize_residual_tokens(&base_tokens, base_scale)?,
+        &base_residual_tokens,
         width,
         predictor_id,
         selected_plane,
         None,
     )?;
+    let gpu_fast = predictor_id != PREDICTOR_LORENZO
+        || lorenzo_prefix_safe(&base_residual_tokens, width, &decoded_base);
     let base_reconstructed = reconstruct_values(&decoded_base, base_step);
     let base_max_abs_err = checked_max_error(source, &base_reconstructed, base_bound)?;
 
-    let (enhancement_predictor, enhancement_scale, enhancement_layer, refined_quantized) =
-        if progressive {
-            let enhancement_tokens = encode_residual_tokens(
-                &fine_quantized,
-                width,
-                PREDICTOR_PREVIOUS_LOD,
-                PlaneModel::default(),
-                Some(&decoded_base),
-            )?;
-            let (scale, enhancement_tokens) = normalize_residual_tokens(&enhancement_tokens)?;
-            let layer = encode_token_layer(&enhancement_tokens)?;
-            let decoded = decode_residual_tokens(
-                &super::predict::denormalize_residual_tokens(&enhancement_tokens, scale)?,
-                width,
-                PREDICTOR_PREVIOUS_LOD,
-                PlaneModel::default(),
-                Some(&decoded_base),
-            )?;
-            (PREDICTOR_PREVIOUS_LOD, scale, layer, decoded)
-        } else {
-            (predictor_id, 1, Vec::new(), decoded_base.clone())
-        };
+    let (
+        enhancement_predictor,
+        enhancement_scale,
+        mut enhancement_layer,
+        refined_quantized,
+        enhancement_direct,
+    ) = if progressive {
+        let enhancement_tokens = encode_residual_tokens(
+            &fine_quantized,
+            width,
+            PREDICTOR_PREVIOUS_LOD,
+            PlaneModel::default(),
+            Some(&decoded_base),
+        )?;
+        let (scale, enhancement_tokens) = normalize_residual_tokens(&enhancement_tokens)?;
+        let layer = encode_token_layer(&enhancement_tokens)?;
+        let direct = pack_direct_residual_tokens(&enhancement_tokens);
+        let decoded = decode_residual_tokens(
+            &super::predict::denormalize_residual_tokens(&enhancement_tokens, scale)?,
+            width,
+            PREDICTOR_PREVIOUS_LOD,
+            PlaneModel::default(),
+            Some(&decoded_base),
+        )?;
+        (PREDICTOR_PREVIOUS_LOD, scale, layer, decoded, direct)
+    } else {
+        (predictor_id, 1, Vec::new(), decoded_base.clone(), None)
+    };
+    let base_direct_layer = pack_direct_residual_tokens(&base_tokens)
+        .as_deref()
+        .map(encode_packed_layer)
+        .transpose()?;
+    let enhancement_direct_layer = enhancement_direct
+        .as_deref()
+        .map(encode_packed_layer)
+        .transpose()?;
+    let gpu_direct = gpu_fast
+        && base_direct_layer
+            .as_ref()
+            .is_some_and(|direct| direct.len() <= base_layer.len())
+        && (!progressive
+            || enhancement_direct_layer
+                .as_ref()
+                .is_some_and(|direct| direct.len() <= enhancement_layer.len()));
+    if gpu_direct {
+        base_layer = base_direct_layer.expect("direct base layer was proven available");
+        if let Some(layer) = enhancement_direct_layer {
+            enhancement_layer = layer;
+        }
+    }
     let reconstructed = reconstruct_values(&refined_quantized, fine_step);
     let max_abs_err = checked_max_error(source, &reconstructed, epsilon)?;
     let mut payload = vec![0u8; PAGE_HEADER_LEN];
     payload[0..4].copy_from_slice(&PAGE_MAGIC);
     put_u16(&mut payload, 4, VERSION);
-    put_u16(
-        &mut payload,
-        6,
-        if progressive {
-            u16::from(PAGE_FLAG_PROGRESSIVE)
-        } else {
-            0
-        },
-    );
+    let page_flags = (if progressive {
+        PAGE_FLAG_PROGRESSIVE
+    } else {
+        0
+    }) | if gpu_fast { PAGE_FLAG_GPU_FAST } else { 0 }
+        | if gpu_direct { PAGE_FLAG_GPU_DIRECT } else { 0 };
+    put_u16(&mut payload, 6, u16::from(page_flags));
     payload[8] = predictor_id;
     payload[9] = enhancement_predictor;
     put_i32(&mut payload, 12, selected_plane.x_slope);
@@ -370,11 +400,7 @@ fn encode_page(
     payload.extend_from_slice(&enhancement_layer);
     Ok(EncodedPage {
         predictor_id,
-        flags: if progressive {
-            PAGE_FLAG_PROGRESSIVE
-        } else {
-            0
-        },
+        flags: page_flags,
         base_layer_len,
         max_abs_err,
         base_max_abs_err,
@@ -488,10 +514,16 @@ pub fn base_only_stream(data: &[u8]) -> F3dzResult<Vec<u8>> {
         put_u16(
             &mut payload,
             6,
-            u16::from(PAGE_FLAG_PROGRESSIVE | PAGE_FLAG_BASE_ONLY),
+            u16::from(
+                PAGE_FLAG_PROGRESSIVE
+                    | PAGE_FLAG_BASE_ONLY
+                    | (entry.flags & (PAGE_FLAG_GPU_FAST | PAGE_FLAG_GPU_DIRECT)),
+            ),
         );
         put_u32(&mut payload, 28, 0);
-        entry.flags = PAGE_FLAG_PROGRESSIVE | PAGE_FLAG_BASE_ONLY;
+        entry.flags = PAGE_FLAG_PROGRESSIVE
+            | PAGE_FLAG_BASE_ONLY
+            | (entry.flags & (PAGE_FLAG_GPU_FAST | PAGE_FLAG_GPU_DIRECT));
         entry.payload_offset = payload_offset;
         entry.payload_len = u32::try_from(payload.len()).map_err(|_| {
             F3dzError::InvalidArgument("base-only payload exceeds u32 length".to_string())
@@ -514,6 +546,10 @@ pub fn base_only_stream(data: &[u8]) -> F3dzResult<Vec<u8>> {
 
 pub(crate) fn encode_token_layer(tokens: &[u32]) -> F3dzResult<Vec<u8>> {
     let bytes = pack_residual_tokens(tokens)?;
+    encode_packed_layer(&bytes)
+}
+
+fn encode_packed_layer(bytes: &[u8]) -> F3dzResult<Vec<u8>> {
     RansEncoded::encode(&bytes)?.to_bytes()
 }
 
@@ -665,5 +701,34 @@ mod tests {
         assert!(!decoded.base_quality);
         checked_max_error(&source, &decoded.values, 0.5).unwrap();
         assert!(base_only_stream(&encoded).is_err());
+    }
+
+    #[test]
+    fn finite_benchmark_pages_are_marked_for_fast_gpu_reconstruction() {
+        let side = 512usize;
+        let source: Vec<f32> = (0..side * side)
+            .map(|index| {
+                let x = (index % side) % 64;
+                let y = (index / side) % 64;
+                let wave = ((x * 17 + y * 31 + (x ^ y) * 3) % 97) as f32 * 0.03125;
+                x as f32 * 0.125 + y as f32 * 0.0625 + wave
+            })
+            .collect();
+        let mut options = EncodeOptions::new(0.125);
+        options.progressive = false;
+        let encoded = encode_dem(&source, side as u32, side as u32, &options).unwrap();
+        let (_, entries) = parse_prefix(&encoded).unwrap();
+        assert_eq!(entries.len(), 64);
+        assert!(entries.iter().all(PageIndexEntry::gpu_fast));
+        let direct_pages = entries.iter().filter(|entry| entry.gpu_direct()).count();
+        assert_eq!(
+            direct_pages,
+            entries.len(),
+            "direct pages={direct_pages}, predictors={:?}",
+            entries
+                .iter()
+                .map(|entry| entry.predictor_id)
+                .collect::<Vec<_>>()
+        );
     }
 }
