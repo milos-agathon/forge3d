@@ -81,6 +81,12 @@ def _expand_grid(layer: dict) -> list[dict]:
     return polygons
 
 
+def _throughput_point(
+    point: list[float], scale: float, offset: tuple[float, float]
+) -> list[float]:
+    return [offset[0] + scale * point[0], offset[1] + scale * point[1]]
+
+
 def _throughput_scenes() -> tuple[dict, dict, dict]:
     width, height = 1920, 1080
     columns, rows = 500, 200
@@ -103,10 +109,45 @@ def _throughput_scenes() -> tuple[dict, dict, dict]:
 
     torture_polygons = []
     torture_lines = []
-    for case in _load_sheet()["cases"]:
+    for case_index, case in enumerate(_load_sheet()["cases"]):
+        # Lay the committed cases out in a 5x2 proof sheet.  Reusing their
+        # original 16-32 px coordinates in a 1920x1080 NDC conversion makes
+        # lyon legitimately reject the smallest default-path triangles before
+        # either renderer is timed.  Uniformly fitting each case into a
+        # 320x320 cell preserves every shape and edge slope while giving the
+        # legacy tessellator a renderable, equivalent throughput input.
+        scale = min(320.0 / case["width"], 320.0 / case["height"])
+        offset = (
+            float((case_index % 5) * 384 + 32),
+            float((case_index // 5) * 540 + 64),
+        )
         for layer in case["layers"]:
-            torture_polygons.extend(_expand_grid(layer))
-            torture_lines.extend(layer.get("polylines", []))
+            for polygon in _expand_grid(layer):
+                torture_polygons.append(
+                    {
+                        "exterior": [
+                            _throughput_point(point, scale, offset)
+                            for point in polygon["exterior"]
+                        ],
+                        "holes": [
+                            [
+                                _throughput_point(point, scale, offset)
+                                for point in ring
+                            ]
+                            for ring in polygon.get("holes", [])
+                        ],
+                    }
+                )
+            for polyline in layer.get("polylines", []):
+                torture_lines.append(
+                    {
+                        **polyline,
+                        "path": [
+                            _throughput_point(point, scale, offset)
+                            for point in polyline["path"]
+                        ],
+                    }
+                )
 
     line_layer = {
         "name": "100k-road-plus-stroke-torture",
@@ -156,6 +197,38 @@ def test_committed_torture_sheet_has_every_required_primitive_class():
     grid = mosaic["layers"][1]["polygon_grid"]
     assert grid["columns"] * grid["rows"] == 100
     assert cases["hairline_stroke_0_5px"]["layers"][0]["polylines"][0]["width"] == 0.5
+    near_horizontal = cases["near_horizontal_slope_1e_4"]["layers"][0]["polygons"][
+        0
+    ]["exterior"][:2]
+    dx = near_horizontal[1][0] - near_horizontal[0][0]
+    dy = near_horizontal[1][1] - near_horizontal[0][1]
+    assert dy / dx == pytest.approx(1.0e-4)
+    midpoint_coverage = 8.0 - 0.5 * (
+        near_horizontal[0][1] + near_horizontal[1][1]
+    )
+    assert min(abs(midpoint_coverage - value) for value in (0.5, 0.75)) > 0.05
+
+
+def test_throughput_scene_contains_scaled_torture_and_exactly_100k_roads():
+    analytic, current_fill, current_line = _throughput_scenes()
+    fill_layer, line_layer = analytic["layers"]
+    torture_line_count = sum(
+        len(layer.get("polylines", []))
+        for case in _load_sheet()["cases"]
+        for layer in case["layers"]
+    )
+    assert fill_layer["polygons"] == current_fill["layers"][0]["polygons"]
+    assert line_layer["polylines"] == current_line["layers"][0]["polylines"]
+    assert len(line_layer["polylines"]) == 100_000 + torture_line_count
+    for layer in analytic["layers"]:
+        for polygon in layer["polygons"]:
+            for point in polygon["exterior"]:
+                assert 0.0 <= point[0] <= analytic["width"]
+                assert 0.0 <= point[1] <= analytic["height"]
+        for polyline in layer["polylines"]:
+            for point in polyline["path"]:
+                assert 0.0 <= point[0] <= analytic["width"]
+                assert 0.0 <= point[1] <= analytic["height"]
 
 
 def test_numpy_reference_counts_4096_samples_per_pixel():
