@@ -55,6 +55,12 @@ on:
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
       - 'tests/test_determinism_matrix.py'
+      - 'tests/test_f3dz_codec.py'
+      - 'tests/data/codec_corpus/**'
+      - 'tools/f3dz_determinism_report.py'
+      - 'src/codec/f3dz/**'
+      - 'src/py_functions/codec.rs'
+      - 'python/forge3d/codec.py'
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
   pull_request:
@@ -69,6 +75,12 @@ on:
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
       - 'tests/test_determinism_matrix.py'
+      - 'tests/test_f3dz_codec.py'
+      - 'tests/data/codec_corpus/**'
+      - 'tools/f3dz_determinism_report.py'
+      - 'src/codec/f3dz/**'
+      - 'src/py_functions/codec.rs'
+      - 'python/forge3d/codec.py'
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
 
@@ -76,6 +88,45 @@ env:
   SCENE: terra_determinata_v1
 
 jobs:
+  f3dz-stream:
+    name: f3dz stream (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build extension
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> "$GITHUB_ENV"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
+          python -m pip install -U pip maturin numpy pytest
+          maturin develop --release
+      - name: Reproduce each stream twice against the committed hashes
+        shell: bash
+        run: |
+          mkdir -p f3dz-determinism
+          python tools/f3dz_determinism_report.py \
+            --output "f3dz-determinism/${{ matrix.os }}.json"
+          python -m pytest \
+            tests/test_f3dz_codec.py::test_error_bound_stored_page_error_nan_and_determinism \
+            tests/test_f3dz_codec.py::test_cross_platform_determinism_hashes \
+            -v --tb=short
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f3dz-determinism-${{ matrix.os }}
+          path: f3dz-determinism/
+          if-no-files-found: error
+
   render:
     name: render (${{ matrix.leg }})
     strategy:

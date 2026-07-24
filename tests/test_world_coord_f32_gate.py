@@ -15,15 +15,15 @@ SANCTIONED = "src/camera/anchor.rs"
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1323
-EXPECTED_CONVERSION_SHA256 = "28d1cc9db71b48c818577782ef697f54a255a6064333cf9870fd6eb1d5ba9bf6"
+EXPECTED_CONVERSION_COUNT = 1327
+EXPECTED_CONVERSION_SHA256 = "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4"
 
-# Reviewed TERMINUS transition from the pinned pre-remediation inventory. The
-# conversion count is unchanged: only the statement containing the existing
-# f64-to-f32 conversion moved behind a checked eight-byte reader.
+# The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
+# four integer-to-f32 reconstruction conversions in predict.rs; those are
+# included in the current count and digest above without weakening the reader
+# transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "base_count": 1323,
-    "base_digest": "f091a37320becd54518275739b3d832d8b9820e45960ba85ce6a91a30eecc5bc",
+    "current_count": 1327,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -177,7 +177,7 @@ def test_all_required_rejecting_probes_change_the_inventory():
 def test_reviewed_checked_reader_inventory_transition_is_exact():
     sites = conversion_inventory()
     transition = REVIEWED_INVENTORY_TRANSITION
-    assert len(sites) == transition["base_count"] == EXPECTED_CONVERSION_COUNT
+    assert len(sites) == transition["current_count"] == EXPECTED_CONVERSION_COUNT
     assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
     assert transition["added"] in sites
     assert transition["removed"] not in sites

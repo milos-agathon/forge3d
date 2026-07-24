@@ -189,3 +189,14 @@ def test_cross_platform_determinism_hashes() -> None:
             encoded = compress_dem(source, eps, progressive=True)
             key = f"eps_{str(eps).replace('.', '_')}"
             assert hashlib.sha256(encoded).hexdigest() == expected[name][key]
+
+
+def test_physical_gpu_ci_contract_is_zero_skip_and_records_benchmark() -> None:
+    workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml").read_text()
+    assert "test-f3dz-gpu:" in workflow
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in workflow
+    assert "FORGE3D_REQUIRE_F3DZ_GPU: '1'" in workflow
+    assert "python -m pytest tests/test_f3dz_codec.py" in workflow
+    assert "scripts/assert_junit_zero_skips.py" in workflow
+    assert "cargo bench --bench f3dz_bench" in workflow
+    assert "f3dz-physical-gpu-evidence" in workflow
