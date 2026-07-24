@@ -396,6 +396,7 @@ else:
             sun_direction: tuple[float, float, float] = (0.4, 0.8, -0.2),
             settings: SmokeRenderSettings | None = None,
             certificate: bool | str | Path = False,
+            cache: str | Path | None = None,
         ) -> np.ndarray:
             del camera_pos, target, up, fovy_deg
             settings = settings or SmokeRenderSettings()
@@ -406,10 +407,11 @@ else:
                 sun_direction=sun_direction,
                 settings=settings,
                 certificate=certificate,
+                cache=cache,
             )
 
         @_captured_cpu_render(
-            "python.smoke.render_projection_rgba", "smoke.python_projection", draw_calls=1
+            "python.smoke.render_projection_rgba", "smoke.cpu_projection", draw_calls=1
         )
         def render_projection_rgba(
             self,
@@ -419,7 +421,9 @@ else:
             sun_direction: tuple[float, float, float] = (0.4, 0.8, -0.2),
             settings: SmokeRenderSettings | None = None,
             certificate: bool | str | Path = False,
+            cache: str | Path | None = None,
         ) -> np.ndarray:
+            _ = cache
             from . import _degradation
 
             _degradation.record(

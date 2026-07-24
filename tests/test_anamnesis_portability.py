@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+import forge3d as f3d
+import numpy as np
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DRIVER = ROOT / "scripts" / "check_anamnesis_portability.py"
+
+
+def test_ci_portability_seed_uses_windows_vulkan():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    seed_job = ci.split("  test-anamnesis-portability-seed:", 1)[1].split(
+        "\n  test-anamnesis-portability:", 1
+    )[0]
+    assert (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-producer]"
+        in seed_job
+    )
+    assert "WGPU_BACKENDS: vulkan" in seed_job
+    assert "name: wheels-windows" in seed_job
+    assert "--producer-backend vulkan --consumer-backend dx12" in seed_job
+    assert "--machine-id-file" in seed_job
+    assert "--runner-name '${{ runner.name }}'" in seed_job
+    assert "metal" not in seed_job.lower()
+
+
+def test_portability_driver_requires_distinct_native_graph_machines():
+    source = DRIVER.read_text(encoding="utf-8")
+    assert 'machine_id == record["producer_machine_id"]' in source
+    assert 'runner_name == record.get("producer_runner_name")' in source
+    assert '"forge3d.anamnesis.native-portability/1"' in source
+    assert 'report["hits"] != _PASS_LABELS' in source
+    assert 'report["graph_command_submissions"] != 0' in source
+    assert "png_to_numpy" not in source
+    assert "render_sequence" not in source
+
+
+def test_check_rejects_same_machine_and_runner_before_native_render(tmp_path):
+    record = tmp_path / "record.json"
+    record.write_text(
+        json.dumps(
+            {
+                "schema": "forge3d.anamnesis.native-portability/1",
+                "compatibility_profile": "terra-determinata-native-portable-v1",
+                "producer_machine_id": "11111111-1111-1111-1111-111111111111",
+                "producer_runner_name": "producer-runner",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    machine = tmp_path / "machine.txt"
+    common = [
+        sys.executable,
+        str(DRIVER),
+        "check",
+        "--cache",
+        str(tmp_path / "cache"),
+        "--record",
+        str(record),
+        "--consumer-frame-blob",
+        str(tmp_path / "consumer.png"),
+        "--consumer-adapter-record",
+        str(tmp_path / "consumer.jsonl"),
+        "--machine-id-file",
+        str(machine),
+    ]
+
+    machine.write_text(
+        "11111111-1111-1111-1111-111111111111\n", encoding="utf-8"
+    )
+    same_machine = subprocess.run(
+        [*common, "--runner-name", "consumer-runner"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert same_machine.returncode != 0
+    assert "distinct physical machines" in same_machine.stderr
+
+    machine.write_text(
+        "22222222-2222-2222-2222-222222222222\n", encoding="utf-8"
+    )
+    same_runner = subprocess.run(
+        [*common, "--runner-name", "producer-runner"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert same_runner.returncode != 0
+    assert "distinct GitHub runner identities" in same_runner.stderr
+
+
+def _run(*arguments: str) -> dict:
+    completed = subprocess.run(
+        [sys.executable, str(DRIVER), *arguments],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout.splitlines()[-1])
+
+
+def test_engine_wgsl_fingerprint_uses_portable_relative_paths():
+    digest = hashlib.sha256()
+    shader_root = ROOT / "src" / "shaders"
+    for path in sorted(shader_root.rglob("*.wgsl")):
+        relative = path.relative_to(shader_root).as_posix().encode("utf-8")
+        content = path.read_bytes()
+        digest.update(relative)
+        digest.update(len(content).to_bytes(8, "little"))
+        digest.update(content)
+    native = json.loads(f3d.anamnesis_engine_fingerprint())
+    assert native["wgsl_tree_sha256"] == digest.hexdigest()
+
+
+def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
+    if os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1":
+        pytest.skip(
+            "native portability is exercised by the protected producer/consumer jobs"
+        )
+    if not f3d.has_gpu():
+        pytest.skip("portable resource rehydration requires a GPU adapter")
+    frame_blob = tmp_path / "terra.png"
+    rgba = np.zeros((512, 512, 4), dtype=np.uint8)
+    rgba[..., 0] = np.arange(512, dtype=np.uint16)[None, :] % 256
+    rgba[..., 1] = np.arange(512, dtype=np.uint16)[:, None] % 256
+    rgba[..., 2] = 127
+    rgba[..., 3] = 255
+    f3d.numpy_to_png(frame_blob, rgba)
+    golden = tmp_path / "terra.sha256"
+    golden.write_text(
+        hashlib.sha256(frame_blob.read_bytes()).hexdigest() + "  terra.png\n",
+        encoding="utf-8",
+    )
+    adapter_record = tmp_path / "adapter.jsonl"
+    adapter_record.write_text(
+        json.dumps(
+            {
+                "adapter": {
+                    "backend": "vulkan",
+                    "name": "physical-test-adapter",
+                    "software_fallback": False,
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cache = tmp_path / "cache"
+    record = tmp_path / "record.json"
+    consumer_blob = tmp_path / "consumer.png"
+    consumer_blob.write_bytes(frame_blob.read_bytes())
+    consumer_adapter = tmp_path / "consumer-adapter.jsonl"
+    consumer_adapter.write_text(
+        json.dumps(
+            {
+                "adapter": {
+                    "backend": "dx12",
+                    "name": "physical-test-consumer",
+                    "software_fallback": False,
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    producer_machine = tmp_path / "producer-machine.txt"
+    producer_machine.write_text(
+        "11111111-1111-1111-1111-111111111111\n", encoding="utf-8"
+    )
+    consumer_machine = tmp_path / "consumer-machine.txt"
+    consumer_machine.write_text(
+        "22222222-2222-2222-2222-222222222222\n", encoding="utf-8"
+    )
+
+    seeded = _run(
+        "seed",
+        "--cache",
+        str(cache),
+        "--record",
+        str(record),
+        "--frame-blob",
+        str(frame_blob),
+        "--golden",
+        str(golden),
+        "--adapter-record",
+        str(adapter_record),
+        "--machine-id-file",
+        str(producer_machine),
+        "--runner-name",
+        "producer-runner",
+    )
+    checked = _run(
+        "check",
+        "--cache",
+        str(cache),
+        "--record",
+        str(record),
+        "--consumer-frame-blob",
+        str(consumer_blob),
+        "--consumer-adapter-record",
+        str(consumer_adapter),
+        "--machine-id-file",
+        str(consumer_machine),
+        "--runner-name",
+        "consumer-runner",
+    )
+    mismatched = _run("mismatch", "--cache", str(cache), "--record", str(record))
+
+    assert seeded["misses"] > 0
+    assert checked["hit_rate"] == 1.0
+    assert checked["hashes_match"] is True
+    assert checked["distinct_machine"] is True
+    assert mismatched["hit_rate"] == 0.0
+    assert mismatched["hashes_match"] is True
+    assert mismatched["mismatch_dimension"] == "compatibility_profile"
+
+
+def test_seed_rejects_blob_that_differs_from_committed_golden(tmp_path):
+    frame_blob = tmp_path / "terra.png"
+    frame_blob.write_bytes(b"wrong pixels")
+    golden = tmp_path / "terra.sha256"
+    golden.write_text(hashlib.sha256(b"golden pixels").hexdigest() + "\n", encoding="utf-8")
+    adapter_record = tmp_path / "adapter.jsonl"
+    adapter_record.write_text(
+        json.dumps({"adapter": {"software_fallback": False}}) + "\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DRIVER),
+            "seed",
+            "--cache",
+            str(tmp_path / "cache"),
+            "--record",
+            str(tmp_path / "record.json"),
+            "--frame-blob",
+            str(frame_blob),
+            "--golden",
+            str(golden),
+            "--adapter-record",
+            str(adapter_record),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "differs from committed golden" in completed.stderr

@@ -537,7 +537,8 @@ impl PySmokeDomain {
         fovy_deg=45.0,
         sun_direction=(0.4, 0.8, -0.2),
         settings=None,
-        certificate=None
+        certificate=None,
+        cache=None
     ))]
     fn render_rgba<'py>(
         &self,
@@ -551,7 +552,9 @@ impl PySmokeDomain {
         sun_direction: (f32, f32, f32),
         settings: Option<PyRef<'_, PySmokeRenderSettings>>,
         certificate: Option<Bound<'_, PyAny>>,
+        cache: Option<Bound<'_, PyAny>>,
     ) -> PyResult<&'py PyArray3<u8>> {
+        let _ = cache;
         let certificate_capture =
             crate::core::certificate::begin_cpu_render_capture("smoke.render_rgba");
         let native_settings = settings
@@ -586,7 +589,8 @@ impl PySmokeDomain {
         view_direction=(0.0, -1.0, 0.0),
         sun_direction=(0.4, 0.8, -0.2),
         settings=None,
-        certificate=None
+        certificate=None,
+        cache=None
     ))]
     fn render_projection_rgba<'py>(
         &self,
@@ -597,7 +601,9 @@ impl PySmokeDomain {
         sun_direction: (f32, f32, f32),
         settings: Option<PyRef<'_, PySmokeRenderSettings>>,
         certificate: Option<Bound<'_, PyAny>>,
+        cache: Option<Bound<'_, PyAny>>,
     ) -> PyResult<&'py PyArray3<u8>> {
+        let _ = cache;
         let certificate_capture =
             crate::core::certificate::begin_cpu_render_capture("smoke.render_projection_rgba");
         let native_settings = settings

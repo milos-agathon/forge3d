@@ -1,6 +1,7 @@
 use super::super::*;
 use crate::py_functions::*;
 
+mod anamnesis;
 mod camera;
 mod diagnostics;
 mod geodesy;
@@ -16,6 +17,7 @@ mod tiles3d;
 
 #[cfg(feature = "extension-module")]
 pub(crate) fn register_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    anamnesis::register_anamnesis_py_functions(m)?;
     interactive::register_interactive_py_functions(m)?;
     geometry::register_geometry_py_functions(m)?;
     io_import::register_io_import_py_functions(m)?;

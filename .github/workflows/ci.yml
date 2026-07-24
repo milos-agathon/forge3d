@@ -799,8 +799,10 @@ jobs:
             'tests/test_vector_overlay_rendering.py'
           )
           $tests -join "`n" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/pytest-files.txt"
+          $pytestBaseTemp = Join-Path $env:RUNNER_TEMP "pytest-m06-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $pytestCache = Join-Path $env:RUNNER_TEMP "pytest-cache-m06-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $started = Get-Date
-          python -m pytest @tests -v --tb=short --junitxml="$env:FORGE3D_M06_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/pytest.log"
+          python -m pytest @tests -v --tb=short --basetemp=$pytestBaseTemp -o "cache_dir=$pytestCache" --junitxml="$env:FORGE3D_M06_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/pytest.log"
           $pytestCode = $LASTEXITCODE
           $finished = Get-Date
           @{
@@ -853,6 +855,252 @@ jobs:
           if-no-files-found: error
 
   # ============================================================================
+  # ANAMNESIS physical cross-backend portability
+  #
+  # Two protected NVIDIA machines are mandatory: a producer-only Vulkan runner
+  # and a consumer-only DX12 runner. Machine UUID and runner-name equality are
+  # rejecting failures. The Linux/Vulkan matrix remains the hosted harness.
+  # ============================================================================
+  test-anamnesis-portability-seed:
+    name: ANAMNESIS Physical Seed (Windows Vulkan)
+    needs: build-wheels
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-producer]
+    timeout-minutes: 20
+    env:
+      FORGE3D_DETERMINISTIC: '1'
+      WGPU_BACKEND: vulkan
+      WGPU_BACKENDS: vulkan
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE: terra-determinata-native-portable-v1
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact-head checkout
+        shell: pwsh
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) {
+            throw "ANAMNESIS checkout mismatch: expected=$expected actual=$actual"
+          }
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install exact-head wheel
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          pip install numpy pillow
+      - name: Require physical NVIDIA Vulkan producer
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "anamnesis-portability-producer-adapter.json"
+      - name: Record immutable producer machine identity
+        shell: pwsh
+        run: |
+          $identity = (Get-CimInstance Win32_ComputerSystemProduct).UUID.Trim().ToLowerInvariant()
+          if (-not $identity -or $identity -eq '00000000-0000-0000-0000-000000000000') {
+            throw "ANAMNESIS producer machine identity is absent"
+          }
+          $identity | Set-Content "anamnesis-portability-producer-machine-id.txt"
+      - name: Render TERRA golden and seed native terrain graph
+        shell: pwsh
+        run: |
+          python -m forge3d.determinism `
+            --scene terra_determinata_v1 --width 512 --height 512 `
+            --out-png anamnesis-portable-producer.png `
+            | Tee-Object -FilePath anamnesis-portable-producer.jsonl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/check_anamnesis_portability.py seed `
+            --cache anamnesis-portable-store `
+            --record anamnesis-portable-record.json `
+            --frame-blob anamnesis-portable-producer.png `
+            --golden tests/goldens/determinism/terra_determinata_v1.sha256 `
+            --adapter-record anamnesis-portable-producer.jsonl `
+            --machine-id-file anamnesis-portability-producer-machine-id.txt `
+            --runner-name '${{ runner.name }}' `
+            --producer-backend vulkan --consumer-backend dx12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anamnesis-physical-portable-store
+          path: |
+            anamnesis-portable-store/
+            anamnesis-portable-record.json
+            anamnesis-portable-producer.jsonl
+            anamnesis-portability-producer-adapter.json
+            anamnesis-portability-producer-machine-id.txt
+          if-no-files-found: error
+
+  test-anamnesis-portability:
+    name: ANAMNESIS Physical Consume (Windows DX12)
+    needs: [build-wheels, test-anamnesis-portability-seed]
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-consumer]
+    timeout-minutes: 20
+    env:
+      FORGE3D_DETERMINISTIC: '1'
+      WGPU_BACKEND: dx12
+      WGPU_BACKENDS: dx12
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE: terra-determinata-native-portable-v1
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact-head checkout
+        shell: pwsh
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) {
+            throw "ANAMNESIS checkout mismatch: expected=$expected actual=$actual"
+          }
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: anamnesis-physical-portable-store
+          path: seeded/
+      - name: Install exact-head wheel
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          pip install numpy pillow
+      - name: Require physical DX12 consumer
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --json "anamnesis-portability-consumer-adapter.json"
+      - name: Record immutable consumer machine identity
+        shell: pwsh
+        run: |
+          $identity = (Get-CimInstance Win32_ComputerSystemProduct).UUID.Trim().ToLowerInvariant()
+          if (-not $identity -or $identity -eq '00000000-0000-0000-0000-000000000000') {
+            throw "ANAMNESIS consumer machine identity is absent"
+          }
+          $identity | Set-Content "anamnesis-portability-consumer-machine-id.txt"
+      - name: Render fresh consumer and require native graph restoration
+        shell: pwsh
+        run: |
+          python -m forge3d.determinism `
+            --scene terra_determinata_v1 --width 512 --height 512 `
+            --out-png anamnesis-portable-consumer.png `
+            | Tee-Object -FilePath anamnesis-portable-consumer.jsonl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/check_anamnesis_portability.py check `
+            --cache seeded/anamnesis-portable-store `
+            --record seeded/anamnesis-portable-record.json `
+            --consumer-frame-blob anamnesis-portable-consumer.png `
+            --consumer-adapter-record anamnesis-portable-consumer.jsonl `
+            --machine-id-file anamnesis-portability-consumer-machine-id.txt `
+            --runner-name '${{ runner.name }}' `
+            --producer-backend vulkan --consumer-backend dx12 `
+            | Tee-Object -FilePath anamnesis-portability-result.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/check_anamnesis_portability.py mismatch `
+            --cache seeded/anamnesis-portable-store `
+            --record seeded/anamnesis-portable-record.json `
+            --producer-backend vulkan --consumer-backend dx12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anamnesis-portability-evidence
+          path: |
+            anamnesis-portability-result.json
+            anamnesis-portable-consumer.jsonl
+            anamnesis-portability-consumer-adapter.json
+            anamnesis-portability-consumer-machine-id.txt
+          if-no-files-found: error
+
+  # ============================================================================
+  # ANAMNESIS production acceptance
+  #
+  # Required physical-GPU lane: synthetic digests and software-adapter ABSENT
+  # markers cannot satisfy the 600-frame, exact-recompute, or 20x gates.
+  # ============================================================================
+  test-anamnesis-production:
+    name: ANAMNESIS 600-frame Production (NVIDIA Vulkan)
+    needs: build-wheels
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 50
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      FORGE3D_RUN_GPU_ANAMNESIS: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact-head checkout
+        shell: pwsh
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) {
+            throw "ANAMNESIS checkout mismatch: expected=$expected actual=$actual"
+          }
+          $actual | Set-Content "$env:RUNNER_TEMP/anamnesis-checked-out-head.txt"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install exact-head wheel and tests
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          pip install pytest numpy
+      - name: Require physical NVIDIA Vulkan terrain execution
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:RUNNER_TEMP/anamnesis-p0-adapter.json"
+      - name: Gate 600/600 bytes, exact recompute set, and 20x speedup
+        shell: pwsh
+        env:
+          FORGE3D_ANAMNESIS_RESULT_PATH: ${{ runner.temp }}/anamnesis-production-result.json
+        run: |
+          python -m pytest tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance -v --tb=short
+      - name: Reject native final-frame stale hits
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:RUNNER_TEMP "anamnesis-p0-native-junit.xml"
+          python -m pytest tests/test_anamnesis_inertness.py::test_native_terrain_cache_restores_all_graph_passes -v --tb=short --junitxml="$junit"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          if ($verifyCode -ne 0) { exit $verifyCode }
+      - name: Prove per-pass GPU resource restoration
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:RUNNER_TEMP "anamnesis-p1-gpu-restore-junit.xml"
+          python -m pytest tests/test_anamnesis_p1.py::test_public_gpu_graph_cache_restores_intermediate_texture -v --tb=short --junitxml="$junit"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          if ($verifyCode -ne 0) { exit $verifyCode }
+      - name: Upload ANAMNESIS production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: anamnesis-production-evidence
+          path: |
+            ${{ runner.temp }}/anamnesis-production-result.json
+            ${{ runner.temp }}/anamnesis-p0-native-junit.xml
+            ${{ runner.temp }}/anamnesis-p1-gpu-restore-junit.xml
+            ${{ runner.temp }}/anamnesis-p0-adapter.json
+            ${{ runner.temp }}/anamnesis-checked-out-head.txt
+          if-no-files-found: error
+
+  # ============================================================================
   # Documentation Build
   # ============================================================================
   build-docs:
@@ -897,7 +1145,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
+    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -923,6 +1171,9 @@ jobs:
              { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
              { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
              [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
+             [ "${{ needs.test-anamnesis-portability-seed.result }}" != "success" ] || \
+             [ "${{ needs.test-anamnesis-portability.result }}" != "success" ] || \
+             [ "${{ needs.test-anamnesis-production.result }}" != "success" ] || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1

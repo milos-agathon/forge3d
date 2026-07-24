@@ -5,6 +5,7 @@ Renders a north arrow or compass rose indicator for cartographic output.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Literal
 
@@ -34,8 +35,9 @@ class NorthArrow:
         self.config = config or NorthArrowConfig()
 
     @_captured_cpu_render("python.north_arrow.render", "north_arrow.cpu", draw_calls=1)
-    def render(self, *, certificate: bool | str = False) -> np.ndarray:
+    def render(self, *, certificate: bool | str = False, cache: str | None = None) -> np.ndarray:
         """Render arrow geometry and the N label through native shaping."""
+        _ = cache
         from ._map_scene_render import _draw_text
 
         image, label, anchor = self.render_geometry()
@@ -52,8 +54,11 @@ class NorthArrow:
             )
         return image
 
-    def render_geometry(self) -> tuple[np.ndarray, str | None, tuple[int, int] | None]:
+    def render_geometry(
+        self, *, cache: str | os.PathLike[str] | None = None
+    ) -> tuple[np.ndarray, str | None, tuple[int, int] | None]:
         """Return deterministic numpy geometry plus optional native-label metadata."""
+        _ = cache  # deterministic CPU helper; accepted for render-surface consistency
         cfg = self.config
         size = cfg.size
         padding = 8

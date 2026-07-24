@@ -60,6 +60,39 @@ impl MaterialSet {
     pub fn get_material(&self, index: usize) -> Option<&crate::core::material::PbrMaterial> {
         self.materials.get(index)
     }
+
+    /// Exact source bytes that can affect the uploaded terrain material set.
+    ///
+    /// ANAMNESIS stores file contents rather than mtimes so a same-path asset
+    /// edit is always a miss and a byte-identical relocation remains a hit.
+    #[cfg(feature = "extension-module")]
+    pub(crate) fn anamnesis_bytes(&self) -> std::io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"forge3d.terrain.material-set/v1\0");
+        bytes.extend_from_slice(bytemuck::cast_slice(&self.materials));
+        bytes.extend_from_slice(&self.triplanar_scale.to_bits().to_le_bytes());
+        bytes.extend_from_slice(&self.normal_strength.to_bits().to_le_bytes());
+        bytes.extend_from_slice(&self.blend_sharpness.to_bits().to_le_bytes());
+        for path in &self._texture_paths {
+            match path {
+                Some(path) => {
+                    bytes.push(1);
+                    let extension = Path::new(path)
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    bytes.extend_from_slice(&(extension.len() as u64).to_le_bytes());
+                    bytes.extend_from_slice(extension.as_bytes());
+                    let content = std::fs::read(path)?;
+                    bytes.extend_from_slice(&(content.len() as u64).to_le_bytes());
+                    bytes.extend_from_slice(&content);
+                }
+                None => bytes.push(0),
+            }
+        }
+        Ok(bytes)
+    }
 }
 
 pub(super) fn resolve_default_texture(file_name: &str) -> Option<String> {

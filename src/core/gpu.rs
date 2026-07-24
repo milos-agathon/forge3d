@@ -17,6 +17,8 @@ pub struct GpuContext {
     /// Negotiated capability set: what forge3d wanted vs. what the adapter
     /// granted. Replaces the old `Features::empty()` request.
     pub capabilities: crate::core::capabilities::CapabilitySet,
+    /// Effective DX12 shader-compiler policy used when the instance was built.
+    pub dx12_compiler: &'static str,
 }
 
 static CTX: OnceCell<GpuContext> = OnceCell::new();
@@ -189,6 +191,11 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             backends,
             ..Default::default()
         };
+        let dx12_compiler = if deterministic_mode() {
+            "fxc"
+        } else {
+            "wgpu-default"
+        };
         if deterministic_mode() {
             // Pin HLSL codegen: FXC regardless of installed DXC DLLs (see
             // deterministic_mode docs for the full fast-math policy).
@@ -360,6 +367,7 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             adapter: Arc::new(adapter),
             software_fallback,
             capabilities,
+            dx12_compiler,
         })
     })
 }

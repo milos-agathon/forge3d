@@ -167,6 +167,8 @@ pub struct ViewerTerrainData {
 #[pyclass(module = "forge3d._forge3d", name = "TerrainRenderer")]
 pub struct TerrainRenderer {
     pub(super) scene: TerrainScene,
+    pub(super) last_anamnesis_report: crate::core::anamnesis::CacheReport,
+    pub(super) last_anamnesis_graph_submissions: usize,
 }
 
 pub(super) struct OfflineAccumulationState {

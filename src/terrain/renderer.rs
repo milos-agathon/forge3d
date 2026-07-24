@@ -27,6 +27,7 @@ use super::render_params::{AddressModeNative, FilterModeNative};
 use crate::lighting::types::{Light, LightType};
 use crate::lighting::LightBuffer;
 
+mod anamnesis;
 mod aov;
 mod atmosphere;
 mod bind_groups;
@@ -40,6 +41,7 @@ mod offline;
 mod pipeline_cache;
 mod probes;
 mod py_api;
+mod render_graph;
 mod resources;
 mod runtime_contract;
 #[cfg(feature = "enable-gpu-instancing")]

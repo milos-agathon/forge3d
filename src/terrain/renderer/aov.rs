@@ -479,15 +479,52 @@ impl TerrainScene {
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
+        let (height_height, height_width) = heightmap.as_array().dim();
+        let mut declaration_uniforms = Vec::new();
+        declaration_uniforms.extend_from_slice(&params.size_px.0.to_le_bytes());
+        declaration_uniforms.extend_from_slice(&params.size_px.1.to_le_bytes());
+        declaration_uniforms.extend_from_slice(&(height_width as u64).to_le_bytes());
+        declaration_uniforms.extend_from_slice(&(height_height as u64).to_le_bytes());
+        declaration_uniforms.extend_from_slice(&time_seconds.to_bits().to_le_bytes());
+        declaration_uniforms.extend_from_slice(
+            &params
+                .terrain_data_revision
+                .unwrap_or(u64::MAX)
+                .to_le_bytes(),
+        );
+        let mut graph = super::render_graph::build_terrain_render_graph(
+            params.size_px.0,
+            params.size_px.1,
+            params.size_px.0,
+            params.size_px.1,
+            height_width as u32,
+            height_height as u32,
+            self.csm_renderer.allocation_size,
+            self.csm_renderer.allocation_layers,
+            self.color_format,
+            true,
+            super::render_graph::TerrainPassDeclarations {
+                prepare: declaration_uniforms.clone(),
+                shadow: declaration_uniforms.clone(),
+                forward: declaration_uniforms.clone(),
+                resolve: declaration_uniforms,
+                prepared_output_size: std::mem::size_of::<crate::terrain::TerrainUniforms>() as u64,
+            },
+            false,
+        )?
+        .plan;
+        debug_assert_eq!(graph.labels.len(), 4);
         let (certificate_capture, _allocation_scope) =
             self.begin_certificate_capture("terrain.render_internal_with_aov");
         let mut timing = self.take_render_timing();
         let decoded = params.decoded();
-        self.prepare_frame_lighting(decoded)?;
-
-        let height_inputs =
-            self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
-        self.prepare_geometry(params)?;
+        let height_inputs = graph.execute_with_barriers("terrain.prepare", |_barriers| {
+            self.prepare_frame_lighting(decoded)?;
+            let inputs =
+                self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
+            self.prepare_geometry(params)?;
+            Ok::<_, anyhow::Error>(inputs)
+        })?;
         let probe_world_span = if is_mesh_camera_mode(&params.camera_mode) {
             params.terrain_span.max(1e-3)
         } else {
@@ -633,16 +670,19 @@ impl TerrainScene {
         )?;
         ts_end(&mut timing, &mut encoder, sun_vis_scope, 0);
 
-        let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
-        let shadow_setup = self.prepare_shadow_setup(
-            &mut encoder,
-            params,
-            decoded,
-            &height_inputs.heightmap_view,
-            height_inputs.width,
-            height_inputs.height,
-        )?;
-        ts_end(&mut timing, &mut encoder, shadow_scope, 0);
+        let shadow_setup = graph.execute_with_barriers("terrain.shadow", |_barriers| {
+            let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
+            let setup = self.prepare_shadow_setup(
+                &mut encoder,
+                params,
+                decoded,
+                &height_inputs.heightmap_view,
+                height_inputs.width,
+                height_inputs.height,
+            )?;
+            ts_end(&mut timing, &mut encoder, shadow_scope, 0);
+            Ok::<_, anyhow::Error>(setup)
+        })?;
         let shadow_bind_group = shadow_setup
             .shadow_bind_group
             .as_ref()
@@ -726,21 +766,29 @@ impl TerrainScene {
             ts_end(&mut timing, &mut encoder, bg_scope, 1);
         }
 
-        let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
-        self.run_main_pass_with_aov(
-            &mut encoder,
-            params,
-            &render_targets,
-            &aov_targets,
-            &pass_bind_groups.main,
-            &ibl_bind_group,
-            shadow_bind_group,
-            &pass_bind_groups.fog,
-            &water_reflection_bind_group,
-            &pass_bind_groups.material_layer,
-            sky_texture.is_some(),
-        )?;
-        ts_end(&mut timing, &mut encoder, main_scope, 1);
+        graph.execute_with_barriers("terrain.forward_aov", |barriers| {
+            if barriers.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "terrain.forward_aov lost its compiled shadow transition"
+                ));
+            }
+            let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
+            self.run_main_pass_with_aov(
+                &mut encoder,
+                params,
+                &render_targets,
+                &aov_targets,
+                &pass_bind_groups.main,
+                &ibl_bind_group,
+                shadow_bind_group,
+                &pass_bind_groups.fog,
+                &water_reflection_bind_group,
+                &pass_bind_groups.material_layer,
+                sky_texture.is_some(),
+            )?;
+            ts_end(&mut timing, &mut encoder, main_scope, 1);
+            Ok::<_, anyhow::Error>(())
+        })?;
 
         #[cfg(feature = "enable-gpu-instancing")]
         {
@@ -764,49 +812,72 @@ impl TerrainScene {
         }
 
         let needs_scaling = render_targets.needs_scaling;
-        let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
-        let (final_texture, final_width, final_height) =
-            self.resolve_output(&mut encoder, params, decoded, render_targets)?;
+        let (
+            final_texture,
+            final_width,
+            final_height,
+            albedo_texture,
+            normal_texture,
+            depth_texture,
+        ) = graph.execute_with_barriers("terrain.resolve_aov", |barriers| {
+            if barriers.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "terrain.resolve_aov lost its compiled beauty transition"
+                ));
+            }
+            let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
+            let (final_texture, final_width, final_height) =
+                self.resolve_output(&mut encoder, params, decoded, &render_targets)?;
 
-        let albedo_texture = self.resolve_aux_output(
-            &mut encoder,
-            decoded,
-            aov_targets.albedo.internal_texture,
-            aov_targets.albedo.internal_view,
-            final_width,
-            final_height,
-            needs_scaling,
-            false,
-            "terrain.aov.albedo.resolved",
-        )?;
-        let normal_texture = self.resolve_aux_output(
-            &mut encoder,
-            decoded,
-            aov_targets.normal.internal_texture,
-            aov_targets.normal.internal_view,
-            final_width,
-            final_height,
-            needs_scaling,
-            true,
-            "terrain.aov.normal.resolved",
-        )?;
-        let depth_texture = self.resolve_aux_output(
-            &mut encoder,
-            decoded,
-            aov_targets.depth.internal_texture,
-            aov_targets.depth.internal_view,
-            final_width,
-            final_height,
-            needs_scaling,
-            false,
-            "terrain.aov.depth.resolved",
-        )?;
-        ts_end(&mut timing, &mut encoder, resolve_scope, 4);
-        self.stage_material_vt_feedback_readback(&mut encoder)?;
+            let albedo_texture = self.resolve_aux_output(
+                &mut encoder,
+                decoded,
+                aov_targets.albedo.internal_texture,
+                aov_targets.albedo.internal_view,
+                final_width,
+                final_height,
+                needs_scaling,
+                false,
+                "terrain.aov.albedo.resolved",
+            )?;
+            let normal_texture = self.resolve_aux_output(
+                &mut encoder,
+                decoded,
+                aov_targets.normal.internal_texture,
+                aov_targets.normal.internal_view,
+                final_width,
+                final_height,
+                needs_scaling,
+                true,
+                "terrain.aov.normal.resolved",
+            )?;
+            let depth_texture = self.resolve_aux_output(
+                &mut encoder,
+                decoded,
+                aov_targets.depth.internal_texture,
+                aov_targets.depth.internal_view,
+                final_width,
+                final_height,
+                needs_scaling,
+                false,
+                "terrain.aov.depth.resolved",
+            )?;
+            ts_end(&mut timing, &mut encoder, resolve_scope, 4);
+            self.stage_material_vt_feedback_readback(&mut encoder)?;
+            Ok::<_, anyhow::Error>((
+                final_texture,
+                final_width,
+                final_height,
+                albedo_texture,
+                normal_texture,
+                depth_texture,
+            ))
+        })?;
         if let Some(t) = timing.as_mut() {
             t.resolve_queries(&mut encoder);
         }
         self.queue.submit(Some(encoder.finish()));
+        graph.finish()?;
         self.finish_material_vt_frame()?;
 
         self.record_render_timings(&mut timing);

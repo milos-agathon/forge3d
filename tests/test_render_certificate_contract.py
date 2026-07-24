@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+import sys
 
 import numpy as np
 
@@ -58,6 +59,48 @@ DOCUMENTED_EXCLUSIONS = {
 }
 
 
+RENDER_ENTRYPOINTS = {
+    "Scene.render_rgba": f3d.Scene.render_rgba,
+    "Scene.render_png": f3d.Scene.render_png,
+    "render_debug_pattern_frame": _native.render_debug_pattern_frame,
+    "render_brdf_tile": _native.render_brdf_tile,
+    "render_brdf_tile_overrides": _native.render_brdf_tile_overrides,
+    "TerrainRenderer.render_terrain_pbr_pom": f3d.TerrainRenderer.render_terrain_pbr_pom,
+    "TerrainRenderer.render_with_aov": f3d.TerrainRenderer.render_with_aov,
+    "render_adjudication_pair": f3d.render_adjudication_pair,
+    "hybrid_render_terrain_reference": f3d.hybrid_render_terrain_reference,
+    "render_offscreen_rgba": render_offscreen_rgba,
+    "Renderer.render_triangle_rgba": f3d.Renderer.render_triangle_rgba,
+    "Renderer.render_triangle_png": f3d.Renderer.render_triangle_png,
+    "MapScene.render": MapScene.render,
+    "render_offline": render_offline,
+    "determinism.render_reference": determinism.render_reference,
+    "PathTracer.render_rgba": path_tracing.PathTracer.render_rgba,
+    "PathTracer.render_progressive": path_tracing.PathTracer.render_progressive,
+    "path_tracing.render_aovs": path_tracing.render_aovs,
+    "path_tracing.render_rgba": path_tracing.render_rgba,
+    "path_tracing.hybrid_render_terrain_reference": path_tracing.hybrid_render_terrain_reference,
+    "HybridRenderer.render_sdf_scene": HybridRenderer.render_sdf_scene,
+    "sdf.render_simple_scene": sdf.render_simple_scene,
+    "Legend.render": Legend.render,
+    "NorthArrow.render": NorthArrow.render,
+    "ScaleBar.render": ScaleBar.render,
+    "RestirDI.render_frame": RestirDI.render_frame,
+    "geometry.instance_mesh_gpu_render": geometry.instance_mesh_gpu_render,
+    "SmokeDomain.render_rgba": SmokeDomain.render_rgba,
+    "SmokeDomain.render_projection_rgba": SmokeDomain.render_projection_rgba,
+    "VectorScene.render_oit": VectorScene.render_oit,
+    "VectorScene.render_pick_map": VectorScene.render_pick_map,
+    "VectorScene.render_oit_and_pick": VectorScene.render_oit_and_pick,
+    "vector_render_oit_py": f3d.vector_render_oit_py,
+    "vector_render_oit_edl_py": f3d.vector_render_oit_edl_py,
+    "vector_render_pick_map_py": f3d.vector_render_pick_map_py,
+    "vector_render_oit_and_pick_py": f3d.vector_render_oit_and_pick_py,
+    "vector_render_polygons_fill_py": f3d.vector_render_polygons_fill_py,
+    "vector_oit_and_pick_demo": f3d.vector_oit_and_pick_demo,
+}
+
+
 def test_brdf_certificate_contract_is_in_public_stub() -> None:
     stub = (Path(f3d.__file__).with_name("__init__.pyi")).read_text(encoding="utf-8")
     for name in ("render_brdf_tile", "render_brdf_tile_overrides"):
@@ -67,52 +110,21 @@ def test_brdf_certificate_contract_is_in_public_stub() -> None:
 
 
 def test_public_render_entrypoints_expose_certificate_keyword() -> None:
-    entrypoints = {
-        "Scene.render_rgba": f3d.Scene.render_rgba,
-        "Scene.render_png": f3d.Scene.render_png,
-        "render_debug_pattern_frame": _native.render_debug_pattern_frame,
-        "render_brdf_tile": _native.render_brdf_tile,
-        "render_brdf_tile_overrides": _native.render_brdf_tile_overrides,
-        "TerrainRenderer.render_terrain_pbr_pom": f3d.TerrainRenderer.render_terrain_pbr_pom,
-        "TerrainRenderer.render_with_aov": f3d.TerrainRenderer.render_with_aov,
-        "render_adjudication_pair": f3d.render_adjudication_pair,
-        "hybrid_render_terrain_reference": f3d.hybrid_render_terrain_reference,
-        "render_offscreen_rgba": render_offscreen_rgba,
-        "Renderer.render_triangle_rgba": f3d.Renderer.render_triangle_rgba,
-        "Renderer.render_triangle_png": f3d.Renderer.render_triangle_png,
-        "MapScene.render": MapScene.render,
-        "render_offline": render_offline,
-        "determinism.render_reference": determinism.render_reference,
-        "PathTracer.render_rgba": path_tracing.PathTracer.render_rgba,
-        "PathTracer.render_progressive": path_tracing.PathTracer.render_progressive,
-        "path_tracing.render_aovs": path_tracing.render_aovs,
-        "path_tracing.render_rgba": path_tracing.render_rgba,
-        "path_tracing.hybrid_render_terrain_reference": path_tracing.hybrid_render_terrain_reference,
-        "HybridRenderer.render_sdf_scene": HybridRenderer.render_sdf_scene,
-        "sdf.render_simple_scene": sdf.render_simple_scene,
-        "Legend.render": Legend.render,
-        "NorthArrow.render": NorthArrow.render,
-        "ScaleBar.render": ScaleBar.render,
-        "RestirDI.render_frame": RestirDI.render_frame,
-        "geometry.instance_mesh_gpu_render": geometry.instance_mesh_gpu_render,
-        "SmokeDomain.render_rgba": SmokeDomain.render_rgba,
-        "SmokeDomain.render_projection_rgba": SmokeDomain.render_projection_rgba,
-        "VectorScene.render_oit": VectorScene.render_oit,
-        "VectorScene.render_pick_map": VectorScene.render_pick_map,
-        "VectorScene.render_oit_and_pick": VectorScene.render_oit_and_pick,
-        "vector_render_oit_py": f3d.vector_render_oit_py,
-        "vector_render_oit_edl_py": f3d.vector_render_oit_edl_py,
-        "vector_render_pick_map_py": f3d.vector_render_pick_map_py,
-        "vector_render_oit_and_pick_py": f3d.vector_render_oit_and_pick_py,
-        "vector_render_polygons_fill_py": f3d.vector_render_polygons_fill_py,
-        "vector_oit_and_pick_demo": f3d.vector_oit_and_pick_demo,
-    }
     missing = [
         name
-        for name, entrypoint in entrypoints.items()
+        for name, entrypoint in RENDER_ENTRYPOINTS.items()
         if "certificate" not in inspect.signature(entrypoint).parameters
     ]
     assert not missing, f"render entrypoints missing certificate= contract: {missing}"
+
+
+def test_public_render_entrypoints_expose_anamnesis_cache_keyword() -> None:
+    missing = [
+        name
+        for name, entrypoint in RENDER_ENTRYPOINTS.items()
+        if "cache" not in inspect.signature(entrypoint).parameters
+    ]
+    assert not missing, f"render entrypoints missing cache= contract: {missing}"
 
 
 def test_brdf_tile_emits_a_live_certified_pass() -> None:
@@ -168,6 +180,64 @@ def test_render_surface_sweep_has_no_uncertified_entrypoints() -> None:
     assert offenders == [], (
         "public render_* callables lack both a certificate= contract and a "
         f"documented exclusion: {offenders}"
+    )
+
+
+def _discover_public_render_surface() -> dict[str, object]:
+    """Discover module functions and class methods instead of trusting a list."""
+    modules = (f3d, _native, determinism, geometry, path_tracing, terrain_demo, sdf)
+    candidates: dict[str, object] = {}
+    for module in modules:
+        for name in dir(module):
+            obj = getattr(module, name)
+            if name.startswith("render_") and callable(obj):
+                candidates.setdefault(name, obj)
+    classes = {
+        cls.__name__: cls
+        for cls in (
+            f3d.Scene,
+            f3d.Renderer,
+            f3d.TerrainRenderer,
+            MapScene,
+            MapPlate,
+            Legend,
+            NorthArrow,
+            ScaleBar,
+            path_tracing.PathTracer,
+            HybridRenderer,
+            RestirDI,
+            SmokeDomain,
+            VectorScene,
+            ViewerHandle,
+            ViewerWidget,
+        )
+    }
+    for class_name, cls in classes.items():
+        for method_name in dir(cls):
+            if not method_name.startswith("render"):
+                continue
+            obj = getattr(cls, method_name)
+            if callable(obj):
+                candidates[f"{class_name}.{method_name}"] = obj
+    return candidates
+
+
+def test_render_surface_sweep_has_no_uncached_entrypoints() -> None:
+    """ANAMNESIS API gate: newly added render surfaces cannot evade cache=."""
+    offenders = []
+    for name, obj in sorted(_discover_public_render_surface().items()):
+        if name in DOCUMENTED_EXCLUSIONS or name.rsplit(".", 1)[-1] in DOCUMENTED_EXCLUSIONS:
+            continue
+        try:
+            params = inspect.signature(obj).parameters
+        except (TypeError, ValueError):
+            offenders.append(f"{name} (signature not introspectable)")
+            continue
+        if "cache" not in params:
+            offenders.append(name)
+    assert offenders == [], (
+        "public render callables lack both a cache= contract and a documented "
+        f"non-render exclusion: {offenders}"
     )
 
 
@@ -305,7 +375,12 @@ def test_native_smoke_certificate_uses_cpu_identity():
     assert [entry["label"] for entry in cert["passes"]] == ["smoke.cpu_projection"]
     assert cert["adapter"]["backend"] == "cpu"
     assert cert["engine"]["wgsl_module_hashes"] == {}
-    assert cert["degradations"] == []
+    if sys.version_info >= (3, 14):
+        assert {(item["kind"], item["name"]) for item in cert["degradations"]} == {
+            ("cpu_fallback", "smoke.render")
+        }
+    else:
+        assert cert["degradations"] == []
 
 
 def test_fallback_renderer_discloses_cpu_degradation():

@@ -55,6 +55,10 @@ on:
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
       - 'tests/test_determinism_matrix.py'
+      - 'python/forge3d/anamnesis.py'
+      - 'src/core/anamnesis/**'
+      - 'scripts/check_anamnesis_portability.py'
+      - 'tests/test_anamnesis_*.py'
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
   pull_request:
@@ -69,6 +73,10 @@ on:
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
       - 'tests/test_determinism_matrix.py'
+      - 'python/forge3d/anamnesis.py'
+      - 'src/core/anamnesis/**'
+      - 'scripts/check_anamnesis_portability.py'
+      - 'tests/test_anamnesis_*.py'
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
 
@@ -102,6 +110,8 @@ jobs:
     continue-on-error: ${{ !matrix.gated }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -190,6 +200,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Forbid relaxed-SIMD in any build configuration (GATED)
         run: |
           # Relaxed SIMD is nondeterministic by design (results may vary per
@@ -212,6 +224,166 @@ jobs:
           path: hash-out/
           if-no-files-found: error
 
+  anamnesis-seed:
+    name: anamnesis golden-store seed (linux/vulkan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact-head checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Mesa Vulkan drivers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
+      - name: Build extension
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -U pip maturin numpy pytest
+          maturin develop --release
+      - name: Gate ANAMNESIS incrementality, speed, hermeticity, and corruption handling
+        run: |
+          source .venv/bin/activate
+          python -m pytest \
+            tests/test_anamnesis_incremental.py \
+            tests/test_anamnesis_adversarial_keys.py \
+            tests/test_anamnesis_inertness.py \
+            tests/test_anamnesis_hermeticity.py \
+            tests/test_anamnesis_portability.py \
+            tests/test_anamnesis_uniform_layout.py \
+            -v --tb=short
+      - name: Render golden and populate portable store
+        shell: bash
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKEND: vulkan
+          WGPU_BACKENDS: vulkan
+        run: |
+          source .venv/bin/activate
+          set +e
+          python scripts/terrain_ci_probe.py \
+            --mode terrain --json anamnesis-seed-adapter.json
+          probe_status=$?
+          set -e
+          if [ "$probe_status" -eq 2 ]; then
+            echo "ABSENT: terrain_ci_probe proved no physical Linux/Vulkan adapter" \
+              > ANAMNESIS.ABSENT
+          elif [ "$probe_status" -ne 0 ]; then
+            echo "ANAMNESIS seed probe crashed on a CI-safe adapter"
+            exit "$probe_status"
+          else
+            set -o pipefail
+            python -m forge3d.determinism \
+              --scene terra_determinata_v1 --width 512 --height 512 \
+              --out-png anamnesis-golden.png \
+              | tee anamnesis-render.jsonl
+            set +o pipefail
+            FORGE3D_RUN_GPU_ANAMNESIS=1 \
+            FORGE3D_ANAMNESIS_RESULT_PATH=anamnesis-gpu-result.json \
+              python -m pytest \
+                tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance \
+                -v --tb=short
+            python scripts/check_anamnesis_portability.py seed \
+              --cache anamnesis-store --record anamnesis-record.json \
+              --frame-blob anamnesis-golden.png \
+              --golden tests/goldens/determinism/terra_determinata_v1.sha256 \
+              --adapter-record anamnesis-render.jsonl
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anamnesis-store-linux
+          path: |
+            anamnesis-store/
+            anamnesis-record.json
+            anamnesis-gpu-result.json
+            anamnesis-seed-adapter.json
+            ANAMNESIS.ABSENT
+          if-no-files-found: error
+
+  anamnesis-portability:
+    name: anamnesis portability consume (windows)
+    needs: anamnesis-seed
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact-head checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: anamnesis-store-linux
+          path: seeded
+      - name: Build extension
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/Scripts/activate
+          python -m pip install -U pip maturin numpy
+          maturin develop --release
+      - name: Require portable hits and mismatch isolation
+        shell: bash
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKEND: dx12
+          WGPU_BACKENDS: dx12
+        run: |
+          source .venv/Scripts/activate
+          if [ -f seeded/ANAMNESIS.ABSENT ]; then
+            echo "ABSENT: Linux/Vulkan seed host exposed no physical adapter"
+          else
+            set +e
+            python scripts/terrain_ci_probe.py \
+              --mode terrain --json anamnesis-consumer-adapter.json
+            probe_status=$?
+            set -e
+            if [ "$probe_status" -eq 2 ]; then
+              echo "ABSENT: terrain_ci_probe proved no physical Windows/DX12 adapter" \
+                > ANAMNESIS.CONSUMER.ABSENT
+              exit 0
+            elif [ "$probe_status" -ne 0 ]; then
+              echo "ANAMNESIS consumer probe crashed on a CI-safe adapter"
+              exit "$probe_status"
+            fi
+            set -o pipefail
+            python -m forge3d.determinism \
+              --scene terra_determinata_v1 --width 512 --height 512 \
+              --out-png anamnesis-consumer.png \
+              | tee anamnesis-consumer.jsonl
+            set +o pipefail
+            python scripts/check_anamnesis_portability.py check \
+              --cache seeded/anamnesis-store --record seeded/anamnesis-record.json \
+              --consumer-frame-blob anamnesis-consumer.png \
+              --consumer-adapter-record anamnesis-consumer.jsonl
+            python scripts/check_anamnesis_portability.py mismatch \
+              --cache seeded/anamnesis-store --record seeded/anamnesis-record.json
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anamnesis-hosted-consumer-evidence
+          path: |
+            anamnesis-consumer-adapter.json
+            anamnesis-consumer.jsonl
+            ANAMNESIS.CONSUMER.ABSENT
+          if-no-files-found: warn
+
   diff:
     name: diff hashes (zero-byte tolerance)
     needs: [render, wasm-policy]
@@ -219,6 +391,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/download-artifact@v4
         with:
           pattern: determinism-hash-*

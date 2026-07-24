@@ -125,6 +125,14 @@ fn uniform_buffer(
 /// under the "adjudication.raster" certificate label inside the shared
 /// `offscreen::forward` harness. Must live on the same wgpu device as
 /// `device`; pass `None` when driving a standalone device.
+pub struct RasterCacheOptions {
+    pub root: std::path::PathBuf,
+    pub max_bytes: u64,
+    pub verify_reads: bool,
+    pub capability_fingerprint_bytes: Vec<u8>,
+    pub engine_fingerprint_bytes: Vec<u8>,
+}
+
 pub fn render_raster_reference(
     device: &Device,
     queue: &Queue,
@@ -133,6 +141,19 @@ pub fn render_raster_reference(
     height: u32,
     timing: Option<&mut crate::core::gpu_timing::OneShotTiming>,
 ) -> Result<Vec<f32>, RenderError> {
+    render_raster_reference_incremental(device, queue, desc, width, height, timing, None)
+        .map(|(pixels, _)| pixels)
+}
+
+pub fn render_raster_reference_incremental(
+    device: &Device,
+    queue: &Queue,
+    desc: &ReferenceSceneDesc,
+    width: u32,
+    height: u32,
+    timing: Option<&mut crate::core::gpu_timing::OneShotTiming>,
+    cache: Option<&RasterCacheOptions>,
+) -> Result<(Vec<f32>, crate::core::anamnesis::CacheReport), RenderError> {
     if width == 0 || height == 0 {
         return Err(RenderError::Render(
             "adjudication raster reference requires non-zero width/height".into(),
@@ -367,13 +388,109 @@ pub fn render_raster_reference(
             vertices: 0..0,
         });
     }
-    let ss_pixels = crate::offscreen::forward::render_forward_hdr(
+    fn append_segment(target: &mut Vec<u8>, label: &[u8], bytes: &[u8]) {
+        target.extend_from_slice(&(label.len() as u64).to_le_bytes());
+        target.extend_from_slice(label);
+        target.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        target.extend_from_slice(bytes);
+    }
+    let forward_cache = cache.map(|options| {
+        let mut pipeline_descriptor_bytes = Vec::new();
+        append_segment(
+            &mut pipeline_descriptor_bytes,
+            b"domain",
+            b"forge3d.adjudication.forward-pipelines/v1",
+        );
+        append_segment(
+            &mut pipeline_descriptor_bytes,
+            b"wgsl.preprocessed",
+            include_str!("../shaders/adjudication_raster.wgsl").as_bytes(),
+        );
+        append_segment(
+            &mut pipeline_descriptor_bytes,
+            b"bind_group_layout",
+            b"0:uniform:vertex_fragment:static;1:uniform:vertex_fragment:static",
+        );
+        append_segment(
+            &mut pipeline_descriptor_bytes,
+            b"sky_pipeline",
+            b"vs_sky/fs_sky;triangle_list;front=ccw;cull=none;rgba32float;blend=none;write=all;depth32float;write=false;compare=always;sample_count=1",
+        );
+        append_segment(
+            &mut pipeline_descriptor_bytes,
+            b"mesh_pipeline",
+            b"vs_mesh/fs_mesh;vertex=float32x3@0:stride12;triangle_list;front=ccw;cull=none;rgba32float;blend=none;write=all;depth32float;write=true;compare=less_equal;sample_count=1",
+        );
+        append_segment(
+            &mut pipeline_descriptor_bytes,
+            b"draw_order",
+            b"sky;plane;sphere[0];sphere[1];sphere[2]",
+        );
+        let mut uniform_bytes = Vec::new();
+        append_segment(
+            &mut uniform_bytes,
+            b"view_projection",
+            bytemuck::cast_slice(&vp.to_cols_array()),
+        );
+        for (index, uniform) in draw_uniforms.iter().enumerate() {
+            append_segment(
+                &mut uniform_bytes,
+                format!("draw_uniform[{index}]").as_bytes(),
+                bytemuck::bytes_of(uniform),
+            );
+        }
+        for value in [0.0f64, 0.0, 0.0, 0.0, 1.0] {
+            append_segment(
+                &mut uniform_bytes,
+                b"clear",
+                &value.to_bits().to_le_bytes(),
+            );
+        }
+        let mut external_input_bytes = Vec::new();
+        append_segment(
+            &mut external_input_bytes,
+            b"output_size",
+            &[width.to_le_bytes(), height.to_le_bytes()].concat(),
+        );
+        append_segment(
+            &mut external_input_bytes,
+            b"sphere.vertices",
+            bytemuck::cast_slice(&sphere_positions),
+        );
+        append_segment(
+            &mut external_input_bytes,
+            b"sphere.indices",
+            bytemuck::cast_slice(&sphere_indices),
+        );
+        append_segment(
+            &mut external_input_bytes,
+            b"plane.vertices",
+            bytemuck::cast_slice(&plane.vertices),
+        );
+        append_segment(
+            &mut external_input_bytes,
+            b"plane.indices",
+            bytemuck::cast_slice(&plane_indices),
+        );
+        crate::offscreen::forward::ForwardCacheDeclaration {
+            root: options.root.clone(),
+            max_bytes: options.max_bytes,
+            verify_reads: options.verify_reads,
+            pipeline_descriptor_bytes,
+            uniform_bytes,
+            external_input_bytes,
+            capability_fingerprint_bytes: options.capability_fingerprint_bytes.clone(),
+            engine_fingerprint_bytes: options.engine_fingerprint_bytes.clone(),
+        }
+    });
+    let (ss_pixels, cache_report) = crate::offscreen::forward::render_forward_hdr_incremental(
         device,
         queue,
         &targets,
         wgpu::Color::BLACK,
         &draws,
         timing.map(|t| (t, "adjudication.raster")),
+        forward_cache.as_ref(),
     )?;
 
     // --- Tent-weighted downsample SSAA x SSAA -> (width, height) ---
@@ -412,7 +529,7 @@ pub fn render_raster_reference(
             hdr[o + 3] = 1.0;
         }
     }
-    Ok(hdr)
+    Ok((hdr, cache_report))
 }
 
 #[cfg(test)]
