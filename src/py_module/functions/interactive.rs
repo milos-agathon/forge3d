@@ -13,6 +13,9 @@ pub(super) fn register_interactive_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(vector_render_pick_map_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector_render_oit_and_pick_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector_render_polygons_fill_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector_render_analytic_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector_coverage_primitives_py, m)?)?;
+    m.add_function(wrap_pyfunction!(_vector_render_coverage_ablation_py, m)?)?;
     m.add_function(wrap_pyfunction!(configure_csm, m)?)?;
     m.add_function(wrap_pyfunction!(set_csm_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(set_csm_light_direction, m)?)?;

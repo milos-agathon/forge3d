@@ -23,7 +23,9 @@ def _write(tmp_path: Path, body: str) -> Path:
 
 
 def test_zero_tests_rejected(tmp_path):
-    path = _write(tmp_path, '<testsuite tests="0" failures="0" errors="0" skipped="0"/>')
+    path = _write(
+        tmp_path, '<testsuite tests="0" failures="0" errors="0" skipped="0"/>'
+    )
     with pytest.raises(JUnitValidationError, match="no tests"):
         verify_junit(path)
 
@@ -62,7 +64,7 @@ def test_xfail_encoded_as_skip_rejected(tmp_path):
         tmp_path,
         '<testsuite tests="1" failures="0" errors="0" skipped="1">'
         '<testcase name="xfail"><skipped type="pytest.xfail">expected</skipped>'
-        '</testcase></testsuite>',
+        "</testcase></testsuite>",
     )
     with pytest.raises(JUnitValidationError, match="zero-skip"):
         verify_junit(path)
@@ -78,7 +80,7 @@ def test_clean_parent_cannot_hide_nested_nonclean_child(tmp_path, outcome):
         f'<testsuite name="child" tests="1" failures="{int(child_counter == "failures")}" '
         f'errors="0" skipped="{int(child_counter == "skipped")}">'
         f'<testcase name="nested"><{outcome}/></testcase>'
-        '</testsuite></testsuite></testsuites>',
+        "</testsuite></testsuite></testsuites>",
     )
     with pytest.raises(JUnitValidationError, match="contradictory"):
         verify_junit(path)
@@ -93,7 +95,7 @@ def test_nested_aggregate_totals_are_not_double_counted(tmp_path):
         '<testcase name="a"/></testsuite>'
         '<testsuite name="b" tests="1" failures="0" errors="0" skipped="0">'
         '<testcase name="b"/></testsuite>'
-        '</testsuite></testsuites>',
+        "</testsuite></testsuites>",
     )
     assert verify_junit(path).tests == 2
 
@@ -141,7 +143,12 @@ def test_m06_evidence_summary_extracts_adapter_and_junit_counts(tmp_path):
                 "runner_name": "forge3d-rtx3070",
                 "runner_os": "Windows",
                 "runner_arch": "X64",
-                "required_labels": ["self-hosted", "Windows", "forge3d-gpu", "gpu-nvidia"],
+                "required_labels": [
+                    "self-hosted",
+                    "Windows",
+                    "forge3d-gpu",
+                    "gpu-nvidia",
+                ],
             }
         ),
         encoding="utf-8",
@@ -214,11 +221,15 @@ def test_m06_evidence_summary_extracts_adapter_and_junit_counts(tmp_path):
     assert "tests=2 failures=0 errors=0 skipped=0" in annotation
 
 
-def test_m06_evidence_summary_fails_closed_on_synthetic_merge_checkout(tmp_path, monkeypatch):
+def test_m06_evidence_summary_fails_closed_on_synthetic_merge_checkout(
+    tmp_path, monkeypatch
+):
     (tmp_path / "run-context.json").write_text(
         json.dumps({"head_sha": "pr-head"}), encoding="utf-8"
     )
-    (tmp_path / "checked-out-head.txt").write_text("synthetic-merge\n", encoding="utf-8")
+    (tmp_path / "checked-out-head.txt").write_text(
+        "synthetic-merge\n", encoding="utf-8"
+    )
     (tmp_path / "adapter-probe.json").write_text(
         json.dumps(
             {
@@ -252,8 +263,8 @@ def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
     root = Path(__file__).resolve().parents[1]
     exact_ref = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
     expected_counts = {
-        "ci.yml": 15,
-        "determinism-matrix.yml": 5,
+        "ci.yml": 16,
+        "determinism-matrix.yml": 6,
     }
 
     for name, expected_count in expected_counts.items():

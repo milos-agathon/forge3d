@@ -94,6 +94,8 @@ _NATIVE_ONLY_EXPORTS = (
         "vector_render_pick_map_py",
         "vector_render_oit_and_pick_py",
         "vector_render_polygons_fill_py",
+        "vector_render_analytic_py",
+        "vector_coverage_primitives_py",
         "ClipmapConfig",  # P2.1/M5: Clipmap terrain
         "ClipmapMesh",  # P2.1/M5: Clipmap terrain
         "clipmap_generate_py",  # P2.1/M5: Clipmap generation function
@@ -129,6 +131,12 @@ _NATIVE_ONLY_EXPORTS = (
         "anamnesis_store_put_leaf",  # ANAMNESIS: native store interoperability
         "anamnesis_store_get",  # ANAMNESIS: native store interoperability
         "anamnesis_restore_rgba8",  # ANAMNESIS: portable GPU resource restore
+        "compress_dem",  # COMPENDIUM: deterministic F3DZ encoder
+        "decompress_dem",  # COMPENDIUM: fail-closed F3DZ decoder
+        "verify_dem",  # COMPENDIUM: CRC/error-bound verifier
+        "dd_selftest",  # DUPLA: GPU DD exactness canary
+        "dd_harness",  # DUPLA: GPU DD bounds proof
+        "dd_jitter_demo",  # DUPLA: Everest absolute-coordinate demo
 )
 
 if _NATIVE_MODULE is not None:
@@ -251,6 +259,7 @@ from . import animation
 from . import gis
 from . import thematic
 from . import camera_rigs
+from . import codec
 
 # -----------------------------------------------------------------------------
 # Core rendering API
@@ -634,6 +643,8 @@ from .text_atlas import (
     validate_atlas_metrics,
 )
 from . import text as text
+from . import precision as precision
+from .precision import dd_harness, dd_jitter_demo, dd_selftest
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -644,6 +655,11 @@ __all__ = [
     "version",
     "text",
     "verify",
+    "codec",
+    "precision",
+    "dd_selftest",
+    "dd_harness",
+    "dd_jitter_demo",
     # Core rendering
     "Renderer",
     "PathTracer",
@@ -696,6 +712,9 @@ __all__ = [
     # CENSOR: budget-enforce test helper
     "request_host_visible_allocation_for_test",
     "shader_report",
+    "compress_dem",
+    "decompress_dem",
+    "verify_dem",
     # CENSOR: typed GPU-error exceptions
     "MemoryBudgetExceeded",
     "DegradedCapability",
@@ -752,6 +771,8 @@ __all__ = [
     "vector_render_pick_map_py",
     "vector_render_oit_and_pick_py",
     "vector_render_polygons_fill_py",
+    "vector_render_analytic_py",
+    "vector_coverage_primitives_py",
     "memory_metrics",
     "PointBuffer",
     "copc_laz_enabled",

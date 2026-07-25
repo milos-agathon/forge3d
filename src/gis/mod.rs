@@ -34,14 +34,16 @@ pub use domain::{
 };
 pub use error::{GisError, GisResult};
 pub use geometry::{
-    buffer_geometry, geometry_centroid, geometry_measure, interpolate_line, repair_geometry,
-    representative_point, simplify_geometry, union_geometries, validate_geometry,
+    buffer_geometry, difference_geometries, geometry_centroid, geometry_measure, interpolate_line,
+    intersection_geometries, is_valid, repair_geometry, representative_point, simplify_geometry,
+    symmetric_difference_geometries, union_geometries, validate_geometry,
 };
 #[cfg(feature = "extension-module")]
 pub use geometry::{
-    buffer_geometry_py, geometry_centroid_py, geometry_measure_py, interpolate_line_py,
-    measure_geometries_py, repair_geometry_py, representative_point_py, simplify_geometry_py,
-    union_geometries_py, validate_geometry_py,
+    buffer_geometry_py, difference_geometries_py, geometry_centroid_py, geometry_measure_py,
+    interpolate_line_py, intersection_geometries_py, is_valid_py, measure_geometries_py,
+    repair_geometry_py, representative_point_py, simplify_geometry_py,
+    symmetric_difference_geometries_py, union_geometries_py, union_py, validate_geometry_py,
 };
 #[cfg(feature = "extension-module")]
 pub use osm::{parse_osm_features_py, query_osm_features_py};

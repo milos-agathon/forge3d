@@ -51,10 +51,32 @@ on:
       - 'src/shaders/lighting_ibl.wgsl'
       - 'src/shaders/terrain_pbr_pom.wgsl'
       - 'src/core/gpu.rs'
+      - 'src/core/dd.rs'
+      - 'src/core/dd/**'
+      - 'src/shaders/includes/dd.wgsl'
+      - 'src/shaders/dd_harness.wgsl'
+      - 'src/shaders/dd_jitter.wgsl'
+      - 'python/forge3d/precision.py'
+      - 'python/forge3d/precision.pyi'
+      - 'python/forge3d/__init__.py'
+      - 'python/forge3d/__init__.pyi'
+      - 'src/py_functions/precision.rs'
+      - 'src/py_functions/mod.rs'
+      - 'src/py_module/functions/precision.rs'
+      - 'src/py_module/functions.rs'
+      - 'scripts/run_dupla_proof.py'
+      - 'tests/test_dd_arithmetic.py'
+      - 'tests/test_dd_jitter.py'
       - 'python/forge3d/determinism.py'
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
       - 'tests/test_determinism_matrix.py'
+      - 'tests/test_f3dz_codec.py'
+      - 'tests/data/codec_corpus/**'
+      - 'tools/f3dz_determinism_report.py'
+      - 'src/codec/f3dz/**'
+      - 'src/py_functions/codec.rs'
+      - 'python/forge3d/codec.py'
       - 'python/forge3d/anamnesis.py'
       - 'src/core/anamnesis/**'
       - 'scripts/check_anamnesis_portability.py'
@@ -69,10 +91,32 @@ on:
       - 'src/shaders/lighting_ibl.wgsl'
       - 'src/shaders/terrain_pbr_pom.wgsl'
       - 'src/core/gpu.rs'
+      - 'src/core/dd.rs'
+      - 'src/core/dd/**'
+      - 'src/shaders/includes/dd.wgsl'
+      - 'src/shaders/dd_harness.wgsl'
+      - 'src/shaders/dd_jitter.wgsl'
+      - 'python/forge3d/precision.py'
+      - 'python/forge3d/precision.pyi'
+      - 'python/forge3d/__init__.py'
+      - 'python/forge3d/__init__.pyi'
+      - 'src/py_functions/precision.rs'
+      - 'src/py_functions/mod.rs'
+      - 'src/py_module/functions/precision.rs'
+      - 'src/py_module/functions.rs'
+      - 'scripts/run_dupla_proof.py'
+      - 'tests/test_dd_arithmetic.py'
+      - 'tests/test_dd_jitter.py'
       - 'python/forge3d/determinism.py'
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
       - 'tests/test_determinism_matrix.py'
+      - 'tests/test_f3dz_codec.py'
+      - 'tests/data/codec_corpus/**'
+      - 'tools/f3dz_determinism_report.py'
+      - 'src/codec/f3dz/**'
+      - 'src/py_functions/codec.rs'
+      - 'python/forge3d/codec.py'
       - 'python/forge3d/anamnesis.py'
       - 'src/core/anamnesis/**'
       - 'scripts/check_anamnesis_portability.py'
@@ -84,6 +128,47 @@ env:
   SCENE: terra_determinata_v1
 
 jobs:
+  f3dz-stream:
+    name: f3dz stream (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build extension
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> "$GITHUB_ENV"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
+          python -m pip install -U pip maturin numpy pytest
+          maturin develop --release
+      - name: Reproduce each stream twice against the committed hashes
+        shell: bash
+        run: |
+          mkdir -p f3dz-determinism
+          python tools/f3dz_determinism_report.py \
+            --output "f3dz-determinism/${{ matrix.os }}.json"
+          python -m pytest \
+            tests/test_f3dz_codec.py::test_error_bound_stored_page_error_nan_and_determinism \
+            tests/test_f3dz_codec.py::test_cross_platform_determinism_hashes \
+            -v --tb=short
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f3dz-determinism-${{ matrix.os }}
+          path: f3dz-determinism/
+          if-no-files-found: error
+
   render:
     name: render (${{ matrix.leg }})
     strategy:
@@ -107,7 +192,6 @@ jobs:
             backend: metal
             gated: true
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ !matrix.gated }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -186,6 +270,16 @@ jobs:
             tail -n 20 render.log >> "hash-out/${SCENE}.ABSENT" || true
             tail -n 20 render.err >> "hash-out/${SCENE}.ABSENT" || true
           fi
+      - name: Prove DUPLA precision
+        shell: bash
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKENDS: ${{ matrix.backend }}
+        run: |
+          python scripts/run_dupla_proof.py \
+            --output "hash-out/dupla-proof-${{ matrix.leg }}.json" \
+            --absence-output "hash-out/dupla-proof-${{ matrix.leg }}.ABSENT" \
+            --failure-output "hash-out/dupla-proof-${{ matrix.leg }}.FAILED"
       - uses: actions/upload-artifact@v4
         # always(): a gated leg that fails still uploads its .FAILED marker so
         # the diff job can report the reason instead of a silent hole.
@@ -403,3 +497,8 @@ jobs:
           --hashes hashes
           --golden tests/goldens/determinism/${{ env.SCENE }}.sha256
           --scene ${{ env.SCENE }}
+      - name: Validate DUPLA backend proofs
+        run: >-
+          python scripts/run_dupla_proof.py
+          --validate-artifacts hashes
+          --expected-legs intel amd nvidia apple

@@ -97,6 +97,7 @@ RENDER_ENTRYPOINTS = {
     "vector_render_pick_map_py": f3d.vector_render_pick_map_py,
     "vector_render_oit_and_pick_py": f3d.vector_render_oit_and_pick_py,
     "vector_render_polygons_fill_py": f3d.vector_render_polygons_fill_py,
+    "vector_render_analytic_py": f3d.vector_render_analytic_py,
     "vector_oit_and_pick_demo": f3d.vector_oit_and_pick_demo,
 }
 
@@ -118,13 +119,33 @@ def test_public_render_entrypoints_expose_certificate_keyword() -> None:
     assert not missing, f"render entrypoints missing certificate= contract: {missing}"
 
 
+# Render entrypoints that are certified but NOT backed by the ANAMNESIS graph
+# cache. Each entry carries the reason, on the same terms as
+# DOCUMENTED_EXCLUSIONS above.
+CACHE_EXCLUSIONS = {
+    # LIMES analytic coverage is a self-contained bin/raster/resolve pipeline
+    # with no reusable native terrain graph, so `vector_render_analytic_py`
+    # takes certificate= but not cache=.
+    "vector_render_analytic_py": "analytic coverage path, no cacheable native graph",
+}
+
+
 def test_public_render_entrypoints_expose_anamnesis_cache_keyword() -> None:
     missing = [
         name
         for name, entrypoint in RENDER_ENTRYPOINTS.items()
-        if "cache" not in inspect.signature(entrypoint).parameters
+        if name not in CACHE_EXCLUSIONS
+        and "cache" not in inspect.signature(entrypoint).parameters
     ]
     assert not missing, f"render entrypoints missing cache= contract: {missing}"
+
+
+def test_cache_exclusions_are_still_certificate_bearing() -> None:
+    """An entrypoint may opt out of the cache, never out of the certificate."""
+
+    for name in CACHE_EXCLUSIONS:
+        entrypoint = RENDER_ENTRYPOINTS[name]
+        assert "certificate" in inspect.signature(entrypoint).parameters, name
 
 
 def test_brdf_tile_emits_a_live_certified_pass() -> None:

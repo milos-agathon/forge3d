@@ -109,6 +109,20 @@ pub fn deterministic_allow_software() -> bool {
     )
 }
 
+fn is_virtualized_adapter_name(name: &str) -> bool {
+    let lowered_name = name.to_lowercase();
+    ["paravirtual", "virtio", "vmware", "virtualbox", "qxl"]
+        .iter()
+        .any(|marker| lowered_name.contains(marker))
+}
+
+pub(crate) fn is_physical_proof_adapter(
+    adapter_info: &wgpu::AdapterInfo,
+    software_fallback: bool,
+) -> bool {
+    !software_fallback && !is_virtualized_adapter_name(&adapter_info.name)
+}
+
 /// Parse `WGPU_BACKENDS`/`WGPU_BACKEND` into a single requested backend, if set.
 /// Returns (raw env value, backend mask for instance creation, expected adapter backend).
 ///
@@ -256,11 +270,9 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             // measured 2026-07-10: the paravirtual Metal hash is bit-stable but
             // systematically differs from real-hardware goldens). Refuse both
             // unless the caller explicitly opts in for a dedicated leg.
-            let lowered_name = adapter_info.name.to_lowercase();
-            let virtualized = ["paravirtual", "virtio", "vmware", "virtualbox", "qxl"]
-                .iter()
-                .any(|marker| lowered_name.contains(marker));
-            if (software_fallback || virtualized) && !deterministic_allow_software() {
+            if !is_physical_proof_adapter(&adapter_info, software_fallback)
+                && !deterministic_allow_software()
+            {
                 let kind = if software_fallback {
                     "software rasterizer"
                 } else {
@@ -360,7 +372,7 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             poison_context(format!("device lost ({reason:?}): {msg}"));
         });
 
-        Ok(GpuContext {
+        let context = GpuContext {
             instance,
             device: Arc::new(device),
             queue: Arc::new(queue),
@@ -368,7 +380,9 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             software_fallback,
             capabilities,
             dx12_compiler,
-        })
+        };
+        crate::core::dd::initialize_for_context(&context)?;
+        Ok(context)
     })
 }
 
@@ -476,7 +490,7 @@ pub fn create_device_and_queue_for_test() -> Option<(wgpu::Device, wgpu::Queue)>
 
 #[cfg(test)]
 mod backend_request_tests {
-    use super::parse_backend_request;
+    use super::{is_virtualized_adapter_name, parse_backend_request};
 
     #[test]
     fn backend_request_is_exact_and_rejects_ambiguous_or_substring_values() {
@@ -487,5 +501,21 @@ mod backend_request_tests {
         assert!(parse_backend_request("notvulkan".to_string()).is_err());
         assert!(parse_backend_request("vulkan,dx12".to_string()).is_err());
         assert!(parse_backend_request(String::new()).is_err());
+    }
+
+    #[test]
+    fn proof_hardware_classifier_recognizes_virtualized_adapter_names() {
+        for name in [
+            "Apple Paravirtual device",
+            "VirtIO GPU",
+            "VMware SVGA 3D",
+            "VirtualBox Graphics Adapter",
+            "QXL display adapter",
+        ] {
+            assert!(is_virtualized_adapter_name(name), "{name}");
+        }
+        assert!(!is_virtualized_adapter_name("NVIDIA GeForce RTX 3070"));
+        assert!(!is_virtualized_adapter_name("AMD Radeon RX 7900 XTX"));
+        assert!(!is_virtualized_adapter_name("Intel Arc A770"));
     }
 }

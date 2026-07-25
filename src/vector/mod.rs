@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod batch;
+pub mod coverage;
 pub mod data;
 pub mod extrusion;
 pub mod gpu_extrusion;
@@ -24,6 +25,10 @@ pub use api::{
     VectorApi, VectorId, VectorStyle,
 };
 pub use batch::{Batch, BatchManager, BatchingStats, Frustum, PrimitiveType, AABB};
+pub use coverage::{
+    render_coverage, CoverageBinner, CoverageGeometry, CoverageGeometryBuilder, CoverageLayer,
+    CoverageRenderOutput, CoverageRenderStats, FillRule, PrimitiveRecord, VectorQuality,
+};
 pub use data::{
     pack_lines, validate_point_instances, validate_polygon_vertices, GraphEdge, GraphNode,
     LineVertex, PackedPolygon, PackedPolyline, PointInstance, PolygonVertex, ValidationResult,

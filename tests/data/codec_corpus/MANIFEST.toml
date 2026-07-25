@@ -1,0 +1,49 @@
+format = "forge3d-f3dz-corpus/1"
+grid_shape = [256, 256]
+dtype = "float32-little-endian"
+source_dataset = "AWS Terrain Tiles / Skadi, derived from USGS 3DEP in the United States"
+source_registry = "https://registry.opendata.aws/terrain-tiles/"
+license = "Public domain (USGS-authored United States elevation data)"
+attribution = "United States Geological Survey (USGS)"
+attribution_reference = "https://github.com/tilezen/joerd/blob/master/docs/attribution.md"
+generator = "tools/generate_f3dz_corpus.py"
+
+[[tiles]]
+name = "alpine"
+file = "alpine.npy"
+character = "Mount Rainier alpine relief"
+source_url = "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N46/N46W122.hgt.gz"
+source_sha256 = "55866d108c7b55b911c226e457d727d5558eb418ba2328920cf6ec8149f45bbf"
+crop_row_column = [256, 768]
+output_sha256 = "c8001eb443efb596c9cf689712b6dde6fba5b45cd0c33e17598e61ec9ade21ff"
+transformation = "256x256 crop; big-endian int16 metres converted exactly to float32"
+
+[[tiles]]
+name = "rolling"
+file = "rolling.npy"
+character = "Shenandoah and Appalachian rolling relief"
+source_url = "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N38/N38W079.hgt.gz"
+source_sha256 = "0aa4afc1985773cd9f9bc9197a9b8cd784cf420242924279cc0146de4103a33a"
+crop_row_column = [1536, 2304]
+output_sha256 = "861f3bcd182c85beb3bf53d4eeca5ddccc76365d468c72d99910ba58d751a239"
+transformation = "256x256 crop; big-endian int16 metres converted exactly to float32"
+
+[[tiles]]
+name = "coastal_flat_nodata"
+file = "coastal_flat_nodata.npy"
+character = "South Florida coastal flat with explicit sea nodata"
+source_url = "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N25/N25W081.hgt.gz"
+source_sha256 = "903135e276b27ad8409249a555d411080b2932779682975234eb47b1e09b61b4"
+crop_row_column = [0, 2304]
+output_sha256 = "8ce7b2f37fd31f7f957a598a74ea891c5a42b90778c5d15630ce049c530e4685"
+transformation = "256x256 crop; source elevation <= 0 sea cells mapped to canonical float32 NaN; positive land metres preserved exactly"
+
+[[tiles]]
+name = "canyon"
+file = "canyon.npy"
+character = "Zion canyon and dissected plateau"
+source_url = "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N37/N37W113.hgt.gz"
+source_sha256 = "73b01c2a33e4a2ae66d2e817445a00c74e8a505713f5f5e71c7de4836b8767aa"
+crop_row_column = [2048, 768]
+output_sha256 = "1999e07d7c6f6c88caa41431e42a46c1b7c736df257682941fa6b5eedf4d676c"
+transformation = "256x256 crop; big-endian int16 metres converted exactly to float32"

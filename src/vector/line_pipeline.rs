@@ -170,6 +170,7 @@ pub fn create_render_pipeline(
     shader: &wgpu::ShaderModule,
     pipeline_layout: &wgpu::PipelineLayout,
     target_format: wgpu::TextureFormat,
+    sample_count: u32,
 ) -> wgpu::RenderPipeline {
     crate::core::shader_registry::create_render_pipeline_scoped(
         device,
@@ -200,7 +201,10 @@ pub fn create_render_pipeline(
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..wgpu::MultisampleState::default()
+            },
             multiview: None,
         },
     )

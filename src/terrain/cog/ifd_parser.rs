@@ -23,6 +23,9 @@ pub const COMPRESSION_NONE: u16 = 1;
 pub const COMPRESSION_LZW: u16 = 5;
 pub const COMPRESSION_DEFLATE: u16 = 8;
 pub const COMPRESSION_DEFLATE_ALT: u16 = 32946;
+/// forge3d private TIFF compression tag for an embedded F3DZ v1 height tile.
+/// Values 65000..=65535 are reserved for private TIFF use.
+pub const COMPRESSION_F3DZ: u16 = 65003;
 
 /// TIFF predictor constants.
 pub const TIFF_PREDICTOR_NONE: u16 = 1;

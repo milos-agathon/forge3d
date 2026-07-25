@@ -12,18 +12,42 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SANCTIONED = "src/camera/anchor.rs"
+SANCTIONED_DD_SPLITS = {
+    (
+        "src/core/dd.rs",
+        "from_f64",
+        "as_f32",
+        1,
+        "let hi = value as f32",
+    ),
+    (
+        "src/core/dd.rs",
+        "from_f64",
+        "as_f32",
+        2,
+        "let lo = (value - hi as f64) as f32",
+    ),
+}
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1323
-EXPECTED_CONVERSION_SHA256 = "02d683c535255d4c3ff8ea2fdd53520d82912f31751e657d7194bf583738d7a3"
+EXPECTED_CONVERSION_COUNT = 1327
+# Re-frozen when ANAMNESIS merged with main. The site COUNT is unchanged, and a
+# site-by-site diff against main shows exactly five added and five removed --
+# the same five `as_f32` statements in src/offscreen/adjudication_raster.rs,
+# moved from `render_raster_reference` to `render_raster_reference_incremental`
+# by the incremental-render rename. A site record is
+# (file, function, operation, nth, statement) with no line numbers, so the
+# digest moved only because the enclosing function was renamed. No new
+# narrowing conversion was introduced by this merge.
+EXPECTED_CONVERSION_SHA256 = "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817"
 
-# Reviewed TERMINUS transition from the pinned pre-remediation inventory. The
-# conversion count is unchanged: only the statement containing the existing
-# f64-to-f32 conversion moved behind a checked eight-byte reader.
+# The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
+# four integer-to-f32 reconstruction conversions in predict.rs; those are
+# included in the current count and digest above without weakening the reader
+# transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "base_count": 1323,
-    "base_digest": "f091a37320becd54518275739b3d832d8b9820e45960ba85ce6a91a30eecc5bc",
+    "current_count": 1327,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -45,8 +69,10 @@ REVIEWED_INVENTORY_TRANSITION = {
 # transition records that function-only ownership change without relaxing the
 # occurrence count or any normalized conversion statement.
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
-    "base_count": 1323,
-    "base_digest": "28d1cc9db71b48c818577782ef697f54a255a6064333cf9870fd6eb1d5ba9bf6",
+    # Re-based on main at the merge: the pre-transition tree is now main rather
+    # than this branch's original base, so the count and digest are main's.
+    "base_count": 1327,
+    "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",
     "removed_function": "render_raster_reference",
@@ -143,12 +169,17 @@ def _conversion_inventory_text(rel: str, raw: str):
     return sites
 
 
-def conversion_inventory():
+def _complete_conversion_inventory():
     sites = []
     for path in sorted((ROOT / "src").rglob("*.rs")):
         rel = path.relative_to(ROOT).as_posix()
         sites.extend(_conversion_inventory_text(rel, path.read_text(encoding="utf-8")))
     return sites
+
+
+def conversion_inventory():
+    """Reviewed narrowing inventory, excluding the exact lossless DD split."""
+    return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
 
 
 def _inventory_digest(sites) -> str:
@@ -194,10 +225,19 @@ def test_all_required_rejecting_probes_change_the_inventory():
         assert _conversion_inventory_text("probe.rs", probe), f"scanner missed {probe}"
 
 
+def test_dd_encode_has_exactly_the_two_reviewed_split_casts():
+    actual = {
+        site
+        for site in _complete_conversion_inventory()
+        if site[0] == "src/core/dd.rs" and site[1] == "from_f64"
+    }
+    assert actual == SANCTIONED_DD_SPLITS
+
+
 def test_reviewed_checked_reader_inventory_transition_is_exact():
     sites = conversion_inventory()
     transition = REVIEWED_INVENTORY_TRANSITION
-    assert len(sites) == transition["base_count"] == EXPECTED_CONVERSION_COUNT
+    assert len(sites) == transition["current_count"] == EXPECTED_CONVERSION_COUNT
     assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
     assert transition["added"] in sites
     assert transition["removed"] not in sites
@@ -239,6 +279,13 @@ def test_anchor_narrow_is_the_only_world_conversion_implementation():
     assert position.count("Self::narrow(") == 3
     direction = _function_body(SANCTIONED, "direction_to_render")
     assert direction.count("Self::narrow(") == 3
+
+
+def test_anchor_dd_split_is_a_named_non_narrowing_crossing():
+    body = re.sub(r"\s+", " ", _function_body(SANCTIONED, "to_dd"))
+    assert "DDVec3::from_dvec3(p)" in body
+    assert "Self::narrow(" not in body
+    assert " as f32" not in body
 
 
 def test_each_viewer_world_route_calls_its_active_anchor_in_the_same_function():

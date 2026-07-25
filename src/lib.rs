@@ -109,6 +109,7 @@ pub mod math {
 pub mod accel;
 pub mod camera;
 pub mod cli;
+pub mod codec;
 pub mod colormap;
 pub mod converters; // Geometry converters (e.g., MultipolygonZ -> OBJ)
 pub mod core;
