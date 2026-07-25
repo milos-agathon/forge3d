@@ -56,12 +56,47 @@ struct FinishedCapture {
     /// (kind, name, consequence), sorted by (kind, name).
     degradations: Vec<(String, String, String)>,
     codec: Option<CodecSnapshot>,
+    precision: Option<PrecisionEvidence>,
+    jitter: Option<JitterEvidence>,
 }
 
 #[derive(Clone)]
 struct CodecSnapshot {
     eps: f32,
     pages_base_quality: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PrecisionEvidence {
+    pub backend: String,
+    pub adapter: String,
+    pub operation: String,
+    pub two_prod_variant: String,
+    pub shader_label: String,
+    pub shader_hash: String,
+    pub generated_count: u64,
+    pub adversarial_count: u64,
+    pub mismatch_count: u64,
+    pub max_err_u2: f64,
+    pub cited_bound_u2: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct JitterEvidence {
+    pub unit: String,
+    pub backend: String,
+    pub adapter: String,
+    pub two_prod_variant: String,
+    pub shader_label: String,
+    pub shader_hash: String,
+    pub frame_count: u32,
+    pub camera_step_metres: f64,
+    pub dd_max_error_px: f64,
+    pub threshold_px: f64,
+    pub raw_max_error_px: f64,
+    pub raw_over_one_px: u32,
+    pub dd_hash_a: String,
+    pub dd_hash_b: String,
 }
 
 /// Passes recorded for the render currently in flight.
@@ -74,6 +109,16 @@ thread_local! {
     static EXTERNAL_CAPTURE: RefCell<Option<RenderCaptureGuard>> = const { RefCell::new(None) };
     static CAPTURE_DEPTH: Cell<usize> = const { Cell::new(0) };
     static CURRENT_CODEC: RefCell<Option<CodecSnapshot>> = const { RefCell::new(None) };
+    static CURRENT_PRECISION: RefCell<Option<PrecisionEvidence>> = const { RefCell::new(None) };
+    static CURRENT_JITTER: RefCell<Option<JitterEvidence>> = const { RefCell::new(None) };
+}
+
+pub fn record_precision_evidence(evidence: PrecisionEvidence) {
+    CURRENT_PRECISION.with(|slot| *slot.borrow_mut() = Some(evidence));
+}
+
+pub fn record_jitter_evidence(evidence: JitterEvidence) {
+    CURRENT_JITTER.with(|slot| *slot.borrow_mut() = Some(evidence));
 }
 
 #[must_use = "a render capture must be finished or retained until the render exits"]
@@ -179,6 +224,8 @@ pub fn begin_render_capture_with_resources(
     begin_shader_render_capture(&BTreeMap::new());
     crate::core::shader_contract_runtime::begin_runtime_contract_capture();
     begin_degradation_capture();
+    CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
+    CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
     notify_python_degradation_capture("begin_capture");
     let mut cur = lock_current();
     cur.clear();
@@ -346,6 +393,8 @@ fn finish_render_capture() {
         by_label: ledger.by_label,
         degradations,
         codec,
+        precision: CURRENT_PRECISION.with(|slot| slot.borrow_mut().take()),
+        jitter: CURRENT_JITTER.with(|slot| slot.borrow_mut().take()),
     };
 
     *lock_last() = Some(finished);
@@ -359,6 +408,8 @@ pub fn abort_render_capture() {
     notify_python_degradation_capture("abort_capture");
     CURRENT_CODEC.with(|codec| codec.borrow_mut().take());
     lock_current().clear();
+    CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
+    CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
 }
 
 /// Start a render-local capture owned by a Python renderer.
@@ -455,6 +506,10 @@ struct ReportJson<'a> {
     degradations: Vec<DegradationJson<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     codec: Option<CodecJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    precision: Option<&'a PrecisionEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jitter: Option<&'a JitterEvidence>,
 }
 
 /// Serialize the LAST completed render capture as the canonical certificate
@@ -515,6 +570,8 @@ pub fn execution_report_json() -> Result<String, RenderError> {
             eps: codec.eps,
             pages_base_quality: codec.pages_base_quality,
         }),
+        precision: cap.precision.as_ref(),
+        jitter: cap.jitter.as_ref(),
     };
 
     serde_json::to_string(&report)
@@ -711,5 +768,39 @@ mod tests {
             serde_json::from_str(&execution_report_json().expect("report assembles"))
                 .expect("report parses");
         assert!(report.get("codec").is_none());
+    }
+
+    #[test]
+    fn precision_evidence_is_scoped_and_optional() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let dd = begin_render_capture("test.dd");
+        record_precision_evidence(PrecisionEvidence {
+            backend: "vulkan".to_string(),
+            adapter: "test-adapter".to_string(),
+            operation: "add".to_string(),
+            two_prod_variant: "fma".to_string(),
+            shader_label: "forge3d.dd_harness.v1".to_string(),
+            shader_hash: "abc123".to_string(),
+            generated_count: 100_000_000,
+            adversarial_count: 1_000_000,
+            mismatch_count: 0,
+            max_err_u2: 2.5,
+            cited_bound_u2: 3.0,
+        });
+        dd.finish();
+        let with_precision: serde_json::Value =
+            serde_json::from_str(&execution_report_json().expect("DD certificate must assemble"))
+                .expect("DD certificate parses");
+        assert_eq!(with_precision["precision"]["operation"], "add");
+        assert_eq!(with_precision["precision"]["mismatch_count"], 0);
+
+        let ordinary = begin_render_capture("test.ordinary");
+        ordinary.finish();
+        let without_precision: serde_json::Value = serde_json::from_str(
+            &execution_report_json().expect("ordinary certificate must assemble"),
+        )
+        .expect("ordinary certificate parses");
+        assert!(without_precision.get("precision").is_none());
     }
 }

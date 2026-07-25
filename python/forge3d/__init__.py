@@ -94,6 +94,8 @@ _NATIVE_ONLY_EXPORTS = (
         "vector_render_pick_map_py",
         "vector_render_oit_and_pick_py",
         "vector_render_polygons_fill_py",
+        "vector_render_analytic_py",
+        "vector_coverage_primitives_py",
         "ClipmapConfig",  # P2.1/M5: Clipmap terrain
         "ClipmapMesh",  # P2.1/M5: Clipmap terrain
         "clipmap_generate_py",  # P2.1/M5: Clipmap generation function
@@ -124,6 +126,9 @@ _NATIVE_ONLY_EXPORTS = (
         "compress_dem",  # COMPENDIUM: deterministic F3DZ encoder
         "decompress_dem",  # COMPENDIUM: fail-closed F3DZ decoder
         "verify_dem",  # COMPENDIUM: CRC/error-bound verifier
+        "dd_selftest",  # DUPLA: GPU DD exactness canary
+        "dd_harness",  # DUPLA: GPU DD bounds proof
+        "dd_jitter_demo",  # DUPLA: Everest absolute-coordinate demo
 )
 
 if _NATIVE_MODULE is not None:
@@ -619,6 +624,8 @@ from .text_atlas import (
     validate_atlas_metrics,
 )
 from . import text as text
+from . import precision as precision
+from .precision import dd_harness, dd_jitter_demo, dd_selftest
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -630,6 +637,10 @@ __all__ = [
     "text",
     "verify",
     "codec",
+    "precision",
+    "dd_selftest",
+    "dd_harness",
+    "dd_jitter_demo",
     # Core rendering
     "Renderer",
     "PathTracer",
@@ -741,6 +752,8 @@ __all__ = [
     "vector_render_pick_map_py",
     "vector_render_oit_and_pick_py",
     "vector_render_polygons_fill_py",
+    "vector_render_analytic_py",
+    "vector_coverage_primitives_py",
     "memory_metrics",
     "PointBuffer",
     "copc_laz_enabled",

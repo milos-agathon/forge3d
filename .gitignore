@@ -396,6 +396,7 @@ tests/test_*examples*.py
 .superpowers/
 scripts/*
 !scripts/summarize_m06_evidence.py
+!scripts/run_dupla_proof.py
 
 # forge3d outputs (A13) 
 out/

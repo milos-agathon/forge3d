@@ -24,6 +24,11 @@ _native = get_native_module()
 
 C4_APIS = (
     "union_geometries",
+    "union",
+    "intersection",
+    "difference",
+    "symmetric_difference",
+    "is_valid",
     "dissolve_vector",
     "buffer_geometry",
     "clip_vector",
@@ -141,6 +146,21 @@ def _require_topology_backend():
         pytest.skip("requires forge3d built with geos-topology")
 
 
+def _has_buffer_backend() -> bool:
+    try:
+        gis.buffer_geometry(_unit_square(), 0.1, crs=WGS84_CRS)
+    except RuntimeError as exc:
+        if "backend_unavailable" in str(exc) and "geos-topology" in str(exc):
+            return False
+        raise
+    return True
+
+
+def _require_buffer_backend():
+    if not _has_buffer_backend():
+        pytest.skip("buffering requires forge3d built with geos-topology")
+
+
 def _ring_area(ring) -> float:
     return abs(
         sum(
@@ -215,27 +235,54 @@ def test_c4_apis_are_importable_from_wrapper_all_stub_and_native():
         assert callable(getattr(_native, name))
 
 
-def test_c4_apis_raise_backend_unavailable_without_topology_backend(tmp_path: Path):
-    if _has_topology_backend():
-        pytest.skip("backend_unavailable contract is default/no-topology only")
-
+def test_c4_exact_apis_work_without_geos_topology_backend(tmp_path: Path):
     path = tmp_path / "boundary.geojson"
     _write_feature_collection(
         path,
         [_feature(_unit_square()), _feature(_shifted_square(2.0, 0.0))],
     )
 
-    _assert_backend_unavailable(lambda: gis.union_geometries([_unit_square()]))
-    _assert_backend_unavailable(lambda: gis.dissolve_vector(_feature_collection()))
-    _assert_backend_unavailable(lambda: gis.buffer_geometry(_unit_square(), 1.0))
-    _assert_backend_unavailable(
-        lambda: gis.clip_vector(_feature_collection(), _unit_square(), clip_crs="EPSG:4326")
-    )
-    _assert_backend_unavailable(
-        lambda: gis.intersect_vectors(_feature_collection(), _feature_collection())
-    )
-    _assert_backend_unavailable(lambda: gis.simplify_geometry(_unit_square(), 0.1))
-    _assert_backend_unavailable(lambda: gis.load_boundary(path))
+    assert gis.union_geometries([_unit_square()], crs=WGS84_CRS)["geometry"]
+    assert gis.dissolve_vector(_feature_collection())["features"]
+    assert gis.clip_vector(
+        _feature_collection(), _unit_square(), clip_crs="EPSG:4326"
+    )["features"]
+    assert gis.intersect_vectors(
+        _feature_collection(), _feature_collection()
+    )["features"]
+    assert gis.simplify_geometry(
+        _unit_square(), 0.1, crs=WGS84_CRS
+    )["geometry"]
+    assert gis.load_boundary(path)["features"]["features"]
+    if not _has_buffer_backend():
+        _assert_backend_unavailable(
+            lambda: gis.buffer_geometry(_unit_square(), 1.0, crs=WGS84_CRS)
+        )
+
+
+def test_euclidea_boolean_names_and_exact_validity_report():
+    left = _unit_square()
+    right = _shifted_square(0.5, 0.0)
+    expected_areas = {
+        "union": 1.5,
+        "intersection": 0.5,
+        "difference": 0.5,
+        "symmetric_difference": 1.0,
+    }
+    for name, expected_area in expected_areas.items():
+        result = getattr(gis, name)([left, right], crs=WGS84_CRS)
+        assert _geometry_area(result["geometry"]) == pytest.approx(expected_area)
+        assert gis.is_valid(result["geometry"])["valid"] is True
+
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        ],
+    }
+    report = gis.is_valid(bowtie)
+    assert report["valid"] is False
+    assert report["reasons"]
 
 
 def test_union_geometries_cheap_validation_and_empty_result():
@@ -418,7 +465,7 @@ def test_union_geometries_optional_shapely_reference_area():
 
 
 def test_buffer_geometry_point_with_topology_backend_returns_polygonal():
-    _require_topology_backend()
+    _require_buffer_backend()
 
     result = gis.buffer_geometry(_point(), 1.0, quad_segs=4, crs=WGS84_CRS)
 
@@ -434,7 +481,7 @@ def test_buffer_geometry_point_with_topology_backend_returns_polygonal():
 
 
 def test_buffer_geometry_polygon_positive_increases_area_and_bounds():
-    _require_topology_backend()
+    _require_buffer_backend()
 
     result = gis.buffer_geometry(_unit_square(), 0.25, quad_segs=8, crs=WGS84_CRS)
     bounds = _geometry_bounds(result["geometry"])
@@ -447,7 +494,7 @@ def test_buffer_geometry_polygon_positive_increases_area_and_bounds():
 
 
 def test_buffer_geometry_zero_distance_valid_polygon_is_deterministic():
-    _require_topology_backend()
+    _require_buffer_backend()
 
     result = gis.buffer_geometry(_unit_square(), 0.0, crs=WGS84_CRS)
 
@@ -460,7 +507,7 @@ def test_buffer_geometry_zero_distance_valid_polygon_is_deterministic():
 def test_buffer_geometry_zero_distance_still_splits_dateline_crossing():
     # The zero-distance identity shortcut still honours the geographic
     # dateline contract: a crossing polygon under EPSG:4326 comes back split.
-    _require_topology_backend()
+    _require_buffer_backend()
     poly = {
         "type": "Polygon",
         "coordinates": [[[170, 10], [-170, 10], [-170, -10], [170, -10], [170, 10]]],
@@ -473,7 +520,7 @@ def test_buffer_geometry_zero_distance_still_splits_dateline_crossing():
 
 
 def test_buffer_geometry_negative_point_returns_empty_output():
-    _require_topology_backend()
+    _require_buffer_backend()
 
     result = gis.buffer_geometry(_point(), -1.0, crs=WGS84_CRS)
 
@@ -485,7 +532,7 @@ def test_buffer_geometry_negative_point_returns_empty_output():
 
 
 def test_buffer_geometry_feature_input_uses_geometry_only():
-    _require_topology_backend()
+    _require_buffer_backend()
 
     result = gis.buffer_geometry(_feature(_point()), 1.0, crs=WGS84_CRS)
 
@@ -495,7 +542,7 @@ def test_buffer_geometry_feature_input_uses_geometry_only():
 
 
 def test_buffer_geometry_rejects_invalid_bowtie_polygon():
-    _require_topology_backend()
+    _require_buffer_backend()
     bowtie = {
         "type": "Polygon",
         "coordinates": [
@@ -508,7 +555,7 @@ def test_buffer_geometry_rejects_invalid_bowtie_polygon():
 
 
 def test_buffer_geometry_rejects_malformed_unsupported_and_feature_collection():
-    _require_topology_backend()
+    _require_buffer_backend()
 
     with pytest.raises(ValueError, match="invalid_geometry"):
         gis.buffer_geometry({"type": "Polygon", "coordinates": [[["bad", 0.0]]]}, 1.0)
@@ -519,7 +566,7 @@ def test_buffer_geometry_rejects_malformed_unsupported_and_feature_collection():
 
 
 def test_buffer_geometry_optional_shapely_reference_area():
-    _require_topology_backend()
+    _require_buffer_backend()
     shapely_geometry = pytest.importorskip("shapely.geometry")
 
     result = gis.buffer_geometry(_unit_square(), 0.25, quad_segs=8, crs=WGS84_CRS)
@@ -1274,12 +1321,12 @@ def test_load_boundary_missing_crs_warning_is_preserved(tmp_path: Path):
     assert "missing_crs" in _warning_codes(result)
 
 
-def test_load_boundary_multi_feature_requires_topology_backend_without_feature(tmp_path: Path):
-    if _has_topology_backend():
-        pytest.skip("backend_unavailable contract is default/no-topology only")
+def test_load_boundary_multi_feature_works_on_exact_default_backend(tmp_path: Path):
     path = _write_feature_collection(
         tmp_path / "boundary-default-multi.geojson",
         [_feature(_unit_square()), _feature(_shifted_square(2.0, 0.0))],
     )
 
-    _assert_backend_unavailable(lambda: gis.load_boundary(path))
+    result = gis.load_boundary(path)
+    assert result["geometry"]["type"] == "MultiPolygon"
+    assert _geometry_area(result["geometry"]) == pytest.approx(2.0)

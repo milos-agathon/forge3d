@@ -4,8 +4,9 @@ This module provides high-level Python wrappers around the vector graphics
 functionality, including polygons, lines, points, and graphs.
 """
 
+import json
 import numpy as np
-from typing import Optional, List, Tuple
+from typing import Any, Mapping, Optional, List, Tuple
 from ._forge3d import (
     add_polygons_py,
     add_lines_py, 
@@ -22,8 +23,88 @@ __all__ = [
     'add_graph',
     'clear_vectors',
     'get_vector_counts',
+    'render_analytic',
+    'coverage_report',
     'VectorScene',
 ]
+
+
+def _analytic_scene_json(scene: Mapping[str, Any]) -> str:
+    if not isinstance(scene, Mapping):
+        raise TypeError("scene must be a mapping")
+    width = int(scene.get("width", 0))
+    height = int(scene.get("height", 0))
+    if width <= 0 or height <= 0:
+        raise ValueError("scene width and height must be positive")
+    layers = scene.get("layers")
+    if not isinstance(layers, list) or not layers:
+        raise ValueError("scene must contain at least one vector layer")
+    for index, layer in enumerate(layers):
+        if not isinstance(layer, Mapping):
+            raise TypeError(f"scene layer {index} must be a mapping")
+        if layer.get("quality", "default") != "analytic":
+            raise ValueError(
+                f"scene layer {index} must explicitly set quality='analytic'; "
+                "the existing vector pipelines remain the default"
+            )
+    return json.dumps(scene, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _render_analytic_details(
+    scene: Mapping[str, Any],
+    *,
+    include_coverage: bool,
+    include_records: bool,
+    certificate: bool | str = False,
+) -> dict[str, Any]:
+    from . import vector_render_analytic_py as _render
+
+    return _render(
+        _analytic_scene_json(scene),
+        include_coverage=bool(include_coverage),
+        include_records=bool(include_records),
+        certificate=certificate,
+    )
+
+
+def render_analytic(
+    scene: Mapping[str, Any],
+    *,
+    certificate: bool | str = False,
+) -> np.ndarray:
+    """Render an explicitly analytic vector-layer scene to an RGBA snapshot.
+
+    Every layer must set ``quality="analytic"``. This explicit opt-in keeps
+    the existing polygon and feathered-line pipelines as unchanged defaults.
+    Coordinates and stroke widths are in output pixels.
+    """
+
+    result = _render_analytic_details(
+        scene,
+        include_coverage=False,
+        include_records=False,
+        certificate=certificate,
+    )
+    return np.asarray(result["rgba"], dtype=np.uint8)
+
+
+def coverage_report(
+    scene: Mapping[str, Any],
+    *,
+    certificate: bool | str = False,
+) -> dict[str, Any]:
+    """Render an analytic scene and return measured coverage/debug statistics."""
+
+    result = _render_analytic_details(
+        scene,
+        include_coverage=False,
+        include_records=False,
+        certificate=certificate,
+    )
+    report = dict(result["report"])
+    execution_json = report.pop("execution_report_json")
+    report["execution_report"] = json.loads(execution_json)
+    return report
 
 def add_polygons(
     exterior_coords: np.ndarray,
@@ -408,9 +489,49 @@ class VectorScene:
     # Rendering
     # ------------------------------------------------------------------
     def render_oit(
-        self, width: int, height: int, *, certificate: bool | str = False
+        self,
+        width: int,
+        height: int,
+        *,
+        quality: str = "default",
+        certificate: bool | str = False,
     ) -> np.ndarray:
-        """Render collected vectors using weighted blended OIT to an RGBA image."""
+        """Render collected vectors to an RGBA image.
+
+        ``quality="default"`` preserves weighted OIT and its existing
+        feathered-line semantics. ``quality="analytic"`` opts every collected
+        polyline into LIMES's exact round-stroke coverage path.
+        """
+        if quality not in {"default", "analytic"}:
+            raise ValueError("quality must be 'default' or 'analytic'")
+        if quality == "analytic":
+            if self._points:
+                raise ValueError("analytic vector coverage does not render points")
+            if not self._polylines:
+                raise ValueError("analytic vector coverage requires at least one polyline")
+            layers = []
+            for index, path in enumerate(self._polylines):
+                layers.append(
+                    {
+                        "name": f"polyline-{index}",
+                        "quality": "analytic",
+                        "fill_rule": "nonzero",
+                        "color": list(self._polyline_rgba[index]),
+                        "polygons": [],
+                        "polylines": [
+                            {
+                                "path": [list(point) for point in path],
+                                "width": self._stroke_width[index],
+                                "cap": "round",
+                                "join": "round",
+                            }
+                        ],
+                    }
+                )
+            return render_analytic(
+                {"width": int(width), "height": int(height), "layers": layers},
+                certificate=certificate,
+            )
         from . import vector_render_oit_py as _render
         result = _render(
             int(width), int(height),
@@ -423,6 +544,23 @@ class VectorScene:
             certificate=certificate,
         )
         return result
+
+    def render_snapshot(
+        self,
+        width: int,
+        height: int,
+        *,
+        quality: str = "default",
+        certificate: bool | str = False,
+    ) -> np.ndarray:
+        """Render the vector snapshot through the selected quality path."""
+
+        return self.render_oit(
+            width,
+            height,
+            quality=quality,
+            certificate=certificate,
+        )
 
     def render_pick_map(
         self,

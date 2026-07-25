@@ -37,6 +37,24 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
+path = "src/shaders/dd_harness.wgsl"
+reason = "dd_harness.wgsl: streaming double-float mirror precision relations are proven by the DUPLA GPU harness but not yet modeled"
+owner = "precision"
+expiry = "2027-07-18"
+
+[[unproven]]
+path = "src/shaders/dd_jitter.wgsl"
+reason = "dd_jitter.wgsl: double-float vertex and readback precision relations are proven by the DUPLA jitter gate but not yet modeled"
+owner = "precision"
+expiry = "2027-07-18"
+
+[[unproven]]
+path = "src/shaders/includes/dd.wgsl"
+reason = "includes/dd.wgsl: paired-f32 error-free transformation precision is proven by backend bounds but not yet modeled"
+owner = "precision"
+expiry = "2027-07-18"
+
+[[unproven]]
 path = "src/shaders/brdf/ashikhmin_shirley.wgsl"
 reason = "brdf/ashikhmin_shirley.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
@@ -628,6 +646,24 @@ expiry = "2027-01-17"
 path = "src/shaders/tonemap_terrain_offline.wgsl"
 reason = "tonemap_terrain_offline.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/vector_coverage_bin.wgsl"
+reason = "vector_coverage_bin.wgsl: atomic storage-buffer allocation and index relations are not yet modeled"
+owner = "vector"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/vector_coverage_raster.wgsl"
+reason = "vector_coverage_raster.wgsl: fixed-array scan-cell breakpoint and storage index relations are not yet modeled"
+owner = "vector"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/vector_coverage_resolve.wgsl"
+reason = "vector_coverage_resolve.wgsl: storage-buffer layer stride and output index relations are not yet modeled"
+owner = "vector"
 expiry = "2027-01-17"
 
 [[unproven]]

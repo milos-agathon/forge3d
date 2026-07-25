@@ -10,6 +10,8 @@ import numpy as np
 from . import gis
 from . import codec as codec
 from . import text as text
+from . import precision as precision
+from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
@@ -905,6 +907,15 @@ def vector_render_polygons_fill_py(
     coordinates_are_ndc: Optional[bool] = ...,
     certificate: bool | str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...
+
+def vector_render_analytic_py(
+    scene_json: str,
+    include_coverage: bool = ...,
+    include_records: bool = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+) -> Dict[str, Any]: ...
+
+def vector_coverage_primitives_py(scene_json: str) -> Dict[str, Any]: ...
 
 def vector_render_oit_py(
     width: int,

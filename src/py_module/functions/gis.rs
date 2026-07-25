@@ -13,6 +13,7 @@ pub(crate) fn register_gis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()>
     m.add_function(wrap_pyfunction!(crate::gis::vector_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::vector_bounds_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::validate_geometry_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::is_valid_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::repair_geometry_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::geometry_measure_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::measure_geometries_py, m)?)?;
@@ -20,6 +21,13 @@ pub(crate) fn register_gis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()>
     m.add_function(wrap_pyfunction!(crate::gis::representative_point_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::interpolate_line_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::union_geometries_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::union_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::intersection_geometries_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::difference_geometries_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::gis::symmetric_difference_geometries_py,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(crate::gis::dissolve_vector_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::buffer_geometry_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::clip_vector_py, m)?)?;

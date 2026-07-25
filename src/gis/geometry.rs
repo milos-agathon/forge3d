@@ -14,6 +14,8 @@ mod parse;
 #[cfg(feature = "extension-module")]
 mod py;
 pub(crate) mod topology;
+mod topology_buffer;
+mod topology_simplify;
 mod validate;
 
 use centroid::centroid_for_geometries;
@@ -36,8 +38,8 @@ use model::{
 use parse::normalize_input;
 
 use topology::{
-    buffer_topology, intersection_polygonal, require_topology_backend, simplify_topology,
-    union_polygonal,
+    buffer_topology, difference_polygonal, intersection_polygonal, polygonal_validity,
+    require_topology_backend, simplify_topology, symmetric_difference_polygonal, union_polygonal,
 };
 use validate::{validate_geometry_value, validate_input_or_error};
 
@@ -68,6 +70,33 @@ fn canonical_point(mut point: Coord, geographic: bool) -> Coord {
 
 pub fn validate_geometry(source: &Value) -> GisResult<Value> {
     Ok(validate_geometry_value(source))
+}
+
+pub fn is_valid(source: &Value) -> GisResult<Value> {
+    let basic = validate_geometry_value(source);
+    if !basic.get("valid").and_then(Value::as_bool).unwrap_or(false) {
+        let reason = basic
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid geometry")
+            .to_string();
+        return Ok(json!({
+            "valid": false,
+            "reason": reason,
+            "reasons": [reason],
+        }));
+    }
+    let input = normalize_input(source, false)?;
+    let geometry = input
+        .geometries
+        .first()
+        .ok_or_else(model::empty_geometry_error)?;
+    let report = polygonal_validity(geometry)?;
+    Ok(json!({
+        "valid": report.valid,
+        "reason": report.reasons.first().cloned(),
+        "reasons": report.reasons,
+    }))
 }
 
 pub fn repair_geometry(source: &Value, method: &str) -> GisResult<Value> {
@@ -291,6 +320,83 @@ pub fn union_geometries(source: &Value, crs: Option<CrsSpec>) -> GisResult<Value
             warnings,
         ),
     }))
+}
+
+fn boolean_geometries(
+    source: &Value,
+    crs: Option<CrsSpec>,
+    name: &str,
+    combine: fn(&Geometry, &Geometry, &str) -> GisResult<Geometry>,
+) -> GisResult<Value> {
+    let input = normalize_union_input(source)?;
+    if input.input_count == 0 {
+        return Ok(json!({
+            "geometry": Value::Null,
+            "operation": operation_value(
+                name,
+                &input.input_geometry_type,
+                None,
+                0,
+                0,
+                false,
+                input.crs,
+                vec![RasterWarning::new(EMPTY_INPUT, format!("{name} received no geometries"), Some("geometries"))],
+            ),
+        }));
+    }
+    validate_input_or_error(&input)?;
+    let geographic = resolve_geographic(&input, crs.as_ref())?;
+    let (geometries, _) = dateline_normalized(&input.geometries, geographic);
+    let mut output = union_polygonal(&geometries[..1])?;
+    for geometry in &geometries[1..] {
+        output = combine(&output, geometry, name)?;
+    }
+    let geometry = canonical_output(output, geographic);
+    let output_geometry_type = geometry.geometry_type();
+    let type_changed = output_geometry_type != input.input_geometry_type;
+    let warnings = if type_changed {
+        vec![RasterWarning::new(
+            GEOMETRY_TYPE_CHANGED,
+            format!(
+                "{name} output type changed from {} to {output_geometry_type}",
+                input.input_geometry_type
+            ),
+            Some("geometry"),
+        )]
+    } else {
+        Vec::new()
+    };
+    let output_count = usize::from(!geometry.is_empty());
+    Ok(json!({
+        "geometry": geometry_value(&geometry)?,
+        "operation": operation_value(
+            name,
+            &input.input_geometry_type,
+            Some(output_geometry_type),
+            input.input_count,
+            output_count,
+            input.input_count != 1 || type_changed,
+            input.crs,
+            warnings,
+        ),
+    }))
+}
+
+pub fn intersection_geometries(source: &Value, crs: Option<CrsSpec>) -> GisResult<Value> {
+    boolean_geometries(source, crs, "intersection", intersection_polygonal)
+}
+
+pub fn difference_geometries(source: &Value, crs: Option<CrsSpec>) -> GisResult<Value> {
+    boolean_geometries(source, crs, "difference", difference_polygonal)
+}
+
+pub fn symmetric_difference_geometries(source: &Value, crs: Option<CrsSpec>) -> GisResult<Value> {
+    boolean_geometries(
+        source,
+        crs,
+        "symmetric_difference",
+        symmetric_difference_polygonal,
+    )
 }
 
 pub fn buffer_geometry(
@@ -746,9 +852,10 @@ fn rings_value(rings: &[Vec<Coord>]) -> GisResult<Vec<Vec<Value>>> {
 
 #[cfg(feature = "extension-module")]
 pub use py::{
-    buffer_geometry_py, geometry_centroid_py, geometry_measure_py, interpolate_line_py,
-    measure_geometries_py, repair_geometry_py, representative_point_py, simplify_geometry_py,
-    union_geometries_py, validate_geometry_py,
+    buffer_geometry_py, difference_geometries_py, geometry_centroid_py, geometry_measure_py,
+    interpolate_line_py, intersection_geometries_py, is_valid_py, measure_geometries_py,
+    repair_geometry_py, representative_point_py, simplify_geometry_py,
+    symmetric_difference_geometries_py, union_geometries_py, union_py, validate_geometry_py,
 };
 
 #[cfg(test)]
