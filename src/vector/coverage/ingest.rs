@@ -13,6 +13,12 @@ pub struct CoverageGeometryBuilder {
     primitives: Vec<PrimitiveRecord>,
     layers: Vec<CoverageLayer>,
     next_stable_id: u32,
+    /// Reused split-parameter scratch for `push_arc`. A round-join stroke emits
+    /// four arcs per segment, so a fresh `vec![0.0, 1.0]` there cost one heap
+    /// allocation per arc -- ~400k of them on the 100k-segment throughput
+    /// scene. The buffer is moved out and back so `push_arc` can still take
+    /// `&mut self` for `take_id` and `primitives`.
+    arc_cuts: Vec<f64>,
 }
 
 impl CoverageGeometryBuilder {
@@ -28,6 +34,7 @@ impl CoverageGeometryBuilder {
             primitives: Vec::new(),
             layers: Vec::new(),
             next_stable_id: 0,
+            arc_cuts: Vec::new(),
         })
     }
 
@@ -253,7 +260,10 @@ impl CoverageGeometryBuilder {
         // Split at every quadrant boundary.  Each emitted record is y-monotone
         // and stays on one x branch, which makes its scanline integral the
         // exact circular-segment antiderivative.
-        let mut cuts = vec![0.0, 1.0];
+        let mut cuts = std::mem::take(&mut self.arc_cuts);
+        cuts.clear();
+        cuts.push(0.0);
+        cuts.push(1.0);
         let end = start + sweep;
         let low = start.min(end);
         let high = start.max(end);
@@ -309,6 +319,7 @@ impl CoverageGeometryBuilder {
                 self.primitives.push(record.with_bin_bounds(bin_bounds));
             }
         }
+        self.arc_cuts = cuts;
         Ok(())
     }
 
