@@ -11,6 +11,9 @@ impl TerrainSpike {
     ) -> PyResult<()> {
         let certificate_capture =
             crate::core::certificate::begin_render_capture("terrain_spike.render_png");
+        if let Some(mosaic) = &self.height_mosaic {
+            mosaic.record_certificate_usage();
+        }
         // Encode pass
         let mut encoder = self
             .device

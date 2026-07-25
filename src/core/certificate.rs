@@ -55,8 +55,15 @@ struct FinishedCapture {
     by_label: BTreeMap<String, u64>,
     /// (kind, name, consequence), sorted by (kind, name).
     degradations: Vec<(String, String, String)>,
+    codec: Option<CodecSnapshot>,
     precision: Option<PrecisionEvidence>,
     jitter: Option<JitterEvidence>,
+}
+
+#[derive(Clone)]
+struct CodecSnapshot {
+    eps: f32,
+    pages_base_quality: u32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -101,6 +108,7 @@ static CAPTURE_USES_GPU: AtomicBool = AtomicBool::new(true);
 thread_local! {
     static EXTERNAL_CAPTURE: RefCell<Option<RenderCaptureGuard>> = const { RefCell::new(None) };
     static CAPTURE_DEPTH: Cell<usize> = const { Cell::new(0) };
+    static CURRENT_CODEC: RefCell<Option<CodecSnapshot>> = const { RefCell::new(None) };
     static CURRENT_PRECISION: RefCell<Option<PrecisionEvidence>> = const { RefCell::new(None) };
     static CURRENT_JITTER: RefCell<Option<JitterEvidence>> = const { RefCell::new(None) };
 }
@@ -211,6 +219,7 @@ pub fn begin_render_capture_with_resources(
         };
     }
 
+    CURRENT_CODEC.with(|codec| codec.borrow_mut().take());
     begin_ledger_capture(allocation_owner_ids);
     begin_shader_render_capture(&BTreeMap::new());
     crate::core::shader_contract_runtime::begin_runtime_contract_capture();
@@ -236,6 +245,34 @@ pub fn record_pass(label: &str, gpu_ms: f64, draw_calls: u32) {
     });
 }
 
+/// Attach F3DZ source evidence to the render capture currently active on this
+/// thread. Multiple tiles accumulate; if their epsilon differs, the
+/// certificate records the largest (weakest) bound, which remains honest for
+/// every contributing page.
+pub fn record_f3dz_pages(eps: f32, page_count: u32, base_quality: bool) {
+    let active = CAPTURE_DEPTH.with(|depth| depth.get() > 0);
+    if !active || !eps.is_finite() || eps <= 0.0 {
+        return;
+    }
+    CURRENT_CODEC.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        match slot.as_mut() {
+            Some(codec) => {
+                codec.eps = codec.eps.max(eps);
+                if base_quality {
+                    codec.pages_base_quality = codec.pages_base_quality.saturating_add(page_count);
+                }
+            }
+            None => {
+                *slot = Some(CodecSnapshot {
+                    eps,
+                    pages_base_quality: if base_quality { page_count } else { 0 },
+                });
+            }
+        }
+    });
+}
+
 /// Finish the in-flight capture: snapshot the allocation ledger, degradations,
 /// shader hashes, adapter info, and negotiated capabilities into the last
 /// completed report. Adapter/capability info is read from the process GPU
@@ -245,6 +282,7 @@ fn finish_render_capture() {
     let uses_gpu = CAPTURE_USES_GPU.load(Ordering::Relaxed);
     let passes = lock_current().clone();
     let ledger = finish_ledger_capture();
+    let codec = CURRENT_CODEC.with(|slot| slot.borrow_mut().take());
 
     let mut degradations: Vec<(String, String, String)> = finish_degradation_capture()
         .into_iter()
@@ -354,6 +392,7 @@ fn finish_render_capture() {
         peak_device_local_bytes: ledger.peak_device_local_bytes,
         by_label: ledger.by_label,
         degradations,
+        codec,
         precision: CURRENT_PRECISION.with(|slot| slot.borrow_mut().take()),
         jitter: CURRENT_JITTER.with(|slot| slot.borrow_mut().take()),
     };
@@ -367,6 +406,7 @@ pub fn abort_render_capture() {
     crate::core::shader_contract_runtime::abort_runtime_contract_capture();
     crate::core::degradation::abort_degradation_capture();
     notify_python_degradation_capture("abort_capture");
+    CURRENT_CODEC.with(|codec| codec.borrow_mut().take());
     lock_current().clear();
     CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
     CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
@@ -449,6 +489,13 @@ struct DegradationJson<'a> {
 }
 
 #[derive(Serialize)]
+struct CodecJson {
+    codec: &'static str,
+    eps: f32,
+    pages_base_quality: u32,
+}
+
+#[derive(Serialize)]
 struct ReportJson<'a> {
     schema: &'a str,
     engine: EngineJson<'a>,
@@ -457,6 +504,8 @@ struct ReportJson<'a> {
     passes: Vec<PassJson<'a>>,
     allocations: AllocationsJson<'a>,
     degradations: Vec<DegradationJson<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    codec: Option<CodecJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     precision: Option<&'a PrecisionEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -516,6 +565,11 @@ pub fn execution_report_json() -> Result<String, RenderError> {
                 consequence,
             })
             .collect(),
+        codec: cap.codec.as_ref().map(|codec| CodecJson {
+            codec: "f3dz/1",
+            eps: codec.eps,
+            pages_base_quality: codec.pages_base_quality,
+        }),
         precision: cap.precision.as_ref(),
         jitter: cap.jitter.as_ref(),
     };
@@ -691,6 +745,29 @@ mod tests {
             .map(|pass| pass["label"].as_str().expect("pass label"))
             .collect();
         assert_eq!(labels, ["outer.before", "inner.gpu", "outer.after"]);
+    }
+
+    #[test]
+    fn f3dz_evidence_is_capture_local_and_records_the_weakest_bound() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let capture = begin_cpu_render_capture("test.f3dz");
+        record_f3dz_pages(0.1, 4, false);
+        record_f3dz_pages(0.5, 3, true);
+        capture.finish();
+        let report: serde_json::Value =
+            serde_json::from_str(&execution_report_json().expect("report assembles"))
+                .expect("report parses");
+        assert_eq!(report["codec"]["codec"], "f3dz/1");
+        assert_eq!(report["codec"]["eps"], 0.5);
+        assert_eq!(report["codec"]["pages_base_quality"], 3);
+
+        let clean = begin_cpu_render_capture("test.no-codec");
+        clean.finish();
+        let report: serde_json::Value =
+            serde_json::from_str(&execution_report_json().expect("report assembles"))
+                .expect("report parses");
+        assert!(report.get("codec").is_none());
     }
 
     #[test]

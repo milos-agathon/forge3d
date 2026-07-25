@@ -123,6 +123,9 @@ _NATIVE_ONLY_EXPORTS = (
         "sign_render_certificate_digest",  # CENSOR: native Ed25519 signer
         "request_host_visible_allocation_for_test",  # CENSOR: budget-enforce test helper
         "shader_report",  # PROBATUM: WGSL proof report
+        "compress_dem",  # COMPENDIUM: deterministic F3DZ encoder
+        "decompress_dem",  # COMPENDIUM: fail-closed F3DZ decoder
+        "verify_dem",  # COMPENDIUM: CRC/error-bound verifier
         "dd_selftest",  # DUPLA: GPU DD exactness canary
         "dd_harness",  # DUPLA: GPU DD bounds proof
         "dd_jitter_demo",  # DUPLA: Everest absolute-coordinate demo
@@ -242,6 +245,7 @@ from . import animation
 from . import gis
 from . import thematic
 from . import camera_rigs
+from . import codec
 
 # -----------------------------------------------------------------------------
 # Core rendering API
@@ -632,6 +636,7 @@ __all__ = [
     "version",
     "text",
     "verify",
+    "codec",
     "precision",
     "dd_selftest",
     "dd_harness",
@@ -688,6 +693,9 @@ __all__ = [
     # CENSOR: budget-enforce test helper
     "request_host_visible_allocation_for_test",
     "shader_report",
+    "compress_dem",
+    "decompress_dem",
+    "verify_dem",
     # CENSOR: typed GPU-error exceptions
     "MemoryBudgetExceeded",
     "DegradedCapability",
