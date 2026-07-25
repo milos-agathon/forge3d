@@ -51,6 +51,22 @@ on:
       - 'src/shaders/lighting_ibl.wgsl'
       - 'src/shaders/terrain_pbr_pom.wgsl'
       - 'src/core/gpu.rs'
+      - 'src/core/dd.rs'
+      - 'src/core/dd/**'
+      - 'src/shaders/includes/dd.wgsl'
+      - 'src/shaders/dd_harness.wgsl'
+      - 'src/shaders/dd_jitter.wgsl'
+      - 'python/forge3d/precision.py'
+      - 'python/forge3d/precision.pyi'
+      - 'python/forge3d/__init__.py'
+      - 'python/forge3d/__init__.pyi'
+      - 'src/py_functions/precision.rs'
+      - 'src/py_functions/mod.rs'
+      - 'src/py_module/functions/precision.rs'
+      - 'src/py_module/functions.rs'
+      - 'scripts/run_dupla_proof.py'
+      - 'tests/test_dd_arithmetic.py'
+      - 'tests/test_dd_jitter.py'
       - 'python/forge3d/determinism.py'
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
@@ -65,6 +81,22 @@ on:
       - 'src/shaders/lighting_ibl.wgsl'
       - 'src/shaders/terrain_pbr_pom.wgsl'
       - 'src/core/gpu.rs'
+      - 'src/core/dd.rs'
+      - 'src/core/dd/**'
+      - 'src/shaders/includes/dd.wgsl'
+      - 'src/shaders/dd_harness.wgsl'
+      - 'src/shaders/dd_jitter.wgsl'
+      - 'python/forge3d/precision.py'
+      - 'python/forge3d/precision.pyi'
+      - 'python/forge3d/__init__.py'
+      - 'python/forge3d/__init__.pyi'
+      - 'src/py_functions/precision.rs'
+      - 'src/py_functions/mod.rs'
+      - 'src/py_module/functions/precision.rs'
+      - 'src/py_module/functions.rs'
+      - 'scripts/run_dupla_proof.py'
+      - 'tests/test_dd_arithmetic.py'
+      - 'tests/test_dd_jitter.py'
       - 'python/forge3d/determinism.py'
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
@@ -99,7 +131,6 @@ jobs:
             backend: metal
             gated: true
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ !matrix.gated }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -176,6 +207,16 @@ jobs:
             tail -n 20 render.log >> "hash-out/${SCENE}.ABSENT" || true
             tail -n 20 render.err >> "hash-out/${SCENE}.ABSENT" || true
           fi
+      - name: Prove DUPLA precision
+        shell: bash
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKENDS: ${{ matrix.backend }}
+        run: |
+          python scripts/run_dupla_proof.py \
+            --output "hash-out/dupla-proof-${{ matrix.leg }}.json" \
+            --absence-output "hash-out/dupla-proof-${{ matrix.leg }}.ABSENT" \
+            --failure-output "hash-out/dupla-proof-${{ matrix.leg }}.FAILED"
       - uses: actions/upload-artifact@v4
         # always(): a gated leg that fails still uploads its .FAILED marker so
         # the diff job can report the reason instead of a silent hole.
@@ -229,3 +270,8 @@ jobs:
           --hashes hashes
           --golden tests/goldens/determinism/${{ env.SCENE }}.sha256
           --scene ${{ env.SCENE }}
+      - name: Validate DUPLA backend proofs
+        run: >-
+          python scripts/run_dupla_proof.py
+          --validate-artifacts hashes
+          --expected-legs intel amd nvidia apple

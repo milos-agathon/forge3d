@@ -69,6 +69,32 @@ def test_intra_backend_bit_identity(tmp_path):
     )
 
 
+def test_dupla_dd_demo_is_backend_pinned_and_byte_identical():
+    """The committed DD render participates in the determinism harness."""
+    backend = _local_backend()
+    env = dict(os.environ)
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=backend)
+    source_python = Path(__file__).parents[1] / "python"
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(source_python), env["PYTHONPATH"]]
+        if env.get("PYTHONPATH")
+        else [str(source_python)]
+    )
+    script = (
+        "import json; from forge3d import precision; "
+        "r=precision.dd_jitter_demo(1000); "
+        "print(json.dumps({'a':r['dd_hash_a'],'b':r['dd_hash_b'],"
+        "'dd':r['dd_max_error_px'],'raw':r['raw_over_one_px']}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True
+    )
+    report = json.loads(result.stdout)
+    assert report["a"] == report["b"]
+    assert report["dd"] < 0.01
+    assert report["raw"] >= 100
+
+
 def test_matches_committed_golden(tmp_path):
     """The canonical render must equal the committed golden hash, byte-exact."""
     assert GOLDEN_PATH.exists(), (
