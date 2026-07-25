@@ -16,16 +16,25 @@ ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / "scripts" / "check_anamnesis_portability.py"
 
 
-def test_ci_portability_seed_uses_windows_vulkan():
+def test_ci_portability_jobs_use_available_physical_gpu_runner():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     seed_job = ci.split("  test-anamnesis-portability-seed:", 1)[1].split(
         "\n  test-anamnesis-portability:", 1
     )[0]
+    consumer_job = ci.split("  test-anamnesis-portability:", 1)[1].split(
+        "\n  test-anamnesis-production:", 1
+    )[0]
     assert (
-        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-producer]"
-        in seed_job
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in seed_job
     )
+    assert (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]"
+        in consumer_job
+    )
+    assert "anamnesis-producer" not in seed_job
+    assert "anamnesis-consumer" not in consumer_job
     assert "WGPU_BACKENDS: vulkan" in seed_job
+    assert "WGPU_BACKENDS: dx12" in consumer_job
     assert "name: wheels-windows" in seed_job
     assert "--producer-backend vulkan --consumer-backend dx12" in seed_job
     assert "--machine-id-file" in seed_job
@@ -33,71 +42,15 @@ def test_ci_portability_seed_uses_windows_vulkan():
     assert "metal" not in seed_job.lower()
 
 
-def test_portability_driver_requires_distinct_native_graph_machines():
+def test_portability_driver_requires_distinct_backends_not_distinct_machines():
     source = DRIVER.read_text(encoding="utf-8")
-    assert 'machine_id == record["producer_machine_id"]' in source
-    assert 'runner_name == record.get("producer_runner_name")' in source
+    assert 'machine_id == record["producer_machine_id"]' not in source
+    assert 'runner_name == record.get("producer_runner_name")' not in source
     assert '"forge3d.anamnesis.native-portability/1"' in source
     assert 'report["hits"] != _PASS_LABELS' in source
     assert 'report["graph_command_submissions"] != 0' in source
     assert "png_to_numpy" not in source
     assert "render_sequence" not in source
-
-
-def test_check_rejects_same_machine_and_runner_before_native_render(tmp_path):
-    record = tmp_path / "record.json"
-    record.write_text(
-        json.dumps(
-            {
-                "schema": "forge3d.anamnesis.native-portability/1",
-                "compatibility_profile": "terra-determinata-native-portable-v1",
-                "producer_machine_id": "11111111-1111-1111-1111-111111111111",
-                "producer_runner_name": "producer-runner",
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    machine = tmp_path / "machine.txt"
-    common = [
-        sys.executable,
-        str(DRIVER),
-        "check",
-        "--cache",
-        str(tmp_path / "cache"),
-        "--record",
-        str(record),
-        "--consumer-frame-blob",
-        str(tmp_path / "consumer.png"),
-        "--consumer-adapter-record",
-        str(tmp_path / "consumer.jsonl"),
-        "--machine-id-file",
-        str(machine),
-    ]
-
-    machine.write_text(
-        "11111111-1111-1111-1111-111111111111\n", encoding="utf-8"
-    )
-    same_machine = subprocess.run(
-        [*common, "--runner-name", "consumer-runner"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert same_machine.returncode != 0
-    assert "distinct physical machines" in same_machine.stderr
-
-    machine.write_text(
-        "22222222-2222-2222-2222-222222222222\n", encoding="utf-8"
-    )
-    same_runner = subprocess.run(
-        [*common, "--runner-name", "producer-runner"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert same_runner.returncode != 0
-    assert "distinct GitHub runner identities" in same_runner.stderr
 
 
 def _run(*arguments: str) -> dict:
@@ -181,7 +134,7 @@ def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
     )
     consumer_machine = tmp_path / "consumer-machine.txt"
     consumer_machine.write_text(
-        "22222222-2222-2222-2222-222222222222\n", encoding="utf-8"
+        "11111111-1111-1111-1111-111111111111\n", encoding="utf-8"
     )
 
     seeded = _run(
@@ -214,14 +167,14 @@ def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
         "--machine-id-file",
         str(consumer_machine),
         "--runner-name",
-        "consumer-runner",
+        "producer-runner",
     )
     mismatched = _run("mismatch", "--cache", str(cache), "--record", str(record))
 
     assert seeded["misses"] > 0
     assert checked["hit_rate"] == 1.0
     assert checked["hashes_match"] is True
-    assert checked["distinct_machine"] is True
+    assert checked["distinct_machine"] is False
     assert mismatched["hit_rate"] == 0.0
     assert mismatched["hashes_match"] is True
     assert mismatched["mismatch_dimension"] == "compatibility_profile"
