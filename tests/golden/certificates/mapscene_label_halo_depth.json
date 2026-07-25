@@ -159,24 +159,24 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "89bb84539357",
-    "version": "1.33.0",
+    "git_sha": "942a8d430423",
+    "version": "1.33.1",
     "wgsl_module_hashes": {
       "overlays_shader": "3f7493a10d4734daa97dedac61a21ab27ebc20e1c9353018abb40f31fdfa803d",
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.shader": "41ddb326e9824a26960838c84635ef149a46fd4a0cc05a2ae6321ee0d3b27b99",
+      "terrain_pbr_pom.shader": "622e56edce3439cbb0170a46b854b2c5d0465eee8980ac6d644d23ccbd82bb4e",
       "text_overlay_shader": "06e0fd5a97f2ad8d44664a1dc8f0e7fdd90231f032a863f7e23315314cb8e0df"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0030720001086592674,
       "label": "terrain.material_vt"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.height_ao"
     },
     {
@@ -186,7 +186,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 3.1057920455932617,
+      "gpu_ms": 1.6158720254898071,
       "label": "terrain.shadow"
     },
     {
@@ -196,7 +196,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.6957440376281738,
+      "gpu_ms": 0.04403200000524521,
       "label": "terrain.main"
     },
     {
@@ -206,7 +206,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "scene.main"
     },
     {
@@ -224,7 +224,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "0ee5769e69abcfd2bd25a46395995036fa0152b6864bdd9e54c05ca458dae33816ccb81017558f319e3637a56989eade8eace17716b91f48ecea554d86a3ed09",
+    "sig": "00d7b19db8a73270deae573c7c90b82c9afa32e71b8e0340a8e3e04b2dc73419755d6c8c04235065fd6513db3a7a080869a8bbed1a45e3b32d42f4d67812fb0e",
     "signed_fields": [
       "adapter",
       "allocations",
