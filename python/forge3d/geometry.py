@@ -312,6 +312,7 @@ def instance_mesh_gpu_render(
     height: int = 512,
     *,
     certificate: bool | str = False,
+    cache: str | None = None,
 ) -> np.ndarray:
     """Render an instanced mesh via the native GPU instancing path, returning an RGBA8 image.
 
@@ -335,6 +336,7 @@ def instance_mesh_gpu_render(
     - In environments without GPU support, prefer the CPU ``instance_mesh`` and external rendering.
     """
     _ensure_native()
+    _ = cache
     fn = getattr(_forge3d, "geometry_instance_mesh_gpu_render_py", None)
     if fn is None:
         raise RuntimeError(

@@ -242,7 +242,12 @@ class PathTracer:
 
     @_captured_synthetic_render("path_tracing.PathTracer.render_rgba")
     def render_rgba(
-        self, *args, spp: int = 1, certificate: bool | str = False, **kwargs
+        self,
+        *args: Any,
+        spp: int = 1,
+        certificate: bool | str = False,
+        cache: str | None = None,
+        **kwargs: Any,
     ) -> np.ndarray:
         """Produce a deterministic synthetic RGBA image.
 
@@ -251,6 +256,7 @@ class PathTracer:
           - path-tracing style: render_rgba(width,height,scene,camera,seed=...,frames=...,use_gpu=...,denoiser=...,svgf_iters=...,synthetic_ok=True)
 
         """
+        _ = cache
         synthetic_ok = bool(kwargs.pop("synthetic_ok", False))
         _require_synthetic_ok(synthetic_ok, "PathTracer.render_rgba")
         def _finish(arr: np.ndarray) -> np.ndarray:
@@ -422,6 +428,7 @@ class PathTracer:
         spp: int = 1,
         synthetic_ok: bool = False,
         certificate: bool | str = False,
+        cache: str | None = None,
     ) -> np.ndarray:
         """Render progressively in tiles, invoking callback on cadence.
 
@@ -435,6 +442,7 @@ class PathTracer:
 
         If the callback returns True, rendering stops early.
         """
+        _ = cache
         _require_synthetic_ok(synthetic_ok, "PathTracer.render_progressive")
         width, height = self._width, self._height
         spp = int(spp)
@@ -514,6 +522,7 @@ def render_aovs(
     mesh: Any | None = None,
     synthetic_ok: bool = False,
     certificate: bool | str = False,
+    cache: str | None = None,
 ) -> Dict[str, np.ndarray]:
     """Render a deterministic synthetic set of AOVs for tests and demos.
 
@@ -521,6 +530,7 @@ def render_aovs(
     Values are procedurally generated and deterministic with the given seed.
 
     """
+    _ = cache
     _require_synthetic_ok(synthetic_ok, "render_aovs")
     width = int(width)
     height = int(height)
@@ -710,8 +720,14 @@ def save_aovs(
 # Additional functions needed by tests
 
 @_captured_synthetic_render("path_tracing.render_rgba")
-def render_rgba(*args, certificate: bool | str = False, **kwargs) -> np.ndarray:
+def render_rgba(
+    *args: Any,
+    certificate: bool | str = False,
+    cache: str | None = None,
+    **kwargs: Any,
+) -> np.ndarray:
     """Render RGBA image (fallback implementation)."""
+    _ = cache
     # Handle positional arguments for width/height
     if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
         width = int(args[0])
@@ -897,6 +913,7 @@ def hybrid_render_terrain_reference(
     variance_threshold: float = 1e-3,
     seed: int = 7,
     certificate: bool | str = False,
+    cache: str | None = None,
 ) -> dict:
     """Converged GPU path-traced reference of a real DEM under sun + IBL.
 
@@ -921,6 +938,7 @@ def hybrid_render_terrain_reference(
     and memory diagnostics (``peak_host_visible_bytes``,
     ``minmax_pyramid_bytes``, ``gpu_resource_bytes``).
     """
+    _ = cache
     if _NATIVE is None or not hasattr(_NATIVE, "hybrid_render_terrain_reference"):
         raise RuntimeError(
             "hybrid_render_terrain_reference requires the native forge3d "

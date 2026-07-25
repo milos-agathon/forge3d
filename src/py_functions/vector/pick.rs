@@ -1,7 +1,7 @@
 use super::*;
 
 #[pyfunction]
-#[pyo3(signature = (width, height, points_xy=None, polylines=None, base_pick_id=None, certificate=None))]
+#[pyo3(signature = (width, height, points_xy=None, polylines=None, base_pick_id=None, certificate=None, cache=None))]
 pub(crate) fn vector_render_pick_map_py(
     py: Python<'_>,
     width: u32,
@@ -10,7 +10,9 @@ pub(crate) fn vector_render_pick_map_py(
     polylines: Option<&Bound<'_, PyAny>>,
     base_pick_id: Option<u32>,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _ = cache;
     let _certificate_capture =
         crate::core::certificate::begin_render_capture("vector_render_pick_map_py");
     let points = extract_xy_list(points_xy)?;
@@ -85,7 +87,7 @@ pub(crate) fn vector_render_pick_map_py(
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, base_pick_id=None, certificate=None))]
+#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, base_pick_id=None, certificate=None, cache=None))]
 pub(crate) fn vector_render_oit_and_pick_py(
     py: Python<'_>,
     width: u32,
@@ -98,7 +100,9 @@ pub(crate) fn vector_render_oit_and_pick_py(
     stroke_width: Option<&Bound<'_, PyAny>>,
     base_pick_id: Option<u32>,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
+    let _ = cache;
     let _certificate_capture =
         crate::core::certificate::begin_render_capture("vector_render_oit_and_pick_py");
     #[cfg(not(feature = "weighted-oit"))]

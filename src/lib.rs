@@ -35,11 +35,6 @@ pub(crate) use crate::core::context as engine_context;
 #[cfg(feature = "extension-module")]
 pub(crate) use crate::core::device_caps::DeviceCaps;
 #[cfg(feature = "extension-module")]
-pub(crate) use crate::core::framegraph_impl::{
-    FrameGraph as Fg, PassType as FgPassType, ResourceDesc as FgResourceDesc,
-    ResourceType as FgResourceType,
-};
-#[cfg(feature = "extension-module")]
 pub(crate) use crate::core::multi_thread::{
     CopyTask as MtCopyTask, MultiThreadConfig as MtConfig, MultiThreadRecorder as MtRecorder,
 };
@@ -57,11 +52,6 @@ pub(crate) use crate::util::image_write;
 pub(crate) use std::path::Path;
 #[cfg(feature = "extension-module")]
 pub(crate) use std::sync::Arc;
-#[cfg(feature = "extension-module")]
-pub(crate) use wgpu::{
-    Extent3d as FgExtent3d, TextureFormat as FgTexFormat, TextureUsages as FgTexUsages,
-};
-
 #[cfg(feature = "extension-module")]
 static GLOBAL_CSM_STATE: Lazy<Mutex<CpuCsmState>> =
     Lazy::new(|| Mutex::new(CpuCsmState::default()));

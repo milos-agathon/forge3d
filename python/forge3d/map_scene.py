@@ -5622,7 +5622,67 @@ class MapScene:
         emit_provenance: bool = False,
         provenance_signing_key: bytes | None = None,
         certificate: "bool | str | os.PathLike[str]" = False,
+        cache: "str | os.PathLike[str] | None" = None,
     ) -> ValidationReport:
+        output = self.recipe.output
+        target = path or (output.path if output is not None else None)
+        cache_eligible = bool(
+            cache is not None
+            and target
+            and not emit_provenance
+            and provenance_signing_key is None
+            and not certificate
+            and output is not None
+            and str(output.format).lower() == "png"
+            and int(output.bit_depth) == 8
+            and not output.aovs
+            and not output.hdr
+        )
+        if cache_eligible:
+            from .anamnesis import render_sequence
+            from ._canonical_json import canonical_json_bytes
+
+            rendered: dict[str, ValidationReport] = {}
+
+            def render_frame(_recipe: Mapping[str, Any], _frame: int) -> bytes:
+                report = self._render_impl(
+                    str(target),
+                    emit_provenance=False,
+                    provenance_signing_key=None,
+                )
+                rendered["report"] = report
+                return Path(str(target)).read_bytes()
+
+            sequence = render_sequence(
+                self.to_dict(),
+                frames=[0],
+                cache=cache,
+                render_frame=render_frame,
+                render_frame_fingerprint=b"forge3d.python.mapscene.render/v1",
+                render_frame_context=canonical_json_bytes(
+                    self.to_dict(),
+                    error_context="MapScene ANAMNESIS callback context",
+                ),
+            )
+            report = rendered.get("report")
+            if report is None:
+                Path(str(target)).parent.mkdir(parents=True, exist_ok=True)
+                Path(str(target)).write_bytes(sequence.frame_blobs[0])
+                report = self._compiled_plan_for_current_recipe().validation_report
+                self.last_render_path = str(target)
+                self.last_render_backend = "anamnesis-cache"
+                self.last_render_metadata = {
+                    "cache_hit": True,
+                    "cache_report": sequence.cache_report.to_dict(),
+                    "frame_sha256": sequence.frame_hashes[0],
+                }
+            else:
+                self.last_render_metadata = dict(self.last_render_metadata or {})
+                self.last_render_metadata["cache_hit"] = False
+                self.last_render_metadata["cache_report"] = sequence.cache_report.to_dict()
+                self.last_render_metadata["frame_sha256"] = sequence.frame_hashes[0]
+            return report
+
         from . import certificate as _certificate
 
         with _certificate._render_capture(

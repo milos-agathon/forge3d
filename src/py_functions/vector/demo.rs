@@ -4,13 +4,15 @@ use crate::vector::api::{PointDef, PolylineDef, VectorStyle};
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width, height, certificate=None))]
+#[pyo3(signature = (width, height, certificate=None, cache=None))]
 pub(crate) fn vector_oit_and_pick_demo(
     py: Python<'_>,
     width: u32,
     height: u32,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<(Py<PyAny>, u32)> {
+    let _ = cache;
     let _certificate_capture =
         crate::core::certificate::begin_render_capture("vector_oit_and_pick_demo");
     #[cfg(not(feature = "weighted-oit"))]

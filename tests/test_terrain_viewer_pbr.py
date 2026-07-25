@@ -838,40 +838,40 @@ class TestTerrainViewerPbr:
                 assert send_ipc(sock, {"cmd": "set_overlay_solid", "solid": True}).get("ok")
                 assert send_ipc(sock, {"cmd": "set_overlay_preserve_colors", "preserve_colors": False}).get("ok")
 
-                time.sleep(2.0)
+                wait_for_frame_advance(sock)
                 assert send_ipc(sock, {
                     "cmd": "snapshot",
                     "path": str(regular_path),
                     "width": 640,
                     "height": 480,
                 }, timeout=60.0).get("ok")
-                assert wait_for_snapshot(regular_path), "regular snapshot not written"
+                assert wait_for_snapshot(regular_path, timeout_s=60.0), "regular snapshot not written"
 
                 assert send_ipc(sock, {
                     "cmd": "set_overlay_preserve_colors",
                     "preserve_colors": True,
                 }).get("ok")
-                time.sleep(2.0)
+                wait_for_frame_advance(sock)
                 assert send_ipc(sock, {
                     "cmd": "snapshot",
                     "path": str(preserve_path),
                     "width": 640,
                     "height": 480,
                 }, timeout=60.0).get("ok")
-                assert wait_for_snapshot(preserve_path), "preserve_colors snapshot not written"
+                assert wait_for_snapshot(preserve_path, timeout_s=60.0), "preserve_colors snapshot not written"
 
                 assert send_ipc(sock, {
                     "cmd": "set_overlay_preserve_colors",
                     "preserve_colors": False,
                 }).get("ok")
-                time.sleep(2.0)
+                wait_for_frame_advance(sock)
                 assert send_ipc(sock, {
                     "cmd": "snapshot",
                     "path": str(regular_again_path),
                     "width": 640,
                     "height": 480,
                 }, timeout=60.0).get("ok")
-                assert wait_for_snapshot(regular_again_path), "regular-again snapshot not written"
+                assert wait_for_snapshot(regular_again_path, timeout_s=60.0), "regular-again snapshot not written"
 
                 regular_hash = image_hash(regular_path)
                 preserve_hash = image_hash(preserve_path)

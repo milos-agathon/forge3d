@@ -2,13 +2,15 @@ use super::super::*;
 use crate::py_types::frame::Frame;
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width, height, certificate=None))]
+#[pyo3(signature = (width, height, certificate=None, cache=None))]
 pub(crate) fn render_debug_pattern_frame(
     py: Python<'_>,
     width: u32,
     height: u32,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<Frame>> {
+    let _ = cache;
     let certificate_capture =
         crate::core::certificate::begin_render_capture("render_debug_pattern_frame");
     let ctx = crate::core::gpu::try_ctx()?;

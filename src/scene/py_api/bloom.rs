@@ -105,22 +105,30 @@ impl Scene {
     /// -----
     /// The written PNG's raw RGBA bytes will match those returned by
     /// `Scene.render_rgba()` on the same frame (row-major, C-contiguous).
-    #[pyo3(signature = (path, certificate = None), text_signature = "($self, path, certificate=None)")]
+    #[pyo3(signature = (path, certificate = None, cache = None), text_signature = "($self, path, certificate=None, cache=None)")]
     pub fn render_png(
         &mut self,
         py: pyo3::Python<'_>,
         path: PathBuf,
         certificate: Option<pyo3::Bound<'_, pyo3::PyAny>>,
+        cache: Option<pyo3::Bound<'_, pyo3::PyAny>>,
     ) -> PyResult<()> {
+        // Scene contains mutable GPU resources whose complete identity is not
+        // yet serializable. Soundness requires a false miss rather than a key
+        // that omits hidden state; MapScene and render_sequence provide the
+        // fully content-addressed offline path.
+        let _ = cache;
         self.render_png_impl(&path)?;
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())
     }
-    #[pyo3(signature = (certificate = None), text_signature = "($self, certificate=None)")]
+    #[pyo3(signature = (certificate = None, cache = None), text_signature = "($self, certificate=None, cache=None)")]
     pub fn render_rgba<'py>(
         &mut self,
         py: pyo3::Python<'py>,
         certificate: Option<pyo3::Bound<'py, pyo3::PyAny>>,
+        cache: Option<pyo3::Bound<'py, pyo3::PyAny>>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, numpy::PyArray3<u8>>> {
+        let _ = cache;
         let out = self.render_rgba_impl(py)?;
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok(out)

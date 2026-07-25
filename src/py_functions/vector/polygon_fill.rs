@@ -140,7 +140,7 @@ fn extract_optional_rgba_list(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<[f
 }
 
 #[cfg(feature = "extension-module")]
-#[pyfunction(signature = (width, height, exteriors, holes=None, fill_rgba=None, stroke_rgba=None, stroke_width=None, fill_rgba_list=None, coordinates_are_ndc=None, certificate=None))]
+#[pyfunction(signature = (width, height, exteriors, holes=None, fill_rgba=None, stroke_rgba=None, stroke_width=None, fill_rgba_list=None, coordinates_are_ndc=None, certificate=None, cache=None))]
 pub(crate) fn vector_render_polygons_fill_py(
     py: Python<'_>,
     width: u32,
@@ -153,7 +153,9 @@ pub(crate) fn vector_render_polygons_fill_py(
     fill_rgba_list: Option<&Bound<'_, PyAny>>,
     coordinates_are_ndc: Option<bool>,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _ = cache;
     let certificate_capture =
         crate::core::certificate::begin_render_capture("vector_render_polygons_fill_py");
     let normalize = !coordinates_are_ndc.unwrap_or(false);

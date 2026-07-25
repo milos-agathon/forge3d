@@ -453,6 +453,7 @@ class HybridRenderer:
         spheres: Optional[List] = None,
         *,
         certificate: bool | str | os.PathLike[str] = False,
+        cache: str | os.PathLike[str] | None = None,
     ) -> np.ndarray:
         """
         Render an SDF scene to RGBA8 image
@@ -464,6 +465,7 @@ class HybridRenderer:
         Returns:
             RGBA8 image as numpy array with shape (height, width, 4)
         """
+        _ = cache
         from . import _degradation
         from . import certificate as _certificate
 
@@ -693,11 +695,12 @@ def render_simple_scene(
     height: int = 512,
     *,
     certificate: bool | str | os.PathLike[str] = False,
+    cache: str | os.PathLike[str] | None = None,
 ) -> np.ndarray:
     """Render a simple test scene"""
     scene = create_simple_scene()
     renderer = HybridRenderer(width, height)
-    return renderer.render_sdf_scene(scene, certificate=certificate)
+    return renderer.render_sdf_scene(scene, certificate=certificate, cache=cache)
 
 
 # Example usage

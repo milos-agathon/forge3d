@@ -5,7 +5,7 @@ use super::super::*;
 pub struct Frame {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
-    texture: crate::core::resource_tracker::TrackedTexture,
+    texture: Arc<crate::core::resource_tracker::TrackedTexture>,
     width: u32,
     height: u32,
     format: wgpu::TextureFormat,
@@ -15,7 +15,7 @@ impl Frame {
     pub(crate) fn new(
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
-        texture: crate::core::resource_tracker::TrackedTexture,
+        texture: impl Into<Arc<crate::core::resource_tracker::TrackedTexture>>,
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
@@ -23,14 +23,14 @@ impl Frame {
         Self {
             device,
             queue,
-            texture,
+            texture: texture.into(),
             width,
             height,
             format,
         }
     }
 
-    fn read_tight_bytes(&self) -> anyhow::Result<Vec<u8>> {
+    pub(crate) fn read_tight_bytes(&self) -> anyhow::Result<Vec<u8>> {
         read_texture_tight(
             &self.device,
             &self.queue,

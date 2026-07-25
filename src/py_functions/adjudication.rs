@@ -15,13 +15,14 @@ use super::super::*;
 /// with identical camera/light fields for both paths (single scene source).
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width, height, spp, certificate = None))]
+#[pyo3(signature = (width, height, spp, certificate = None, cache = None))]
 pub(crate) fn render_adjudication_pair(
     py: Python<'_>,
     width: u32,
     height: u32,
     spp: u32,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     use numpy::PyArray1;
 
@@ -49,14 +50,76 @@ pub(crate) fn render_adjudication_pair(
         spp,
         Some(&mut timing),
     )?;
-    let raster_hdr = crate::offscreen::adjudication_raster::render_raster_reference(
-        g.device.as_ref(),
-        g.queue.as_ref(),
-        &desc,
-        width,
-        height,
-        Some(&mut timing),
-    )?;
+    let certificate_enabled = certificate
+        .as_ref()
+        .is_some_and(|value| !value.is_none() && !matches!(value.extract::<bool>(), Ok(false)));
+    let cache_options = if certificate_enabled {
+        None
+    } else {
+        cache
+            .as_ref()
+            .map(|value| -> PyResult<_> {
+                let path = value.extract::<std::path::PathBuf>().or_else(|_| {
+                    value
+                        .call_method0("__fspath__")?
+                        .extract::<std::path::PathBuf>()
+                })?;
+                let limits = g.device.limits();
+                let capability = crate::core::anamnesis::CapabilityFingerprint {
+                    granted_features: g
+                        .capabilities
+                        .granted_names()
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                    limits: std::collections::BTreeMap::from([
+                        (
+                            "max_texture_dimension_2d".into(),
+                            limits.max_texture_dimension_2d as u64,
+                        ),
+                        ("max_buffer_size".into(), limits.max_buffer_size),
+                        ("max_bind_groups".into(), limits.max_bind_groups as u64),
+                        (
+                            "max_storage_buffers_per_shader_stage".into(),
+                            limits.max_storage_buffers_per_shader_stage as u64,
+                        ),
+                        (
+                            "min_uniform_buffer_offset_alignment".into(),
+                            limits.min_uniform_buffer_offset_alignment as u64,
+                        ),
+                        (
+                            "min_storage_buffer_offset_alignment".into(),
+                            limits.min_storage_buffer_offset_alignment as u64,
+                        ),
+                    ]),
+                    backend: format!("{:?}", g.adapter.get_info().backend).to_lowercase(),
+                    dx12_compiler: g.dx12_compiler.into(),
+                    naga_capabilities: vec![format!(
+                        "wgpu-validation-default@naga-{}",
+                        env!("FORGE3D_NAGA_VERSION")
+                    )],
+                };
+                Ok(crate::offscreen::adjudication_raster::RasterCacheOptions {
+                    root: path,
+                    max_bytes: 512 * 1024 * 1024,
+                    verify_reads: true,
+                    capability_fingerprint_bytes: capability.canonical_bytes(),
+                    engine_fingerprint_bytes: crate::core::anamnesis::EngineFingerprint::current()
+                        .canonical_bytes(),
+                })
+            })
+            .transpose()?
+    };
+    let (raster_hdr, cache_report) =
+        crate::offscreen::adjudication_raster::render_raster_reference_incremental(
+            g.device.as_ref(),
+            g.queue.as_ref(),
+            &desc,
+            width,
+            height,
+            Some(&mut timing),
+            cache_options.as_ref(),
+        )?;
 
     // Tonemap parity by construction: one shared operator (Reinhard, see
     // core::tonemap::resolve_reference_hdr_to_rgba8), same exposure, both paths.
@@ -83,6 +146,13 @@ pub(crate) fn render_adjudication_pair(
         }
         meta.set_item(key, sub)?;
     }
+    let cache_meta = pyo3::types::PyDict::new_bound(py);
+    cache_meta.set_item("hits", cache_report.hits)?;
+    cache_meta.set_item("misses", cache_report.misses)?;
+    cache_meta.set_item("bytes_read", cache_report.bytes_read)?;
+    cache_meta.set_item("bytes_written", cache_report.bytes_written)?;
+    cache_meta.set_item("wall_ms_saved", cache_report.wall_ms_saved)?;
+    meta.set_item("cache", cache_meta)?;
 
     if !timing.record_into_certificate() {
         crate::core::certificate::record_pass("adjudication.path_trace", 0.0, spp);

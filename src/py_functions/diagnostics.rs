@@ -30,75 +30,16 @@ pub(crate) fn report_device(py: Python<'_>) -> PyResult<Py<PyDict>> {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn c5_build_framegraph_report(py: Python<'_>) -> PyResult<Py<PyDict>> {
-    // Build a small framegraph with non-overlapping transient resources to allow aliasing
-    let mut fg = Fg::new();
-
-    // Three color targets (transient, aliasable)
-    let extent = FgExtent3d {
-        width: 256,
-        height: 256,
-        depth_or_array_layers: 1,
-    };
-    let usage = FgTexUsages::RENDER_ATTACHMENT | FgTexUsages::TEXTURE_BINDING;
-
-    let gbuffer = fg.add_resource(FgResourceDesc {
-        name: "gbuffer".to_string(),
-        resource_type: FgResourceType::ColorAttachment,
-        format: Some(FgTexFormat::Rgba8UnormSrgb),
-        extent: Some(extent),
-        size: None,
-        usage: Some(usage),
-        can_alias: true,
-    });
-
-    let tmp = fg.add_resource(FgResourceDesc {
-        name: "lighting_tmp".to_string(),
-        resource_type: FgResourceType::ColorAttachment,
-        format: Some(FgTexFormat::Rgba8UnormSrgb),
-        extent: Some(extent),
-        size: None,
-        usage: Some(usage),
-        can_alias: true,
-    });
-
-    let ldr = fg.add_resource(FgResourceDesc {
-        name: "ldr_output".to_string(),
-        resource_type: FgResourceType::ColorAttachment,
-        format: Some(FgTexFormat::Rgba8UnormSrgb),
-        extent: Some(extent),
-        size: None,
-        usage: Some(usage),
-        can_alias: true,
-    });
-
-    // Passes
-    fg.add_pass("g_buffer", FgPassType::Graphics, |pb| {
-        pb.write(gbuffer);
-        Ok(())
-    })?;
-
-    fg.add_pass("lighting", FgPassType::Graphics, |pb| {
-        pb.read(gbuffer).write(tmp);
-        Ok(())
-    })?;
-
-    fg.add_pass("post", FgPassType::Graphics, |pb| {
-        pb.read(tmp).write(ldr);
-        Ok(())
-    })?;
-
-    // Compile + plan barriers
-    fg.compile().map_err(PyErr::from)?;
-    let (_plan, _barriers) = fg.get_execution_plan().map_err(PyErr::from)?;
-
-    // Metrics
-    let metrics = fg.metrics();
-    let alias_reuse = metrics.aliased_count > 0;
-    let barrier_ok = true;
+    let report = crate::core::framegraph_impl::last_renderer_graph_report();
+    let alias_reuse = report.metrics.aliased_count > 0;
+    let barrier_ok = !report.labels.is_empty() && report.barrier_count > 0;
 
     let d = PyDict::new_bound(py);
     d.set_item("alias_reuse", alias_reuse)?;
     d.set_item("barrier_ok", barrier_ok)?;
+    d.set_item("labels", report.labels)?;
+    d.set_item("barrier_count", report.barrier_count)?;
+    d.set_item("cache_disabled_passes", report.cache_disabled_passes)?;
     Ok(d.into())
 }
 
@@ -465,6 +406,18 @@ pub(crate) fn capabilities(py: Python<'_>) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
     d.set_item("requested", ctx.capabilities.wanted_names())?;
     d.set_item("granted", ctx.capabilities.granted_names())?;
+    d.set_item(
+        "backend",
+        format!("{:?}", ctx.adapter.get_info().backend).to_lowercase(),
+    )?;
+    d.set_item("dx12_compiler", ctx.dx12_compiler)?;
+    d.set_item(
+        "naga_capabilities",
+        vec![format!(
+            "wgpu-validation-default@naga-{}",
+            env!("FORGE3D_NAGA_VERSION")
+        )],
+    )?;
 
     let lim = PyDict::new_bound(py);
     lim.set_item("max_texture_dimension_2d", limits.max_texture_dimension_2d)?;

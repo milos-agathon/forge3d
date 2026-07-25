@@ -1,6 +1,174 @@
 use super::*;
 use crate::terrain::render_params;
 use numpy::PyUntypedArrayMethods;
+use pyo3::types::PyDict;
+use sha2::{Digest, Sha256};
+
+fn append_content_digest(target: &mut Vec<u8>, domain: &[u8], content: &[u8]) {
+    target.extend_from_slice(&(domain.len() as u64).to_le_bytes());
+    target.extend_from_slice(domain);
+    target.extend_from_slice(&(content.len() as u64).to_le_bytes());
+    target.extend_from_slice(&Sha256::digest(content));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn terrain_cache_options<'py>(
+    py: Python<'py>,
+    cache: Option<&Bound<'py, PyAny>>,
+    scene: &TerrainScene,
+    material_set: &crate::render::material_set::MaterialSet,
+    env_maps: &crate::lighting::ibl_wrapper::IBL,
+    params: &render_params::TerrainRenderParams,
+    heightmap: &PyReadonlyArray2<'py, f32>,
+    water_mask: Option<&PyReadonlyArray2<'py, f32>>,
+    time_seconds: f32,
+) -> PyResult<Option<super::anamnesis::TerrainCacheOptions>> {
+    let Some(cache) = cache else {
+        return Ok(None);
+    };
+    if matches!(
+        params
+            .decoded()
+            .shadow
+            .technique
+            .to_ascii_uppercase()
+            .as_str(),
+        "VSM" | "EVSM" | "MSM"
+    ) {
+        return Err(PyRuntimeError::new_err(
+            "native terrain ANAMNESIS rejects moment-shadow techniques until their moment texture is a declared graph output",
+        ));
+    }
+    let root = cache.extract::<std::path::PathBuf>().or_else(|_| {
+        cache
+            .call_method0("__fspath__")?
+            .extract::<std::path::PathBuf>()
+    })?;
+    let dataclasses = py.import_bound("dataclasses")?;
+    let params_dict = dataclasses
+        .getattr("asdict")?
+        .call1((params.python_object.bind(py),))?;
+    let params_mapping = params_dict.downcast::<PyDict>()?;
+    let canonical = py.import_bound("forge3d._canonical_json")?;
+    let kwargs = PyDict::new_bound(py);
+    kwargs.set_item("error_context", "native terrain ANAMNESIS state")?;
+    let params_bytes = canonical
+        .getattr("canonical_json_bytes")?
+        .call((params_dict.clone(),), Some(&kwargs))?
+        .extract::<Vec<u8>>()?;
+    let shadow_projection = PyDict::new_bound(py);
+    for key in [
+        "terrain_span",
+        "z_scale",
+        "clip",
+        "light",
+        "shadows",
+        "clamp",
+        "height_curve_mode",
+        "height_curve_strength",
+        "height_curve_power",
+        "height_curve_lut",
+    ] {
+        if let Some(value) = params_mapping.get_item(key)? {
+            shadow_projection.set_item(key, value)?;
+        }
+    }
+    kwargs.set_item("error_context", "native terrain ANAMNESIS shadow state")?;
+    let mut shadow_bytes = canonical
+        .getattr("canonical_json_bytes")?
+        .call((shadow_projection,), Some(&kwargs))?
+        .extract::<Vec<u8>>()?;
+
+    let mut state = Vec::new();
+    state.extend_from_slice(b"forge3d.terrain.native-inputs/v2\0");
+    state.extend_from_slice(&(params_bytes.len() as u64).to_le_bytes());
+    state.extend_from_slice(&params_bytes);
+    let material_bytes = material_set.anamnesis_bytes().map_err(|error| {
+        PyRuntimeError::new_err(format!(
+            "failed to identify terrain material source: {error}"
+        ))
+    })?;
+    append_content_digest(&mut state, b"material-set", &material_bytes);
+    let ibl_bytes = env_maps
+        .anamnesis_bytes()
+        .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))?;
+    append_content_digest(&mut state, b"ibl", &ibl_bytes);
+
+    let height = heightmap.as_array();
+    let mut height_bytes = Vec::new();
+    height_bytes.extend_from_slice(&(height.shape()[0] as u64).to_le_bytes());
+    height_bytes.extend_from_slice(&(height.shape()[1] as u64).to_le_bytes());
+    for value in height.iter() {
+        height_bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+    }
+    match water_mask {
+        Some(mask) => {
+            state.push(1);
+            let mask = mask.as_array();
+            state.extend_from_slice(&(mask.shape()[0] as u64).to_le_bytes());
+            state.extend_from_slice(&(mask.shape()[1] as u64).to_le_bytes());
+            let mut digest = Sha256::new();
+            for value in mask.iter() {
+                digest.update(value.to_bits().to_le_bytes());
+            }
+            state.extend_from_slice(&digest.finalize());
+        }
+        None => state.push(0),
+    }
+    state.extend_from_slice(&time_seconds.to_bits().to_le_bytes());
+    for name in [
+        "FORGE3D_TERRAIN_SHADOW_DEBUG",
+        "VF_COLOR_DEBUG_MODE",
+        "VF_ROUGHNESS_MULT",
+        "VF_SPEC_AA_ENABLED",
+        "VF_SPECAA_SIGMA_SCALE",
+        "VF_FORCE_LUT_UNORM",
+    ] {
+        state.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        state.extend_from_slice(name.as_bytes());
+        match std::env::var_os(name) {
+            Some(value) => {
+                state.push(1);
+                let value = value.to_string_lossy();
+                state.extend_from_slice(&(value.len() as u64).to_le_bytes());
+                state.extend_from_slice(value.as_bytes());
+            }
+            None => state.push(0),
+        }
+    }
+    for path in [
+        params.decoded().materials.normal_path.as_ref(),
+        params.decoded().materials.roughness_path.as_ref(),
+        params.decoded().materials.mask_path.as_ref(),
+    ] {
+        match path {
+            Some(path) => {
+                state.push(1);
+                let content = std::fs::read(path).map_err(|error| {
+                    PyRuntimeError::new_err(format!(
+                        "failed to identity terrain material map {path:?}: {error}"
+                    ))
+                })?;
+                let extension = std::path::Path::new(path)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                append_content_digest(&mut state, extension.as_bytes(), &content);
+            }
+            None => state.push(0),
+        }
+    }
+    scene
+        .append_anamnesis_external_state(&mut state)
+        .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))?;
+    scene
+        .append_anamnesis_external_state(&mut shadow_bytes)
+        .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))?;
+    super::anamnesis::TerrainCacheOptions::new(root, state, height_bytes, shadow_bytes)
+        .map(Some)
+        .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))
+}
 
 #[pymethods]
 impl TerrainRenderer {
@@ -16,7 +184,11 @@ impl TerrainRenderer {
             PyRuntimeError::new_err(format!("Failed to create TerrainRenderer: {:#}", e))
         })?;
 
-        Ok(Self { scene })
+        Ok(Self {
+            scene,
+            last_anamnesis_report: crate::core::anamnesis::CacheReport::default(),
+            last_anamnesis_graph_submissions: 0,
+        })
     }
 
     #[pyo3(signature = (lights))]
@@ -65,7 +237,7 @@ impl TerrainRenderer {
         self.scene.light_debug_info()
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None, time_seconds=0.0, certificate=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None, time_seconds=0.0, certificate=None, cache=None))]
     pub fn render_terrain_pbr_pom<'py>(
         &mut self,
         py: Python<'py>,
@@ -77,7 +249,10 @@ impl TerrainRenderer {
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
         time_seconds: f32,
         certificate: Option<Bound<'py, PyAny>>,
+        cache: Option<Bound<'py, PyAny>>,
     ) -> PyResult<Py<crate::Frame>> {
+        self.last_anamnesis_report = crate::core::anamnesis::CacheReport::default();
+        self.last_anamnesis_graph_submissions = 0;
         if self
             .scene
             .offline_session_active()
@@ -94,7 +269,25 @@ impl TerrainRenderer {
             ));
         }
 
-        let frame = self
+        let certificate_enabled = certificate
+            .as_ref()
+            .is_some_and(|value| !value.is_none() && !matches!(value.extract::<bool>(), Ok(false)));
+        let cache_options = terrain_cache_options(
+            py,
+            if certificate_enabled {
+                None
+            } else {
+                cache.as_ref()
+            },
+            &self.scene,
+            material_set,
+            env_maps,
+            params,
+            &heightmap,
+            water_mask.as_ref(),
+            time_seconds,
+        )?;
+        let (frame, report, graph_submissions) = self
             .scene
             .render_internal(
                 material_set,
@@ -103,15 +296,18 @@ impl TerrainRenderer {
                 heightmap,
                 water_mask,
                 time_seconds,
+                cache_options.as_ref(),
             )
-            .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {:#}", e)))?;
+            .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {e:#}")))?;
+        self.last_anamnesis_report = report;
+        self.last_anamnesis_graph_submissions = graph_submissions;
 
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
 
         Py::new(py, frame)
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, certificate=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, certificate=None, cache=None))]
     pub fn render_with_aov<'py>(
         &mut self,
         py: Python<'py>,
@@ -122,7 +318,15 @@ impl TerrainRenderer {
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
         time_seconds: f32,
         certificate: Option<Bound<'py, PyAny>>,
+        cache: Option<Bound<'py, PyAny>>,
     ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
+        self.last_anamnesis_report = crate::core::anamnesis::CacheReport::default();
+        self.last_anamnesis_graph_submissions = 0;
+        if cache.as_ref().is_some_and(|value| !value.is_none()) {
+            return Err(PyRuntimeError::new_err(
+                "native terrain ANAMNESIS does not yet serialize the multi-attachment AOV graph; use cache=None",
+            ));
+        }
         if self
             .scene
             .offline_session_active()
@@ -154,6 +358,24 @@ impl TerrainRenderer {
             "TerrainRenderer(backend=wgpu, device={:?})",
             self.scene.device.features()
         )
+    }
+
+    /// Report the most recent native one-shot ANAMNESIS lookup.
+    #[getter]
+    fn last_anamnesis_cache_report(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let report = &self.last_anamnesis_report;
+        let dict = PyDict::new_bound(py);
+        dict.set_item("hits", &report.hits)?;
+        dict.set_item("misses", &report.misses)?;
+        dict.set_item("bytes_read", report.bytes_read)?;
+        dict.set_item("bytes_written", report.bytes_written)?;
+        dict.set_item("wall_ms_saved", report.wall_ms_saved)?;
+        dict.set_item("hit_rate", report.hit_rate())?;
+        dict.set_item(
+            "graph_command_submissions",
+            self.last_anamnesis_graph_submissions,
+        )?;
+        Ok(dict.into())
     }
 
     #[cfg(feature = "enable-gpu-instancing")]

@@ -11,9 +11,9 @@ pub(in crate::terrain::renderer) struct UploadedHeightInputs {
     pub(in crate::terrain::renderer) height: u32,
     pub(in crate::terrain::renderer) heightmap_data: Vec<f32>,
     pub(in crate::terrain::renderer) terrain_data_hash: u64,
-    pub(in crate::terrain::renderer) _heightmap_texture: TrackedTexture,
+    pub(in crate::terrain::renderer) heightmap_texture: Arc<TrackedTexture>,
     pub(in crate::terrain::renderer) heightmap_view: wgpu::TextureView,
-    pub(in crate::terrain::renderer) _water_mask_texture: Option<TrackedTexture>,
+    pub(in crate::terrain::renderer) _water_mask_texture: Option<Arc<TrackedTexture>>,
     pub(in crate::terrain::renderer) water_mask_view_uploaded: Option<wgpu::TextureView>,
 }
 
@@ -113,8 +113,11 @@ impl TerrainScene {
             }
             hasher.finish()
         };
-        let heightmap_texture =
-            self.upload_heightmap_texture(width as u32, height as u32, &heightmap_data)?;
+        let heightmap_texture = Arc::new(self.upload_heightmap_texture(
+            width as u32,
+            height as u32,
+            &heightmap_data,
+        )?);
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.compute_coarse_ao_from_heightmap(width as u32, height as u32, &heightmap_data)?;
 
@@ -144,7 +147,7 @@ impl TerrainScene {
                 let tex =
                     self.upload_water_mask_texture(width as u32, height as u32, &mask_bytes)?;
                 let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-                (Some(tex), Some(view))
+                (Some(Arc::new(tex)), Some(view))
             } else {
                 log::warn!(
                     target: "terrain.water",
@@ -163,7 +166,7 @@ impl TerrainScene {
             height: height as u32,
             heightmap_data,
             terrain_data_hash,
-            _heightmap_texture: heightmap_texture,
+            heightmap_texture,
             heightmap_view,
             _water_mask_texture: water_mask_texture,
             water_mask_view_uploaded,

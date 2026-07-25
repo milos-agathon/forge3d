@@ -1,0 +1,12 @@
+schema = "forge3d.anamnesis.irrelevant_inputs/1"
+
+# These fields select where already-produced bytes are written. They are
+# removed only from the opaque renderer's pixel projection; output format,
+# dimensions, bit depth, AOV, HDR, and every unknown output field remain keyed.
+# `test_output_destination_is_proven_irrelevant_to_pixel_keys` changes the
+# destination and proves the renderer is not reinvoked while bytes stay equal.
+irrelevant_inputs = [
+  "output.path",
+  "output.directory",
+  "output.filename",
+]

@@ -202,8 +202,8 @@ class Renderer:
         **kwargs: Any,
     ) -> None: ...
     def info(self) -> str: ...
-    def render_triangle_rgba(self, *, certificate: bool | str | PathLikeStr = ...) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
-    def render_triangle_png(self, path: PathLikeStr, *, certificate: bool | str | PathLikeStr = ...) -> None: ...
+    def render_triangle_rgba(self, *, certificate: bool | str | PathLikeStr = ..., cache: str | PathLikeStr | None = ...) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
+    def render_triangle_png(self, path: PathLikeStr, *, certificate: bool | str | PathLikeStr = ..., cache: str | PathLikeStr | None = ...) -> None: ...
     def get_config(self) -> Dict[str, Any]: ...
     def set_lights(self, lights: Sequence[Mapping[str, Any]] | Mapping[str, Any]) -> None: ...
     def set_msaa_samples(self, samples: int) -> int: ...
@@ -224,8 +224,8 @@ class Scene:
         up: Tuple[float, float, float],
         fovy_deg: float, znear: float, zfar: float) -> None: ...
     def set_height_from_r32f(self, height_r32f: np.ndarray) -> None: ...
-    def render_png(self, path: PathLikeStr, certificate: bool | str | PathLikeStr | None = ...) -> None: ...
-    def render_rgba(self, certificate: bool | str | PathLikeStr | None = ...) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
+    def render_png(self, path: PathLikeStr, certificate: bool | str | PathLikeStr | None = ..., cache: str | PathLikeStr | None = ...) -> None: ...
+    def render_rgba(self, certificate: bool | str | PathLikeStr | None = ..., cache: str | PathLikeStr | None = ...) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
     def set_msaa_samples(self, samples: int) -> int: ...
     def debug_uniforms_f32(self) -> np.ndarray: ...
     def debug_lut_format(self) -> str: ...
@@ -714,6 +714,8 @@ class CameraAnimation:
 
 class TerrainRenderer:
     def __init__(self, session: "Session") -> None: ...
+    @property
+    def last_anamnesis_cache_report(self) -> dict[str, Any]: ...
     def render_terrain_pbr_pom(
         self,
         material_set: "MaterialSet",
@@ -724,6 +726,7 @@ class TerrainRenderer:
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
         certificate: bool | str | PathLikeStr | None = ...,
+        cache: str | PathLikeStr | None = ...,
     ) -> Frame: ...
     def render_with_aov(
         self,
@@ -734,6 +737,7 @@ class TerrainRenderer:
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
         certificate: bool | str | PathLikeStr | None = ...,
+        cache: str | PathLikeStr | None = ...,
     ) -> Tuple[Frame, AovFrame]: ...
     def begin_offline_accumulation(
         self,
@@ -818,6 +822,8 @@ def render_offline(
     settings: OfflineQualitySettings,
     progress_callback: Optional[Callable[[OfflineProgress], None]] = ...,
     water_mask: Optional[np.ndarray] = ...,
+    certificate: bool | str | PathLikeStr = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> OfflineResult: ...
 
 def oidn_available() -> bool: ...
@@ -893,6 +899,7 @@ def vector_oit_and_pick_demo(
     width: int = ...,
     height: int = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, int]: ...
 
 def vector_render_polygons_fill_py(
@@ -906,6 +913,7 @@ def vector_render_polygons_fill_py(
     fill_rgba_list: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
     coordinates_are_ndc: Optional[bool] = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...
 
 def vector_render_analytic_py(
@@ -928,6 +936,7 @@ def vector_render_oit_py(
     polyline_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
     stroke_width: Optional[Sequence[float]] = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W,4) uint8
 
 def vector_render_oit_edl_py(
@@ -943,6 +952,7 @@ def vector_render_oit_edl_py(
     edl_strength: float = ...,
     edl_radius_px: float = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W,4) uint8
 
 def vector_render_pick_map_py(
@@ -953,6 +963,7 @@ def vector_render_pick_map_py(
     polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
     base_pick_id: Optional[int] = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W) uint32
 
 def vector_render_oit_and_pick_py(
@@ -967,6 +978,7 @@ def vector_render_oit_and_pick_py(
     stroke_width: Optional[Sequence[float]] = ...,
     base_pick_id: Optional[int] = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
 
 def composite_rgba_over(bottom: np.ndarray, top: np.ndarray, *, premultiplied: bool = ...) -> np.ndarray: ...  # (H,W,4) uint8
@@ -1008,6 +1020,7 @@ def render_debug_pattern_frame(
     width: int,
     height: int,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> Any: ...
 
 def render_brdf_tile(
@@ -1045,6 +1058,7 @@ def render_brdf_tile(
     sphere_sectors: int = ...,
     sphere_stacks: int = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...
 
 def render_brdf_tile_overrides(
@@ -1084,6 +1098,7 @@ def render_brdf_tile_overrides(
     light_dir: Tuple[float, float, float] | None = ...,
     debug_kind: int = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...
 
 class DeviceProbeResult(TypedDict, total=False):
@@ -1161,9 +1176,9 @@ class VectorScene:
     def clear(self) -> None: ...
     def add_point(self, x: float, y: float, rgba: Tuple[float, float, float, float] | None = ..., size: float | None = ...) -> None: ...
     def add_polyline(self, path: Sequence[Tuple[float, float]], rgba: Tuple[float, float, float, float] | None = ..., width: float | None = ...) -> None: ...
-    def render_oit(self, width: int, height: int, *, certificate: bool | str | PathLikeStr = ...) -> np.ndarray: ...  # (H,W,4) uint8
-    def render_pick_map(self, width: int, height: int, base_pick_id: int = ..., *, certificate: bool | str | PathLikeStr = ...) -> np.ndarray: ...  # (H,W) uint32
-    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = ..., *, certificate: bool | str | PathLikeStr = ...) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
+    def render_oit(self, width: int, height: int, *, certificate: bool | str | PathLikeStr = ..., cache: str | PathLikeStr | None = ...) -> np.ndarray: ...  # (H,W,4) uint8
+    def render_pick_map(self, width: int, height: int, base_pick_id: int = ..., *, certificate: bool | str | PathLikeStr = ..., cache: str | PathLikeStr | None = ...) -> np.ndarray: ...  # (H,W) uint32
+    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = ..., *, certificate: bool | str | PathLikeStr = ..., cache: str | PathLikeStr | None = ...) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
 
 # P5: Screen-space effects classes
 class SSAOSettings:
@@ -1359,6 +1374,21 @@ def abort_render_execution_capture() -> None: ...
 
 # CENSOR: native Ed25519 certificate signer (signature hex, public-key hex)
 def sign_render_certificate_digest(seed: bytes, digest: bytes) -> tuple[str, str]: ...
+def anamnesis_leaf_key(content: bytes) -> str: ...
+def anamnesis_pass_key(
+    label: str,
+    pipeline_descriptor: bytes,
+    uniform_bytes: bytes,
+    input_keys: list[tuple[str, str]],
+    capability_fingerprint: bytes,
+    engine_fingerprint: bytes,
+) -> str: ...
+def anamnesis_engine_fingerprint() -> str: ...
+def anamnesis_store_verify(root: str | os.PathLike[str], max_bytes: int) -> dict[str, int]: ...
+def anamnesis_store_gc(root: str | os.PathLike[str], max_bytes: int) -> int: ...
+def anamnesis_store_put_leaf(root: str | os.PathLike[str], blob: bytes, label: str, max_bytes: int) -> str: ...
+def anamnesis_store_get(root: str | os.PathLike[str], key: str, max_bytes: int) -> bytes | None: ...
+def anamnesis_restore_rgba8(blob: bytes, width: int, height: int) -> bytes: ...
 
 # CENSOR: budget-enforce test helper (raises MemoryBudgetExceeded when over budget)
 def request_host_visible_allocation_for_test(bytes: int, label: str) -> None: ...
@@ -1387,6 +1417,7 @@ def render_adjudication_pair(
     height: int,
     spp: int,
     certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
 
 # PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
@@ -1412,6 +1443,7 @@ def hybrid_render_terrain_reference(
     seed: int = ...,
     certificate: bool | str | PathLikeStr | None = ...,
     sun_color: Optional[Sequence[float] | np.ndarray] = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> Dict[str, Any]: ...
 
 def render_offscreen_rgba(
@@ -1424,6 +1456,7 @@ def render_offscreen_rgba(
     frames: int = ...,
     denoiser: str = ...,
     certificate: bool | str | PathLikeStr = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...
 
 # P2.3: Label style bindings

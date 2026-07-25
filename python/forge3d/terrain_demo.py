@@ -721,6 +721,7 @@ def render_sunrise_to_noon_sequence(
     size: tuple[int, int] = (320, 180),
     steps: int = 4,
     certificate: bool | str | Path = False,
+    cache: str | Path | None = None,
 ) -> list[Path]:
     """Render a short sunrise-to-noon sequence using RendererConfig."""
 
@@ -843,6 +844,7 @@ def render_sunrise_to_noon_sequence(
                     if certificate
                     else False
                 ),
+                cache=cache,
             )
             rgba = frame.to_numpy()
         else:

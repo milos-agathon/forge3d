@@ -32,7 +32,15 @@ SANCTIONED_DD_SPLITS = {
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
 EXPECTED_CONVERSION_COUNT = 1327
-EXPECTED_CONVERSION_SHA256 = "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4"
+# Re-frozen when ANAMNESIS merged with main. The site COUNT is unchanged, and a
+# site-by-site diff against main shows exactly five added and five removed --
+# the same five `as_f32` statements in src/offscreen/adjudication_raster.rs,
+# moved from `render_raster_reference` to `render_raster_reference_incremental`
+# by the incremental-render rename. A site record is
+# (file, function, operation, nth, statement) with no line numbers, so the
+# digest moved only because the enclosing function was renamed. No new
+# narrowing conversion was introduced by this merge.
+EXPECTED_CONVERSION_SHA256 = "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
@@ -53,6 +61,28 @@ REVIEWED_INVENTORY_TRANSITION = {
         "as_f32",
         1,
         "heights.push(f64::from_le_bytes(read_le_bytes8(data, i * 8)) as f32)",
+    ),
+}
+
+# ANAMNESIS retained the exact five adjudication conversions and moved them
+# into the incremental implementation beneath the compatibility wrapper. This
+# transition records that function-only ownership change without relaxing the
+# occurrence count or any normalized conversion statement.
+REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
+    # Re-based on main at the merge: the pre-transition tree is now main rather
+    # than this branch's original base, so the count and digest are main's.
+    "base_count": 1327,
+    "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
+    "result_digest": EXPECTED_CONVERSION_SHA256,
+    "path": "src/offscreen/adjudication_raster.rs",
+    "removed_function": "render_raster_reference",
+    "added_function": "render_raster_reference_incremental",
+    "statements": (
+        "let aspect = width as f32 / height as f32",
+        "let aspect = width as f32 / height as f32",
+        "u.misc = [desc.plane_half_extent, i as f32, 1.0, 0.0]",
+        "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5",
+        "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5",
     ),
 }
 
@@ -211,6 +241,30 @@ def test_reviewed_checked_reader_inventory_transition_is_exact():
     assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
     assert transition["added"] in sites
     assert transition["removed"] not in sites
+
+
+def test_reviewed_anamnesis_function_ownership_transition_is_exact():
+    sites = conversion_inventory()
+    transition = REVIEWED_ANAMNESIS_INVENTORY_TRANSITION
+    assert len(sites) == transition["base_count"] == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == transition["result_digest"]
+    for ordinal, statement in enumerate(transition["statements"], start=1):
+        removed = (
+            transition["path"],
+            transition["removed_function"],
+            "as_f32",
+            ordinal,
+            statement,
+        )
+        added = (
+            transition["path"],
+            transition["added_function"],
+            "as_f32",
+            ordinal,
+            statement,
+        )
+        assert removed not in sites
+        assert added in sites
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():

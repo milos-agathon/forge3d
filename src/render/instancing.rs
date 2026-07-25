@@ -122,7 +122,7 @@ pub fn geometry_instance_mesh_gpu_py(
 /// Render an instanced mesh to RGBA8 using GPU instancing (feature-gated).
 #[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]
 #[pyfunction]
-#[pyo3(signature = (width, height, mesh, transforms, certificate=None))]
+#[pyo3(signature = (width, height, mesh, transforms, certificate=None, cache=None))]
 pub fn geometry_instance_mesh_gpu_render_py(
     py: Python<'_>,
     width: u32,
@@ -130,7 +130,9 @@ pub fn geometry_instance_mesh_gpu_render_py(
     mesh: &Bound<'_, PyDict>,
     transforms: PyReadonlyArray2<'_, f32>, // (N,16) row-major
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _ = cache;
     let certificate_capture =
         crate::core::certificate::begin_render_capture("geometry_instance_mesh_gpu_render_py");
     if width == 0 || height == 0 {

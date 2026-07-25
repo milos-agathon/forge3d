@@ -123,6 +123,14 @@ _NATIVE_ONLY_EXPORTS = (
         "sign_render_certificate_digest",  # CENSOR: native Ed25519 signer
         "request_host_visible_allocation_for_test",  # CENSOR: budget-enforce test helper
         "shader_report",  # PROBATUM: WGSL proof report
+        "anamnesis_leaf_key",  # ANAMNESIS: native content key primitive
+        "anamnesis_pass_key",  # ANAMNESIS: native hermetic pass key
+        "anamnesis_engine_fingerprint",  # ANAMNESIS: pinned engine identity
+        "anamnesis_store_verify",  # ANAMNESIS: native unified-store verifier
+        "anamnesis_store_gc",  # ANAMNESIS: native unified-store LRU
+        "anamnesis_store_put_leaf",  # ANAMNESIS: native store interoperability
+        "anamnesis_store_get",  # ANAMNESIS: native store interoperability
+        "anamnesis_restore_rgba8",  # ANAMNESIS: portable GPU resource restore
         "compress_dem",  # COMPENDIUM: deterministic F3DZ encoder
         "decompress_dem",  # COMPENDIUM: fail-closed F3DZ decoder
         "verify_dem",  # COMPENDIUM: CRC/error-bound verifier
@@ -176,6 +184,12 @@ class _NativeSymbolMissing(AttributeError):
 
 
 def __getattr__(name: str):
+    if name == "anamnesis":
+        import importlib
+
+        module = importlib.import_module(".anamnesis", __name__)
+        globals()[name] = module
+        return module
     if name in _NATIVE_ONLY_EXPORTS:
         if _NATIVE_MODULE is None:
             cause = native_import_error()
@@ -335,9 +349,10 @@ class Renderer:
         "python.renderer.render_triangle_rgba", "renderer.cpu_triangle", draw_calls=1
     )
     def render_triangle_rgba(
-        self, *, certificate: bool | str | Path = False
+        self, *, certificate: bool | str | Path = False, cache: str | Path | None = None
     ) -> np.ndarray:
         """Render a basic triangle pattern (fallback test method)."""
+        _ = cache
         from . import _degradation
 
         _degradation.record(
@@ -358,10 +373,14 @@ class Renderer:
         return img
 
     def render_triangle_png(
-        self, path, *, certificate: bool | str | Path = False
+        self,
+        path: str | Path,
+        *,
+        certificate: bool | str | Path = False,
+        cache: str | Path | None = None,
     ) -> None:
         """Render triangle to PNG file."""
-        numpy_to_png(path, self.render_triangle_rgba(certificate=certificate))
+        numpy_to_png(path, self.render_triangle_rgba(certificate=certificate, cache=cache))
 
 
 # -----------------------------------------------------------------------------
@@ -782,6 +801,7 @@ __all__ = [
     "io",
     "terrain_scatter",
     "animation",
+    "anamnesis",
     "camera_rigs",
     "datasets",
     "widgets",

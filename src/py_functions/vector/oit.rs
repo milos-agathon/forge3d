@@ -2,7 +2,7 @@ use super::*;
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, certificate=None))]
+#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, certificate=None, cache=None))]
 pub(crate) fn vector_render_oit_py(
     py: Python<'_>,
     width: u32,
@@ -14,7 +14,9 @@ pub(crate) fn vector_render_oit_py(
     polyline_rgba: Option<&Bound<'_, PyAny>>,
     stroke_width: Option<&Bound<'_, PyAny>>,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _ = cache;
     let _certificate_capture =
         crate::core::certificate::begin_render_capture("vector_render_oit_py");
     #[cfg(not(feature = "weighted-oit"))]
@@ -128,7 +130,7 @@ pub(crate) fn vector_render_oit_py(
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, edl_strength=1.5, edl_radius_px=1.0, certificate=None))]
+#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, edl_strength=1.5, edl_radius_px=1.0, certificate=None, cache=None))]
 pub(crate) fn vector_render_oit_edl_py(
     py: Python<'_>,
     width: u32,
@@ -142,7 +144,9 @@ pub(crate) fn vector_render_oit_edl_py(
     edl_strength: f32,
     edl_radius_px: f32,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _ = cache;
     let _certificate_capture =
         crate::core::certificate::begin_render_capture("vector_render_oit_edl_py");
     #[cfg(not(feature = "weighted-oit"))]

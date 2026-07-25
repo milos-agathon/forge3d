@@ -13,7 +13,7 @@ use super::*;
     debug_no_srgb=false, output_mode=1, metallic_override=0.0,
     mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0,
     sphere_sectors=64, sphere_stacks=32,
-    certificate=None
+    certificate=None, cache=None
 ))]
 pub(crate) fn render_brdf_tile<'py>(
     py: Python<'py>,
@@ -51,7 +51,9 @@ pub(crate) fn render_brdf_tile<'py>(
     sphere_sectors: u32,
     sphere_stacks: u32,
     certificate: Option<Bound<'py, PyAny>>,
+    cache: Option<Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyArray3<u8>>> {
+    let _ = cache;
     render_brdf_tile_impl(
         py,
         model,
@@ -107,7 +109,7 @@ pub(crate) fn render_brdf_tile<'py>(
     mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0,
     sphere_sectors=64, sphere_stacks=32,
     light_dir=None, debug_kind=0,
-    certificate=None
+    certificate=None, cache=None
 ))]
 pub(crate) fn render_brdf_tile_overrides<'py>(
     py: Python<'py>,
@@ -147,7 +149,9 @@ pub(crate) fn render_brdf_tile_overrides<'py>(
     light_dir: Option<(f32, f32, f32)>,
     debug_kind: u32,
     certificate: Option<Bound<'py, PyAny>>,
+    cache: Option<Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyArray3<u8>>> {
+    let _ = cache;
     render_brdf_tile_impl(
         py,
         model,
