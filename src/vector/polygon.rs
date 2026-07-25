@@ -35,6 +35,22 @@ impl PolygonRenderer {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
     ) -> Result<Self, RenderError> {
+        Self::new_with_sample_count(device, target_format, 1)
+    }
+
+    /// Construct the existing tessellated-fill pipeline with an explicit sample
+    /// count. Production callers keep using [`Self::new`] (one sample); LIMES
+    /// uses this only for the committed 4x-MSAA ablation.
+    pub(crate) fn new_with_sample_count(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> Result<Self, RenderError> {
+        if !matches!(sample_count, 1 | 4) {
+            return Err(RenderError::Upload(format!(
+                "PolygonRenderer sample_count must be 1 or 4, got {sample_count}"
+            )));
+        }
         // Load and compile shader
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
@@ -138,7 +154,10 @@ impl PolygonRenderer {
                     conservative: false,
                 },
                 depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    ..wgpu::MultisampleState::default()
+                },
                 multiview: None,
             },
         );
