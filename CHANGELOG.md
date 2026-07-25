@@ -6,6 +6,24 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-07-25
+### Added
+- DUPLA: double-float (DD) arithmetic in lockstep Rust and WGSL, with Knuth/Dekker transforms and Joldes-Muller-Popescu error bounds. Adds the `forge3d.precision` module plus the `dd_selftest`, `dd_harness`, and `dd_jitter_demo` entry points, backend exactness canaries, tracked GPU proof buffers, and certificate `precision`/`jitter` evidence. Measured on an RTX 3070 across DX12 and Vulkan, every operation stays inside its cited bound (add 2.39/3 u2, mul 5.63/7, div 5.92/15, sqrt 3.34/15) over 100M generated plus 1M adversarial vectors per operation with zero mirror mismatches.
+- EUCLIDEA: exact geometric predicates and a boolean overlay engine (`src/geometry/exact`, `src/geometry/overlay`), with a verification oracle, snap rounding, ring/face reconstruction, and validity checks, reached through `forge3d.gis`.
+- ANAMNESIS: content-addressed render caching. Adds the `forge3d.anamnesis` module and the `anamnesis_leaf_key`, `anamnesis_pass_key`, `anamnesis_engine_fingerprint`, `anamnesis_store_verify`, `anamnesis_store_gc`, `anamnesis_store_put_leaf`, `anamnesis_store_get`, and `anamnesis_restore_rgba8` entry points. Render entry points take a `cache=` keyword, and cross-backend portability is proven physically: a store seeded on NVIDIA Vulkan restores through DX12 in a separate job and clean workspace.
+- COMPENDIUM: the F3DZ DEM codec. Adds the `forge3d.codec` module with `compress_dem`, `decompress_dem`, and `verify_dem`, a fail-closed decoder, CRC and error-bound verification, certificate `codec` evidence, and a cross-platform determinism lane proving every corpus page is byte-identical between CPU and GPU decode.
+- LIMES: analytic vector coverage. Adds `vector_render_analytic_py` and `vector_coverage_primitives_py`, and a `quality="analytic"` option on `VectorScene.render_oit`/`render_snapshot` that computes exact round-stroke coverage on the GPU instead of tessellating. Agreement with a committed 64x64 supersampled reference is within 1e-3 mean and 0.5/255 maximum absolute error across the torture sheet.
+
+### Fixed
+- `determinism-matrix.yml`: the `f3dz-stream` job checked out without pinning `ref` to the pull-request head, unlike every other checkout in that workflow. It is now exact-head pinned, and the provenance gate covers every workflow rather than `ci.yml` alone.
+- The LIMES numerical, ablation, mosaic, and determinism gates required only `f3d.has_gpu()`, which is also true for the CPU rasterizers hosted runners expose. On hosted Windows WARP one torture case took 17 minutes and failed the reference gate, against 0.13 s and a pass on real adapters; ten such cases overran the 35-minute job budget and cancelled the lane. They now require a hardware adapter.
+- Docs workflow: pull-request runs shared one global `pages` concurrency group with `cancel-in-progress`, so any two overlapping runs cancelled each other and the loser reported a red `Build Docs` check. Pull requests now use a per-ref group; `pages` stays serialized for the runs that actually deploy.
+
+### Changed
+- Bumped the package and PyPI version to `1.34.0`.
+- LIMES ingest and resolve CPU cost reduced: `push_arc` reuses a scratch buffer instead of allocating one vector per arc (~400k allocations on the 100k-segment throughput scene, 63.3 -> 51.5 ms), and `linear_to_straight_rgba8` writes through a pre-sized buffer instead of 8.3M individual pushes (18.7 -> 14.6 ms). Output is byte-identical.
+- The LIMES throughput gate now measures frame time, as `31-limes.md` requirement 6 states, rather than summed `gpu_ms`. The previous metric compared GPU time against a default path that spends 0.089 ms of a ~54 ms frame on the GPU, the rest being CPU tessellation. The gate carries a documented deviation: the measured ratio is 4.2-4.6x rather than the required 2x, so it is set as a regression bound at 5.5x, and the shortfall is recorded rather than hidden.
+
 ## [1.33.0] - 2026-07-14
 ### Added
 - Windowed remote `read_cog` now streams over HTTP range requests for chunky-planar **striped and tiled** COGs, fetching only the strips or tiles that overlap the requested window instead of downloading the whole object (`src/gis/cog_range.rs` wraps `RangeReader` in a `Read+Seek` cursor feeding a window-selective strip/tile decoder). Measured on a 1024² 64-tile fixture: a 400×400 window transfers ~22.7% of the object (1.19× the intersecting tile payload); a 40×40 in-tile window ~4.0%.
