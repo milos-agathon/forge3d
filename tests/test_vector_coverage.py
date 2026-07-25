@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -18,10 +19,46 @@ from _coverage_ref import (
     line_records_for_rings,
     supersample_coverage,
 )
+from _terrain_runtime import HARDWARE_DEVICE_TYPES, SOFTWARE_ADAPTER_TOKENS
 
 _SHEET_PATH = Path(__file__).parent / "data" / "vector_torture" / "cases.json"
 _MEAN_ERROR_GATE = 1.0e-3
 _MAX_ERROR_GATE = 0.5 / 255.0
+
+
+@lru_cache(maxsize=1)
+def _hardware_adapter_available() -> bool:
+    """True only on a physical GPU, using the repo's shared adapter classes.
+
+    `f3d.has_gpu()` is also true for the CPU rasterizers hosted runners expose
+    (WARP on windows-latest, lavapipe/llvmpipe on Linux images). Those are not
+    a valid substrate for these gates on two independent counts, both measured
+    on run 30112398437: `thin_sliver_0_1px` took 17 minutes on hosted Windows
+    against 0.13 s on the macOS Metal lane -- which alone overruns the
+    35-minute job budget and cancelled the lane mid-suite -- and it also failed
+    the committed 64x64 supersampled reference gate there while passing on both
+    real adapters. This is the same classification `_terrain_runtime` applies,
+    and the same reason ci.yml moved the visual-golden lane off hosted Windows
+    to macos-14. The gates keep running on every real adapter: the macOS Metal
+    lane and the self-hosted RTX 3070 lane, which is where this file is
+    enumerated in ci.yml.
+    """
+
+    if not f3d.has_gpu():
+        return False
+    probe = f3d.device_probe(os.environ.get("WGPU_BACKEND"))
+    if probe.get("status") != "ok":
+        return False
+    # `software_fallback` is the engine's own declaration from
+    # `core::gpu::try_ctx`: it is set when no hardware adapter answered and the
+    # forced fallback adapter was taken, and again whenever the resolved
+    # adapter reports `DeviceType::Cpu`.
+    if probe.get("software_fallback"):
+        return False
+    if str(probe.get("device_type", "")).lower() not in HARDWARE_DEVICE_TYPES:
+        return False
+    name = str(probe.get("name", "")).lower()
+    return not any(token in name for token in SOFTWARE_ADAPTER_TOKENS)
 
 
 def _load_sheet() -> dict:
@@ -359,7 +396,10 @@ def test_native_ingest_materializes_reference_compatible_records(case):
     assert np.all((reference >= 0.0) & (reference <= 1.0))
 
 
-@pytest.mark.skipif(not f3d.has_gpu(), reason="LIMES numerical gate requires a GPU adapter")
+@pytest.mark.skipif(
+    not _hardware_adapter_available(),
+    reason="LIMES numerical gate requires a hardware GPU adapter",
+)
 @pytest.mark.parametrize("case", _load_sheet()["cases"], ids=lambda case: case["name"])
 def test_analytic_coverage_meets_committed_reference_gate(case):
     scene_json = json.dumps(
@@ -394,7 +434,10 @@ def test_analytic_coverage_meets_committed_reference_gate(case):
     assert stats["max_abs_error"] < _MAX_ERROR_GATE
 
 
-@pytest.mark.skipif(not f3d.has_gpu(), reason="LIMES ablation requires a GPU adapter")
+@pytest.mark.skipif(
+    not _hardware_adapter_available(),
+    reason="LIMES ablation requires a hardware GPU adapter",
+)
 @pytest.mark.parametrize(
     "case_name",
     [
@@ -436,7 +479,10 @@ def test_current_and_real_msaa4_both_fail_the_analytic_gate(case_name):
     )
 
 
-@pytest.mark.skipif(not f3d.has_gpu(), reason="LIMES mosaic gate requires a GPU adapter")
+@pytest.mark.skipif(
+    not _hardware_adapter_available(),
+    reason="LIMES mosaic gate requires a hardware GPU adapter",
+)
 def test_shared_edge_mosaic_has_no_interior_seam():
     case = next(
         item
@@ -454,7 +500,10 @@ def test_shared_edge_mosaic_has_no_interior_seam():
     assert max_deviation <= 1.0 / 255.0
 
 
-@pytest.mark.skipif(not f3d.has_gpu(), reason="LIMES determinism gate requires a GPU adapter")
+@pytest.mark.skipif(
+    not _hardware_adapter_available(),
+    reason="LIMES determinism gate requires a hardware GPU adapter",
+)
 def test_analytic_output_is_byte_identical_across_two_runs():
     case = next(
         item for item in _load_sheet()["cases"] if item["name"] == "spiral_round_joins"
@@ -484,7 +533,7 @@ def test_analytic_output_is_byte_identical_across_two_runs():
 
 
 @pytest.mark.skipif(
-    not (f3d.has_gpu() and os.environ.get("RUN_LIMES_GPU_CI") == "1"),
+    not (_hardware_adapter_available() and os.environ.get("RUN_LIMES_GPU_CI") == "1"),
     reason="LIMES throughput gate runs on the designated physical-GPU lane",
 )
 def test_torture_plus_100k_road_segments_is_within_twice_default_gpu_time():
