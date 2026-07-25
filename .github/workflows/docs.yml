@@ -25,7 +25,14 @@ permissions:
   pages: write
 
 concurrency:
-  group: pages
+  # Pages deployments must stay serialized in one global group, but pull-request
+  # runs never touch Pages at all -- both the `upload-pages-artifact` step and
+  # the whole `deploy` job are gated on `github.event_name != 'pull_request'`.
+  # Sharing the global group meant any two overlapping docs runs cancelled each
+  # other, and the loser reported a red `Build Docs` check on its pull request
+  # (observed on runs 30111903503 and 30149024130). Give pull requests their own
+  # per-ref group and leave `pages` to the runs that actually deploy.
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.ref) || 'pages' }}
   cancel-in-progress: true
 
 jobs:
