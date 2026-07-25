@@ -71,6 +71,7 @@ impl TerrainRenderParams {
             gamma: core.gamma,
             albedo_mode: core.albedo_mode,
             colormap_strength: core.colormap_strength,
+            hue_variation_strength: core.hue_variation_strength,
             ao_weight: core.ao_weight,
             height_curve_mode: core.height_curve_mode,
             height_curve_strength: core.height_curve_strength,

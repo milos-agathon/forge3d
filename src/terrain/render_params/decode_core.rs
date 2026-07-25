@@ -18,6 +18,7 @@ pub(super) struct CoreTerrainParams {
     pub gamma: f32,
     pub albedo_mode: String,
     pub colormap_strength: f32,
+    pub hue_variation_strength: f32,
     pub ao_weight: f32,
     pub height_curve_mode: String,
     pub height_curve_strength: f32,
@@ -109,6 +110,11 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
             "colormap_strength must be between 0 and 1",
         ));
     }
+    let hue_variation_strength = match params.getattr("hue_variation_strength") {
+        Ok(value) => to_finite_f32(value.as_gil_ref(), "hue_variation_strength")?,
+        Err(_) => 0.08,
+    }
+    .clamp(0.0, 0.2);
 
     let ao_weight = params
         .getattr("ao_weight")
@@ -234,6 +240,7 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         gamma,
         albedo_mode,
         colormap_strength,
+        hue_variation_strength,
         ao_weight,
         height_curve_mode,
         height_curve_strength,

@@ -186,7 +186,7 @@ struct OverlayUniforms {
     params0 : vec4<f32>, // domain_min, inv_range, overlay_strength, offset
     params1 : vec4<f32>, // blend_mode, debug_mode, albedo_mode, colormap_strength
     params2 : vec4<f32>, // gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale
-    params3 : vec4<f32>, // P5: ao_weight, ao_fallback_enabled, pad, pad
+    params3 : vec4<f32>, // P5: ao_weight, ao_fallback_enabled, hue_variation_strength, pad
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
@@ -3336,9 +3336,9 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     
     // P4: Apply slope+elevation hue variation to increase h_std metric
     // Combines slope (steep=redder, flat=yellower) and elevation spread
-    // Using strength of 0.08 - safe value that maintains h_mean in target range
+    // The caller can set strength to zero when the supplied palette must remain authoritative.
     if (!is_water) {
-        let hue_variation_strength = 0.08;
+        let hue_variation_strength = clamp(u_overlay.params3.z, 0.0, 0.2);
         albedo = apply_slope_hue_variation(albedo, slope_factor, height_norm, hue_variation_strength);
     }
     

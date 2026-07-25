@@ -82,7 +82,12 @@ impl TerrainScene {
                 params0: [0.0; 4],
                 params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength],
                 params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale],
-                params3: [ao_weight, ao_fallback_enabled, 0.0, 0.0],
+                params3: [
+                    ao_weight,
+                    ao_fallback_enabled,
+                    params.hue_variation_strength.clamp(0.0, 0.2),
+                    0.0,
+                ],
                 params4: [
                     detail_enabled,
                     detail_scale,
