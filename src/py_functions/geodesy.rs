@@ -64,6 +64,209 @@ pub(crate) fn solar_position(
     Ok(dict.into_py(py))
 }
 
+/// Curvature- and refraction-aware GPU viewshed over a north-up EPSG:4326 DEM.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (
+    dem,
+    observer,
+    bounds,
+    height_system,
+    *,
+    observer_height = 1.7,
+    target_height = 0.0,
+    max_distance = None,
+    earth_model = "ellipsoid",
+    sphere_radius_m = 6_371_008.8,
+    refraction_model = "bennett",
+    refraction_k = 0.13,
+    pressure_mbar = 1013.25,
+    temperature_c = 15.0
+))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn terrain_viewshed<'py>(
+    py: Python<'py>,
+    dem: PyReadonlyArray2<'py, f32>,
+    observer: (f64, f64),
+    bounds: (f64, f64, f64, f64),
+    height_system: &str,
+    observer_height: f64,
+    target_height: f64,
+    max_distance: Option<f64>,
+    earth_model: &str,
+    sphere_radius_m: f64,
+    refraction_model: &str,
+    refraction_k: f64,
+    pressure_mbar: f64,
+    temperature_c: f64,
+) -> PyResult<PyObject> {
+    let (observer_lat, observer_lon) = observer;
+    let (left, bottom, right, top) = bounds;
+    let right_unwrapped = if right <= left { right + 360.0 } else { right };
+    let longitude_span = right_unwrapped - left;
+    let mut observer_lon_unwrapped = observer_lon;
+    if observer_lon_unwrapped < left {
+        observer_lon_unwrapped += 360.0;
+    }
+    if !(-90.0..=90.0).contains(&observer_lat)
+        || !(-180.0..=180.0).contains(&observer_lon)
+        || !(-180.0..=180.0).contains(&left)
+        || !(-180.0..=180.0).contains(&right)
+        || !(longitude_span > 0.0 && top > bottom)
+        || longitude_span >= 180.0
+        || top - bottom >= 180.0
+        || !(-90.0..=90.0).contains(&bottom)
+        || !(-90.0..=90.0).contains(&top)
+        || observer_lon_unwrapped < left
+        || observer_lon_unwrapped > right_unwrapped
+        || observer_lat < bottom
+        || observer_lat > top
+    {
+        return Err(PyValueError::new_err(
+            "observer must be finite and inside local EPSG:4326 bounds spanning less than 180 degrees",
+        ));
+    }
+    let array = dem.as_array();
+    let (height, width) = (array.nrows(), array.ncols());
+    if width < 2 || height < 2 || width > u32::MAX as usize || height > u32::MAX as usize {
+        return Err(PyValueError::new_err(
+            "dem must be a two-dimensional array at least 2x2",
+        ));
+    }
+    let geodesic = crate::geo::geodesic::Geodesic::wgs84();
+    let longitude_step = longitude_span / width as f64;
+    let latitude_step = (top - bottom) / height as f64;
+    let normalized_observer_lon = (observer_lon + 180.0).rem_euclid(360.0) - 180.0;
+    let earth =
+        crate::geo::refraction::EarthModel::from_name(earth_model, observer_lat, sphere_radius_m)
+            .map_err(PyValueError::new_err)?;
+    let mut positions_m = Vec::with_capacity(width * height);
+    let mut farthest_m = 0.0_f64;
+    for row in 0..height {
+        let latitude = top - (row as f64 + 0.5) * latitude_step;
+        for column in 0..width {
+            let longitude_unwrapped = left + (column as f64 + 0.5) * longitude_step;
+            let longitude = (longitude_unwrapped + 180.0).rem_euclid(360.0) - 180.0;
+            let (distance_m, azimuth) = match earth {
+                crate::geo::refraction::EarthModel::Sphere { radius_m } => {
+                    let latitude_1 = observer_lat.to_radians();
+                    let latitude_2 = latitude.to_radians();
+                    let longitude_delta = (longitude - normalized_observer_lon).to_radians();
+                    let central_angle = (latitude_1.sin() * latitude_2.sin()
+                        + latitude_1.cos() * latitude_2.cos() * longitude_delta.cos())
+                    .clamp(-1.0, 1.0)
+                    .acos();
+                    let azimuth = (longitude_delta.sin() * latitude_2.cos()).atan2(
+                        latitude_1.cos() * latitude_2.sin()
+                            - latitude_1.sin() * latitude_2.cos() * longitude_delta.cos(),
+                    );
+                    (radius_m * central_angle, azimuth)
+                }
+                _ => {
+                    let inverse = geodesic.inverse(
+                        observer_lat,
+                        normalized_observer_lon,
+                        latitude,
+                        longitude,
+                    );
+                    (inverse.s12, inverse.azi1.to_radians())
+                }
+            };
+            positions_m.push([
+                (distance_m * azimuth.sin()) as f32,
+                (distance_m * azimuth.cos()) as f32,
+            ]);
+            farthest_m = farthest_m.max(distance_m);
+        }
+    }
+    let max_distance_m = max_distance.unwrap_or(farthest_m);
+    let refraction = crate::geo::refraction::RefractionModel::from_name(
+        refraction_model,
+        pressure_mbar,
+        temperature_c,
+        refraction_k,
+    )
+    .map_err(PyValueError::new_err)?;
+    let options = crate::terrain::analysis::viewshed::ViewshedOptions {
+        width: width as u32,
+        height: height as u32,
+        observer_x: ((observer_lon_unwrapped - left) / longitude_step - 0.5) as f32,
+        observer_y: ((top - observer_lat) / latitude_step - 0.5) as f32,
+        observer_height_m: observer_height as f32,
+        target_height_m: target_height as f32,
+        max_distance_m: max_distance_m as f32,
+        observer_latitude_rad: observer_lat.to_radians() as f32,
+        observer_longitude_rad: normalized_observer_lon.to_radians() as f32,
+        left_unwrapped_deg: left as f32,
+        top_deg: top as f32,
+        longitude_step_deg: longitude_step as f32,
+        latitude_step_deg: latitude_step as f32,
+        geodesic_sphere_radius_m: match earth {
+            crate::geo::refraction::EarthModel::Sphere { radius_m } => radius_m as f32,
+            _ => 0.0,
+        },
+        earth_model: earth,
+        refraction_model: refraction,
+    };
+    let heights: Vec<f32> = match height_system {
+        "ellipsoidal" => array.iter().copied().collect(),
+        "orthometric_egm96" => {
+            let mut converted = Vec::with_capacity(width * height);
+            for row in 0..height {
+                let latitude = top - (row as f64 + 0.5) * latitude_step;
+                for column in 0..width {
+                    let longitude_unwrapped =
+                        left + (column as f64 + 0.5) * longitude_step;
+                    let longitude = (longitude_unwrapped + 180.0).rem_euclid(360.0) - 180.0;
+                    converted.push(
+                        array[(row, column)]
+                            + crate::geo::geoid::undulation_deg(latitude, longitude) as f32,
+                    );
+                }
+            }
+            converted
+        }
+        _ => {
+            return Err(PyValueError::new_err(format!(
+                "unsupported height_system {height_system:?}; expected 'ellipsoidal' or 'orthometric_egm96'"
+            )))
+        }
+    };
+    let output =
+        crate::terrain::analysis::viewshed::compute_viewshed(&heights, &positions_m, &options)
+            .map_err(|error| PyRuntimeError::new_err(format!("viewshed failed: {error}")))?;
+    let shape = (height, width);
+    let visibility = ndarray::Array2::from_shape_vec(
+        shape,
+        output.visibility.into_iter().map(u8::from).collect(),
+    )
+    .map_err(|error| PyRuntimeError::new_err(format!("viewshed shape failed: {error}")))?;
+    let curvature = ndarray::Array2::from_shape_vec(shape, output.curvature_drop_m)
+        .map_err(|error| PyRuntimeError::new_err(format!("viewshed shape failed: {error}")))?;
+    let refraction = ndarray::Array2::from_shape_vec(shape, output.refraction_gain_m)
+        .map_err(|error| PyRuntimeError::new_err(format!("viewshed shape failed: {error}")))?;
+    let horizon = ndarray::Array2::from_shape_vec(shape, output.horizon_distance_m)
+        .map_err(|error| PyRuntimeError::new_err(format!("viewshed shape failed: {error}")))?;
+    let dict = PyDict::new_bound(py);
+    dict.set_item(
+        "visibility",
+        PyArray2::from_owned_array_bound(py, visibility),
+    )?;
+    dict.set_item(
+        "curvature_drop_m",
+        PyArray2::from_owned_array_bound(py, curvature),
+    )?;
+    dict.set_item(
+        "refraction_gain_m",
+        PyArray2::from_owned_array_bound(py, refraction),
+    )?;
+    dict.set_item(
+        "horizon_distance_m",
+        PyArray2::from_owned_array_bound(py, horizon),
+    )?;
+    Ok(dict.into_py(py))
+}
+
 /// EGM96 geoid undulation N(lat, lon) in metres (degree/order 120 synthesis,
 /// NGA F477 convention, WGS84 ellipsoid).
 #[cfg(feature = "extension-module")]

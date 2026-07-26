@@ -9,6 +9,7 @@ import os
 import numpy as np
 from . import gis
 from . import geo as geo
+from . import terrain as terrain
 from . import codec as codec
 from . import text as text
 from . import precision as precision

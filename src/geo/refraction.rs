@@ -3,6 +3,15 @@
 const WGS84_A_M: f64 = 6_378_137.0;
 const WGS84_E2: f64 = 6.694_379_990_141_316_5e-3;
 
+pub fn principal_radii_m(latitude_deg: f64) -> Result<(f64, f64), String> {
+    if !latitude_deg.is_finite() || !(-90.0..=90.0).contains(&latitude_deg) {
+        return Err("latitude must be finite and in [-90, 90]".into());
+    }
+    let phi = latitude_deg.to_radians();
+    let w = (1.0 - WGS84_E2 * phi.sin().powi(2)).sqrt();
+    Ok((WGS84_A_M * (1.0 - WGS84_E2) / w.powi(3), WGS84_A_M / w))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EarthModel {
     Flat,
@@ -49,10 +58,7 @@ impl EarthModel {
             Self::Ellipsoid { latitude_deg }
                 if latitude_deg.is_finite() && (-90.0..=90.0).contains(&latitude_deg) =>
             {
-                let phi = latitude_deg.to_radians();
-                let w = (1.0 - WGS84_E2 * phi.sin().powi(2)).sqrt();
-                let meridional = WGS84_A_M * (1.0 - WGS84_E2) / w.powi(3);
-                let prime_vertical = WGS84_A_M / w;
+                let (meridional, prime_vertical) = principal_radii_m(latitude_deg)?;
                 let azimuth = azimuth_deg.to_radians();
                 Ok(1.0
                     / (azimuth.cos().powi(2) / meridional + azimuth.sin().powi(2) / prime_vertical))

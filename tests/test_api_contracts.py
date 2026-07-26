@@ -124,6 +124,7 @@ class TestNativeModuleSymbols:
         "sun_position",
         "sun_position_utc",
         "solar_position",
+        "terrain_viewshed",
         "clipmap_generate_py",
         "engine_info",
         "hybrid_render",
@@ -793,6 +794,7 @@ class TestPackageLevelApiContracts:
         "dd_harness",
         "dd_jitter_demo",
         "geo",
+        "terrain",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)
