@@ -3,6 +3,7 @@
 //! The analytic theories are deliberately bounded: callers get an error
 //! outside the interval validated against the committed Horizons oracle.
 
+pub mod catalog;
 pub mod frames;
 pub mod moon;
 pub mod time;
@@ -162,9 +163,9 @@ fn apparent_geocentric_equatorial(body: Body, jd_tt: f64) -> Result<DVec3, Astro
         }
     };
     let distance = ecliptic.length();
-    let (dpsi, deps, mean_obliquity) = frames::nutation(jd_tt);
-    let true_equatorial =
-        DMat3::from_rotation_x(mean_obliquity + deps) * DMat3::from_rotation_z(dpsi) * ecliptic;
+    let mean_obliquity = frames::mean_obliquity(jd_tt);
+    let mean_equatorial = DMat3::from_rotation_x(mean_obliquity) * ecliptic;
+    let true_equatorial = frames::nutate_mean_to_true(mean_equatorial, jd_tt);
     let velocity_ecliptic = vsop::earth_velocity(jd_tt)?;
     let velocity_equatorial = DMat3::from_rotation_x(mean_obliquity) * velocity_ecliptic;
     Ok(frames::annual_aberration(true_equatorial, velocity_equatorial) * distance)

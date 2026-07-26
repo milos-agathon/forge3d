@@ -22,6 +22,10 @@ VSOP_FILES = ("mer", "ven", "ear", "mar", "jup", "sat")
 VSOP_HEADER = re.compile(r"VARIABLE\s+(\d).*T\*\*(\d)\s+(\d+)\s+TERMS")
 MOON_URL = "https://raw.githubusercontent.com/commenthol/astronomia/master/src/moonposition.js"
 HORIZONS_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
+BSC_URL = (
+    "https://vizier.cds.unistra.fr/viz-bin/asu-tsv?"
+    "-source=V%2F50%2Fcatalog&-out=HR,RAJ2000,DEJ2000,Vmag,B-V&-out.max=unlimited"
+)
 SITES = (
     ("amsterdam", 52.3676, 4.9041, 0.0),
     ("mauna_kea", 19.8207, -155.4681, 4.205),
@@ -48,6 +52,40 @@ BODIES = (
     ("jupiter", "599"),
     ("saturn", "699"),
 )
+
+
+def generate_catalog() -> None:
+    expected_count = 9_096
+    source = urllib.request.urlopen(BSC_URL, timeout=60).read().decode("utf-8")
+    stars = []
+    for line in source.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 5 or not fields[0].strip().isdigit():
+            continue
+        ra, dec, magnitude, bv = (field.strip() for field in fields[1:])
+        if not ra or not dec or not magnitude:
+            continue
+        hours, minutes, seconds = map(float, ra.split())
+        sign = -1.0 if dec.startswith("-") else 1.0
+        degrees, arcminutes, arcseconds = map(float, dec[1:].split())
+        stars.append(
+            (
+                15.0 * (hours + minutes / 60.0 + seconds / 3_600.0),
+                sign * (degrees + arcminutes / 60.0 + arcseconds / 3_600.0),
+                float(magnitude),
+                float(bv) if bv else float("nan"),
+            )
+        )
+    if len(stars) != expected_count:
+        raise RuntimeError(f"expected {expected_count} usable BSC rows, received {len(stars)}")
+
+    output = ASTRO / "bright_stars.bin"
+    with output.open("wb") as stream:
+        stream.write(b"F3DBSC01")
+        stream.write(struct.pack("<I", len(stars)))
+        for star in stars:
+            stream.write(struct.pack("<ffff", *star))
+    print(f"{output}: {len(stars)} stars, {output.stat().st_size} bytes")
 
 
 def generate_vsop() -> None:
@@ -255,6 +293,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--vsop", action="store_true")
     parser.add_argument("--moon", action="store_true")
+    parser.add_argument("--catalog", action="store_true")
     parser.add_argument("--horizons", action="store_true")
     parser.add_argument("--delta-t", action="store_true")
     options = parser.parse_args()
@@ -262,6 +301,8 @@ if __name__ == "__main__":
         generate_vsop()
     if options.moon:
         generate_moon()
+    if options.catalog:
+        generate_catalog()
     if options.horizons:
         generate_horizons()
     if options.delta_t:

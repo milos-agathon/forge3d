@@ -35,3 +35,12 @@ license = "MIT"
 model = "60 longitude/radius terms and 60 latitude terms"
 max_horizons_topocentric_position_error_arcsec = 22.30
 sha256 = "4242e9c3d0c2f30d7f7864555160e88ec3cb01d0ffb6333bd945706dcae5d685"
+
+[[asset]]
+path = "bright_stars.bin"
+source = "Yale Bright Star Catalogue, 5th Revised Edition (Hoffleit & Warren 1991), CDS V/50/catalog"
+source_url = "https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50"
+license = "public-domain astronomical catalog data"
+model = "9,096 valid FK5/J2000 epoch-2000 records; RA, Dec, Johnson V, and B-V; no proper motion"
+nominal_limiting_magnitude = 6.5
+sha256 = "72e4ac8502ac0ce21b3c1f2f679ea3f8e08f17a443240dd944984c87064d2ba8"

@@ -79,6 +79,17 @@ pub fn precess_j2000_to_date(direction: DVec3, jd_tt: f64) -> DVec3 {
     (matrix * direction).normalize()
 }
 
+/// Mean equator/equinox of date to true place using the dominant
+/// IAU 1980/Meeus nutation terms declared by [`nutation`].
+pub fn nutate_mean_to_true(direction: DVec3, jd_tt: f64) -> DVec3 {
+    let (dpsi, deps, mean_obliquity) = nutation(jd_tt);
+    (DMat3::from_rotation_x(mean_obliquity + deps)
+        * DMat3::from_rotation_z(dpsi)
+        * DMat3::from_rotation_x(-mean_obliquity)
+        * direction)
+        .normalize()
+}
+
 /// First-order annual aberration, equivalent to the vector form in SOFA
 /// `iauAb` when gravitational potential and second-order beta terms are
 /// omitted (<0.01 arcsec over SIDERA's window).
