@@ -30,12 +30,19 @@ impl Viewer {
     }
 
     pub(crate) fn update_lit_uniform(&mut self) {
-        let sun_dir = [0.3f32, 0.6, -1.0];
+        let sun_direction_vs = (self.current_frame_camera().view()
+            * glam::Vec4::from((glam::Vec3::from_array(self.lit_sun_direction_ws), 0.0)))
+        .truncate()
+        .normalize();
         let params: [f32; 12] = [
-            sun_dir[0],
-            sun_dir[1],
-            sun_dir[2],
-            self.lit_sun_intensity,
+            sun_direction_vs.x,
+            sun_direction_vs.y,
+            sun_direction_vs.z,
+            if self.lit_sun_direction_ws[1] > 0.0 {
+                self.lit_sun_intensity
+            } else {
+                0.0
+            },
             self.lit_ibl_intensity,
             if self.lit_use_ibl { 1.0 } else { 0.0 },
             self.lit_brdf as f32,
@@ -47,5 +54,55 @@ impl Viewer {
         ];
         self.queue
             .write_buffer(&self.lit_uniform, 0, bytemuck::cast_slice(&params));
+    }
+
+    pub(crate) fn sync_terrain_sun_to_lit(&mut self) {
+        let direction = glam::Vec3::from_array(self.lit_sun_direction_ws).normalize();
+        let azimuth = direction
+            .x
+            .atan2(direction.z)
+            .to_degrees()
+            .rem_euclid(360.0);
+        let elevation = direction.y.clamp(-1.0, 1.0).asin().to_degrees();
+        if let Some(terrain_viewer) = self.terrain_viewer.as_mut() {
+            terrain_viewer.set_sun(
+                azimuth,
+                elevation,
+                if elevation > 0.0 {
+                    self.lit_sun_intensity
+                } else {
+                    0.0
+                },
+            );
+        }
+    }
+
+    pub(crate) fn sync_astro_observation(&mut self) {
+        if !self.astro_observation_active {
+            return;
+        }
+        let Some(observation) = crate::astro::observation::current_observation() else {
+            return;
+        };
+        let sun = observation.bodies[0].1;
+        let azimuth = sun.azimuth.value() as f32;
+        let elevation = sun.altitude.value() as f32;
+        if observation.revision != self.astro_observation_revision {
+            let azimuth_rad = azimuth.to_radians();
+            let elevation_rad = elevation.to_radians();
+            self.lit_sun_direction_ws = [
+                elevation_rad.cos() * azimuth_rad.sin(),
+                elevation_rad.sin(),
+                elevation_rad.cos() * azimuth_rad.cos(),
+            ];
+            self.update_lit_uniform();
+            self.astro_observation_revision = observation.revision;
+        }
+        if observation.revision != self.astro_terrain_revision {
+            if self.terrain_viewer.is_some() {
+                self.sync_terrain_sun_to_lit();
+                self.astro_terrain_revision = observation.revision;
+            }
+        }
     }
 }

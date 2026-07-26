@@ -11,6 +11,8 @@ from . import gis
 from . import codec as codec
 from . import text as text
 from . import precision as precision
+from . import astro as astro
+from . import sky as sky
 from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig

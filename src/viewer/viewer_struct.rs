@@ -130,7 +130,11 @@ pub struct Viewer {
     pub(crate) gi_ssgi_weight: f32,
     pub(crate) gi_ssr_weight: f32,
     // Lit params (exposed via :lit-* commands)
+    pub(crate) lit_sun_direction_ws: [f32; 3],
     pub(crate) lit_sun_intensity: f32,
+    pub(crate) astro_observation_active: bool,
+    pub(crate) astro_observation_revision: u64,
+    pub(crate) astro_terrain_revision: u64,
     pub(crate) lit_ibl_intensity: f32,
     pub(crate) lit_use_ibl: bool,
     pub(crate) lit_ibl_rotation_deg: f32,

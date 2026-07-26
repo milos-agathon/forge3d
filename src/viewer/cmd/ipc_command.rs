@@ -5,23 +5,70 @@ use crate::viewer::event_loop::{
 use crate::viewer::viewer_enums::ViewerCmd;
 use crate::viewer::Viewer;
 
+fn apply_manual_sun_control(
+    direction_ws: &mut [f32; 3],
+    observation_active: &mut bool,
+    azimuth_deg: f32,
+    elevation_deg: f32,
+) {
+    let az_rad = azimuth_deg.to_radians();
+    let el_rad = elevation_deg.to_radians();
+    *direction_ws = glam::Vec3::new(
+        el_rad.cos() * az_rad.sin(),
+        el_rad.sin(),
+        el_rad.cos() * az_rad.cos(),
+    )
+    .normalize()
+    .to_array();
+    *observation_active = false;
+}
+
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
         ViewerCmd::SetSunDirection {
             azimuth_deg,
             elevation_deg,
         } => {
-            let az_rad = azimuth_deg.to_radians();
-            let el_rad = elevation_deg.to_radians();
-            let _dir = glam::Vec3::new(
-                el_rad.cos() * az_rad.sin(),
-                el_rad.sin(),
-                el_rad.cos() * az_rad.cos(),
+            apply_manual_sun_control(
+                &mut viewer.lit_sun_direction_ws,
+                &mut viewer.astro_observation_active,
+                *azimuth_deg,
+                *elevation_deg,
             );
-            println!(
-                "Sun direction: azimuth={:.1}° elevation={:.1}°",
-                azimuth_deg, elevation_deg
-            );
+            viewer.update_lit_uniform();
+            viewer.sync_terrain_sun_to_lit();
+            true
+        }
+        ViewerCmd::SetObservation {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            latitude_deg,
+            longitude_deg,
+            height_m,
+        } => {
+            let result =
+                crate::astro::time::UtcDateTime::new(*year, *month, *day, *hour, *minute, *second)
+                    .and_then(|utc| {
+                        crate::astro::Observer::new(
+                            crate::geo::units::Angle::new(*latitude_deg),
+                            crate::geo::units::Angle::new(*longitude_deg),
+                            *height_m,
+                        )
+                        .and_then(|observer| {
+                            crate::astro::observation::set_observation(utc, observer).map(|_| ())
+                        })
+                    });
+            match result {
+                Ok(()) => {
+                    viewer.astro_observation_active = true;
+                    viewer.sync_astro_observation();
+                }
+                Err(error) => viewer.reject_command(format!("observation_rejected: {error}")),
+            }
             true
         }
         ViewerCmd::SetIbl { path, intensity } => {
@@ -147,5 +194,21 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_manual_sun_control;
+
+    #[test]
+    fn manual_sun_control_mutates_direction_and_disables_observation() {
+        let mut direction = [0.0; 3];
+        let mut observation_active = true;
+        apply_manual_sun_control(&mut direction, &mut observation_active, 90.0, 30.0);
+        assert!(!observation_active);
+        assert!((direction[0] - 30_f32.to_radians().cos()).abs() < 1e-6);
+        assert!((direction[1] - 0.5).abs() < 1e-6);
+        assert!(direction[2].abs() < 1e-6);
     }
 }

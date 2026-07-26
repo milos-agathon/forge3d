@@ -132,6 +132,9 @@ fn precession_and_lunar_parallax_are_load_bearing() {
         parallax_arcminutes > 30.0,
         "{parallax_arcminutes} arcminutes"
     );
+    println!(
+        "ablation displacements arcminutes: precession={precession_arcminutes}, lunar_parallax={parallax_arcminutes}"
+    );
 }
 
 fn parse_utc(value: &str) -> UtcDateTime {

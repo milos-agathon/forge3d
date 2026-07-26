@@ -278,7 +278,7 @@ from .viewer import (
     open_viewer,
     open_viewer_async,
 )
-from . import viewer_ipc, colors, interactive, datasets, widgets, smoke, verify
+from . import astro, viewer_ipc, colors, interactive, datasets, widgets, sky, smoke, verify
 from .datasets import (
     available as available_datasets,
     bundled as bundled_datasets,
@@ -805,6 +805,8 @@ __all__ = [
     "camera_rigs",
     "datasets",
     "widgets",
+    "astro",
+    "sky",
     # Interactive viewer
     "open_viewer",
     "open_viewer_async",

@@ -223,7 +223,11 @@ impl Viewer {
             gi_ssgi_weight: 1.0,
             gi_ssr_weight: 1.0,
             // Lit params
+            lit_sun_direction_ws: [0.3, 0.6, -1.0],
             lit_sun_intensity: 1.0,
+            astro_observation_active: false,
+            astro_observation_revision: 0,
+            astro_terrain_revision: 0,
             lit_ibl_intensity: 0.6,
             lit_use_ibl: true,
             lit_ibl_rotation_deg: 0.0,

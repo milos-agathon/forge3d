@@ -48,6 +48,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     println!("[terrain] Loaded: {}", path);
                 }
             }
+            // A loaded scene owns fresh terrain lighting state; restore the live sun.
+            viewer.sync_terrain_sun_to_lit();
+            viewer.astro_terrain_revision = viewer.astro_observation_revision;
             true
         }
         ViewerCmd::SetTerrainCamera {

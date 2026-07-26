@@ -6,6 +6,7 @@
 pub mod catalog;
 pub mod frames;
 pub mod moon;
+pub mod observation;
 pub mod time;
 pub mod vsop;
 
@@ -41,6 +42,18 @@ impl Body {
             "jupiter" => Ok(Self::Jupiter),
             "saturn" => Ok(Self::Saturn),
             _ => Err(AstroError::UnknownBody(name.to_string())),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sun => "sun",
+            Self::Moon => "moon",
+            Self::Mercury => "mercury",
+            Self::Venus => "venus",
+            Self::Mars => "mars",
+            Self::Jupiter => "jupiter",
+            Self::Saturn => "saturn",
         }
     }
 }

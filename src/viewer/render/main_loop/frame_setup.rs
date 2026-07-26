@@ -22,6 +22,8 @@ impl Viewer {
         if self.frame_count == 0 {
             eprintln!("[viewer-debug] entering render loop (first frame)");
         }
+        self.sync_astro_observation();
+        self.update_lit_uniform();
 
         // Ensure auto-snapshot request is registered before encoding so we render to an offscreen texture
         if self.snapshot_request.is_none() && !self.auto_snapshot_done {
@@ -115,16 +117,16 @@ impl Viewer {
                 .write_buffer(&self.sky_camera, base, bytemuck::cast_slice(&eye4));
 
             // Update sky params each frame based on viewer-set fields
-            let sun_dir_vs = glam::Vec3::new(0.3, 0.6, -1.0).normalize();
-            let sun_dir_ws = (inv_view
-                * glam::Vec4::new(sun_dir_vs.x, sun_dir_vs.y, sun_dir_vs.z, 0.0))
-            .truncate()
-            .normalize();
+            let sun_dir_ws = glam::Vec3::from_array(self.lit_sun_direction_ws).normalize();
             let model_id: u32 = self.sky_model_id;
             let turb: f32 = self.sky_turbidity.clamp(1.0, 10.0);
             let ground: f32 = self.sky_ground_albedo.clamp(0.0, 1.0);
             let expose: f32 = self.sky_exposure.max(0.0);
-            let sun_i: f32 = self.sky_sun_intensity.max(0.0);
+            let sun_i: f32 = if sun_dir_ws.y > 0.0 {
+                self.sky_sun_intensity.max(0.0)
+            } else {
+                0.0
+            };
 
             let sky_params_frame = SkyUniforms::new(
                 [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
