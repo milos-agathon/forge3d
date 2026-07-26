@@ -1,5 +1,6 @@
 """SELENE planetary-datum CPU gates."""
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,15 @@ def _areoid_reference_points():
         for line in path.read_text().splitlines()
         if line.strip() and not line.startswith("#")
         for lat, lon, value, source in [line.split()]
+    ]
+
+
+def _mars_geodesic_reference_points():
+    path = Path(__file__).parent / "data" / "geodtest_mars.dat"
+    return [
+        tuple(map(float, line.split()))
+        for line in path.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
     ]
 
 
@@ -52,6 +62,78 @@ def test_body_info_reports_reference_surfaces_and_units():
 def test_body_info_rejects_unknown_body_without_earth_fallback():
     with pytest.raises(ValueError, match="unsupported body 'ceres'.*earth, moon, or mars"):
         crs.body_info("ceres")
+
+
+def test_mars_geodesics_match_committed_geographiclib_oracle():
+    points = _mars_geodesic_reference_points()
+    assert len(points) == 100
+    worst_distance = 0.0
+    worst_azimuth = 0.0
+    for lat1, lon1, azi1, lat2, lon2, azi2, distance, *_ in points:
+        result = crs.geodesic_inverse(
+            lat1, lon1, lat2, lon2, body="mars"
+        )
+        worst_distance = max(worst_distance, abs(result["s12"] - distance))
+        worst_azimuth = max(
+            worst_azimuth,
+            _longitude_error(result["azi1"], azi1),
+            _longitude_error(result["azi2"], azi2),
+        )
+    assert worst_distance < 1e-3
+    assert worst_azimuth < 1e-9
+
+
+def test_moon_geodesics_match_exact_great_circle_and_close():
+    radius = crs.body_info("moon")["semi_major_m"]
+    worst_relative = 0.0
+    for index in range(100):
+        lat1 = -80.0 + index * 1.4
+        lon1 = -175.0 + (index * 73.0) % 350.0
+        lat2 = 75.0 - index * 1.3
+        lon2 = -170.0 + (index * 47.0) % 340.0
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        delta_lon = math.radians(lon2 - lon1)
+        central_angle = math.atan2(
+            math.hypot(
+                math.cos(phi2) * math.sin(delta_lon),
+                math.cos(phi1) * math.sin(phi2)
+                - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lon),
+            ),
+            math.sin(phi1) * math.sin(phi2)
+            + math.cos(phi1) * math.cos(phi2) * math.cos(delta_lon),
+        )
+        result = crs.geodesic_inverse(
+            lat1, lon1, lat2, lon2, body="moon"
+        )
+        expected = radius * central_angle
+        worst_relative = max(
+            worst_relative, abs(result["s12"] - expected) / expected
+        )
+        destination = crs.geodesic_direct(
+            lat1, lon1, result["azi1"], result["s12"], body="moon"
+        )
+        assert abs(destination["lat2"] - lat2) < 1e-12
+        assert _longitude_error(destination["lon2"], lon2) < 1e-12
+    assert worst_relative < 1e-12
+
+
+def test_geodesic_body_defaults_to_earth_and_rejects_unknown_body():
+    omitted = crs.geodesic_inverse(10.0, 20.0, -30.0, 40.0)
+    explicit = crs.geodesic_inverse(10.0, 20.0, -30.0, 40.0, body="earth")
+    assert omitted == explicit
+    with pytest.raises(ValueError, match="unsupported body 'ceres'"):
+        crs.geodesic_inverse(10.0, 20.0, -30.0, 40.0, body="ceres")
+
+
+def test_olympus_mons_wrong_earth_datum_moves_position_over_2900_km():
+    lon, lat, height = 226.2, 18.65, 21_900.0
+    mars = np.asarray(
+        gis.CrsTransform.from_crs(
+            "IAU:49902", "FORGE3D:499"
+        ).transform_point3(lon, lat, height)
+    )
+    deliberately_wrong_wgs84 = np.asarray(crs.wgs84_to_ecef(lon, lat, height))
+    assert np.linalg.norm(mars - deliberately_wrong_wgs84) > 2_900_000.0
 
 
 def test_mars_areoid_matches_committed_pds_gmm3_map_below_half_metre():
