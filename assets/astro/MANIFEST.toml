@@ -3,12 +3,12 @@ validity = "2000-01-01 through 2050-12-31 UTC"
 
 [[asset]]
 path = "delta_t_fit.dat"
-source = "Espenak & Meeus, NASA/TP-2009-214174, equations 2-15 and 2-16"
-source_url = "https://eclipse.gsfc.nasa.gov/5MCSE/TP2009-214174.pdf"
-license = "United States government work"
-model = "piecewise polynomial TT-UT1 fit"
-max_decimal_representation_residual_seconds = 1e-9
-sha256 = "ff379f80597dbed150ed7f143a4fbf8160d0d82837095dcb993a54066b54881a"
+source = "JPL Horizons DE441 observer table quantity 49 (IERS EOP UT1-UTC), monthly nodes"
+source_url = "https://ssd.jpl.nasa.gov/horizons/"
+license = "NASA/JPL public ephemeris data"
+model = "piecewise-linear TT-UT1 fit; future EOP follows Horizons' declared frozen-EOP assumption"
+max_validated_midmonth_residual_seconds = 0.0061
+sha256 = "52006f4d97f1eab6322b4a67ae2cfbc35542407c10ee7cc369f87e74017c699f"
 
 [[asset]]
 path = "leap_seconds.dat"
@@ -17,3 +17,21 @@ source_url = "https://hpiers.obspm.fr/iers/bul/bulc/bulletinc.dat"
 license = "IERS public data"
 model = "TAI-UTC offsets; the last published offset is held constant through 2050"
 sha256 = "04c99602d83e104a56b55a3a184425804676eab83bc731238b989be560e0e336"
+
+[[asset]]
+path = "vsop87d.bin"
+source = "IMCCE VSOP87D heliocentric ecliptic theory, all terms for Earth and Mercury through Saturn"
+source_url = "https://ftp.imcce.fr/pub/ephem/planets/vsop87/"
+license = "IMCCE public astronomical theory data"
+model = "25,659 VSOP87D periodic terms; body coverage intentionally ends at Saturn"
+max_horizons_position_error_arcsec = 2.13
+sha256 = "463ab9b3855f9249bb9e64db159e9695154b0ee80cfcde82824ffb860399443e"
+
+[[asset]]
+path = "moon_terms.bin"
+source = "Meeus Astronomical Algorithms tables 47.A/47.B, via astronomia's MIT-licensed transcription"
+source_url = "https://github.com/commenthol/astronomia/blob/master/src/moonposition.js"
+license = "MIT"
+model = "60 longitude/radius terms and 60 latitude terms"
+max_horizons_topocentric_position_error_arcsec = 22.30
+sha256 = "4242e9c3d0c2f30d7f7864555160e88ec3cb01d0ffb6333bd945706dcae5d685"

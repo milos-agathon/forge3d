@@ -4,10 +4,16 @@
 //! outside the interval validated against the committed Horizons oracle.
 
 pub mod frames;
+pub mod moon;
 pub mod time;
+pub mod vsop;
 
 use crate::geo::units::{Angle, Degree};
+use glam::{DMat3, DVec3};
 use std::fmt;
+
+const LIGHT_SPEED_AU_PER_DAY: f64 = 173.144_632_684_669_3;
+const MOON_RADIUS_KM: f64 = 1_737.4;
 
 pub const MIN_YEAR: i32 = 2000;
 pub const MAX_YEAR: i32 = 2050;
@@ -84,6 +90,84 @@ pub struct BodyPosition {
     pub azimuth: Angle<Degree>,
     pub altitude: Angle<Degree>,
     pub distance_au: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MoonPhase {
+    pub illuminated_fraction: f64,
+    pub phase_angle: Angle<Degree>,
+    pub apparent_semidiameter_arcsec: f64,
+}
+
+pub fn body_position(
+    body: Body,
+    utc: time::UtcDateTime,
+    observer: Observer,
+    refraction: bool,
+) -> Result<BodyPosition, AstroError> {
+    let jd_tt = time::julian_day_tt(utc)?;
+    let sidereal = frames::gast(time::julian_day_ut1(utc)?, jd_tt);
+    let geocentric = apparent_geocentric_equatorial(body, jd_tt)?;
+    let topocentric = frames::geocentric_to_topocentric(geocentric, observer, sidereal);
+    let (azimuth, true_altitude) =
+        frames::equatorial_to_horizontal(topocentric, observer, sidereal);
+    Ok(BodyPosition {
+        azimuth,
+        altitude: if refraction {
+            frames::refract_altitude(true_altitude)
+        } else {
+            true_altitude
+        },
+        distance_au: topocentric.length(),
+    })
+}
+
+pub fn moon_phase(utc: time::UtcDateTime) -> Result<MoonPhase, AstroError> {
+    let jd_tt = time::julian_day_tt(utc)?;
+    let moon = moon::geocentric_ecliptic(jd_tt)?;
+    let earth = vsop::heliocentric_ecliptic(vsop::VsopBody::Earth, jd_tt)?;
+    let sun_from_earth = -earth;
+    let moon_to_earth = -moon.ecliptic_of_date_au;
+    let moon_to_sun = sun_from_earth - moon.ecliptic_of_date_au;
+    let phase_angle = moon_to_earth.angle_between(moon_to_sun);
+    Ok(MoonPhase {
+        illuminated_fraction: (1.0 + phase_angle.cos()) * 0.5,
+        phase_angle: Angle::new(phase_angle.to_degrees()),
+        apparent_semidiameter_arcsec: (MOON_RADIUS_KM / moon.distance_km).asin().to_degrees()
+            * 3_600.0,
+    })
+}
+
+fn apparent_geocentric_equatorial(body: Body, jd_tt: f64) -> Result<DVec3, AstroError> {
+    let earth = vsop::heliocentric_ecliptic(vsop::VsopBody::Earth, jd_tt)?;
+    let ecliptic = match body {
+        Body::Sun => -earth,
+        Body::Moon => moon::geocentric_ecliptic(jd_tt)?.ecliptic_of_date_au,
+        _ => {
+            let planet = match body {
+                Body::Mercury => vsop::VsopBody::Mercury,
+                Body::Venus => vsop::VsopBody::Venus,
+                Body::Mars => vsop::VsopBody::Mars,
+                Body::Jupiter => vsop::VsopBody::Jupiter,
+                Body::Saturn => vsop::VsopBody::Saturn,
+                Body::Sun | Body::Moon => unreachable!(),
+            };
+            let mut light_time = 0.0;
+            let mut geocentric = DVec3::ZERO;
+            for _ in 0..3 {
+                geocentric = vsop::heliocentric_ecliptic(planet, jd_tt - light_time)? - earth;
+                light_time = geocentric.length() / LIGHT_SPEED_AU_PER_DAY;
+            }
+            geocentric
+        }
+    };
+    let distance = ecliptic.length();
+    let (dpsi, deps, mean_obliquity) = frames::nutation(jd_tt);
+    let true_equatorial =
+        DMat3::from_rotation_x(mean_obliquity + deps) * DMat3::from_rotation_z(dpsi) * ecliptic;
+    let velocity_ecliptic = vsop::earth_velocity(jd_tt)?;
+    let velocity_equatorial = DMat3::from_rotation_x(mean_obliquity) * velocity_ecliptic;
+    Ok(frames::annual_aberration(true_equatorial, velocity_equatorial) * distance)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

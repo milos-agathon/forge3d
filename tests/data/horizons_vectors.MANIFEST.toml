@@ -1,0 +1,10 @@
+format_version = 1
+path = "horizons_vectors.dat"
+source = "NASA/JPL Horizons API, DE441"
+source_url = "https://ssd-api.jpl.nasa.gov/doc/horizons.html"
+license = "NASA/JPL public ephemeris data"
+generation_command = "python tools/generate_sidera_assets.py --horizons"
+settings = "coord@399, ICRF, AIRLESS, quantities 4/10/13/20/24/30/49"
+combinations = 40
+vectors = 280
+sha256 = "8fe00b39b85d28d10f894e9c7b468f454a5ce0bc0f3540e8693caccfa99f9392"

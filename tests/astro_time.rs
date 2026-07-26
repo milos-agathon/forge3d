@@ -40,6 +40,29 @@ fn iau_2006_gmst_matches_sofa_reference_epoch() {
 }
 
 #[test]
+fn iau_2006_gmst_stays_within_budget_across_sidera_window() {
+    let cases = [
+        (
+            UtcDateTime::new(2000, 1, 1, 0, 0, 0.0).unwrap(),
+            1.744_793_167_080_565_2,
+        ),
+        (
+            UtcDateTime::new(2026, 7, 26, 22, 0, 0.0).unwrap(),
+            4.792_809_523_685_919,
+        ),
+        (
+            UtcDateTime::new(2050, 12, 31, 23, 0, 0.0).unwrap(),
+            1.493_405_560_994_384_4,
+        ),
+    ];
+    for (utc, expected) in cases {
+        let actual = gmst(julian_day_ut1(utc).unwrap(), julian_day_tt(utc).unwrap());
+        let error_seconds = (actual - expected).abs() * 86_400.0 / (2.0 * std::f64::consts::PI);
+        assert!(error_seconds < 0.1, "{error_seconds} sidereal seconds");
+    }
+}
+
+#[test]
 fn bennett_refraction_at_five_degrees_matches_reference() {
     let apparent = refract_altitude(Angle::<Degree>::new(5.0));
     let correction_arcminutes = (apparent.value() - 5.0) * 60.0;
