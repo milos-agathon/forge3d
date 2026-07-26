@@ -37,6 +37,77 @@ pub struct TerrainPtUniforms {
     pub extra: [u32; 4],
 }
 
+/// Curvature parameters consumed by the shared terrain traversal. The two
+/// explicit pads match WGSL uniform layout (vec2 alignment = 8 bytes).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct EarthCurvatureUniforms {
+    pub inv_two_r_prime: f32,
+    pub _pad0: f32,
+    pub ray_origin_geodetic: [f32; 2],
+    pub enabled: u32,
+    pub _pad1: u32,
+}
+
+impl EarthCurvatureUniforms {
+    pub fn new(
+        earth: crate::geo::refraction::EarthModel,
+        refraction: crate::geo::refraction::RefractionModel,
+        ray_origin_geodetic: [f64; 2],
+        azimuth_deg: f64,
+    ) -> Result<Self, RenderError> {
+        if !ray_origin_geodetic[0].is_finite()
+            || !(-90.0..=90.0).contains(&ray_origin_geodetic[0])
+            || !ray_origin_geodetic[1].is_finite()
+            || !(-180.0..=180.0).contains(&ray_origin_geodetic[1])
+        {
+            return Err(RenderError::render(
+                "ray-origin latitude/longitude must be finite and in [-90,90]/[-180,180]",
+            ));
+        }
+        let effective_radius =
+            crate::geo::refraction::effective_radius_m(earth, refraction, azimuth_deg)
+                .map_err(RenderError::render)?;
+        let enabled = effective_radius.is_finite();
+        Ok(Self {
+            inv_two_r_prime: if enabled {
+                (0.5 / effective_radius) as f32
+            } else {
+                0.0
+            },
+            _pad0: 0.0,
+            ray_origin_geodetic: [ray_origin_geodetic[0] as f32, ray_origin_geodetic[1] as f32],
+            enabled: u32::from(enabled),
+            _pad1: 0,
+        })
+    }
+}
+
+/// Exact range of y(t) + d(t)^2/(2R') over a node ray span.
+#[cfg(test)]
+fn curved_ray_height_range(
+    origin_y: f64,
+    direction_y: f64,
+    horizontal_direction_sq: f64,
+    t0: f64,
+    t1: f64,
+    inv_two_r_prime: f64,
+) -> (f64, f64) {
+    let a = horizontal_direction_sq * inv_two_r_prime;
+    let height = |t: f64| origin_y + direction_y * t + a * t * t;
+    let y0 = height(t0);
+    let y1 = height(t1);
+    let mut minimum = y0.min(y1);
+    let maximum = y0.max(y1);
+    if a > 0.0 {
+        let vertex = -direction_y / (2.0 * a);
+        if (t0..=t1).contains(&vertex) {
+            minimum = minimum.min(height(vertex));
+        }
+    }
+    (minimum, maximum)
+}
+
 /// CPU-side min-max mip chain (kept for unit tests and re-upload).
 pub struct MinMaxMips {
     /// levels[0] is the finest (per-cell) level; each entry is [min, max].
@@ -527,5 +598,203 @@ mod tests {
         assert!(build_minmax_mips(&[1.0], 1, 1).is_err());
         assert!(build_minmax_mips(&[f32::NAN; 4], 2, 2).is_err());
         assert!(build_minmax_mips(&[1.0; 5], 2, 2).is_err());
+    }
+
+    fn curvature_fixture() -> Vec<f32> {
+        (0..256 * 256)
+            .map(|i| {
+                let x = (i % 256) as f32;
+                let y = (i / 256) as f32;
+                900.0
+                    + 180.0 * (x * 0.071).sin()
+                    + 120.0 * (y * 0.047).cos()
+                    + 650.0 * (-((x - 150.0).powi(2) + (y - 126.0).powi(2)) / 900.0).exp()
+            })
+            .collect()
+    }
+
+    #[derive(Clone, Copy)]
+    struct ProofRay {
+        start_x: f64,
+        row: usize,
+        origin_y: f64,
+        horizontal_x: f64,
+        direction_y: f64,
+        inv_two_r_prime: f64,
+    }
+
+    fn cell_hit(heights: &[f32], ray: ProofRay, cell: usize, t0: f64, t1: f64) -> bool {
+        let h0 = f64::from(heights[ray.row * 256 + cell]);
+        let h1 = f64::from(heights[ray.row * 256 + cell + 1]);
+        let terrain_at =
+            |t: f64| h0 + (h1 - h0) * (ray.start_x + ray.horizontal_x * t / 500.0 - cell as f64);
+        let deviation = |t: f64| {
+            ray.origin_y
+                + ray.direction_y * t
+                + ray.horizontal_x.powi(2) * ray.inv_two_r_prime * t * t
+                - terrain_at(t)
+        };
+        let mut minimum = deviation(t0).min(deviation(t1));
+        let a = ray.horizontal_x.powi(2) * ray.inv_two_r_prime;
+        let terrain_slope = (h1 - h0) * ray.horizontal_x / 500.0;
+        let vertex = -(ray.direction_y - terrain_slope) / (2.0 * a);
+        if (t0..=t1).contains(&vertex) {
+            minimum = minimum.min(deviation(vertex));
+        }
+        minimum <= 0.0
+    }
+
+    fn brute_row_hit(heights: &[f32], ray: ProofRay) -> bool {
+        let positive = ray.horizontal_x > 0.0;
+        let first = ray.start_x.floor() as i32;
+        for step in 0..255 {
+            let cell = if positive { first + step } else { first - step };
+            if !(0..255).contains(&cell) {
+                break;
+            }
+            let xa = if positive {
+                ray.start_x.max(cell as f64)
+            } else {
+                ray.start_x.min((cell + 1) as f64)
+            };
+            let xb = if positive {
+                (cell + 1) as f64
+            } else {
+                cell as f64
+            };
+            let t0 = ((xa - ray.start_x) * 500.0 / ray.horizontal_x).max(1e-3);
+            let t1 = (xb - ray.start_x) * 500.0 / ray.horizontal_x;
+            if cell_hit(heights, ray, cell as usize, t0.min(t1), t0.max(t1)) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn descent_row_hit(heights: &[f32], mips: &MinMaxMips, ray: ProofRay) -> bool {
+        let mut stack = vec![(mips.levels.len() - 1, 0u32)];
+        while let Some((level, nx)) = stack.pop() {
+            let cx0 = nx << level;
+            if cx0 >= 255 {
+                continue;
+            }
+            let cx1 = ((nx + 1) << level).min(255);
+            let ta = (f64::from(cx0) - ray.start_x) * 500.0 / ray.horizontal_x;
+            let tb = (f64::from(cx1) - ray.start_x) * 500.0 / ray.horizontal_x;
+            let t0 = ta.min(tb).max(1e-3);
+            let t1 = ta.max(tb);
+            if t0 > t1 || t1 < 0.0 {
+                continue;
+            }
+            let ny = (ray.row as u32) >> level;
+            let (lw, _) = mips.dims[level];
+            let mm = mips.levels[level][(ny * lw + nx) as usize];
+            let (ray_min, ray_max) = curved_ray_height_range(
+                ray.origin_y,
+                ray.direction_y,
+                ray.horizontal_x.powi(2),
+                t0,
+                t1,
+                ray.inv_two_r_prime,
+            );
+            if ray_min > f64::from(mm[1]) || ray_max < f64::from(mm[0]) {
+                continue;
+            }
+            if level == 0 {
+                if cell_hit(heights, ray, cx0 as usize, t0, t1) {
+                    return true;
+                }
+            } else {
+                stack.push((level - 1, nx * 2));
+                stack.push((level - 1, nx * 2 + 1));
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn curvature_descent_is_conservative() {
+        assert_eq!(std::mem::size_of::<EarthCurvatureUniforms>(), 24);
+        let distance = 100_000.0f64;
+        let inv_two_r = 1.0 / 14_650_000.0;
+        let reference_drop = distance * distance * inv_two_r;
+        let gpu_drop = (distance as f32).powi(2) * inv_two_r as f32;
+        assert!((reference_drop - f64::from(gpu_drop)).abs() < 1.0);
+
+        let heights = curvature_fixture();
+        let mips = build_minmax_mips(&heights, 256, 256).unwrap();
+        let mut state = 0x4845_4c49u32;
+        let mut false_misses = 0usize;
+        let mut false_hits = 0usize;
+        for _ in 0..10_000 {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let row = (state as usize % 254) + 1;
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let start_x = 1.0 + f64::from(state % 253) + 0.25;
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let positive = state & 1 == 0;
+            let elevation = (0.1 + f64::from((state >> 1) % 790) / 100.0).to_radians();
+            let horizontal_x = elevation.cos() * if positive { 1.0 } else { -1.0 };
+            let cell = start_x.floor() as usize;
+            let u = start_x - cell as f64;
+            let surface = f64::from(heights[row * 256 + cell]) * (1.0 - u)
+                + f64::from(heights[row * 256 + cell + 1]) * u;
+            let ray = ProofRay {
+                start_x,
+                row,
+                origin_y: surface + 1.7,
+                horizontal_x,
+                direction_y: elevation.sin(),
+                inv_two_r_prime: 1.0 / 14_650_000.0,
+            };
+            let brute = brute_row_hit(&heights, ray);
+            let descent = descent_row_hit(&heights, &mips, ray);
+            false_misses += usize::from(brute && !descent);
+            false_hits += usize::from(!brute && descent);
+        }
+
+        let mut mask_matches = 0usize;
+        let mut mask_pixels = 0usize;
+        let mut mask_false_misses = 0usize;
+        let mut mask_false_hits = 0usize;
+        let elevation = 0.6f64.to_radians();
+        for row in 0..255 {
+            for cell in 0..255 {
+                let surface = 0.75 * f64::from(heights[row * 256 + cell])
+                    + 0.25 * f64::from(heights[row * 256 + cell + 1]);
+                let ray = ProofRay {
+                    start_x: cell as f64 + 0.25,
+                    row,
+                    origin_y: surface + 1.7,
+                    horizontal_x: elevation.cos(),
+                    direction_y: elevation.sin(),
+                    inv_two_r_prime: 1.0 / 14_650_000.0,
+                };
+                let brute = brute_row_hit(&heights, ray);
+                let descent = descent_row_hit(&heights, &mips, ray);
+                mask_matches += usize::from(brute == descent);
+                mask_false_misses += usize::from(brute && !descent);
+                mask_false_hits += usize::from(!brute && descent);
+                mask_pixels += 1;
+            }
+        }
+        let false_hit_rate = false_hits as f64 / 10_000.0;
+        let agreement = mask_matches as f64 / mask_pixels as f64;
+        println!(
+            "HELIOS conservative descent: false_misses={false_misses}, \
+             false_hit_rate={false_hit_rate:.6}, shadow_mask_agreement={agreement:.6}, \
+             mask_false_misses={mask_false_misses}, mask_false_hits={mask_false_hits}"
+        );
+        assert_eq!(false_misses, 0);
+        assert!(false_hit_rate < 0.001);
+        assert!(agreement >= 0.999);
+
+        let shader = include_str!("../../shaders/hybrid_terrain_traversal.wgsl");
+        assert!(shader.contains("struct EarthCurvatureUniforms"));
+        assert!(shader.contains("terrain_curved_height_range"));
+        let hybrid = include_str!("../../shaders/hybrid_traversal.wgsl");
+        assert!(hybrid.contains("let terrain_hit = terrain_trace(tray, true);"));
     }
 }
