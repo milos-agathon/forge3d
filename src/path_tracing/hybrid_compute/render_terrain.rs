@@ -12,7 +12,7 @@
 // RELEVANT FILES: src/shaders/hybrid_terrain_traversal.wgsl,
 //                 src/path_tracing/hybrid_compute/terrain_heightfield.rs
 
-use super::terrain_heightfield::TerrainPtScene;
+use super::terrain_heightfield::{AlbedoSampling, TerrainPtScene};
 use super::*;
 use crate::core::memory_tracker::global_tracker;
 use crate::path_tracing::lighting::{GpuAreaLight, GpuDirectionalLight};
@@ -109,7 +109,7 @@ fn record_runtime_contract(
         );
         check("terrain.origin_spacing", &terrain.origin_spacing, -1.5, 1.0);
         check("terrain.h_params", &terrain.h_params, 0.0, 1.0);
-        check("terrain.albedo_pad", &terrain.albedo_pad, 0.0, 0.6);
+        check("terrain.albedo_pad", &terrain.albedo_pad, 0.0, 65_504.0);
         check(
             "terrain.dims",
             &terrain.dims.map(|value| value as f32),
@@ -120,7 +120,7 @@ fn record_runtime_contract(
             "terrain.mips",
             &terrain.mips.map(|value| value as f32),
             0.0,
-            3.0,
+            7.0,
         );
         check(
             "terrain.extra",
@@ -230,6 +230,8 @@ pub struct TerrainReferenceDesc {
     pub spacing: (f32, f32),
     pub exaggeration: f32,
     pub albedo: [f32; 3],
+    pub albedo_map: Option<Vec<f32>>,
+    pub albedo_sampling: AlbedoSampling,
     pub cam_origin: [f32; 3],
     pub cam_look_at: [f32; 3],
     pub cam_up: [f32; 3],
@@ -476,6 +478,27 @@ fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
     if !(desc.exaggeration.is_finite() && desc.exaggeration > 0.0) {
         return err("terrain exaggeration must be finite and > 0".into());
     }
+    if let Some(albedo_map) = &desc.albedo_map {
+        let expected = (desc.dem_width as usize)
+            .checked_mul(desc.dem_height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or_else(|| RenderError::Render("albedo map dimensions overflow".into()))?;
+        if albedo_map.len() != expected {
+            return err(format!(
+                "albedo map length {} does not match DEM shape {}x{}x4",
+                albedo_map.len(),
+                desc.dem_height,
+                desc.dem_width
+            ));
+        }
+        if albedo_map.chunks_exact(4).any(|rgba| {
+            rgba.iter().any(|v| !v.is_finite())
+                || rgba[..3].iter().any(|v| *v < 0.0)
+                || !(0.0..=1.0).contains(&rgba[3])
+        }) {
+            return err("albedo map RGB must be finite and >= 0; alpha must be in [0,1]".into());
+        }
+    }
     if !(finite3(desc.cam_origin) && finite3(desc.cam_look_at) && finite3(desc.cam_up)) {
         return err("camera origin/look_at/up must be finite".into());
     }
@@ -627,6 +650,8 @@ impl HybridPathTracer {
             desc.spacing,
             desc.exaggeration,
             desc.albedo,
+            desc.albedo_map.as_deref(),
+            desc.albedo_sampling,
             desc.env_map
                 .as_ref()
                 .map(|(data, w, h)| (data.as_slice(), *w, *h)),
@@ -697,13 +722,13 @@ impl HybridPathTracer {
             cam_forward: forward.into(),
             seed_hi: desc.seed,
             seed_lo: desc.seed ^ 0x85EB_CA6B,
-            camera_model: desc.camera_model as u32 | if desc.seamless_camera { 1 << 31 } else { 0 },
+            camera_model: desc.camera_model as u32,
             full_width: desc.full_width,
             full_height: desc.full_height,
             pixel_offset_x: desc.pixel_offset_x,
             pixel_offset_y: desc.pixel_offset_y,
             ortho_half_height: desc.ortho_half_height,
-            _camera_pad: 0,
+            camera_flags: u32::from(desc.seamless_camera),
             sensor_rect: desc.sensor_rect,
         };
         let base_ubo = tracked_create_buffer_init(
@@ -970,6 +995,9 @@ impl HybridPathTracer {
         let env_view = terrain_scene
             .env_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let albedo_view = terrain_scene
+            .albedo_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-terrain-bg2"),
             layout: &self.layouts.accum,
@@ -1005,6 +1033,10 @@ impl HybridPathTracer {
                 wgpu::BindGroupEntry {
                     binding: 7,
                     resource: reservoir_prev.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::TextureView(&albedo_view),
                 },
             ],
         });
@@ -1046,6 +1078,10 @@ impl HybridPathTracer {
                 wgpu::BindGroupEntry {
                     binding: 9,
                     resource: gbuffer_pos.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::TextureView(&albedo_view),
                 },
             ],
         });
@@ -1394,6 +1430,7 @@ mod tests {
         factor_sun_lighting, should_require_valid_sun_reservoirs, validate_desc, CameraModel,
         TerrainReferenceDesc,
     };
+    use crate::path_tracing::hybrid_compute::AlbedoSampling;
 
     fn desc(camera_model: CameraModel) -> TerrainReferenceDesc {
         TerrainReferenceDesc {
@@ -1403,6 +1440,8 @@ mod tests {
             spacing: (1.0, 1.0),
             exaggeration: 1.0,
             albedo: [0.6; 3],
+            albedo_map: None,
+            albedo_sampling: AlbedoSampling::Nearest,
             cam_origin: [0.0, 2.0, 2.0],
             cam_look_at: [0.0, 0.0, 0.0],
             cam_up: [0.0, 1.0, 0.0],
@@ -1470,6 +1509,19 @@ mod tests {
         assert!(validate_desc(&value).is_err());
         value.sensor_rect = [0.5, 0.0, 1.0, 1.0];
         assert!(validate_desc(&value).is_ok());
+    }
+
+    #[test]
+    fn albedo_map_must_match_the_dem_grid() {
+        let mut value = desc(CameraModel::Pinhole);
+        value.albedo_map = Some(vec![1.0; 15]);
+        assert!(validate_desc(&value).is_err());
+        value.albedo_map = Some(vec![1.0; 16]);
+        assert!(validate_desc(&value).is_ok());
+        value.albedo_map.as_mut().unwrap()[3] = 0.5;
+        assert!(validate_desc(&value).is_ok());
+        value.albedo_map.as_mut().unwrap()[3] = 1.5;
+        assert!(validate_desc(&value).is_err());
     }
 
     #[test]

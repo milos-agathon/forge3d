@@ -900,6 +900,8 @@ def hybrid_render_terrain_reference(
     spacing: "tuple[float, float]" = (1.0, 1.0),
     exaggeration: float = 1.0,
     albedo: "tuple[float, float, float]" = (0.6, 0.6, 0.6),
+    albedo_map: "np.ndarray | None" = None,
+    albedo_sampling: str = "nearest",
     camera_model: str | None = None,
     sensor_rect: "tuple[float, float, float, float] | None" = None,
     full_width: int | None = None,
@@ -935,6 +937,11 @@ def hybrid_render_terrain_reference(
     samples per accumulation frame; the min-max pyramid keeps per-sample
     texture reads O(log mips), so cost scales ~linearly from 1 to 8 spp.
 
+    ``albedo_map`` is a terrain-grid-aligned ``(H, W, 4)`` RGBA array used by
+    beauty, ReSTIR, and the albedo AOV. Choose categorical ``"nearest"`` or
+    continuous ``"bilinear"`` sampling with ``albedo_sampling``; texels whose
+    alpha is below one fall back to the constant ``albedo``.
+
     Accumulates frames until the per-pixel luminance variance of the running
     mean across the last convergence window drops below
     ``variance_threshold`` (or raises after ``max_frames`` — no silent fake
@@ -959,6 +966,27 @@ def hybrid_render_terrain_reference(
         )
     if not np.isfinite(dem).all():
         raise ValueError("heightmap contains non-finite samples")
+    if albedo_sampling not in {"nearest", "bilinear"}:
+        raise ValueError(
+            "albedo_sampling must be 'nearest' or 'bilinear', "
+            f"got {albedo_sampling!r}"
+        )
+    material = None
+    if albedo_map is not None:
+        material = np.ascontiguousarray(albedo_map, dtype=np.float32)
+        expected = (*dem.shape, 4)
+        if material.shape != expected:
+            raise ValueError(
+                f"albedo_map must have shape {expected}, got {material.shape}"
+            )
+        if not np.isfinite(material).all():
+            raise ValueError("albedo_map contains non-finite samples")
+        if np.any(material[..., :3] < 0.0) or np.any(
+            (material[..., 3] < 0.0) | (material[..., 3] > 1.0)
+        ):
+            raise ValueError(
+                "albedo_map RGB must be non-negative and alpha must be in [0, 1]"
+            )
     if int(min_frames) > int(max_frames):
         raise ValueError(
             f"min_frames ({min_frames}) must be <= max_frames ({max_frames})"
@@ -1030,6 +1058,8 @@ def hybrid_render_terrain_reference(
         spacing=(float(spacing[0]), float(spacing[1])),
         exaggeration=float(exaggeration),
         albedo=(float(albedo[0]), float(albedo[1]), float(albedo[2])),
+        albedo_map=material,
+        albedo_sampling=albedo_sampling,
         camera_model=None if model_arg is None else model,
         sensor_rect=None if rect_arg is None else tuple(float(value) for value in rect),
         full_width=full_width,

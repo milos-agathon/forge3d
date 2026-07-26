@@ -127,7 +127,7 @@ pub(crate) fn _pt_render_gpu_mesh(
         pixel_offset_x: 0,
         pixel_offset_y: 0,
         ortho_half_height: 1.0,
-        _camera_pad: 0,
+        camera_flags: 0,
         sensor_rect: [0.0, 0.0, 1.0, 1.0],
     };
 

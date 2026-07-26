@@ -82,6 +82,8 @@ fn extract_sun_color(obj: &Bound<'_, PyAny>) -> PyResult<[f32; 3]> {
     full_width = None,
     full_height = None,
     pixel_offset = None,
+    albedo_map = None,
+    albedo_sampling = "nearest",
 ))]
 pub(crate) fn hybrid_render_terrain_reference(
     py: Python<'_>,
@@ -112,10 +114,12 @@ pub(crate) fn hybrid_render_terrain_reference(
     full_width: Option<u32>,
     full_height: Option<u32>,
     pixel_offset: Option<(u32, u32)>,
+    albedo_map: Option<numpy::PyReadonlyArray3<'_, f32>>,
+    albedo_sampling: &str,
 ) -> PyResult<Py<PyAny>> {
     let _ = cache;
     use crate::path_tracing::hybrid_compute::{
-        CameraModel, HybridPathTracer, TerrainReferenceDesc,
+        AlbedoSampling, CameraModel, HybridPathTracer, TerrainReferenceDesc,
     };
     use numpy::PyArray1;
 
@@ -262,6 +266,30 @@ pub(crate) fn hybrid_render_terrain_reference(
         None => None,
     };
 
+    let albedo_sampling = match albedo_sampling {
+        "nearest" => AlbedoSampling::Nearest,
+        "bilinear" => AlbedoSampling::Bilinear,
+        value => {
+            return Err(PyValueError::new_err(format!(
+                "albedo_sampling must be 'nearest' or 'bilinear', got {value:?}"
+            )))
+        }
+    };
+    let albedo_map = match &albedo_map {
+        Some(arr) => {
+            let map = arr.as_array();
+            let expected = [dem_h as usize, dem_w as usize, 4];
+            if map.shape() != expected {
+                return Err(PyValueError::new_err(format!(
+                    "albedo_map must have shape ({dem_h}, {dem_w}, 4), got {:?}",
+                    map.shape()
+                )));
+            }
+            Some(map.iter().copied().collect::<Vec<f32>>())
+        }
+        None => None,
+    };
+
     let mesh = match (&mesh_vertices, &mesh_indices) {
         (Some(v), Some(i)) => {
             let v = v.as_array();
@@ -294,6 +322,8 @@ pub(crate) fn hybrid_render_terrain_reference(
         spacing,
         exaggeration,
         albedo: [albedo.0, albedo.1, albedo.2],
+        albedo_map,
+        albedo_sampling,
         cam_origin,
         cam_look_at,
         cam_up,
@@ -322,6 +352,42 @@ pub(crate) fn hybrid_render_terrain_reference(
         min_frames,
         variance_threshold,
     };
+
+    let model_name = match camera_model {
+        CameraModel::Pinhole => "pinhole",
+        CameraModel::Orthographic => "orthographic",
+        CameraModel::OffAxis => "off_axis",
+    };
+    crate::core::certificate::record_input("camera_model", model_name);
+    crate::core::certificate::record_input(
+        "sensor_rect",
+        format!(
+            "{},{},{},{}",
+            sensor_rect.0, sensor_rect.1, sensor_rect.2, sensor_rect.3
+        ),
+    );
+    crate::core::certificate::record_input(
+        "albedo_map_sha256",
+        desc.albedo_map
+            .as_deref()
+            .map(|map| {
+                crate::core::provenance::to_hex(&crate::core::provenance::sha256(
+                    bytemuck::cast_slice(map),
+                ))
+            })
+            .unwrap_or_else(|| "none".to_string()),
+    );
+    crate::core::certificate::record_input(
+        "albedo_sampling",
+        match albedo_sampling {
+            AlbedoSampling::Nearest => "nearest",
+            AlbedoSampling::Bilinear => "bilinear",
+        },
+    );
+    crate::core::certificate::record_input(
+        "albedo",
+        format!("{},{},{}", desc.albedo[0], desc.albedo[1], desc.albedo[2]),
+    );
 
     let tracer = HybridPathTracer::new()?;
     let out = tracer.render_terrain_reference(&desc)?;

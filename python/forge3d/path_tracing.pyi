@@ -70,6 +70,8 @@ def hybrid_render_terrain_reference(
     spacing: Tuple[float, float] = ...,
     exaggeration: float = ...,
     albedo: Tuple[float, float, float] = ...,
+    albedo_map: np.ndarray | None = ...,
+    albedo_sampling: str = ...,
     camera_model: str | None = ...,
     sensor_rect: Tuple[float, float, float, float] | None = ...,
     full_width: int | None = ...,

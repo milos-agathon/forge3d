@@ -22,7 +22,7 @@ pub struct Uniforms {
     pub pixel_offset_x: u32,
     pub pixel_offset_y: u32,
     pub ortho_half_height: f32,
-    pub _camera_pad: u32,
+    pub camera_flags: u32,
     pub sensor_rect: [f32; 4],
 }
 

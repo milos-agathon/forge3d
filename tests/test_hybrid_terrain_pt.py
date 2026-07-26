@@ -470,6 +470,8 @@ def test_sun_color_signature_stubs_and_native_order():
         ("spacing", ko, (1.0, 1.0), "tuple[float, float]"),
         ("exaggeration", ko, 1.0, "float"),
         ("albedo", ko, (0.6, 0.6, 0.6), "tuple[float, float, float]"),
+        ("albedo_map", ko, None, "np.ndarray | None"),
+        ("albedo_sampling", ko, "nearest", "str"),
         ("camera_model", ko, None, "str | None"),
         ("sensor_rect", ko, None, "tuple[float, float, float, float] | None"),
         ("full_width", ko, None, "int | None"),
@@ -498,8 +500,8 @@ def test_sun_color_signature_stubs_and_native_order():
     wrapper_stub[3] = ("camera", po, "...", "dict | None")
     wrapper_stub[4] = ("spacing", ko, "...", "Tuple[float, float]")
     wrapper_stub[6] = ("albedo", ko, "...", "Tuple[float, float, float]")
-    wrapper_stub[8] = ("sensor_rect", ko, "...", "Tuple[float, float, float, float] | None")
-    wrapper_stub[11] = ("pixel_offset", ko, "...", "Optional[Tuple[int, int]]")
+    wrapper_stub[10] = ("sensor_rect", ko, "...", "Tuple[float, float, float, float] | None")
+    wrapper_stub[13] = ("pixel_offset", ko, "...", "Optional[Tuple[int, int]]")
     wrapper_stub[-2] = ("certificate", ko, "...", "bool | str | None")
 
     native_runtime = [
@@ -530,6 +532,8 @@ def test_sun_color_signature_stubs_and_native_order():
         ("full_width", po, None, ""),
         ("full_height", po, None, ""),
         ("pixel_offset", po, None, ""),
+        ("albedo_map", po, None, ""),
+        ("albedo_sampling", po, "nearest", ""),
     ]
     native_stub = [
         (name, po, required if default == required else "...", ann)
@@ -561,6 +565,8 @@ def test_sun_color_signature_stubs_and_native_order():
             ("full_width", po, "...", "Optional[int]"),
             ("full_height", po, "...", "Optional[int]"),
             ("pixel_offset", po, "...", "Optional[Tuple[int, int]]"),
+            ("albedo_map", po, "...", "Optional[np.ndarray]"),
+            ("albedo_sampling", po, "...", "str"),
         ]
     ]
 

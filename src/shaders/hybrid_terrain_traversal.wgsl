@@ -20,8 +20,8 @@ struct TerrainPtUniforms {
     h_params: vec4<f32>,       // h_min, h_max, exaggeration, env_intensity
     albedo_pad: vec4<f32>,     // terrain albedo rgb, unused
     dims: vec4<u32>,           // width_texels, height_texels, cell_w, cell_h
-    mips: vec4<u32>,           // mip_count, flags(bit0 enabled), env_w, env_h
-    extra: vec4<u32>,          // spp, welford_window, unused, unused
+    mips: vec4<u32>,           // mip_count, flags(bit0 terrain, bit1 albedo), env_w, env_h
+    extra: vec4<u32>,          // spp, welford_window, albedo sampling, unused
 }
 
 // Canonical ReSTIR DI structs — byte-compatible with the Rust `Reservoir` /
@@ -60,6 +60,7 @@ struct RestirReservoir {
 // main_terrain_gbuffer entry, which has its own pipeline layout.
 @group(2) @binding(8) var<storage, read_write> terrain_gbuffer_nr: array<vec4<f32>>;
 @group(2) @binding(9) var<storage, read_write> terrain_gbuffer_pos: array<vec4<f32>>;
+@group(2) @binding(10) var terrain_albedo_tex: texture_2d<f32>;
 
 const TERRAIN_STACK_SIZE: u32 = 64u;
 const TERRAIN_PI: f32 = 3.14159265358979323846;
@@ -73,6 +74,49 @@ fn terrain_reservoir_weight(w_sum: f32, m: u32, target_pdf: f32) -> f32 {
 
 fn terrain_enabled() -> bool {
     return (terrain.mips.y & 1u) != 0u;
+}
+
+// Terrain-grid-aligned material lookup. World xz follows the same texel
+// transform as the bilinear height patch. Alpha < 1 declares no material and
+// deliberately falls back to the constant terrain albedo.
+fn terrain_material_or_fallback(rgba: vec4<f32>) -> vec3<f32> {
+    return select(terrain.albedo_pad.rgb, rgba.rgb, rgba.a >= 1.0);
+}
+
+fn terrain_albedo_at(world_xz: vec2<f32>) -> vec3<f32> {
+    if (terrain.mips.y < 2u) {
+        return terrain.albedo_pad.rgb;
+    }
+    let texel = clamp(
+        (world_xz - terrain.origin_spacing.xy) / terrain.origin_spacing.zw,
+        vec2<f32>(0.0),
+        vec2<f32>(f32(terrain.dims.x - 1u), f32(terrain.dims.y - 1u)),
+    );
+    if (terrain.extra.z == 0u) {
+        return terrain_material_or_fallback(
+            textureLoad(
+                terrain_albedo_tex,
+                vec2<i32>(i32(floor(texel.x + 0.5)), i32(floor(texel.y + 0.5))),
+                0,
+            ),
+        );
+    }
+    let lo = vec2<u32>(u32(floor(texel.x)), u32(floor(texel.y)));
+    let hi = min(lo + vec2<u32>(1u), terrain.dims.xy - vec2<u32>(1u));
+    let f = fract(texel);
+    let a = terrain_material_or_fallback(
+        textureLoad(terrain_albedo_tex, vec2<i32>(i32(lo.x), i32(lo.y)), 0)
+    );
+    let b = terrain_material_or_fallback(
+        textureLoad(terrain_albedo_tex, vec2<i32>(i32(hi.x), i32(lo.y)), 0)
+    );
+    let c = terrain_material_or_fallback(
+        textureLoad(terrain_albedo_tex, vec2<i32>(i32(lo.x), i32(hi.y)), 0)
+    );
+    let d = terrain_material_or_fallback(
+        textureLoad(terrain_albedo_tex, vec2<i32>(i32(hi.x), i32(hi.y)), 0)
+    );
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
 // Safe reciprocal that avoids inf propagation for axis-parallel rays.
@@ -455,9 +499,7 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         var reuse_w = 1.0;
         if (prev_valid) {
             sun_dir = normalize(prev_r.sample.direction);
-            if ((uniforms.camera_model & 0x80000000u) == 0u) {
-                reuse_w = clamp(prev_r.weight, 0.0, 4.0);
-            }
+            reuse_w = clamp(prev_r.weight, 0.0, 4.0);
         }
         var sun = vec3<f32>(0.0);
         let nd = max(dot(n, sun_dir), 0.0);
@@ -529,8 +571,7 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         let cray = Ray(center_camera.origin, 1e-3, center_camera.direction, 1e30);
         let chit = intersect_hybrid(cray);
         let is_hit = chit.hit != 0u;
-        var calbedo = get_surface_properties(chit);
-        if (chit.hit_type == 3u) { calbedo = terrain.albedo_pad.rgb; }
+        let calbedo = get_surface_properties(chit);
         let coord = vec2<i32>(i32(gid.x), i32(gid.y));
         if (aov_enabled(AOV_ALBEDO_BIT)) {
             textureStore(aov_albedo, coord,
@@ -553,8 +594,9 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
 // ---------------------------------------------------------------------------
 // ReSTIR G-buffer entry (own pipeline layout — see hybrid_compute/setup.rs)
 // ---------------------------------------------------------------------------
-// Writes the per-pixel surface record (world normal + roughness, world
-// position) that pt_restir_spatial.wgsl re-evaluates target pdfs against.
+// Writes the per-pixel surface record (world normal + material/light
+// coefficient, world position + terrain tag) that pt_restir_spatial.wgsl
+// re-evaluates target pdfs against.
 // Camera and scene are static across the accumulation, so the driver runs
 // this once before the frame loop, from the unjittered center ray.
 @compute @workgroup_size(8, 8, 1)
@@ -569,8 +611,23 @@ fn main_terrain_gbuffer(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let hit = intersect_hybrid(ray);
     if (hit.hit != 0u) {
-        terrain_gbuffer_nr[pix] = vec4<f32>(hit.normal, 1.0);
-        terrain_gbuffer_pos[pix] = vec4<f32>(hit.point, 1.0);
+        let material = get_surface_properties(hit);
+        if (
+            terrain.mips.y >= 2u
+            && hit.hit_type == 3u
+            && any(material != terrain.albedo_pad.rgb)
+        ) {
+            let material_pdf = terrain_luminance(material * lighting.light_color);
+            terrain_gbuffer_nr[pix] = vec4<f32>(hit.normal, material_pdf);
+            // Negative w tags the terrain-specific material coefficient
+            // without changing the shared spatial shader's mesh contract.
+            terrain_gbuffer_pos[pix] = vec4<f32>(hit.point, -1.0);
+        } else {
+            // Keep flag-off and constant-equivalent maps byte-identical to
+            // the pre-OBLIQUA spatial reuse path.
+            terrain_gbuffer_nr[pix] = vec4<f32>(hit.normal, 1.0);
+            terrain_gbuffer_pos[pix] = vec4<f32>(hit.point, 1.0);
+        }
     } else {
         // Sky pixels: shading never consults their reservoirs; keep the
         // record finite for the spatial pass's normalize().

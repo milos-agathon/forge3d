@@ -1449,6 +1449,8 @@ def hybrid_render_terrain_reference(
     full_width: Optional[int] = ...,
     full_height: Optional[int] = ...,
     pixel_offset: Optional[Tuple[int, int]] = ...,
+    albedo_map: Optional[np.ndarray] = ...,
+    albedo_sampling: str = ...,
 ) -> Dict[str, Any]: ...
 
 def render_offscreen_rgba(

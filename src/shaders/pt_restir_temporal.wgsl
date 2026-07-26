@@ -22,7 +22,7 @@ struct Uniforms {
     pixel_offset_x: u32,
     pixel_offset_y: u32,
     ortho_half_height: f32,
-    _camera_pad: u32,
+    camera_flags: u32,
     sensor_rect: vec4<f32>,
 }
 

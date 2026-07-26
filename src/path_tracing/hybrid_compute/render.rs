@@ -190,7 +190,8 @@ impl HybridPathTracer {
         let dummy_height = dummy_tex("hybrid-pt-dummy-height", wgpu::TextureFormat::R32Float)?;
         let dummy_minmax = dummy_tex("hybrid-pt-dummy-minmax", wgpu::TextureFormat::Rg32Float)?;
         let dummy_env = dummy_tex("hybrid-pt-dummy-env", wgpu::TextureFormat::Rgba32Float)?;
-        let (height_view, minmax_view, env_view) = match terrain {
+        let dummy_albedo = dummy_tex("hybrid-pt-dummy-albedo", wgpu::TextureFormat::Rgba32Float)?;
+        let (height_view, minmax_view, env_view, albedo_view) = match terrain {
             Some(t) => (
                 t.pyramid
                     .height_texture
@@ -200,11 +201,14 @@ impl HybridPathTracer {
                     .create_view(&wgpu::TextureViewDescriptor::default()),
                 t.env_texture
                     .create_view(&wgpu::TextureViewDescriptor::default()),
+                t.albedo_texture
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
             ),
             None => (
                 dummy_height.create_view(&wgpu::TextureViewDescriptor::default()),
                 dummy_minmax.create_view(&wgpu::TextureViewDescriptor::default()),
                 dummy_env.create_view(&wgpu::TextureViewDescriptor::default()),
+                dummy_albedo.create_view(&wgpu::TextureViewDescriptor::default()),
             ),
         };
         // Terrain uniforms: real block (flags bit 0 set) or zeroed (bit 0
@@ -285,6 +289,10 @@ impl HybridPathTracer {
                 wgpu::BindGroupEntry {
                     binding: 7,
                     resource: dummy_reservoir_prev.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::TextureView(&albedo_view),
                 },
             ],
         });
