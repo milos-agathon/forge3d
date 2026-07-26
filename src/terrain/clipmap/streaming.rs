@@ -6,6 +6,8 @@ use crate::terrain::lod::LodConfig;
 use crate::terrain::page_table::PageTable;
 use crate::terrain::stream::HeightMosaic;
 use crate::terrain::tiling::TileId;
+#[cfg(feature = "enable-globe")]
+use glam::DVec3;
 use glam::{Mat4, Vec2, Vec3};
 use wgpu::Queue;
 
@@ -26,6 +28,20 @@ impl ClipmapStreamer {
         }
     }
 
+    #[cfg(feature = "enable-globe")]
+    pub fn new_globe(
+        config: ClipmapConfig,
+        center_ecef: DVec3,
+        frame: super::globe::GlobeFrame,
+        terrain_extent: f32,
+    ) -> Option<Self> {
+        Some(Self {
+            clipmap: ClipmapLevel::new_globe(config, center_ecef, frame, terrain_extent)?,
+            pending_tiles: Vec::new(),
+            loaded_tiles: Vec::new(),
+        })
+    }
+
     /// Update clipmap based on camera position and request needed tiles.
     pub fn update(
         &mut self,
@@ -38,7 +54,23 @@ impl ClipmapStreamer {
         let new_center = Vec2::new(camera_pos.x, camera_pos.z);
         let required_tiles = self.clipmap.update_center(new_center);
 
-        // Filter out already loaded tiles
+        self.queue_required(required_tiles)
+    }
+
+    /// Follow a planetary camera's surface subpoint in f64 ECEF.
+    #[cfg(feature = "enable-globe")]
+    pub fn update_globe(&mut self, camera_anchor: DVec3) -> Vec<TileId> {
+        if !camera_anchor.is_finite() || camera_anchor.length_squared() == 0.0 {
+            return Vec::new();
+        }
+        let surface_radius = self.clipmap.center_ecef().length();
+        let surface_center = camera_anchor.normalize() * surface_radius;
+        self.clipmap.recenter(camera_anchor);
+        let required_tiles = self.clipmap.update_globe_center(surface_center);
+        self.queue_required(required_tiles)
+    }
+
+    fn queue_required(&mut self, required_tiles: Vec<TileId>) -> Vec<TileId> {
         let new_tiles: Vec<TileId> = required_tiles
             .into_iter()
             .filter(|t| !self.loaded_tiles.contains(t) && !self.pending_tiles.contains(t))
@@ -70,7 +102,7 @@ impl ClipmapStreamer {
 
     /// Get current clipmap center.
     pub fn center(&self) -> Vec2 {
-        self.clipmap.center
+        self.clipmap.render_center()
     }
 
     /// Get terrain extent.
@@ -157,5 +189,28 @@ mod tests {
             assert!(streamer.pending_count() < pending_before || pending_before == 0);
             assert!(streamer.loaded_count() > 0);
         }
+    }
+
+    #[cfg(feature = "enable-globe")]
+    #[test]
+    fn globe_streamer_follows_surface_subpoint() {
+        use super::super::globe::GlobeFrame;
+
+        let radius = GlobeFrame::WGS84_MEAN_RADIUS_M;
+        let camera = DVec3::X * (radius + 1_000.0);
+        let frame = GlobeFrame::globe(camera).unwrap();
+        let mut streamer = ClipmapStreamer::new_globe(
+            ClipmapConfig::new(2, 4),
+            DVec3::X * radius,
+            frame,
+            10_000.0,
+        )
+        .unwrap();
+        let next_camera = frame.lonlat_alt_to_ecef(1.0, 0.0, 1_000.0).unwrap();
+        let requested = streamer.update_globe(next_camera);
+
+        assert!(!requested.is_empty());
+        assert!((streamer.clipmap.center_ecef().length() - radius).abs() < 1.0e-6);
+        assert_eq!(streamer.clipmap.camera_anchor(), Some(next_camera));
     }
 }

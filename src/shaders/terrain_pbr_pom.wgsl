@@ -4473,21 +4473,33 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     return out;
 }
 
-
 // ──────────────────────────────────────────────────────────────────────────
 // BOP-P2-02: Clipmap ring/skirt vertex path.
 // Consumes the CPU-generated clipmap mesh (src/terrain/clipmap/) instead of
 // the procedural grid in vs_main, sampling the same height texture and
 // feeding the same fs_main PBR fragment stage. clip_morph.x < 0 marks skirt
-// vertices, which are pushed down by a small offset derived from the ring
-// resolution (u_terrain.camera_mode_params.y) to seal cracks between LOD rings.
+// vertices, which are pushed down along the per-vertex geodetic up direction.
 // ──────────────────────────────────────────────────────────────────────────
+
+fn clipmap_decode_octahedral(encoded: vec2<f32>) -> vec3<f32> {
+    var normal = vec3<f32>(
+        encoded,
+        1.0 - abs(encoded.x) - abs(encoded.y),
+    );
+    if (normal.z < 0.0) {
+        let old_x = normal.x;
+        normal.x = (1.0 - abs(normal.y)) * select(-1.0, 1.0, old_x >= 0.0);
+        normal.y = (1.0 - abs(old_x)) * select(-1.0, 1.0, normal.y >= 0.0);
+    }
+    return det_normalize3(normal);
+}
 
 @vertex
 fn vs_clipmap_main(
-    @location(0) clip_pos_xz : vec2<f32>,
+    @location(0) clip_position : vec3<f32>,
     @location(1) clip_uv : vec2<f32>,
-    @location(2) clip_morph : vec2<f32>
+    @location(2) clip_morph : vec2<f32>,
+    @location(3) clip_normal_oct : vec2<f32>
 ) -> VertexOutput {
     var out : VertexOutput;
 
@@ -4502,15 +4514,18 @@ fn vs_clipmap_main(
     let skirt_offset = select(0.0, u_terrain.camera_mode_params.y * 0.001, clip_morph.x < 0.0);
     let world_z_centered = (h_disp - h_center - skirt_offset) * h_exag;
     let world_z_original = (h_disp - skirt_offset) * h_exag;
+    let geodetic_up = clipmap_decode_octahedral(clip_normal_oct);
+    let world_position = clip_position + geodetic_up * world_z_original;
+    let centered_position = clip_position + geodetic_up * world_z_centered;
 
-    out.world_position = vec3<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_original);
-    out.world_normal = vec3<f32>(0.0, 0.0, 1.0);
+    out.world_position = world_position;
+    out.world_normal = geodetic_up;
     out.tex_coord = uv;
     out.clip_position = det_mat4_mul_vec4(
         u_terrain.proj,
         det_mat4_mul_vec4(
             u_terrain.view,
-            vec4<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_centered, 1.0),
+            vec4<f32>(centered_position, 1.0),
         ),
     );
     return out;

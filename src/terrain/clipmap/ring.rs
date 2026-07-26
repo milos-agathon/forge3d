@@ -6,6 +6,11 @@
 use super::vertex::ClipmapVertex;
 use glam::Vec2;
 
+#[cfg(test)]
+fn position_xz(vertex: &ClipmapVertex) -> Vec2 {
+    Vec2::new(vertex.position[0], vertex.position[1])
+}
+
 /// Generate the center block mesh (solid grid at finest LOD).
 pub fn make_center_block(
     resolution: u32,
@@ -250,7 +255,7 @@ pub fn make_ring_skirts(
 
     for (i, v) in vertices.iter().enumerate() {
         // Create skirt vertex below this one (depth offset applied in shader).
-        let sv = ClipmapVertex::skirt(v.position[0], v.position[1], v.uv[0], v.uv[1], ring_index);
+        let sv = ClipmapVertex::skirt_from(v, ring_index);
         skirt_verts.push(sv);
 
         // Connect to the previous vertex only when it sits on the same row.
@@ -286,9 +291,9 @@ mod tests {
         let i0 = indices[0] as usize;
         let i1 = indices[1] as usize;
         let i2 = indices[2] as usize;
-        let v0 = Vec2::from(verts[i0].position);
-        let v1 = Vec2::from(verts[i1].position);
-        let v2 = Vec2::from(verts[i2].position);
+        let v0 = position_xz(&verts[i0]);
+        let v1 = position_xz(&verts[i1]);
+        let v2 = position_xz(&verts[i2]);
         // CCW check: cross product should be positive
         let cross = (v1 - v0).perp_dot(v2 - v0);
         assert!(cross > 0.0, "First triangle should be CCW");
@@ -326,8 +331,8 @@ mod tests {
         let mut max_edge = 0.0f32;
         for tri in skirt_indices.chunks(3) {
             for k in 0..3 {
-                let a = Vec2::from(all[tri[k] as usize].position);
-                let b = Vec2::from(all[tri[(k + 1) % 3] as usize].position);
+                let a = position_xz(&all[tri[k] as usize]);
+                let b = position_xz(&all[tri[(k + 1) % 3] as usize]);
                 max_edge = max_edge.max(a.distance(b));
             }
         }

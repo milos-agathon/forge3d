@@ -123,6 +123,13 @@ impl GlobeFrame {
         self.ecef_to_local.transform_vector3(vector)
     }
 
+    /// Build a stable local-east/north/up to ECEF transform at a world point.
+    pub(crate) fn tangent_to_ecef(origin: DVec3) -> Option<DMat4> {
+        let distance = origin.length();
+        (origin.is_finite() && distance.is_finite() && distance > 0.0)
+            .then(|| tangent_transform(origin).transpose())
+    }
+
     /// Subtract the f64 camera anchor before the sole f32 render conversion.
     pub fn camera_relative(&self, ecef: DVec3) -> Option<CameraRelative> {
         if !ecef.is_finite() {
