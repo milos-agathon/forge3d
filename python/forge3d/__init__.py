@@ -255,6 +255,7 @@ from .terrain_params import (
 from .offline import OfflineProgress, OfflineResult, render_offline
 from .denoise_oidn import oidn_available, oidn_denoise
 from . import presets
+from . import geo
 from . import animation
 from . import gis
 from . import thematic
@@ -684,6 +685,7 @@ __all__ = [
     "SunPosition",
     "sun_position",
     "sun_position_utc",
+    "geo",
     # AEQUITAS: PT-vs-raster adjudication
     "render_adjudication_pair",
     # PROMETHEUS: GPU terrain path-traced reference

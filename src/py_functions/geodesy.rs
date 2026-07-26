@@ -8,6 +8,62 @@ use super::super::*;
 #[cfg(feature = "extension-module")]
 use numpy::{PyArray2, PyReadonlyArray2};
 
+/// NREL SPA topocentric solar vector.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (
+    utc,
+    lat,
+    lon,
+    elev_m = 0.0,
+    *,
+    tz_offset_hours = 0.0,
+    delta_t_seconds = 69.0,
+    pressure_mbar = 1013.25,
+    temperature_c = 15.0
+))]
+pub(crate) fn solar_position(
+    py: Python<'_>,
+    utc: &Bound<'_, PyAny>,
+    lat: f64,
+    lon: f64,
+    elev_m: f64,
+    tz_offset_hours: f64,
+    delta_t_seconds: f64,
+    pressure_mbar: f64,
+    temperature_c: f64,
+) -> PyResult<PyObject> {
+    let (year, month, day, hour, minute, second) = utc
+        .extract::<(i32, u32, u32, u32, u32, f64)>()
+        .map_err(|_| {
+            PyValueError::new_err("utc must be (year, month, day, hour, minute, second)")
+        })?;
+    let vector = crate::geo::solar::solar_position(&crate::geo::solar::SolarTime {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        tz_offset_hours,
+        delta_t_seconds,
+        latitude_deg: lat,
+        longitude_deg: lon,
+        elevation_m: elev_m,
+        pressure_mbar,
+        temperature_c,
+    })
+    .map_err(PyValueError::new_err)?;
+    let dict = PyDict::new_bound(py);
+    dict.set_item("zenith_deg", vector.zenith_deg)?;
+    dict.set_item("azimuth_deg", vector.azimuth_deg)?;
+    dict.set_item("apparent_elevation_deg", vector.apparent_elevation_deg)?;
+    dict.set_item("true_elevation_deg", vector.true_elevation_deg)?;
+    dict.set_item("distance_au", vector.distance_au)?;
+    dict.set_item("equation_of_time_min", vector.equation_of_time_min)?;
+    Ok(dict.into_py(py))
+}
+
 /// EGM96 geoid undulation N(lat, lon) in metres (degree/order 120 synthesis,
 /// NGA F477 convention, WGS84 ellipsoid).
 #[cfg(feature = "extension-module")]

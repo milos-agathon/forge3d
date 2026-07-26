@@ -5,7 +5,10 @@
 pub mod geodesic;
 pub mod geoid;
 pub mod projections;
+pub mod refraction;
 pub mod reproject;
+pub mod solar;
+mod solar_coefficients;
 pub mod units;
 
 // Re-export main types and functions

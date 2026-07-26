@@ -8,6 +8,7 @@ from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping,
 import os
 import numpy as np
 from . import gis
+from . import geo as geo
 from . import codec as codec
 from . import text as text
 from . import precision as precision
