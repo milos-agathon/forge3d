@@ -22,7 +22,7 @@ mod render_terrain;
 mod setup;
 pub mod terrain_heightfield;
 
-pub use render_terrain::{TerrainReferenceDesc, TerrainReferenceOutput};
+pub use render_terrain::{CameraModel, TerrainReferenceDesc, TerrainReferenceOutput};
 pub use terrain_heightfield::TerrainPtScene;
 
 /// Additional uniforms for hybrid traversal
@@ -105,7 +105,14 @@ impl Default for HybridTracerParams {
                 cam_forward: [0.0, 0.0, -1.0],
                 seed_hi: 12345,
                 seed_lo: 67890,
-                _pad_end: [0, 0, 0],
+                camera_model: 0,
+                full_width: 512,
+                full_height: 512,
+                pixel_offset_x: 0,
+                pixel_offset_y: 0,
+                ortho_half_height: 1.0,
+                _camera_pad: 0,
+                sensor_rect: [0.0, 0.0, 1.0, 1.0],
             },
             lighting_uniforms: LightingUniforms {
                 light_dir,

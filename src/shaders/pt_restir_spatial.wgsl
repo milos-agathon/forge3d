@@ -18,7 +18,14 @@ struct Uniforms {
     cam_forward: vec3<f32>,
     seed_hi: u32,
     seed_lo: u32,
-    _pad: u32,
+    camera_model: u32,
+    full_width: u32,
+    full_height: u32,
+    pixel_offset_x: u32,
+    pixel_offset_y: u32,
+    ortho_half_height: f32,
+    _camera_pad: u32,
+    sensor_rect: vec4<f32>,
 }
 
 // Scene lights (Group 1)
@@ -170,7 +177,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let K: u32 = 8u;
     let R: u32 = 3u;
 
-    var seed = (uniforms.seed_hi ^ uniforms.frame_index) + idx * 1664525u + 1013904223u;
+    let global_idx = (y + uniforms.pixel_offset_y) * uniforms.full_width
+        + x + uniforms.pixel_offset_x;
+    var seed = (uniforms.seed_hi ^ uniforms.frame_index)
+        + global_idx * 1664525u + 1013904223u;
 
     let r_self = in_reservoirs[idx];
     var out_r: Reservoir;

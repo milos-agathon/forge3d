@@ -470,6 +470,11 @@ def test_sun_color_signature_stubs_and_native_order():
         ("spacing", ko, (1.0, 1.0), "tuple[float, float]"),
         ("exaggeration", ko, 1.0, "float"),
         ("albedo", ko, (0.6, 0.6, 0.6), "tuple[float, float, float]"),
+        ("camera_model", ko, None, "str | None"),
+        ("sensor_rect", ko, None, "tuple[float, float, float, float] | None"),
+        ("full_width", ko, None, "int | None"),
+        ("full_height", ko, None, "int | None"),
+        ("pixel_offset", ko, None, "tuple[int, int] | None"),
         ("sun_azimuth_deg", ko, 315.0, "float"),
         ("sun_elevation_deg", ko, 45.0, "float"),
         ("sun_intensity", ko, 2.5, "float"),
@@ -493,6 +498,8 @@ def test_sun_color_signature_stubs_and_native_order():
     wrapper_stub[3] = ("camera", po, "...", "dict | None")
     wrapper_stub[4] = ("spacing", ko, "...", "Tuple[float, float]")
     wrapper_stub[6] = ("albedo", ko, "...", "Tuple[float, float, float]")
+    wrapper_stub[8] = ("sensor_rect", ko, "...", "Tuple[float, float, float, float] | None")
+    wrapper_stub[11] = ("pixel_offset", ko, "...", "Optional[Tuple[int, int]]")
     wrapper_stub[-2] = ("certificate", ko, "...", "bool | str | None")
 
     native_runtime = [
@@ -518,6 +525,11 @@ def test_sun_color_signature_stubs_and_native_order():
         ("certificate", po, None, ""),
         ("sun_color", po, None, ""),
         ("cache", po, None, ""),
+        ("camera_model", po, None, ""),
+        ("sensor_rect", po, None, ""),
+        ("full_width", po, None, ""),
+        ("full_height", po, None, ""),
+        ("pixel_offset", po, None, ""),
     ]
     native_stub = [
         (name, po, required if default == required else "...", ann)
@@ -544,6 +556,11 @@ def test_sun_color_signature_stubs_and_native_order():
             ("certificate", po, "...", "bool | str | PathLikeStr | None"),
             ("sun_color", po, "...", "Optional[Sequence[float] | np.ndarray]"),
             ("cache", po, "...", "str | PathLikeStr | None"),
+            ("camera_model", po, "...", "Optional[str]"),
+            ("sensor_rect", po, "...", "Optional[Tuple[float, float, float, float]]"),
+            ("full_width", po, "...", "Optional[int]"),
+            ("full_height", po, "...", "Optional[int]"),
+            ("pixel_offset", po, "...", "Optional[Tuple[int, int]]"),
         ]
     ]
 

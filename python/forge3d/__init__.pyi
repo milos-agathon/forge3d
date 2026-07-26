@@ -1444,6 +1444,11 @@ def hybrid_render_terrain_reference(
     certificate: bool | str | PathLikeStr | None = ...,
     sun_color: Optional[Sequence[float] | np.ndarray] = ...,
     cache: str | PathLikeStr | None = ...,
+    camera_model: Optional[str] = ...,
+    sensor_rect: Optional[Tuple[float, float, float, float]] = ...,
+    full_width: Optional[int] = ...,
+    full_height: Optional[int] = ...,
+    pixel_offset: Optional[Tuple[int, int]] = ...,
 ) -> Dict[str, Any]: ...
 
 def render_offscreen_rgba(

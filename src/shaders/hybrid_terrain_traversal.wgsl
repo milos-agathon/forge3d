@@ -404,10 +404,9 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         && prev_r.weight > 0.0 && prev_r.target_pdf > 0.0
         && prev_r.sample.light_type == 1u;
 
-    var st: u32 = uniforms.seed_hi ^ (gid.x * 1664525u) ^ (gid.y * 1013904223u)
+    let gpx = global_pixel(gid.xy);
+    var st: u32 = uniforms.seed_hi ^ (gpx.x * 1664525u) ^ (gpx.y * 1013904223u)
         ^ (uniforms.frame_index * 92837111u) ^ uniforms.seed_lo;
-    let half_h = tan(0.5 * uniforms.cam_fov_y);
-    let half_w = uniforms.cam_aspect * half_h;
     let spp = max(terrain.extra.x, 1u);
 
     var frame_radiance = vec3<f32>(0.0);
@@ -418,11 +417,9 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         let jy = terrain_tent_offset(xorshift32(&st)) * 0.5;
 
         // Jittered beauty ray.
-        let ndc_x = ((f32(gid.x) + 0.5 + jx) / f32(W)) * 2.0 - 1.0;
-        let ndc_y = (1.0 - (f32(gid.y) + 0.5 + jy) / f32(H)) * 2.0 - 1.0;
-        var rd = normalize(vec3<f32>(ndc_x * half_w, ndc_y * half_h, -1.0));
-        rd = normalize(rd.x * uniforms.cam_right + rd.y * uniforms.cam_up + rd.z * (-uniforms.cam_forward));
-        let ray = Ray(uniforms.cam_origin, 1e-3, rd, 1e30);
+        let camera = generate_camera_ray(gid.xy, vec2<f32>(jx, jy));
+        let rd = camera.direction;
+        let ray = Ray(camera.origin, 1e-3, rd, 1e30);
 
         let hit = intersect_hybrid(ray);
         if (hit.hit == 0u) {
@@ -458,7 +455,9 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         var reuse_w = 1.0;
         if (prev_valid) {
             sun_dir = normalize(prev_r.sample.direction);
-            reuse_w = clamp(prev_r.weight, 0.0, 4.0);
+            if ((uniforms.camera_model & 0x80000000u) == 0u) {
+                reuse_w = clamp(prev_r.weight, 0.0, 4.0);
+            }
         }
         var sun = vec3<f32>(0.0);
         let nd = max(dot(n, sun_dir), 0.0);
@@ -468,6 +467,11 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (lighting.shadows_enabled != 0u && intersect_shadow_ray(sray, 1e30)) {
                 vis = 0.0;
             }
+            // The renderer currently supplies one directional delta light.
+            // The explicit sensor contract uses unit normalization: tile-edge
+            // reservoirs have fewer spatial neighbors than a monolithic frame
+            // and may not change energy. Omitting sensor_rect preserves the
+            // historical pinhole reservoir weight byte-for-byte.
             sun = albedo * lighting.light_color * nd * vis * reuse_w;
         }
 
@@ -521,11 +525,8 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
     // --- Geometric AOVs from the unjittered center ray (frame 0 only via
     // aov_flags) so they align with rasterizer pixel-center sampling ---
     if (uniforms.aov_flags != 0u) {
-        let cx = ((f32(gid.x) + 0.5) / f32(W)) * 2.0 - 1.0;
-        let cy = (1.0 - (f32(gid.y) + 0.5) / f32(H)) * 2.0 - 1.0;
-        var crd = normalize(vec3<f32>(cx * half_w, cy * half_h, -1.0));
-        crd = normalize(crd.x * uniforms.cam_right + crd.y * uniforms.cam_up + crd.z * (-uniforms.cam_forward));
-        let cray = Ray(uniforms.cam_origin, 1e-3, crd, 1e30);
+        let center_camera = generate_camera_ray(gid.xy, vec2<f32>(0.0));
+        let cray = Ray(center_camera.origin, 1e-3, center_camera.direction, 1e30);
         let chit = intersect_hybrid(cray);
         let is_hit = chit.hit != 0u;
         var calbedo = get_surface_properties(chit);
@@ -563,13 +564,8 @@ fn main_terrain_gbuffer(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= W || gid.y >= H) { return; }
     let pix = gid.y * W + gid.x;
 
-    let half_h = tan(0.5 * uniforms.cam_fov_y);
-    let half_w = uniforms.cam_aspect * half_h;
-    let ndc_x = ((f32(gid.x) + 0.5) / f32(W)) * 2.0 - 1.0;
-    let ndc_y = (1.0 - (f32(gid.y) + 0.5) / f32(H)) * 2.0 - 1.0;
-    var rd = normalize(vec3<f32>(ndc_x * half_w, ndc_y * half_h, -1.0));
-    rd = normalize(rd.x * uniforms.cam_right + rd.y * uniforms.cam_up + rd.z * (-uniforms.cam_forward));
-    let ray = Ray(uniforms.cam_origin, 1e-3, rd, 1e30);
+    let center_camera = generate_camera_ray(gid.xy, vec2<f32>(0.0));
+    let ray = Ray(center_camera.origin, 1e-3, center_camera.direction, 1e30);
 
     let hit = intersect_hybrid(ray);
     if (hit.hit != 0u) {

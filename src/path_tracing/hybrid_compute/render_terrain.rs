@@ -215,6 +215,13 @@ fn record_runtime_contract(
 /// accumulated mean luminance across the last N frames (02-prometheus DoD).
 pub const WELFORD_WINDOW: u32 = 32;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CameraModel {
+    Pinhole = 0,
+    Orthographic = 1,
+    OffAxis = 2,
+}
+
 /// Full scene description for the terrain reference render.
 pub struct TerrainReferenceDesc {
     pub heights: Vec<f32>,
@@ -226,7 +233,15 @@ pub struct TerrainReferenceDesc {
     pub cam_origin: [f32; 3],
     pub cam_look_at: [f32; 3],
     pub cam_up: [f32; 3],
+    pub camera_model: CameraModel,
+    pub seamless_camera: bool,
     pub fov_y_deg: f32,
+    pub ortho_half_height: f32,
+    pub sensor_rect: [f32; 4],
+    pub full_width: u32,
+    pub full_height: u32,
+    pub pixel_offset_x: u32,
+    pub pixel_offset_y: u32,
     pub exposure: f32,
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
@@ -477,10 +492,68 @@ fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
     {
         return err("camera up vector must not be parallel to the view direction".into());
     }
-    if !(desc.fov_y_deg.is_finite() && desc.fov_y_deg > 0.0 && desc.fov_y_deg < 180.0) {
+    match desc.camera_model {
+        CameraModel::Pinhole | CameraModel::OffAxis => {
+            if !(desc.fov_y_deg.is_finite() && desc.fov_y_deg > 0.0 && desc.fov_y_deg < 180.0) {
+                return err(format!(
+                    "fov_y must be finite and in (0, 180) degrees, got {}",
+                    desc.fov_y_deg
+                ));
+            }
+        }
+        CameraModel::Orthographic => {
+            if !(desc.ortho_half_height.is_finite() && desc.ortho_half_height > 0.0) {
+                return err(format!(
+                    "orthographic half_height must be finite and > 0, got {}",
+                    desc.ortho_half_height
+                ));
+            }
+        }
+    }
+    let [x0, y0, x1, y1] = desc.sensor_rect;
+    if !desc.sensor_rect.iter().all(|v| v.is_finite())
+        || x0 < 0.0
+        || y0 < 0.0
+        || x1 > 1.0
+        || y1 > 1.0
+        || x0 >= x1
+        || y0 >= y1
+    {
         return err(format!(
-            "fov_y must be finite and in (0, 180) degrees, got {}",
-            desc.fov_y_deg
+            "sensor_rect must be finite, ordered, and inside [0,1], got {:?}",
+            desc.sensor_rect
+        ));
+    }
+    if desc.full_width == 0
+        || desc.full_height == 0
+        || desc.pixel_offset_x.saturating_add(desc.width) > desc.full_width
+        || desc.pixel_offset_y.saturating_add(desc.height) > desc.full_height
+    {
+        return err(format!(
+            "tile {}x{} at ({},{}) exceeds full image {}x{}",
+            desc.width,
+            desc.height,
+            desc.pixel_offset_x,
+            desc.pixel_offset_y,
+            desc.full_width,
+            desc.full_height
+        ));
+    }
+    let expected_rect = [
+        desc.pixel_offset_x as f32 / desc.full_width as f32,
+        desc.pixel_offset_y as f32 / desc.full_height as f32,
+        (desc.pixel_offset_x + desc.width) as f32 / desc.full_width as f32,
+        (desc.pixel_offset_y + desc.height) as f32 / desc.full_height as f32,
+    ];
+    if desc
+        .sensor_rect
+        .iter()
+        .zip(expected_rect)
+        .any(|(actual, expected)| (actual - expected).abs() > 1e-4)
+    {
+        return err(format!(
+            "sensor_rect {:?} does not match canonical tile rectangle {:?}",
+            desc.sensor_rect, expected_rect
         ));
     }
     if !(desc.exposure.is_finite() && desc.exposure > 0.0) {
@@ -618,13 +691,20 @@ impl HybridPathTracer {
             cam_origin: desc.cam_origin,
             cam_fov_y: desc.fov_y_deg.to_radians(),
             cam_right: right.into(),
-            cam_aspect: width as f32 / height as f32,
+            cam_aspect: desc.full_width as f32 / desc.full_height as f32,
             cam_up: up.into(),
             cam_exposure: desc.exposure,
             cam_forward: forward.into(),
             seed_hi: desc.seed,
             seed_lo: desc.seed ^ 0x85EB_CA6B,
-            _pad_end: [0; 3],
+            camera_model: desc.camera_model as u32 | if desc.seamless_camera { 1 << 31 } else { 0 },
+            full_width: desc.full_width,
+            full_height: desc.full_height,
+            pixel_offset_x: desc.pixel_offset_x,
+            pixel_offset_y: desc.pixel_offset_y,
+            ortho_half_height: desc.ortho_half_height,
+            _camera_pad: 0,
+            sensor_rect: desc.sensor_rect,
         };
         let base_ubo = tracked_create_buffer_init(
             device,
@@ -1310,7 +1390,87 @@ impl HybridPathTracer {
 
 #[cfg(test)]
 mod tests {
-    use super::{factor_sun_lighting, should_require_valid_sun_reservoirs};
+    use super::{
+        factor_sun_lighting, should_require_valid_sun_reservoirs, validate_desc, CameraModel,
+        TerrainReferenceDesc,
+    };
+
+    fn desc(camera_model: CameraModel) -> TerrainReferenceDesc {
+        TerrainReferenceDesc {
+            heights: vec![0.0; 4],
+            dem_width: 2,
+            dem_height: 2,
+            spacing: (1.0, 1.0),
+            exaggeration: 1.0,
+            albedo: [0.6; 3],
+            cam_origin: [0.0, 2.0, 2.0],
+            cam_look_at: [0.0, 0.0, 0.0],
+            cam_up: [0.0, 1.0, 0.0],
+            camera_model,
+            seamless_camera: true,
+            fov_y_deg: 45.0,
+            ortho_half_height: 1.0,
+            sensor_rect: [0.0, 0.0, 1.0, 1.0],
+            full_width: 8,
+            full_height: 8,
+            pixel_offset_x: 0,
+            pixel_offset_y: 0,
+            exposure: 1.0,
+            sun_azimuth_deg: 315.0,
+            sun_elevation_deg: 45.0,
+            sun_intensity: 2.5,
+            sun_color: [1.0, 0.97, 0.92],
+            env_map: None,
+            env_intensity: 0.35,
+            mesh: None,
+            width: 8,
+            height: 8,
+            seed: 7,
+            spp: 1,
+            max_frames: 32,
+            min_frames: 32,
+            variance_threshold: 1e-3,
+        }
+    }
+
+    #[test]
+    fn camera_validation_branches_by_model() {
+        let mut pinhole = desc(CameraModel::Pinhole);
+        pinhole.fov_y_deg = f32::NAN;
+        assert!(validate_desc(&pinhole).is_err());
+
+        let mut ortho = desc(CameraModel::Orthographic);
+        ortho.fov_y_deg = f32::NAN;
+        assert!(validate_desc(&ortho).is_ok());
+        ortho.ortho_half_height = 0.0;
+        assert!(validate_desc(&ortho).is_err());
+    }
+
+    #[test]
+    fn camera_validation_rejects_invalid_sensor_rects() {
+        for rect in [
+            [-0.1, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 1.1, 1.0],
+            [0.5, 0.0, 0.5, 1.0],
+            [0.0, 0.8, 1.0, 0.2],
+        ] {
+            let mut value = desc(CameraModel::OffAxis);
+            value.sensor_rect = rect;
+            assert!(validate_desc(&value).is_err(), "accepted {rect:?}");
+        }
+    }
+
+    #[test]
+    fn camera_validation_rejects_tiles_outside_full_image() {
+        let mut value = desc(CameraModel::OffAxis);
+        value.width = 5;
+        value.pixel_offset_x = 4;
+        assert!(validate_desc(&value).is_err());
+        value.width = 4;
+        assert!(validate_desc(&value).is_err());
+        value.sensor_rect = [0.5, 0.0, 1.0, 1.0];
+        assert!(validate_desc(&value).is_ok());
+    }
 
     #[test]
     fn direct_bakes_intensity_restir_keeps_it_separate() {

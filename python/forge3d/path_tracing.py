@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import wraps
+from operator import index as _index
 from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable, Sequence
 
 import numpy as np
@@ -899,6 +900,11 @@ def hybrid_render_terrain_reference(
     spacing: "tuple[float, float]" = (1.0, 1.0),
     exaggeration: float = 1.0,
     albedo: "tuple[float, float, float]" = (0.6, 0.6, 0.6),
+    camera_model: str | None = None,
+    sensor_rect: "tuple[float, float, float, float] | None" = None,
+    full_width: int | None = None,
+    full_height: int | None = None,
+    pixel_offset: "tuple[int, int] | None" = None,
     sun_azimuth_deg: float = 315.0,
     sun_elevation_deg: float = 45.0,
     sun_intensity: float = 2.5,
@@ -976,6 +982,31 @@ def hybrid_render_terrain_reference(
     if any(c < 0.0 for c in sun_rgb):
         raise ValueError(f"sun_color components must be non-negative, got {sun_color!r}")
     cam = dict(camera or {})
+    model_arg = cam.get("model") if camera_model is None else camera_model
+    model = str("pinhole" if model_arg is None else model_arg)
+    if model not in {"pinhole", "orthographic", "off_axis"}:
+        raise ValueError(
+            "camera model must be 'pinhole', 'orthographic', or "
+            f"'off_axis', got {model!r}"
+        )
+    rect_arg = sensor_rect if sensor_rect is not None else cam.get("sensor_rect")
+    rect = tuple((0.0, 0.0, 1.0, 1.0) if rect_arg is None else rect_arg)
+    if len(rect) != 4:
+        raise ValueError(f"sensor_rect must contain four values, got {rect!r}")
+    offset = (0, 0)
+    if pixel_offset is not None:
+        try:
+            offset = (_index(pixel_offset[0]), _index(pixel_offset[1]))
+        except (TypeError, IndexError) as exc:
+            raise ValueError("pixel_offset must contain two non-negative integers") from exc
+        if offset[0] < 0 or offset[1] < 0:
+            raise ValueError("pixel_offset must contain two non-negative integers")
+    if (full_width is None) != (full_height is None):
+        raise ValueError("full_width and full_height must be provided together")
+    if offset != (0, 0) and full_width is None:
+        raise ValueError("offset renders require full_width and full_height")
+    if rect != (0.0, 0.0, 1.0, 1.0) and full_width is None:
+        raise ValueError("cropped sensor_rect requires full_width and full_height")
     env = None
     if env_map is not None:
         env = np.ascontiguousarray(env_map, dtype=np.float32)
@@ -999,6 +1030,11 @@ def hybrid_render_terrain_reference(
         spacing=(float(spacing[0]), float(spacing[1])),
         exaggeration=float(exaggeration),
         albedo=(float(albedo[0]), float(albedo[1]), float(albedo[2])),
+        camera_model=None if model_arg is None else model,
+        sensor_rect=None if rect_arg is None else tuple(float(value) for value in rect),
+        full_width=full_width,
+        full_height=full_height,
+        pixel_offset=None if pixel_offset is None else offset,
         sun_azimuth_deg=float(sun_azimuth_deg),
         sun_elevation_deg=float(sun_elevation_deg),
         sun_intensity=float(sun_intensity),

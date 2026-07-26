@@ -19,7 +19,14 @@ struct Uniforms {
   cam_forward: vec3<f32>,
   seed_hi: u32,
   seed_lo: u32,
-  _pad: u32,
+  camera_model: u32,
+  full_width: u32,
+  full_height: u32,
+  pixel_offset_x: u32,
+  pixel_offset_y: u32,
+  ortho_half_height: f32,
+  _camera_pad: u32,
+  sensor_rect: vec4<f32>,
 }
 
 // Lighting uniforms (Group 0, binding 1 — folded into the base uniform group
@@ -90,6 +97,53 @@ fn tent_filter(u: f32) -> f32 {
   return select(1.0 + t, 1.0 - t, t < 0.0);
 }
 
+struct CameraRay {
+  origin: vec3<f32>,
+  direction: vec3<f32>,
+}
+
+fn global_pixel(gid: vec2<u32>) -> vec2<u32> {
+  return gid + vec2<u32>(uniforms.pixel_offset_x, uniforms.pixel_offset_y);
+}
+
+// Each call selects a sub-rectangle of the ideal full sensor. Tiles vary only
+// this rectangle and the global pixel offset; the latter also keeps RNG
+// identity with the full-frame render.
+fn generate_camera_ray(gid: vec2<u32>, jitter: vec2<f32>) -> CameraRay {
+  let local_uv = (vec2<f32>(gid) + vec2<f32>(0.5) + jitter)
+      / vec2<f32>(f32(uniforms.width), f32(uniforms.height));
+  let sensor_uv = mix(uniforms.sensor_rect.xy, uniforms.sensor_rect.zw, local_uv);
+  let ndc = vec2<f32>(sensor_uv.x * 2.0 - 1.0, (1.0 - sensor_uv.y) * 2.0 - 1.0);
+  let full_aspect = f32(uniforms.full_width) / f32(uniforms.full_height);
+  // Legacy mesh callers may intentionally override cam_aspect. OBLIQUA marks
+  // full-sensor cameras with the high bit and uses the ideal-frame aspect.
+  let aspect = select(
+      uniforms.cam_aspect,
+      full_aspect,
+      (uniforms.camera_model & 0x80000000u) != 0u
+  );
+
+  var ray: CameraRay;
+  if ((uniforms.camera_model & 3u) == 1u) {
+    let half_h = uniforms.ortho_half_height;
+    let half_w = aspect * half_h;
+    ray.origin = uniforms.cam_origin
+        + ndc.x * half_w * uniforms.cam_right
+        + ndc.y * half_h * uniforms.cam_up;
+    ray.direction = normalize(uniforms.cam_forward);
+  } else {
+    let half_h = tan(0.5 * uniforms.cam_fov_y);
+    let half_w = aspect * half_h;
+    var rd = normalize(vec3<f32>(ndc.x * half_w, ndc.y * half_h, -1.0));
+    ray.origin = uniforms.cam_origin;
+    ray.direction = normalize(
+        rd.x * uniforms.cam_right + rd.y * uniforms.cam_up
+        + rd.z * (-uniforms.cam_forward)
+    );
+  }
+  return ray;
+}
+
 // Ray-sphere intersection (for legacy sphere support)
 fn ray_sphere(ro: vec3<f32>, rd: vec3<f32>, c: vec3<f32>, r: f32) -> f32 {
   let oc = ro - c;
@@ -117,22 +171,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let W = uniforms.width;
   let H = uniforms.height;
   if (gid.x >= W || gid.y >= H) { return; }
-  let px = f32(gid.x);
-  let py = f32(gid.y);
-
   // Seed per-pixel RNG
-  var st: u32 = uniforms.seed_hi ^ (gid.x * 1664525u) ^ (gid.y * 1013904223u) ^ uniforms.frame_index;
+  let gpx = global_pixel(gid.xy);
+  var st: u32 = uniforms.seed_hi ^ (gpx.x * 1664525u) ^ (gpx.y * 1013904223u) ^ uniforms.frame_index;
   let jx = tent_filter(xorshift32(&st)) * 0.5;
   let jy = tent_filter(xorshift32(&st)) * 0.5;
 
   // Generate camera ray
-  let ndc_x = ((px + 0.5 + jx) / f32(W)) * 2.0 - 1.0;
-  let ndc_y = (1.0 - (py + 0.5 + jy) / f32(H)) * 2.0 - 1.0;
-  let half_h = tan(0.5 * uniforms.cam_fov_y);
-  let half_w = uniforms.cam_aspect * half_h;
-  var rd = normalize(vec3<f32>(ndc_x * half_w, ndc_y * half_h, -1.0));
-  rd = normalize(rd.x * uniforms.cam_right + rd.y * uniforms.cam_up + rd.z * (-uniforms.cam_forward));
-  let ro = uniforms.cam_origin;
+  let camera = generate_camera_ray(gid.xy, vec2<f32>(jx, jy));
+  let ro = camera.origin;
+  let rd = camera.direction;
 
   // Create ray
   let camera_ray = Ray(ro, 1e-3, rd, 1e30);
