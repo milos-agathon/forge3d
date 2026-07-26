@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from collections.abc import Mapping
 from typing import TypedDict
 
 from ._native import get_native_module
@@ -60,6 +61,7 @@ class SolarTime:
     delta_t_seconds: float = 69.0
     pressure_mbar: float = 1013.25
     temperature_c: float = 15.0
+    delta_t: float | None = None
 
     def position(self) -> SolarVector:
         return solar_position(
@@ -68,13 +70,31 @@ class SolarTime:
             self.observer_lon,
             self.observer_elev_m,
             tz_offset_hours=self.tz_offset_hours,
-            delta_t_seconds=self.delta_t_seconds,
+            delta_t_seconds=(
+                self.delta_t_seconds if self.delta_t is None else self.delta_t
+            ),
             pressure_mbar=self.pressure_mbar,
             temperature_c=self.temperature_c,
         )
 
     def to_native(self) -> dict[str, object]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["delta_t_seconds"] = (
+            self.delta_t_seconds if self.delta_t is None else self.delta_t
+        )
+        payload.pop("delta_t")
+        return payload
+
+
+def _coerce_solar_time(value: SolarTime | Mapping[str, object]) -> SolarTime:
+    if isinstance(value, SolarTime):
+        return value
+    if isinstance(value, Mapping):
+        fields = dict(value)
+        if "delta_t" in fields and "delta_t_seconds" not in fields:
+            fields["delta_t_seconds"] = fields.pop("delta_t")
+        return SolarTime(**fields)
+    raise TypeError("solar_time must be forge3d.geo.SolarTime or a mapping")
 
 
 __all__ = ["SolarTime", "SolarVector", "solar_position"]

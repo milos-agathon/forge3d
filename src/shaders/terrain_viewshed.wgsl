@@ -17,6 +17,8 @@ struct ViewshedCell {
 @group(0) @binding(1) var<storage, read> heights: array<f32>;
 @group(0) @binding(2) var<storage, read> geodesic_positions_m: array<vec2<f32>>;
 @group(0) @binding(3) var<storage, read_write> result: array<ViewshedCell>;
+@group(0) @binding(4) var<storage, read> shadow_inputs: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read_write> shadow_result: array<atomic<u32>>;
 
 fn height_at(pixel: vec2<f32>) -> f32 {
     let limit = vec2<f32>(
@@ -60,22 +62,29 @@ fn latlon_to_pixel(latitude: f32, longitude: f32) -> vec2<f32> {
     );
 }
 
-fn geodesic_sample_pixel(azimuth: f32, distance_m: f32) -> vec2<f32> {
+fn geodesic_sample_pixel(
+    origin_latitude: f32,
+    origin_longitude: f32,
+    azimuth: f32,
+    distance_m: f32,
+) -> vec2<f32> {
+    // Flat disables the vertical drop only. EPSG:4326 raster navigation stays
+    // geodesic so the ablation does not also change horizontal distances.
     if uniforms.metric.w > 0.0 {
         let angular_distance = distance_m / uniforms.metric.w;
-        let sin_latitude = sin(uniforms.geodetic.x) * cos(angular_distance)
-            + cos(uniforms.geodetic.x) * sin(angular_distance) * cos(azimuth);
+        let sin_latitude = sin(origin_latitude) * cos(angular_distance)
+            + cos(origin_latitude) * sin(angular_distance) * cos(azimuth);
         let latitude = asin(clamp(sin_latitude, -1.0, 1.0));
-        let longitude = uniforms.geodetic.y + atan2(
-            sin(azimuth) * sin(angular_distance) * cos(uniforms.geodetic.x),
-            cos(angular_distance) - sin(uniforms.geodetic.x) * sin(latitude),
+        let longitude = origin_longitude + atan2(
+            sin(azimuth) * sin(angular_distance) * cos(origin_latitude),
+            cos(angular_distance) - sin(origin_latitude) * sin(latitude),
         );
         return latlon_to_pixel(latitude, longitude);
     }
     let flattening = 1.0 / 298.257223563;
     let semi_major = 6378137.0;
     let semi_minor = semi_major * (1.0 - flattening);
-    let reduced_latitude = atan((1.0 - flattening) * tan(uniforms.geodetic.x));
+    let reduced_latitude = atan((1.0 - flattening) * tan(origin_latitude));
     let sin_u1 = sin(reduced_latitude);
     let cos_u1 = cos(reduced_latitude);
     let sin_azimuth = sin(azimuth);
@@ -123,7 +132,7 @@ fn geodesic_sample_pixel(azimuth: f32, distance_m: f32) -> vec2<f32> {
         * (sigma + coefficient_c * sin_sigma
             * (cos_two_sigma_m + coefficient_c * cos_sigma
                 * (-1.0 + 2.0 * cos_two_sigma_m * cos_two_sigma_m)));
-    return latlon_to_pixel(latitude, uniforms.geodetic.y + longitude_delta);
+    return latlon_to_pixel(latitude, origin_longitude + longitude_delta);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -166,7 +175,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var step = 1u; step < steps; step += 1u) {
         let fraction = f32(step) / f32(steps);
         let sample_distance = distance_m * fraction;
-        let sample_pixel = geodesic_sample_pixel(azimuth, sample_distance);
+        let sample_pixel = geodesic_sample_pixel(
+            uniforms.geodetic.x,
+            uniforms.geodetic.y,
+            azimuth,
+            sample_distance,
+        );
         let outer_min = vec2<f32>(-0.5);
         let outer_max = vec2<f32>(uniforms.dimensions.xy) - vec2<f32>(0.5);
         if any(sample_pixel < outer_min) || any(sample_pixel > outer_max) {
@@ -190,4 +204,94 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         refraction_gain,
         horizon_distance,
     );
+}
+
+fn local_inverse_radius(latitude: f32, azimuth: f32) -> f32 {
+    if uniforms.physics.w == 0.0 {
+        return 0.0;
+    }
+    if uniforms.metric.w > 0.0 {
+        return 1.0 / uniforms.metric.w;
+    }
+    let semi_major = 6378137.0;
+    let eccentricity_squared = 0.0066943799901413165;
+    let w = sqrt(1.0 - eccentricity_squared * sin(latitude) * sin(latitude));
+    let meridional = semi_major * (1.0 - eccentricity_squared) / (w * w * w);
+    let prime_vertical = semi_major / w;
+    return cos(azimuth) * cos(azimuth) / meridional
+        + sin(azimuth) * sin(azimuth) / prime_vertical;
+}
+
+fn shadow_step_m(latitude: f32, azimuth: f32) -> f32 {
+    let flattening_term = 1.0 - 0.0066943799901413165
+        * sin(latitude) * sin(latitude);
+    let meridional = 6378137.0 * (1.0 - 0.0066943799901413165)
+        / (flattening_term * sqrt(flattening_term));
+    let prime_vertical = 6378137.0 / sqrt(flattening_term);
+    let horizontal_meridional = select(meridional, uniforms.metric.w, uniforms.metric.w > 0.0);
+    let horizontal_prime_vertical = select(
+        prime_vertical,
+        uniforms.metric.w,
+        uniforms.metric.w > 0.0,
+    );
+    let north_cell_m = horizontal_meridional * radians(uniforms.metric.z);
+    let east_cell_m = horizontal_prime_vertical * cos(latitude)
+        * radians(uniforms.metric.y);
+    let east_crossing_m = east_cell_m / max(abs(sin(azimuth)), 1e-6);
+    let north_crossing_m = north_cell_m / max(abs(cos(azimuth)), 1e-6);
+    return max(0.1, 0.5 * min(north_crossing_m, east_crossing_m));
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn shadow_mask_main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x >= uniforms.dimensions.x || id.y >= uniforms.dimensions.y {
+        return;
+    }
+    let index = id.y * uniforms.dimensions.x + id.x;
+    let geodetic_and_sun = shadow_inputs[index];
+    if geodetic_and_sun.w <= 0.0 {
+        return;
+    }
+    let origin_geodetic = geodetic_and_sun.xy;
+    let origin_height = heights[index];
+    let azimuth = geodetic_and_sun.z;
+    let ray_slope = tan(geodetic_and_sun.w);
+    let inv_radius = local_inverse_radius(origin_geodetic.x, azimuth);
+    let effective_inv_radius = inv_radius * uniforms.physics.z;
+
+    var visible = 1u;
+    var distance_m = shadow_step_m(origin_geodetic.x, azimuth);
+    loop {
+        if distance_m > uniforms.metric.x {
+            break;
+        }
+        let sample_pixel = geodesic_sample_pixel(
+            origin_geodetic.x,
+            origin_geodetic.y,
+            azimuth,
+            distance_m,
+        );
+        let outer_min = vec2<f32>(-0.5);
+        let outer_max = vec2<f32>(uniforms.dimensions.xy) - vec2<f32>(0.5);
+        if any(sample_pixel < outer_min) || any(sample_pixel > outer_max) {
+            // The bool mask is DEM-local: leaving its declared bounds means
+            // this DEM contains no farther blocker, so the ray stays lit.
+            break;
+        }
+        // The camera-relative distance is squared directly; no subtraction of
+        // large world coordinates can erase the sub-metre curvature term.
+        let effective_drop = 0.5 * effective_inv_radius * distance_m * distance_m;
+        let ray_height = origin_height + distance_m * ray_slope + effective_drop;
+        if height_at(sample_pixel) > ray_height + 0.001 {
+            visible = 0u;
+            break;
+        }
+        let sample_latitude = radians(
+            uniforms.geodetic.w - (sample_pixel.y + 0.5) * uniforms.metric.z,
+        );
+        distance_m += shadow_step_m(sample_latitude, azimuth);
+    }
+    if visible != 0u {
+        atomicOr(&shadow_result[index / 32u], 1u << (index % 32u));
+    }
 }

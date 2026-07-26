@@ -31,6 +31,7 @@ class SolarTime:
     delta_t_seconds: float
     pressure_mbar: float
     temperature_c: float
+    delta_t: float | None
     def __init__(
         self,
         utc: UtcTuple,
@@ -41,6 +42,7 @@ class SolarTime:
         delta_t_seconds: float = ...,
         pressure_mbar: float = ...,
         temperature_c: float = ...,
+        delta_t: float | None = ...,
     ) -> None: ...
     def position(self) -> SolarVector: ...
     def to_native(self) -> dict[str, object]: ...

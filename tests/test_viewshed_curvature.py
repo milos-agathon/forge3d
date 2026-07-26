@@ -203,6 +203,11 @@ def test_viewshed_shader_has_no_fixed_los_step_cap() -> None:
     ).read_text(encoding="utf-8")
     assert "8192u" not in shader
     assert "let steps = max(half_cell_steps, 1u);" in shader
+    assert "north_crossing_m" in shader
+    assert "east_crossing_m" in shader
+    assert "shadow_step_m(sample_latitude, azimuth)" in shader
+    assert "geodesic_positions_m: array<vec2<f32>>" in shader
+    assert "shadow_result: array<atomic<u32>>" in shader
 
 
 def test_viewshed_reports_missing_native_lazily(monkeypatch) -> None:

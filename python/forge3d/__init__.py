@@ -266,7 +266,12 @@ from . import codec
 # -----------------------------------------------------------------------------
 # Core rendering API
 # -----------------------------------------------------------------------------
-from .path_tracing import ExperimentalSyntheticOutput, PathTracer, make_camera
+from .path_tracing import (
+    ExperimentalSyntheticOutput,
+    PathTracer,
+    hybrid_render_terrain_reference,
+    make_camera,
+)
 
 # -----------------------------------------------------------------------------
 # Interactive Viewer API

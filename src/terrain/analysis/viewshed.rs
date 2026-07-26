@@ -71,16 +71,17 @@ fn physics_terms(options: &ViewshedOptions) -> Result<[f32; 4], String> {
     ])
 }
 
-fn validate(
+fn validate_common(
     heights: &[f32],
-    positions_m: &[[f32; 2]],
+    position_count: usize,
+    positions_are_finite: bool,
     options: &ViewshedOptions,
 ) -> Result<(), String> {
     let expected = options.width as usize * options.height as usize;
     if options.width < 2
         || options.height < 2
         || heights.len() != expected
-        || positions_m.len() != expected
+        || position_count != expected
     {
         return Err(format!(
             "DEM/position lengths do not match dimensions {}x{} (both dimensions must be at least 2)",
@@ -88,12 +89,7 @@ fn validate(
             options.height
         ));
     }
-    if heights.iter().any(|height| !height.is_finite())
-        || positions_m
-            .iter()
-            .flatten()
-            .any(|coordinate| !coordinate.is_finite())
-    {
+    if heights.iter().any(|height| !height.is_finite()) || !positions_are_finite {
         return Err(format!(
             "DEM heights and geodesic positions must be finite ({} heights)",
             heights.len(),
@@ -135,7 +131,23 @@ fn validate(
     Ok(())
 }
 
-pub fn compute_viewshed(
+fn validate(
+    heights: &[f32],
+    positions_m: &[[f32; 2]],
+    options: &ViewshedOptions,
+) -> Result<(), String> {
+    validate_common(
+        heights,
+        positions_m.len(),
+        positions_m
+            .iter()
+            .flatten()
+            .all(|coordinate| coordinate.is_finite()),
+        options,
+    )
+}
+
+fn compute_visibility(
     heights: &[f32],
     positions_m: &[[f32; 2]],
     options: &ViewshedOptions,
@@ -288,6 +300,170 @@ pub fn compute_viewshed(
     drop(mapped);
     readback.unmap();
     Ok(result)
+}
+
+pub fn compute_viewshed(
+    heights: &[f32],
+    positions_m: &[[f32; 2]],
+    options: &ViewshedOptions,
+) -> RenderResult<ViewshedOutput> {
+    compute_visibility(heights, positions_m, options)
+}
+
+pub fn compute_shadow_mask(
+    heights: &[f32],
+    geodetic_positions_and_sun_rad: &[[f32; 4]],
+    options: &ViewshedOptions,
+) -> RenderResult<Vec<bool>> {
+    let expected = options.width as usize * options.height as usize;
+    if geodetic_positions_and_sun_rad.len() != expected
+        || geodetic_positions_and_sun_rad
+            .iter()
+            .flatten()
+            .any(|value| !value.is_finite())
+    {
+        return Err(RenderError::render(
+            "shadow-mask geodetic/solar inputs do not match the DEM",
+        ));
+    }
+    validate_common(heights, geodetic_positions_and_sun_rad.len(), true, options)
+        .map_err(RenderError::render)?;
+    let physics = physics_terms(options).map_err(RenderError::render)?;
+    let context = crate::core::gpu::try_ctx()?;
+    let device = &context.device;
+    let queue = &context.queue;
+    let uniforms = ViewshedUniforms {
+        dimensions: [options.width, options.height, 0, 0],
+        observer: [
+            options.observer_x,
+            options.observer_y,
+            options.observer_height_m,
+            options.target_height_m,
+        ],
+        metric: [
+            options.max_distance_m,
+            options.longitude_step_deg,
+            options.latitude_step_deg,
+            options.geodesic_sphere_radius_m,
+        ],
+        physics,
+        geodetic: [
+            options.observer_latitude_rad,
+            options.observer_longitude_rad,
+            options.left_unwrapped_deg,
+            options.top_deg,
+        ],
+    };
+    let height_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("helios.shadow_mask.heights"),
+            contents: bytemuck::cast_slice(heights),
+            usage: wgpu::BufferUsages::STORAGE,
+        },
+    )?;
+    let uniform_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("helios.shadow_mask.uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        },
+    )?;
+    let input_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("helios.shadow_mask.inputs"),
+            contents: bytemuck::cast_slice(geodetic_positions_and_sun_rad),
+            usage: wgpu::BufferUsages::STORAGE,
+        },
+    )?;
+    let word_count = expected.div_ceil(32);
+    let zero_words = vec![0u32; word_count];
+    let output_size = (word_count * std::mem::size_of::<u32>()) as u64;
+    let output = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("helios.shadow_mask.output"),
+            contents: bytemuck::cast_slice(&zero_words),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        },
+    )?;
+    let readback = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("helios.shadow_mask.readback"),
+            size: output_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?;
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("helios.shadow_mask.shader"),
+        source: wgpu::ShaderSource::Wgsl(
+            include_str!("../../shaders/terrain_viewshed.wgsl").into(),
+        ),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("helios.shadow_mask.pipeline"),
+        layout: None,
+        module: &shader,
+        entry_point: "shadow_mask_main",
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("helios.shadow_mask.bind_group"),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: height_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: input_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: output.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("helios.shadow_mask.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("helios.shadow_mask.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(options.width.div_ceil(8), options.height.div_ceil(8), 1);
+    }
+    encoder.copy_buffer_to_buffer(&output, 0, &readback, 0, output_size);
+    queue.submit(Some(encoder.finish()));
+    let slice = readback.slice(..);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    device.poll(wgpu::Maintain::Wait);
+    receiver
+        .recv()
+        .map_err(|error| RenderError::readback(format!("shadow-mask callback failed: {error}")))?
+        .map_err(|error| RenderError::readback(format!("shadow-mask map failed: {error}")))?;
+    let mapped = slice.get_mapped_range();
+    let words = bytemuck::cast_slice::<u8, u32>(&mapped);
+    let visibility = (0..expected)
+        .map(|index| words[index / 32] & (1u32 << (index % 32)) != 0)
+        .collect();
+    drop(mapped);
+    readback.unmap();
+    Ok(visibility)
 }
 
 #[cfg(test)]

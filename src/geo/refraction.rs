@@ -14,9 +14,16 @@ pub fn principal_radii_m(latitude_deg: f64) -> Result<(f64, f64), String> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EarthModel {
+    /// Disable the vertical curvature drop. Geographic analyses still use
+    /// WGS84 geodesics horizontally so flat-vs-curved ablations change one
+    /// physical variable instead of also changing the DEM distance metric.
     Flat,
-    Sphere { radius_m: f64 },
-    Ellipsoid { latitude_deg: f64 },
+    Sphere {
+        radius_m: f64,
+    },
+    Ellipsoid {
+        latitude_deg: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

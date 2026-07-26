@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
 
 from ._native import get_native_module, native_import_error
+from .geo import SolarTime, _coerce_solar_time
+
+
+def _solar_time_payload(solar_time: SolarTime | Mapping[str, object]) -> dict[str, object]:
+    return _coerce_solar_time(solar_time).to_native()
+
+
+def _terrain_native(name: str) -> Any:
+    native = get_native_module()
+    if native is None:
+        cause = native_import_error()
+        detail = f": {cause}" if cause is not None else ""
+        raise RuntimeError(f"forge3d native extension is unavailable{detail}")
+    if not hasattr(native, name):
+        raise RuntimeError(f"forge3d native extension does not provide {name}; rebuild the extension")
+    return native
 
 
 def viewshed(
@@ -27,15 +44,7 @@ def viewshed(
     return_diagnostics: bool = False,
 ) -> np.ndarray | dict[str, np.ndarray]:
     """Compute a GPU visibility raster for an EPSG:4326 north-up DEM."""
-    native = get_native_module()
-    if native is None:
-        cause = native_import_error()
-        detail = f": {cause}" if cause is not None else ""
-        raise RuntimeError(f"forge3d native extension is unavailable{detail}")
-    if not hasattr(native, "terrain_viewshed"):
-        raise RuntimeError(
-            "forge3d native extension does not provide terrain_viewshed; rebuild the extension"
-        )
+    native = _terrain_native("terrain_viewshed")
     if len(observer) == 3:
         observer_height = float(observer[2])
     elif len(observer) != 2:
@@ -62,4 +71,64 @@ def viewshed(
     return arrays if return_diagnostics else arrays["visibility"]
 
 
-__all__ = ["viewshed"]
+def shadow_mask(
+    dem: np.ndarray,
+    solar_time: SolarTime | Mapping[str, object],
+    *,
+    bounds: tuple[float, float, float, float],
+    height_system: str,
+    earth_model: str = "ellipsoid",
+    sphere_radius_m: float = 6_371_008.8,
+    refraction_model: str = "bennett",
+    refraction_k: float = 0.13,
+) -> np.ndarray:
+    """Return DEM-local terrain-to-sun visibility (``True`` means lit).
+
+    Terrain outside ``bounds`` is outside the analysis domain and therefore
+    cannot occlude; the mask answers whether this DEM contains a blocker.
+    """
+    native = _terrain_native("terrain_shadow_mask")
+    result = native.terrain_shadow_mask(
+        np.ascontiguousarray(dem, dtype=np.float32),
+        _solar_time_payload(solar_time),
+        bounds,
+        height_system,
+        earth_model=earth_model,
+        sphere_radius_m=sphere_radius_m,
+        refraction_model=refraction_model,
+        refraction_k=refraction_k,
+    )
+    return np.asarray(result, dtype=np.bool_)
+
+
+def shadow_tip(
+    dem: np.ndarray,
+    peak_lat: float,
+    peak_lon: float,
+    solar_time: SolarTime | Mapping[str, object],
+    *,
+    bounds: tuple[float, float, float, float],
+    height_system: str,
+    earth_model: str = "ellipsoid",
+    sphere_radius_m: float = 6_371_008.8,
+    refraction_model: str = "bennett",
+    refraction_k: float = 0.13,
+) -> dict[str, float]:
+    """Return the curved-Earth terminus of a peak's direct solar shadow."""
+    native = _terrain_native("terrain_shadow_tip")
+    result = native.terrain_shadow_tip(
+        np.ascontiguousarray(dem, dtype=np.float32),
+        float(peak_lat),
+        float(peak_lon),
+        _solar_time_payload(solar_time),
+        bounds,
+        height_system,
+        earth_model=earth_model,
+        sphere_radius_m=sphere_radius_m,
+        refraction_model=refraction_model,
+        refraction_k=refraction_k,
+    )
+    return {str(key): float(value) for key, value in result.items()}
+
+
+__all__ = ["shadow_mask", "shadow_tip", "viewshed"]

@@ -86,9 +86,15 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             azimuth_deg,
             elevation_deg,
             intensity,
+            source,
         } => {
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
-                terrain_viewer.set_sun(*azimuth_deg, *elevation_deg, *intensity);
+                terrain_viewer.set_sun(
+                    *azimuth_deg,
+                    *elevation_deg,
+                    *intensity,
+                    source.as_deref().unwrap_or("manual_angles"),
+                );
                 println!(
                     "[terrain] Sun: az={:.1}° el={:.1}° int={:.2}",
                     azimuth_deg, elevation_deg, intensity
@@ -210,6 +216,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     terrain.cam_target = candidate_target;
                     terrain.sun_azimuth_deg = candidate_sun_azimuth;
                     terrain.sun_elevation_deg = candidate_sun_elevation;
+                    if sun_azimuth.is_some() || sun_elevation.is_some() {
+                        terrain.sun_source = "manual_angles".to_string();
+                    }
                     terrain.sun_intensity = candidate_sun_intensity;
                     terrain.ambient = candidate_ambient;
                     terrain.z_scale = candidate_zscale;

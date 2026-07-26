@@ -125,6 +125,8 @@ class TestNativeModuleSymbols:
         "sun_position_utc",
         "solar_position",
         "terrain_viewshed",
+        "terrain_shadow_mask",
+        "terrain_shadow_tip",
         "clipmap_generate_py",
         "engine_info",
         "hybrid_render",

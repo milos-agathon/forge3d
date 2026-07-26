@@ -273,6 +273,11 @@ pub(crate) fn hybrid_render_terrain_reference(
     d.set_item("peak_host_visible_bytes", out.peak_host_visible_bytes)?;
     d.set_item("minmax_pyramid_bytes", out.minmax_pyramid_bytes)?;
     d.set_item("gpu_resource_bytes", out.gpu_resource_bytes)?;
+    // This low-level native seam only accepts resolved angles. The public
+    // Python SolarTime wrapper replaces this diagnostic after resolution.
+    d.set_item("sun_source", "manual_angles")?;
+    d.set_item("solar_azimuth_deg", sun_azimuth_deg)?;
+    d.set_item("solar_elevation_deg", sun_elevation_deg)?;
     // The hybrid_pt.* passes (live gpu_ms when timestamps are granted) are
     // recorded inside HybridPathTracer::render_terrain_reference.
     certificate_capture.finish();
