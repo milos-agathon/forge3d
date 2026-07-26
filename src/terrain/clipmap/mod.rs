@@ -15,6 +15,8 @@
 //! ```
 
 pub mod geomorph;
+#[cfg(feature = "enable-globe")]
+pub mod globe;
 pub mod gpu_lod;
 pub mod level;
 #[cfg(feature = "extension-module")]
