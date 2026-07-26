@@ -1,12 +1,20 @@
 """SELENE planetary-datum CPU gates."""
 
+import hashlib
+import importlib.util
+import json
 import math
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pytest
 
 from forge3d import crs, gis
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _longitude_error(actual, expected):
@@ -30,6 +38,19 @@ def _mars_geodesic_reference_points():
         for line in path.read_text().splitlines()
         if line.strip() and not line.startswith("#")
     ]
+
+
+def _load_moon_example():
+    path = ROOT / "examples" / "moon_south_pole.py"
+    spec = importlib.util.spec_from_file_location("moon_south_pole", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(path.parent))
+    try:
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(path.parent))
+    return module
 
 
 def test_body_info_reports_reference_surfaces_and_units():
@@ -134,6 +155,43 @@ def test_olympus_mons_wrong_earth_datum_moves_position_over_2900_km():
     )
     deliberately_wrong_wgs84 = np.asarray(crs.wgs84_to_ecef(lon, lat, height))
     assert np.linalg.norm(mars - deliberately_wrong_wgs84) > 2_900_000.0
+
+
+def test_lola_scene_asset_is_typed_small_provenanced_and_tracked(tmp_path):
+    asset = ROOT / "assets" / "tif" / "moon_south_pole_lola.tif"
+    manifest_path = asset.with_suffix(".manifest.json")
+    manifest = json.loads(manifest_path.read_text())
+    assert asset.stat().st_size <= 5 * 1024 * 1024
+    assert hashlib.sha256(asset.read_bytes()).hexdigest() == manifest["asset_sha256"]
+
+    info = gis.read_raster_info(asset)
+    assert info.crs_authority == {"name": "IAU", "code": "30110"}
+    assert (info.width, info.height) == (480, 480)
+    assert info.height_system == "ellipsoidal"
+    assert info.resolution == pytest.approx(
+        (1895.2094015093426, 1895.2094015093426)
+    )
+
+    subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "--error-unmatch",
+            "assets/tif/moon_south_pole_lola.tif",
+            "assets/tif/moon_south_pole_lola.manifest.json",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    scene = _load_moon_example().build_scene(tmp_path / "moon.png")
+    assert scene.recipe.terrain.crs == "IAU:30110"
+    assert scene.recipe.target_crs == "IAU:30110"
+    assert scene.recipe.terrain.metadata["body"] == "Moon"
+    assert scene.recipe.terrain.metadata["body_radius_m"] == 1_737_400.0
+    assert scene.validate().status == "ok"
 
 
 def test_mars_areoid_matches_committed_pds_gmm3_map_below_half_metre():
