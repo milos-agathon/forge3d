@@ -182,6 +182,7 @@ class TestNativeModuleSymbols:
         "geometry_measure",
         "measure_geometries",
         # MENSURA geodesy surface (src/py_functions/geodesy.rs)
+        "body_info",
         "geoid_undulation",
         "orthometric_to_ellipsoidal",
         "ellipsoidal_to_orthometric",

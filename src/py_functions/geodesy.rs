@@ -8,6 +8,26 @@ use super::super::*;
 #[cfg(feature = "extension-module")]
 use numpy::{PyArray2, PyReadonlyArray2};
 
+/// Return the registered datum constants for Earth, Moon, or Mars.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (name))]
+pub(crate) fn body_info(py: Python<'_>, name: &str) -> PyResult<PyObject> {
+    let body = crate::geo::body::body(name).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", body.name)?;
+    dict.set_item("semi_major_m", body.ellipsoid.a)?;
+    dict.set_item("semi_minor_m", body.ellipsoid.b())?;
+    dict.set_item("flattening", body.ellipsoid.f)?;
+    dict.set_item("prime_meridian_w0_deg", body.prime_meridian_w0)?;
+    dict.set_item("rotation_rate_deg_per_day", body.rotation_rate)?;
+    dict.set_item(
+        "gravity_surface",
+        body.gravity_surface.map(|surface| surface.name()),
+    )?;
+    Ok(dict.into_py(py))
+}
+
 /// EGM96 geoid undulation N(lat, lon) in metres (degree/order 120 synthesis,
 /// NGA F477 convention, WGS84 ellipsoid).
 #[cfg(feature = "extension-module")]

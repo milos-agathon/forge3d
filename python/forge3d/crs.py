@@ -383,6 +383,11 @@ def _require_geodesy_native() -> Any:
     return _native
 
 
+def body_info(name: str) -> dict[str, Any]:
+    """Return registered planetary datum constants with explicit units."""
+    return _require_geodesy_native().body_info(name)
+
+
 def geoid_undulation(lat: float, lon: float) -> float:
     """EGM96 geoid undulation N(lat, lon) in metres.
 
@@ -449,6 +454,7 @@ __all__ = [
     "crs_to_epsg",
     "get_crs_from_rasterio",
     "get_crs_from_geopandas",
+    "body_info",
     "geoid_undulation",
     "orthometric_to_ellipsoidal",
     "ellipsoidal_to_orthometric",
