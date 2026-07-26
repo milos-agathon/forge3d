@@ -142,8 +142,8 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "942a8d430423",
-    "version": "1.33.1",
+    "git_sha": "411171758b01",
+    "version": "1.34.0",
     "wgsl_module_hashes": {
       "terrain.offline.accumulate.pipeline": "cd37fc252033f64ac13406bfef71e937c11a6087a120f416eb24ba5d79e61126",
       "terrain.offline.depth_expand.pipeline": "6f14fde673a2cf69e5df1329388f883aee883e06d863125faebfb2ff492f4b35",
@@ -151,13 +151,13 @@
       "terrain.offline.resolve.pipeline": "d2367288470929cc76d87081dc0d30617ecafd4c7a4b094edcbc797a8ac00f62",
       "terrain.offline.tonemap.pipeline": "367de2d10062295e6786e725af15955296fbeeed71eb8916b6fd6dff0738c1b4",
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.aov.shader": "622e56edce3439cbb0170a46b854b2c5d0465eee8980ac6d644d23ccbd82bb4e"
+      "terrain_pbr_pom.aov.shader": "7f3892bcc05b6baaae3eb0da209a8242a7c13454a807a3cab4bc068408e2b10b"
     }
   },
   "passes": [
     {
       "draw_calls": 4,
-      "gpu_ms": 6.309887886047363,
+      "gpu_ms": 10.853376388549805,
       "label": "terrain.offline.accumulate_batch"
     },
     {
@@ -170,7 +170,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "bb4f0a08ce182a7c6e46c39ea2c1b2e221ef46ccbf82d0e3fc51cb4003816adce04a3933a250d3cf9fa1d1ff93d934a04260aad65192c73543f93472ffb3460a",
+    "sig": "339d80d51ae0474b8126f83faf08ec07bdd898d5c2de21f7305374498e562b42a75f636d061b0543a971590237d2da437b9feb465f52864b6845955b13b0940a",
     "signed_fields": [
       "adapter",
       "allocations",

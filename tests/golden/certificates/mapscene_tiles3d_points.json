@@ -139,12 +139,12 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "942a8d430423",
-    "version": "1.33.1",
+    "git_sha": "411171758b01",
+    "version": "1.34.0",
     "wgsl_module_hashes": {
       "point_instanced.wgsl": "e8159414ae314a3988323cde19c5f4e0ebbc61f01dead822d25e3b386f438dfc",
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.shader": "622e56edce3439cbb0170a46b854b2c5d0465eee8980ac6d644d23ccbd82bb4e",
+      "terrain_pbr_pom.shader": "7f3892bcc05b6baaae3eb0da209a8242a7c13454a807a3cab4bc068408e2b10b",
       "vf.Vector.OIT.Compose": "934b46d4b65e4911a49ba0b29b6c2deea2662d8eac1db0cab40a78677a88122d",
       "vf.Vector.PointEDL": "7072f56a0ae357ab08cd6b4fc1f82573b3abf01db331b205f82c0596c678f8de"
     }
@@ -152,12 +152,17 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 8.052736282348633,
+      "label": "terrain.shadow"
+    },
+    {
+      "draw_calls": 0,
+      "gpu_ms": 0.004095999989658594,
       "label": "terrain.material_vt"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.height_ao"
     },
     {
@@ -167,17 +172,12 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 6.822912216186523,
-      "label": "terrain.shadow"
-    },
-    {
-      "draw_calls": 0,
       "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.20582400262355804,
+      "gpu_ms": 0.17100800573825836,
       "label": "terrain.main"
     },
     {
@@ -187,17 +187,17 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.036864,
+      "gpu_ms": 0.03584,
       "label": "vector.oit"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.012288,
+      "gpu_ms": 0.011264,
       "label": "vector.oit.compose"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.013312,
+      "gpu_ms": 0.011264,
       "label": "vector.edl"
     },
     {
@@ -210,7 +210,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "59c1b8b39780cd543e7017e53978a1c57f7750386ab5e73e57df05e4626b6970f85f5cc7c9f25e0b6a6d29d05ebb886bf762d70a906345a258c62a394d06840f",
+    "sig": "b17061e19d4a38683de34a9f21c190ed03c0b08528fdbe91d03b82fcba85bdda412ade468bcffd67f9a85ad704ed452828a8c9c4a3c0ff5f61be844b4c2b6407",
     "signed_fields": [
       "adapter",
       "allocations",

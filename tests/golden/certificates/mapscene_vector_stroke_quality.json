@@ -124,47 +124,47 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "942a8d430423",
-    "version": "1.33.1",
+    "git_sha": "411171758b01",
+    "version": "1.34.0",
     "wgsl_module_hashes": {
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.shader": "622e56edce3439cbb0170a46b854b2c5d0465eee8980ac6d644d23ccbd82bb4e"
+      "terrain_pbr_pom.shader": "7f3892bcc05b6baaae3eb0da209a8242a7c13454a807a3cab4bc068408e2b10b"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
-      "label": "terrain.material_vt"
-    },
-    {
-      "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
-      "label": "terrain.height_ao"
-    },
-    {
-      "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
-      "label": "terrain.sun_visibility"
-    },
-    {
-      "draw_calls": 0,
-      "gpu_ms": 1.6128000020980835,
+      "gpu_ms": 6.238207817077637,
       "label": "terrain.shadow"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
+      "label": "terrain.material_vt"
+    },
+    {
+      "draw_calls": 0,
+      "gpu_ms": 0.0030720001086592674,
+      "label": "terrain.height_ao"
+    },
+    {
+      "draw_calls": 0,
+      "gpu_ms": 0.002047999994829297,
+      "label": "terrain.sun_visibility"
+    },
+    {
+      "draw_calls": 0,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.043007999658584595,
+      "gpu_ms": 0.1730560064315796,
       "label": "terrain.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.resolve"
     },
     {
@@ -177,7 +177,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "1cd81f2fe98e1563d86b5d21cd673562326056428e7f7e9e168d5db898df43ac8b2105cf3a23565d2601d683e1bccfd0fd400652b1232c3812dcbc3cb26a2204",
+    "sig": "6dfc7a94fd8c0e51696a3f61792b527c93519851f9149efcc935e2b0a72a07d27ec62ed61833891109f3ff7470f3aaa58c04284affb077de84b402e4d908f50b",
     "signed_fields": [
       "adapter",
       "allocations",
