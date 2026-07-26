@@ -91,6 +91,7 @@ PORTABLE_CI_CARGO_FEATURES = {
     "enable-renderer-config",
     "enable-staging-rings",
     "shader-contract-asserts",
+    "enable-globe",
 }
 DEDICATED_SYSTEM_FEATURES = {"proj"}
 
@@ -217,6 +218,7 @@ WHEEL_REQUIRED_FEATURES = {
     "enable-staging-rings",
     "copc_laz",
     "cog_streaming",
+    "enable-globe",
     "gis-remote",
     # MENSURA ships real topology ops (pure-Rust `geo` crate) as a wheel
     # feature; the public forge3d.gis topology surface requires it.

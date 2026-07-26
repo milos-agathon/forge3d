@@ -20,6 +20,9 @@ EXPECTED_ANCHOR_INVENTORY = {
     ("src/scene/core/constructor.rs", "new_impl", "constructor", 1),
     ("src/scene/mod.rs", "<module>", "storage", 1),
     ("src/scene/py_api/base.rs", "set_camera_look_at", "rebase_call", 1),
+    ("src/terrain/clipmap/globe.rs", "<module>", "storage", 1),
+    ("src/terrain/clipmap/globe.rs", "anchor_at", "constructor", 1),
+    ("src/terrain/clipmap/globe.rs", "anchor_at", "rebase_call", 1),
     ("src/tiles3d/renderer.rs", "add_buildings", "constructor", 1),
     ("src/tiles3d/renderer.rs", "add_buildings", "rebase_call", 1),
     ("src/tiles3d/renderer.rs", "from_buildings", "constructor", 1),
@@ -61,6 +64,14 @@ LOCAL_NON_VIEWER_JUSTIFICATIONS = {
     ("src/py_types/pointcloud.rs", "create_gpu_buffer"): "caller-supplied standalone point-buffer anchor",
     ("src/scene/core/constructor.rs", "new_impl"): "offscreen Scene owns its separate signed ABI",
     ("src/scene/mod.rs", "<module>"): "offscreen Scene persistent anchor",
+    (
+        "src/terrain/clipmap/globe.rs",
+        "<module>",
+    ): "ORBIS planetary frame owns its camera-relative render anchor",
+    (
+        "src/terrain/clipmap/globe.rs",
+        "anchor_at",
+    ): "ORBIS frame initializes its sole anchor at the f64 camera position",
     ("src/tiles3d/renderer.rs", "add_buildings"): "standalone CityJSON renderer helper",
     ("src/tiles3d/renderer.rs", "from_buildings"): "standalone CityJSON renderer helper",
 }

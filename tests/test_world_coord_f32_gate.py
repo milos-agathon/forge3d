@@ -40,7 +40,7 @@ EXPECTED_CONVERSION_COUNT = 1327
 # (file, function, operation, nth, statement) with no line numbers, so the
 # digest moved only because the enclosing function was renamed. No new
 # narrowing conversion was introduced by this merge.
-EXPECTED_CONVERSION_SHA256 = "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817"
+EXPECTED_CONVERSION_SHA256 = "e7db7db0a692556e171ec2954993eb97d889786f442b881d0ebfb9bfa0e960dd"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are

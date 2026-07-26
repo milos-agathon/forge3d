@@ -4,7 +4,11 @@
 //! artifacts and visual seams between clipmap rings.
 
 use super::vertex::ClipmapVertex;
-use glam::Vec2;
+use glam::{Vec2, Vec3};
+
+fn position_xz(vertex: &ClipmapVertex) -> Vec2 {
+    Vec2::new(vertex.position[0], vertex.position[1])
+}
 
 /// Configuration for geo-morphing.
 #[derive(Debug, Clone, Copy)]
@@ -94,13 +98,13 @@ pub fn analyze_seams(
             boundary_count += 1;
 
             // Find closest inner ring vertex
-            let outer_pos = Vec2::from(outer_v.position);
+            let outer_pos = position_xz(outer_v);
             let mut min_dist = f32::MAX;
 
             for inner_v in inner_vertices {
                 // Check outer boundary of inner ring (morph_weight near 1)
                 if inner_v.morph_weight() > 0.9 {
-                    let inner_pos = Vec2::from(inner_v.position);
+                    let inner_pos = position_xz(inner_v);
                     let dist = outer_pos.distance(inner_pos);
                     min_dist = min_dist.min(dist);
                 }
@@ -175,12 +179,12 @@ pub fn blend_boundary_vertices(
 
     for fine_v in fine_vertices {
         // Find corresponding coarse vertex
-        let fine_pos = Vec2::from(fine_v.position);
+        let fine_pos = position_xz(fine_v);
         let mut best_coarse: Option<&ClipmapVertex> = None;
         let mut best_dist = f32::MAX;
 
         for coarse_v in coarse_vertices {
-            let coarse_pos = Vec2::from(coarse_v.position);
+            let coarse_pos = position_xz(coarse_v);
             let dist = fine_pos.distance(coarse_pos);
             if dist < best_dist {
                 best_dist = dist;
@@ -192,17 +196,25 @@ pub fn blend_boundary_vertices(
             if best_dist < 1.0 {
                 // Blend position based on morph weight
                 let t = blend_factor * fine_v.morph_weight();
-                let blended_pos = fine_pos.lerp(Vec2::from(coarse_v.position), t);
+                let blended_pos =
+                    Vec3::from(fine_v.position).lerp(Vec3::from(coarse_v.position), t);
+                let blended_up = fine_v
+                    .geodetic_up()
+                    .lerp(coarse_v.geodetic_up(), t)
+                    .normalize_or_zero();
                 let blended_uv = Vec2::from(fine_v.uv).lerp(Vec2::from(coarse_v.uv), t);
 
-                blended.push(ClipmapVertex::new(
-                    blended_pos.x,
-                    blended_pos.y,
-                    blended_uv.x,
-                    blended_uv.y,
+                let mut vertex = ClipmapVertex::with_position(
+                    blended_pos,
+                    blended_up,
+                    blended_uv,
                     fine_v.morph_weight(),
-                    fine_v.ring_index() as u32,
-                ));
+                    fine_v.ring_index(),
+                );
+                if fine_v.is_globe() {
+                    vertex.set_globe_position(blended_pos, blended_up);
+                }
+                blended.push(vertex);
             } else {
                 blended.push(*fine_v);
             }
