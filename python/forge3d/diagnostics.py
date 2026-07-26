@@ -483,6 +483,19 @@ def capabilities() -> dict[str, Any]:
     return native.capabilities()
 
 
+def culling_stats() -> dict[str, Any]:
+    """Return GPU-read two-phase terrain culling counters for the last frame."""
+    from ._native import get_native_module
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "terrain_culling_stats"):
+        raise RuntimeError(
+            "forge3d native extension is unavailable; culling_stats() requires "
+            "the compiled _forge3d module (build with `maturin develop`)."
+        )
+    return dict(native.terrain_culling_stats())
+
+
 def render_certificate(sign: bool = True) -> dict[str, Any]:
     """Assemble a RenderCertificate for the LAST completed native render.
 
@@ -985,6 +998,7 @@ __all__ = [
     "SEVERITIES",
     "SUPPORT_LEVELS",
     "capabilities",
+    "culling_stats",
     "crs_mismatch_diagnostic",
     "estimated_gpu_memory_diagnostic",
     "memory_budget_validation_report",

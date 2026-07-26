@@ -270,6 +270,7 @@ class TestNativeModuleSymbols:
         # CENSOR: global degradation sink
         "native_degradations",
         "clear_native_degradations",
+        "terrain_culling_stats",
         # CENSOR: negotiated GPU capability report
         "capabilities",
         # CENSOR: last-render execution certificate JSON

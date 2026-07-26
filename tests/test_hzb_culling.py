@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+import forge3d as f3d
+from forge3d.diagnostics import culling_stats, render_certificate
+
+from _terrain_runtime import _write_test_hdr, terrain_rendering_available
+from test_terrain_clipmap_streaming import _make_params, _render_rgba
+
+
+requires_terrain = pytest.mark.skipif(
+    not terrain_rendering_available(),
+    reason="Terrain rendering runtime unavailable on this adapter",
+)
+
+WIN2_SIZE = (3840, 2160)
+
+
+def _canyon_dem(size: int = 96) -> np.ndarray:
+    x = np.linspace(-1.0, 1.0, size, dtype=np.float32)
+    xx, _ = np.meshgrid(x, x)
+    return np.clip(np.abs(xx) * 3.0, 0.0, 1.0).astype(np.float32)
+
+
+def _win2_params(culling: str):
+    return _make_params(
+        culling=culling,
+        terrain_span=50.0,
+        cam_radius=7.0,
+        z_scale=50.0,
+        theta_deg=88.0,
+        phi_deg=0.0,
+        size_px=WIN2_SIZE,
+    )
+
+
+def _terrain_main_gpu_ms() -> float:
+    passes = render_certificate(sign=False)["passes"]
+    return float(next(item["gpu_ms"] for item in passes if item["label"] == "terrain.main"))
+
+
+def test_culling_parameter_contract():
+    params = _make_params(culling="hzb_two_phase")
+    assert params.culling == "hzb_two_phase"
+    with pytest.raises(ValueError, match="culling must be one of"):
+        _make_params(culling="not-a-culling-mode")
+
+
+@requires_terrain
+def test_two_phase_hzb_is_bitwise_identical_to_unculled_render():
+    with tempfile.TemporaryDirectory() as td:
+        hdr_path = Path(td) / "probe.hdr"
+        _write_test_hdr(hdr_path)
+        ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
+        dem = _canyon_dem()
+
+        baseline_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        baseline_timings = []
+        for _ in range(7):
+            baseline = _render_rgba(
+                baseline_renderer, _win2_params("none"), dem, ibl
+            )
+            baseline_timings.append(_terrain_main_gpu_ms())
+        baseline_gpu_ms = float(np.median(baseline_timings[2:]))
+
+        culled_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        culled_timings = []
+        for _ in range(7):
+            culled = _render_rgba(
+                culled_renderer, _win2_params("hzb_two_phase"), dem, ibl
+            )
+            culled_timings.append(_terrain_main_gpu_ms())
+        culled_gpu_ms = float(np.median(culled_timings[2:]))
+
+    np.testing.assert_array_equal(culled, baseline)
+    stats = culling_stats()
+    assert stats["cull_percent"] >= 60.0, stats
+    assert stats["phase1_drawn"] + stats["phase2_recovered"] == stats["final_drawn"]
+    assert baseline_gpu_ms / culled_gpu_ms >= 1.8, {
+        "baseline_gpu_ms": baseline_gpu_ms,
+        "culled_gpu_ms": culled_gpu_ms,
+    }
+    certificate = render_certificate(sign=False)
+    assert "hzb_cull" in certificate["engine"]["wgsl_module_hashes"]
+    assert "p5.hzb.build.shader" in certificate["engine"]["wgsl_module_hashes"]
+
+
+@requires_terrain
+def test_fresh_hzb_recovers_tiles_rejected_by_camera_history():
+    with tempfile.TemporaryDirectory() as td:
+        hdr_path = Path(td) / "probe.hdr"
+        _write_test_hdr(hdr_path)
+        ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
+        dem = _canyon_dem()
+        size = (640, 360)
+
+        culled_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        warm = _make_params(
+            culling="hzb_two_phase",
+            terrain_span=50.0,
+            cam_radius=7.0,
+            z_scale=50.0,
+            theta_deg=88.0,
+            phi_deg=0.0,
+            size_px=size,
+        )
+        current = _make_params(
+            culling="hzb_two_phase",
+            terrain_span=50.0,
+            cam_radius=7.0,
+            z_scale=50.0,
+            theta_deg=88.0,
+            phi_deg=20.0,
+            size_px=size,
+        )
+        _render_rgba(culled_renderer, warm, dem, ibl)
+        culled = _render_rgba(culled_renderer, current, dem, ibl)
+        stats = culling_stats()
+
+        baseline_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        baseline = _render_rgba(
+            baseline_renderer,
+            _make_params(
+                culling="none",
+                terrain_span=50.0,
+                cam_radius=7.0,
+                z_scale=50.0,
+                theta_deg=88.0,
+                phi_deg=20.0,
+                size_px=size,
+            ),
+            dem,
+            ibl,
+        )
+
+    np.testing.assert_array_equal(culled, baseline)
+    assert stats["phase1_rejected"] > 0, stats
+    assert stats["phase2_recovered"] > 0, stats

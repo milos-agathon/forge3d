@@ -80,6 +80,7 @@ impl TerrainRenderParams {
             colormap_srgb: core.colormap_srgb,
             output_srgb_eotf: core.output_srgb_eotf,
             camera_mode: core.camera_mode,
+            culling: core.culling,
             debug_mode: core.debug_mode,
             aa_samples: core.aa_samples,
             aa_seed: core.aa_seed,

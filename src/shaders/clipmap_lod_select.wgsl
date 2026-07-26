@@ -11,17 +11,18 @@ struct LodSelectParams {
     frustum_planes: array<vec4<f32>, 6>,  // left, right, bottom, top, near, far
     lod_params: vec4<f32>,    // x=pixel_error_budget, y=viewport_height, z=fov_y, w=max_lod
     terrain_params: vec4<f32>, // x=tile_size, y=num_tiles, z=variant_count, w=first_instance
-    height_params: vec4<f32>,  // x=min world height, y=max world height
+    height_params: vec4<f32>,  // x=min world height, y=max world height, z=frustum enabled
 }
 
 struct TileInfo {
     tile_id: u32,       // packed: lod(8) | x(12) | y(12)
+    height_min: f32,
     bounds_min: vec2<f32>,
     bounds_max: vec2<f32>,
     distance: f32,
     selected_lod: u32,
     visible: u32,       // 0 = culled, 1 = visible
-    _pad: u32,
+    height_max: f32,
 }
 
 struct OutputHeader {
@@ -142,12 +143,15 @@ fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let distance = length(tile_center - camera_pos_2d);
     tile.distance = distance;
     
-    let visible = frustum_cull_aabb(
-        tile.bounds_min,
-        tile.bounds_max,
-        params.height_params.x,
-        params.height_params.y,
-    );
+    let has_local_heights = tile.height_min <= tile.height_max;
+    let height_min = select(params.height_params.x, tile.height_min, has_local_heights);
+    let height_max = select(params.height_params.y, tile.height_max, has_local_heights);
+    let visible = params.height_params.z < 0.5 || frustum_cull_aabb(
+            tile.bounds_min,
+            tile.bounds_max,
+            height_min,
+            height_max,
+        );
     tile.visible = select(0u, 1u, visible);
     
         if visible {

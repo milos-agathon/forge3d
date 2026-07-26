@@ -241,6 +241,12 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
+path = "src/shaders/hzb_cull.wgsl"
+reason = "hzb_cull.wgsl: conservative projected-AABB texture relations are not yet modeled"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
 path = "src/shaders/ibl_brdf.wgsl"
 reason = "ibl_brdf.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"

@@ -580,6 +580,7 @@ class TerrainRenderParams:
     overlays: Sequence[OverlayLayer]
     terrain_data_revision: Optional[int]
     material_map_paths: Dict[str, str]
+    culling: Literal["none", "frustum", "hzb_two_phase"]
     def __init__(self, params: Any) -> None: ...
     @property
     def light(self) -> Any: ...

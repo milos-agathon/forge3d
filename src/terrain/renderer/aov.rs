@@ -364,10 +364,16 @@ impl TerrainScene {
             pass.set_bind_group(5, water_reflection_bind_group, &[]);
             pass.set_bind_group(6, material_layer_bind_group, &[]);
 
+            if params.culling == "hzb_two_phase" {
+                crate::core::degradation::record_degradation(
+                    "rendering_fallback",
+                    "terrain_hzb_two_phase_aov",
+                    "AOV rendering uses the direct clipmap path; two-phase HZB applies to the beauty pass",
+                );
+            }
             self.geometry_provider()?.draw(&mut pass);
         }
 
-        let _ = params;
         Ok(())
     }
 
@@ -522,7 +528,12 @@ impl TerrainScene {
             self.prepare_frame_lighting(decoded)?;
             let inputs =
                 self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
-            self.prepare_geometry(params)?;
+            self.prepare_geometry(
+                params,
+                &inputs.heightmap_data,
+                (inputs.width, inputs.height),
+                inputs.terrain_data_hash,
+            )?;
             Ok::<_, anyhow::Error>(inputs)
         })?;
         let probe_world_span = if is_mesh_camera_mode(&params.camera_mode) {

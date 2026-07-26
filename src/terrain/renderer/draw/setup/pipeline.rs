@@ -214,7 +214,12 @@ impl TerrainScene {
                 sample_count: effective_msaa,
                 dimension: wgpu::TextureDimension::D2,
                 format: TERRAIN_DEPTH_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | if effective_msaa == 1 {
+                        wgpu::TextureUsages::TEXTURE_BINDING
+                    } else {
+                        wgpu::TextureUsages::empty()
+                    },
                 view_formats: &[],
             },
         )?);

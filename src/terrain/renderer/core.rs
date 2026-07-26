@@ -137,6 +137,8 @@ pub struct TerrainScene {
     pub(super) material_vt: Mutex<super::virtual_texture::TerrainMaterialVT>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
     pub(super) geometry_provider: Option<TerrainGeometryProvider>,
+    pub(super) two_phase_culler: Option<crate::terrain::culling::two_phase::TwoPhaseTerrainCuller>,
+    pub(super) culling_stats: crate::terrain::culling::two_phase::CullingStats,
     pub(super) height_streaming: Option<super::streaming::HeightStreamingState>,
     /// CENSOR Task 9: owned per-render GPU timing manager, lazily constructed on
     /// the first render when the device granted `TIMESTAMP_QUERY`. Stored behind

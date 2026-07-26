@@ -593,6 +593,8 @@ impl TerrainScene {
             material_vt: Mutex::new(super::virtual_texture::TerrainMaterialVT::new()),
             viewer_heightmap: None,
             geometry_provider: None,
+            two_phase_culler: None,
+            culling_stats: crate::terrain::culling::two_phase::CullingStats::default(),
             height_streaming: None,
             gpu_timing: Mutex::new(None),
             _tracked_scene_textures: tracked_scene_textures,

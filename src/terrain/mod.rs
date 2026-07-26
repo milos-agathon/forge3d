@@ -44,6 +44,7 @@ pub use lod::{
 
 // P2.1/M5: Clipmap terrain system for true scalability
 pub mod clipmap;
+pub mod culling;
 pub use clipmap::{
     make_center_block, make_ring, make_ring_skirts, ClipmapConfig, ClipmapLevel, ClipmapMesh,
     ClipmapStreamer, ClipmapVertex,

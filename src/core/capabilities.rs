@@ -44,6 +44,11 @@ pub const WANTED: &[(&str, Features, &str)] = &[
         Features::MULTI_DRAW_INDIRECT,
         "terrain indirect draws are issued in a CPU loop instead of one multi-draw call",
     ),
+    (
+        "multi_draw_indirect_count",
+        Features::MULTI_DRAW_INDIRECT_COUNT,
+        "terrain compacted indirect counts cannot drive one GPU multi-draw call; a CPU draw loop is used",
+    ),
 ];
 
 #[derive(Clone, Copy, Debug)]

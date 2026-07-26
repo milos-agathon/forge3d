@@ -342,6 +342,28 @@ pub(crate) fn native_degradations(py: Python<'_>) -> PyResult<PyObject> {
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
+pub(crate) fn terrain_culling_stats(py: Python<'_>) -> PyResult<PyObject> {
+    let stats = crate::terrain::culling::two_phase::latest_stats();
+    let dict = pyo3::types::PyDict::new_bound(py);
+    dict.set_item("frustum_passing", stats.frustum_passing)?;
+    dict.set_item("phase1_drawn", stats.phase1_drawn)?;
+    dict.set_item("phase1_rejected", stats.phase1_rejected)?;
+    dict.set_item("phase2_recovered", stats.phase2_recovered)?;
+    dict.set_item("final_drawn", stats.final_drawn)?;
+    dict.set_item("culled", stats.culled)?;
+    dict.set_item("projection_bypassed", stats.projection_bypassed)?;
+    dict.set_item("background_bypassed", stats.background_bypassed)?;
+    let percent = if stats.frustum_passing == 0 {
+        0.0
+    } else {
+        100.0 * stats.culled as f64 / stats.frustum_passing as f64
+    };
+    dict.set_item("cull_percent", percent)?;
+    Ok(dict.into())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
 pub(crate) fn clear_native_degradations() {
     crate::core::degradation::clear_degradations();
 }

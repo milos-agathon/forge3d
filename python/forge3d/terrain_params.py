@@ -1901,6 +1901,8 @@ class TerrainRenderParams:
     # the polar angle from +Z (0 = top-down, 90 = horizon) and cam_phi_deg the
     # azimuth within the terrain plane; plain "mesh" keeps legacy output.
     camera_mode: str = "screen"
+    # Terrain submission policy. HZB mode is conservative and only active for clipmap/MSAA1.
+    culling: str = "frustum"
     # P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
     debug_mode: int = 0
     # M1: Accumulation AA sample count (1 = no AA, 16/64/256 typical for offline)
@@ -2144,6 +2146,7 @@ def make_terrain_params_config(
     cam_theta_deg: float = 45.0,
     fov_y_deg: float = 55.0,
     camera_mode: str = "screen",  # "screen", "mesh", or "mesh:zup" (Z-up orbit, see TerrainParams)
+    culling: str = "frustum",  # "none", "frustum", or "hzb_two_phase"
     debug_mode: int = 0,  # 0=normal, 40=view-depth probe, 41=NDC depth, 42=view-pos XYZ
     clip: Optional[Tuple[float, float]] = None,
     height_curve_mode: str = "linear",
@@ -2321,6 +2324,7 @@ def make_terrain_params_config(
         probes=probes,
         reflection_probes=reflection_probes,
         camera_mode=str(camera_mode),
+        culling=str(culling),
         debug_mode=int(debug_mode),
         aa_samples=int(aa_samples),
         aa_seed=aa_seed,

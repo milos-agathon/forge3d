@@ -63,6 +63,7 @@ impl LodSelectParams {
         variant_count: u32,
         first_instance: bool,
         height_bounds: (f32, f32),
+        frustum_culling: bool,
     ) -> Self {
         Self {
             view_proj: view_proj.to_cols_array_2d(),
@@ -80,7 +81,12 @@ impl LodSelectParams {
                 variant_count as f32,
                 u32::from(first_instance) as f32,
             ],
-            height_params: [height_bounds.0, height_bounds.1, 0.0, 0.0],
+            height_params: [
+                height_bounds.0,
+                height_bounds.1,
+                u32::from(frustum_culling) as f32,
+                0.0,
+            ],
         }
     }
 }
@@ -90,27 +96,33 @@ impl LodSelectParams {
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct TileInfo {
     pub tile_id: u32,
-    pub _pad0: u32,
+    pub height_min: f32,
     pub bounds_min: [f32; 2],
     pub bounds_max: [f32; 2],
     pub distance: f32,
     pub selected_lod: u32,
     pub visible: u32,
-    pub _pad1: u32,
+    pub height_max: f32,
 }
 
 impl TileInfo {
     pub fn new(lod: u32, x: u32, y: u32, bounds_min: Vec2, bounds_max: Vec2) -> Self {
         Self {
             tile_id: Self::pack_id(lod, x, y),
-            _pad0: 0,
+            height_min: f32::INFINITY,
             bounds_min: [bounds_min.x, bounds_min.y],
             bounds_max: [bounds_max.x, bounds_max.y],
             distance: 0.0,
             selected_lod: lod,
             visible: 1,
-            _pad1: 0,
+            height_max: f32::NEG_INFINITY,
         }
+    }
+
+    pub fn with_height_bounds(mut self, height_min: f32, height_max: f32) -> Self {
+        self.height_min = height_min;
+        self.height_max = height_max;
+        self
     }
 
     pub fn pack_id(lod: u32, x: u32, y: u32) -> u32 {
@@ -390,6 +402,7 @@ impl GpuLodSelector {
             variant_count,
             false,
             (-f32::MAX, f32::MAX),
+            true,
         );
         let params_buffer = tracked_create_buffer_init(
             device,
@@ -463,6 +476,7 @@ impl GpuLodSelector {
                 label: Some("lod_output_header"),
                 contents: bytemuck::bytes_of(&header),
                 usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::INDIRECT
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
             },
@@ -527,6 +541,7 @@ impl GpuLodSelector {
         camera_pos: Vec3,
         first_instance: bool,
         height_bounds: (f32, f32),
+        frustum_culling: bool,
     ) {
         let frustum = FrustumPlanes::from_view_proj(view_proj);
         let params = LodSelectParams::new(
@@ -538,6 +553,7 @@ impl GpuLodSelector {
             resources.variant_count,
             first_instance,
             height_bounds,
+            frustum_culling,
         );
         queue.write_buffer(&resources.params, 0, bytemuck::bytes_of(&params));
         encoder.clear_buffer(&resources.output_header, 0, None);
@@ -602,6 +618,7 @@ impl GpuLodSelector {
                 camera_pos,
                 false,
                 (0.0, 1000.0),
+                true,
             );
             let offset = camera_stride * camera_index as u64;
             encoder.copy_buffer_to_buffer(
@@ -704,13 +721,12 @@ pub fn cpu_lod_select(
         let bounds_max = Vec2::from(tile.bounds_max);
         let center = (bounds_min + bounds_max) * 0.5;
 
-        let visible = frustum_test_aabb(
-            bounds_min,
-            bounds_max,
-            height_bounds.0,
-            height_bounds.1,
-            &frustum,
-        );
+        let (height_min, height_max) = if tile.height_min <= tile.height_max {
+            (tile.height_min, tile.height_max)
+        } else {
+            height_bounds
+        };
+        let visible = frustum_test_aabb(bounds_min, bounds_max, height_min, height_max, &frustum);
 
         if !visible {
             culled_count += 1;

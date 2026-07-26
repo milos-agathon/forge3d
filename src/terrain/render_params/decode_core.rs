@@ -27,6 +27,7 @@ pub(super) struct CoreTerrainParams {
     pub colormap_srgb: bool,
     pub output_srgb_eotf: bool,
     pub camera_mode: String,
+    pub culling: String,
     pub debug_mode: u32,
     pub aa_samples: u32,
     pub aa_seed: Option<u64>,
@@ -174,6 +175,16 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         .ok()
         .and_then(|v| v.extract::<String>().ok())
         .unwrap_or_else(|| "screen".to_string());
+    let culling = params
+        .getattr("culling")
+        .ok()
+        .and_then(|v| v.extract::<String>().ok())
+        .unwrap_or_else(|| "frustum".to_string());
+    if !matches!(culling.as_str(), "none" | "frustum" | "hzb_two_phase") {
+        return Err(PyValueError::new_err(
+            "culling must be one of 'none', 'frustum', or 'hzb_two_phase'",
+        ));
+    }
     let debug_mode = params
         .getattr("debug_mode")
         .ok()
@@ -249,6 +260,7 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         colormap_srgb,
         output_srgb_eotf,
         camera_mode,
+        culling,
         debug_mode,
         aa_samples,
         aa_seed,

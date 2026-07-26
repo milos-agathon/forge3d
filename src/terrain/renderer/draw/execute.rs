@@ -2,6 +2,12 @@ use super::setup::RenderTargets;
 use super::*;
 use crate::core::resource_tracker::TrackedTexture;
 
+enum TerrainDrawSource<'a> {
+    Direct,
+    Lod(&'a crate::terrain::clipmap::gpu_lod::GpuLodDrawResources),
+    Culled(&'a crate::terrain::culling::two_phase::CullDrawResources),
+}
+
 impl TerrainScene {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::terrain::renderer) fn encode_forward_pass(
@@ -243,11 +249,10 @@ impl TerrainScene {
             .device
             .features()
             .contains(wgpu::Features::INDIRECT_FIRST_INSTANCE);
-        let multi_draw = first_instance
-            && self
-                .device
-                .features()
-                .contains(wgpu::Features::MULTI_DRAW_INDIRECT);
+        let multi_draw_count = first_instance
+            && self.device.features().contains(
+                wgpu::Features::MULTI_DRAW_INDIRECT | wgpu::Features::MULTI_DRAW_INDIRECT_COUNT,
+            );
         let half_height = (decoded.clamp.height_range.1 - decoded.clamp.height_range.0).abs()
             * params.z_scale.abs()
             * 0.5;
@@ -261,6 +266,112 @@ impl TerrainScene {
             (-half_height - skirt, half_height),
             first_instance,
         );
+        let hzb_requested = params.culling == "hzb_two_phase";
+        let hzb_enabled = hzb_requested
+            && render_targets.sample_count == 1
+            && indirect.is_some()
+            && self.two_phase_culler.is_some();
+        if hzb_requested && !hzb_enabled {
+            crate::core::degradation::record_degradation(
+                "rendering_fallback",
+                "terrain_hzb_two_phase",
+                "requires single-sample clipmap geometry; using frustum-only indirect draws",
+            );
+        }
+        if hzb_enabled {
+            let lod = indirect.expect("HZB requires clipmap LOD resources");
+            let (_, view, proj) = Self::build_camera_matrices(params);
+            let view_proj = proj * view;
+            let culler = self
+                .two_phase_culler
+                .as_ref()
+                .expect("HZB culler prepared with clipmap geometry");
+            culler.phase1(
+                self.queue.as_ref(),
+                encoder,
+                view_proj,
+                (-half_height - skirt, half_height),
+                first_instance,
+            );
+            let phase1_calls = self.encode_terrain_draw_pass(
+                encoder,
+                render_targets,
+                bind_group,
+                ibl_bind_group,
+                shadow_bind_group,
+                fog_bind_group,
+                water_reflection_bind_group,
+                material_layer_bind_group,
+                preserve_background,
+                false,
+                TerrainDrawSource::Culled(culler.phase1_resources()),
+                multi_draw_count,
+                first_instance,
+            )?;
+            culler.build_phase2_hzb(self.device.as_ref(), encoder, &render_targets.depth_view)?;
+            culler.phase2(
+                self.queue.as_ref(),
+                encoder,
+                view_proj,
+                (-half_height - skirt, half_height),
+                first_instance,
+            );
+            let phase2_calls = self.encode_terrain_draw_pass(
+                encoder,
+                render_targets,
+                bind_group,
+                ibl_bind_group,
+                shadow_bind_group,
+                fog_bind_group,
+                water_reflection_bind_group,
+                material_layer_bind_group,
+                true,
+                true,
+                TerrainDrawSource::Culled(culler.phase2_resources()),
+                multi_draw_count,
+                first_instance,
+            )?;
+            culler.build_previous_hzb(self.device.as_ref(), encoder, &render_targets.depth_view)?;
+            culler.stage_stats(encoder, lod);
+            return Ok(phase1_calls + phase2_calls);
+        }
+        self.encode_terrain_draw_pass(
+            encoder,
+            render_targets,
+            bind_group,
+            ibl_bind_group,
+            shadow_bind_group,
+            fog_bind_group,
+            water_reflection_bind_group,
+            material_layer_bind_group,
+            preserve_background,
+            false,
+            indirect
+                .map(TerrainDrawSource::Lod)
+                .unwrap_or(TerrainDrawSource::Direct),
+            multi_draw_count,
+            first_instance,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_terrain_draw_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        render_targets: &RenderTargets,
+        bind_group: &wgpu::BindGroup,
+        ibl_bind_group: &wgpu::BindGroup,
+        shadow_bind_group: &wgpu::BindGroup,
+        fog_bind_group: &wgpu::BindGroup,
+        water_reflection_bind_group: &wgpu::BindGroup,
+        material_layer_bind_group: &wgpu::BindGroup,
+        preserve_background: bool,
+        load_depth: bool,
+        draw_source: TerrainDrawSource<'_>,
+        multi_draw_count: bool,
+        first_instance: bool,
+    ) -> Result<u32> {
+        let geometry = self.geometry_provider()?;
         let pipeline_cache = self
             .pipeline
             .lock()
@@ -291,7 +402,7 @@ impl TerrainScene {
                     view: color_view,
                     resolve_target,
                     ops: wgpu::Operations {
-                        load: if preserve_background {
+                        load: if preserve_background || load_depth {
                             wgpu::LoadOp::Load
                         } else {
                             wgpu::LoadOp::Clear(wgpu::Color {
@@ -307,7 +418,7 @@ impl TerrainScene {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &render_targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: if preserve_background {
+                        load: if preserve_background || load_depth {
                             wgpu::LoadOp::Load
                         } else {
                             wgpu::LoadOp::Clear(1.0)
@@ -339,11 +450,17 @@ impl TerrainScene {
             pass.set_bind_group(4, fog_bind_group, &[]);
             pass.set_bind_group(5, water_reflection_bind_group, &[]);
             pass.set_bind_group(6, material_layer_bind_group, &[]);
-            let draw_calls = if let Some(indirect) = indirect.as_ref() {
-                geometry.draw_indirect(&mut pass, indirect, multi_draw, first_instance)
-            } else {
-                geometry.draw(&mut pass);
-                1
+            let draw_calls = match draw_source {
+                TerrainDrawSource::Direct => {
+                    geometry.draw(&mut pass);
+                    1
+                }
+                TerrainDrawSource::Lod(resources) => {
+                    geometry.draw_indirect(&mut pass, resources, multi_draw_count, first_instance)
+                }
+                TerrainDrawSource::Culled(resources) => {
+                    geometry.draw_culled(&mut pass, resources, multi_draw_count, first_instance)
+                }
             };
             return Ok(draw_calls);
         }

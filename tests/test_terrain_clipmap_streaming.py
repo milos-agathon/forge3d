@@ -60,12 +60,14 @@ def _make_params(
     phi_deg: float = 28.0,
     cam_radius: float = 1.0,
     z_scale: float = 1.2,
+    culling: str = "frustum",
+    terrain_span: float = TERRAIN_SPAN_M,
 ) -> "f3d.TerrainRenderParams":
     return f3d.TerrainRenderParams(
         make_terrain_params_config(
             size_px=size_px,
             render_scale=1.0,
-            terrain_span=TERRAIN_SPAN_M,
+            terrain_span=terrain_span,
             msaa_samples=1,
             z_scale=z_scale,
             exposure=1.0,
@@ -81,7 +83,8 @@ def _make_params(
             cam_theta_deg=theta_deg,
             fov_y_deg=45.0,
             camera_mode=camera_mode,
-            clip=(0.1, TERRAIN_SPAN_M * 1.5),
+            culling=culling,
+            clip=(0.1, terrain_span * 1.5),
             overlays=[_build_overlay()],
             pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         )

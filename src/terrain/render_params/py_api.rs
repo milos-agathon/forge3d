@@ -133,6 +133,11 @@ impl TerrainRenderParams {
         &self.camera_mode
     }
 
+    #[getter]
+    pub fn culling(&self) -> &str {
+        &self.culling
+    }
+
     /// P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
     #[getter]
     pub fn debug_mode(&self) -> u32 {

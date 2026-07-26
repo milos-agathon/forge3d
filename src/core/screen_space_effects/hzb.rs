@@ -163,6 +163,7 @@ impl HzbPyramid {
         levels: u32,
         reversed_z: bool,
     ) -> RenderResult<()> {
+        crate::core::shader_registry::record_shader_use("p5.hzb.build.shader");
         // Copy depth -> HZB level 0
         let dst0 = self.tex.create_view(&TextureViewDescriptor {
             label: Some("p5.hzb.mip0"),
