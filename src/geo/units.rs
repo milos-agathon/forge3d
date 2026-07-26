@@ -348,6 +348,15 @@ impl GeoidModel for Egm96 {
     const NAME: &'static str = "EGM96";
 }
 
+/// The GMM3-derived Mars areoid (see `crate::geo::geoid`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarsAreoid {}
+impl Sealed for MarsAreoid {}
+impl GeoidModel for MarsAreoid {
+    type Body = Mars;
+    const NAME: &'static str = "Mars areoid";
+}
+
 /// Marker trait for vertical reference systems.
 pub trait HeightSystem: Sealed + Copy + core::fmt::Debug + 'static {
     type Body: BodyTag;

@@ -398,6 +398,11 @@ def geoid_undulation(lat: float, lon: float) -> float:
     return _require_geodesy_native().geoid_undulation(lat, lon)
 
 
+def areoid_undulation(lat: float, lon: float) -> float:
+    """GMM3 Mars areoid undulation above its reference ellipsoid, metres."""
+    return _require_geodesy_native().areoid_undulation(lat, lon)
+
+
 def orthometric_to_ellipsoidal(h_orthometric: float, lat: float, lon: float) -> float:
     """Convert an orthometric (EGM96) height to ellipsoidal: h = H + N."""
     return _require_geodesy_native().orthometric_to_ellipsoidal(h_orthometric, lat, lon)
@@ -455,6 +460,7 @@ __all__ = [
     "get_crs_from_rasterio",
     "get_crs_from_geopandas",
     "body_info",
+    "areoid_undulation",
     "geoid_undulation",
     "orthometric_to_ellipsoidal",
     "ellipsoidal_to_orthometric",

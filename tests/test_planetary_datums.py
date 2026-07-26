@@ -1,8 +1,20 @@
 """SELENE planetary-datum CPU gates."""
 
+from pathlib import Path
+
 import pytest
 
 from forge3d import crs
+
+
+def _areoid_reference_points():
+    path = Path(__file__).parent / "data" / "mars_areoid_reference.txt"
+    return [
+        (float(lat), float(lon), float(value), source)
+        for line in path.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+        for lat, lon, value, source in [line.split()]
+    ]
 
 
 def test_body_info_reports_reference_surfaces_and_units():
@@ -35,3 +47,22 @@ def test_body_info_reports_reference_surfaces_and_units():
 def test_body_info_rejects_unknown_body_without_earth_fallback():
     with pytest.raises(ValueError, match="unsupported body 'ceres'.*earth, moon, or mars"):
         crs.body_info("ceres")
+
+
+def test_mars_areoid_matches_committed_pds_gmm3_map_below_half_metre():
+    points = _areoid_reference_points()
+    assert len(points) >= 20
+    errors = [
+        abs(crs.areoid_undulation(lat, lon) - expected)
+        for lat, lon, expected, _source in points
+    ]
+    assert max(errors) < 0.5
+
+
+@pytest.mark.parametrize(
+    "lat,lon",
+    [(90.1, 0.0), (-90.1, 0.0), (float("nan"), 0.0), (0.0, float("inf"))],
+)
+def test_mars_areoid_rejects_invalid_coordinates(lat, lon):
+    with pytest.raises(ValueError):
+        crs.areoid_undulation(lat, lon)

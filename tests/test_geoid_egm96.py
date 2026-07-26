@@ -6,13 +6,39 @@
 # RELEVANT FILES: src/geo/geoid.rs, assets/geoid/egm96_n120.bin,
 #                 tests/data/egm96_test_values.txt
 
+import hashlib
 import math
 from pathlib import Path
+import struct
 
 import numpy as np
 import pytest
 
 import forge3d
+
+
+_BYTE_LOCK_POINTS = [
+    (-89.5, 0.5),
+    (-75.25, 42.75),
+    (-60.0, -120.0),
+    (-45.5, 179.5),
+    (-30.25, -179.75),
+    (-15.0, 90.0),
+    (0.0, 0.0),
+    (0.5, 179.5),
+    (12.345, 67.89),
+    (23.5, -45.5),
+    (35.0, 120.0),
+    (46.87, 102.45),
+    (51.5074, -0.1278),
+    (60.0, 10.0),
+    (70.25, -135.0),
+    (80.0, 179.0),
+    (89.5, 359.5),
+    (-33.8688, 151.2093),
+    (27.9881, 86.925),
+    (-22.9068, -43.1729),
+]
 
 
 def _reference_points():
@@ -44,6 +70,16 @@ def test_egm96_degree_120_matches_nga_published_values():
     print(
         "EGM96 degree-120 worst residual vs published degree-360 values: "
         f"{worst:.4f} m at {worst_at}"
+    )
+
+
+def test_egm96_refactor_is_byte_identical():
+    payload = b"".join(
+        struct.pack("<d", forge3d.geoid_undulation(lat, lon))
+        for lat, lon in _BYTE_LOCK_POINTS
+    )
+    assert hashlib.sha256(payload).hexdigest() == (
+        "ab9469d5e078dbfaa5df9b02219733c482ee21ed1f872fa251ed7056da27a639"
     )
 
 

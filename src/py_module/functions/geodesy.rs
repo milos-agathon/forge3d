@@ -3,6 +3,7 @@ use super::*;
 #[cfg(feature = "extension-module")]
 pub(crate) fn register_geodesy_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(crate::py_functions::body_info, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::py_functions::areoid_undulation, m)?)?;
     m.add_function(wrap_pyfunction!(crate::py_functions::geoid_undulation, m)?)?;
     m.add_function(wrap_pyfunction!(
         crate::py_functions::orthometric_to_ellipsoidal,

@@ -42,6 +42,19 @@ pub(crate) fn geoid_undulation(lat: f64, lon: f64) -> PyResult<f64> {
     Ok(crate::geo::geoid::undulation_deg(lat, lon))
 }
 
+/// GMM3 Mars areoid undulation above its reference ellipsoid, metres.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (lat, lon))]
+pub(crate) fn areoid_undulation(lat: f64, lon: f64) -> PyResult<f64> {
+    if !(-90.0..=90.0).contains(&lat) || !lon.is_finite() {
+        return Err(PyValueError::new_err(format!(
+            "invalid_argument: latitude must be in [-90, 90] and longitude finite, got ({lat}, {lon})"
+        )));
+    }
+    Ok(crate::geo::geoid::areoid_undulation_deg(lat, lon))
+}
+
 /// Convert an orthometric (EGM96) height to an ellipsoidal height:
 /// h = H + N(lat, lon). Returns metres.
 #[cfg(feature = "extension-module")]
