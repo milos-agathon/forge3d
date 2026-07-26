@@ -1,0 +1,19 @@
+format_version = 1
+validity = "2000-01-01 through 2050-12-31 UTC"
+
+[[asset]]
+path = "delta_t_fit.dat"
+source = "Espenak & Meeus, NASA/TP-2009-214174, equations 2-15 and 2-16"
+source_url = "https://eclipse.gsfc.nasa.gov/5MCSE/TP2009-214174.pdf"
+license = "United States government work"
+model = "piecewise polynomial TT-UT1 fit"
+max_decimal_representation_residual_seconds = 1e-9
+sha256 = "ff379f80597dbed150ed7f143a4fbf8160d0d82837095dcb993a54066b54881a"
+
+[[asset]]
+path = "leap_seconds.dat"
+source = "IERS Bulletin C leap-second history through Bulletin C 52"
+source_url = "https://hpiers.obspm.fr/iers/bul/bulc/bulletinc.dat"
+license = "IERS public data"
+model = "TAI-UTC offsets; the last published offset is held constant through 2050"
+sha256 = "04c99602d83e104a56b55a3a184425804676eab83bc731238b989be560e0e336"

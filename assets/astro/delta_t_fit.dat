@@ -1,0 +1,6 @@
+# SIDERA ΔT = TT-UT1 polynomial coefficients, seconds.
+# Source: Espenak & Meeus, NASA/TP-2009-214174, equations 2-15 and 2-16.
+# Columns: decimal_year_start decimal_year_end origin c0 c1 ...
+# Decimal storage residual against the cited expressions is < 1e-9 s.
+2000 2005 2000 63.86 0.3345 -0.060374 0.0017275 0.000651814 0.00002373599
+2005 2051 2000 62.92 0.32217 0.005589
