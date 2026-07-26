@@ -26,6 +26,18 @@ pub(crate) struct TileKey {
     pub mip_level: u32,
 }
 
+impl TileKey {
+    pub fn request_priority(&self) -> (u32, u32, u32, u32, u32) {
+        (
+            self.mip_level,
+            self.material_index,
+            self.y,
+            self.x,
+            self.family_slot,
+        )
+    }
+}
+
 /// Residency snapshot for one material family.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FamilyResidency {
@@ -271,5 +283,18 @@ mod tests {
         assert_eq!(decode_feedback_payload(out_of_range, material_count), None);
         // material_count = 0 is clamped instead of dividing by zero.
         assert_eq!(decode_feedback_payload(1, 0), Some((0, 0)));
+    }
+
+    #[test]
+    fn request_priority_orders_families_deterministically() {
+        let mut requests = [key(2, 0, 0), key(0, 1, 0), key(1, 0, 0), key(0, 0, 0)];
+        requests.sort_by_key(TileKey::request_priority);
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| (request.family_slot, request.x))
+                .collect::<Vec<_>>(),
+            vec![(0, 0), (1, 0), (2, 0), (0, 1)],
+        );
     }
 }

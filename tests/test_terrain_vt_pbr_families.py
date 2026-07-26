@@ -448,6 +448,7 @@ class TestTerrainVTPbrFamilies:
             budget_sum += stats[f"budget_bytes_{family}"]
 
         assert resident_sum == pytest.approx(stats["resident_bytes_total"])
+        assert f3d.memory_metrics()["resident_tile_bytes"] == pytest.approx(resident_sum)
         assert resident_sum <= budget_bytes
         assert budget_sum <= budget_bytes
         assert resident_sum <= MEMORY_BUDGET_LIMIT_BYTES

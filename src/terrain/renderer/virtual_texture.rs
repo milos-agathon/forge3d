@@ -893,27 +893,6 @@ impl TerrainMaterialVTRuntime {
             None
         };
 
-        // Route the VT footprint through the 512 MiB resource registry so the
-        // budget tracker sees the atlas, page table, and feedback buffers.
-        let memory_tracker = crate::core::memory_tracker::global_tracker();
-        let page_table_layers = TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels;
-        memory_tracker.track_texture_allocation(
-            atlas_size,
-            atlas_size,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
-        memory_tracker.track_texture_allocation(
-            pages_x0,
-            pages_y0.saturating_mul(page_table_layers),
-            wgpu::TextureFormat::Rgba32Float,
-        );
-        if let Some(feedback) = feedback_buffer.as_ref() {
-            let feedback_bytes = feedback.buffer().size();
-            memory_tracker.track_buffer_allocation(feedback_bytes, false);
-            // The readback staging buffer is host-visible (MAP_READ).
-            memory_tracker.track_buffer_allocation(feedback_bytes, true);
-        }
-
         let mut page_tables = Vec::with_capacity(
             (TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels) as usize,
         );
@@ -1057,7 +1036,7 @@ impl TerrainMaterialVTRuntime {
         }
 
         let mut ordered = requests.into_iter().collect::<Vec<_>>();
-        ordered.sort_by_key(|key| (key.mip_level, key.material_index, key.y, key.x));
+        ordered.sort_by_key(TileKey::request_priority);
         ordered
     }
 
@@ -1450,26 +1429,7 @@ impl TerrainMaterialVTRuntime {
 #[cfg(feature = "extension-module")]
 impl Drop for TerrainMaterialVTRuntime {
     fn drop(&mut self) {
-        // Release the footprint reported to the 512 MiB resource registry in
-        // `TerrainMaterialVTRuntime::new`.
-        let memory_tracker = crate::core::memory_tracker::global_tracker();
-        let page_table_layers = TERRAIN_VT_FAMILY_COUNT * self.material_count * self.max_mip_levels;
-        memory_tracker.free_texture_allocation(
-            self.atlas_size,
-            self.atlas_size,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
-        memory_tracker.free_texture_allocation(
-            self.pages_x0,
-            self.pages_y0.saturating_mul(page_table_layers),
-            wgpu::TextureFormat::Rgba32Float,
-        );
-        if let Some(feedback) = self.feedback_buffer.as_ref() {
-            let feedback_bytes = feedback.buffer().size();
-            memory_tracker.free_buffer_allocation(feedback_bytes, false);
-            memory_tracker.free_buffer_allocation(feedback_bytes, true);
-        }
-        memory_tracker.clear_resident_tiles();
+        crate::core::memory_tracker::global_tracker().clear_resident_tiles();
     }
 }
 
