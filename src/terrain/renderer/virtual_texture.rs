@@ -56,17 +56,27 @@ pub(super) struct TerrainVTBindingResources<'a> {
 
 #[cfg(feature = "extension-module")]
 #[repr(C, align(16))]
+#[derive(Clone, Copy, Default, Pod, Zeroable)]
+struct TerrainVtFamilyInfo {
+    enabled: u32,
+    page_table_offset: u32,
+    virtual_width: u32,
+    virtual_height: u32,
+}
+
+#[cfg(feature = "extension-module")]
+const _: [(); 16] = [(); std::mem::size_of::<TerrainVtFamilyInfo>()];
+
+#[cfg(feature = "extension-module")]
+#[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct TerrainVTUniformsGpu {
     config0: [u32; 4],
     config1: [u32; 4],
     config2: [u32; 4],
-    /// Per-family info (`TerrainVtFamilyInfo`): the single source of truth the
-    /// shader reads per family. x = enabled (0/1), y = page-table layer
-    /// offset, z = atlas layer (0 while all families share one atlas layer),
-    /// w = registered source count. Matches `family_info` in
-    /// `terrain_pbr_pom.wgsl`; refreshed every `prepare_frame`.
-    family_info: [[u32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
+    /// Per-family single source of truth read by `terrain_pbr_pom.wgsl`;
+    /// refreshed every `prepare_frame`.
+    family_info: [TerrainVtFamilyInfo; TERRAIN_VT_FAMILY_COUNT as usize],
 }
 
 #[cfg(feature = "extension-module")]
@@ -622,7 +632,7 @@ impl TerrainMaterialVT {
             config0: [0, 0, 0, 0],
             config1: [0, 0, 0, 0],
             config2: [0, 0, 0, 0],
-            family_info: [[0, 0, 0, 0]; TERRAIN_VT_FAMILY_COUNT as usize],
+            family_info: [TerrainVtFamilyInfo::default(); TERRAIN_VT_FAMILY_COUNT as usize],
         };
         let fallback_colors = TerrainMaterialVTRuntime::default_fallback_colors();
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -639,7 +649,7 @@ impl TerrainMaterialVT {
         runtime: &TerrainMaterialVTRuntime,
         enabled: bool,
     ) {
-        let mut family_info = [[0u32; 4]; TERRAIN_VT_FAMILY_COUNT as usize];
+        let mut family_info = [TerrainVtFamilyInfo::default(); TERRAIN_VT_FAMILY_COUNT as usize];
         for (slot, info) in family_info.iter_mut().enumerate() {
             let slot_u32 = slot as u32;
             let family_enabled = enabled && (runtime.family_mask & (1u32 << slot_u32)) != 0;
@@ -648,16 +658,16 @@ impl TerrainMaterialVT {
                 .keys()
                 .filter(|(family_slot, _)| *family_slot == slot_u32)
                 .count() as u32;
-            *info = [
-                if family_enabled && source_count > 0 {
+            *info = TerrainVtFamilyInfo {
+                enabled: if family_enabled && source_count > 0 {
                     1
                 } else {
                     0
                 },
-                slot_u32 * runtime.material_count * runtime.max_mip_levels,
-                0,
-                source_count,
-            ];
+                page_table_offset: slot_u32 * runtime.material_count * runtime.max_mip_levels,
+                virtual_width: runtime.virtual_size.0,
+                virtual_height: runtime.virtual_size.1,
+            };
         }
         let uniforms = TerrainVTUniformsGpu {
             config0: [

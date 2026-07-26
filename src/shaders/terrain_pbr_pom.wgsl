@@ -488,8 +488,8 @@ struct TerrainVTUniforms {
     config2: vec4<u32>,
     // TerrainVtFamilyInfo: per-family single source of truth, refreshed each
     // frame from CPU residency state. x = enabled (0/1), y = page-table layer
-    // offset, z = atlas layer (0 while families share one atlas layer),
-    // w = registered source count. Must match TerrainVTUniformsGpu in
+    // offset, z/w = virtual width/height. All families share one atlas layer.
+    // Must match TerrainVTUniformsGpu in
     // src/terrain/renderer/virtual_texture.rs.
     family_info: array<vec4<u32>, 3>,
 }
@@ -1773,6 +1773,11 @@ fn terrain_vt_family_enabled(family_slot: u32) -> bool {
     return terrain_vt_uniforms.family_info[family_slot].x != 0u;
 }
 
+fn terrain_vt_family_virtual_size(family_slot: u32) -> vec2<f32> {
+    let family = terrain_vt_uniforms.family_info[min(family_slot, 2u)];
+    return vec2<f32>(f32(max(family.z, 1u)), f32(max(family.w, 1u)));
+}
+
 fn terrain_vt_material_index(layer: f32) -> u32 {
     let material_count = max(terrain_vt_uniforms.config2.y, 1u);
     let clamped_layer = clamp(u32(max(layer, 0.0)), 0u, material_count - 1u);
@@ -1790,11 +1795,8 @@ fn terrain_vt_fallback_color(family_slot: u32, material_index: u32) -> vec4<f32>
     return terrain_vt_fallbacks.albedo[clamped_material];
 }
 
-fn terrain_vt_desired_mip(ddx_uv: vec2<f32>, ddy_uv: vec2<f32>) -> u32 {
-    let virtual_size = vec2<f32>(
-        f32(max(terrain_vt_uniforms.config1.x, 1u)),
-        f32(max(terrain_vt_uniforms.config1.y, 1u)),
-    );
+fn terrain_vt_desired_mip(family_slot: u32, ddx_uv: vec2<f32>, ddy_uv: vec2<f32>) -> u32 {
+    let virtual_size = terrain_vt_family_virtual_size(family_slot);
     let footprint_x = max(length(ddx_uv * virtual_size), length(ddy_uv * virtual_size));
     let desired = max(log2(max(footprint_x, 1.0)), 0.0);
     return min(u32(desired), max(terrain_vt_uniforms.config2.x, 1u) - 1u);
@@ -1867,17 +1869,14 @@ fn terrain_vt_resolve_family_uv(
     }
 
     let material_index = terrain_vt_material_index(layer);
-    let virtual_size = vec2<f32>(
-        f32(max(terrain_vt_uniforms.config1.x, 1u)),
-        f32(max(terrain_vt_uniforms.config1.y, 1u)),
-    );
+    let virtual_size = terrain_vt_family_virtual_size(family_slot);
     let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
     let tile_border = f32(terrain_vt_uniforms.config0.z);
     let atlas_size = f32(max(terrain_vt_uniforms.config0.w, 1u));
     let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
     let wrapped_uv = fract(uv);
     let virtual_texel = wrapped_uv * virtual_size;
-    let desired_mip = terrain_vt_desired_mip(ddx_uv, ddy_uv);
+    let desired_mip = terrain_vt_desired_mip(family_slot, ddx_uv, ddy_uv);
     let desired_page_dims = terrain_vt_page_dims(desired_mip);
     let desired_page_size = vec2<f32>(tile_size * exp2(f32(desired_mip)), tile_size * exp2(f32(desired_mip)));
     let desired_page = min(vec2<u32>(virtual_texel / desired_page_size), desired_page_dims - vec2<u32>(1u, 1u));
@@ -1934,14 +1933,11 @@ fn terrain_vt_resolve_source_id(
         return 0u;
     }
     let material_index = terrain_vt_material_index(layer);
-    let virtual_size = vec2<f32>(
-        f32(max(terrain_vt_uniforms.config1.x, 1u)),
-        f32(max(terrain_vt_uniforms.config1.y, 1u)),
-    );
+    let virtual_size = terrain_vt_family_virtual_size(family_slot);
     let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
     let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
     let virtual_texel = fract(uv) * virtual_size;
-    var mip_level = terrain_vt_desired_mip(ddx_uv, ddy_uv);
+    var mip_level = terrain_vt_desired_mip(family_slot, ddx_uv, ddy_uv);
     loop {
         let page_dims = terrain_vt_page_dims(mip_level);
         let page_size = vec2<f32>(tile_size * exp2(f32(mip_level)), tile_size * exp2(f32(mip_level)));
