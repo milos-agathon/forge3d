@@ -2,9 +2,14 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from forge3d import crs
+from forge3d import crs, gis
+
+
+def _longitude_error(actual, expected):
+    return abs((actual - expected + 180.0) % 360.0 - 180.0)
 
 
 def _areoid_reference_points():
@@ -66,3 +71,234 @@ def test_mars_areoid_matches_committed_pds_gmm3_map_below_half_metre():
 def test_mars_areoid_rejects_invalid_coordinates(lat, lon):
     with pytest.raises(ValueError):
         crs.areoid_undulation(lat, lon)
+
+
+@pytest.mark.parametrize(
+    "geographic,projected",
+    [
+        ("IAU:30100", "IAU:30110"),
+        ("IAU:49900", "IAU:49910"),
+        ("IAU:49902", "IAU:49912"),
+    ],
+)
+def test_iau_equirectangular_global_grid_closes_below_nanodegree(
+    geographic, projected
+):
+    forward = gis.CrsTransform.from_crs(geographic, projected)
+    inverse = gis.CrsTransform.from_crs(projected, geographic)
+    worst = 0.0
+    for row in range(25):
+        lat = -88.0 + 176.0 * row / 24.0
+        for col in range(40):
+            lon = -175.5 + 351.0 * col / 39.0
+            x, y = forward.transform_point(lon, lat)
+            recovered_lon, recovered_lat = inverse.transform_point(x, y)
+            worst = max(
+                worst,
+                _longitude_error(recovered_lon, lon),
+                abs(recovered_lat - lat),
+            )
+    assert worst < 1e-9
+
+
+@pytest.mark.parametrize(
+    "geographic,body_fixed",
+    [("IAU:30100", "FORGE3D:301"), ("IAU:49902", "FORGE3D:499")],
+)
+def test_planetocentric_body_fixed_global_grid_closes_below_nanodegree(
+    geographic, body_fixed
+):
+    forward = gis.CrsTransform.from_crs(geographic, body_fixed)
+    inverse = gis.CrsTransform.from_crs(body_fixed, geographic)
+    worst_degrees = 0.0
+    worst_height = 0.0
+    for row in range(25):
+        lat = -88.0 + 176.0 * row / 24.0
+        for col in range(40):
+            lon = -175.5 + 351.0 * col / 39.0
+            xyz = forward.transform_point3(lon, lat, 1234.5)
+            recovered_lon, recovered_lat, recovered_height = inverse.transform_point3(
+                *xyz
+            )
+            worst_degrees = max(
+                worst_degrees,
+                _longitude_error(recovered_lon, lon),
+                abs(recovered_lat - lat),
+            )
+            worst_height = max(worst_height, abs(recovered_height - 1234.5))
+    assert worst_degrees < 1e-9
+    assert worst_height < 1e-6
+
+
+def test_mars_spherical_and_ellipsoidal_iau_crs_keep_distinct_surfaces():
+    sphere = gis.CrsTransform.from_crs("IAU:49900", "FORGE3D:499")
+    ellipsoid = gis.CrsTransform.from_crs("IAU:49902", "FORGE3D:499")
+    sphere_radius = np.linalg.norm(sphere.transform_point3(0.0, 45.0, 0.0))
+    ellipsoid_radius = np.linalg.norm(ellipsoid.transform_point3(0.0, 45.0, 0.0))
+    assert sphere_radius == pytest.approx(3_396_190.0, abs=1e-9)
+    assert sphere_radius - ellipsoid_radius > 10_000.0
+
+
+def test_mars_ocentric_projections_match_proj_iau_2015_oracle():
+    equirectangular = gis.CrsTransform.from_crs("IAU:49902", "IAU:49912")
+    polar = gis.CrsTransform.from_crs("IAU:49902", "IAU:49932")
+    assert equirectangular.transform_point(10.0, 20.0) == pytest.approx(
+        (592_746.9752330622, 1_198_439.5701681552), abs=1e-6
+    )
+    assert polar.transform_point(10.0, 80.0) == pytest.approx(
+        (102_584.23432793329, -581_784.1031234111), abs=1e-6
+    )
+
+
+def test_python_custom_planetocentric_projection_dicts_are_routable():
+    mars_eqc = {
+        "method": "planetocentric_eqc",
+        "a": 3_396_190.0,
+        "inv_f": 169.894447223612,
+        "lat0": 0.0,
+        "lon0": 0.0,
+        "lat_ts": 0.0,
+        "false_easting": 0.0,
+        "false_northing": 0.0,
+    }
+    forward = gis.CrsTransform.from_crs("IAU:49902", mars_eqc)
+    inverse = gis.CrsTransform.from_crs(mars_eqc, "IAU:49902")
+    projected = forward.transform_point(10.0, 20.0)
+    assert projected == pytest.approx(
+        (592_746.9752330622, 1_198_439.5701681552), abs=1e-6
+    )
+    assert inverse.transform_point(*projected) == pytest.approx((10.0, 20.0), abs=1e-12)
+
+    rounded_mars = {**mars_eqc, "a": 3_396_190.000001, "inv_f": 169.8944472}
+    gis.CrsTransform.from_crs("IAU:49902", rounded_mars)
+
+    moon_eqc = {
+        **mars_eqc,
+        "method": "planetocentric_eqc",
+        "a": 1_737_400.0,
+        "inv_f": float("inf"),
+    }
+    moon = gis.CrsTransform.from_crs("IAU:30100", moon_eqc)
+    assert moon.transform_point(10.0, 20.0) == pytest.approx(
+        (303_233.5042414948, 606_467.0084829896), abs=1e-6
+    )
+
+    ambiguous_mars = {**mars_eqc, "method": "eqc", "inv_f": float("inf")}
+    with pytest.raises(ValueError, match="planetocentric|custom"):
+        gis.CrsTransform.from_crs("IAU:49900", ambiguous_mars)
+
+
+@pytest.mark.parametrize(
+    "geographic,north,south",
+    [
+        ("IAU:30100", "IAU:30130", "IAU:30135"),
+        ("IAU:49900", "IAU:49930", "IAU:49935"),
+    ],
+)
+def test_iau_polar_stereographic_round_trips(geographic, north, south):
+    for code, lon, lat in [(north, 44.0, 80.0), (south, -73.0, -80.0)]:
+        forward = gis.CrsTransform.from_crs(geographic, code)
+        inverse = gis.CrsTransform.from_crs(code, geographic)
+        x, y = forward.transform_point(lon, lat)
+        recovered_lon, recovered_lat = inverse.transform_point(x, y)
+        assert _longitude_error(recovered_lon, lon) < 1e-9
+        assert abs(recovered_lat - lat) < 1e-9
+
+
+def test_iau_dispatch_rejects_unknown_cross_body_and_mars_ographic_codes():
+    with pytest.raises(ValueError, match=r"unsupported IAU code 30199"):
+        gis.CrsTransform.from_crs("IAU:30100", "IAU:30199")
+    with pytest.raises(ValueError, match=r"Moon.*Mars|Mars.*Moon"):
+        gis.CrsTransform.from_crs("IAU:30100", "IAU:49910")
+    with pytest.raises(ValueError, match=r"planetographic|ographic.*planetocentric"):
+        gis.CrsTransform.from_crs("IAU:49901", "IAU:49910")
+
+
+def test_unknown_iau_geotiff_requires_and_preserves_defining_wkt(tmp_path):
+    path = tmp_path / "unknown_lunar_crs.tif"
+    crs_spec = {
+        "name": "IAU",
+        "code": "30199",
+        "wkt": 'PROJCRS["Unknown lunar projection"]',
+    }
+    written = gis.write_raster(
+        path,
+        np.arange(4, dtype=np.int16).reshape(2, 2),
+        crs=crs_spec,
+        transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2.0),
+    )
+    reread = gis.read_raster_info(path)
+    expected_authority = {"name": "IAU", "code": "30199"}
+    assert written.crs_authority == expected_authority
+    assert reread.crs_authority == expected_authority
+    assert reread.crs_wkt == crs_spec["wkt"]
+
+
+def test_iau_wkt_body_consistency_and_like_path_equivalence(tmp_path):
+    source = tmp_path / "moon_with_wkt.tif"
+    moon_crs = {
+        "name": "IAU",
+        "code": "30115",
+        "wkt": 'PROJCRS["Moon"]',
+    }
+    gis.write_raster(
+        source,
+        np.arange(4, dtype=np.int16).reshape(2, 2),
+        crs=moon_crs,
+        transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2.0),
+    )
+    copied = gis.write_raster(
+        tmp_path / "copied.tif",
+        np.arange(4, dtype=np.int16).reshape(2, 2),
+        crs="IAU:30115",
+        like_path=source,
+    )
+    assert copied.crs_authority == {"name": "IAU", "code": "30115"}
+
+    with pytest.raises(ValueError, match="different planetary body"):
+        gis.write_raster(
+            tmp_path / "contradictory.tif",
+            np.arange(4, dtype=np.int16).reshape(2, 2),
+            crs={
+                "name": "IAU",
+                "code": "30115",
+                "wkt": 'PROJCRS["Mars"]',
+            },
+            transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2.0),
+        )
+    with pytest.raises(ValueError, match="different planetary body"):
+        gis.write_raster(
+            tmp_path / "earth_wkt.tif",
+            np.arange(4, dtype=np.int16).reshape(2, 2),
+            crs={
+                "name": "IAU",
+                "code": "30115",
+                "wkt": 'GEOGCRS["WGS 84",DATUM["World Geodetic System 1984"]]',
+            },
+            transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2.0),
+        )
+    with pytest.raises(ValueError, match="WKT kind"):
+        gis.write_raster(
+            tmp_path / "wrong_kind.tif",
+            np.arange(4, dtype=np.int16).reshape(2, 2),
+            crs={
+                "name": "IAU",
+                "code": "30115",
+                "wkt": 'GEOGCRS["Moon"]',
+            },
+            transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2.0),
+        )
+
+
+def test_iau_raster_authority_survives_geotiff_round_trip(tmp_path):
+    path = tmp_path / "moon_iau.tif"
+    written = gis.write_raster(
+        path,
+        np.arange(4, dtype=np.int16).reshape(2, 2),
+        crs="IAU:30115",
+        transform=(0.5, 0.0, -180.0, 0.0, -0.5, -80.0),
+    )
+    reread = gis.read_raster_info(path)
+    expected = {"name": "IAU", "code": "30115"}
+    assert written.crs_authority == expected
+    assert reread.crs_authority == expected

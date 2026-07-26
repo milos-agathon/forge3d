@@ -500,12 +500,12 @@ impl CrsTag for MoonMe2000 {
 impl CrsTag for MarsIau2000 {
     type Body = Mars;
     const AUTHORITY: &'static str = "IAU";
-    const CODE: u32 = 49900;
+    const CODE: u32 = 49902;
     const NAME: &'static str = "Mars (2015) planetocentric +East";
 }
 impl<B: BodyTag> CrsTag for EcefOf<B> {
     type Body = B;
-    const AUTHORITY: &'static str = B::CRS_AUTHORITY;
+    const AUTHORITY: &'static str = B::BODY_FIXED_AUTHORITY;
     const CODE: u32 = B::BODY_FIXED_CODE;
     const NAME: &'static str = B::BODY_FIXED_NAME;
 }
@@ -917,15 +917,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn planetary_crs_tags_use_the_iau_authority() {
+    fn planetary_geographic_tags_use_iau_without_body_fixed_impersonation() {
         assert_eq!(Wgs84::AUTHORITY, "EPSG");
         assert_eq!(Wgs84::CODE, 4326);
         assert_eq!(MoonMe2000::AUTHORITY, "IAU");
         assert_eq!(MoonMe2000::CODE, 30100);
         assert_eq!(MarsIau2000::AUTHORITY, "IAU");
-        assert_eq!(MarsIau2000::CODE, 49900);
-        assert_eq!(EcefOf::<Moon>::AUTHORITY, "IAU");
-        assert_eq!(EcefOf::<Moon>::CODE, 30101);
+        assert_eq!(MarsIau2000::CODE, 49902);
+        assert_eq!(EcefOf::<Moon>::AUTHORITY, "FORGE3D");
+        assert_eq!(EcefOf::<Moon>::CODE, 301);
+        assert_eq!(EcefOf::<Mars>::AUTHORITY, "FORGE3D");
+        assert_eq!(EcefOf::<Mars>::CODE, 499);
     }
 
     #[test]

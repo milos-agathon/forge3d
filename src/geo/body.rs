@@ -93,7 +93,7 @@ mod sealed {
 /// Marker implemented only by bodies in the compile-time datum registry.
 pub trait BodyTag: sealed::Sealed + Copy + core::fmt::Debug + 'static {
     const BODY: &'static Body;
-    const CRS_AUTHORITY: &'static str;
+    const BODY_FIXED_AUTHORITY: &'static str;
     const BODY_FIXED_CODE: u32;
     const BODY_FIXED_NAME: &'static str;
 }
@@ -111,21 +111,21 @@ impl sealed::Sealed for Mars {}
 
 impl BodyTag for Earth {
     const BODY: &'static Body = &EARTH;
-    const CRS_AUTHORITY: &'static str = "EPSG";
+    const BODY_FIXED_AUTHORITY: &'static str = "EPSG";
     const BODY_FIXED_CODE: u32 = 4978;
-    const BODY_FIXED_NAME: &'static str = "Earth body-fixed";
+    const BODY_FIXED_NAME: &'static str = "Earth-centred, Earth-fixed";
 }
 impl BodyTag for Moon {
     const BODY: &'static Body = &MOON;
-    const CRS_AUTHORITY: &'static str = "IAU";
-    const BODY_FIXED_CODE: u32 = 30101;
-    const BODY_FIXED_NAME: &'static str = "Moon body-fixed";
+    const BODY_FIXED_AUTHORITY: &'static str = "FORGE3D";
+    const BODY_FIXED_CODE: u32 = 301;
+    const BODY_FIXED_NAME: &'static str = "Moon-centred, Moon-fixed";
 }
 impl BodyTag for Mars {
     const BODY: &'static Body = &MARS;
-    const CRS_AUTHORITY: &'static str = "IAU";
-    const BODY_FIXED_CODE: u32 = 49901;
-    const BODY_FIXED_NAME: &'static str = "Mars body-fixed";
+    const BODY_FIXED_AUTHORITY: &'static str = "FORGE3D";
+    const BODY_FIXED_CODE: u32 = 499;
+    const BODY_FIXED_NAME: &'static str = "Mars-centred, Mars-fixed";
 }
 
 #[cfg(test)]
