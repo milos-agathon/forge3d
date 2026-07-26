@@ -97,9 +97,10 @@ impl TerrainScene {
             ts_end(timing, encoder, scope, 1);
         }
         let main_scope = ts_begin(timing, encoder, "terrain.main");
-        self.run_main_pass(
+        let terrain_draw_calls = self.run_main_pass(
             encoder,
             params,
+            decoded,
             render_targets,
             &pass_bind_groups.main,
             ibl_bind_group,
@@ -109,7 +110,7 @@ impl TerrainScene {
             &pass_bind_groups.material_layer,
             sky_texture.is_some(),
         )?;
-        ts_end(timing, encoder, main_scope, 1);
+        ts_end(timing, encoder, main_scope, terrain_draw_calls);
 
         #[cfg(feature = "enable-gpu-instancing")]
         {
@@ -227,6 +228,7 @@ impl TerrainScene {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         params: &crate::terrain::render_params::TerrainRenderParams,
+        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         render_targets: &RenderTargets,
         bind_group: &wgpu::BindGroup,
         ibl_bind_group: &wgpu::BindGroup,
@@ -235,7 +237,30 @@ impl TerrainScene {
         water_reflection_bind_group: &wgpu::BindGroup,
         material_layer_bind_group: &wgpu::BindGroup,
         preserve_background: bool,
-    ) -> Result<()> {
+    ) -> Result<u32> {
+        let geometry = self.geometry_provider()?;
+        let first_instance = self
+            .device
+            .features()
+            .contains(wgpu::Features::INDIRECT_FIRST_INSTANCE);
+        let multi_draw = first_instance
+            && self
+                .device
+                .features()
+                .contains(wgpu::Features::MULTI_DRAW_INDIRECT);
+        let half_height = (decoded.clamp.height_range.1 - decoded.clamp.height_range.0).abs()
+            * params.z_scale.abs()
+            * 0.5;
+        let skirt = clipmap_camera_config(&params.camera_mode)
+            .map(|config| config.ring_resolution as f32 * 0.001 * params.z_scale.abs())
+            .unwrap_or(0.0);
+        let indirect = geometry.encode_indirect(
+            self.queue.as_ref(),
+            encoder,
+            params,
+            (-half_height - skirt, half_height),
+            first_instance,
+        );
         let pipeline_cache = self
             .pipeline
             .lock()
@@ -295,7 +320,6 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
-            let geometry = self.geometry_provider()?;
             crate::core::shader_registry::record_shader_use(if geometry.is_clipmap() {
                 "terrain_pbr_pom.clipmap.shader"
             } else {
@@ -315,11 +339,14 @@ impl TerrainScene {
             pass.set_bind_group(4, fog_bind_group, &[]);
             pass.set_bind_group(5, water_reflection_bind_group, &[]);
             pass.set_bind_group(6, material_layer_bind_group, &[]);
-            geometry.draw(&mut pass);
+            let draw_calls = if let Some(indirect) = indirect.as_ref() {
+                geometry.draw_indirect(&mut pass, indirect, multi_draw, first_instance)
+            } else {
+                geometry.draw(&mut pass);
+                1
+            };
+            return Ok(draw_calls);
         }
-
-        let _ = params;
-        Ok(())
     }
 
     pub(in crate::terrain::renderer) fn resolve_output(

@@ -26,6 +26,7 @@ from _terrain_runtime import (
     _write_test_hdr,
     terrain_rendering_available,
 )
+from forge3d.diagnostics import render_certificate
 from forge3d.terrain_params import PomSettings, make_terrain_params_config
 
 requires_terrain = pytest.mark.skipif(
@@ -131,6 +132,15 @@ def test_terrain_renderer_exposes_height_streaming_api():
 
 @requires_terrain
 class TestClipmapGeometryProvider:
+    def test_clipmap_render_uses_gpu_lod_indirect_draws(self, terrain_ibl):
+        renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        _render_rgba(renderer, _make_params(), _steep_dem(64), terrain_ibl)
+
+        certificate = render_certificate(sign=False)
+        main_pass = next(p for p in certificate["passes"] if p["label"] == "terrain.main")
+        assert main_pass["draw_calls"] >= 1
+        assert "clipmap_lod_select" in certificate["engine"]["wgsl_module_hashes"]
+
     def test_clipmap_render_is_deterministic(self, terrain_ibl):
         session = f3d.Session(window=False)
         renderer = f3d.TerrainRenderer(session)

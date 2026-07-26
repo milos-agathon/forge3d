@@ -181,7 +181,10 @@ impl TerrainScene {
                         vertex: wgpu::VertexState {
                             module: &shader,
                             entry_point: "vs_clipmap_main",
-                            buffers: &[crate::terrain::clipmap::ClipmapVertex::desc()],
+                            buffers: &[
+                                crate::terrain::clipmap::ClipmapVertex::desc(),
+                                crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::desc(),
+                            ],
                         },
                         fragment: Some(wgpu::FragmentState {
                             module: &shader,
@@ -353,7 +356,10 @@ impl TerrainScene {
                 write_mask: wgpu::ColorWrites::ALL,
             }));
         }
-        let clipmap_vertex_buffers = [crate::terrain::clipmap::ClipmapVertex::desc()];
+        let clipmap_vertex_buffers = [
+            crate::terrain::clipmap::ClipmapVertex::desc(),
+            crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::desc(),
+        ];
         let (vertex_entry, vertex_buffers): (&str, &[wgpu::VertexBufferLayout]) =
             if clipmap_geometry {
                 ("vs_clipmap_main", &clipmap_vertex_buffers)

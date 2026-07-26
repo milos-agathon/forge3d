@@ -13,7 +13,13 @@
 
 use super::*;
 use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
-use crate::terrain::clipmap::ClipmapConfig;
+use crate::terrain::clipmap::{
+    gpu_lod::{
+        ClipmapDrawInstance, GpuLodConfig, GpuLodDrawResources, GpuLodSelector,
+        IndirectDrawTemplate, TileInfo,
+    },
+    ClipmapConfig,
+};
 
 /// Cache key for the generated clipmap mesh. Regeneration only happens when
 /// the clipmap configuration, terrain span, or streaming center changes —
@@ -27,6 +33,8 @@ pub(in crate::terrain::renderer) struct ClipmapGeometryKey {
     morph_range_bits: u32,
     terrain_span_bits: u32,
     center_bits: (u32, u32),
+    viewport: (u32, u32),
+    fov_y_bits: u32,
 }
 
 impl ClipmapGeometryKey {
@@ -34,6 +42,8 @@ impl ClipmapGeometryKey {
         config: &ClipmapConfig,
         terrain_span: f32,
         center: glam::Vec2,
+        viewport: (u32, u32),
+        fov_y: f32,
     ) -> Self {
         Self {
             ring_count: config.ring_count,
@@ -43,6 +53,8 @@ impl ClipmapGeometryKey {
             morph_range_bits: config.morph_range.to_bits(),
             terrain_span_bits: terrain_span.to_bits(),
             center_bits: (center.x.to_bits(), center.y.to_bits()),
+            viewport,
+            fov_y_bits: fov_y.to_bits(),
         }
     }
 }
@@ -56,6 +68,9 @@ pub(in crate::terrain::renderer) enum TerrainGeometryProvider {
         vertex_buffer: TrackedBuffer,
         index_buffer: TrackedBuffer,
         index_count: u32,
+        fallback_instance_buffer: TrackedBuffer,
+        lod_selector: GpuLodSelector,
+        lod_resources: GpuLodDrawResources,
         cache_key: ClipmapGeometryKey,
     },
 }
@@ -75,14 +90,153 @@ impl TerrainGeometryProvider {
                 vertex_buffer,
                 index_buffer,
                 index_count,
+                fallback_instance_buffer,
                 ..
             } => {
                 pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                pass.set_vertex_buffer(1, fallback_instance_buffer.slice(..));
                 pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*index_count, 0, 0..1);
             }
         }
     }
+
+    pub(in crate::terrain::renderer) fn encode_indirect(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        height_bounds: (f32, f32),
+        first_instance: bool,
+    ) -> Option<&GpuLodDrawResources> {
+        let Self::Clipmap {
+            lod_selector,
+            lod_resources,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let (eye, view, proj) = TerrainScene::build_camera_matrices(params);
+        lod_selector.encode_indirect(
+            queue,
+            encoder,
+            lod_resources,
+            proj * view,
+            eye,
+            first_instance,
+            height_bounds,
+        );
+        Some(lod_resources)
+    }
+
+    pub(in crate::terrain::renderer) fn draw_indirect<'p>(
+        &'p self,
+        pass: &mut wgpu::RenderPass<'p>,
+        resources: &'p GpuLodDrawResources,
+        multi_draw: bool,
+        first_instance: bool,
+    ) -> u32 {
+        let Self::Clipmap {
+            vertex_buffer,
+            index_buffer,
+            ..
+        } = self
+        else {
+            self.draw(pass);
+            return 1;
+        };
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, resources.instance_buffer.slice(..));
+        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        if multi_draw && first_instance {
+            pass.multi_draw_indexed_indirect(
+                &resources.indirect_buffer,
+                0,
+                resources.max_draw_count,
+            );
+        } else {
+            let stride = std::mem::size_of::<
+                crate::terrain::clipmap::gpu_lod::DrawIndexedIndirectArgs,
+            >() as u64;
+            for draw in 0..resources.max_draw_count {
+                if !first_instance {
+                    let offset =
+                        u64::from(draw) * std::mem::size_of::<ClipmapDrawInstance>() as u64;
+                    pass.set_vertex_buffer(1, resources.instance_buffer.slice(offset..));
+                }
+                pass.draw_indexed_indirect(&resources.indirect_buffer, u64::from(draw) * stride);
+            }
+        }
+        if multi_draw && first_instance {
+            1
+        } else {
+            resources.max_draw_count
+        }
+    }
+}
+
+fn append_clipmap_lod_variant(
+    mesh: &mut crate::terrain::clipmap::ClipmapMesh,
+    config: &ClipmapConfig,
+    center: glam::Vec2,
+    terrain_span: f32,
+    region_index: usize,
+    lod: u32,
+) -> crate::terrain::clipmap::level::MeshBounds {
+    let resolution = if region_index == 0 {
+        config.center_resolution
+    } else {
+        config.ring_resolution
+    }
+    .checked_shr(lod)
+    .unwrap_or(0)
+    .max(2);
+    let base_cell_size = terrain_span / (config.center_resolution.max(1) as f32 * 8.0);
+    let (vertices, mut indices) = if region_index == 0 {
+        crate::terrain::clipmap::make_center_block(
+            resolution,
+            center,
+            base_cell_size * config.center_resolution as f32 * 0.5,
+            terrain_span,
+        )
+    } else {
+        let ring_index = region_index as u32 - 1;
+        let (inner, outer) = config.ring_bounds(ring_index, base_cell_size, center);
+        let (mut vertices, mut indices) = crate::terrain::clipmap::make_ring(
+            ring_index,
+            inner,
+            outer,
+            resolution,
+            center,
+            terrain_span,
+            config.morph_range,
+        );
+        let (skirt_vertices, skirt_indices) = crate::terrain::clipmap::make_ring_skirts(
+            &vertices,
+            &indices,
+            config.skirt_depth,
+            ring_index,
+            resolution as usize + 1,
+        );
+        vertices.extend(skirt_vertices);
+        indices.extend(skirt_indices);
+        (vertices, indices)
+    };
+    let vertex_start = mesh.vertices.len() as u32;
+    let index_start = mesh.indices.len() as u32;
+    for index in &mut indices {
+        *index += vertex_start;
+    }
+    let bounds = crate::terrain::clipmap::level::MeshBounds {
+        vertex_start,
+        vertex_count: vertices.len() as u32,
+        index_start,
+        index_count: indices.len() as u32,
+    };
+    mesh.vertices.extend(vertices);
+    mesh.indices.extend(indices);
+    bounds
 }
 
 impl TerrainScene {
@@ -105,7 +259,13 @@ impl TerrainScene {
 
         let center = self.height_streaming_center();
         let terrain_span = params.terrain_span.max(1.0);
-        let cache_key = ClipmapGeometryKey::new(&config, terrain_span, center);
+        let cache_key = ClipmapGeometryKey::new(
+            &config,
+            terrain_span,
+            center,
+            params.size_px,
+            params.fov_y_deg.to_radians(),
+        );
         if let Some(TerrainGeometryProvider::Clipmap {
             cache_key: existing,
             ..
@@ -116,7 +276,52 @@ impl TerrainScene {
             }
         }
 
-        let mesh = crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span);
+        let mut mesh =
+            crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span);
+        let fallback_index_count = mesh.index_count();
+        let regions: Vec<_> = std::iter::once(mesh.center_bounds)
+            .chain(mesh.ring_bounds.iter().copied())
+            .collect();
+        let variant_count = config.ring_count.max(1);
+        let mut lod_tiles = Vec::with_capacity(regions.len());
+        let mut draw_templates = Vec::with_capacity(regions.len() * variant_count as usize);
+        for (region_index, region) in regions.iter().copied().enumerate() {
+            let vertices = &mesh.vertices[region.vertex_start as usize
+                ..(region.vertex_start + region.vertex_count) as usize];
+            let bounds_min = vertices
+                .iter()
+                .fold(glam::Vec2::splat(f32::INFINITY), |v, p| {
+                    v.min(glam::Vec2::from(p.position))
+                });
+            let bounds_max = vertices
+                .iter()
+                .fold(glam::Vec2::splat(f32::NEG_INFINITY), |v, p| {
+                    v.max(glam::Vec2::from(p.position))
+                });
+            let lod = region_index.saturating_sub(1) as u32;
+            let tile = TileInfo::new(lod, region_index as u32, 0, bounds_min, bounds_max);
+            for variant in 0..variant_count {
+                let variant_region = if variant == 0 {
+                    region
+                } else {
+                    append_clipmap_lod_variant(
+                        &mut mesh,
+                        &config,
+                        center,
+                        terrain_span,
+                        region_index,
+                        variant,
+                    )
+                };
+                draw_templates.push(IndirectDrawTemplate {
+                    index_count: variant_region.index_count,
+                    first_index: variant_region.index_start,
+                    base_vertex: 0,
+                    tile_id: tile.tile_id,
+                });
+            }
+            lod_tiles.push(tile);
+        }
         let vertex_buffer = tracked_create_buffer_init(
             self.device.as_ref(),
             &wgpu::util::BufferInitDescriptor {
@@ -133,10 +338,39 @@ impl TerrainScene {
                 usage: wgpu::BufferUsages::INDEX,
             },
         )?;
+        let fallback_instance = ClipmapDrawInstance::identity(lod_tiles[0].tile_id, 0);
+        let fallback_instance_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.clipmap.fallback_instance"),
+                contents: bytemuck::bytes_of(&fallback_instance),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        )?;
+        let lod_selector = GpuLodSelector::new(
+            self.device.as_ref(),
+            GpuLodConfig {
+                viewport_width: params.size_px.0,
+                viewport_height: params.size_px.1,
+                fov_y: params.fov_y_deg.to_radians(),
+                max_lod: variant_count - 1,
+                terrain_width: terrain_span,
+                tile_size: terrain_span / config.ring_resolution.max(1) as f32,
+                ..Default::default()
+            },
+        );
+        let lod_resources = lod_selector.create_draw_resources(
+            self.device.as_ref(),
+            &lod_tiles,
+            &draw_templates,
+        )?;
         self.geometry_provider = Some(TerrainGeometryProvider::Clipmap {
             vertex_buffer,
             index_buffer,
-            index_count: mesh.index_count(),
+            index_count: fallback_index_count,
+            fallback_instance_buffer,
+            lod_selector,
+            lod_resources,
             cache_key,
         });
         Ok(())

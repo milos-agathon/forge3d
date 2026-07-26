@@ -39,6 +39,11 @@ pub const WANTED: &[(&str, Features, &str)] = &[
         Features::INDIRECT_FIRST_INSTANCE,
         "indirect draws with non-zero first_instance unavailable",
     ),
+    (
+        "multi_draw_indirect",
+        Features::MULTI_DRAW_INDIRECT,
+        "terrain indirect draws are issued in a CPU loop instead of one multi-draw call",
+    ),
 ];
 
 #[derive(Clone, Copy, Debug)]

@@ -4487,7 +4487,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
 fn vs_clipmap_main(
     @location(0) clip_pos_xz : vec2<f32>,
     @location(1) clip_uv : vec2<f32>,
-    @location(2) clip_morph : vec2<f32>
+    @location(2) clip_morph : vec2<f32>,
+    @location(3) instance_col0 : vec4<f32>,
+    @location(4) instance_col1 : vec4<f32>,
+    @location(5) instance_col2 : vec4<f32>,
+    @location(6) instance_col3 : vec4<f32>,
+    @location(7) _tile_id_lod : vec2<u32>
 ) -> VertexOutput {
     var out : VertexOutput;
 
@@ -4502,15 +4507,27 @@ fn vs_clipmap_main(
     let skirt_offset = select(0.0, u_terrain.camera_mode_params.y * 0.001, clip_morph.x < 0.0);
     let world_z_centered = (h_disp - h_center - skirt_offset) * h_exag;
     let world_z_original = (h_disp - skirt_offset) * h_exag;
+    let instance_transform = mat4x4<f32>(
+        instance_col0,
+        instance_col1,
+        instance_col2,
+        instance_col3,
+    );
+    let instance_position = instance_transform * vec4<f32>(
+        clip_pos_xz.x,
+        clip_pos_xz.y,
+        world_z_centered,
+        1.0,
+    );
 
-    out.world_position = vec3<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_original);
+    out.world_position = vec3<f32>(instance_position.xy, world_z_original);
     out.world_normal = vec3<f32>(0.0, 0.0, 1.0);
     out.tex_coord = uv;
     out.clip_position = det_mat4_mul_vec4(
         u_terrain.proj,
         det_mat4_mul_vec4(
             u_terrain.view,
-            vec4<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_centered, 1.0),
+            instance_position,
         ),
     );
     return out;
