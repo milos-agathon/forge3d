@@ -914,6 +914,14 @@ def hybrid_render_terrain_reference(
     seed: int = 7,
     certificate: bool | str = False,
     cache: str | None = None,
+    observer_latitude_deg: float = 0.0,
+    observer_longitude_deg: float = 0.0,
+    earth_model: str = "ellipsoid",
+    sphere_radius_m: float = 6_371_008.8,
+    refraction_model: str = "bennett",
+    refraction_k: float = 0.13,
+    pressure_mbar: float = 1013.25,
+    temperature_c: float = 15.0,
 ) -> dict:
     """Converged GPU path-traced reference of a real DEM under sun + IBL.
 
@@ -1013,4 +1021,12 @@ def hybrid_render_terrain_reference(
         variance_threshold=float(variance_threshold),
         seed=int(seed),
         certificate=certificate,
+        observer_latitude_deg=float(observer_latitude_deg),
+        observer_longitude_deg=float(observer_longitude_deg),
+        earth_model=earth_model,
+        sphere_radius_m=float(sphere_radius_m),
+        refraction_model=refraction_model,
+        refraction_k=float(refraction_k),
+        pressure_mbar=float(pressure_mbar),
+        temperature_c=float(temperature_c),
     )

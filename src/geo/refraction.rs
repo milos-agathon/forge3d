@@ -27,6 +27,17 @@ pub enum RefractionModel {
 }
 
 impl EarthModel {
+    pub fn from_name(name: &str, latitude_deg: f64, sphere_radius_m: f64) -> Result<Self, String> {
+        match name {
+            "flat" => Ok(Self::Flat),
+            "sphere" => Ok(Self::Sphere {
+                radius_m: sphere_radius_m,
+            }),
+            "ellipsoid" | "wgs84" => Ok(Self::Ellipsoid { latitude_deg }),
+            _ => Err(format!("unsupported earth_model {name:?}")),
+        }
+    }
+
     pub fn directional_radius_m(self, azimuth_deg: f64) -> Result<f64, String> {
         if !azimuth_deg.is_finite() {
             return Err("azimuth must be finite".into());
@@ -52,6 +63,27 @@ impl EarthModel {
 }
 
 impl RefractionModel {
+    pub fn from_name(
+        name: &str,
+        pressure_mbar: f64,
+        temperature_c: f64,
+        k: f64,
+    ) -> Result<Self, String> {
+        match name {
+            "none" => Ok(Self::None),
+            "bennett" => Ok(Self::Bennett {
+                pressure_mbar,
+                temperature_c,
+            }),
+            "saemundsson" => Ok(Self::Saemundsson {
+                pressure_mbar,
+                temperature_c,
+            }),
+            "effective_radius" => Ok(Self::EffectiveRadius { k }),
+            _ => Err(format!("unsupported refraction_model {name:?}")),
+        }
+    }
+
     pub fn k(self) -> Result<f64, String> {
         let value = match self {
             Self::None => 0.0,
@@ -108,5 +140,17 @@ mod tests {
         let effective =
             effective_radius_m(earth, RefractionModel::EffectiveRadius { k: 0.13 }, 0.0).unwrap();
         assert!(effective > earth.directional_radius_m(0.0).unwrap());
+    }
+
+    #[test]
+    fn model_names_are_strict_and_flat_still_validates_refraction() {
+        assert!(EarthModel::from_name("mean-earth", 0.0, 6_371_000.0).is_err());
+        assert!(RefractionModel::from_name("standard", 1013.25, 15.0, 0.13).is_err());
+        assert!(effective_radius_m(
+            EarthModel::Flat,
+            RefractionModel::EffectiveRadius { k: 1.0 },
+            0.0
+        )
+        .is_err());
     }
 }

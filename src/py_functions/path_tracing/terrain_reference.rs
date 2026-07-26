@@ -77,6 +77,14 @@ fn extract_sun_color(obj: &Bound<'_, PyAny>) -> PyResult<[f32; 3]> {
     certificate = None,
     sun_color = None,
     cache = None,
+    observer_latitude_deg = 0.0,
+    observer_longitude_deg = 0.0,
+    earth_model = "ellipsoid",
+    sphere_radius_m = 6371008.8,
+    refraction_model = "bennett",
+    refraction_k = 0.13,
+    pressure_mbar = 1013.25,
+    temperature_c = 15.0,
 ))]
 pub(crate) fn hybrid_render_terrain_reference(
     py: Python<'_>,
@@ -102,6 +110,14 @@ pub(crate) fn hybrid_render_terrain_reference(
     certificate: Option<Bound<'_, PyAny>>,
     sun_color: Option<Bound<'_, PyAny>>,
     cache: Option<Bound<'_, PyAny>>,
+    observer_latitude_deg: f64,
+    observer_longitude_deg: f64,
+    earth_model: &str,
+    sphere_radius_m: f64,
+    refraction_model: &str,
+    refraction_k: f64,
+    pressure_mbar: f64,
+    temperature_c: f64,
 ) -> PyResult<Py<PyAny>> {
     let _ = cache;
     use crate::path_tracing::hybrid_compute::{HybridPathTracer, TerrainReferenceDesc};
@@ -111,6 +127,19 @@ pub(crate) fn hybrid_render_terrain_reference(
         None => [1.0, 0.97, 0.92],
         Some(obj) => extract_sun_color(obj)?,
     };
+    let earth_model = crate::geo::refraction::EarthModel::from_name(
+        earth_model,
+        observer_latitude_deg,
+        sphere_radius_m,
+    )
+    .map_err(PyValueError::new_err)?;
+    let refraction_model = crate::geo::refraction::RefractionModel::from_name(
+        refraction_model,
+        pressure_mbar,
+        temperature_c,
+        refraction_k,
+    )
+    .map_err(PyValueError::new_err)?;
 
     let certificate_capture =
         crate::core::certificate::begin_render_capture("hybrid_render_terrain_reference");
@@ -198,6 +227,9 @@ pub(crate) fn hybrid_render_terrain_reference(
         sun_elevation_deg,
         sun_intensity,
         sun_color,
+        observer_geodetic_deg: [observer_latitude_deg, observer_longitude_deg],
+        earth_model,
+        refraction_model,
         env_map: env,
         env_intensity,
         mesh,

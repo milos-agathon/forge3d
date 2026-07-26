@@ -1445,6 +1445,14 @@ def hybrid_render_terrain_reference(
     certificate: bool | str | PathLikeStr | None = ...,
     sun_color: Optional[Sequence[float] | np.ndarray] = ...,
     cache: str | PathLikeStr | None = ...,
+    observer_latitude_deg: float = ...,
+    observer_longitude_deg: float = ...,
+    earth_model: str = ...,
+    sphere_radius_m: float = ...,
+    refraction_model: str = ...,
+    refraction_k: float = ...,
+    pressure_mbar: float = ...,
+    temperature_c: float = ...,
 ) -> Dict[str, Any]: ...
 
 def render_offscreen_rgba(

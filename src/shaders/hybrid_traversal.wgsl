@@ -221,7 +221,7 @@ fn intersect_hybrid_optimized(ray: Ray, early_exit_distance: f32) -> HybridHitRe
         && terrain_enabled()) {
         var tray = ray;
         tray.tmax = best_hit.t;
-        let terrain_hit = terrain_intersect(tray);
+        let terrain_hit = terrain_trace(tray, true);
         if (terrain_hit.hit != 0u && terrain_hit.t < best_hit.t) {
             best_hit = terrain_hit;
         }

@@ -85,4 +85,12 @@ def hybrid_render_terrain_reference(
     seed: int = ...,
     certificate: bool | str | None = ...,
     cache: str | None = ...,
+    observer_latitude_deg: float = ...,
+    observer_longitude_deg: float = ...,
+    earth_model: str = ...,
+    sphere_radius_m: float = ...,
+    refraction_model: str = ...,
+    refraction_k: float = ...,
+    pressure_mbar: float = ...,
+    temperature_c: float = ...,
 ) -> Dict[str, object]: ...
