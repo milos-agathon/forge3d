@@ -211,6 +211,13 @@ pub struct GpuLodDrawResources {
     bind_group: wgpu::BindGroup,
 }
 
+#[cfg(feature = "extension-module")]
+impl GpuLodDrawResources {
+    pub(crate) fn template_buffer(&self) -> &wgpu::Buffer {
+        &self._draw_templates
+    }
+}
+
 /// Frustum planes for culling (Ax + By + Cz + D = 0 format).
 #[derive(Debug, Clone)]
 pub struct FrustumPlanes {
@@ -237,7 +244,11 @@ impl FrustumPlanes {
             right: normalize_plane(rows[3] - rows[0]),
             bottom: normalize_plane(rows[3] + rows[1]),
             top: normalize_plane(rows[3] - rows[1]),
-            near: normalize_plane(rows[3] + rows[2]),
+            // WGPU/glam perspective matrices use a zero-to-one depth range.
+            // The near clip inequality is therefore row2 >= 0, not the
+            // OpenGL-style row3 + row2 >= 0.  The latter rejected every
+            // clipmap tile on the NVIDIA Vulkan acceptance lane.
+            near: normalize_plane(rows[2]),
             far: normalize_plane(rows[3] - rows[2]),
         }
     }
@@ -911,11 +922,22 @@ mod tests {
     }
 
     #[test]
+    fn zero_to_one_near_plane_keeps_points_in_front_of_camera() {
+        let eye = Vec3::new(0.0, 0.0, 10.0);
+        let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 0.1, 100.0);
+        let planes = FrustumPlanes::from_view_proj(projection * view);
+        for plane in planes.to_array() {
+            let distance = Vec3::new(plane[0], plane[1], plane[2]).dot(Vec3::ZERO) + plane[3];
+            assert!(distance >= 0.0, "origin rejected by plane {plane:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a physical GPU; the TESSELLA lane runs this exact test"]
     fn gpu_and_cpu_select_identical_tile_sets_for_1000_cameras() {
-        let Ok(context) = crate::core::gpu::try_ctx() else {
-            eprintln!("GPU LOD differential ABSENT: no adapter on this test host");
-            return;
-        };
+        let context = crate::core::gpu::try_ctx()
+            .expect("TESSELLA GPU/CPU differential requires a physical GPU adapter");
         let config = GpuLodConfig {
             pixel_error_budget: 256.0,
             terrain_width: 2048.0,

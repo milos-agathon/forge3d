@@ -149,6 +149,7 @@ impl TerrainScene {
                     &self.fog_bind_group_layout,
                     &self.water_reflection_bind_group_layout,
                     &self.material_layer_bind_group_layout,
+                    &self.visibility_resolve_bind_group_layout,
                     self.color_format,
                 ));
         }

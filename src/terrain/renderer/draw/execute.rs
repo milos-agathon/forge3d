@@ -320,7 +320,7 @@ impl TerrainScene {
                 first_instance,
             );
             let phase1_source = TerrainDrawSource::Culled(culler.phase1_resources());
-            if visibility_enabled {
+            let phase1_visibility_calls = if visibility_enabled {
                 self.encode_visibility_draw_pass(
                     encoder,
                     render_targets,
@@ -330,24 +330,30 @@ impl TerrainScene {
                     phase1_source,
                     multi_draw_count,
                     first_instance,
-                )?;
-            }
-            let phase1_calls = self.encode_terrain_draw_pass(
-                encoder,
-                render_targets,
-                bind_group,
-                ibl_bind_group,
-                shadow_bind_group,
-                fog_bind_group,
-                water_reflection_bind_group,
-                material_layer_bind_group,
-                preserve_background,
-                visibility_enabled,
-                visibility_enabled,
-                phase1_source,
-                multi_draw_count,
-                first_instance,
-            )?;
+                )?
+            } else {
+                0
+            };
+            let phase1_calls = if visibility_enabled {
+                phase1_visibility_calls
+            } else {
+                self.encode_terrain_draw_pass(
+                    encoder,
+                    render_targets,
+                    bind_group,
+                    ibl_bind_group,
+                    shadow_bind_group,
+                    fog_bind_group,
+                    water_reflection_bind_group,
+                    material_layer_bind_group,
+                    preserve_background,
+                    false,
+                    false,
+                    phase1_source,
+                    multi_draw_count,
+                    first_instance,
+                )?
+            };
             culler.build_phase2_hzb(self.device.as_ref(), encoder, &render_targets.depth_view)?;
             culler.phase2(
                 self.queue.as_ref(),
@@ -357,7 +363,7 @@ impl TerrainScene {
                 first_instance,
             );
             let phase2_source = TerrainDrawSource::Culled(culler.phase2_resources());
-            if visibility_enabled {
+            let phase2_visibility_calls = if visibility_enabled {
                 self.encode_visibility_draw_pass(
                     encoder,
                     render_targets,
@@ -367,25 +373,42 @@ impl TerrainScene {
                     phase2_source,
                     multi_draw_count,
                     first_instance,
-                )?;
-            }
-            let phase2_calls = self.encode_terrain_draw_pass(
-                encoder,
-                render_targets,
-                bind_group,
-                ibl_bind_group,
-                shadow_bind_group,
-                fog_bind_group,
-                water_reflection_bind_group,
-                material_layer_bind_group,
-                true,
-                true,
-                visibility_enabled,
-                phase2_source,
-                multi_draw_count,
-                first_instance,
-            )?;
+                )?
+            } else {
+                0
+            };
+            let phase2_calls = if visibility_enabled {
+                phase2_visibility_calls
+            } else {
+                self.encode_terrain_draw_pass(
+                    encoder,
+                    render_targets,
+                    bind_group,
+                    ibl_bind_group,
+                    shadow_bind_group,
+                    fog_bind_group,
+                    water_reflection_bind_group,
+                    material_layer_bind_group,
+                    true,
+                    true,
+                    false,
+                    phase2_source,
+                    multi_draw_count,
+                    first_instance,
+                )?
+            };
             if visibility_enabled {
+                self.encode_visibility_resolve_pass(
+                    encoder,
+                    render_targets,
+                    bind_group,
+                    ibl_bind_group,
+                    shadow_bind_group,
+                    fog_bind_group,
+                    water_reflection_bind_group,
+                    material_layer_bind_group,
+                    preserve_background,
+                )?;
                 self.stage_visibility_stats(encoder)?;
             }
             culler.build_previous_hzb(self.device.as_ref(), encoder, &render_targets.depth_view)?;
@@ -395,7 +418,7 @@ impl TerrainScene {
         let draw_source = indirect
             .map(TerrainDrawSource::Lod)
             .unwrap_or(TerrainDrawSource::Direct);
-        if visibility_enabled {
+        let visibility_calls = if visibility_enabled {
             self.encode_visibility_draw_pass(
                 encoder,
                 render_targets,
@@ -405,25 +428,42 @@ impl TerrainScene {
                 draw_source,
                 multi_draw_count,
                 first_instance,
-            )?;
-        }
-        let draw_calls = self.encode_terrain_draw_pass(
-            encoder,
-            render_targets,
-            bind_group,
-            ibl_bind_group,
-            shadow_bind_group,
-            fog_bind_group,
-            water_reflection_bind_group,
-            material_layer_bind_group,
-            preserve_background,
-            visibility_enabled,
-            visibility_enabled,
-            draw_source,
-            multi_draw_count,
-            first_instance,
-        )?;
+            )?
+        } else {
+            0
+        };
+        let draw_calls = if visibility_enabled {
+            visibility_calls
+        } else {
+            self.encode_terrain_draw_pass(
+                encoder,
+                render_targets,
+                bind_group,
+                ibl_bind_group,
+                shadow_bind_group,
+                fog_bind_group,
+                water_reflection_bind_group,
+                material_layer_bind_group,
+                preserve_background,
+                false,
+                false,
+                draw_source,
+                multi_draw_count,
+                first_instance,
+            )?
+        };
         if visibility_enabled {
+            self.encode_visibility_resolve_pass(
+                encoder,
+                render_targets,
+                bind_group,
+                ibl_bind_group,
+                shadow_bind_group,
+                fog_bind_group,
+                water_reflection_bind_group,
+                material_layer_bind_group,
+                preserve_background,
+            )?;
             self.stage_visibility_stats(encoder)?;
         }
         Ok(draw_calls)
@@ -502,6 +542,80 @@ impl TerrainScene {
             }
         };
         Ok(draw_calls)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_visibility_resolve_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        render_targets: &RenderTargets,
+        bind_group: &wgpu::BindGroup,
+        ibl_bind_group: &wgpu::BindGroup,
+        shadow_bind_group: &wgpu::BindGroup,
+        fog_bind_group: &wgpu::BindGroup,
+        water_reflection_bind_group: &wgpu::BindGroup,
+        material_layer_bind_group: &wgpu::BindGroup,
+        preserve_color: bool,
+    ) -> Result<()> {
+        let resolve_bind_group = self.visibility_resolve_bind_group(&render_targets.depth_view)?;
+        let pipeline_cache = self
+            .pipeline
+            .lock()
+            .map_err(|_| anyhow!("TerrainRenderer pipeline mutex poisoned"))?;
+        let pipeline = pipeline_cache
+            .visibility_resolve_pipeline
+            .as_ref()
+            .ok_or_else(|| anyhow!("visibility resolve pipeline not initialized"))?;
+        let light_buffer_guard = self
+            .light_buffer
+            .lock()
+            .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
+        let light_bind_group = light_buffer_guard
+            .bind_group()
+            .expect("LightBuffer should always provide a bind group");
+        let color_view = render_targets
+            .msaa_view
+            .as_ref()
+            .unwrap_or(&render_targets.internal_view);
+        let resolve_target = render_targets
+            .msaa_view
+            .as_ref()
+            .map(|_| &render_targets.internal_view);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("terrain.visibility.fullscreen_resolve"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: color_view,
+                resolve_target,
+                ops: wgpu::Operations {
+                    load: if preserve_color {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.1,
+                            b: 0.15,
+                            a: 1.0,
+                        })
+                    },
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        crate::core::shader_registry::record_shader_use("terrain_visbuffer_resolve.shader");
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        pass.set_bind_group(1, light_bind_group, &[]);
+        pass.set_bind_group(2, ibl_bind_group, &[]);
+        pass.set_bind_group(3, shadow_bind_group, &[]);
+        pass.set_bind_group(4, fog_bind_group, &[]);
+        pass.set_bind_group(5, water_reflection_bind_group, &[]);
+        pass.set_bind_group(6, material_layer_bind_group, &[]);
+        pass.set_bind_group(7, &resolve_bind_group, &[]);
+        pass.draw(0..3, 0..1);
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _tessella_evidence import record_tessella_result
 from forge3d.diagnostics import culling_stats, render_certificate
 from forge3d.terrain_params import make_terrain_params_config
 
@@ -100,6 +101,20 @@ def test_two_phase_hzb_is_bitwise_identical_to_unculled_render():
     certificate = render_certificate(sign=False)
     assert "hzb_cull" in certificate["engine"]["wgsl_module_hashes"]
     assert "p5.hzb.build.shader" in certificate["engine"]["wgsl_module_hashes"]
+    record_tessella_result(
+        "hzb_occlusion",
+        {
+            "cull_percent": float(stats["cull_percent"]),
+            "phase1_drawn": int(stats["phase1_drawn"]),
+            "phase1_rejected": int(stats["phase1_rejected"]),
+            "phase2_recovered": int(stats["phase2_recovered"]),
+            "final_drawn": int(stats["final_drawn"]),
+            "baseline_gpu_ms": baseline_gpu_ms,
+            "culled_gpu_ms": culled_gpu_ms,
+            "speedup": baseline_gpu_ms / culled_gpu_ms,
+            "bitwise_identical": True,
+        },
+    )
 
 
 @requires_terrain
@@ -153,3 +168,11 @@ def test_fresh_hzb_recovers_tiles_rejected_by_camera_history():
     np.testing.assert_array_equal(culled, baseline)
     assert stats["phase1_rejected"] > 0, stats
     assert stats["phase2_recovered"] > 0, stats
+    record_tessella_result(
+        "hzb_history_recovery",
+        {
+            "phase1_rejected": int(stats["phase1_rejected"]),
+            "phase2_recovered": int(stats["phase2_recovered"]),
+            "bitwise_identical": True,
+        },
+    )

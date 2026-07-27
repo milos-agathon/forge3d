@@ -10,6 +10,7 @@ pub(crate) struct RetainedRequestSet {
 }
 
 impl RetainedRequestSet {
+    #[cfg_attr(not(feature = "extension-module"), allow(dead_code))]
     pub(crate) fn iter(&self) -> impl Iterator<Item = &HashSet<TileKey>> {
         self.buckets.iter()
     }
@@ -32,24 +33,6 @@ impl IndexMut<usize> for RetainedRequestSet {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.buckets[index]
     }
-}
-
-pub(crate) fn retention_probe(not_ready_frames: u32) -> (bool, bool, usize) {
-    let key = TileKey {
-        family_slot: 0,
-        material_index: 0,
-        x: 17,
-        y: 9,
-        mip_level: 3,
-    };
-    let mut retained = RetainedRequestSet::default();
-    retained[0].insert(key);
-    for _ in 0..not_ready_frames {
-        retained.on_not_ready();
-    }
-    let preserved = retained[0].contains(&key);
-    retained[0].remove(&key);
-    (preserved, retained[0].is_empty(), retained[0].len())
 }
 
 #[cfg(test)]

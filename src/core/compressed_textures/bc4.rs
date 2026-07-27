@@ -158,4 +158,13 @@ mod tests {
             .unwrap();
         assert!(max_error <= 18, "max BC4 error was {max_error}");
     }
+
+    #[test]
+    fn decodes_spec_constructed_reference_block() {
+        // Independently constructed BC4 UNORM block: endpoints 255/0 and all
+        // 3-bit selectors zero. This is the canonical solid-white block and
+        // catches bit-order/interoperability drift against external decoders.
+        let reference = [255, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(decode_block(&reference), [255; 16]);
+    }
 }

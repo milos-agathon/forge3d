@@ -8,8 +8,9 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _tessella_evidence import record_tessella_result
 from _terrain_runtime import _write_test_hdr, terrain_rendering_available
-from forge3d.diagnostics import render_certificate, visibility_stats
+from forge3d.diagnostics import render_certificate, visibility_stats, vt_stats
 from forge3d.mem import memory_metrics
 from forge3d.terrain_params import (
     PomSettings,
@@ -49,7 +50,7 @@ def _build_sparse_store(tmp_path: Path) -> tuple[f3d.VTStore, dict]:
             "--tile-size",
             "128",
             "--tile-border",
-            "4",
+            "0",
             "--seed",
             "19",
         ],
@@ -87,7 +88,7 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
             family=family,
             virtual_size_px=(VIRTUAL_SIDE, VIRTUAL_SIDE),
             tile_size=128,
-            tile_border=4,
+            tile_border=0,
         )
         for family in ("albedo", "normal", "mask")
     ]
@@ -124,6 +125,11 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     assert settling_frame <= 8
     assert stats["retained_requests"] == 0
     assert stats["evictions"] <= stats["tiles_streamed"]
+    public_stats = vt_stats()
+    assert all(public_stats[key] == value for key, value in stats.items())
+    assert stats["atlas_device_local_bytes"] > 0
+    assert stats["atlas_uncompressed_equivalent_bytes"] >= stats["atlas_device_local_bytes"]
+    assert stats["atlas_compression_ratio"] >= 1.0
     assert visibility_stats()["fallback_texels"] == 0
     degradations = render_certificate(sign=False)["degradations"]
     assert not {
@@ -140,3 +146,20 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
         "manifest": manifest,
         "vt_stats": stats,
     }
+    record_tessella_result(
+        "vt_out_of_core",
+        {
+            "logical_texel_bytes": int(manifest["logical_texel_bytes"]),
+            "sparse_store_bytes": Path(store.path).stat().st_size,
+            "settling_frames": settling_frame,
+            "retained_requests": int(stats["retained_requests"]),
+            "miss_rate": float(stats["miss_rate"]),
+            "fallback_texels": int(visibility_stats()["fallback_texels"]),
+            "atlas_device_local_bytes": int(stats["atlas_device_local_bytes"]),
+            "atlas_uncompressed_equivalent_bytes": int(
+                stats["atlas_uncompressed_equivalent_bytes"]
+            ),
+            "atlas_compression_ratio": float(stats["atlas_compression_ratio"]),
+            "peak_host_visible_bytes": int(peak_host),
+        },
+    )

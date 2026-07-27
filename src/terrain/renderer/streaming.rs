@@ -26,6 +26,7 @@ use crate::terrain::lod::LodConfig;
 use crate::terrain::page_table::{AsyncTileLoader, CoalescePolicy, HeightReader};
 use crate::terrain::stream::{HeightMosaic, MosaicConfig};
 use crate::terrain::tiling::{QuadTreeNode, TileBounds, TileId};
+use crate::terrain::vt_family_residency::{FamilyResidencyTracker, TileKey as VtTileKey};
 use glam::{Mat4, Vec2, Vec3};
 
 /// Slices height tiles out of a caller-provided DEM by bilinear sampling.
@@ -223,7 +224,10 @@ pub(in crate::terrain::renderer) struct HeightStreamingStats {
     pub loader_completed: usize,
 }
 
-pub(in crate::terrain::renderer) struct HeightStreamingState {
+/// Fourth-family VT runtime. Height uses an R32Float physical mosaic, but its
+/// demand retention and residency accounting are the same feedback-driven
+/// `TileKey`/family policy used by albedo, normal, and mask.
+pub(in crate::terrain::renderer) struct HeightVtFamilyRuntime {
     pub(in crate::terrain::renderer) streamer: ClipmapStreamer,
     pub(in crate::terrain::renderer) mosaic: HeightMosaic,
     loader: AsyncTileLoader,
@@ -234,6 +238,8 @@ pub(in crate::terrain::renderer) struct HeightStreamingState {
     tiles_axis: u32,
     tile_resolution: u32,
     resident_fine: HashSet<TileId>,
+    feedback_requests: crate::terrain::vt::requests::RetainedRequestSet,
+    family_residency: FamilyResidencyTracker,
     /// ring tile -> fine tiles still missing before it counts as loaded
     ring_waiting: HashMap<TileId, HashSet<TileId>>,
     tiles_requested: usize,
@@ -241,7 +247,7 @@ pub(in crate::terrain::renderer) struct HeightStreamingState {
     coarse_prefilled: usize,
 }
 
-impl HeightStreamingState {
+impl HeightVtFamilyRuntime {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::terrain::renderer) fn new(
         device: &wgpu::Device,
@@ -313,6 +319,12 @@ impl HeightStreamingState {
             tiles_axis,
             tile_resolution,
             resident_fine: HashSet::new(),
+            feedback_requests: Default::default(),
+            family_residency: FamilyResidencyTracker::new(
+                max_resident_bytes.unwrap_or(resident_bytes),
+                1u32 << crate::terrain::vt::HEIGHT_FAMILY,
+                u64::from(tile_resolution) * u64::from(tile_resolution) * 4,
+            ),
             ring_waiting: HashMap::new(),
             tiles_requested: 0,
             tiles_uploaded: 0,
@@ -383,6 +395,15 @@ impl HeightStreamingState {
                 continue;
             }
             for t in &fine {
+                self.feedback_requests[crate::terrain::vt::HEIGHT_FAMILY as usize].insert(
+                    VtTileKey {
+                        family_slot: crate::terrain::vt::HEIGHT_FAMILY as u32,
+                        material_index: 0,
+                        x: t.x,
+                        y: t.y,
+                        mip_level: t.lod,
+                    },
+                );
                 if self.loader.request(*t) {
                     self.tiles_requested += 1;
                 }
@@ -410,6 +431,13 @@ impl HeightStreamingState {
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
         for t in missing {
+            self.feedback_requests[crate::terrain::vt::HEIGHT_FAMILY as usize].insert(VtTileKey {
+                family_slot: crate::terrain::vt::HEIGHT_FAMILY as u32,
+                material_index: 0,
+                x: t.x,
+                y: t.y,
+                mip_level: t.lod,
+            });
             if self.loader.request(t) {
                 self.tiles_requested += 1;
             }
@@ -426,6 +454,15 @@ impl HeightStreamingState {
                 .is_ok()
             {
                 self.resident_fine.insert(td.tile_id);
+                let key = VtTileKey {
+                    family_slot: crate::terrain::vt::HEIGHT_FAMILY as u32,
+                    material_index: 0,
+                    x: td.tile_id.x,
+                    y: td.tile_id.y,
+                    mip_level: td.tile_id.lod,
+                };
+                self.feedback_requests[crate::terrain::vt::HEIGHT_FAMILY as usize].remove(&key);
+                self.family_residency.on_insert(key);
                 self.tiles_uploaded += 1;
             }
         }
@@ -444,7 +481,20 @@ impl HeightStreamingState {
             self.streamer.mark_loaded(&satisfied);
         }
 
-        self.stats()
+        let stats = self.stats();
+        let height = self
+            .family_residency
+            .family(crate::terrain::vt::HEIGHT_FAMILY as u32);
+        super::virtual_texture::publish_height_family_stats(
+            height.resident_tiles,
+            height.resident_bytes,
+            height.budget_bytes,
+            self.feedback_requests
+                .iter()
+                .map(|bucket| bucket.len() as u32)
+                .sum(),
+        );
+        stats
     }
 
     pub(in crate::terrain::renderer) fn stats(&self) -> HeightStreamingStats {

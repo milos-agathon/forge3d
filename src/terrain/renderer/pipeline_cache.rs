@@ -59,7 +59,14 @@ impl TerrainScene {
     /// Preprocess terrain shader by resolving #include directives
     /// WGSL doesn't have a preprocessor, so we manually expand includes
     pub(super) fn preprocess_terrain_shader(device: &wgpu::Device) -> String {
-        let source = crate::shader_sources::terrain();
+        Self::preprocess_terrain_source(device, crate::shader_sources::terrain())
+    }
+
+    fn preprocess_visibility_shader(device: &wgpu::Device) -> String {
+        Self::preprocess_terrain_source(device, crate::shader_sources::terrain_visibility())
+    }
+
+    fn preprocess_terrain_source(device: &wgpu::Device, source: String) -> String {
         if super::virtual_texture::bindless_bc_supported(device) {
             source
                 .replace(
@@ -231,7 +238,7 @@ impl TerrainScene {
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader_source = Self::preprocess_visibility_shader(device);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_visbuffer_write.shader",
@@ -294,9 +301,10 @@ impl TerrainScene {
         fog_bind_group_layout: &wgpu::BindGroupLayout,
         water_reflection_bind_group_layout: &wgpu::BindGroupLayout,
         material_layer_bind_group_layout: &wgpu::BindGroupLayout,
+        visibility_resolve_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader_source = Self::preprocess_visibility_shader(device);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_visbuffer_resolve.shader",
@@ -312,6 +320,7 @@ impl TerrainScene {
                 fog_bind_group_layout,
                 water_reflection_bind_group_layout,
                 material_layer_bind_group_layout,
+                visibility_resolve_bind_group_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -326,15 +335,12 @@ impl TerrainScene {
                         layout: Some(&pipeline_layout),
                         vertex: wgpu::VertexState {
                             module: &shader,
-                            entry_point: "vs_clipmap_main",
-                            buffers: &[
-                                crate::terrain::clipmap::ClipmapVertex::desc(),
-                                crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::desc(),
-                            ],
+                            entry_point: "vs_visibility_fullscreen",
+                            buffers: &[],
                         },
                         fragment: Some(wgpu::FragmentState {
                             module: &shader,
-                            entry_point: "fs_visibility_resolve",
+                            entry_point: "fs_visibility_resolve_fullscreen",
                             targets: &[Some(wgpu::ColorTargetState {
                                 format: color_format,
                                 blend: None,
@@ -342,13 +348,7 @@ impl TerrainScene {
                             })],
                         }),
                         primitive: wgpu::PrimitiveState::default(),
-                        depth_stencil: Some(wgpu::DepthStencilState {
-                            format: TERRAIN_DEPTH_FORMAT,
-                            depth_write_enabled: false,
-                            depth_compare: wgpu::CompareFunction::Equal,
-                            stencil: wgpu::StencilState::default(),
-                            bias: wgpu::DepthBiasState::default(),
-                        }),
+                        depth_stencil: None,
                         multisample: wgpu::MultisampleState::default(),
                         multiview: None,
                     },

@@ -63,4 +63,15 @@ mod tests {
         assert_eq!(encoded.len(), 64);
         assert_eq!(decode_bc5_rg8(&encoded, 8, 8).unwrap(), rg);
     }
+
+    #[test]
+    fn decodes_spec_constructed_bc5_reference_block() {
+        // Two independently constructed BC4 reference blocks: solid R=255
+        // followed by solid G=0, in the BC5-mandated R-then-G ordering.
+        let reference = [255, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            decode_bc5_rg8(&reference, 4, 4).unwrap(),
+            [255, 0].repeat(16)
+        );
+    }
 }

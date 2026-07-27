@@ -13,7 +13,7 @@ use wgpu::{Buffer, Device, Queue};
 
 pub(crate) fn unpack_visibility_id(packed: u32) -> Option<(u32, u32)> {
     let value = packed.checked_sub(1)?;
-    Some((value >> 8, value & 0xff))
+    Some((value >> 16, value & 0xffff))
 }
 
 /// Rich pick result with full feature attributes
@@ -584,7 +584,7 @@ mod tests {
     #[test]
     fn visibility_id_reserves_zero_for_background() {
         assert_eq!(unpack_visibility_id(0), None);
-        let packed = (1 + (0x1234 << 8)) | 0x56;
+        let packed = ((0x1234 << 16) | 0x56) + 1;
         assert_eq!(unpack_visibility_id(packed), Some((0x1234, 0x56)));
     }
 }

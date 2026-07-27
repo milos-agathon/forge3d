@@ -5,8 +5,8 @@ mod store;
 
 pub use store::{
     write_packed_store, MmapPageStore, PackedPage, PageBytes, PageFormat, PageKey, StoreManifest,
-    StoreMetadata, VirtualTextureStore,
+    StoreMetadata, VirtualTextureStore, HEIGHT_FAMILY,
 };
 
 #[cfg(feature = "cog_streaming")]
-pub use store::{CogPageStore, HEIGHT_FAMILY};
+pub use store::CogPageStore;

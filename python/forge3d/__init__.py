@@ -120,8 +120,8 @@ _NATIVE_ONLY_EXPORTS = (
         "clear_native_degradations",  # CENSOR: global degradation sink reset
         "terrain_culling_stats",  # TESSELLA: two-phase HZB counters
         "terrain_visibility_stats",  # TESSELLA: visibility resolve counters
+        "terrain_vt_stats",  # TESSELLA: virtual-texture residency counters
         "terrain_seam_stats",  # TESSELLA: clipmap seam analysis
-        "vt_request_retention_probe",  # TESSELLA: device-free retention gate
         "capabilities",  # CENSOR: negotiated GPU capability report
         "render_execution_report",  # CENSOR: last-render execution certificate JSON
         "begin_render_execution_capture",  # CENSOR: Python-render capture begin
@@ -716,8 +716,8 @@ __all__ = [
     "clear_native_degradations",
     "terrain_culling_stats",
     "terrain_visibility_stats",
+    "terrain_vt_stats",
     "terrain_seam_stats",
-    "vt_request_retention_probe",
     # CENSOR: negotiated GPU capability report
     "capabilities",
     # CENSOR: last-render execution certificate JSON

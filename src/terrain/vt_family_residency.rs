@@ -1,7 +1,7 @@
 //! Device-free per-family residency accounting for the terrain material VT.
 //!
-//! The terrain virtual-texture runtime pages three material families (albedo,
-//! normal, mask) through one shared atlas + tile cache. This module owns the
+//! The terrain virtual-texture runtime pages four families (albedo, normal,
+//! mask, height) through one feedback-driven residency policy. This module owns the
 //! CPU-side policy that keeps each family inside its own residency budget:
 //! budgets are an even split of the total VT budget across enabled families,
 //! and eviction pressure from one family never drains another family's
@@ -13,8 +13,8 @@
 
 use std::collections::VecDeque;
 
-/// Number of terrain VT material families (albedo, normal, mask).
-pub(crate) const VT_FAMILY_COUNT: usize = 3;
+/// Number of terrain VT families (albedo, normal, mask, height).
+pub(crate) const VT_FAMILY_COUNT: usize = 4;
 
 /// Identity of one virtual-texture tile within a family/material/mip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

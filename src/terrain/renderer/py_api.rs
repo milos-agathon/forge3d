@@ -921,12 +921,37 @@ impl TerrainRenderer {
         Ok(material_vt.get_stats())
     }
 
+    /// Test hook for the mandatory live feedback-retention acceptance gate.
+    /// The request is inserted into the active renderer VT runtime, held while
+    /// feedback is forced not-ready, then converges through the normal upload
+    /// path after the requested number of frames.
+    #[pyo3(text_signature = "(self, not_ready_frames)")]
+    fn force_vt_feedback_not_ready_for_test(&self, not_ready_frames: u32) -> PyResult<()> {
+        let mut material_vt = self.scene.material_vt.lock().map_err(|error| {
+            PyRuntimeError::new_err(format!("Failed to lock material_vt: {error}"))
+        })?;
+        material_vt
+            .force_live_retention_probe(not_ready_frames)
+            .map_err(PyRuntimeError::new_err)
+    }
+
     /// Return `(tile_id, triangle_id)` identities for visibility-buffer
     /// pixels. Background pixels return `None`.
     #[pyo3(text_signature = "(self, pixels)")]
     fn pick_visibility_pixels(&self, pixels: Vec<(u32, u32)>) -> PyResult<Vec<Option<(u32, u32)>>> {
         self.scene
             .pick_visibility_pixels(&pixels)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    }
+
+    /// Independent CPU-BVH oracle for TESSELLA visibility-buffer acceptance.
+    #[pyo3(text_signature = "(self, pixels)")]
+    fn pick_visibility_pixels_cpu(
+        &self,
+        pixels: Vec<(u32, u32)>,
+    ) -> PyResult<Vec<Option<(u32, u32)>>> {
+        self.scene
+            .pick_visibility_pixels_cpu(&pixels)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     }
 
@@ -1033,7 +1058,7 @@ impl TerrainRenderer {
                 ))
             }
         };
-        let state = super::streaming::HeightStreamingState::new(
+        let state = super::streaming::HeightVtFamilyRuntime::new(
             self.scene.device.as_ref(),
             self.scene.queue.as_ref(),
             terrain_extent_m,
@@ -1085,7 +1110,7 @@ impl TerrainRenderer {
             tile_resolution,
         ));
         let reader = std::sync::Arc::new(super::streaming::StoreHeightReader::new(store));
-        let state = super::streaming::HeightStreamingState::new(
+        let state = super::streaming::HeightVtFamilyRuntime::new(
             self.scene.device.as_ref(),
             self.scene.queue.as_ref(),
             terrain_extent_m,

@@ -1,10 +1,11 @@
 //! TESSELLA terrain visibility buffer.
 //!
 //! Zero is reserved for background. Visible primitives are encoded as
-//! `1 + ((tile_id & 0x00ff_ffff) << 8) | (triangle_id & 0xff)`. The extra one
+//! `1 + ((tile_lod_id & 0xffff) << 16) | (triangle_id & 0xffff)`. The extra one
 //! keeps tile zero / triangle zero distinct from background. The material
-//! resolve re-rasterizes only depth-equal fragments, so POM and VT feedback
-//! execute exactly once for every non-background visibility pixel.
+//! resolve is a full-screen fragment pass. It reads primitive identity and
+//! depth, reconstructs the visible surface, and invokes POM/material/feedback
+//! exactly once for every non-background visibility pixel.
 
 use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{
@@ -12,6 +13,208 @@ use crate::core::resource_tracker::{
 };
 use bytemuck::{Pod, Zeroable};
 use std::sync::{Mutex, OnceLock};
+
+pub(in crate::terrain::renderer) struct CpuVisibilityOracle {
+    mesh: crate::accel::cpu_bvh::MeshCPU,
+    bvh: crate::accel::cpu_bvh::BvhCPU,
+    identities: Vec<(u32, u32)>,
+    inv_view_proj: [[f32; 4]; 4],
+    viewport: (u32, u32),
+}
+
+impl CpuVisibilityOracle {
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::terrain::renderer) fn build(
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        heightmap: &[f32],
+        height_dims: (u32, u32),
+        clipmap: &crate::terrain::clipmap::ClipmapMesh,
+        tiles: &[crate::terrain::clipmap::gpu_lod::TileInfo],
+        templates: &[crate::terrain::clipmap::gpu_lod::IndirectDrawTemplate],
+        variant_count: u32,
+        lod_config: &crate::terrain::clipmap::gpu_lod::GpuLodConfig,
+    ) -> anyhow::Result<Self> {
+        use crate::terrain::clipmap::gpu_lod::cpu_lod_select;
+
+        let decoded = params.decoded();
+        let (h_min, h_max) = decoded.clamp.height_range;
+        let h_center = (h_min + h_max) * 0.5;
+        let skirt = super::core::clipmap_camera_config(&params.camera_mode)
+            .map(|config| config.ring_resolution as f32 * 0.001 * params.z_scale.abs())
+            .unwrap_or(0.0);
+        let vertices = clipmap
+            .vertices
+            .iter()
+            .map(|vertex| {
+                let height = sample_height_bilinear(heightmap, height_dims, vertex.uv);
+                let skirt_offset = if vertex.is_skirt() { skirt } else { 0.0 };
+                [
+                    vertex.position[0],
+                    vertex.position[1],
+                    (height - h_center) * params.z_scale - skirt_offset,
+                ]
+            })
+            .collect::<Vec<_>>();
+        let (eye, view, proj) = super::TerrainScene::build_camera_matrices(params);
+        let selected = cpu_lod_select(
+            tiles,
+            proj * view,
+            eye,
+            lod_config,
+            (
+                (h_min - h_center) * params.z_scale - skirt,
+                (h_max - h_center) * params.z_scale,
+            ),
+        );
+        let tile_indices = tiles
+            .iter()
+            .enumerate()
+            .map(|(index, tile)| (tile.tile_id, index))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut indices = Vec::new();
+        let mut identities = Vec::new();
+        for visible in selected.visible_tiles {
+            let Some(&tile_index) = tile_indices.get(&visible.tile_id) else {
+                continue;
+            };
+            let template_index =
+                tile_index * variant_count as usize + visible.selected_lod as usize;
+            let Some(template) = templates.get(template_index) else {
+                continue;
+            };
+            let source = &clipmap.indices[template.first_index as usize
+                ..(template.first_index + template.index_count) as usize];
+            for (primitive, triangle) in source.chunks_exact(3).enumerate() {
+                indices.push([triangle[0], triangle[1], triangle[2]]);
+                identities.push((
+                    ((visible.selected_lod & 0xf) << 12) | (template.tile_id & 0xfff),
+                    primitive as u32 & 0xffff,
+                ));
+            }
+        }
+        let mesh = crate::accel::cpu_bvh::MeshCPU::new(vertices, indices);
+        let bvh = crate::accel::cpu_bvh::build_bvh_cpu(
+            &mesh,
+            &crate::accel::cpu_bvh::BuildOptions::default(),
+        )?;
+        Ok(Self {
+            mesh,
+            bvh,
+            identities,
+            inv_view_proj: (proj * view).inverse().to_cols_array_2d(),
+            viewport: params.size_px,
+        })
+    }
+
+    fn pick(&self, pixels: &[(u32, u32)]) -> Vec<Option<(u32, u32)>> {
+        pixels
+            .iter()
+            .map(|&(x, y)| {
+                let ray = crate::picking::unproject_cursor(
+                    x,
+                    y,
+                    self.viewport.0,
+                    self.viewport.1,
+                    self.inv_view_proj,
+                );
+                self.intersect(&ray)
+            })
+            .collect()
+    }
+
+    fn intersect(&self, ray: &crate::picking::Ray) -> Option<(u32, u32)> {
+        let mut closest = f32::INFINITY;
+        let mut identity = None;
+        let mut stack = vec![0u32];
+        while let Some(node_index) = stack.pop() {
+            let node = self.bvh.nodes.get(node_index as usize)?;
+            if !ray_aabb(ray, node.aabb_min, node.aabb_max, closest) {
+                continue;
+            }
+            if node.is_leaf() {
+                for offset in 0..node.right {
+                    let reordered = *self.bvh.tri_indices.get((node.left + offset) as usize)?;
+                    let (v0, v1, v2) = self.mesh.get_triangle(reordered as usize)?;
+                    if let Some(distance) = ray_triangle(ray, v0, v1, v2) {
+                        if distance < closest {
+                            closest = distance;
+                            identity = self.identities.get(reordered as usize).copied();
+                        }
+                    }
+                }
+            } else {
+                stack.push(node.right);
+                stack.push(node.left);
+            }
+        }
+        identity
+    }
+}
+
+fn sample_height_bilinear(data: &[f32], dims: (u32, u32), uv: [f32; 2]) -> f32 {
+    let fx = uv[0].clamp(0.0, 1.0) * dims.0.saturating_sub(1) as f32;
+    let fy = uv[1].clamp(0.0, 1.0) * dims.1.saturating_sub(1) as f32;
+    let x0 = fx.floor() as usize;
+    let y0 = fy.floor() as usize;
+    let x1 = (x0 + 1).min(dims.0.saturating_sub(1) as usize);
+    let y1 = (y0 + 1).min(dims.1.saturating_sub(1) as usize);
+    let tx = fx - x0 as f32;
+    let ty = fy - y0 as f32;
+    let width = dims.0 as usize;
+    let top = data[y0 * width + x0] * (1.0 - tx) + data[y0 * width + x1] * tx;
+    let bottom = data[y1 * width + x0] * (1.0 - tx) + data[y1 * width + x1] * tx;
+    top * (1.0 - ty) + bottom * ty
+}
+
+fn ray_aabb(ray: &crate::picking::Ray, min: [f32; 3], max: [f32; 3], limit: f32) -> bool {
+    let mut near: f32 = 0.0;
+    let mut far = limit;
+    for axis in 0..3 {
+        let inv = 1.0 / ray.direction[axis];
+        let mut a = (min[axis] - ray.origin[axis]) * inv;
+        let mut b = (max[axis] - ray.origin[axis]) * inv;
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+        near = near.max(a);
+        far = far.min(b);
+        if near > far {
+            return false;
+        }
+    }
+    true
+}
+
+fn ray_triangle(
+    ray: &crate::picking::Ray,
+    v0: [f32; 3],
+    v1: [f32; 3],
+    v2: [f32; 3],
+) -> Option<f32> {
+    let origin = glam::Vec3::from_array(ray.origin);
+    let direction = glam::Vec3::from_array(ray.direction);
+    let a = glam::Vec3::from_array(v0);
+    let edge1 = glam::Vec3::from_array(v1) - a;
+    let edge2 = glam::Vec3::from_array(v2) - a;
+    let p = direction.cross(edge2);
+    let det = edge1.dot(p);
+    if det.abs() < 1e-8 {
+        return None;
+    }
+    let inv_det = det.recip();
+    let t = origin - a;
+    let u = t.dot(p) * inv_det;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let q = t.cross(edge1);
+    let v = direction.dot(q) * inv_det;
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+    let distance = edge2.dot(q) * inv_det;
+    (distance > 0.0).then_some(distance)
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
@@ -272,6 +475,123 @@ impl TerrainVisibilityBuffer {
 
 #[cfg(feature = "extension-module")]
 impl super::TerrainScene {
+    pub(super) fn create_visibility_resolve_bind_group_layout(
+        device: &wgpu::Device,
+    ) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain.visibility.resolve.layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        })
+    }
+
+    pub(super) fn visibility_resolve_bind_group(
+        &self,
+        depth_view: &wgpu::TextureView,
+    ) -> anyhow::Result<wgpu::BindGroup> {
+        let visibility = self
+            .visibility_buffer
+            .lock()
+            .map_err(|_| anyhow::anyhow!("terrain visibility buffer mutex poisoned"))?;
+        let buffer = visibility
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("terrain visibility buffer not initialized"))?;
+        let (vertices, indices, templates, meta) = self
+            .geometry_provider()?
+            .visibility_resolve_buffers()
+            .ok_or_else(|| anyhow::anyhow!("visibility resolve requires clipmap geometry"))?;
+        Ok(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.visibility.resolve.bind_group"),
+            layout: &self.visibility_resolve_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(buffer.view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: vertices.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: indices.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: templates.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: meta.as_entire_binding(),
+                },
+            ],
+        }))
+    }
+
     pub(super) fn ensure_visibility_buffer(&self, width: u32, height: u32) -> anyhow::Result<()> {
         let mut visibility = self
             .visibility_buffer
@@ -342,5 +662,19 @@ impl super::TerrainScene {
         picking
             .pick_visibility_pixels(buffer.texture(), buffer.width, buffer.height, pixels)
             .map_err(anyhow::Error::msg)
+    }
+
+    pub(super) fn pick_visibility_pixels_cpu(
+        &self,
+        pixels: &[(u32, u32)],
+    ) -> anyhow::Result<Vec<Option<(u32, u32)>>> {
+        let oracle = self
+            .cpu_visibility_oracle
+            .lock()
+            .map_err(|_| anyhow::anyhow!("terrain CPU visibility oracle mutex poisoned"))?;
+        let oracle = oracle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no CPU BVH visibility oracle is available"))?;
+        Ok(oracle.pick(pixels))
     }
 }

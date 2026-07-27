@@ -51,7 +51,7 @@ mod streaming;
 mod uniforms;
 mod upload;
 mod viewer;
-mod virtual_texture;
+pub(crate) mod virtual_texture;
 pub(crate) mod visibility_buffer;
 mod water_reflection;
 

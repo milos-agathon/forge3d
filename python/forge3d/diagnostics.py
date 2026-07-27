@@ -508,6 +508,19 @@ def visibility_stats() -> dict[str, Any]:
     return dict(native.terrain_visibility_stats())
 
 
+def vt_stats() -> dict[str, Any]:
+    """Return live terrain virtual-texture residency and footprint counters."""
+    from ._native import get_native_module
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "terrain_vt_stats"):
+        raise RuntimeError(
+            "forge3d native extension is unavailable; vt_stats() requires "
+            "the compiled _forge3d module."
+        )
+    return dict(native.terrain_vt_stats())
+
+
 def seam_stats() -> dict[str, Any]:
     """Return live clipmap seam-analysis counters for the last geometry build."""
     from ._native import get_native_module
@@ -1024,6 +1037,7 @@ __all__ = [
     "SUPPORT_LEVELS",
     "capabilities",
     "culling_stats",
+    "vt_stats",
     "visibility_stats",
     "seam_stats",
     "crs_mismatch_diagnostic",

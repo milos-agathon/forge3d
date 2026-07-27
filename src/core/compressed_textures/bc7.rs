@@ -78,6 +78,30 @@ pub fn decode_bc7_rgba8(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>,
     Ok(decoded)
 }
 
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+
+    #[test]
+    fn mode6_solid_white_matches_spec_constructed_reference_block() {
+        // Mode prefix bit 6, eight 7-bit 0x7f endpoints, both p-bits set,
+        // anchor selector 0, and fifteen selectors 0. The literal is derived
+        // from the BC7 mode-6 bit layout, not from this encoder.
+        let reference = [
+            0xc0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00,
+        ];
+        assert_eq!(
+            decode_bc7_rgba8(&reference, 4, 4).unwrap(),
+            vec![255; 4 * 4 * 4]
+        );
+        assert_eq!(
+            encode_bc7_rgba8(&[255; 4 * 4 * 4], 4, 4).unwrap(),
+            reference
+        );
+    }
+}
+
 fn encode_block(pixels: &[[u8; 4]; 16]) -> [u8; BLOCK_BYTES] {
     let (mut endpoint0, mut endpoint1) = principal_endpoints(pixels);
     let mut indices = choose_indices(pixels, endpoint0, endpoint1);

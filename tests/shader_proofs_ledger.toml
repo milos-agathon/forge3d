@@ -229,6 +229,12 @@ owner = "terrain-streaming"
 expiry = "2027-07-27"
 
 [[unproven]]
+path = "src/shaders/terrain_visibility_fullscreen.wgsl"
+reason = "terrain_visibility_fullscreen.wgsl: primitive-ID bounds and perspective reconstruction are exact-head GPU and CPU-BVH gated but not yet modeled"
+owner = "terrain-streaming"
+expiry = "2027-07-27"
+
+[[unproven]]
 path = "src/shaders/hybrid_kernel.wgsl"
 reason = "hybrid_kernel.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"

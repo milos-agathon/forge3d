@@ -5,6 +5,7 @@ import numpy as np
 import forge3d as f3d
 from _deltae import delta_e_2000, srgb_to_lab
 from _ssim import ssim
+from _tessella_evidence import record_tessella_result
 
 
 def _smooth_albedo(side: int = 64) -> np.ndarray:
@@ -34,6 +35,16 @@ def test_bc7_mode6_clears_tessella_fidelity_gate():
     assert len(encoded) * 4 == source.nbytes
     assert measured_ssim >= 0.98, measured_ssim
     assert mean_delta_e < 1.5, mean_delta_e
+    record_tessella_result(
+        "bc7_fidelity",
+        {
+            "source_bytes": source.nbytes,
+            "encoded_bytes": len(encoded),
+            "compression_ratio": source.nbytes / len(encoded),
+            "ssim": float(measured_ssim),
+            "mean_delta_e_2000": mean_delta_e,
+        },
+    )
 
 
 def test_bc5_normal_angular_error_clears_gate():
@@ -64,3 +75,13 @@ def test_bc5_normal_angular_error_clears_gate():
     assert len(encoded) * 2 == rg.nbytes
     assert float(angular.mean()) < 1.0, float(angular.mean())
     assert float(angular.max()) < 4.0, float(angular.max())
+    record_tessella_result(
+        "bc5_fidelity",
+        {
+            "source_bytes": rg.nbytes,
+            "encoded_bytes": len(encoded),
+            "compression_ratio": rg.nbytes / len(encoded),
+            "mean_angular_error_degrees": float(angular.mean()),
+            "max_angular_error_degrees": float(angular.max()),
+        },
+    )

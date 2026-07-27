@@ -1904,7 +1904,7 @@ class TerrainRenderParams:
     # Terrain submission policy. HZB mode is conservative and only active for clipmap/MSAA1.
     culling: str = "frustum"
     # Material evaluation path. "visibility" performs a depth/ID prepass and
-    # shades only depth-equal visible fragments.
+    # one full-screen barycentric material resolve per visible pixel.
     shading: str = "forward"
     # Optional disk-backed store returned by forge3d.terrain.open_vt_store().
     vt_store: Optional[object] = None
@@ -2169,6 +2169,7 @@ def make_terrain_params_config(
     cam_radius: float = 1200.0,
     cam_phi_deg: float = 135.0,
     cam_theta_deg: float = 45.0,
+    cam_target: Sequence[float] = (0.0, 0.0, 0.0),
     fov_y_deg: float = 55.0,
     camera_mode: str = "screen",  # "screen", "mesh", or "mesh:zup" (Z-up orbit, see TerrainParams)
     culling: str = "frustum",  # "none", "frustum", or "hzb_two_phase"
@@ -2306,7 +2307,7 @@ def make_terrain_params_config(
         terrain_span=float(terrain_span),
         msaa_samples=msaa_samples,
         z_scale=z_scale,
-        cam_target=[0.0, 0.0, 0.0],
+        cam_target=[float(value) for value in cam_target],
         cam_radius=float(cam_radius),
         cam_phi_deg=float(cam_phi_deg),
         cam_theta_deg=float(cam_theta_deg),

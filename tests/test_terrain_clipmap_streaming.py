@@ -64,6 +64,7 @@ def _make_params(
     shading: str = "forward",
     vt=None,
     terrain_span: float = TERRAIN_SPAN_M,
+    cam_target: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> "f3d.TerrainRenderParams":
     return f3d.TerrainRenderParams(
         make_terrain_params_config(
@@ -83,6 +84,7 @@ def _make_params(
             cam_radius=cam_radius,
             cam_phi_deg=phi_deg,
             cam_theta_deg=theta_deg,
+            cam_target=list(cam_target),
             fov_y_deg=45.0,
             camera_mode=camera_mode,
             culling=culling,

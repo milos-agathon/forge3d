@@ -86,6 +86,8 @@ impl TerrainScene {
 
         let material_layer_bind_group_layout =
             Self::create_material_layer_bind_group_layout(device.as_ref());
+        let visibility_resolve_bind_group_layout =
+            Self::create_visibility_resolve_bind_group_layout(device.as_ref());
         let material_layer_uniform_buffer = tracked_create_buffer_init(
             &device,
             &wgpu::util::BufferInitDescriptor {
@@ -580,6 +582,7 @@ impl TerrainScene {
             water_reflection_fallback_view,
             water_reflection_pipeline,
             material_layer_bind_group_layout,
+            visibility_resolve_bind_group_layout,
             material_layer_uniform_buffer,
             vt_uniform_buffer,
             vt_fallback_uniform_buffer,
@@ -632,6 +635,7 @@ impl TerrainScene {
             scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
             material_vt: Mutex::new(super::virtual_texture::TerrainMaterialVT::new()),
             visibility_buffer: Mutex::new(None),
+            cpu_visibility_oracle: Mutex::new(None),
             viewer_heightmap: None,
             geometry_provider: None,
             two_phase_culler: None,

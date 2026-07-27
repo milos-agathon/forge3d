@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 #[cfg(feature = "extension-module")]
@@ -142,7 +142,59 @@ struct TerrainMaterialVTStats {
     prefetch_requests: u32,
     uploaded_bytes: u64,
     upload_budget_bytes: u64,
+    atlas_device_local_bytes: u64,
+    atlas_uncompressed_equivalent_bytes: u64,
+    bindless_bc: bool,
     families: [FamilyResidency; VT_FAMILY_COUNT],
+}
+
+#[cfg(feature = "extension-module")]
+static LAST_VT_STATS: OnceLock<Mutex<HashMap<String, f32>>> = OnceLock::new();
+
+#[cfg(feature = "extension-module")]
+pub fn latest_stats() -> HashMap<String, f32> {
+    LAST_VT_STATS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map(|stats| stats.clone())
+        .unwrap_or_default()
+}
+
+#[cfg(feature = "extension-module")]
+fn publish_stats(stats: &HashMap<String, f32>) {
+    if let Ok(mut latest) = LAST_VT_STATS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        let height = latest
+            .iter()
+            .filter(|(key, _)| key.ends_with("_height") || key.starts_with("height_"))
+            .map(|(key, value)| (key.clone(), *value))
+            .collect::<Vec<_>>();
+        latest.clone_from(stats);
+        latest.extend(height);
+    }
+}
+
+#[cfg(feature = "extension-module")]
+pub(super) fn publish_height_family_stats(
+    resident_tiles: u32,
+    resident_bytes: u64,
+    budget_bytes: u64,
+    pending_requests: u32,
+) {
+    if let Ok(mut latest) = LAST_VT_STATS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        latest.insert("resident_tiles_height".to_string(), resident_tiles as f32);
+        latest.insert("resident_bytes_height".to_string(), resident_bytes as f32);
+        latest.insert("budget_bytes_height".to_string(), budget_bytes as f32);
+        latest.insert(
+            "height_pending_requests".to_string(),
+            pending_requests as f32,
+        );
+    }
 }
 
 #[cfg(feature = "extension-module")]
@@ -179,6 +231,9 @@ struct TerrainMaterialVTRuntime {
     layer_fallbacks: [[f32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
     stats: TerrainMaterialVTStats,
     last_camera_target: Option<[f32; 2]>,
+    /// Acceptance-only fault injection: while non-zero the live feedback map
+    /// remains unavailable and retained keys are not submitted for upload.
+    feedback_not_ready_frames: u32,
 }
 
 #[cfg(feature = "extension-module")]
@@ -219,7 +274,13 @@ impl PartialOrd for PriorityRequest {
 }
 
 #[cfg(feature = "extension-module")]
-fn request_score(key: TileKey, desired_mip: u32, feedback: bool, prefetch: bool) -> u64 {
+fn request_score(
+    key: TileKey,
+    desired_mip: u32,
+    feedback: bool,
+    prefetch: bool,
+    screen_space_error: f32,
+) -> u64 {
     let family_importance = match key.family_slot {
         TERRAIN_VT_FAMILY_ALBEDO => 3,
         TERRAIN_VT_FAMILY_NORMAL => 2,
@@ -229,6 +290,7 @@ fn request_score(key: TileKey, desired_mip: u32, feedback: bool, prefetch: bool)
     u64::from(feedback) * 1_000_000_000
         + ancestor_priority * 10_000_000
         + family_importance * 1_000_000
+        + (screen_space_error.clamp(0.0, 4096.0) * 1_000.0) as u64
         + if prefetch { 0 } else { 500_000 }
 }
 
@@ -366,6 +428,7 @@ impl TerrainMaterialVT {
         self.source_generation = self.source_generation.wrapping_add(1);
         self.last_stats = TerrainMaterialVTStats::default();
         self.bound_store_path = None;
+        let _ = self.get_stats();
     }
 
     pub fn get_stats(&self) -> HashMap<String, f32> {
@@ -408,6 +471,27 @@ impl TerrainMaterialVT {
             "upload_budget_bytes".to_string(),
             stats.upload_budget_bytes as f32,
         );
+        out.insert(
+            "atlas_device_local_bytes".to_string(),
+            stats.atlas_device_local_bytes as f32,
+        );
+        out.insert(
+            "atlas_uncompressed_equivalent_bytes".to_string(),
+            stats.atlas_uncompressed_equivalent_bytes as f32,
+        );
+        out.insert(
+            "atlas_compression_ratio".to_string(),
+            if stats.atlas_device_local_bytes == 0 {
+                1.0
+            } else {
+                stats.atlas_uncompressed_equivalent_bytes as f32
+                    / stats.atlas_device_local_bytes as f32
+            },
+        );
+        out.insert(
+            "bindless_bc".to_string(),
+            if stats.bindless_bc { 1.0 } else { 0.0 },
+        );
         let mut resident_bytes_total = 0u64;
         for (slot, name) in TERRAIN_VT_SUPPORTED_FAMILIES.iter().enumerate() {
             let family = stats.families[slot];
@@ -426,7 +510,39 @@ impl TerrainMaterialVT {
             "resident_bytes_total".to_string(),
             resident_bytes_total as f32,
         );
+        publish_stats(&out);
         out
+    }
+
+    pub fn force_live_retention_probe(&mut self, not_ready_frames: u32) -> Result<(), String> {
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| "material VT runtime is not initialized".to_string())?;
+        let (&(family_slot, material_index), _) = runtime
+            .sources
+            .iter()
+            .next()
+            .ok_or_else(|| "material VT runtime has no source".to_string())?;
+        let mip_level = 0;
+        let (pages_x, pages_y) = runtime.pages_at_mip(mip_level);
+        let key = TileKey {
+            family_slot,
+            material_index,
+            x: pages_x.saturating_sub(1),
+            y: pages_y.saturating_sub(1),
+            mip_level,
+        };
+        runtime.pending_feedback[family_slot as usize].insert(key);
+        runtime.feedback_not_ready_frames = not_ready_frames;
+        runtime.stats.feedback_requests = runtime
+            .pending_feedback
+            .iter()
+            .map(|bucket| bucket.len() as u32)
+            .sum();
+        runtime.stats.retained_requests = runtime.stats.feedback_requests;
+        self.last_stats = runtime.stats;
+        Ok(())
     }
 
     fn miss_rate(stats: TerrainMaterialVTStats) -> f32 {
@@ -601,6 +717,7 @@ impl TerrainMaterialVT {
         if let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() {
             feedback_buffer.clear(encoder);
         }
+        let _ = self.get_stats();
 
         Ok(true)
     }
@@ -642,6 +759,8 @@ impl TerrainMaterialVT {
                     .iter()
                     .map(|bucket| bucket.len() as u32)
                     .sum();
+                self.last_stats = runtime.stats;
+                let _ = self.get_stats();
                 return Ok(());
             };
             // Demux decoded entries by family so each family drives its own
@@ -680,6 +799,7 @@ impl TerrainMaterialVT {
         }
         runtime.feedback_staged = false;
         self.last_stats = runtime.stats;
+        let _ = self.get_stats();
         Ok(())
     }
 
@@ -1176,11 +1296,21 @@ impl TerrainMaterialVTRuntime {
             layer_fallbacks,
             stats: TerrainMaterialVTStats::default(),
             last_camera_target: None,
+            feedback_not_ready_frames: 0,
         };
         runtime.stats.total_pages = total_pages;
         runtime.stats.cache_budget_pages = budget_pages;
         runtime.stats.cache_budget_mb = residency_budget_mb;
         runtime.stats.source_count = runtime.sources.len() as u32;
+        let atlas_texels = u64::from(atlas_size) * u64::from(atlas_size);
+        runtime.stats.atlas_uncompressed_equivalent_bytes =
+            atlas_texels * u64::from(TERRAIN_VT_FAMILY_COUNT) * 4;
+        runtime.stats.atlas_device_local_bytes = if bindless_bc {
+            atlas_texels * u64::from(TERRAIN_VT_FAMILY_COUNT)
+        } else {
+            atlas_texels * 4
+        };
+        runtime.stats.bindless_bc = bindless_bc;
         Ok(runtime)
     }
 
@@ -1278,7 +1408,13 @@ impl TerrainMaterialVTRuntime {
                     self.insert_prioritized_with_ancestors(
                         &mut priorities,
                         key,
-                        request_score(key, desired_mip, false, false),
+                        request_score(
+                            key,
+                            desired_mip,
+                            false,
+                            false,
+                            self.page_screen_space_error(key, params),
+                        ),
                     );
                 }
             }
@@ -1286,38 +1422,35 @@ impl TerrainMaterialVTRuntime {
 
         if params.prefetch_horizon_ms > 0.0 && velocity != [0.0, 0.0] {
             let requests_before_prefetch = priorities.len();
-            let (predicted_min, predicted_max) = predicted_rect;
-            let predicted_start_x =
-                ((predicted_min[0] * pages_x as f32).floor() as i32).clamp(0, pages_x as i32 - 1);
-            let predicted_start_y =
-                ((predicted_min[1] * pages_y as f32).floor() as i32).clamp(0, pages_y as i32 - 1);
-            let predicted_end_x = ((predicted_max[0] * pages_x as f32).ceil() as i32 - 1)
-                .clamp(0, pages_x as i32 - 1);
-            let predicted_end_y = ((predicted_max[1] * pages_y as f32).ceil() as i32 - 1)
-                .clamp(0, pages_y as i32 - 1);
+            let predicted_pages =
+                self.predicted_lod_pages(&predicted_params, desired_mip, predicted_rect);
             for (family_slot, material_index) in self.sources.keys().copied() {
-                for y in predicted_start_y..=predicted_end_y {
-                    for x in predicted_start_x..=predicted_end_x {
-                        let key = TileKey {
-                            family_slot,
-                            material_index,
-                            x: x as u32,
-                            y: y as u32,
-                            mip_level: desired_mip,
-                        };
-                        self.insert_prioritized_with_ancestors(
-                            &mut priorities,
+                for &(x, y) in &predicted_pages {
+                    let key = TileKey {
+                        family_slot,
+                        material_index,
+                        x,
+                        y,
+                        mip_level: desired_mip,
+                    };
+                    self.insert_prioritized_with_ancestors(
+                        &mut priorities,
+                        key,
+                        request_score(
                             key,
-                            request_score(key, desired_mip, false, true),
-                        );
-                    }
+                            desired_mip,
+                            false,
+                            true,
+                            self.page_screen_space_error(key, params),
+                        ),
+                    );
                 }
             }
             self.stats.prefetch_requests =
                 priorities.len().saturating_sub(requests_before_prefetch) as u32;
         }
 
-        if use_feedback {
+        if use_feedback && self.feedback_not_ready_frames == 0 {
             let feedback_requests = self
                 .pending_feedback
                 .iter()
@@ -1332,10 +1465,25 @@ impl TerrainMaterialVTRuntime {
                     self.insert_prioritized_with_ancestors(
                         &mut priorities,
                         feedback,
-                        request_score(feedback, desired_mip, true, false),
+                        request_score(
+                            feedback,
+                            desired_mip,
+                            true,
+                            false,
+                            self.page_screen_space_error(feedback, params),
+                        ),
                     );
                 }
             }
+        }
+        if self.feedback_not_ready_frames > 0 {
+            self.pending_feedback.on_not_ready();
+            self.feedback_not_ready_frames -= 1;
+            self.stats.retained_requests = self
+                .pending_feedback
+                .iter()
+                .map(|bucket| bucket.len() as u32)
+                .sum();
         }
 
         let mut queue = priorities
@@ -1361,6 +1509,85 @@ impl TerrainMaterialVTRuntime {
         }
         self.stats.upload_budget_bytes = params.vt_upload_budget_bytes;
         ordered
+    }
+
+    fn page_screen_space_error(
+        &self,
+        key: TileKey,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+    ) -> f32 {
+        let (pages_x, pages_y) = self.pages_at_mip(key.mip_level);
+        let span = params.terrain_span.max(1.0);
+        let page_world = (span / pages_x.max(1) as f32).max(span / pages_y.max(1) as f32);
+        let center = glam::Vec3::new(
+            ((key.x as f32 + 0.5) / pages_x.max(1) as f32 - 0.5) * span,
+            ((key.y as f32 + 0.5) / pages_y.max(1) as f32 - 0.5) * span,
+            0.0,
+        );
+        let (eye, _, _) = super::TerrainScene::build_camera_matrices(params);
+        let distance = eye.distance(center).max(page_world * 0.5);
+        let focal_pixels = params.size_px.1.max(1) as f32
+            / (2.0 * (params.fov_y_deg.to_radians() * 0.5).tan().max(1e-4));
+        page_world * focal_pixels / distance
+    }
+
+    /// Select predictive pages with the same CPU reference implementation
+    /// used to verify the GPU clipmap LOD selector.  The UV rectangle is only
+    /// a conservative candidate generator; the predicted camera frustum makes
+    /// the final request decision.
+    fn predicted_lod_pages(
+        &self,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        mip_level: u32,
+        conservative_rect: ([f32; 2], [f32; 2]),
+    ) -> Vec<(u32, u32)> {
+        use crate::terrain::clipmap::gpu_lod::{cpu_lod_select, GpuLodConfig, TileInfo};
+
+        let (pages_x, pages_y) = self.pages_at_mip(mip_level);
+        let (rect_min, rect_max) = conservative_rect;
+        let start_x = ((rect_min[0] * pages_x as f32).floor() as i32).clamp(0, pages_x as i32 - 1);
+        let start_y = ((rect_min[1] * pages_y as f32).floor() as i32).clamp(0, pages_y as i32 - 1);
+        let end_x = ((rect_max[0] * pages_x as f32).ceil() as i32 - 1).clamp(0, pages_x as i32 - 1);
+        let end_y = ((rect_max[1] * pages_y as f32).ceil() as i32 - 1).clamp(0, pages_y as i32 - 1);
+        let span = params.terrain_span.max(1.0);
+        let tiles = (start_y..=end_y)
+            .flat_map(|y| {
+                (start_x..=end_x).map(move |x| {
+                    let min = glam::Vec2::new(
+                        (x as f32 / pages_x as f32 - 0.5) * span,
+                        (y as f32 / pages_y as f32 - 0.5) * span,
+                    );
+                    let max = glam::Vec2::new(
+                        ((x + 1) as f32 / pages_x as f32 - 0.5) * span,
+                        ((y + 1) as f32 / pages_y as f32 - 0.5) * span,
+                    );
+                    TileInfo::new(mip_level, x as u32, y as u32, min, max)
+                })
+            })
+            .collect::<Vec<_>>();
+        let (eye, view, proj) = super::TerrainScene::build_camera_matrices(params);
+        cpu_lod_select(
+            &tiles,
+            proj * view,
+            eye,
+            &GpuLodConfig {
+                viewport_width: params.size_px.0,
+                viewport_height: params.size_px.1,
+                fov_y: params.fov_y_deg.to_radians(),
+                max_lod: 0,
+                terrain_width: span,
+                tile_size: span / pages_x.max(pages_y).max(1) as f32,
+                ..Default::default()
+            },
+            (-span, span),
+        )
+        .visible_tiles
+        .into_iter()
+        .map(|tile| {
+            let (_, x, y) = TileInfo::unpack_id(tile.tile_id);
+            (x, y)
+        })
+        .collect()
     }
 
     fn ensure_tile_resident(

@@ -1212,6 +1212,7 @@ jobs:
       FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
       FORGE3D_NO_BOOTSTRAP: '1'
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      FORGE3D_TESSELLA_REQUIRED_GPU: '1'
 
     steps:
       - uses: actions/checkout@v4
@@ -1254,6 +1255,13 @@ jobs:
         shell: pwsh
         run: |
           python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/adapter-probe.log"
+          exit $LASTEXITCODE
+      - name: Require the 1,000-camera GPU CPU LOD differential
+        shell: pwsh
+        run: |
+          cargo test --release --lib `
+            terrain::clipmap::gpu_lod::tests::gpu_and_cpu_select_identical_tile_sets_for_1000_cameras `
+            -- --ignored --exact --nocapture *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/gpu-cpu-lod-differential.log"
           exit $LASTEXITCODE
       - name: Run all six TESSELLA acceptance gates
         shell: pwsh

@@ -44,6 +44,23 @@ pub(crate) fn terrain() -> String {
     .join("\n")
 }
 
+pub(crate) fn terrain_visibility() -> String {
+    let source = terrain()
+        .replace(
+            "let packed = ((input.tile_id & 0x00ffffffu) << 8u)\n        | (primitive_index & 0xffu);",
+            "let packed = ((input.tile_id & 0xffffu) << 16u)\n        | (primitive_index & 0xffffu);",
+        )
+        .replace(
+            "out.tile_id = _tile_id_lod.x;",
+            "out.tile_id = ((_tile_id_lod.y & 0xfu) << 12u)\n        | (_tile_id_lod.x & 0xfffu);",
+        );
+    [
+        source,
+        include_str!("shaders/terrain_visibility_fullscreen.wgsl").to_string(),
+    ]
+    .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,10 +77,25 @@ mod tests {
                 "textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0)",
                 "textureSampleLevel(terrain_vt_atlas[family_slot], terrain_vt_sampler, atlas_uv, 0.0)",
             );
+        let visibility = terrain_visibility();
+        assert!(visibility.contains("let packed = ((input.tile_id & 0xffffu) << 16u)"));
+        assert!(visibility.contains("out.tile_id = ((_tile_id_lod.y & 0xfu) << 12u)"));
+        assert!(visibility.contains("fn fs_visibility_resolve_fullscreen("));
+        let bindless_visibility = visibility
+            .replace(
+                "var terrain_vt_atlas: texture_2d<f32>;",
+                "var terrain_vt_atlas: binding_array<texture_2d<f32>>;",
+            )
+            .replace(
+                "textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0)",
+                "textureSampleLevel(terrain_vt_atlas[family_slot], terrain_vt_sampler, atlas_uv, 0.0)",
+            );
         for source in [
             hybrid_kernel(),
             terrain,
             bindless_terrain,
+            visibility,
+            bindless_visibility,
             include_str!("shaders/terrain_visbuffer_resolve.wgsl").to_string(),
         ] {
             let module = naga::front::wgsl::parse_str(&source).unwrap();

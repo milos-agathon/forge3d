@@ -89,6 +89,12 @@ pub(in crate::terrain::renderer) enum TerrainGeometryProvider {
         fallback_instance_buffer: TrackedBuffer,
         lod_selector: GpuLodSelector,
         lod_resources: GpuLodDrawResources,
+        lod_config: GpuLodConfig,
+        cpu_mesh: crate::terrain::clipmap::ClipmapMesh,
+        lod_tiles: Vec<TileInfo>,
+        draw_templates: Vec<IndirectDrawTemplate>,
+        variant_count: u32,
+        visibility_meta_buffer: TrackedBuffer,
         cache_key: ClipmapGeometryKey,
     },
 }
@@ -96,6 +102,27 @@ pub(in crate::terrain::renderer) enum TerrainGeometryProvider {
 impl TerrainGeometryProvider {
     pub(in crate::terrain::renderer) fn is_clipmap(&self) -> bool {
         matches!(self, Self::Clipmap { .. })
+    }
+
+    pub(in crate::terrain::renderer) fn visibility_resolve_buffers(
+        &self,
+    ) -> Option<(&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer)> {
+        let Self::Clipmap {
+            vertex_buffer,
+            index_buffer,
+            lod_resources,
+            visibility_meta_buffer,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        Some((
+            vertex_buffer,
+            index_buffer,
+            lod_resources.template_buffer(),
+            visibility_meta_buffer,
+        ))
     }
 
     /// Issue the draw for this geometry. The caller must have selected the
@@ -518,6 +545,7 @@ impl TerrainScene {
         }) = self.geometry_provider.as_ref()
         {
             if *existing == cache_key {
+                self.refresh_cpu_visibility_oracle(params, heightmap, height_dims)?;
                 return Ok(());
             }
         }
@@ -649,6 +677,9 @@ impl TerrainScene {
                     );
                     tile = tile.with_height_bounds(bounds.0, bounds.1);
                 }
+                // Visibility IDs use a compact dense tile index so the
+                // full-screen pass can index draw metadata without a search.
+                tile.tile_id = lod_tiles.len() as u32;
                 for chunks in &variant_chunks {
                     let selected = chunks[chunk_index];
                     let selected = if selected.index_count == 0 {
@@ -671,7 +702,7 @@ impl TerrainScene {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.clipmap.vertex_buffer"),
                 contents: bytemuck::cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
             },
         )?;
         let index_buffer = tracked_create_buffer_init(
@@ -679,7 +710,7 @@ impl TerrainScene {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.clipmap.index_buffer"),
                 contents: bytemuck::cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::STORAGE,
             },
         )?;
         let fallback_instance = ClipmapDrawInstance::identity(lod_tiles[0].tile_id, 0);
@@ -691,22 +722,28 @@ impl TerrainScene {
                 usage: wgpu::BufferUsages::VERTEX,
             },
         )?;
-        let lod_selector = GpuLodSelector::new(
-            self.device.as_ref(),
-            GpuLodConfig {
-                viewport_width: params.size_px.0,
-                viewport_height: params.size_px.1,
-                fov_y: params.fov_y_deg.to_radians(),
-                max_lod: variant_count - 1,
-                terrain_width: terrain_span,
-                tile_size: terrain_span / config.ring_resolution.max(1) as f32,
-                ..Default::default()
-            },
-        );
+        let lod_config = GpuLodConfig {
+            viewport_width: params.size_px.0,
+            viewport_height: params.size_px.1,
+            fov_y: params.fov_y_deg.to_radians(),
+            max_lod: variant_count - 1,
+            terrain_width: terrain_span,
+            tile_size: terrain_span / config.ring_resolution.max(1) as f32,
+            ..Default::default()
+        };
+        let lod_selector = GpuLodSelector::new(self.device.as_ref(), lod_config.clone());
         let lod_resources = lod_selector.create_draw_resources(
             self.device.as_ref(),
             &lod_tiles,
             &draw_templates,
+        )?;
+        let visibility_meta_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.visibility.resolve_meta"),
+                contents: bytemuck::cast_slice(&[variant_count, 0, 0, 0]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
         )?;
         let scale = params.render_scale.clamp(0.25, 4.0);
         self.two_phase_culler = if params.culling == "hzb_two_phase" {
@@ -728,8 +765,54 @@ impl TerrainScene {
             fallback_instance_buffer,
             lod_selector,
             lod_resources,
+            lod_config,
+            cpu_mesh: mesh,
+            lod_tiles,
+            draw_templates,
+            variant_count,
+            visibility_meta_buffer,
             cache_key,
         });
+        self.refresh_cpu_visibility_oracle(params, heightmap, height_dims)?;
+        Ok(())
+    }
+
+    fn refresh_cpu_visibility_oracle(
+        &self,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        heightmap: &[f32],
+        height_dims: (u32, u32),
+    ) -> Result<()> {
+        let mut oracle = self
+            .cpu_visibility_oracle
+            .lock()
+            .map_err(|_| anyhow!("terrain CPU visibility oracle mutex poisoned"))?;
+        if params.shading != "visibility" {
+            *oracle = None;
+            return Ok(());
+        }
+        let Some(TerrainGeometryProvider::Clipmap {
+            lod_config,
+            cpu_mesh,
+            lod_tiles,
+            draw_templates,
+            variant_count,
+            ..
+        }) = self.geometry_provider.as_ref()
+        else {
+            *oracle = None;
+            return Ok(());
+        };
+        *oracle = Some(super::visibility_buffer::CpuVisibilityOracle::build(
+            params,
+            heightmap,
+            height_dims,
+            cpu_mesh,
+            lod_tiles,
+            draw_templates,
+            *variant_count,
+            lod_config,
+        )?);
         Ok(())
     }
 

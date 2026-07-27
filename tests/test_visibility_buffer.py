@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _tessella_evidence import record_tessella_result
 from _terrain_runtime import _write_test_hdr, terrain_rendering_available
 from forge3d.diagnostics import render_certificate, visibility_stats
 from forge3d.terrain_params import (
@@ -117,7 +118,24 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
         )
     )
     first = renderer.pick_visibility_pixels(pixels)
-    second = renderer.pick_visibility_pixels(pixels)
-    assert first == second
+    cpu = renderer.pick_visibility_pixels_cpu(pixels)
+    assert first == cpu
     assert len(first) == 10_000
     assert sum(value is not None for value in first) > 0
+    record_tessella_result(
+        "visibility_buffer",
+        {
+            "visible_pixels": int(stats["visible_pixels"]),
+            "background_pixels": int(stats["background_pixels"]),
+            "feedback_records": int(stats["feedback_records"]),
+            "material_invocations": int(stats["material_invocations"]),
+            "fallback_texels": int(stats["fallback_texels"]),
+            "picking_samples": len(first),
+            "picking_hits": sum(value is not None for value in first),
+            "gpu_cpu_picking_matches": sum(
+                gpu_value == cpu_value
+                for gpu_value, cpu_value in zip(first, cpu, strict=True)
+            ),
+            "bitwise_identical_to_forward": True,
+        },
+    )
