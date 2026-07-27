@@ -272,6 +272,15 @@ fn append_clipmap_lod_variant(
             terrain_span,
             config.morph_range,
         );
+        crate::terrain::clipmap::geomorph::correct_seam_vertices(
+            &mut vertices,
+            ring_index,
+            config.ring_resolution << (ring_index + 1).min(16),
+            &crate::terrain::clipmap::geomorph::GeomorphConfig {
+                morph_range: config.morph_range,
+                ..Default::default()
+            },
+        );
         let (skirt_vertices, skirt_indices) = crate::terrain::clipmap::make_ring_skirts(
             &vertices,
             &indices,
@@ -515,6 +524,51 @@ impl TerrainScene {
 
         let mut mesh =
             crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span);
+        let geomorph_config = crate::terrain::clipmap::geomorph::GeomorphConfig {
+            morph_range: config.morph_range,
+            max_seam_gap: (terrain_span * 1e-6).max(0.001),
+            snap_to_coarse: true,
+        };
+        for (ring_index, bounds) in mesh.ring_bounds.iter().copied().enumerate() {
+            let range =
+                bounds.vertex_start as usize..(bounds.vertex_start + bounds.vertex_count) as usize;
+            crate::terrain::clipmap::geomorph::correct_seam_vertices(
+                &mut mesh.vertices[range],
+                ring_index as u32,
+                config.ring_resolution << ((ring_index as u32 + 1).min(16)),
+                &geomorph_config,
+            );
+        }
+        let seam_regions = std::iter::once(mesh.center_bounds)
+            .chain(mesh.ring_bounds.iter().copied())
+            .collect::<Vec<_>>();
+        let mut seam_summary = crate::terrain::clipmap::geomorph::SeamAnalysis {
+            boundary_vertex_count: 0,
+            max_gap: 0.0,
+            avg_gap: 0.0,
+            t_junction_count: 0,
+            seams_valid: true,
+        };
+        for pair in seam_regions.windows(2) {
+            let inner = pair[0];
+            let outer = pair[1];
+            let analysis = crate::terrain::clipmap::geomorph::analyze_seams(
+                &mesh.vertices[inner.vertex_start as usize
+                    ..(inner.vertex_start + inner.vertex_count) as usize],
+                &mesh.vertices[outer.vertex_start as usize
+                    ..(outer.vertex_start + outer.vertex_count) as usize],
+                &geomorph_config,
+            );
+            seam_summary.max_gap = seam_summary.max_gap.max(analysis.max_gap);
+            seam_summary.avg_gap += analysis.avg_gap * analysis.boundary_vertex_count as f32;
+            seam_summary.boundary_vertex_count += analysis.boundary_vertex_count;
+            seam_summary.t_junction_count += analysis.t_junction_count;
+            seam_summary.seams_valid &= analysis.seams_valid;
+        }
+        if seam_summary.boundary_vertex_count > 0 {
+            seam_summary.avg_gap /= seam_summary.boundary_vertex_count as f32;
+        }
+        crate::terrain::clipmap::geomorph::publish_seam_analysis(seam_summary);
         let fallback_index_count = mesh.index_count();
         let regions: Vec<_> = std::iter::once(mesh.center_bounds)
             .chain(mesh.ring_bounds.iter().copied())

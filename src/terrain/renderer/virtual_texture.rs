@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,6 +14,8 @@ use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::core::staging_rings::StagingRing;
 #[cfg(feature = "extension-module")]
 use crate::core::tile_cache::{TileCache, TileData, TileId};
+#[cfg(feature = "extension-module")]
+use crate::terrain::vt::VirtualTextureStore;
 #[cfg(feature = "extension-module")]
 use crate::terrain::vt_family_residency::{
     decode_feedback_payload, FamilyResidency, FamilyResidencyTracker, TileKey, VT_FAMILY_COUNT,
@@ -35,10 +38,25 @@ const TERRAIN_VT_FALLBACK_COUNT: usize =
     super::core::MATERIAL_LAYER_CAPACITY * TERRAIN_VT_FAMILY_COUNT as usize;
 
 #[cfg(feature = "extension-module")]
+pub(super) fn bindless_bc_supported(device: &wgpu::Device) -> bool {
+    let features = device.features();
+    features.contains(wgpu::Features::TEXTURE_COMPRESSION_BC)
+        && features.contains(wgpu::Features::TEXTURE_BINDING_ARRAY)
+        && features
+            .contains(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING)
+}
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+enum VTSourcePayload {
+    Resident(Vec<u8>),
+    Store(Arc<dyn crate::terrain::vt::VirtualTextureStore>),
+}
+
 #[derive(Clone)]
 pub(super) struct VTSource {
     pub virtual_size: (u32, u32),
-    pub data: Vec<u8>,
+    payload: VTSourcePayload,
     pub fallback_color: [f32; 4],
     /// VERITAS: stable, device-independent source id
     /// (`family_slot * 4 + material_index + 1`; 0 == SOURCE_ID_NONE).
@@ -49,7 +67,7 @@ pub(super) struct VTSource {
 
 #[cfg(feature = "extension-module")]
 pub(super) struct TerrainVTBindingResources<'a> {
-    pub atlas_view: &'a wgpu::TextureView,
+    pub atlas_views: &'a [wgpu::TextureView],
     pub page_table_view: &'a wgpu::TextureView,
     pub feedback_buffer: Option<&'a wgpu::Buffer>,
 }
@@ -89,9 +107,15 @@ struct MipImage {
 
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
+enum PreparedVTSourcePayload {
+    Resident(Vec<MipImage>),
+    Store(Arc<dyn crate::terrain::vt::VirtualTextureStore>),
+}
+
+#[derive(Clone)]
 struct PreparedVTSource {
     fallback_color: [f32; 4],
-    mips: Vec<MipImage>,
+    payload: PreparedVTSourcePayload,
     /// VERITAS: stable source id + SHA256 of the source payload (both
     /// copied from `VTSource`, assigned at ingest).
     source_id: u32,
@@ -114,6 +138,10 @@ struct TerrainMaterialVTStats {
     resident_megabytes: f32,
     source_count: u32,
     feedback_requests: u32,
+    retained_requests: u32,
+    prefetch_requests: u32,
+    uploaded_bytes: u64,
+    upload_budget_bytes: u64,
     families: [FamilyResidency; VT_FAMILY_COUNT],
 }
 
@@ -128,8 +156,9 @@ struct TerrainMaterialVTRuntime {
     max_mip_levels: u32,
     pages_x0: u32,
     pages_y0: u32,
-    atlas_texture: TrackedTexture,
-    atlas_view: wgpu::TextureView,
+    atlas_textures: Vec<TrackedTexture>,
+    atlas_views: Vec<wgpu::TextureView>,
+    bindless_bc: bool,
     #[cfg(feature = "enable-staging-rings")]
     staging_ring: StagingRing,
     page_table_texture: TrackedTexture,
@@ -140,7 +169,7 @@ struct TerrainMaterialVTRuntime {
     tile_cache: TileCache,
     family_residency: FamilyResidencyTracker,
     feedback_buffer: Option<FeedbackBuffer>,
-    pending_feedback: [Vec<TileKey>; VT_FAMILY_COUNT],
+    pending_feedback: crate::terrain::vt::requests::RetainedRequestSet,
     feedback_staged: bool,
     budget_pages: u32,
     residency_budget_mb: f32,
@@ -149,6 +178,58 @@ struct TerrainMaterialVTRuntime {
     family_mask: u32,
     layer_fallbacks: [[f32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
     stats: TerrainMaterialVTStats,
+    last_camera_target: Option<[f32; 2]>,
+}
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PriorityRequest {
+    key: TileKey,
+    score: u64,
+}
+
+#[cfg(feature = "extension-module")]
+impl Ord for PriorityRequest {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score.cmp(&other.score).then_with(|| {
+            (
+                self.key.family_slot,
+                self.key.material_index,
+                self.key.mip_level,
+                self.key.y,
+                self.key.x,
+            )
+                .cmp(&(
+                    other.key.family_slot,
+                    other.key.material_index,
+                    other.key.mip_level,
+                    other.key.y,
+                    other.key.x,
+                ))
+                .reverse()
+        })
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl PartialOrd for PriorityRequest {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[cfg(feature = "extension-module")]
+fn request_score(key: TileKey, desired_mip: u32, feedback: bool, prefetch: bool) -> u64 {
+    let family_importance = match key.family_slot {
+        TERRAIN_VT_FAMILY_ALBEDO => 3,
+        TERRAIN_VT_FAMILY_NORMAL => 2,
+        _ => 1,
+    };
+    let ancestor_priority = u64::from(key.mip_level.saturating_sub(desired_mip));
+    u64::from(feedback) * 1_000_000_000
+        + ancestor_priority * 10_000_000
+        + family_importance * 1_000_000
+        + if prefetch { 0 } else { 500_000 }
 }
 
 #[cfg(feature = "extension-module")]
@@ -157,6 +238,7 @@ pub(super) struct TerrainMaterialVT {
     runtime: Option<TerrainMaterialVTRuntime>,
     source_generation: u64,
     last_stats: TerrainMaterialVTStats,
+    bound_store_path: Option<String>,
 }
 
 #[cfg(feature = "extension-module")]
@@ -167,6 +249,7 @@ impl TerrainMaterialVT {
             runtime: None,
             source_generation: 0,
             last_stats: TerrainMaterialVTStats::default(),
+            bound_store_path: None,
         }
     }
 
@@ -223,7 +306,7 @@ impl TerrainMaterialVT {
             (material_index, family),
             VTSource {
                 virtual_size: virtual_size_px,
-                data,
+                payload: VTSourcePayload::Resident(data),
                 fallback_color,
                 source_id,
                 content_hash,
@@ -234,11 +317,55 @@ impl TerrainMaterialVT {
         Ok(())
     }
 
+    fn bind_store(&mut self, path: &str) -> Result<(), String> {
+        if self.bound_store_path.as_deref() == Some(path) {
+            return Ok(());
+        }
+        let store = Arc::new(crate::terrain::vt::MmapPageStore::open(path)?);
+        let metadata = store.metadata();
+        let width = u32::try_from(metadata.virtual_width).map_err(|_| {
+            "VT store virtual_width exceeds the renderer's u32 contract".to_string()
+        })?;
+        let height = u32::try_from(metadata.virtual_height).map_err(|_| {
+            "VT store virtual_height exceeds the renderer's u32 contract".to_string()
+        })?;
+        if metadata.family_count < TERRAIN_VT_FAMILY_COUNT {
+            return Err(format!(
+                "VT store exposes {} families; terrain material rendering requires {TERRAIN_VT_FAMILY_COUNT}",
+                metadata.family_count
+            ));
+        }
+        self.sources.clear();
+        let fallbacks = Self::default_family_fallbacks();
+        for material_index in 0..super::core::MATERIAL_LAYER_CAPACITY as u32 {
+            for (family_slot, family) in TERRAIN_VT_SUPPORTED_FAMILIES.iter().enumerate() {
+                self.sources.insert(
+                    (material_index, (*family).to_string()),
+                    VTSource {
+                        virtual_size: (width, height),
+                        payload: VTSourcePayload::Store(store.clone()),
+                        fallback_color: fallbacks[family_slot],
+                        source_id: crate::core::provenance::source_id_for(
+                            family_slot as u32,
+                            material_index,
+                        ),
+                        content_hash: store.content_hash(),
+                    },
+                );
+            }
+        }
+        self.source_generation = self.source_generation.wrapping_add(1);
+        self.runtime = None;
+        self.bound_store_path = Some(path.to_string());
+        Ok(())
+    }
+
     pub fn clear_sources(&mut self) {
         self.sources.clear();
         self.runtime = None;
         self.source_generation = self.source_generation.wrapping_add(1);
         self.last_stats = TerrainMaterialVTStats::default();
+        self.bound_store_path = None;
     }
 
     pub fn get_stats(&self) -> HashMap<String, f32> {
@@ -267,6 +394,19 @@ impl TerrainMaterialVT {
         out.insert(
             "feedback_requests".to_string(),
             stats.feedback_requests as f32,
+        );
+        out.insert(
+            "retained_requests".to_string(),
+            stats.retained_requests as f32,
+        );
+        out.insert(
+            "prefetch_requests".to_string(),
+            stats.prefetch_requests as f32,
+        );
+        out.insert("uploaded_bytes".to_string(), stats.uploaded_bytes as f32);
+        out.insert(
+            "upload_budget_bytes".to_string(),
+            stats.upload_budget_bytes as f32,
         );
         let mut resident_bytes_total = 0u64;
         for (slot, name) in TERRAIN_VT_SUPPORTED_FAMILIES.iter().enumerate() {
@@ -302,7 +442,7 @@ impl TerrainMaterialVT {
         self.runtime
             .as_ref()
             .map(|runtime| TerrainVTBindingResources {
-                atlas_view: &runtime.atlas_view,
+                atlas_views: &runtime.atlas_views,
                 page_table_view: &runtime.page_table_view,
                 feedback_buffer: runtime
                     .feedback_buffer
@@ -398,6 +538,9 @@ impl TerrainMaterialVT {
         vt_uniform_buffer: &wgpu::Buffer,
         vt_fallback_uniform_buffer: &wgpu::Buffer,
     ) -> Result<bool, String> {
+        if let Some(path) = params.vt_store_path.as_deref() {
+            self.bind_store(path)?;
+        }
         let layers = Self::active_layers(&decoded.vt);
         if layers.is_empty() {
             self.runtime = None;
@@ -491,11 +634,14 @@ impl TerrainMaterialVT {
             return Ok(());
         }
 
-        for bucket in runtime.pending_feedback.iter_mut() {
-            bucket.clear();
-        }
         if let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() {
             let Some(entries) = feedback_buffer.try_read_feedback_entries(device)? else {
+                runtime.pending_feedback.on_not_ready();
+                runtime.stats.retained_requests = runtime
+                    .pending_feedback
+                    .iter()
+                    .map(|bucket| bucket.len() as u32)
+                    .sum();
                 return Ok(());
             };
             // Demux decoded entries by family so each family drives its own
@@ -517,7 +663,7 @@ impl TerrainMaterialVT {
                 if entry.tile_x >= pages_x || entry.tile_y >= pages_y {
                     continue;
                 }
-                runtime.pending_feedback[family_slot as usize].push(TileKey {
+                runtime.pending_feedback[family_slot as usize].insert(TileKey {
                     family_slot,
                     material_index,
                     x: entry.tile_x,
@@ -530,6 +676,7 @@ impl TerrainMaterialVT {
                 .iter()
                 .map(|bucket| bucket.len() as u32)
                 .sum();
+            runtime.stats.retained_requests = runtime.stats.feedback_requests;
         }
         runtime.feedback_staged = false;
         self.last_stats = runtime.stats;
@@ -766,30 +913,72 @@ impl TerrainMaterialVTRuntime {
             .min(Self::page_table_mip_levels(pages_x0, pages_y0))
             .max(1);
 
-        let atlas_texture = tracked_create_texture(
-            device,
-            &wgpu::TextureDescriptor {
-                label: Some("terrain.material_vt.atlas"),
-                size: wgpu::Extent3d {
-                    width: atlas_size,
-                    height: atlas_size,
-                    depth_or_array_layers: 1,
+        let bindless_bc = bindless_bc_supported(device.as_ref());
+        if !bindless_bc {
+            let features = device.features();
+            if !features.contains(wgpu::Features::TEXTURE_COMPRESSION_BC) {
+                crate::core::degradation::record_degradation(
+                    "rendering_fallback",
+                    "terrain_vt_bc_atlas",
+                    "adapter lacks TEXTURE_COMPRESSION_BC; using raw RGBA8 atlas uploads",
+                );
+            }
+            if !features.contains(wgpu::Features::TEXTURE_BINDING_ARRAY)
+                || !features.contains(
+                    wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,
+                )
+            {
+                crate::core::degradation::record_degradation(
+                    "rendering_fallback",
+                    "terrain_vt_bindless_atlas",
+                    "adapter lacks descriptor indexing; using the single-atlas compatibility path",
+                );
+            }
+        }
+        if bindless_bc && (!atlas_size.is_multiple_of(4) || !slot_size.is_multiple_of(4)) {
+            return Err(
+                "BC atlas_size and tile_size + 2*tile_border must be multiples of four".to_string(),
+            );
+        }
+        let atlas_formats = if bindless_bc {
+            vec![
+                wgpu::TextureFormat::Bc7RgbaUnormSrgb,
+                wgpu::TextureFormat::Bc5RgUnorm,
+                wgpu::TextureFormat::Bc7RgbaUnorm,
+            ]
+        } else {
+            vec![wgpu::TextureFormat::Rgba8UnormSrgb]
+        };
+        let mut atlas_textures = Vec::with_capacity(atlas_formats.len());
+        let mut atlas_views = Vec::with_capacity(atlas_formats.len());
+        for format in atlas_formats {
+            let texture = tracked_create_texture(
+                device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain.material_vt.atlas"),
+                    size: wgpu::Extent3d {
+                        width: atlas_size,
+                        height: atlas_size,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            },
-        )
-        .map_err(|e| e.to_string())?;
-        let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("terrain.material_vt.atlas.view"),
-            format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
-            dimension: Some(wgpu::TextureViewDimension::D2),
-            ..Default::default()
-        });
+            )
+            .map_err(|e| e.to_string())?;
+            let view = texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("terrain.material_vt.atlas.view"),
+                format: Some(format),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                ..Default::default()
+            });
+            atlas_textures.push(texture);
+            atlas_views.push(view);
+        }
         #[cfg(feature = "enable-staging-rings")]
         let staging_ring = {
             let max_tile_bytes =
@@ -855,7 +1044,14 @@ impl TerrainMaterialVTRuntime {
                 (family_slot, *material_index),
                 PreparedVTSource {
                     fallback_color: source.fallback_color,
-                    mips: build_rgba_mip_chain(&source.data, source.virtual_size, max_mip_levels),
+                    payload: match &source.payload {
+                        VTSourcePayload::Resident(data) => PreparedVTSourcePayload::Resident(
+                            build_rgba_mip_chain(data, source.virtual_size, max_mip_levels),
+                        ),
+                        VTSourcePayload::Store(store) => {
+                            PreparedVTSourcePayload::Store(store.clone())
+                        }
+                    },
                     source_id: source.source_id,
                     content_hash: source.content_hash,
                 },
@@ -867,7 +1063,13 @@ impl TerrainMaterialVTRuntime {
                 .saturating_mul(prepared_sources.len() as u32);
 
         let atlas_slots_total = (atlas_size / slot_size) * (atlas_size / slot_size);
-        let slot_bytes = slot_size as usize * slot_size as usize * TERRAIN_VT_BYTES_PER_PIXEL;
+        let slot_bytes = slot_size as usize
+            * slot_size as usize
+            * if bindless_bc {
+                1
+            } else {
+                TERRAIN_VT_BYTES_PER_PIXEL
+            };
         let budget_bytes = (residency_budget_mb * 1024.0 * 1024.0).floor() as usize;
         let budget_pages = budget_bytes.checked_div(slot_bytes).unwrap_or(0).max(1) as u32;
         let budget_pages = budget_pages.min(atlas_slots_total).max(1);
@@ -897,11 +1099,21 @@ impl TerrainMaterialVTRuntime {
         // budget tracker sees the atlas, page table, and feedback buffers.
         let memory_tracker = crate::core::memory_tracker::global_tracker();
         let page_table_layers = TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels;
-        memory_tracker.track_texture_allocation(
-            atlas_size,
-            atlas_size,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
+        if bindless_bc {
+            for format in [
+                wgpu::TextureFormat::Bc7RgbaUnormSrgb,
+                wgpu::TextureFormat::Bc5RgUnorm,
+                wgpu::TextureFormat::Bc7RgbaUnorm,
+            ] {
+                memory_tracker.track_texture_allocation(atlas_size, atlas_size, format);
+            }
+        } else {
+            memory_tracker.track_texture_allocation(
+                atlas_size,
+                atlas_size,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            );
+        }
         memory_tracker.track_texture_allocation(
             pages_x0,
             pages_y0.saturating_mul(page_table_layers),
@@ -941,8 +1153,9 @@ impl TerrainMaterialVTRuntime {
             max_mip_levels,
             pages_x0,
             pages_y0,
-            atlas_texture,
-            atlas_view,
+            atlas_textures,
+            atlas_views,
+            bindless_bc,
             #[cfg(feature = "enable-staging-rings")]
             staging_ring,
             page_table_texture,
@@ -962,6 +1175,7 @@ impl TerrainMaterialVTRuntime {
             family_mask,
             layer_fallbacks,
             stats: TerrainMaterialVTStats::default(),
+            last_camera_target: None,
         };
         runtime.stats.total_pages = total_pages;
         runtime.stats.cache_budget_pages = budget_pages;
@@ -1010,10 +1224,17 @@ impl TerrainMaterialVTRuntime {
         self.stats.cache_budget_pages = self.budget_pages;
         self.stats.cache_budget_mb = residency_budget_mb;
         self.stats.source_count = self.sources.len() as u32;
+        self.stats.retained_requests = self
+            .pending_feedback
+            .iter()
+            .map(|bucket| bucket.len() as u32)
+            .sum();
+        self.stats.prefetch_requests = 0;
+        self.stats.uploaded_bytes = 0;
     }
 
     fn collect_requests(
-        &self,
+        &mut self,
         params: &crate::terrain::render_params::TerrainRenderParams,
         render_width: u32,
         render_height: u32,
@@ -1021,43 +1242,124 @@ impl TerrainMaterialVTRuntime {
     ) -> Vec<TileKey> {
         let desired_mip = self.target_mip_level(params, render_width, render_height);
         let (uv_min, uv_max) = self.visible_uv_rect(params);
+        let current_target = [params.cam_target[0], params.cam_target[1]];
+        let velocity = self
+            .last_camera_target
+            .map(|previous| {
+                [
+                    current_target[0] - previous[0],
+                    current_target[1] - previous[1],
+                ]
+            })
+            .unwrap_or([0.0, 0.0]);
+        self.last_camera_target = Some(current_target);
+        let prediction_scale = params.prefetch_horizon_ms / (1000.0 / 60.0);
+        let mut predicted_params = params.clone();
+        predicted_params.cam_target[0] += velocity[0] * prediction_scale;
+        predicted_params.cam_target[1] += velocity[1] * prediction_scale;
+        let predicted_rect = self.visible_uv_rect(&predicted_params);
         let (pages_x, pages_y) = self.pages_at_mip(desired_mip);
         let start_x = ((uv_min[0] * pages_x as f32).floor() as i32).clamp(0, pages_x as i32 - 1);
         let start_y = ((uv_min[1] * pages_y as f32).floor() as i32).clamp(0, pages_y as i32 - 1);
         let end_x = ((uv_max[0] * pages_x as f32).ceil() as i32 - 1).clamp(0, pages_x as i32 - 1);
         let end_y = ((uv_max[1] * pages_y as f32).ceil() as i32 - 1).clamp(0, pages_y as i32 - 1);
 
-        let mut requests = HashSet::new();
+        let mut priorities = HashMap::<TileKey, u64>::new();
         for (family_slot, material_index) in self.sources.keys().copied() {
             for y in start_y..=end_y {
                 for x in start_x..=end_x {
-                    self.insert_tile_with_ancestors(
-                        &mut requests,
-                        TileKey {
-                            family_slot,
-                            material_index,
-                            x: x as u32,
-                            y: y as u32,
-                            mip_level: desired_mip,
-                        },
+                    let key = TileKey {
+                        family_slot,
+                        material_index,
+                        x: x as u32,
+                        y: y as u32,
+                        mip_level: desired_mip,
+                    };
+                    self.insert_prioritized_with_ancestors(
+                        &mut priorities,
+                        key,
+                        request_score(key, desired_mip, false, false),
                     );
                 }
             }
         }
 
+        if params.prefetch_horizon_ms > 0.0 && velocity != [0.0, 0.0] {
+            let requests_before_prefetch = priorities.len();
+            let (predicted_min, predicted_max) = predicted_rect;
+            let predicted_start_x =
+                ((predicted_min[0] * pages_x as f32).floor() as i32).clamp(0, pages_x as i32 - 1);
+            let predicted_start_y =
+                ((predicted_min[1] * pages_y as f32).floor() as i32).clamp(0, pages_y as i32 - 1);
+            let predicted_end_x = ((predicted_max[0] * pages_x as f32).ceil() as i32 - 1)
+                .clamp(0, pages_x as i32 - 1);
+            let predicted_end_y = ((predicted_max[1] * pages_y as f32).ceil() as i32 - 1)
+                .clamp(0, pages_y as i32 - 1);
+            for (family_slot, material_index) in self.sources.keys().copied() {
+                for y in predicted_start_y..=predicted_end_y {
+                    for x in predicted_start_x..=predicted_end_x {
+                        let key = TileKey {
+                            family_slot,
+                            material_index,
+                            x: x as u32,
+                            y: y as u32,
+                            mip_level: desired_mip,
+                        };
+                        self.insert_prioritized_with_ancestors(
+                            &mut priorities,
+                            key,
+                            request_score(key, desired_mip, false, true),
+                        );
+                    }
+                }
+            }
+            self.stats.prefetch_requests =
+                priorities.len().saturating_sub(requests_before_prefetch) as u32;
+        }
+
         if use_feedback {
-            for feedback in self.pending_feedback.iter().flatten() {
+            let feedback_requests = self
+                .pending_feedback
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+            for feedback in feedback_requests {
                 if self
                     .sources
                     .contains_key(&(feedback.family_slot, feedback.material_index))
                 {
-                    self.insert_tile_with_ancestors(&mut requests, *feedback);
+                    self.insert_prioritized_with_ancestors(
+                        &mut priorities,
+                        feedback,
+                        request_score(feedback, desired_mip, true, false),
+                    );
                 }
             }
         }
 
-        let mut ordered = requests.into_iter().collect::<Vec<_>>();
-        ordered.sort_by_key(|key| (key.mip_level, key.material_index, key.y, key.x));
+        let mut queue = priorities
+            .into_iter()
+            .map(|(key, score)| PriorityRequest { key, score })
+            .collect::<BinaryHeap<_>>();
+        let mut ordered = Vec::new();
+        let mut budget = 0u64;
+        while let Some(request) = queue.pop() {
+            let cache_tile = self.encode_cache_tile(request.key);
+            let bytes = if self.tile_cache.is_resident(&cache_tile) {
+                0
+            } else {
+                u64::from(self.slot_size)
+                    * u64::from(self.slot_size)
+                    * if self.bindless_bc { 1 } else { 4 }
+            };
+            if bytes > 0 && budget.saturating_add(bytes) > params.vt_upload_budget_bytes {
+                continue;
+            }
+            budget += bytes;
+            ordered.push(request.key);
+        }
+        self.stats.upload_budget_bytes = params.vt_upload_budget_bytes;
         ordered
     }
 
@@ -1073,6 +1375,7 @@ impl TerrainMaterialVTRuntime {
             self.tile_cache.access_tile(&cache_tile);
             self.family_residency.note_access(key);
             self.stats.cache_hits += 1;
+            self.pending_feedback[key.family_slot as usize].remove(&key);
             return Ok(());
         }
 
@@ -1107,11 +1410,15 @@ impl TerrainMaterialVTRuntime {
             self.clear_page_entry(victim);
         }
 
-        let tile_data = self.build_tile_data(&source, key);
+        let tile_data = self.build_tile_data(&source, key)?;
         let upload_start = Instant::now();
-        self.upload_tile_to_atlas(encoder, queue, &tile_data, atlas_slot);
+        self.upload_tile_to_atlas(encoder, queue, key, &tile_data, atlas_slot);
         let upload_ms = upload_start.elapsed().as_secs_f32() * 1000.0;
         self.stats.tiles_streamed += 1;
+        self.stats.uploaded_bytes = self
+            .stats
+            .uploaded_bytes
+            .saturating_add(tile_data.data.len() as u64);
         self.stats.last_upload_ms = upload_ms;
         let stream_count = self.stats.tiles_streamed.max(1) as f32;
         self.stats.avg_upload_ms =
@@ -1119,6 +1426,7 @@ impl TerrainMaterialVTRuntime {
         self.stats.evictions = self.tile_cache.stats().evictions as u32;
         self.set_page_entry(key, atlas_slot);
         self.family_residency.on_insert(key);
+        self.pending_feedback[key.family_slot as usize].remove(&key);
         let _ = device;
         Ok(())
     }
@@ -1128,7 +1436,11 @@ impl TerrainMaterialVTRuntime {
         let resident_bytes = self.stats.resident_pages as usize
             * self.slot_size as usize
             * self.slot_size as usize
-            * TERRAIN_VT_BYTES_PER_PIXEL;
+            * if self.bindless_bc {
+                1
+            } else {
+                TERRAIN_VT_BYTES_PER_PIXEL
+            };
         self.stats.resident_megabytes = resident_bytes as f32 / (1024.0 * 1024.0);
         for slot in 0..VT_FAMILY_COUNT {
             self.stats.families[slot] = self.family_residency.family(slot as u32);
@@ -1184,8 +1496,95 @@ impl TerrainMaterialVTRuntime {
         }
     }
 
-    fn build_tile_data(&self, source: &PreparedVTSource, key: TileKey) -> TileData {
-        let mip = &source.mips[key.mip_level as usize];
+    fn build_tile_data(&self, source: &PreparedVTSource, key: TileKey) -> Result<TileData, String> {
+        if let PreparedVTSourcePayload::Store(store) = &source.payload {
+            let page = store.page(crate::terrain::vt::PageKey {
+                family: key.family_slot as u8,
+                mip: key.mip_level as u8,
+                x: key.x,
+                y: key.y,
+            })?;
+            if page.width != self.slot_size || page.height != self.slot_size {
+                return Err(format!(
+                    "VT store page {:?} is {}x{}, expected {}x{}",
+                    key, page.width, page.height, self.slot_size, self.slot_size
+                ));
+            }
+            if self.bindless_bc {
+                let expected = match key.family_slot {
+                    TERRAIN_VT_FAMILY_ALBEDO => crate::terrain::vt::PageFormat::Bc7Srgb,
+                    TERRAIN_VT_FAMILY_NORMAL => crate::terrain::vt::PageFormat::Bc5Unorm,
+                    TERRAIN_VT_FAMILY_MASK => crate::terrain::vt::PageFormat::Bc7Unorm,
+                    _ => {
+                        return Err(format!(
+                            "unsupported material VT family {}",
+                            key.family_slot
+                        ))
+                    }
+                };
+                if page.format != expected {
+                    return Err(format!(
+                        "VT store page {:?} uses {:?}; family {} requires {:?}",
+                        key, page.format, key.family_slot, expected
+                    ));
+                }
+                return Ok(TileData {
+                    id: self.encode_cache_tile(key),
+                    data: page.data,
+                    width: self.slot_size,
+                    height: self.slot_size,
+                    format: page.format.wgpu(),
+                });
+            }
+            let rgba = match page.format {
+                crate::terrain::vt::PageFormat::Bc7Srgb
+                | crate::terrain::vt::PageFormat::Bc7Unorm => {
+                    crate::core::compressed_textures::decode_bc7_rgba8(
+                        &page.data,
+                        page.width,
+                        page.height,
+                    )?
+                }
+                crate::terrain::vt::PageFormat::Bc5Unorm => {
+                    let rg = crate::core::compressed_textures::decode_bc5_rg8(
+                        &page.data,
+                        page.width,
+                        page.height,
+                    )?;
+                    let mut rgba =
+                        Vec::with_capacity(page.width as usize * page.height as usize * 4);
+                    for sample in rg.chunks_exact(2) {
+                        let nx = f32::from(sample[0]) / 127.5 - 1.0;
+                        let ny = f32::from(sample[1]) / 127.5 - 1.0;
+                        let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+                        rgba.extend_from_slice(&[
+                            sample[0],
+                            sample[1],
+                            ((nz * 0.5 + 0.5) * 255.0).round() as u8,
+                            255,
+                        ]);
+                    }
+                    rgba
+                }
+                crate::terrain::vt::PageFormat::Rgba8Srgb => page.data,
+                crate::terrain::vt::PageFormat::R32Float => {
+                    return Err(
+                        "R32Float height page cannot bind to a material VT family".to_string()
+                    )
+                }
+            };
+            return Ok(TileData {
+                id: self.encode_cache_tile(key),
+                data: rgba,
+                width: self.slot_size,
+                height: self.slot_size,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            });
+        }
+        let PreparedVTSourcePayload::Resident(mips) = &source.payload else {
+            unreachable!("store source handled above")
+        };
+        let mip = &mips[key.mip_level as usize];
         let slot_size = self.slot_size as usize;
         let tile_size = self.tile_size as i32;
         let tile_border = self.tile_border as i32;
@@ -1204,19 +1603,62 @@ impl TerrainMaterialVTRuntime {
             }
         }
 
-        TileData {
+        let (data, format) = if self.bindless_bc {
+            match key.family_slot {
+                TERRAIN_VT_FAMILY_ALBEDO => (
+                    crate::core::compressed_textures::encode_bc7_rgba8(
+                        &data,
+                        self.slot_size,
+                        self.slot_size,
+                    )?,
+                    wgpu::TextureFormat::Bc7RgbaUnormSrgb,
+                ),
+                TERRAIN_VT_FAMILY_NORMAL => {
+                    let rg = data
+                        .chunks_exact(4)
+                        .flat_map(|rgba| [rgba[0], rgba[1]])
+                        .collect::<Vec<_>>();
+                    (
+                        crate::core::compressed_textures::encode_bc5_rg8(
+                            &rg,
+                            self.slot_size,
+                            self.slot_size,
+                        )?,
+                        wgpu::TextureFormat::Bc5RgUnorm,
+                    )
+                }
+                TERRAIN_VT_FAMILY_MASK => (
+                    crate::core::compressed_textures::encode_bc7_rgba8(
+                        &data,
+                        self.slot_size,
+                        self.slot_size,
+                    )?,
+                    wgpu::TextureFormat::Bc7RgbaUnorm,
+                ),
+                _ => {
+                    return Err(format!(
+                        "unsupported material VT family {}",
+                        key.family_slot
+                    ))
+                }
+            }
+        } else {
+            (data, wgpu::TextureFormat::Rgba8UnormSrgb)
+        };
+        Ok(TileData {
             id: self.encode_cache_tile(key),
             data,
             width: self.slot_size,
             height: self.slot_size,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        }
+            format,
+        })
     }
 
     fn upload_tile_to_atlas(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
+        key: TileKey,
         tile_data: &TileData,
         atlas_slot: crate::core::tile_cache::AtlasSlot,
     ) {
@@ -1225,24 +1667,47 @@ impl TerrainMaterialVTRuntime {
             y: atlas_slot.atlas_y,
             z: 0,
         };
+        let atlas_texture = &self.atlas_textures[if self.bindless_bc {
+            key.family_slot as usize
+        } else {
+            0
+        }];
         #[cfg(feature = "enable-staging-rings")]
         {
-            if self.staging_ring.upload_texture_region(
-                encoder,
-                queue,
-                &self.atlas_texture,
-                origin,
-                &tile_data.data,
-                tile_data.width,
-                tile_data.height,
-                TERRAIN_VT_BYTES_PER_PIXEL as u32,
-            ) {
+            if self.bindless_bc
+                && self.staging_ring.upload_compressed_texture_region(
+                    encoder,
+                    queue,
+                    atlas_texture,
+                    origin,
+                    &tile_data.data,
+                    tile_data.width,
+                    tile_data.height,
+                    4,
+                    4,
+                    16,
+                )
+            {
+                return;
+            }
+            if !self.bindless_bc
+                && self.staging_ring.upload_texture_region(
+                    encoder,
+                    queue,
+                    atlas_texture,
+                    origin,
+                    &tile_data.data,
+                    tile_data.width,
+                    tile_data.height,
+                    TERRAIN_VT_BYTES_PER_PIXEL as u32,
+                )
+            {
                 return;
             }
         }
         queue.write_texture(
             wgpu::ImageCopyTexture {
-                texture: &self.atlas_texture,
+                texture: atlas_texture,
                 mip_level: 0,
                 origin,
                 aspect: wgpu::TextureAspect::All,
@@ -1250,7 +1715,11 @@ impl TerrainMaterialVTRuntime {
             &tile_data.data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(tile_data.width * TERRAIN_VT_BYTES_PER_PIXEL as u32),
+                bytes_per_row: Some(if self.bindless_bc {
+                    tile_data.width.div_ceil(4) * 16
+                } else {
+                    tile_data.width * TERRAIN_VT_BYTES_PER_PIXEL as u32
+                }),
                 rows_per_image: Some(tile_data.height),
             },
             wgpu::Extent3d {
@@ -1330,11 +1799,17 @@ impl TerrainMaterialVTRuntime {
         }
     }
 
-    fn insert_tile_with_ancestors(&self, requests: &mut HashSet<TileKey>, mut key: TileKey) {
+    fn insert_prioritized_with_ancestors(
+        &self,
+        requests: &mut HashMap<TileKey, u64>,
+        mut key: TileKey,
+        mut score: u64,
+    ) {
         loop {
-            if !requests.insert(key) {
-                break;
-            }
+            requests
+                .entry(key)
+                .and_modify(|current| *current = (*current).max(score))
+                .or_insert(score);
             if key.mip_level + 1 >= self.max_mip_levels {
                 break;
             }
@@ -1345,6 +1820,7 @@ impl TerrainMaterialVTRuntime {
                 y: key.y / 2,
                 mip_level: key.mip_level + 1,
             };
+            score = score.saturating_add(10_000_000);
         }
     }
 

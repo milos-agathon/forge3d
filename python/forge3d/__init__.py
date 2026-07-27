@@ -24,6 +24,9 @@ version = __version__
 
 import numpy as np
 
+from . import terrain
+from .terrain import VTStore, open_vt_store
+
 from ._png import load_png_rgba as _load_png_rgba
 from ._png import save_png as _save_png
 
@@ -115,6 +118,10 @@ _NATIVE_ONLY_EXPORTS = (
         "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
+        "terrain_culling_stats",  # TESSELLA: two-phase HZB counters
+        "terrain_visibility_stats",  # TESSELLA: visibility resolve counters
+        "terrain_seam_stats",  # TESSELLA: clipmap seam analysis
+        "vt_request_retention_probe",  # TESSELLA: device-free retention gate
         "capabilities",  # CENSOR: negotiated GPU capability report
         "render_execution_report",  # CENSOR: last-render execution certificate JSON
         "begin_render_execution_capture",  # CENSOR: Python-render capture begin
@@ -134,6 +141,10 @@ _NATIVE_ONLY_EXPORTS = (
         "compress_dem",  # COMPENDIUM: deterministic F3DZ encoder
         "decompress_dem",  # COMPENDIUM: fail-closed F3DZ decoder
         "verify_dem",  # COMPENDIUM: CRC/error-bound verifier
+        "encode_bc7_rgba8",  # TESSELLA: deterministic BC7 mode-6 encoder
+        "decode_bc7_rgba8",  # TESSELLA: deterministic BC7 mode-6 decoder
+        "encode_bc5_rg8",  # TESSELLA: deterministic BC5 encoder
+        "decode_bc5_rg8",  # TESSELLA: deterministic BC5 decoder
         "dd_selftest",  # DUPLA: GPU DD exactness canary
         "dd_harness",  # DUPLA: GPU DD bounds proof
         "dd_jitter_demo",  # DUPLA: Everest absolute-coordinate demo
@@ -650,6 +661,9 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
+    "terrain",
+    "VTStore",
+    "open_vt_store",
     # Version
     "__version__",
     "version",
@@ -700,6 +714,10 @@ __all__ = [
     # CENSOR: global degradation sink
     "native_degradations",
     "clear_native_degradations",
+    "terrain_culling_stats",
+    "terrain_visibility_stats",
+    "terrain_seam_stats",
+    "vt_request_retention_probe",
     # CENSOR: negotiated GPU capability report
     "capabilities",
     # CENSOR: last-render execution certificate JSON
@@ -715,6 +733,10 @@ __all__ = [
     "compress_dem",
     "decompress_dem",
     "verify_dem",
+    "encode_bc7_rgba8",
+    "decode_bc7_rgba8",
+    "encode_bc5_rg8",
+    "decode_bc5_rg8",
     # CENSOR: typed GPU-error exceptions
     "MemoryBudgetExceeded",
     "DegradedCapability",

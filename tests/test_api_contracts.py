@@ -271,6 +271,13 @@ class TestNativeModuleSymbols:
         "native_degradations",
         "clear_native_degradations",
         "terrain_culling_stats",
+        "terrain_visibility_stats",
+        "terrain_seam_stats",
+        "vt_request_retention_probe",
+        "encode_bc7_rgba8",
+        "decode_bc7_rgba8",
+        "encode_bc5_rg8",
+        "decode_bc5_rg8",
         # CENSOR: negotiated GPU capability report
         "capabilities",
         # CENSOR: last-render execution certificate JSON

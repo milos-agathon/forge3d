@@ -179,7 +179,11 @@ impl TerrainScene {
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    count: None,
+                    count: if super::super::virtual_texture::bindless_bc_supported(device) {
+                        std::num::NonZeroU32::new(3)
+                    } else {
+                        None
+                    },
                 },
                 // binding 9: VT atlas sampler
                 wgpu::BindGroupLayoutEntry {
@@ -245,6 +249,16 @@ impl TerrainScene {
                     binding: 15,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 16,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],

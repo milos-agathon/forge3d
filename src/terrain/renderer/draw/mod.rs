@@ -242,6 +242,7 @@ impl TerrainScene {
         let mut material_vt_started = false;
         let mut timing_needs_resolve = false;
         let mut hzb_frame_staged = false;
+        let mut visibility_frame_staged = false;
 
         scheduler
             .execute_graph_with(&scheduler_plan, &leaf_keys, |pass, action| {
@@ -453,6 +454,9 @@ impl TerrainScene {
                             hzb_frame_staged = params.culling == "hzb_two_phase"
                                 && render_targets.sample_count == 1
                                 && self.two_phase_culler.is_some();
+                            visibility_frame_staged = params.shading == "visibility"
+                                && is_clipmap_camera_mode(&params.camera_mode)
+                                && render_targets.sample_count == 1;
                             Ok::<_, anyhow::Error>(())
                         })?;
                         timing_needs_resolve = true;
@@ -603,6 +607,11 @@ impl TerrainScene {
         } else {
             self.culling_stats = crate::terrain::culling::two_phase::CullingStats::default();
             crate::terrain::culling::two_phase::publish_stats(self.culling_stats);
+        }
+        if visibility_frame_staged {
+            self.finish_visibility_frame()?;
+        } else {
+            super::visibility_buffer::publish_stats(Default::default());
         }
         self.record_render_timings(&mut timing);
         self.store_render_timing(timing);

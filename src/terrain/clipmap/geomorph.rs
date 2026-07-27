@@ -5,6 +5,7 @@
 
 use super::vertex::ClipmapVertex;
 use glam::Vec2;
+use std::sync::{Mutex, OnceLock};
 
 /// Configuration for geo-morphing.
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +41,47 @@ pub struct SeamAnalysis {
     pub t_junction_count: u32,
     /// Whether all seams are within acceptable tolerance.
     pub seams_valid: bool,
+}
+
+static LAST_SEAM_ANALYSIS: OnceLock<Mutex<SeamAnalysis>> = OnceLock::new();
+
+pub fn publish_seam_analysis(analysis: SeamAnalysis) {
+    if let Ok(mut current) = LAST_SEAM_ANALYSIS
+        .get_or_init(|| {
+            Mutex::new(SeamAnalysis {
+                boundary_vertex_count: 0,
+                max_gap: 0.0,
+                avg_gap: 0.0,
+                t_junction_count: 0,
+                seams_valid: true,
+            })
+        })
+        .lock()
+    {
+        *current = analysis;
+    }
+}
+
+pub fn latest_seam_analysis() -> SeamAnalysis {
+    LAST_SEAM_ANALYSIS
+        .get_or_init(|| {
+            Mutex::new(SeamAnalysis {
+                boundary_vertex_count: 0,
+                max_gap: 0.0,
+                avg_gap: 0.0,
+                t_junction_count: 0,
+                seams_valid: true,
+            })
+        })
+        .lock()
+        .map(|analysis| analysis.clone())
+        .unwrap_or(SeamAnalysis {
+            boundary_vertex_count: 0,
+            max_gap: 0.0,
+            avg_gap: 0.0,
+            t_junction_count: 0,
+            seams_valid: true,
+        })
 }
 
 /// Calculate morph weight for a vertex based on distance from LOD boundary.

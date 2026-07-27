@@ -61,6 +61,8 @@ def _make_params(
     cam_radius: float = 1.0,
     z_scale: float = 1.2,
     culling: str = "frustum",
+    shading: str = "forward",
+    vt=None,
     terrain_span: float = TERRAIN_SPAN_M,
 ) -> "f3d.TerrainRenderParams":
     return f3d.TerrainRenderParams(
@@ -84,6 +86,8 @@ def _make_params(
             fov_y_deg=45.0,
             camera_mode=camera_mode,
             culling=culling,
+            shading=shading,
+            vt=vt,
             clip=(0.1, terrain_span * 1.5),
             overlays=[_build_overlay()],
             pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),

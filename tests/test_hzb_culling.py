@@ -8,6 +8,7 @@ import pytest
 
 import forge3d as f3d
 from forge3d.diagnostics import culling_stats, render_certificate
+from forge3d.terrain_params import make_terrain_params_config
 
 from _terrain_runtime import _write_test_hdr, terrain_rendering_available
 from test_terrain_clipmap_streaming import _make_params, _render_rgba
@@ -45,10 +46,21 @@ def _terrain_main_gpu_ms() -> float:
 
 
 def test_culling_parameter_contract():
-    params = _make_params(culling="hzb_two_phase")
+    required = {
+        "size_px": (64, 64),
+        "render_scale": 1.0,
+        "terrain_span": 10.0,
+        "msaa_samples": 1,
+        "z_scale": 1.0,
+        "exposure": 1.0,
+        "domain": (0.0, 1.0),
+    }
+    params = f3d.TerrainRenderParams(
+        make_terrain_params_config(**required, culling="hzb_two_phase")
+    )
     assert params.culling == "hzb_two_phase"
     with pytest.raises(ValueError, match="culling must be one of"):
-        _make_params(culling="not-a-culling-mode")
+        make_terrain_params_config(**required, culling="not-a-culling-mode")
 
 
 @requires_terrain

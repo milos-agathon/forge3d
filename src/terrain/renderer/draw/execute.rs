@@ -2,6 +2,7 @@ use super::setup::RenderTargets;
 use super::*;
 use crate::core::resource_tracker::TrackedTexture;
 
+#[derive(Clone, Copy)]
 enum TerrainDrawSource<'a> {
     Direct,
     Lod(&'a crate::terrain::clipmap::gpu_lod::GpuLodDrawResources),
@@ -259,13 +260,21 @@ impl TerrainScene {
         let skirt = clipmap_camera_config(&params.camera_mode)
             .map(|config| config.ring_resolution as f32 * 0.001 * params.z_scale.abs())
             .unwrap_or(0.0);
-        let indirect = geometry.encode_indirect(
-            self.queue.as_ref(),
-            encoder,
-            params,
-            (-half_height - skirt, half_height),
-            first_instance,
-        );
+        // `culling="none"` is the pixel-correctness oracle: submit the exact
+        // combined clipmap mesh once. Feeding every off-screen region through
+        // the compacted indirect path changes overlap/order at ring corners
+        // and previously produced a uniformly magenta baseline on Metal.
+        let indirect = if params.culling == "none" {
+            None
+        } else {
+            geometry.encode_indirect(
+                self.queue.as_ref(),
+                encoder,
+                params,
+                (-half_height - skirt, half_height),
+                first_instance,
+            )
+        };
         let hzb_requested = params.culling == "hzb_two_phase";
         let hzb_enabled = hzb_requested
             && render_targets.sample_count == 1
@@ -278,6 +287,23 @@ impl TerrainScene {
                 "requires single-sample clipmap geometry; using frustum-only indirect draws",
             );
         }
+        let visibility_requested = params.shading == "visibility";
+        let visibility_enabled =
+            visibility_requested && geometry.is_clipmap() && render_targets.sample_count == 1;
+        if visibility_requested && !visibility_enabled {
+            crate::core::degradation::record_degradation(
+                "rendering_fallback",
+                "terrain_visibility_buffer",
+                "requires single-sample clipmap geometry; using forward material shading",
+            );
+        }
+        if visibility_enabled {
+            self.ensure_visibility_buffer(
+                render_targets.internal_width,
+                render_targets.internal_height,
+            )?;
+        }
+        encoder.clear_buffer(&self.vt_frame_counters_buffer, 0, None);
         if hzb_enabled {
             let lod = indirect.expect("HZB requires clipmap LOD resources");
             let (_, view, proj) = Self::build_camera_matrices(params);
@@ -293,6 +319,19 @@ impl TerrainScene {
                 (-half_height - skirt, half_height),
                 first_instance,
             );
+            let phase1_source = TerrainDrawSource::Culled(culler.phase1_resources());
+            if visibility_enabled {
+                self.encode_visibility_draw_pass(
+                    encoder,
+                    render_targets,
+                    bind_group,
+                    preserve_background,
+                    false,
+                    phase1_source,
+                    multi_draw_count,
+                    first_instance,
+                )?;
+            }
             let phase1_calls = self.encode_terrain_draw_pass(
                 encoder,
                 render_targets,
@@ -303,8 +342,9 @@ impl TerrainScene {
                 water_reflection_bind_group,
                 material_layer_bind_group,
                 preserve_background,
-                false,
-                TerrainDrawSource::Culled(culler.phase1_resources()),
+                visibility_enabled,
+                visibility_enabled,
+                phase1_source,
                 multi_draw_count,
                 first_instance,
             )?;
@@ -316,6 +356,19 @@ impl TerrainScene {
                 (-half_height - skirt, half_height),
                 first_instance,
             );
+            let phase2_source = TerrainDrawSource::Culled(culler.phase2_resources());
+            if visibility_enabled {
+                self.encode_visibility_draw_pass(
+                    encoder,
+                    render_targets,
+                    bind_group,
+                    true,
+                    true,
+                    phase2_source,
+                    multi_draw_count,
+                    first_instance,
+                )?;
+            }
             let phase2_calls = self.encode_terrain_draw_pass(
                 encoder,
                 render_targets,
@@ -327,15 +380,34 @@ impl TerrainScene {
                 material_layer_bind_group,
                 true,
                 true,
-                TerrainDrawSource::Culled(culler.phase2_resources()),
+                visibility_enabled,
+                phase2_source,
                 multi_draw_count,
                 first_instance,
             )?;
+            if visibility_enabled {
+                self.stage_visibility_stats(encoder)?;
+            }
             culler.build_previous_hzb(self.device.as_ref(), encoder, &render_targets.depth_view)?;
             culler.stage_stats(encoder, lod);
             return Ok(phase1_calls + phase2_calls);
         }
-        self.encode_terrain_draw_pass(
+        let draw_source = indirect
+            .map(TerrainDrawSource::Lod)
+            .unwrap_or(TerrainDrawSource::Direct);
+        if visibility_enabled {
+            self.encode_visibility_draw_pass(
+                encoder,
+                render_targets,
+                bind_group,
+                preserve_background,
+                false,
+                draw_source,
+                multi_draw_count,
+                first_instance,
+            )?;
+        }
+        let draw_calls = self.encode_terrain_draw_pass(
             encoder,
             render_targets,
             bind_group,
@@ -345,13 +417,91 @@ impl TerrainScene {
             water_reflection_bind_group,
             material_layer_bind_group,
             preserve_background,
-            false,
-            indirect
-                .map(TerrainDrawSource::Lod)
-                .unwrap_or(TerrainDrawSource::Direct),
+            visibility_enabled,
+            visibility_enabled,
+            draw_source,
             multi_draw_count,
             first_instance,
-        )
+        )?;
+        if visibility_enabled {
+            self.stage_visibility_stats(encoder)?;
+        }
+        Ok(draw_calls)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_visibility_draw_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        render_targets: &RenderTargets,
+        bind_group: &wgpu::BindGroup,
+        load_depth: bool,
+        load_visibility: bool,
+        draw_source: TerrainDrawSource<'_>,
+        multi_draw_count: bool,
+        first_instance: bool,
+    ) -> Result<u32> {
+        let geometry = self.geometry_provider()?;
+        let pipeline_cache = self
+            .pipeline
+            .lock()
+            .map_err(|_| anyhow!("TerrainRenderer pipeline mutex poisoned"))?;
+        let pipeline = pipeline_cache
+            .visibility_write_pipeline
+            .as_ref()
+            .ok_or_else(|| anyhow!("visibility write pipeline not initialized"))?;
+        let visibility = self
+            .visibility_buffer
+            .lock()
+            .map_err(|_| anyhow!("terrain visibility buffer mutex poisoned"))?;
+        let visibility = visibility
+            .as_ref()
+            .ok_or_else(|| anyhow!("terrain visibility buffer not initialized"))?;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("terrain.visibility.write_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: visibility.view(),
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: if load_visibility {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                    },
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &render_targets.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: if load_depth {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(1.0)
+                    },
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        crate::core::shader_registry::record_shader_use("terrain_visbuffer_write.shader");
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        let draw_calls = match draw_source {
+            TerrainDrawSource::Direct => {
+                geometry.draw(&mut pass);
+                1
+            }
+            TerrainDrawSource::Lod(resources) => {
+                geometry.draw_indirect(&mut pass, resources, multi_draw_count, first_instance)
+            }
+            TerrainDrawSource::Culled(resources) => {
+                geometry.draw_culled(&mut pass, resources, multi_draw_count, first_instance)
+            }
+        };
+        Ok(draw_calls)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -365,8 +515,9 @@ impl TerrainScene {
         fog_bind_group: &wgpu::BindGroup,
         water_reflection_bind_group: &wgpu::BindGroup,
         material_layer_bind_group: &wgpu::BindGroup,
-        preserve_background: bool,
+        preserve_color: bool,
         load_depth: bool,
+        visibility_resolve: bool,
         draw_source: TerrainDrawSource<'_>,
         multi_draw_count: bool,
         first_instance: bool,
@@ -402,7 +553,7 @@ impl TerrainScene {
                     view: color_view,
                     resolve_target,
                     ops: wgpu::Operations {
-                        load: if preserve_background || load_depth {
+                        load: if preserve_color {
                             wgpu::LoadOp::Load
                         } else {
                             wgpu::LoadOp::Clear(wgpu::Color {
@@ -418,7 +569,7 @@ impl TerrainScene {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &render_targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: if preserve_background || load_depth {
+                        load: if load_depth {
                             wgpu::LoadOp::Load
                         } else {
                             wgpu::LoadOp::Clear(1.0)
@@ -431,15 +582,24 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
-            crate::core::shader_registry::record_shader_use(if geometry.is_clipmap() {
+            crate::core::shader_registry::record_shader_use(if visibility_resolve {
+                "terrain_visbuffer_resolve.shader"
+            } else if geometry.is_clipmap() {
                 "terrain_pbr_pom.clipmap.shader"
             } else {
                 "terrain_pbr_pom.shader"
             });
             pass.set_pipeline(if geometry.is_clipmap() {
-                pipeline_cache.clipmap_pipeline.as_ref().ok_or_else(|| {
-                    anyhow!("clipmap pipeline not initialized for clipmap geometry")
-                })?
+                if visibility_resolve {
+                    pipeline_cache
+                        .visibility_resolve_pipeline
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("visibility resolve pipeline not initialized"))?
+                } else {
+                    pipeline_cache.clipmap_pipeline.as_ref().ok_or_else(|| {
+                        anyhow!("clipmap pipeline not initialized for clipmap geometry")
+                    })?
+                }
             } else {
                 &pipeline_cache.pipeline
             });

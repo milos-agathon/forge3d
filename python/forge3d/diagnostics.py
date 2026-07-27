@@ -495,6 +495,31 @@ def culling_stats() -> dict[str, Any]:
         )
     return dict(native.terrain_culling_stats())
 
+def visibility_stats() -> dict[str, Any]:
+    """Return one-record-per-visible-pixel counters for the last frame."""
+    from ._native import get_native_module
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "terrain_visibility_stats"):
+        raise RuntimeError(
+            "forge3d native extension is unavailable; visibility_stats() "
+            "requires the compiled _forge3d module."
+        )
+    return dict(native.terrain_visibility_stats())
+
+
+def seam_stats() -> dict[str, Any]:
+    """Return live clipmap seam-analysis counters for the last geometry build."""
+    from ._native import get_native_module
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "terrain_seam_stats"):
+        raise RuntimeError(
+            "forge3d native extension is unavailable; seam_stats() requires "
+            "the compiled _forge3d module."
+        )
+    return dict(native.terrain_seam_stats())
+
 
 def render_certificate(sign: bool = True) -> dict[str, Any]:
     """Assemble a RenderCertificate for the LAST completed native render.
@@ -999,6 +1024,8 @@ __all__ = [
     "SUPPORT_LEVELS",
     "capabilities",
     "culling_stats",
+    "visibility_stats",
+    "seam_stats",
     "crs_mismatch_diagnostic",
     "estimated_gpu_memory_diagnostic",
     "memory_budget_validation_report",

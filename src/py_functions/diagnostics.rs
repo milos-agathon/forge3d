@@ -364,6 +364,53 @@ pub(crate) fn terrain_culling_stats(py: Python<'_>) -> PyResult<PyObject> {
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
+pub(crate) fn terrain_visibility_stats(py: Python<'_>) -> PyResult<PyObject> {
+    let stats = crate::terrain::renderer::visibility_buffer::latest_stats();
+    let dict = pyo3::types::PyDict::new_bound(py);
+    dict.set_item("visible_pixels", stats.visible_pixels)?;
+    dict.set_item("feedback_records", stats.feedback_records)?;
+    dict.set_item("material_invocations", stats.material_invocations)?;
+    dict.set_item("background_pixels", stats.background_pixels)?;
+    dict.set_item("fallback_texels", stats.fallback_texels)?;
+    dict.set_item(
+        "forward_material_invocations",
+        stats.forward_material_invocations,
+    )?;
+    Ok(dict.into())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn terrain_seam_stats(py: Python<'_>) -> PyResult<PyObject> {
+    let stats = crate::terrain::clipmap::geomorph::latest_seam_analysis();
+    let dict = pyo3::types::PyDict::new_bound(py);
+    dict.set_item("boundary_vertex_count", stats.boundary_vertex_count)?;
+    dict.set_item("max_gap", stats.max_gap)?;
+    dict.set_item("avg_gap", stats.avg_gap)?;
+    dict.set_item("crack_count", stats.t_junction_count)?;
+    dict.set_item("seams_valid", stats.seams_valid)?;
+    Ok(dict.into())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (not_ready_frames=30))]
+pub(crate) fn vt_request_retention_probe(
+    py: Python<'_>,
+    not_ready_frames: u32,
+) -> PyResult<PyObject> {
+    let (preserved, converged, remaining) =
+        crate::terrain::vt::requests::retention_probe(not_ready_frames);
+    let dict = pyo3::types::PyDict::new_bound(py);
+    dict.set_item("not_ready_frames", not_ready_frames)?;
+    dict.set_item("preserved", preserved)?;
+    dict.set_item("converged", converged)?;
+    dict.set_item("remaining_requests", remaining)?;
+    Ok(dict.into())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
 pub(crate) fn clear_native_degradations() {
     crate::core::degradation::clear_degradations();
 }

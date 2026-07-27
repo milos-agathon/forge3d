@@ -50,7 +50,22 @@ mod tests {
 
     #[test]
     fn assembled_renderer_sources_are_valid_wgsl() {
-        for source in [hybrid_kernel(), terrain()] {
+        let terrain = terrain();
+        let bindless_terrain = terrain
+            .replace(
+                "var terrain_vt_atlas: texture_2d<f32>;",
+                "var terrain_vt_atlas: binding_array<texture_2d<f32>>;",
+            )
+            .replace(
+                "textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0)",
+                "textureSampleLevel(terrain_vt_atlas[family_slot], terrain_vt_sampler, atlas_uv, 0.0)",
+            );
+        for source in [
+            hybrid_kernel(),
+            terrain,
+            bindless_terrain,
+            include_str!("shaders/terrain_visbuffer_resolve.wgsl").to_string(),
+        ] {
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),

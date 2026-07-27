@@ -86,6 +86,73 @@ impl HeightReader for DemSliceHeightReader {
     }
 }
 
+/// HeightReader compatibility adapter over TESSELLA's store contract. This is
+/// the single bridge used by COG-backed height streaming; the render path no
+/// longer owns a separate COG-specific paging loop.
+#[cfg(feature = "cog_streaming")]
+pub(in crate::terrain::renderer) struct StoreHeightReader {
+    store: Arc<dyn crate::terrain::vt::VirtualTextureStore>,
+}
+
+#[cfg(feature = "cog_streaming")]
+impl StoreHeightReader {
+    pub(in crate::terrain::renderer) fn new(
+        store: Arc<dyn crate::terrain::vt::VirtualTextureStore>,
+    ) -> Self {
+        Self { store }
+    }
+}
+
+#[cfg(feature = "cog_streaming")]
+impl HeightReader for StoreHeightReader {
+    fn read(
+        &self,
+        _root_bounds: &TileBounds,
+        _tile_size: Vec2,
+        tile_id: TileId,
+        width: u32,
+        height: u32,
+    ) -> Vec<f32> {
+        let page = match self.store.page(crate::terrain::vt::PageKey {
+            family: crate::terrain::vt::HEIGHT_FAMILY,
+            mip: tile_id.lod as u8,
+            x: tile_id.x,
+            y: tile_id.y,
+        }) {
+            Ok(page) => page,
+            Err(error) => {
+                crate::core::degradation::record_degradation(
+                    "streaming_failure",
+                    "terrain_cog_page",
+                    &error,
+                );
+                return vec![0.0; (width * height) as usize];
+            }
+        };
+        if page.format != crate::terrain::vt::PageFormat::R32Float {
+            crate::core::degradation::record_degradation(
+                "streaming_failure",
+                "terrain_cog_page_format",
+                "COG height store returned a non-R32Float page",
+            );
+            return vec![0.0; (width * height) as usize];
+        }
+        let source = bytemuck::cast_slice::<u8, f32>(&page.data);
+        if page.width == width && page.height == height {
+            source.to_vec()
+        } else if page.width == page.height && width == height {
+            upsample_bilinear(source, page.width, width)
+        } else {
+            crate::core::degradation::record_degradation(
+                "streaming_failure",
+                "terrain_cog_page_shape",
+                "COG height page could not be resampled to the square mosaic tile",
+            );
+            vec![0.0; (width * height) as usize]
+        }
+    }
+}
+
 fn upsample_bilinear(src: &[f32], src_res: u32, dst_res: u32) -> Vec<f32> {
     let mut out = Vec::with_capacity((dst_res * dst_res) as usize);
     for y in 0..dst_res {

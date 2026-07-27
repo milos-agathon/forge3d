@@ -58,8 +58,21 @@ impl TerrainScene {
 
     /// Preprocess terrain shader by resolving #include directives
     /// WGSL doesn't have a preprocessor, so we manually expand includes
-    pub(super) fn preprocess_terrain_shader() -> String {
-        crate::shader_sources::terrain()
+    pub(super) fn preprocess_terrain_shader(device: &wgpu::Device) -> String {
+        let source = crate::shader_sources::terrain();
+        if super::virtual_texture::bindless_bc_supported(device) {
+            source
+                .replace(
+                    "var terrain_vt_atlas: texture_2d<f32>;",
+                    "var terrain_vt_atlas: binding_array<texture_2d<f32>>;",
+                )
+                .replace(
+                    "textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0)",
+                    "textureSampleLevel(terrain_vt_atlas[family_slot], terrain_vt_sampler, atlas_uv, 0.0)",
+                )
+        } else {
+            source
+        }
     }
 
     pub(super) fn create_render_pipeline(
@@ -74,7 +87,7 @@ impl TerrainScene {
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader();
+        let shader_source = Self::preprocess_terrain_shader(device);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.shader",
@@ -148,7 +161,7 @@ impl TerrainScene {
         // `vs_clipmap_main` lives in the shared terrain_pbr_pom.wgsl module, so
         // the clipmap geometry path shades through the exact same PBR fragment
         // stage as the procedural-grid path.
-        let shader_source = Self::preprocess_terrain_shader();
+        let shader_source = Self::preprocess_terrain_shader(device);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.clipmap.shader",
@@ -207,6 +220,136 @@ impl TerrainScene {
                             count: sample_count,
                             ..Default::default()
                         },
+                        multiview: None,
+                    },
+                )
+            },
+        )
+    }
+
+    pub(super) fn create_clipmap_visibility_write_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> wgpu::RenderPipeline {
+        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "terrain_visbuffer_write.shader",
+            &shader_source,
+        );
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain.visbuffer.write.pipeline_layout"),
+            bind_group_layouts: &[bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        crate::core::shader_registry::with_error_scope(
+            device,
+            "terrain.visbuffer.write.pipeline",
+            || {
+                crate::core::shader_registry::create_render_pipeline_scoped(
+                    device,
+                    &wgpu::RenderPipelineDescriptor {
+                        label: Some("terrain.visbuffer.write.pipeline"),
+                        layout: Some(&pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &shader,
+                            entry_point: "vs_clipmap_main",
+                            buffers: &[
+                                crate::terrain::clipmap::ClipmapVertex::desc(),
+                                crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::desc(),
+                            ],
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &shader,
+                            entry_point: "fs_visibility",
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::R32Uint,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        primitive: wgpu::PrimitiveState::default(),
+                        depth_stencil: Some(wgpu::DepthStencilState {
+                            format: TERRAIN_DEPTH_FORMAT,
+                            depth_write_enabled: true,
+                            depth_compare: wgpu::CompareFunction::Less,
+                            stencil: wgpu::StencilState::default(),
+                            bias: wgpu::DepthBiasState::default(),
+                        }),
+                        multisample: wgpu::MultisampleState::default(),
+                        multiview: None,
+                    },
+                )
+            },
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn create_clipmap_visibility_resolve_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        light_buffer_layout: &wgpu::BindGroupLayout,
+        ibl_bind_group_layout: &wgpu::BindGroupLayout,
+        shadow_bind_group_layout: &wgpu::BindGroupLayout,
+        fog_bind_group_layout: &wgpu::BindGroupLayout,
+        water_reflection_bind_group_layout: &wgpu::BindGroupLayout,
+        material_layer_bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+    ) -> wgpu::RenderPipeline {
+        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "terrain_visbuffer_resolve.shader",
+            &shader_source,
+        );
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain.visbuffer.resolve.pipeline_layout"),
+            bind_group_layouts: &[
+                bind_group_layout,
+                light_buffer_layout,
+                ibl_bind_group_layout,
+                shadow_bind_group_layout,
+                fog_bind_group_layout,
+                water_reflection_bind_group_layout,
+                material_layer_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+        crate::core::shader_registry::with_error_scope(
+            device,
+            "terrain.visbuffer.resolve.pipeline",
+            || {
+                crate::core::shader_registry::create_render_pipeline_scoped(
+                    device,
+                    &wgpu::RenderPipelineDescriptor {
+                        label: Some("terrain.visbuffer.resolve.pipeline"),
+                        layout: Some(&pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &shader,
+                            entry_point: "vs_clipmap_main",
+                            buffers: &[
+                                crate::terrain::clipmap::ClipmapVertex::desc(),
+                                crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::desc(),
+                            ],
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &shader,
+                            entry_point: "fs_visibility_resolve",
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: color_format,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        primitive: wgpu::PrimitiveState::default(),
+                        depth_stencil: Some(wgpu::DepthStencilState {
+                            format: TERRAIN_DEPTH_FORMAT,
+                            depth_write_enabled: false,
+                            depth_compare: wgpu::CompareFunction::Equal,
+                            stencil: wgpu::StencilState::default(),
+                            bias: wgpu::DepthBiasState::default(),
+                        }),
+                        multisample: wgpu::MultisampleState::default(),
                         multiview: None,
                     },
                 )
@@ -296,7 +439,7 @@ impl TerrainScene {
         include_source_id: bool,
         clipmap_geometry: bool,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader();
+        let shader_source = Self::preprocess_terrain_shader(device);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.aov.shader",

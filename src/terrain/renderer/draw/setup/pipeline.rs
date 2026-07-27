@@ -104,6 +104,8 @@ impl TerrainScene {
             // Invalidate so the clipmap variant is rebuilt at the new sample
             // count on next use.
             pipeline_cache.clipmap_pipeline = None;
+            pipeline_cache.visibility_write_pipeline = None;
+            pipeline_cache.visibility_resolve_pipeline = None;
             pipeline_cache.sample_count = effective_msaa;
         }
         if needs_clipmap && pipeline_cache.clipmap_pipeline.is_none() {
@@ -123,6 +125,32 @@ impl TerrainScene {
                 self.color_format,
                 effective_msaa,
             ));
+        }
+        if needs_clipmap
+            && effective_msaa == 1
+            && pipeline_cache.visibility_write_pipeline.is_none()
+        {
+            let light_buffer = self
+                .light_buffer
+                .lock()
+                .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
+            pipeline_cache.visibility_write_pipeline =
+                Some(Self::create_clipmap_visibility_write_pipeline(
+                    self.device.as_ref(),
+                    &self.bind_group_layout,
+                ));
+            pipeline_cache.visibility_resolve_pipeline =
+                Some(Self::create_clipmap_visibility_resolve_pipeline(
+                    self.device.as_ref(),
+                    &self.bind_group_layout,
+                    light_buffer.bind_group_layout(),
+                    &self.ibl_bind_group_layout,
+                    &self.shadow_bind_group_layout,
+                    &self.fog_bind_group_layout,
+                    &self.water_reflection_bind_group_layout,
+                    &self.material_layer_bind_group_layout,
+                    self.color_format,
+                ));
         }
         Ok(())
     }

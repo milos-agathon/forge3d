@@ -52,6 +52,7 @@ mod uniforms;
 mod upload;
 mod viewer;
 mod virtual_texture;
+pub(crate) mod visibility_buffer;
 mod water_reflection;
 
 pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
