@@ -68,8 +68,11 @@ def test_sparse_store_declares_at_least_256_gib_without_allocating_it(tmp_path):
     assert int(manifest["logical_texel_bytes"]) >= LOGICAL_MIN_BYTES
     assert manifest["procedural"] is True
     assert manifest["page_order"] == "family,mip,morton2"
-    assert Path(store.path).stat().st_size < 4096
+    assert Path(store.path).stat().st_size < 128 * 1024
     assert Path(store.path).read_bytes()[:8] == b"F3DVT1\0\0"
+    assert manifest["page_count"] == 3
+    assert len(manifest["pages"]) == 3
+    assert all(len(page["sha256"]) == 64 for page in manifest["pages"])
 
 
 @pytest.mark.gpu_lane
@@ -94,7 +97,12 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     ]
     config = make_terrain_params_config(
         size_px=(3840, 2160),
+        render_scale=1.0,
         terrain_span=50.0,
+        msaa_samples=1,
+        z_scale=1.0,
+        exposure=1.0,
+        domain=(0.0, 1.0),
         camera_mode="clipmap:4:32:32:10:0.3",
         culling="frustum",
         shading="visibility",

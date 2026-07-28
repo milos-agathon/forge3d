@@ -42,6 +42,21 @@ def test_visibility_parameter_contract():
     assert forward.culling in {"none", "frustum", "hzb_two_phase"}
 
 
+def test_feedback_counter_tracks_the_physical_surface_write():
+    root = Path(__file__).resolve().parents[1]
+    shader = (root / "src/shaders/terrain_pbr_pom.wgsl").read_text(
+        encoding="utf-8"
+    )
+    fullscreen = (
+        root / "src/shaders/terrain_visibility_fullscreen.wgsl"
+    ).read_text(encoding="utf-8")
+    assert shader.count(
+        "atomicAdd(&terrain_frame_counters.feedback_records, 1u)"
+    ) == 1
+    assert "terrain_vt_write_surface_feedback(input.tex_coord, 0u)" in shader
+    assert "terrain_vt_write_surface_feedback(surface.tex_coord, 0u)" in fullscreen
+
+
 @pytest.mark.gpu_lane
 @requires_terrain
 def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
@@ -102,8 +117,18 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
     np.testing.assert_array_equal(visibility, forward)
     stats = visibility_stats()
     assert stats["visible_pixels"] + stats["background_pixels"] == size[0] * size[1]
-    assert stats["feedback_records"] == stats["visible_pixels"]
+    assert stats["visibility_feedback_records"] == stats["visible_pixels"]
     assert stats["material_invocations"] == stats["visible_pixels"]
+    assert stats["forward_material_invocations"] >= stats["visible_pixels"]
+    assert (
+        stats["forward_feedback_records"] == stats["forward_material_invocations"]
+    )
+    assert (
+        stats["forward_feedback_records"] >= stats["visibility_feedback_records"]
+    )
+    overdraw_factor = (
+        stats["forward_feedback_records"] / stats["visibility_feedback_records"]
+    )
     assert stats["fallback_texels"] == 0
     shader_hashes = render_certificate(sign=False)["engine"]["wgsl_module_hashes"]
     assert "terrain_visbuffer_write.shader" in shader_hashes
@@ -127,8 +152,15 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
         {
             "visible_pixels": int(stats["visible_pixels"]),
             "background_pixels": int(stats["background_pixels"]),
-            "feedback_records": int(stats["feedback_records"]),
+            "visibility_feedback_records": int(
+                stats["visibility_feedback_records"]
+            ),
+            "forward_feedback_records": int(stats["forward_feedback_records"]),
             "material_invocations": int(stats["material_invocations"]),
+            "forward_material_invocations": int(
+                stats["forward_material_invocations"]
+            ),
+            "measured_overdraw_factor": float(overdraw_factor),
             "fallback_texels": int(stats["fallback_texels"]),
             "picking_samples": len(first),
             "picking_hits": sum(value is not None for value in first),

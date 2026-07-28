@@ -144,6 +144,8 @@ pub struct TerrainScene {
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
     pub(super) geometry_provider: Option<TerrainGeometryProvider>,
     pub(super) two_phase_culler: Option<crate::terrain::culling::two_phase::TwoPhaseTerrainCuller>,
+    pub(super) terrain_minmax_pyramid:
+        Option<crate::path_tracing::hybrid_compute::terrain_heightfield::TerrainMinMaxPyramid>,
     pub(super) culling_stats: crate::terrain::culling::two_phase::CullingStats,
     pub(super) height_streaming: Option<super::streaming::HeightVtFamilyRuntime>,
     /// CENSOR Task 9: owned per-render GPU timing manager, lazily constructed on

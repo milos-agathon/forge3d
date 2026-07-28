@@ -369,6 +369,11 @@ pub(crate) fn terrain_visibility_stats(py: Python<'_>) -> PyResult<PyObject> {
     let dict = pyo3::types::PyDict::new_bound(py);
     dict.set_item("visible_pixels", stats.visible_pixels)?;
     dict.set_item("feedback_records", stats.feedback_records)?;
+    dict.set_item(
+        "visibility_feedback_records",
+        stats.visibility_feedback_records,
+    )?;
+    dict.set_item("forward_feedback_records", stats.forward_feedback_records)?;
     dict.set_item("material_invocations", stats.material_invocations)?;
     dict.set_item("background_pixels", stats.background_pixels)?;
     dict.set_item("fallback_texels", stats.fallback_texels)?;
@@ -395,9 +400,11 @@ pub(crate) fn terrain_seam_stats(py: Python<'_>) -> PyResult<PyObject> {
     let stats = crate::terrain::clipmap::geomorph::latest_seam_analysis();
     let dict = pyo3::types::PyDict::new_bound(py);
     dict.set_item("boundary_vertex_count", stats.boundary_vertex_count)?;
+    dict.set_item("depth_sample_count", stats.depth_sample_count)?;
     dict.set_item("max_gap", stats.max_gap)?;
     dict.set_item("avg_gap", stats.avg_gap)?;
-    dict.set_item("crack_count", stats.t_junction_count)?;
+    dict.set_item("t_junction_count", stats.t_junction_count)?;
+    dict.set_item("crack_count", stats.crack_count)?;
     dict.set_item("seams_valid", stats.seams_valid)?;
     Ok(dict.into())
 }

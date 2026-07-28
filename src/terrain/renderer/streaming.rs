@@ -87,15 +87,11 @@ impl HeightReader for DemSliceHeightReader {
     }
 }
 
-/// HeightReader compatibility adapter over TESSELLA's store contract. This is
-/// the single bridge used by COG-backed height streaming; the render path no
-/// longer owns a separate COG-specific paging loop.
-#[cfg(feature = "cog_streaming")]
+/// HeightReader compatibility adapter over TESSELLA's store contract.
 pub(in crate::terrain::renderer) struct StoreHeightReader {
     store: Arc<dyn crate::terrain::vt::VirtualTextureStore>,
 }
 
-#[cfg(feature = "cog_streaming")]
 impl StoreHeightReader {
     pub(in crate::terrain::renderer) fn new(
         store: Arc<dyn crate::terrain::vt::VirtualTextureStore>,
@@ -104,7 +100,6 @@ impl StoreHeightReader {
     }
 }
 
-#[cfg(feature = "cog_streaming")]
 impl HeightReader for StoreHeightReader {
     fn read(
         &self,
@@ -151,6 +146,89 @@ impl HeightReader for StoreHeightReader {
             );
             vec![0.0; (width * height) as usize]
         }
+    }
+}
+
+/// Store-backed adapter for caller-provided DEM readers. Even in-memory DEM
+/// sources therefore enter the renderer through `VirtualTextureStore::page`;
+/// COG and packed-file sources use the same downstream path.
+struct ReaderPageStore {
+    reader: Arc<dyn HeightReader>,
+    root_bounds: TileBounds,
+    tile_world_size: Vec2,
+    tile_resolution: u32,
+    metadata: crate::terrain::vt::StoreMetadata,
+    digest: [u8; 32],
+}
+
+impl ReaderPageStore {
+    fn new(
+        reader: Arc<dyn HeightReader>,
+        root_bounds: TileBounds,
+        tile_world_size: Vec2,
+        tile_resolution: u32,
+        lod: u32,
+    ) -> Self {
+        let tiles_axis = 1u64 << lod;
+        let virtual_side = tiles_axis * u64::from(tile_resolution);
+        let metadata = crate::terrain::vt::StoreMetadata {
+            virtual_width: virtual_side,
+            virtual_height: virtual_side,
+            tile_size: tile_resolution,
+            tile_border: 0,
+            family_count: 4,
+            procedural: false,
+            procedural_seed: 0,
+        };
+        let mut identity = Vec::new();
+        identity.extend_from_slice(&virtual_side.to_le_bytes());
+        identity.extend_from_slice(&tile_resolution.to_le_bytes());
+        identity.extend_from_slice(&lod.to_le_bytes());
+        let digest = crate::core::provenance::sha256(&identity);
+        Self {
+            reader,
+            root_bounds,
+            tile_world_size,
+            tile_resolution,
+            metadata,
+            digest,
+        }
+    }
+}
+
+impl crate::terrain::vt::VirtualTextureStore for ReaderPageStore {
+    fn page(
+        &self,
+        key: crate::terrain::vt::PageKey,
+    ) -> std::result::Result<crate::terrain::vt::PageBytes, String> {
+        if key.family != crate::terrain::vt::HEIGHT_FAMILY {
+            return Err(format!("height store cannot serve family {}", key.family));
+        }
+        let heights = self.reader.read(
+            &self.root_bounds,
+            self.tile_world_size,
+            TileId::new(u32::from(key.mip), key.x, key.y),
+            self.tile_resolution,
+            self.tile_resolution,
+        );
+        crate::terrain::vt::PageBytes::new(
+            crate::terrain::vt::PageFormat::R32Float,
+            self.tile_resolution,
+            self.tile_resolution,
+            bytemuck::cast_slice(&heights).to_vec(),
+        )
+    }
+
+    fn metadata(&self) -> &crate::terrain::vt::StoreMetadata {
+        &self.metadata
+    }
+
+    fn content_hash(&self) -> [u8; 32] {
+        self.digest
+    }
+
+    fn page_count(&self) -> u64 {
+        0
     }
 }
 
@@ -293,6 +371,15 @@ impl HeightVtFamilyRuntime {
             },
             false,
         )?;
+        let store: Arc<dyn crate::terrain::vt::VirtualTextureStore> =
+            Arc::new(ReaderPageStore::new(
+                reader,
+                root_bounds.clone(),
+                tile_world_size,
+                tile_resolution,
+                lod,
+            ));
+        let reader: Arc<dyn HeightReader> = Arc::new(StoreHeightReader::new(store));
         let loader = AsyncTileLoader::new_with_reader(
             root_bounds.clone(),
             tile_world_size,
@@ -373,14 +460,35 @@ impl HeightVtFamilyRuntime {
         map_tile_to_fixed_lod(tile, self.lod, self.tiles_axis, out);
     }
 
-    /// One streaming step: update the clipmap center from the camera, request
-    /// missing fine tiles, and drain completed loads into the mosaic.
+    /// One streaming step. Visibility feedback is the primary demand signal;
+    /// camera-derived ring tiles are lower-priority predictive prefetch.
     pub(in crate::terrain::renderer) fn stream_step(
         &mut self,
         queue: &wgpu::Queue,
         camera_pos: Vec3,
+        feedback_uvs: &[[f32; 2]],
         max_uploads: usize,
     ) -> HeightStreamingStats {
+        for uv in feedback_uvs {
+            let x = (uv[0].clamp(0.0, 1.0 - f32::EPSILON) * self.tiles_axis as f32) as u32;
+            let y = (uv[1].clamp(0.0, 1.0 - f32::EPSILON) * self.tiles_axis as f32) as u32;
+            let tile = TileId::new(self.lod, x, y);
+            if self.resident_fine.contains(&tile) {
+                continue;
+            }
+            let key = VtTileKey {
+                family_slot: crate::terrain::vt::HEIGHT_FAMILY as u32,
+                material_index: 0,
+                x,
+                y,
+                mip_level: self.lod,
+            };
+            self.feedback_requests[crate::terrain::vt::HEIGHT_FAMILY as usize].insert(key);
+            if self.loader.request(tile) {
+                self.tiles_requested += 1;
+            }
+        }
+
         let lod_config = LodConfig::new(2.0, 1024, 768, 45.0f32.to_radians());
         let ring_tiles =
             self.streamer

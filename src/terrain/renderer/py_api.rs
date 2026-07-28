@@ -1150,6 +1150,12 @@ impl TerrainRenderer {
         max_uploads: usize,
     ) -> PyResult<PyObject> {
         let queue = self.scene.queue.clone();
+        let feedback_uvs = self
+            .scene
+            .material_vt
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("material VT mutex poisoned"))?
+            .latest_feedback_uvs();
         let state = self.scene.height_streaming.as_mut().ok_or_else(|| {
             PyRuntimeError::new_err(
                 "height streaming not enabled; call enable_height_streaming() first",
@@ -1158,6 +1164,7 @@ impl TerrainRenderer {
         let stats = state.stream_step(
             queue.as_ref(),
             glam::Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2),
+            &feedback_uvs,
             max_uploads,
         );
         height_streaming_stats_to_py(py, &stats)

@@ -302,6 +302,13 @@ impl TerrainScene {
                 render_targets.internal_width,
                 render_targets.internal_height,
             )?;
+        } else if geometry.is_clipmap() && render_targets.sample_count == 1 {
+            // Reuse the counters readback to capture the actual forward
+            // material/feedback invocation baseline.
+            self.ensure_visibility_buffer(
+                render_targets.internal_width,
+                render_targets.internal_height,
+            )?;
         }
         encoder.clear_buffer(&self.vt_frame_counters_buffer, 0, None);
         if hzb_enabled {
@@ -409,8 +416,8 @@ impl TerrainScene {
                     material_layer_bind_group,
                     preserve_background,
                 )?;
-                self.stage_visibility_stats(encoder)?;
             }
+            self.stage_visibility_stats(encoder)?;
             culler.build_previous_hzb(self.device.as_ref(), encoder, &render_targets.depth_view)?;
             culler.stage_stats(encoder, lod);
             return Ok(phase1_calls + phase2_calls);
@@ -464,6 +471,8 @@ impl TerrainScene {
                 material_layer_bind_group,
                 preserve_background,
             )?;
+            self.stage_visibility_stats(encoder)?;
+        } else if geometry.is_clipmap() && render_targets.sample_count == 1 {
             self.stage_visibility_stats(encoder)?;
         }
         Ok(draw_calls)

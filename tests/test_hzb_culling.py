@@ -64,6 +64,15 @@ def test_culling_parameter_contract():
         make_terrain_params_config(**required, culling="not-a-culling-mode")
 
 
+def test_hzb_reuses_prometheus_terrain_minmax_pyramid():
+    root = Path(__file__).resolve().parents[1]
+    geometry = (root / "src/terrain/renderer/geometry.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "TerrainMinMaxPyramid::from_heightfield" in geometry
+    assert "build_minmax_mips(" not in geometry
+
+
 @requires_terrain
 def test_two_phase_hzb_is_bitwise_identical_to_unculled_render():
     with tempfile.TemporaryDirectory() as td:

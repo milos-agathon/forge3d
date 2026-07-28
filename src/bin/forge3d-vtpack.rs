@@ -45,18 +45,17 @@ fn run() -> Result<(), String> {
         return Ok(());
     };
     let (metadata, pages) = if args.procedural {
-        (
-            StoreMetadata {
-                virtual_width: args.virtual_width,
-                virtual_height: args.virtual_height,
-                tile_size: args.tile_size,
-                tile_border: args.tile_border,
-                family_count: 3,
-                procedural: true,
-                procedural_seed: args.seed,
-            },
-            Vec::new(),
-        )
+        let metadata = StoreMetadata {
+            virtual_width: args.virtual_width,
+            virtual_height: args.virtual_height,
+            tile_size: args.tile_size,
+            tile_border: args.tile_border,
+            family_count: 3,
+            procedural: true,
+            procedural_seed: args.seed,
+        };
+        let pages = pack_procedural_pages(&metadata)?;
+        (metadata, pages)
     } else {
         pack_images(&args)?
     };
@@ -77,6 +76,61 @@ fn run() -> Result<(), String> {
         String::from_utf8(json).expect("JSON serialization is UTF-8")
     );
     Ok(())
+}
+
+fn pack_procedural_pages(metadata: &StoreMetadata) -> Result<Vec<PackedPage>, String> {
+    let side = metadata.slot_size();
+    let texels = side as usize * side as usize;
+    (0..metadata.family_count)
+        .map(|family| {
+            let family = family as u8;
+            let bytes = match family {
+                0 => {
+                    let mut rgba = Vec::with_capacity(texels * 4);
+                    for index in 0..texels {
+                        let value = (index as u64)
+                            .wrapping_mul(0x9e37_79b9)
+                            .wrapping_add(metadata.procedural_seed)
+                            as u8;
+                        rgba.extend_from_slice(&[value, value.wrapping_add(31), 96, 255]);
+                    }
+                    PageBytes::new(
+                        PageFormat::Bc7Srgb,
+                        side,
+                        side,
+                        forge3d::core::compressed_textures::encode_bc7_rgba8(&rgba, side, side)?,
+                    )?
+                }
+                1 => {
+                    let rg = vec![128; texels * 2];
+                    PageBytes::new(
+                        PageFormat::Bc5Unorm,
+                        side,
+                        side,
+                        forge3d::core::compressed_textures::encode_bc5_rg8(&rg, side, side)?,
+                    )?
+                }
+                _ => {
+                    let rgba = [192, 128, 32, 255].repeat(texels);
+                    PageBytes::new(
+                        PageFormat::Bc7Unorm,
+                        side,
+                        side,
+                        forge3d::core::compressed_textures::encode_bc7_rgba8(&rgba, side, side)?,
+                    )?
+                }
+            };
+            Ok(PackedPage {
+                key: PageKey {
+                    family,
+                    mip: 0,
+                    x: 0,
+                    y: 0,
+                },
+                bytes,
+            })
+        })
+        .collect()
 }
 
 fn parse_args(raw: Vec<String>) -> Result<Option<Args>, String> {

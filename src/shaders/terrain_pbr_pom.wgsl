@@ -1858,6 +1858,36 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
         mip_level,
         logical_material + 1u,
     );
+    atomicAdd(&terrain_frame_counters.feedback_records, 1u);
+}
+
+fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
+    if (!terrain_vt_enabled()
+        || terrain_vt_uniforms.config2.w == 0u
+        || !terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)) {
+        return;
+    }
+    let virtual_size = vec2<f32>(
+        f32(max(terrain_vt_uniforms.config1.x, 1u)),
+        f32(max(terrain_vt_uniforms.config1.y, 1u)),
+    );
+    let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
+    let desired_mip = terrain_vt_desired_mip(dpdx(uv), dpdy(uv));
+    let page_dims = terrain_vt_page_dims(desired_mip);
+    let page_size = vec2<f32>(tile_size * exp2(f32(desired_mip)));
+    let page = min(
+        vec2<u32>(fract(uv) * virtual_size / page_size),
+        page_dims - vec2<u32>(1u),
+    );
+    // One physical record represents this surface sample. CPU readback fans
+    // it out to all enabled material families.
+    terrain_vt_write_feedback(
+        TERRAIN_VT_FAMILY_ALBEDO,
+        material_index,
+        desired_mip,
+        page.x,
+        page.y,
+    );
 }
 
 // Shared residency-gated page walk. Returns vec4(linear_rgb, 1.0) when a
@@ -1894,8 +1924,6 @@ fn terrain_vt_resolve_family_uv(
     let desired_page_dims = terrain_vt_page_dims(desired_mip);
     let desired_page_size = vec2<f32>(tile_size * exp2(f32(desired_mip)), tile_size * exp2(f32(desired_mip)));
     let desired_page = min(vec2<u32>(virtual_texel / desired_page_size), desired_page_dims - vec2<u32>(1u, 1u));
-    terrain_vt_write_feedback(family_slot, material_index, desired_mip, desired_page.x, desired_page.y);
-
     var mip_level = desired_mip;
     loop {
         let page_dims = terrain_vt_page_dims(mip_level);
@@ -4487,15 +4515,19 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
 
 @fragment
 fn fs_main(input : VertexOutput) -> FragmentOutput {
-    return shade_main(input);
+    let out = shade_main(input);
+    atomicAdd(&terrain_frame_counters.material_invocations, 1u);
+    atomicAdd(&terrain_frame_counters.forward_material_invocations, 1u);
+    terrain_vt_write_surface_feedback(input.tex_coord, 0u);
+    return out;
 }
 
 @fragment
 fn fs_visibility_resolve(input : VertexOutput) -> FragmentOutput {
     let out = shade_main(input);
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
+    terrain_vt_write_surface_feedback(input.tex_coord, 0u);
     if (terrain_vt_uniforms.config2.w != 0u) {
-        atomicAdd(&terrain_frame_counters.feedback_records, 1u);
         if (terrain_vt_enabled()
             && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
             && out.source_id == 0u) {
@@ -4542,7 +4574,20 @@ fn vs_clipmap_main(
     var out : VertexOutput;
 
     let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_fine = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let height_dims = vec2<f32>(textureDimensions(height_tex));
+    let coarse_texels = exp2(min(max(clip_morph.y, 0.0) + 1.0, 16.0));
+    let coarse_step = vec2<f32>(coarse_texels)
+        / max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0));
+    let coarse_cell = uv / coarse_step;
+    let coarse_base = floor(coarse_cell) * coarse_step;
+    let coarse_t = fract(coarse_cell);
+    let h00 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h10 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h01 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h11 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h_coarse = mix(mix(h00, h10, coarse_t.x), mix(h01, h11, coarse_t.x), coarse_t.y);
+    let h_raw = mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;

@@ -222,6 +222,7 @@ struct TerrainMaterialVTRuntime {
     family_residency: FamilyResidencyTracker,
     feedback_buffer: Option<FeedbackBuffer>,
     pending_feedback: crate::terrain::vt::requests::RetainedRequestSet,
+    latest_feedback_uvs: Vec<[f32; 2]>,
     feedback_staged: bool,
     budget_pages: u32,
     residency_budget_mb: f32,
@@ -231,9 +232,6 @@ struct TerrainMaterialVTRuntime {
     layer_fallbacks: [[f32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
     stats: TerrainMaterialVTStats,
     last_camera_target: Option<[f32; 2]>,
-    /// Acceptance-only fault injection: while non-zero the live feedback map
-    /// remains unavailable and retained keys are not submitted for upload.
-    feedback_not_ready_frames: u32,
 }
 
 #[cfg(feature = "extension-module")]
@@ -534,7 +532,11 @@ impl TerrainMaterialVT {
             mip_level,
         };
         runtime.pending_feedback[family_slot as usize].insert(key);
-        runtime.feedback_not_ready_frames = not_ready_frames;
+        runtime
+            .feedback_buffer
+            .as_ref()
+            .ok_or_else(|| "material VT feedback buffer is disabled".to_string())?
+            .force_not_ready_polls_for_test(not_ready_frames);
         runtime.stats.feedback_requests = runtime
             .pending_feedback
             .iter()
@@ -552,6 +554,13 @@ impl TerrainMaterialVT {
         } else {
             stats.cache_misses as f32 / total_requests as f32
         }
+    }
+
+    pub fn latest_feedback_uvs(&self) -> Vec<[f32; 2]> {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.latest_feedback_uvs.clone())
+            .unwrap_or_default()
     }
 
     pub fn binding_resources(&self) -> Option<TerrainVTBindingResources<'_>> {
@@ -763,18 +772,16 @@ impl TerrainMaterialVT {
                 let _ = self.get_stats();
                 return Ok(());
             };
+            runtime.latest_feedback_uvs.clear();
             // Demux decoded entries by family so each family drives its own
             // requested tile/mip set; a family with no feedback this frame
             // simply contributes an empty bucket.
             for entry in entries {
-                let Some((family_slot, material_index)) =
+                let Some((_family_slot, material_index)) =
                     decode_feedback_payload(entry.frame_number, runtime.material_count)
                 else {
                     continue;
                 };
-                if !runtime.sources.contains_key(&(family_slot, material_index)) {
-                    continue;
-                }
                 if entry.mip_level >= runtime.max_mip_levels {
                     continue;
                 }
@@ -782,13 +789,31 @@ impl TerrainMaterialVT {
                 if entry.tile_x >= pages_x || entry.tile_y >= pages_y {
                     continue;
                 }
-                runtime.pending_feedback[family_slot as usize].insert(TileKey {
-                    family_slot,
-                    material_index,
-                    x: entry.tile_x,
-                    y: entry.tile_y,
-                    mip_level: entry.mip_level,
-                });
+                let feedback_uv = [
+                    (entry.tile_x as f32 + 0.5) / pages_x.max(1) as f32,
+                    (entry.tile_y as f32 + 0.5) / pages_y.max(1) as f32,
+                ];
+                if !runtime.latest_feedback_uvs.contains(&feedback_uv) {
+                    runtime.latest_feedback_uvs.push(feedback_uv);
+                }
+                // The visibility/forward fragment writes exactly one physical
+                // record. Apply its page coordinate to each enabled material
+                // family so normal/mask residency follows albedo without
+                // multiplying GPU feedback writes.
+                for target_family in 0..TERRAIN_VT_FAMILY_COUNT {
+                    if runtime
+                        .sources
+                        .contains_key(&(target_family, material_index))
+                    {
+                        runtime.pending_feedback[target_family as usize].insert(TileKey {
+                            family_slot: target_family,
+                            material_index,
+                            x: entry.tile_x,
+                            y: entry.tile_y,
+                            mip_level: entry.mip_level,
+                        });
+                    }
+                }
             }
             runtime.stats.feedback_requests = runtime
                 .pending_feedback
@@ -1287,6 +1312,7 @@ impl TerrainMaterialVTRuntime {
             family_residency,
             feedback_buffer,
             pending_feedback: Default::default(),
+            latest_feedback_uvs: Vec::new(),
             feedback_staged: false,
             budget_pages,
             residency_budget_mb,
@@ -1296,7 +1322,6 @@ impl TerrainMaterialVTRuntime {
             layer_fallbacks,
             stats: TerrainMaterialVTStats::default(),
             last_camera_target: None,
-            feedback_not_ready_frames: 0,
         };
         runtime.stats.total_pages = total_pages;
         runtime.stats.cache_budget_pages = budget_pages;
@@ -1450,7 +1475,11 @@ impl TerrainMaterialVTRuntime {
                 priorities.len().saturating_sub(requests_before_prefetch) as u32;
         }
 
-        if use_feedback && self.feedback_not_ready_frames == 0 {
+        let feedback_map_delayed = self
+            .feedback_buffer
+            .as_ref()
+            .is_some_and(FeedbackBuffer::is_forced_not_ready_for_test);
+        if use_feedback && !feedback_map_delayed {
             let feedback_requests = self
                 .pending_feedback
                 .iter()
@@ -1476,9 +1505,8 @@ impl TerrainMaterialVTRuntime {
                 }
             }
         }
-        if self.feedback_not_ready_frames > 0 {
+        if feedback_map_delayed {
             self.pending_feedback.on_not_ready();
-            self.feedback_not_ready_frames -= 1;
             self.stats.retained_requests = self
                 .pending_feedback
                 .iter()

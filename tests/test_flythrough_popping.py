@@ -61,6 +61,7 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
     seams = seam_stats()
     height_vt = vt_stats()
     assert max_delta_e < 1.0, max_delta_e
+    assert seams["depth_sample_count"] > 0, seams
     assert seams["crack_count"] == 0, seams
     assert seams["seams_valid"] is True, seams
     assert height_vt["resident_tiles_height"] > 0, height_vt
@@ -71,8 +72,24 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             "frames": len(path),
             "camera_path_m": float(path[-1] - path[0]),
             "max_delta_e_2000": max_delta_e,
+            "depth_sample_count": int(seams["depth_sample_count"]),
             "crack_count": int(seams["crack_count"]),
             "resident_height_tiles": int(height_vt["resident_tiles_height"]),
             "height_pending_requests": int(height_vt["height_pending_requests"]),
         },
     )
+
+
+def test_crack_metric_is_depth_discontinuity_backed():
+    root = Path(__file__).resolve().parents[1]
+    geometry = (root / "src/terrain/renderer/geometry.rs").read_text(
+        encoding="utf-8"
+    )
+    geomorph = (root / "src/terrain/clipmap/geomorph.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "analyze_depth_discontinuities" in geometry
+    assert "coarse_depth" in geomorph
+    assert "gap > threshold" in geomorph
+    assert "result.sample_count = 0" not in geomorph
+    assert "result.crack_count = 1" in geomorph

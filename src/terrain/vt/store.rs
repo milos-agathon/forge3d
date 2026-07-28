@@ -158,6 +158,14 @@ pub struct StoreManifest {
     pub page_order: String,
     pub encodings: Vec<PageFormat>,
     pub directory_sha256: String,
+    /// Integrity digest for every physically packed page.
+    pub pages: Vec<ManifestPageDigest>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ManifestPageDigest {
+    pub key: PageKey,
+    pub sha256: String,
 }
 
 pub trait VirtualTextureStore: Send + Sync {
@@ -300,7 +308,22 @@ impl MmapPageStore {
     fn read_page_uncached(&self, key: PageKey) -> Result<PageBytes, String> {
         let Some(entry) = self.directory.get(&key) else {
             if self.metadata.procedural {
-                return procedural_page(&self.metadata, key);
+                if u32::from(key.family) >= self.metadata.family_count {
+                    return Err(format!(
+                        "procedural VT family {} is out of range",
+                        key.family
+                    ));
+                }
+                // Sparse procedural stores pack one immutable canonical page
+                // per family. Virtual coordinates repeat that physical page;
+                // no request is synthesized in host memory.
+                let canonical = PageKey {
+                    family: key.family,
+                    mip: 0,
+                    x: 0,
+                    y: 0,
+                };
+                return self.read_page_uncached(canonical);
             }
             return Err(format!("VT page not found: {key:?}"));
         };
@@ -508,6 +531,13 @@ pub fn write_packed_store(
         page_order: "family,mip,morton2".to_string(),
         encodings,
         directory_sha256: crate::core::provenance::to_hex(&sha256(&directory)),
+        pages: pages
+            .iter()
+            .map(|page| ManifestPageDigest {
+                key: page.key,
+                sha256: crate::core::provenance::to_hex(&page.bytes.sha256),
+            })
+            .collect(),
     })
 }
 
@@ -625,74 +655,6 @@ fn decode_directory_entry(bytes: &[u8]) -> Result<DirectoryEntry, String> {
         raw_length: get_u32(bytes, 28),
         digest: bytes[32..64].try_into().unwrap(),
     })
-}
-
-fn procedural_page(metadata: &StoreMetadata, key: PageKey) -> Result<PageBytes, String> {
-    if u32::from(key.family) >= metadata.family_count {
-        return Err(format!(
-            "procedural VT family {} is out of range",
-            key.family
-        ));
-    }
-    let side = metadata.slot_size();
-    let border = metadata.tile_border as i64;
-    let tile_size = metadata.tile_size as i64;
-    let mut rgba = Vec::with_capacity(side as usize * side as usize * 4);
-    let mut rg = Vec::with_capacity(side as usize * side as usize * 2);
-    let mip_scale = 1i64 << u32::from(key.mip).min(30);
-    for local_y in 0..side {
-        for local_x in 0..side {
-            let global_x = (i64::from(key.x) * tile_size + i64::from(local_x) - border) * mip_scale;
-            let global_y = (i64::from(key.y) * tile_size + i64::from(local_y) - border) * mip_scale;
-            let noise = procedural_byte(global_x, global_y, metadata.procedural_seed);
-            match key.family {
-                0 => rgba.extend_from_slice(&[
-                    noise,
-                    procedural_byte(global_y, global_x, metadata.procedural_seed ^ 0x51),
-                    noise.wrapping_add(53),
-                    255,
-                ]),
-                1 => {
-                    let nx = 112u8.wrapping_add(noise & 31);
-                    let ny = 112u8.wrapping_add((noise >> 3) & 31);
-                    rg.extend_from_slice(&[nx, ny]);
-                }
-                _ => rgba.extend_from_slice(&[noise, 180, 32, 255]),
-            }
-        }
-    }
-    match key.family {
-        0 => PageBytes::new(
-            PageFormat::Bc7Srgb,
-            side,
-            side,
-            crate::core::compressed_textures::encode_bc7_rgba8(&rgba, side, side)?,
-        ),
-        1 => PageBytes::new(
-            PageFormat::Bc5Unorm,
-            side,
-            side,
-            crate::core::compressed_textures::encode_bc5_rg8(&rg, side, side)?,
-        ),
-        _ => PageBytes::new(
-            PageFormat::Bc7Unorm,
-            side,
-            side,
-            crate::core::compressed_textures::encode_bc7_rgba8(&rgba, side, side)?,
-        ),
-    }
-}
-
-fn procedural_byte(x: i64, y: i64, seed: u64) -> u8 {
-    let mut value = (x as u64)
-        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
-        .rotate_left(17)
-        ^ (y as u64).wrapping_mul(0xc2b2_ae3d_27d4_eb4f)
-        ^ seed;
-    value ^= value >> 33;
-    value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
-    value ^= value >> 33;
-    value as u8
 }
 
 fn validate_metadata(metadata: &StoreMetadata) -> Result<(), String> {
@@ -849,7 +811,47 @@ mod tests {
             procedural_seed: 19,
         };
         assert!(metadata.logical_texel_bytes() >= 256u128 * 1024 * 1024 * 1024);
-        write_packed_store(&path, &metadata, []).unwrap();
+        let side = metadata.slot_size();
+        let pages = (0..3u8)
+            .map(|family| {
+                let (format, data) = if family == 1 {
+                    (
+                        PageFormat::Bc5Unorm,
+                        crate::core::compressed_textures::encode_bc5_rg8(
+                            &vec![128; side as usize * side as usize * 2],
+                            side,
+                            side,
+                        )
+                        .unwrap(),
+                    )
+                } else {
+                    (
+                        if family == 0 {
+                            PageFormat::Bc7Srgb
+                        } else {
+                            PageFormat::Bc7Unorm
+                        },
+                        crate::core::compressed_textures::encode_bc7_rgba8(
+                            &vec![128; side as usize * side as usize * 4],
+                            side,
+                            side,
+                        )
+                        .unwrap(),
+                    )
+                };
+                PackedPage {
+                    key: PageKey {
+                        family,
+                        mip: 0,
+                        x: 0,
+                        y: 0,
+                    },
+                    bytes: PageBytes::new(format, side, side, data).unwrap(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let manifest = write_packed_store(&path, &metadata, pages).unwrap();
+        assert_eq!(manifest.pages.len(), 3);
         let store = MmapPageStore::open(&path).unwrap();
         let page = store
             .page(PageKey {

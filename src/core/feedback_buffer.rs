@@ -8,6 +8,7 @@ use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::core::tile_cache::TileId;
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Mutex;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue};
@@ -19,6 +20,7 @@ pub struct FeedbackBuffer {
     /// CPU-readable staging buffer for feedback readback
     readback_buffer: TrackedBuffer,
     pending_readback: Mutex<Option<Receiver<Result<(), wgpu::BufferAsyncError>>>>,
+    forced_not_ready_polls: AtomicU32,
 }
 
 /// Feedback entry structure (matches GPU layout)
@@ -69,6 +71,7 @@ impl FeedbackBuffer {
             feedback_buffer,
             readback_buffer,
             pending_readback: Mutex::new(None),
+            forced_not_ready_polls: AtomicU32::new(0),
         })
     }
 
@@ -92,6 +95,15 @@ impl FeedbackBuffer {
     /// Whether a non-blocking readback map is currently in flight.
     pub fn has_pending_readback(&self) -> bool {
         self.pending_readback.lock().unwrap().is_some()
+    }
+
+    /// Delay the actual non-blocking map completion path for acceptance tests.
+    pub fn force_not_ready_polls_for_test(&self, polls: u32) {
+        self.forced_not_ready_polls.store(polls, Ordering::Release);
+    }
+
+    pub fn is_forced_not_ready_for_test(&self) -> bool {
+        self.forced_not_ready_polls.load(Ordering::Acquire) > 0
     }
 
     fn start_readback_if_needed(&self) {
@@ -225,6 +237,15 @@ impl FeedbackBuffer {
         device: &Device,
     ) -> Result<Option<Vec<FeedbackEntry>>, String> {
         self.start_readback_if_needed();
+        if self
+            .forced_not_ready_polls
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
+                (remaining > 0).then_some(remaining - 1)
+            })
+            .is_ok()
+        {
+            return Ok(None);
+        }
         device.poll(wgpu::Maintain::Poll);
 
         let map_result = {

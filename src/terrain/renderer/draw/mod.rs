@@ -454,8 +454,7 @@ impl TerrainScene {
                             hzb_frame_staged = params.culling == "hzb_two_phase"
                                 && render_targets.sample_count == 1
                                 && self.two_phase_culler.is_some();
-                            visibility_frame_staged = params.shading == "visibility"
-                                && is_clipmap_camera_mode(&params.camera_mode)
+                            visibility_frame_staged = is_clipmap_camera_mode(&params.camera_mode)
                                 && render_targets.sample_count == 1;
                             Ok::<_, anyhow::Error>(())
                         })?;

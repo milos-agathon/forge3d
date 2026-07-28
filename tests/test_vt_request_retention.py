@@ -97,6 +97,18 @@ def test_no_shipped_synthetic_reader_callers():
     assert callers == []
 
 
+def test_retention_fault_injection_delays_the_real_feedback_map():
+    root = Path(__file__).resolve().parents[1] / "src"
+    feedback = (root / "core/feedback_buffer.rs").read_text(encoding="utf-8")
+    runtime = (root / "terrain/renderer/virtual_texture.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "forced_not_ready_polls" in feedback
+    assert "try_read_feedback_entries" in feedback
+    assert "force_not_ready_polls_for_test" in runtime
+    assert "feedback_not_ready_frames" not in runtime
+
+
 def test_gpu_lod_and_visibility_shaders_have_live_callsites():
     root = Path(__file__).resolve().parents[1]
     geometry = (root / "src/terrain/renderer/geometry.rs").read_text()
@@ -120,10 +132,14 @@ def test_height_is_the_fourth_feedback_driven_vt_family():
     root = Path(__file__).resolve().parents[1]
     residency = (root / "src/terrain/vt_family_residency.rs").read_text()
     streaming = (root / "src/terrain/renderer/streaming.rs").read_text()
+    py_api = (root / "src/terrain/renderer/py_api.rs").read_text()
     assert "VT_FAMILY_COUNT: usize = 4" in residency
     assert "HeightVtFamilyRuntime" in streaming
     assert "RetainedRequestSet" in streaming
     assert "FamilyResidencyTracker" in streaming
+    assert "ReaderPageStore" in streaming
+    assert "VirtualTextureStore for ReaderPageStore" in streaming
+    assert "latest_feedback_uvs" in py_api
 
 
 def test_public_vt_stats_diagnostics_surface_is_registered():

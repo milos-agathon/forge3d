@@ -639,6 +639,7 @@ impl TerrainScene {
             viewer_heightmap: None,
             geometry_provider: None,
             two_phase_culler: None,
+            terrain_minmax_pyramid: None,
             culling_stats: crate::terrain::culling::two_phase::CullingStats::default(),
             height_streaming: None,
             gpu_timing: Mutex::new(None),

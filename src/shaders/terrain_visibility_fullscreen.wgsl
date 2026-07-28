@@ -173,8 +173,8 @@ fn fs_visibility_resolve_fullscreen(
     surface.tile_id = tile_lod_id;
     let out = shade_main(surface);
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
+    terrain_vt_write_surface_feedback(surface.tex_coord, 0u);
     if (terrain_vt_uniforms.config2.w != 0u) {
-        atomicAdd(&terrain_frame_counters.feedback_records, 1u);
         if (terrain_vt_enabled()
             && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
             && out.source_id == 0u) {

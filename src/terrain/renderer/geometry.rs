@@ -572,9 +572,11 @@ impl TerrainScene {
             .collect::<Vec<_>>();
         let mut seam_summary = crate::terrain::clipmap::geomorph::SeamAnalysis {
             boundary_vertex_count: 0,
+            depth_sample_count: 0,
             max_gap: 0.0,
             avg_gap: 0.0,
             t_junction_count: 0,
+            crack_count: 0,
             seams_valid: true,
         };
         for pair in seam_regions.windows(2) {
@@ -587,11 +589,27 @@ impl TerrainScene {
                     ..(outer.vertex_start + outer.vertex_count) as usize],
                 &geomorph_config,
             );
+            let depth_analysis = crate::terrain::clipmap::geomorph::analyze_depth_discontinuities(
+                &mesh.vertices[inner.vertex_start as usize
+                    ..(inner.vertex_start + inner.vertex_count) as usize],
+                &mesh.vertices[outer.vertex_start as usize
+                    ..(outer.vertex_start + outer.vertex_count) as usize],
+                heightmap,
+                height_dims,
+                params.z_scale,
+                geomorph_config.max_seam_gap,
+            );
             seam_summary.max_gap = seam_summary.max_gap.max(analysis.max_gap);
+            seam_summary.max_gap = seam_summary.max_gap.max(depth_analysis.max_depth_gap);
             seam_summary.avg_gap += analysis.avg_gap * analysis.boundary_vertex_count as f32;
             seam_summary.boundary_vertex_count += analysis.boundary_vertex_count;
+            seam_summary.depth_sample_count += depth_analysis.sample_count;
             seam_summary.t_junction_count += analysis.t_junction_count;
-            seam_summary.seams_valid &= analysis.seams_valid;
+            seam_summary.crack_count += analysis.crack_count;
+            seam_summary.crack_count += depth_analysis.crack_count;
+            seam_summary.seams_valid &= analysis.seams_valid
+                && depth_analysis.sample_count > 0
+                && depth_analysis.crack_count == 0;
         }
         if seam_summary.boundary_vertex_count > 0 {
             seam_summary.avg_gap /= seam_summary.boundary_vertex_count as f32;
@@ -602,15 +620,23 @@ impl TerrainScene {
             .chain(mesh.ring_bounds.iter().copied())
             .collect();
         let variant_count = config.ring_count.max(1);
-        let minmax = (params.culling == "hzb_two_phase")
-            .then(|| {
-                crate::path_tracing::hybrid_compute::terrain_heightfield::build_minmax_mips(
+        self.terrain_minmax_pyramid = if params.culling == "hzb_two_phase" {
+            Some(
+                crate::path_tracing::hybrid_compute::terrain_heightfield::TerrainMinMaxPyramid::from_heightfield(
+                    self.device.as_ref(),
+                    self.queue.as_ref(),
                     heightmap,
                     height_dims.0,
                     height_dims.1,
-                )
-            })
-            .transpose()?;
+                )?,
+            )
+        } else {
+            None
+        };
+        let minmax = self
+            .terrain_minmax_pyramid
+            .as_ref()
+            .map(|pyramid| pyramid.cpu_mips());
         let chunked = minmax.is_some();
         let mut lod_tiles = Vec::new();
         let mut draw_templates = Vec::new();

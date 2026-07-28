@@ -230,7 +230,12 @@ struct VisibilityCounters {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct VisibilityStats {
     pub visible_pixels: u32,
+    /// Feedback records emitted by the most recent frame.
     pub feedback_records: u32,
+    /// Feedback records emitted by the visibility-resolve path.
+    pub visibility_feedback_records: u32,
+    /// Feedback records emitted by the forward path, including overdraw.
+    pub forward_feedback_records: u32,
     pub material_invocations: u32,
     pub background_pixels: u32,
     pub fallback_texels: u32,
@@ -244,6 +249,15 @@ pub fn publish_stats(stats: VisibilityStats) {
         .get_or_init(|| Mutex::new(VisibilityStats::default()))
         .lock()
     {
+        let mut stats = stats;
+        if stats.forward_material_invocations > 0 {
+            stats.forward_feedback_records = stats.feedback_records;
+            stats.visibility_feedback_records = current.visibility_feedback_records;
+        } else if stats.material_invocations > 0 {
+            stats.visibility_feedback_records = stats.feedback_records;
+            stats.forward_feedback_records = current.forward_feedback_records;
+            stats.forward_material_invocations = current.forward_material_invocations;
+        }
         *current = stats;
     }
 }
@@ -465,6 +479,8 @@ impl TerrainVisibilityBuffer {
         Ok(VisibilityStats {
             visible_pixels: counters.visible_pixels,
             feedback_records: counters.feedback_records,
+            visibility_feedback_records: 0,
+            forward_feedback_records: 0,
             material_invocations: counters.material_invocations,
             background_pixels: counters.background_pixels,
             fallback_texels: counters.fallback_texels,
