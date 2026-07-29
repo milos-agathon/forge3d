@@ -8,7 +8,19 @@ const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xa85d_315e_c1f1_a349;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x4758_e817_2f5b_182e;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xbdbc_175a_5ea9_dc49;
+// Re-pinned for TESSELLA (2026-07-29). The assembled terrain source changed, so
+// every summary below was disabled and the module fell back to raw IR (201
+// alarms, `proof_status = unproven`). Four SUMMARIZED helpers changed body:
+// `calculate_normal_ddxddy`, `compute_height_lod`, `sample_triplanar` and
+// `sample_triplanar_vt_family`. All four carry the identical substitution
+// `dpdxCoarse/dpdyCoarse(x)` -> `terrain_screen_ddx/ddy_world|uv(x)`, wrappers
+// that `select` between the hardware derivative and the explicit gradient the
+// visibility-resolve pass supplies (a full-screen pass has no valid hardware
+// derivative of the reconstructed surface). That changes WHICH derivative feeds
+// mip selection and the Sobel cross product, never the functions' result
+// ranges, so each summary's declared range still holds. Every other summarized
+// helper is byte-identical to the previously pinned assembly.
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xb37d_0672_f4b7_fb1f;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {
