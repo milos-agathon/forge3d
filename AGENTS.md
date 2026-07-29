@@ -1,126 +1,128 @@
-# Agent Reflections
+# forge3d Agent Guide
 
-## P0.2: Wrapper/Native Callsite Mismatch (2026-02-19)
+## Scope and authority
 
-- When probing for native API methods, always verify whether a function is a **module-level free function** or an **instance method on a class**. The old `offscreen.py` checked `hasattr(_native, "render_rgba")` but `render_rgba` is a method on `Scene` instances, not a module-level export. This pattern of dead probes can persist silently for a long time because the fallback path works.
-- The PyO3 `#[pyo3(text_signature = "($self)")]` annotation on `Scene.render_rgba` confirms it takes no positional arguments beyond `self` -- width and height are baked in at `Scene` construction time. Always read the Rust signature before wiring up Python calls.
-- When removing dead code that probed nonexistent module-level functions, also clean up imports that become unused (e.g., `_forge3d`, `warnings` in `viewer.py`).
-- Contract tests that assert "function X does NOT exist at module level" are valuable for documenting architectural decisions and preventing future developers from re-introducing the same mistake.
+This file governs the repository unless a deeper `AGENTS.md` applies.
 
-## P0.3: Register Orphaned PyO3 Classes (2026-02-19)
+- `AGENTS.md` is the source of truth for durable AI working guidance.
+- Code, tests, manifests, and `.github/workflows/ci.yml` are authoritative for product behavior and executable configuration.
+- Prefer executable gates over prose. Correct stale in-scope guidance when found.
+- Do not mirror new durable guidance into tool-specific instruction files unless explicitly requested.
 
-- When a Rust struct has `#[pyclass]` but no corresponding `m.add_class::<T>()?;` in the `#[pymodule]` init function, the class is invisible to Python even though it compiles fine. Always check that every `#[pyclass]` has a matching registration in `src/lib.rs`.
-- When importing multiple types from the same module (e.g., `crate::sdf::py`), consolidate into a single `use` statement with a braced group rather than adding separate `use` lines per type.
-- Negative contract tests ("X is NOT registered") should be flipped to positive assertions ("X IS registered") when the registration is intentionally added. Also add construction tests that verify the class is not just importable but actually usable (constructible, methods callable).
-- The `EXPECTED_CLASSES` list in Section 1 of `test_api_contracts.py` must be updated whenever new `m.add_class` registrations are added, otherwise the parametrized existence test won't cover them.
+## Commands
 
-## P0.4: Resolve Mesh TBN Drift (2026-02-19)
+Run focused checks while iterating, then every relevant gate before claiming completion. Report anything not run.
 
-- When Rust code is gated behind a Cargo feature flag (e.g., `#[cfg(feature = "enable-tbn")]`), you must also add that feature to the maturin build features in `pyproject.toml`. Otherwise the module compiles but the functions are excluded from the extension. The `pyproject.toml` `[tool.maturin].features` list is the single source of truth for which features are included in the Python wheel.
-- PyO3 `#[pyfunction]` wrappers that convert Rust structs to Python dicts should use a shared helper function (e.g., `tbn_result_to_py_dict`) to avoid duplicating dict-building logic across multiple wrapper functions.
-- When the Python wrapper (e.g., `mesh.py`) has a feature-detection guard like `_HAS_TBN = hasattr(_forge3d, 'mesh_generate_cube_tbn')`, simply registering the function in the pymodule is enough to flip the flag. No changes to the Python wrapper itself are needed.
-- For feature-gated registrations in `lib.rs`, wrap related function registrations in a `#[cfg(feature = "...")]` block to keep them conditional, matching the module-level gating in `mod.rs`.
-- The `EXPECTED_FUNCTIONS` list in the contract tests should be updated alongside registration to maintain the contract lock.
+```powershell
+# Setup.
+python -m pip install -U pip maturin pytest
 
-## P1.1: SSGI/SSR Settings Wiring (2026-02-19)
+# Rebuild after Rust or WGSL changes.
+maturin develop
 
-- When adding state tracking to `Scene` for a new feature (SSGI, SSR, bloom, etc.), follow the pattern: add fields to the struct, initialize with defaults in the constructor, add `#[pymethods]` for enable/disable/is_enabled/set_settings/get_settings, and update the `.pyi` type stubs.
-- `get_*_settings()` should return a dict (not a typed object) for maximum flexibility and compatibility with the Python side. Use `pyo3::types::PyDict::new(py)` and `dict.set_item(...)`.
-- Behavior tests for Scene methods should test at the class level (`hasattr(_native.Scene, "method_name")`) when instance construction is blocked by GPU/shader issues. This avoids test fragility while still asserting the API contract.
+# Focused API contracts and canonical Python CI lane.
+python -m pytest tests/test_api_contracts.py -v --tb=short
+python scripts/ci_pytest_lane.py -v --tb=short
 
-## P1.2: Bloom Execute Wiring via Resource Pool (2026-02-19)
+# Rust format and canonical lint.
+cargo fmt --check
+cargo forge3d-clippy
 
-> HISTORICAL (superseded 2026-07-10): CENSOR deleted `PostFxEffect`, `BloomEffect`, `PostFxResourcePool`, and `PostFxChain` as zero-caller dead structure. The notes below document the original wiring only; `BloomConfig` and Scene's CPU bloom path remain live.
+# CI-equivalent Rust tests; keep synchronized with ci.yml.
+cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
 
-- The `PostFxEffect::execute()` trait method needs `queue: &Queue` to upload uniform data before dispatching compute passes. When modifying a trait signature, check that the only implementor is `BloomEffect` to avoid a wider refactor.
-- `BloomEffect` differs from `TerrainBloomProcessor` in that it must use the `PostFxResourcePool`'s ping-pong texture pairs for intermediate storage rather than owning its own textures. Allocate pairs during `initialize()` and retrieve views during `execute()`.
-- The bloom composite pass requires a **4-binding layout** (original + bloom + output + uniforms), distinct from the 3-binding brightpass/blur layouts. This was missing from the original stub and had to be added alongside the composite pipeline and shader loading.
-- Bloom default-off semantics are critical for backward compatibility: `BloomConfig::default().enabled == false`, and `execute()` returns `Ok(())` immediately when disabled.
-- The `PostFxChain::execute_chain()` must also accept `queue` and forward it to each effect's `execute()` call.
+# Docs.
+make -C docs html
+```
 
-## P2.1: Point Cloud GPU Rendering Path (2026-02-19)
+`cargo test <filter> --lib` without `--features extension-module` can skip the terrain renderer. Confirm expected test names ran.
 
-- The Rust `PointBuffer` stores positions as flat `Vec<f32>` [x,y,z,...] and colors as `Option<Vec<u8>>` [r,g,b,...]. The `create_gpu_buffer()` method interleaves them into [x,y,z,r,g,b] per point, normalizing u8 colors to 0..1 f32. Default is white when no colors are present.
-- PyO3 bindings for simple data structs work best as thin wrapper types (e.g., `PyPointBuffer` wrapping `pointcloud::PointBuffer`) rather than deriving `#[pyclass]` directly on the Rust struct, because the inner struct lacks `Clone`/`Copy` and holds non-PyO3-compatible fields.
-- When returning numpy arrays from PyO3, prefer `PyArray1::from_vec_bound(py, data)` over the deprecated `from_vec(py, data)` in pyo3 0.21+.
-- Constructor validation for `PointBuffer` (positions length divisible by 3, colors matching point count) prevents downstream GPU buffer mismatches. Always validate at the boundary.
-- The `renderer.rs` file (353 lines) is slightly over the 300-line guideline due to pre-existing duplication between `load_copc_points` and `load_ept_points`. A future refactor could extract a common `load_points_generic` helper.
-- `MemoryReport` separates observation from policy: it reports cache_used, cache_budget, utilization, and entry_count without deciding what to do about high utilization. This keeps the renderer testable without GPU access.
+## Boundaries
 
-## P2.2: COPC LAZ Decompression Feature Gate (2026-02-20)
+### Always
 
-- The `laz` crate is a transitive dependency via `las = { features = ["laz"] }` but must be added as a direct optional dependency (`laz = { version = "0.9", optional = true }`) to use its API directly in `copc_decode.rs`. A marker feature alone (`copc_laz = []`) is insufficient since `use laz::...` requires the crate to be a direct dependency.
-- When splitting a file to stay under 300 lines, the natural boundary for COPC is dataset/hierarchy (copc.rs) vs chunk decoding/parsing (copc_decode.rs). The decode module uses `pub(crate)` visibility to expose `decode_chunk` and `parse_uncompressed_points` only within the crate.
-- For feature-gated code using `#[cfg(feature = "copc_laz")]`, the non-feature path must explicitly suppress unused-variable warnings using `let _ = (data, point_count, ...)` or the compiler will warn about unused parameters.
-- The COPC file format stores LAZ compression parameters in a VLR with user_id "laszip encoded" and record_id 22204. The existing code only read the first VLR (COPC info); the fix iterates all `num_vlrs` VLRs to also capture the LAZ VLR.
-- The MtStHelens.laz fixture uses NAD83 State Plane Washington South coordinates (US feet), not UTM. Always check actual coordinate values before writing range assertions in tests.
-- When testing LAZ decompression end-to-end from Python, the `las::Reader` already decompresses LAZ transparently. Exposing a `read_laz_points_info()` PyO3 function that returns (count, coords, has_rgb) provides a lightweight fixture validation without requiring a COPC-specific fixture file.
+- Read relevant callers, callees, tests, and signatures before editing; fix shared root causes once.
+- Reuse existing helpers and patterns before adding code or dependencies.
+- Preserve unrelated working-tree changes and keep the diff scoped.
+- Validate inputs at Python/native, file-format, network, and GPU boundaries.
+- Update public APIs, stubs, exports, contract lists, tests, and docs together.
+- State exactly which checks ran and their results.
 
-## P2.3: Labels Python Bindings (2026-02-20)
+### Ask first
 
-- For PyO3 bindings of simple config structs like `LabelStyle`, follow the established `PySelectionStyle`/`PyHighlightStyle` pattern: separate `#[pyclass]` struct with `#[pyo3(get, set)]` on each field, a `#[new]` constructor with default values matching the Rust `Default` impl, bidirectional `From` conversions, and `__repr__`.
-- When exposing `[f32; 4]` color arrays to Python, convert to/from tuples `(f32, f32, f32, f32)` rather than `Vec<f32>` for consistency with other bindings (e.g., `PySelectionStyle.color`). Same for `[f32; 2]` offsets.
-- For `f32::MAX` default values in Rust, use the literal value `3.4028235e38` in the `#[pyo3(signature)]` since PyO3 doesn't evaluate Rust constants in signature defaults.
-- Nested PyO3 classes (e.g., `PyLabelFlags` inside `PyLabelStyle`) must also be registered with `m.add_class::<>()` and derive `Clone`. When used as a field in another `#[pyclass]`, the `#[pyo3(get, set)]` attribute works seamlessly.
-- New `py_bindings.rs` submodules should be declared unconditionally in `mod.rs` (not behind `cfg(feature)`), with the `#[cfg(feature = "extension-module")]` guard on individual items inside the file. This matches the pattern used by `lighting/py_bindings.rs` and `terrain/cog/py_bindings.rs`.
+- Add or upgrade a production dependency.
+- Break public compatibility or serialized formats.
+- Update committed goldens, signed certificates, or determinism hashes.
+- Weaken, skip, allow-list, or delete a test, capability gate, or safety check.
+- Perform destructive, release, deployment, signing, or unrequested external actions.
 
-## SUTURA: Zero-Placeholder MapScene (2026-07-07)
+### Never
 
-- The `allow_placeholder` escape hatch is gone: `MapScene.render` either draws through the native GPU-terrain path or raises `MapSceneNativeUnavailable`, whose `.diagnostics` carry structured `{"status": "diagnostic_block", "layer", "reason", "required_native"}` dicts built by `_map_scene_validation.diagnostic_block`. Never reintroduce a CPU placeholder branch; `tests/test_mapscene_sutura_integrity.py::test_no_allow_placeholder_symbol` greps the whole package for regressions.
-- Depth-occlusion label culling lives ONLY in `MapScene.compile_plan()`, which is a total function of the serialized recipe (CPU camera/terrain sampler, never a live GPU depth frame). `_render_native_offscreen_result` requires a `CompiledScenePlan` and mutates no label state; `MapScene.render` compiles on demand when `compiled_plan` is None.
-- The frozen compiled plan (label plans + per-label visibility flags keyed by a camera+terrain hash) is stored in new `RecipeManifest.compiled_label_plans` / `depth_cull` fields. `manifest_to_json` canonicalizes floats (`allow_nan=False`, `-0.0 -> 0.0`) so `to_json -> from_json -> to_json` round-trips byte-identically.
-- `BUNDLE_VERSION` is 3: bundles persist `scene/compiled_plan.json` and `MapScene.load_bundle` rehydrates it verbatim; v2 bundles (no compiled plan) are recompiled once on load.
-- Dataclass serialization asymmetries (`None` vs `[]` from `_sequence`) silently break byte-identical validation reports after a bundle round-trip — normalize at the decode boundary (`_layer_from_dict`), e.g. `bounds=data.get("bounds") or None`.
-- When a test asserts exact equality on `last_render_metadata`, pop nondeterministic timing keys (`offline_accumulation_ms`, `timing_source`) first; they come from `time.perf_counter` in `_render_terrain_renderer_result`.
+- Open, print, copy, modify, or commit credentials, tokens, private keys, `.env` files, or suspected secrets.
+- Edit generated products: `target/`, `_build/`, `dist/`, `python/forge3d/_forge3d.pyd`, or `python/forge3d/forge3d.pdb`.
+- Claim a check passed unless its successful result was observed.
+- Hide unavailable capability behind a placeholder, silent fallback, synthetic success, or misleading certificate.
+- Reintroduce deleted legacy postfx/framegraph structures or dead feature flags without a current caller and explicit requirement.
 
-## PROMETHEUS Remediation: Audit Fix Pass (2026-07-08)
+## Stack and repository map
 
-- The terrain PT reservoir now uses the CANONICAL ReSTIR layout (`src/path_tracing/restir/types.rs` `Reservoir`/`LightSample`, 80-byte storage stride). When a WGSL struct must match a Rust `Pod` struct in a storage array, verify the STRIDE, not the field list — the original ad-hoc `TerrainReservoir` had an 80-byte WGSL stride against a 64-byte Rust allocation and wgpu will not catch a short runtime-sized array until the last pixels write out of the bound range.
-- Real temporal/spatial reuse = dispatching the existing `pt_restir_temporal.wgsl`/`pt_restir_spatial.wgsl` as standalone pipelines inside `HybridPathTracer` with three canonical reservoir buffers (curr candidates -> temporal merges prev+curr -> out -> spatial writes back into prev). The kernel M-clamps prev in place (cap 512) before each merge, otherwise `m`/`w_sum` grow ~9x per spatial pass and overflow within ~40 frames.
-- The spatial pass needs a G-buffer (`gbuffer_nr`/`gbuffer_pos` at group(1) bindings 10/11) for target-pdf re-evaluation. For a static scene + deterministic camera, write it ONCE from a dedicated entry (`main_terrain_gbuffer`) with its OWN pipeline layout — keeping those two storage bindings out of the main kernel's layout is what keeps every pipeline within 8 storage buffers per compute stage.
-- Bind-group portability: lighting moved from group(4) to group(0)@binding(1) so all hybrid pipelines fit `max_bind_groups = 4`. When a shader comment claims "consolidated to stay within max_bind_groups=4", count the actual pipeline-layout groups — the claim had drifted.
-- `HybridScene::dummy_storage_buffer()` must cover ONE ELEMENT of the largest runtime-sized array it stands in for (WGSL `BvhNode` = 48 bytes); a 4-byte dummy fails wgpu validation with "Buffer is bound with size 4 where the shader expects N" only at dispatch time.
-- Memory-tracker hygiene for multi-resource render paths: wrap every tracked allocation in a Drop guard (`TrackedGpu`) and implement `Drop` on tracked wrapper types (`TerrainMinMaxPyramid`, `TerrainPtScene`) so `?`/early-return paths cannot leak tracker state. Gate the budget on tracker metrics captured AFTER all allocations, not on `peak_host_visible_bytes` alone (device-local resources never appear in host-visible metrics).
-- "Variance across the last N frames" (02-prometheus.md:59) is implementable as a WINDOWED Welford over the running-mean luminance: reset at `frame_index % window == 0`, gate on `m2/(n-1)` at window boundaries. Raw per-frame sample variance never falls for a stochastic estimator; variance of the running mean does.
-- Background Bash gotcha that bit this session twice: `cmd | tail -N` in a background task truncates the retained log AND masks the exit code (pipeline status = tail's). Redirect to a scratchpad file and grep it instead.
+- Rust edition 2021; wgpu 0.19; WGSL shaders.
+- Python 3.10+; PyO3 0.21.2; NumPy; maturin >=1.5,<2.0.
+- `src/lib.rs`: crate root and native module entry.
+- `src/py_module/`, `src/py_functions/`, `src/py_types/`: PyO3 bridge.
+- `src/core/`: GPU context, resource tracking, timing, render contracts.
+- `src/terrain/`: primary terrain/rendering engine.
+- `src/shaders/` and `src/viewer/**/*.wgsl`: shader sources.
+- `src/gis/`: native GIS implementation.
+- `python/forge3d/`: public Python API, wrappers, and `.pyi` stubs.
+- `tests/`: behavior, contract, honesty, reachability, golden gates.
+- `.github/workflows/ci.yml`: supported feature matrix and CI authority.
 
-## BOP-P2-02: Clipmap Geometry Provider + Height Streaming (2026-07-09)
+See `README.md`, `CONTRIBUTING.md`, `docs/start/architecture.md`, and `docs/guides/feature_map.md` for architecture and setup.
 
-- The 2026-07-05 audit's "adding the clipmap vertex entry to the shared terrain shader crashed Vulkan pipeline validation/construction" no longer reproduces on the current wgpu/driver stack. When a backend-conditional fallback exists only because of a historical crash, re-verify the crash before building more machinery around the gate — removing the two `Backend::Vulkan` checks and rendering produced near-identical output to the recorded DX12 evidence (RGB sum 1878111 vs 1877131).
-- WGSL entry points cost nothing until a pipeline uses them: moving `vs_clipmap_main` from a Rust `push_str` hack into `terrain_pbr_pom.wgsl` is safe for every other pipeline compiled from the same preprocessed module (`vs_main`, AOV, offline HDR), because wgpu validates the resource interface per entry point at pipeline creation, not per module.
-- `cargo test <filter> --lib` without `--features extension-module` silently skips the entire `src/terrain/renderer/` tree. A run that reports "N passed, hundreds filtered out" can still mean *your new tests never ran* — check the module paths in the reported test names, then re-run with the feature.
-- `make_ring_skirts` stitched curtain quads across row/strip boundaries ("Simplified: add all for now"), creating triangles spanning the whole ring — caught by `tests/test_geomorph_seams.py` (max edge 4360 on a 1000 m extent). Skirt adjacency must be row-aware: pass `row_width = resolution + 1` and skip pairs where `i % row_width == 0`. When a generator comment says "simplified for now", assume a test somewhere is already red because of it.
-- The fixed-LOD `HeightMosaic` mode (slot = tile coords) makes the atlas a direct geographic mosaic that binds as `height_tex` with plain [0,1] UVs — no page-table indirection needed in the mega-shader. Coarse-prefill (low-res read upsampled per tile at enable time) is what turns "tiles in flight" into "coarse terrain" instead of holes.
-- `ClipmapStreamer::update()` only emits center/corner ring tiles, so camera-driven demand alone never converges full residency; pair it with a nearest-first top-up loop through `AsyncTileLoader::request()` (which already dedups and enforces max-in-flight backpressure).
-- Clipmap vertex UVs are world-anchored (`(world + extent/2) / extent`), so recentering the ring mesh on a moving camera keeps DEM alignment for free; putting the streaming center in the geometry cache key gives regeneration-on-move with zero per-frame CPU mesh cost when stationary.
-- Ten P2 recipe goldens (auto_water, clipmap, cloud_shadows, copc, arabic, screen-space pair, textured_gltf, thematic, tiles3d) were explicitly listed in `.gitignore` — they existed only on this machine while the plan claimed "intended baselines are committed". When a golden gate depends on files, check `git ls-files` for them, not just the working tree.
+## Native Python contracts
 
-## CENSOR (2026-07-09/10)
+- Distinguish module functions from instance methods; read the Rust signature before wiring Python.
+- Register every `#[pyclass]` and exposed `#[pyfunction]`; match registration and implementation `#[cfg]` gates.
+- For public native symbols, update guarded re-exports, `__all__`, `.pyi` stubs, and `EXPECTED_FUNCTIONS`/`EXPECTED_CLASSES`.
+- Wheel features belong in `[tool.maturin].features`; directly used optional crates must be direct optional dependencies.
+- Prefer thin PyO3 wrappers and existing tuple, dict, constructor-default, and `__repr__` conventions.
+- Run `maturin develop` before Python tests to avoid a stale native binary.
 
-- Project-wide honesty pass. Earlier areas (prior tasks): capability negotiation replaced the `Features::empty()` device request so the device advertises what it actually enables; the host-visible budget default flipped to ENFORCE (`BUDGET_POLICY_ENFORCE`), over-budget host-visible allocations now return `RenderError::Budget`; a source-level allocation gate (`tests/test_allocation_gate.py`) forbids raw `create_buffer`/`create_texture` outside `src/core/resource_tracker.rs`; and a signed `RenderCertificate` + verifier attests real render provenance.
-- Task 14 (dead-feature + dead-structure removal): deleted six features from `Cargo.toml [features]` that had ZERO `#[cfg(feature="…")]` refs anywhere in `src/`/`tests/`/`benches/`/`build.rs` — `terrain_spike`, `exr` (the standalone marker only; `images = ["dep:exr"]` kept because the `exr` crate is still an optional dep the AOV path uses), `enable-ibl`, `enable-csm`, `enable-render-bundles`, `enable-memory-pools`. `terrain_spike` guarded nothing, so its module already compiled unconditionally and was left alone.
-- The CI feature list in `.github/workflows/ci.yml` (`cargo check`/`cargo test`/`cargo doc`), the `forge3d-clippy` alias in `.cargo/config.toml`, the curated cargo-test command in `CLAUDE.md`, and `.claude/rules/build-and-ci.md` all embedded the SAME stale list independently — grep every one when the matrix changes. Corrected list (final, 2026-07-10; `ci.yml` is the source of truth and gate (c) in `tests/test_no_silent_degradation.py` locks it): `default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings`. An earlier version of this very note omitted `cog_streaming`/`gis-remote`/`geos-topology` — even the correction had drifted; trust the gate, not prose.
-- Dead structure — all confirmed zero external callers before deletion. The final closure deletes the complete legacy `PostFxChain`/`PostFxEffect`/`PostFxResourcePool` graph and its unreachable standalone `BloomEffect`, while retaining the live `BloomConfig` used by Scene's real CPU postfx path. The zero-caller legacy `src/core/framegraph.rs` wrapper and zero-caller `TonemapProcessor` were also deleted; `framegraph_impl` remains because diagnostics exercises it, and `core::tonemap::resolve_reference_hdr_to_rgba8` remains as the authoritative adjudication resolve. Earlier deletions also removed render bundles and the parallel `src/render/memory_budget.rs`; the live `src/util/memory_budget.rs` IBL estimators are untouched.
-- Viewer bind groups are cached by resource identity in `viewer/render/main_loop/postfx_cache.rs`, invalidated on resize and IBL replacement, and the frame-loop `postfx.rs` contains no `create_bind_group` calls. Snapshot composite bind groups are created lazily only on a cache miss; routine frames allocate none.
-- After deleting a method, sweep the file's imports: removing `execute_chain` orphaned `RenderError` and `GpuTimingManager` in `chain.rs`, and `postfx_apply_noop` orphaned `use wgpu::*;` in `postfx/mod.rs`. Unused-import warnings are `-D warnings` clippy failures, so this is not optional cleanup.
-- F-11 closure removed the temporary sky/fog frame-loop exemptions: their bind groups are miss-only caches, resize invalidates every cache whose texture/depth identity changes, and the routine frame files contain no bind-group or sampler creation.
-- F-06 production certificates use a random Ed25519 seed stored only as the `FORGE3D_CERT_SIGNING_KEY` Actions secret. The tracked public key and all committed certificates rotate atomically; protected internal/release lanes fail without the secret or on any key/signature mismatch, while fork PRs are explicitly marked untrusted.
-- Pre-existing red found during verification (NOT caused by Task 14): `offscreen::adjudication_raster::tests::raster_twin_is_explicitly_blocked_and_reuses_shared_infra` asserted `forward.rs` contains the literal `global_tracker()`, which sibling CENSOR commit `f488592d` ("drop redundant manual tracking") had removed. RESOLVED in `a9f1e05b`: the lock now asserts the honest new invariant (`read_hdr_texture` + `tracked_create_texture`) and the test is green in the curated matrix.
-- CI runners carry a newer clippy than local stable: three lints (`iter_kv_map`, `manual_filter`, needless `&` in `println!`) passed local `cargo forge3d-clippy` but failed all three Test Rust legs on the CENSOR red-proof PR. Fixed at the source (`point_spot_lights/management.rs`, `offscreen/pipeline.rs`, `viewer_input.rs`) rather than allow-listed — when CI clippy disagrees with local, prefer fixing the lint over widening the alias's `--allow` list.
+## GPU and WGSL contracts
 
-## CENSOR audit remediation (2026-07-10)
+- Synchronize Rust/WGSL bindings, formats, alignment, and storage-array stride; verify byte stride, not field order alone.
+- Stay within negotiated adapter limits; dummy bindings cover one full element of their largest represented WGSL type.
+- A clean Rust build does not prove WGSL validity. Rebuild and run the focused GPU pipeline.
+- Create production GPU resources through tracked helpers in `src/core/resource_tracker.rs`; use Drop guards for early returns.
+- Evaluate budgets after relevant allocations; host-visible metrics exclude device-local memory.
+- Cache routine-frame bind groups and invalidate them when resource identity changes.
+- Negotiate capabilities; never use a default empty device descriptor in production render paths.
 
-- The independent Fable 5 audit (local `docs/audits/fable5-moonshots/14-censor-implementation-audit.md`; `docs/audits/` is git-ignored by policy) scored 12/20 requirements `full`, 8 `partial`. Remediation closed the code-side gaps in one pass:
-- **Golden negative control (F-02):** `UPDATE_GOLDENS` was bound at import, so the control's `monkeypatch.delenv` was dead code — under `FORGE3D_UPDATE_RECIPE_GOLDENS=1` the "rejecting" control would have COPIED the corrupted image over the committed golden. Update-mode is now the call-time `_update_goldens_enabled()`, the control simulates a refresh run (setenv → delenv) and asserts the golden's bytes are untouched. Lesson: any env-driven test-mode flag read at module import defeats per-test monkeypatching.
-- **Live `gpu_ms` everywhere (F-04):** new `OneShotTiming` wrapper in `core/gpu_timing.rs` (also `for_device` for renderers owning a non-global device, e.g. TerrainSpike). Every certified GPU render path now records live per-pass timings — vector oit/pick/fill/demo, adjudication (raster fully; PT frame-0 representative region — a wavefront frame spans multiple encoders), hybrid PT (frame-0 per pipeline), instancing, spike, offline batch (first-sample representative), debug pattern, BRDF tile (its dormant timestamp query set finally gets READ). `timestamp_valid` is now derived (`begin != 0 && end >= begin`), and all record loops report invalid stamps as 0.0. Pass labels/orders unchanged ⇒ signed payloads byte-identical ⇒ committed certificates stayed valid.
-- **Render-surface honesty (F-05):** `render_brdf_tile{,_overrides}` gained the `certificate=` contract; `test_render_certificate_contract.py` now sweeps every public `render_*` callable (forge3d + `_forge3d`) — each must take `certificate=` or sit in `DOCUMENTED_EXCLUSIONS` with a reason mirrored in its docstring.
-- **Probe honesty (F-10):** `terrain_ci_probe.py` exit codes now distinguish ABSENT (2: no CI-safe adapter → marker + job success) from CRASH (3: adapter present, smoke render raised → golden job FAILS). The probe step lost its `continue-on-error`.
-- **Gates hardened (F-08/F-09/F-11):** allocation gate adds UFCS/`create_texture_with_data`/line-split patterns (immediately caught a helper false-positive — pattern narrowed to `Device::create_*`); dead-structure gate greps forbidden symbols repo-wide and checks the whole frame-loop dir against a documented bind-group allowlist; a new capability gate rejects `request_device(&wgpu::DeviceDescriptor::default()` in production code, and `extrude_polygon_gpu_py` now uses the negotiated global context instead of a private default device.
-- **Ledger cross-invariant (F-07):** `finish_ledger_capture` debug-asserts equality on both axes between the ledger and `ResourceRegistry`'s exact `ResourceHandle` subset (the public registry totals intentionally also include estimate-only legacy bookkeeping); mid-capture ownerless allocations are counted (only pre-existing ambient entries are excluded) — both the paired and deliberately unpaired cases are unit-locked.
-- Verification after remediation: `cargo fmt --check` / `forge3d-clippy` / curated `cargo test` (693 passed) / focused pytest (84 passed, 0 skipped, live RTX 3070) all green; determinism SHA unchanged across the refactor (`8e397b1a…`).
+## Render honesty and determinism
 
-## ANAMNESIS completion audit (2026-07-22)
+- `MapScene.render` uses native GPU terrain or raises `MapSceneNativeUnavailable` with structured diagnostics; no CPU placeholder or `allow_placeholder`.
+- Depth culling lives only in `MapScene.compile_plan()`; rendering consumes `CompiledScenePlan` without mutating labels.
+- Preserve byte-identical manifest/bundle round trips: reject NaN, canonicalize negative zero, normalize optionals at decode, and persist compiled plans.
+- GPU render entry points follow the certificate contract or a documented exclusion. Timings come from executed GPU work.
+- Preserve explicit scheduler capability fingerprints; probe only when an external renderer supplies none.
+- Warm cache indexes avoid per-entry metadata reads, count their own bytes, and fall back on inventory mismatch.
+- Cross-backend portability requires an independent physical render with qualifying golden and adapter metadata; otherwise report `ABSENT`.
+- Verify committed goldens with `git ls-files`, not working-tree presence.
 
-- A hermeticity test must exercise the public scheduler output, not compare a key against a second hand-written hash of the same inputs. The real-output mutation lane exposed that `render_sequence(..., capabilities=...)` discarded explicit capabilities for the built-in executor. Preserve explicit fingerprints on every executor; only probe native capabilities when an external renderer supplies none.
-- A warm-store index that still opens every entry's `meta.json` before loading defeats the cache on Windows. Validate the fast pack in memory, compare its key set with the directory inventory, and fall back to the full metadata scan only on mismatch. Count the fast-pack payload against `max_bytes` and remove the on-disk pack before writes/GC so the optimization cannot exceed the store budget.
-- Cross-backend portability requires two independent physical renders. A consumer may enter the portable TERRA equivalence class only after its own output matches the committed golden and its adapter metadata proves a non-software DX12 device; otherwise emit `ABSENT` rather than treating a cached producer blob as proof of consumer determinism.
+## Change-specific verification
+
+- Python-only: focused pytest; add the canonical lane for shared behavior or CI accounting.
+- Rust: focused Rust test, `cargo fmt --check`, and `cargo forge3d-clippy`.
+- Rust/PyO3 API: `maturin develop`, API contracts, focused Python behavior tests.
+- WGSL/pipeline: `maturin develop`, shader reachability, focused GPU smoke or golden.
+- MapScene/certificate/cache/determinism: named integrity tests and affected golden gate.
+- Documentation-only: verify referenced commands/paths and run `git diff --check`.
+- CI-only matrices remain reported as not run locally.
+
+## Definition of done
+
+- The requested behavior is implemented at the shared root cause.
+- APIs, stubs, exports, serialization, tests, and docs agree.
+- Relevant checks passed; actual results and unrun gates are explicit.
+- The diff contains only intended changes, with no secrets or generated artifacts.
