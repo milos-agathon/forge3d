@@ -74,7 +74,7 @@ struct CsmUniforms {
     _pad1a: f32,
     _pad1b: f32,
     _pad1c: f32,
-    // [blocker radius (texels), filter radius (texels), moment bias, dimensionless light size]
+    // [blocker radius (texels), max filter radius (texels), moment bias, light radius (texels)]
     technique_params: vec4<f32>,
     technique_reserved: vec4<f32>,
     cascade_blend_range: f32,
@@ -543,7 +543,11 @@ fn sample_csm_shadow(world_pos: vec3<f32>, normal: vec3<f32>, cascade_idx: u32) 
             avg_blocker_depth,
             csm_uniforms.technique_params.w
         );
-        let filter_radius = min(csm_uniforms.technique_params.y + penumbra, 100.0);
+        let max_filter_radius = min(csm_uniforms.technique_params.y, 100.0);
+        let filter_radius = min(
+            max(penumbra, min(max_filter_radius, 1.0)),
+            max_filter_radius
+        );
         var poisson_disk = array<vec2<f32>, 16>(
             vec2<f32>(-0.94201624, -0.39906216),
             vec2<f32>(0.94558609, -0.76890725),

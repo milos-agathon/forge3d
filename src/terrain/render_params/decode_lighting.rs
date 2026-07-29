@@ -150,6 +150,21 @@ pub(super) fn parse_shadow_settings(shadows: &Bound<'_, PyAny>) -> PyResult<Shad
         .ok()
         .and_then(|value| value.extract().ok())
         .unwrap_or(0.0);
+    let pcss_blocker_radius = shadows
+        .getattr("pcss_blocker_radius")
+        .ok()
+        .and_then(|value| value.extract().ok())
+        .unwrap_or(crate::shadows::DEFAULT_PCSS_BLOCKER_RADIUS_TEXELS);
+    let pcss_filter_radius = shadows
+        .getattr("pcss_filter_radius")
+        .ok()
+        .and_then(|value| value.extract().ok())
+        .unwrap_or(crate::shadows::DEFAULT_PCSS_FILTER_RADIUS_TEXELS);
+    let light_size = shadows
+        .getattr("light_size")
+        .ok()
+        .and_then(|value| value.extract().ok())
+        .unwrap_or(crate::shadows::DEFAULT_PCSS_LIGHT_SIZE);
     Ok(ShadowSettingsNative {
         enabled: shadows.getattr("enabled")?.extract().unwrap_or(true),
         technique: shadows
@@ -164,6 +179,9 @@ pub(super) fn parse_shadow_settings(shadows: &Bound<'_, PyAny>) -> PyResult<Shad
         max_distance: shadows.getattr("max_distance")?.extract().unwrap_or(3000.0),
         softness,
         pcss_light_radius,
+        pcss_blocker_radius,
+        pcss_filter_radius,
+        light_size,
         intensity: shadows.getattr("intensity")?.extract().unwrap_or(1.0),
         slope_scale_bias: shadows
             .getattr("slope_scale_bias")?

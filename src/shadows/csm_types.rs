@@ -88,7 +88,7 @@ pub struct CsmUniforms {
     pub technique_flags: u32,
     /// Padding to align technique_params to 16-byte boundary
     pub _padding1: [f32; 3],
-    /// PCSS blocker/filter texel radii, moment bias, and dimensionless light size.
+    /// PCSS blocker/max-filter texel radii, moment bias, and texel-space light radius.
     pub technique_params: [f32; 4],
     /// Reserved for future expansions (e.g., MSM tuning)
     pub technique_reserved: [f32; 4],

@@ -65,8 +65,14 @@ class ShadowSettings:
     light_bleed_reduction: float
     evsm_exponent: float
     fade_start: float
-    # Optional dimensionless PCSS area-light size. Zero selects the renderer minimum.
+    # Legacy PCSS light radius in world units. When non-zero it takes precedence
+    # over light_size and is converted per cascade using that cascade's texel size.
     pcss_light_radius: float = 0.0
+    # PCSS search radius, maximum adaptive filter radius, and area-light radius
+    # in shadow-map texels.
+    pcss_blocker_radius: float = 6.0
+    pcss_filter_radius: float = 4.0
+    light_size: float = 1.0
 
     # Shadow technique constants matching Rust ShadowTechnique enum
     # ALL_TECHNIQUES: Full set recognized by config layer
@@ -111,6 +117,15 @@ class ShadowSettings:
 
         if self.pcss_light_radius < 0.0:
             raise ValueError("pcss_light_radius must be >= 0")
+
+        if self.pcss_blocker_radius < 0.0:
+            raise ValueError("pcss_blocker_radius must be >= 0")
+
+        if self.pcss_filter_radius < 0.0:
+            raise ValueError("pcss_filter_radius must be >= 0")
+
+        if self.light_size <= 0.0:
+            raise ValueError("light_size must be > 0")
 
         if self.intensity < 0.0:
             raise ValueError("intensity must be >= 0")

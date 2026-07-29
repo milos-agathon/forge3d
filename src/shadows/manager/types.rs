@@ -16,9 +16,9 @@ pub struct ShadowManagerConfig {
     pub technique: ShadowTechnique,
     /// Blocker-search radius in shadow-map texels.
     pub pcss_blocker_radius: f32,
-    /// Base PCF radius in shadow-map texels.
+    /// Maximum adaptive PCSS filter radius in shadow-map texels.
     pub pcss_filter_radius: f32,
-    /// Dimensionless area-light size used by the PCSS penumbra estimate.
+    /// Area-light radius in shadow-map texels used by the PCSS penumbra estimate.
     pub light_size: f32,
     pub moment_bias: f32,
     /// P0.2/M3: Blur kernel radius for VSM/EVSM/MSM moment maps (2-4 typical)

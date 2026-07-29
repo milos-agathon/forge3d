@@ -411,12 +411,7 @@ impl ViewerTerrainScene {
         // Build CSM uniforms with current technique
         // Use cascade data from CSM renderer if shadow depth passes have been rendered
         let debug_mode = self.pbr_config.debug_mode;
-        let technique_params = [
-            crate::shadows::DEFAULT_PCSS_BLOCKER_RADIUS_TEXELS,
-            crate::shadows::DEFAULT_PCSS_FILTER_RADIUS_TEXELS,
-            0.0005,
-            crate::shadows::DEFAULT_PCSS_LIGHT_SIZE,
-        ];
+        let technique_params = super::super::shader_pbr::default_viewer_pcss_technique_params();
         let csm_uniforms = if let Some(ref csm) = self.csm_renderer {
             // Copy uniforms from CSM renderer (populated by render_shadow_passes)
             let mut u = csm.uniforms;

@@ -61,10 +61,10 @@ pub struct ShadowParams {
     /// Blocker-search radius in shadow-map texels.
     #[serde(default = "ShadowParams::default_pcss_blocker_radius")]
     pub pcss_blocker_radius: f32,
-    /// Base PCF radius in shadow-map texels.
+    /// Maximum adaptive PCSS filter radius in shadow-map texels.
     #[serde(default = "ShadowParams::default_pcss_filter_radius")]
     pub pcss_filter_radius: f32,
-    /// Dimensionless area-light size used by the PCSS penumbra estimate.
+    /// Area-light radius in shadow-map texels used by the PCSS penumbra estimate.
     #[serde(default = "ShadowParams::default_light_size")]
     pub light_size: f32,
     #[serde(default = "ShadowParams::default_moment_bias")]

@@ -117,6 +117,46 @@ class TestShadowConfigValidation:
         config = load_renderer_config(None, {"shadows": "pcss"})
         assert config.shadows.technique == "pcss"
 
+    @pytest.mark.parametrize(
+        "factory_path",
+        (
+            "forge3d.map_scene._mapscene_shadow_settings",
+            "forge3d.terrain_demo._make_terrain_shadow_settings",
+        ),
+    )
+    def test_active_terrain_translation_preserves_explicit_pcss_parameters(
+        self, factory_path: str
+    ):
+        """The two active Python entry points must not reinterpret PCSS controls."""
+        from importlib import import_module
+
+        module_name, factory_name = factory_path.rsplit(".", 1)
+        factory = getattr(import_module(module_name), factory_name)
+        public = ShadowParams(
+            technique="pcss",
+            pcss_blocker_radius=7.25,
+            pcss_filter_radius=3.5,
+            light_size=2.75,
+        )
+
+        native_input = factory(public)
+
+        assert native_input.pcss_blocker_radius == pytest.approx(7.25)
+        assert native_input.pcss_filter_radius == pytest.approx(3.5)
+        assert native_input.light_size == pytest.approx(2.75)
+        assert native_input.softness != pytest.approx(public.light_size)
+
+    def test_terrain_shadow_defaults_match_public_pcss_defaults(self):
+        """Direct terrain settings and RendererConfig share one texel-space default."""
+        settings = TestShadowTechniqueValidation()._make_shadow_settings("pcss")
+        public = ShadowParams()
+
+        assert settings.pcss_blocker_radius == pytest.approx(
+            public.pcss_blocker_radius
+        )
+        assert settings.pcss_filter_radius == pytest.approx(public.pcss_filter_radius)
+        assert settings.light_size == pytest.approx(public.light_size)
+
 
 class TestValidateShadowTechnique:
     """Test the validate_shadow_technique function directly."""
@@ -494,6 +534,9 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
         curve_mode: str = "linear",
         curve_power: float = 1.0,
         curve_lut: np.ndarray | None = None,
+        pcss_blocker_radius: float = 6.0,
+        pcss_filter_radius: float = 4.0,
+        light_size: float = 1.0,
         pcss_light_radius: float = 0.0,
     ) -> np.ndarray:
         shadows = ShadowSettings(
@@ -511,6 +554,9 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
             light_bleed_reduction=0.5,
             evsm_exponent=40.0,
             fade_start=1.0,
+            pcss_blocker_radius=pcss_blocker_radius,
+            pcss_filter_radius=pcss_filter_radius,
+            light_size=light_size,
             pcss_light_radius=pcss_light_radius,
         )
         config = make_terrain_params_config(
@@ -549,19 +595,23 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
             heightmap=heightmap if terrain is None else terrain,
         ).to_numpy()
 
-    luminance = {
-        technique: np.dot(
-            render(technique)[..., :3].astype(np.float32) / 255.0,
-            np.array([0.2126, 0.7152, 0.0722], dtype=np.float32),
-        )
+    raw = {
+        technique: render(technique)[..., :3].astype(np.float32) / 255.0
         for technique in ("pcf", "vsm", "evsm")
     }
-    terrain_reference = np.dot(
-        render("pcf", enabled=False)[..., :3].astype(np.float32) / 255.0,
-        np.array([0.2126, 0.7152, 0.0722], dtype=np.float32),
+    luminance = {technique: image[..., 0] for technique, image in raw.items()}
+    terrain_reference = (
+        render("pcf", enabled=False)[..., 0].astype(np.float32) / 255.0
     )
     terrain = terrain_reference > 0.9
     assert terrain.any(), "shadow-disabled native render contains no flat terrain"
+    for technique, image in raw.items():
+        assert np.max(np.abs(image[..., 0][terrain] - image[..., 1][terrain])) <= (
+            1.0 / 255.0
+        )
+        assert np.max(np.abs(image[..., 0][terrain] - image[..., 2][terrain])) <= (
+            1.0 / 255.0
+        )
 
     lit_plain = terrain & (luminance["pcf"] > 0.9)
     cast_shadow = terrain & (luminance["pcf"] < 0.6)
@@ -591,12 +641,13 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
         )
 
     pcss = {
-        radius: np.dot(
-            render("pcss", pcss_light_radius=radius)[..., :3].astype(np.float32)
-            / 255.0,
-            np.array([0.2126, 0.7152, 0.0722], dtype=np.float32),
+        light_size: (
+            render(
+                "pcss", light_size=light_size, pcss_filter_radius=16.0
+            )[..., 0].astype(np.float32)
+            / 255.0
         )
-        for radius in (0.5, 0.99)
+        for light_size in (1.0, 12.0)
     }
     pcss_mae = {
         radius: float(
@@ -605,32 +656,86 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
         for radius, visibility in pcss.items()
     }
     print(f"PCSS vs PCF MAE: {pcss_mae}")
-    for radius, mae in pcss_mae.items():
-        assert mae >= 0.001, f"PCSS radius {radius} aliases PCF: MAE={mae:.6f}"
-
-    cast_shadow = terrain & (luminance["pcf"] < 0.6)
-    padded = np.pad(cast_shadow, 1)
-    interior = (
-        cast_shadow
-        & padded[:-2, 1:-1]
-        & padded[2:, 1:-1]
-        & padded[1:-1, :-2]
-        & padded[1:-1, 2:]
+    assert pcss_mae[12.0] >= 0.002, (
+        f"wide-light PCSS aliases PCF: MAE={pcss_mae[12.0]:.6f}"
     )
-    edge = cast_shadow & ~interior
-    assert edge.any(), "deterministic cast shadow has no measurable edge"
-    edge_band = np.lib.stride_tricks.sliding_window_view(
-        np.pad(edge, 12), (25, 25)
-    ).any(axis=(-2, -1))
+    assert pcss_mae[12.0] >= pcss_mae[1.0] + 0.00075, (
+        f"light-size response is only a near-fixed perturbation: {pcss_mae}"
+    )
 
-    def transition_width(visibility: np.ndarray) -> float:
+    def edge_geometry(
+        pcf_visibility: np.ndarray, terrain_mask: np.ndarray
+    ) -> tuple[np.ndarray, int]:
+        cast = terrain_mask & (pcf_visibility < 0.6)
+        padded = np.pad(cast, 1)
+        interior = (
+            cast
+            & padded[:-2, 1:-1]
+            & padded[2:, 1:-1]
+            & padded[1:-1, :-2]
+            & padded[1:-1, 2:]
+        )
+        edge = cast & ~interior
+        assert edge.any(), "deterministic cast shadow has no measurable edge"
+        band = np.lib.stride_tricks.sliding_window_view(
+            np.pad(edge, 12), (25, 25)
+        ).any(axis=(-2, -1))
+        return band & terrain_mask, int(edge.sum())
+
+    edge_band, edge_count = edge_geometry(luminance["pcf"], terrain)
+
+    def transition_width(
+        visibility: np.ndarray, band: np.ndarray, denominator: int
+    ) -> float:
         transition = 4.0 * visibility * (1.0 - visibility)
-        return float(transition[edge_band & terrain].sum() / edge.sum())
+        return float(transition[band].sum() / denominator)
 
-    widths = {radius: transition_width(visibility) for radius, visibility in pcss.items()}
+    widths = {
+        radius: transition_width(visibility, edge_band, edge_count)
+        for radius, visibility in pcss.items()
+    }
     print(f"PCSS transition widths: {widths}")
-    assert widths[0.99] >= widths[0.5] + 0.01, (
-        f"larger PCSS light radius did not widen the cast-shadow transition: {widths}"
+    assert widths[12.0] >= widths[1.0] + 0.25, (
+        f"larger PCSS light size did not widen the cast-shadow transition: {widths}"
+    )
+
+    shallow_heightmap = heightmap * np.float32(0.35)
+    # Preserve the scene's light-frustum depth range while reducing the central
+    # caster height, so this changes blocker/receiver separation rather than
+    # merely renormalizing the shadow projection.
+    shallow_heightmap[0, 0] = np.float32(1.0)
+    shallow_pcf = (
+        render("pcf", terrain=shallow_heightmap)[..., 0].astype(np.float32) / 255.0
+    )
+    shallow_terrain = (
+        render("pcf", enabled=False, terrain=shallow_heightmap)[..., 0] > 230
+    )
+    shallow_edge_band, shallow_edge_count = edge_geometry(
+        shallow_pcf, shallow_terrain
+    )
+    shallow_widths = {}
+    for light_size in (1.0, 12.0):
+        visibility = (
+            render(
+                "pcss",
+                terrain=shallow_heightmap,
+                light_size=light_size,
+                pcss_filter_radius=16.0,
+            )[..., 0].astype(np.float32)
+            / 255.0
+        )
+        shallow_widths[light_size] = transition_width(
+            visibility, shallow_edge_band, shallow_edge_count
+        )
+    print(f"Shallow-separation PCSS transition widths: {shallow_widths}")
+    shallow_growth = shallow_widths[12.0] - shallow_widths[1.0]
+    full_growth = widths[12.0] - widths[1.0]
+    assert shallow_growth >= 0.25, (
+        f"shallow PCSS is only a near-fixed perturbation: {shallow_widths}"
+    )
+    assert abs(full_growth - shallow_growth) >= 0.10, (
+        "PCSS light-size response ignored blocker/receiver separation: "
+        f"full_growth={full_growth:.4f}, shallow_growth={shallow_growth:.4f}"
     )
 
     curve_heightmap = np.zeros_like(heightmap)

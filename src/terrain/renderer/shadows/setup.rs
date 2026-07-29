@@ -1,5 +1,19 @@
 use super::*;
 
+fn terrain_shadow_uniform_params(
+    settings: &crate::terrain::render_params::ShadowSettingsNative,
+) -> ([f32; 4], [f32; 4]) {
+    (
+        [
+            settings.pcss_blocker_radius,
+            settings.pcss_filter_radius,
+            0.0005,
+            settings.light_size,
+        ],
+        [settings.pcss_light_radius, 0.0, 0.0, 0.0],
+    )
+}
+
 pub(in crate::terrain::renderer) struct ShadowSetup {
     pub(in crate::terrain::renderer) eye: glam::Vec3,
     pub(in crate::terrain::renderer) view_matrix: glam::Mat4,
@@ -133,12 +147,9 @@ impl TerrainScene {
             ShadowTechnique::PCSS => 5,
             _ => 3,
         };
-        self.csm_renderer.uniforms.technique_params = [
-            shadow_settings.softness * 10.0,
-            shadow_settings.softness * 20.0,
-            0.0005,
-            shadow_settings.pcss_light_radius.max(0.5),
-        ];
+        let (technique_params, technique_reserved) = terrain_shadow_uniform_params(shadow_settings);
+        self.csm_renderer.uniforms.technique_params = technique_params;
+        self.csm_renderer.uniforms.technique_reserved = technique_reserved;
 
         log::info!(
             target: "terrain.shadow",
@@ -224,5 +235,38 @@ impl TerrainScene {
             height_min,
             shadow_bind_group,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_terrain_pcss_params_preserve_texel_controls() {
+        let settings = crate::terrain::render_params::ShadowSettingsNative {
+            pcss_blocker_radius: 7.25,
+            pcss_filter_radius: 3.5,
+            light_size: 2.75,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            terrain_shadow_uniform_params(&settings).0,
+            [7.25, 3.5, 0.0005, 2.75]
+        );
+    }
+
+    #[test]
+    fn legacy_world_radius_is_encoded_for_per_cascade_conversion() {
+        let settings = crate::terrain::render_params::ShadowSettingsNative {
+            light_size: 2.75,
+            pcss_light_radius: 0.75,
+            ..Default::default()
+        };
+
+        let (params, reserved) = terrain_shadow_uniform_params(&settings);
+        assert_eq!(params[3], 2.75);
+        assert_eq!(reserved, [0.75, 0.0, 0.0, 0.0]);
     }
 }

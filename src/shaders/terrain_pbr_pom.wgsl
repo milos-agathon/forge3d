@@ -353,7 +353,7 @@ struct CsmUniforms {
     _pad1a: f32,
     _pad1b: f32,
     _pad1c: f32,
-    // [blocker radius (texels), filter radius (texels), moment bias, dimensionless light size]
+    // [blocker radius (texels), max filter radius (texels), moment bias, light radius (texels)]
     technique_params: vec4<f32>,       // 16 bytes, offset 720
     technique_reserved: vec4<f32>,     // 16 bytes, offset 736
     cascade_blend_range: f32,          // 4 bytes, offset 752
@@ -1089,6 +1089,19 @@ fn pcss_penumbra_size_terrain(
     return clamp(penumbra, 0.0, 100.0);
 }
 
+fn pcss_light_size_texels_terrain(
+    light_size_texels: f32,
+    legacy_world_radius: f32,
+    cascade_texel_size: f32,
+) -> f32 {
+    if (legacy_world_radius > 0.0) {
+        // Legacy public pcss_light_radius is world-space. Convert against the
+        // selected cascade so the penumbra calculation remains texel-space.
+        return legacy_world_radius / max(cascade_texel_size, 0.000001);
+    }
+    return max(light_size_texels, 0.0);
+}
+
 /// Sample shadow map with technique-based filtering
 fn sample_shadow_pcf_terrain(
     world_pos: vec3<f32>,
@@ -1117,7 +1130,9 @@ fn sample_shadow_pcf_terrain(
     let depth_01 = ndc.z;
     
     // Check if outside shadow map bounds
-    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || shadow_coords.y < 0.0 || shadow_coords.y > 1.0) {
+    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
+        shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
+        depth_01 < 0.0 || depth_01 > 1.0) {
         return 1.0; // No shadow outside bounds
     }
     
@@ -1192,9 +1207,19 @@ fn sample_shadow_pcf_terrain(
         let penumbra = pcss_penumbra_size_terrain(
             compare_depth,
             avg_blocker_depth,
-            csm_uniforms.technique_params.w
+            pcss_light_size_texels_terrain(
+                csm_uniforms.technique_params.w,
+                csm_uniforms.technique_reserved.x,
+                cascade.texel_size
+            )
         );
-        let filter_radius = min(csm_uniforms.technique_params.y + penumbra, 100.0);
+        // The configured filter radius is a texel-space upper bound. Keeping
+        // the blocker-derived radius below it preserves contact hardening.
+        let max_filter_radius = min(csm_uniforms.technique_params.y, 100.0);
+        let filter_radius = min(
+            max(penumbra, min(max_filter_radius, 1.0)),
+            max_filter_radius
+        );
         var poisson_disk = array<vec2<f32>, 16>(
             vec2<f32>(-0.94201624, -0.39906216),
             vec2<f32>(0.94558609, -0.76890725),
@@ -4478,16 +4503,8 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // Activated by compile-time DEBUG_SHADOW_RAW or runtime csm_uniforms.debug_mode == 2
     // ──────────────────────────────────────────────────────────────────────────
     if (TERRAIN_USE_SHADOWS && (DEBUG_SHADOW_RAW || csm_debug_mode == SHADOW_DEBUG_RAW)) {
-        // Show raw shadow_visibility as grayscale
-        // Black = fully shadowed (0.0), White = fully lit (1.0)
-        // Red tint = in shadow (visibility < 0.5)
-        if (shadow_visibility < 0.5) {
-            // In shadow - show as red-tinted grayscale
-            final_color = vec3<f32>(shadow_visibility * 2.0, shadow_visibility * 0.5, shadow_visibility * 0.5);
-        } else {
-            // Lit - show as grayscale
-            final_color = vec3<f32>(shadow_visibility, shadow_visibility, shadow_visibility);
-        }
+        // Linear grayscale: each output channel is the visibility value.
+        final_color = vec3<f32>(shadow_visibility);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -4500,7 +4517,9 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     let output_srgb_eotf = u_overlay.params5.z > 0.5;
     let offline_hdr_output = u_overlay.params5.w > 0.5;
     var encoded_color: vec3<f32>;
-    if (offline_hdr_output) {
+    if (TERRAIN_USE_SHADOWS && (DEBUG_SHADOW_RAW || csm_debug_mode == SHADOW_DEBUG_RAW)) {
+        encoded_color = final_color;
+    } else if (offline_hdr_output) {
         encoded_color = final_color;
     } else if (output_srgb_eotf) {
         // P6: Exact sRGB EOTF - clamp to [0,1] first, then apply exact curve

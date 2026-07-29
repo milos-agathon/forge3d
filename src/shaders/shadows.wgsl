@@ -43,7 +43,7 @@ struct CsmUniforms {
     _pad1a: f32,
     _pad1b: f32,
     _pad1c: f32,
-    // [blocker radius (texels), filter radius (texels), moment bias, dimensionless light size]
+    // [blocker radius (texels), max filter radius (texels), moment bias, light radius (texels)]
     technique_params: vec4<f32>,
     technique_reserved: vec4<f32>,  // Reserved for future use
     cascade_blend_range: f32,       // Cascade blend range (0.0 = no blend, 0.1 = 10% blend)
@@ -363,8 +363,11 @@ fn sample_shadow_pcss(
     let penumbra = pcss_penumbra_size(receiver_depth, avg_blocker_depth, light_size);
     
     // Step 3: Adaptive PCF filter with penumbra-based radius
-    let adaptive_filter_radius = base_filter_radius + penumbra;
-    let clamped_filter_radius = min(adaptive_filter_radius, 100.0);
+    let max_filter_radius = min(base_filter_radius, 100.0);
+    let clamped_filter_radius = min(
+        max(penumbra, min(max_filter_radius, 1.0)),
+        max_filter_radius
+    );
     
     // Use Poisson disk for final filtering
     var poisson_disk = array<vec2<f32>, 16>(
