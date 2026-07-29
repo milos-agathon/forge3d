@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import math
 from numbers import Integral
 from typing import List, Optional, Tuple, Sequence
 
@@ -115,17 +116,17 @@ class ShadowSettings:
         if self.softness < 0.0:
             raise ValueError("softness must be >= 0")
 
-        if self.pcss_light_radius < 0.0:
-            raise ValueError("pcss_light_radius must be >= 0")
-
-        if self.pcss_blocker_radius < 0.0:
-            raise ValueError("pcss_blocker_radius must be >= 0")
-
-        if self.pcss_filter_radius < 0.0:
-            raise ValueError("pcss_filter_radius must be >= 0")
-
-        if self.light_size <= 0.0:
-            raise ValueError("light_size must be > 0")
+        for name, value, allow_zero in (
+            ("pcss_light_radius", self.pcss_light_radius, True),
+            ("pcss_blocker_radius", self.pcss_blocker_radius, True),
+            ("pcss_filter_radius", self.pcss_filter_radius, True),
+            ("light_size", self.light_size, False),
+        ):
+            if not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
+            if value < 0.0 or (not allow_zero and value == 0.0):
+                operator = ">=" if allow_zero else ">"
+                raise ValueError(f"{name} must be {operator} 0")
 
         if self.intensity < 0.0:
             raise ValueError("intensity must be >= 0")

@@ -157,6 +157,38 @@ class TestShadowConfigValidation:
         assert settings.pcss_filter_radius == pytest.approx(public.pcss_filter_radius)
         assert settings.light_size == pytest.approx(public.light_size)
 
+    @pytest.mark.parametrize(
+        ("field_name", "value"),
+        (
+            ("pcss_light_radius", np.nan),
+            ("pcss_blocker_radius", np.inf),
+            ("pcss_filter_radius", -np.inf),
+            ("light_size", np.nan),
+        ),
+    )
+    def test_terrain_shadow_rejects_non_finite_pcss_controls(
+        self, field_name: str, value: float
+    ):
+        kwargs = {field_name: value}
+        with pytest.raises(ValueError, match=rf"{field_name} must be finite"):
+            ShadowSettings(
+                enabled=True,
+                technique="PCSS",
+                resolution=2048,
+                cascades=1,
+                max_distance=20.0,
+                softness=1.0,
+                intensity=1.0,
+                slope_scale_bias=0.001,
+                depth_bias=0.0005,
+                normal_bias=0.0002,
+                min_variance=1e-4,
+                light_bleed_reduction=0.5,
+                evsm_exponent=40.0,
+                fade_start=1.0,
+                **kwargs,
+            )
+
 
 class TestValidateShadowTechnique:
     """Test the validate_shadow_technique function directly."""
@@ -697,45 +729,6 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
     print(f"PCSS transition widths: {widths}")
     assert widths[12.0] >= widths[1.0] + 0.25, (
         f"larger PCSS light size did not widen the cast-shadow transition: {widths}"
-    )
-
-    shallow_heightmap = heightmap * np.float32(0.35)
-    # Preserve the scene's light-frustum depth range while reducing the central
-    # caster height, so this changes blocker/receiver separation rather than
-    # merely renormalizing the shadow projection.
-    shallow_heightmap[0, 0] = np.float32(1.0)
-    shallow_pcf = (
-        render("pcf", terrain=shallow_heightmap)[..., 0].astype(np.float32) / 255.0
-    )
-    shallow_terrain = (
-        render("pcf", enabled=False, terrain=shallow_heightmap)[..., 0] > 230
-    )
-    shallow_edge_band, shallow_edge_count = edge_geometry(
-        shallow_pcf, shallow_terrain
-    )
-    shallow_widths = {}
-    for light_size in (1.0, 12.0):
-        visibility = (
-            render(
-                "pcss",
-                terrain=shallow_heightmap,
-                light_size=light_size,
-                pcss_filter_radius=16.0,
-            )[..., 0].astype(np.float32)
-            / 255.0
-        )
-        shallow_widths[light_size] = transition_width(
-            visibility, shallow_edge_band, shallow_edge_count
-        )
-    print(f"Shallow-separation PCSS transition widths: {shallow_widths}")
-    shallow_growth = shallow_widths[12.0] - shallow_widths[1.0]
-    full_growth = widths[12.0] - widths[1.0]
-    assert shallow_growth >= 0.25, (
-        f"shallow PCSS is only a near-fixed perturbation: {shallow_widths}"
-    )
-    assert abs(full_growth - shallow_growth) >= 0.10, (
-        "PCSS light-size response ignored blocker/receiver separation: "
-        f"full_growth={full_growth:.4f}, shallow_growth={shallow_growth:.4f}"
     )
 
     curve_heightmap = np.zeros_like(heightmap)

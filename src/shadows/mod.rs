@@ -56,7 +56,7 @@ pub fn clamp_evsm_exponent(exponent: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn execute_visibility_helper(source: &str, helper: &str) -> [f32; 5] {
+    fn execute_shader_probe(source: &str, label: &str, probe_body: &str) -> [f32; 5] {
         let context = crate::core::gpu::try_ctx().expect("GPU context");
         let device = &context.device;
         let queue = &context.queue;
@@ -66,15 +66,7 @@ mod tests {
 
 @compute @workgroup_size(1)
 fn test_visibility_entry() {{
-    visibility_output[0] = {helper}(0.5, 0.01, 0.25);
-    visibility_output[1] = {helper}(0.5, 0.01, 0.6);
-    let moments = vec4<f32>(0.5, 0.26, -0.5, 0.26);
-    visibility_output[2] =
-        evsm_visibility_from_moments(moments, 0.25, -0.4, 0.0001);
-    visibility_output[3] =
-        evsm_visibility_from_moments(moments, 0.6, -0.75, 0.0001);
-    visibility_output[4] =
-        evsm_visibility_from_moments(moments, 0.25, -0.75, 0.0001);
+    {probe_body}
 }}"
         );
         device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -89,7 +81,7 @@ fn test_visibility_entry() {{
             entry_point: "test_visibility_entry",
         });
         if let Some(error) = pollster::block_on(device.pop_error_scope()) {
-            panic!("{helper} visibility harness failed: {error}");
+            panic!("{label} shader probe failed: {error}");
         }
         let output = crate::core::resource_tracker::tracked_create_buffer(
             device,
@@ -161,8 +153,18 @@ fn test_visibility_entry() {{
     #[test]
     fn shared_evsm_visibility_helpers_execute_lit_front_of_mean() {
         let source = include_str!("../shaders/includes/shadow_moments.wgsl");
+        let probe = "
+visibility_output[0] = chebyshev_upper_bound_visibility(0.5, 0.01, 0.25);
+visibility_output[1] = chebyshev_upper_bound_visibility(0.5, 0.01, 0.6);
+let moments = vec4<f32>(0.5, 0.26, -0.5, 0.26);
+visibility_output[2] =
+    evsm_visibility_from_moments(moments, 0.25, -0.4, 0.0001);
+visibility_output[3] =
+    evsm_visibility_from_moments(moments, 0.6, -0.75, 0.0001);
+visibility_output[4] =
+    evsm_visibility_from_moments(moments, 0.25, -0.75, 0.0001);";
         let [front, behind, positive_front, negative_front, both_front] =
-            execute_visibility_helper(source, "chebyshev_upper_bound_visibility");
+            execute_shader_probe(source, "EVSM visibility", probe);
         assert_eq!(front, 1.0, "front-of-mean receiver must be lit");
         assert!(
             (behind - 0.5).abs() < 1.0e-5,
@@ -177,6 +179,26 @@ fn test_visibility_entry() {{
             "the negative lobe's lit shortcut masked the positive lobe"
         );
         assert_eq!(both_front, 1.0, "both front-of-mean lobes must be lit");
+    }
+
+    #[test]
+    fn shared_pcss_penumbra_grows_with_light_size_and_receiver_separation() {
+        let probe = "
+visibility_output[0] = pcss_penumbra_size(0.55, 0.5, 1.0);
+visibility_output[1] = pcss_penumbra_size(0.55, 0.5, 12.0);
+visibility_output[2] = pcss_penumbra_size(0.8, 0.5, 1.0);
+visibility_output[3] = pcss_penumbra_size(0.8, 0.5, 12.0);
+visibility_output[4] = 0.0;";
+        let [near_small, near_large, far_small, far_large, _] =
+            execute_shader_probe(CSM_SHADER_SOURCE, "PCSS penumbra", probe);
+        let near_growth = near_large - near_small;
+        let far_growth = far_large - far_small;
+
+        assert!(near_growth > 1.0, "light-size response was {near_growth}");
+        assert!(
+            far_growth >= near_growth + 4.0,
+            "receiver separation did not widen PCSS: near={near_growth}, far={far_growth}"
+        );
     }
 }
 

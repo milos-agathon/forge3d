@@ -143,6 +143,31 @@ pub(super) fn parse_sampling_settings(
     })
 }
 
+fn validate_pcss_controls(
+    pcss_light_radius: f32,
+    pcss_blocker_radius: f32,
+    pcss_filter_radius: f32,
+    light_size: f32,
+) -> PyResult<()> {
+    for (name, value, allow_zero) in [
+        ("pcss_light_radius", pcss_light_radius, true),
+        ("pcss_blocker_radius", pcss_blocker_radius, true),
+        ("pcss_filter_radius", pcss_filter_radius, true),
+        ("light_size", light_size, false),
+    ] {
+        if !value.is_finite() {
+            return Err(PyValueError::new_err(format!("{name} must be finite")));
+        }
+        if value < 0.0 || (!allow_zero && value == 0.0) {
+            let operator = if allow_zero { ">=" } else { ">" };
+            return Err(PyValueError::new_err(format!(
+                "{name} must be {operator} 0"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn parse_shadow_settings(shadows: &Bound<'_, PyAny>) -> PyResult<ShadowSettingsNative> {
     let softness = shadows.getattr("softness")?.extract().unwrap_or(0.01);
     let pcss_light_radius = shadows
@@ -165,6 +190,12 @@ pub(super) fn parse_shadow_settings(shadows: &Bound<'_, PyAny>) -> PyResult<Shad
         .ok()
         .and_then(|value| value.extract().ok())
         .unwrap_or(crate::shadows::DEFAULT_PCSS_LIGHT_SIZE);
+    validate_pcss_controls(
+        pcss_light_radius,
+        pcss_blocker_radius,
+        pcss_filter_radius,
+        light_size,
+    )?;
     Ok(ShadowSettingsNative {
         enabled: shadows.getattr("enabled")?.extract().unwrap_or(true),
         technique: shadows
@@ -190,4 +221,21 @@ pub(super) fn parse_shadow_settings(shadows: &Bound<'_, PyAny>) -> PyResult<Shad
         depth_bias: shadows.getattr("depth_bias")?.extract().unwrap_or(0.0005),
         normal_bias: shadows.getattr("normal_bias")?.extract().unwrap_or(0.0002),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_pcss_controls;
+
+    #[test]
+    fn native_pcss_boundary_rejects_non_finite_controls() {
+        for values in [
+            [f32::NAN, 6.0, 4.0, 1.0],
+            [0.0, f32::INFINITY, 4.0, 1.0],
+            [0.0, 6.0, f32::NEG_INFINITY, 1.0],
+            [0.0, 6.0, 4.0, f32::NAN],
+        ] {
+            assert!(validate_pcss_controls(values[0], values[1], values[2], values[3]).is_err());
+        }
+    }
 }
