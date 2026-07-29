@@ -425,7 +425,10 @@ impl TerrainScene {
                 )?;
             }
             self.stage_visibility_stats(encoder)?;
-            culler.build_previous_hzb(self.device.as_ref(), encoder, &render_targets.depth_view)?;
+            // No second pyramid build here: `build_phase2_hzb` above already
+            // produced the max-reduced pyramid, and `finish_frame`'s index flip
+            // hands that same pyramid to the next frame's phase 1. See
+            // `TwoPhaseCuller::build_phase2_hzb`.
             culler.stage_stats(encoder, lod);
             return Ok(phase1_calls + phase2_calls);
         }

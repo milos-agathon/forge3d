@@ -55,7 +55,25 @@ struct VisibilityReconstructedVertex {
 fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     let source = terrain_visibility_vertices[index];
     let uv = clamp(source.uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_fine = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    // Geomorphing, mirrored from `vs_clipmap_main`. Reconstructing from the
+    // FINE height alone put every morphing vertex at a different clip position
+    // than pass 1 rasterised it from, which tilts the triangle and biases the
+    // barycentrics -- and therefore the interpolated UV -- by a fraction of a
+    // pixel across the whole morph band of every clipmap ring.
+    let height_dims = vec2<f32>(textureDimensions(height_tex));
+    let coarse_texels = exp2(min(max(source.morph_data.y, 0.0) + 1.0, 16.0));
+    let coarse_step = vec2<f32>(coarse_texels)
+        / max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0));
+    let coarse_cell = uv / coarse_step;
+    let coarse_base = floor(coarse_cell) * coarse_step;
+    let coarse_t = fract(coarse_cell);
+    let h00 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h10 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h01 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h11 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h_coarse = mix(mix(h00, h10, coarse_t.x), mix(h01, h11, coarse_t.x), coarse_t.y);
+    let h_raw = mix(h_fine, h_coarse, clamp(source.morph_data.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -115,6 +133,59 @@ fn visibility_barycentrics(
     return vec3<f32>(1.0 - y - z, y, z);
 }
 
+struct VisibilitySurfaceSample {
+    world: vec3<f32>,
+    uv: vec2<f32>,
+}
+
+// Perspective-correct interpolation of one reconstructed triangle at an
+// arbitrary NDC position. Evaluating it OUTSIDE the triangle is deliberate:
+// that extrapolation is what the rasteriser hands its helper lanes, and it is
+// how the quad-aligned analytic gradients below are formed.
+fn visibility_sample_surface(
+    ndc_xy: vec2<f32>,
+    v0: VisibilityReconstructedVertex,
+    v1: VisibilityReconstructedVertex,
+    v2: VisibilityReconstructedVertex,
+    w: vec3<f32>,
+) -> VisibilitySurfaceSample {
+    let bary_screen = visibility_barycentrics(
+        ndc_xy,
+        v0.clip.xy / w.x,
+        v1.clip.xy / w.y,
+        v2.clip.xy / w.z,
+    );
+    let perspective = bary_screen / w;
+    let bary = perspective / max(
+        perspective.x + perspective.y + perspective.z,
+        1e-8,
+    );
+    var sample: VisibilitySurfaceSample;
+    sample.world = v0.world * bary.x + v1.world * bary.y + v2.world * bary.z;
+    sample.uv = v0.uv * bary.x + v1.uv * bary.y + v2.uv * bary.z;
+    return sample;
+}
+
+// The packed pass-1 identity at `pixel`, or 0 when the pixel is background.
+// Out-of-range coordinates (an odd-sized target's last quad) clamp to the edge,
+// which can only ever return a real neighbour's identity or 0.
+fn visibility_pixel_identity(pixel: vec2<i32>) -> u32 {
+    let limit = vec2<i32>(textureDimensions(terrain_visibility_ids)) - vec2<i32>(1);
+    let clamped = clamp(pixel, vec2<i32>(0), limit);
+    let encoded = textureLoad(terrain_visibility_ids, clamped, 0).x;
+    let depth = textureLoad(terrain_visibility_depth, clamped, 0);
+    return select(encoded, 0u, depth >= 1.0);
+}
+
+// Framebuffer pixel centre -> normalised device coordinates.
+fn visibility_ndc_at(pixel_centre: vec2<f32>, dimensions: vec2<f32>) -> vec2<f32> {
+    let uv_screen = pixel_centre / dimensions;
+    return vec2<f32>(
+        uv_screen.x * 2.0 - 1.0,
+        1.0 - uv_screen.y * 2.0,
+    );
+}
+
 @vertex
 fn vs_visibility_fullscreen(
     @builtin(vertex_index) vertex_index: u32,
@@ -131,20 +202,41 @@ fn fs_visibility_resolve_fullscreen(
     input: VisibilityFullscreenOutput,
 ) -> FragmentOutput {
     let pixel = vec2<i32>(input.clip_position.xy);
-    let encoded = textureLoad(terrain_visibility_ids, pixel, 0).x;
-    if (encoded == 0u) {
+    let covered = visibility_pixel_identity(pixel);
+    // Helper-lane emulation. The forward rasteriser runs a partially covered
+    // 2x2 quad with EVERY lane carrying the covering triangle's attributes --
+    // the uncovered lanes are helper invocations whose only job is to give the
+    // covered lanes a correct `dpdx`/`dpdy`. A full-screen resolve pass has no
+    // such lanes, so an uncovered pixel used to fall through with a garbage
+    // identity (`0u - 1u`) and poison the quad derivative of every covered
+    // neighbour: LOD selection, the LOD-aware height normal, the virtual-texture
+    // mip and the Toksvig/edge normal gradients all read it. Adopting a covered
+    // quad partner's triangle and extrapolating it to this pixel's own centre
+    // reproduces exactly what the rasteriser would have interpolated here.
+    let quad_base = pixel & vec2<i32>(-2, -2);
+    var identity = covered;
+    if (identity == 0u) {
+        for (var lane = 0u; lane < 4u; lane = lane + 1u) {
+            let partner = visibility_pixel_identity(
+                quad_base + vec2<i32>(i32(lane & 1u), i32(lane >> 1u)),
+            );
+            if (identity == 0u) {
+                identity = partner;
+            }
+        }
+    }
+    if (identity == 0u) {
+        // Every lane of this quad is background, so no derivative depends on
+        // it. All four lanes take this branch together: quad uniformity, and
+        // therefore derivative uniformity, is preserved.
         discard;
     }
-    let depth = textureLoad(terrain_visibility_depth, pixel, 0);
-    if (depth >= 1.0) {
-        discard;
-    }
+    let encoded = identity;
     let dimensions = vec2<f32>(textureDimensions(terrain_visibility_ids));
-    let uv_screen = (input.clip_position.xy + vec2<f32>(0.5)) / dimensions;
-    let ndc_xy = vec2<f32>(
-        uv_screen.x * 2.0 - 1.0,
-        1.0 - uv_screen.y * 2.0,
-    );
+    // `@builtin(position).xy` is ALREADY the pixel centre in framebuffer space
+    // ((0.5, 0.5) is the centre of the top-left pixel), so adding another half
+    // texel shifted every reconstructed attribute one half pixel down-right.
+    let ndc_xy = visibility_ndc_at(input.clip_position.xy, dimensions);
     let payload = encoded - 1u;
     let tile_lod_id = payload >> 16u;
     let primitive = payload & 0xffffu;
@@ -163,35 +255,53 @@ fn fs_visibility_resolve_fullscreen(
     let v2 = visibility_reconstruct_vertex(
         u32(i32(terrain_visibility_indices[first + 2u]) + draw_template.base_vertex),
     );
-    let w0 = visibility_safe_w(v0.clip.w);
-    let w1 = visibility_safe_w(v1.clip.w);
-    let w2 = visibility_safe_w(v2.clip.w);
-    let bary_screen = visibility_barycentrics(
-        ndc_xy,
-        v0.clip.xy / w0,
-        v1.clip.xy / w1,
-        v2.clip.xy / w2,
+    let w = vec3<f32>(
+        visibility_safe_w(v0.clip.w),
+        visibility_safe_w(v1.clip.w),
+        visibility_safe_w(v2.clip.w),
     );
-    let perspective = bary_screen / vec3<f32>(w0, w1, w2);
-    let bary = perspective / max(
-        perspective.x + perspective.y + perspective.z,
-        1e-8,
-    );
+    let here = visibility_sample_surface(ndc_xy, v0, v1, v2, w);
+
+    // Quad-aligned analytic gradients of THIS pixel's covering triangle. A
+    // coarse derivative is evaluated once per 2x2 quad from its top-left lane,
+    // so sampling the same triangle at the quad's three anchor centres
+    // reproduces the value the rasteriser would have produced for it, whatever
+    // the neighbouring pixels' triangles happen to be.
+    let quad_origin = vec2<f32>(quad_base) + vec2<f32>(0.5, 0.5);
+    let anchor00 = visibility_sample_surface(
+        visibility_ndc_at(quad_origin, dimensions), v0, v1, v2, w);
+    let anchor10 = visibility_sample_surface(
+        visibility_ndc_at(quad_origin + vec2<f32>(1.0, 0.0), dimensions), v0, v1, v2, w);
+    let anchor01 = visibility_sample_surface(
+        visibility_ndc_at(quad_origin + vec2<f32>(0.0, 1.0), dimensions), v0, v1, v2, w);
+    terrain_explicit_ddx_uv = anchor10.uv - anchor00.uv;
+    terrain_explicit_ddy_uv = anchor01.uv - anchor00.uv;
+    terrain_explicit_ddx_world = anchor10.world - anchor00.world;
+    terrain_explicit_ddy_world = anchor01.world - anchor00.world;
+    terrain_explicit_gradients = 1u;
+
     var surface: VertexOutput;
     surface.clip_position = input.clip_position;
-    surface.world_position =
-        v0.world * bary.x + v1.world * bary.y + v2.world * bary.z;
+    surface.world_position = here.world;
     surface.world_normal = vec3<f32>(0.0, 0.0, 1.0);
-    surface.tex_coord = v0.uv * bary.x + v1.uv * bary.y + v2.uv * bary.z;
+    surface.tex_coord = here.uv;
     surface.tile_id = tile_lod_id;
     let out = shade_main(surface);
-    atomicAdd(&terrain_frame_counters.material_invocations, 1u);
-    terrain_vt_write_surface_feedback(surface.tex_coord, 0u);
-    if (terrain_vt_uniforms.config2.w != 0u) {
-        if (terrain_vt_enabled()
-            && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
-            && out.source_id == 0u) {
-            atomicAdd(&terrain_frame_counters.fallback_texels, 1u);
+    if (covered == 0u) {
+        // An emulated helper lane. It has now contributed its derivatives to
+        // the covered lanes of this quad and must contribute nothing else: no
+        // colour, no material-invocation count and no feedback record. That is
+        // what keeps `visibility_feedback_records == visible_pixels` exact.
+        discard;
+    } else {
+        atomicAdd(&terrain_frame_counters.material_invocations, 1u);
+        terrain_vt_write_surface_feedback(surface.tex_coord, 0u);
+        if (terrain_vt_uniforms.config2.w != 0u) {
+            if (terrain_vt_enabled()
+                && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
+                && out.source_id == 0u) {
+                atomicAdd(&terrain_frame_counters.fallback_texels, 1u);
+            }
         }
     }
     return out;

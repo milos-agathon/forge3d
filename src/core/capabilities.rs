@@ -194,8 +194,7 @@ impl IndirectDrawMode {
 pub fn bindless_bc_atlas_supported(granted: Features) -> bool {
     granted.contains(Features::TEXTURE_COMPRESSION_BC)
         && granted.contains(Features::TEXTURE_BINDING_ARRAY)
-        && granted
-            .contains(Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING)
+        && granted.contains(Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING)
 }
 
 /// Record the atlas fallbacks implied by `granted`. Must be called on EVERY

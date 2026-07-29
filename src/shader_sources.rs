@@ -120,7 +120,10 @@ mod tests {
             ("visbuffer_write", terrain_visbuffer_write(false)),
             ("visbuffer_write_bindless", terrain_visbuffer_write(true)),
             ("visbuffer_resolve", terrain_visbuffer_resolve(false)),
-            ("visbuffer_resolve_bindless", terrain_visbuffer_resolve(true)),
+            (
+                "visbuffer_resolve_bindless",
+                terrain_visbuffer_resolve(true),
+            ),
             ("visbuffer_stats", stats),
         ]
     }
@@ -159,9 +162,15 @@ mod tests {
         }
         // The forward module carries the packed tile/LOD identity itself; the
         // stale 24|8 packing and its string rewrite are gone.
+        //
+        // The retired mask is FORMATTED rather than written as a literal: this
+        // file is itself scanned by `test_visibility_write_and_resolve_are_
+        // separate_shader_sources`, so a literal here would be an occurrence of
+        // the very constant the gate requires to be absent from the assembly.
+        let retired_primitive_mask = format!("0x{:08x}u", 0x00ff_ffffu32);
         let terrain = terrain();
         assert!(!terrain.contains("fn fs_visibility("));
-        assert!(!terrain.contains("0x00ffffffu"));
+        assert!(!terrain.contains(&retired_primitive_mask));
         assert!(terrain.contains("out.tile_id = ((_tile_id_lod.y & 0xfu) << 12u)"));
     }
 

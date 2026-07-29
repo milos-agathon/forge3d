@@ -13,6 +13,63 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Mutex;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue};
 
+/// Largest number of slots the bounded feedback set will ever allocate.
+///
+/// TESSELLA win 1: the host-visible footprint of the feedback path must be a
+/// function of this constant, never of the virtual texture's size. 65,536 slots
+/// is 256 KiB of `MAP_READ` memory and is two orders of magnitude above the
+/// distinct-page working set a 3840x2160 frame can produce (bounded by
+/// `pixels / tile_area` summed over the mip chain).
+pub const FEEDBACK_MAX_SLOTS: u32 = 1 << 16;
+
+/// Linear probes before a sample is declared overflow. Mirrored by
+/// `terrain_vt_write_feedback` through `TerrainVTUniforms.config3.y`.
+pub const FEEDBACK_PROBE_LIMIT: u32 = 8;
+
+/// Page-index layout the GPU keys were built from, used to invert
+/// `terrain_vt_feedback_index` on readback.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FeedbackLayout {
+    /// Mip-0 page columns (`TerrainVTUniforms.config1.z`).
+    pub base_pages_x: u32,
+    /// Mip-0 page rows (`TerrainVTUniforms.config1.w`).
+    pub base_pages_y: u32,
+    /// Mip levels per logical material (`config2.x`).
+    pub max_mip_levels: u32,
+    /// Materials per family (`config2.y`).
+    pub material_count: u32,
+}
+
+impl FeedbackLayout {
+    /// Decode one non-empty slot back into the page it names.
+    ///
+    /// The GPU stores `page_index + 1` and nothing else, so this inversion is
+    /// the only thing standing between a key and a tile request. It mirrors
+    /// `terrain_vt_feedback_index` in `terrain_pbr_pom.wgsl` exactly.
+    fn decode(&self, key: u32) -> Option<FeedbackEntry> {
+        let index = key.checked_sub(1)?;
+        let base_pages_x = self.base_pages_x.max(1);
+        let base_pages_y = self.base_pages_y.max(1);
+        let max_mip_levels = self.max_mip_levels.max(1);
+        let material_count = self.material_count.max(1);
+        let tile_x = index % base_pages_x;
+        let rest = index / base_pages_x;
+        let tile_y = rest % base_pages_y;
+        let rest = rest / base_pages_y;
+        let mip_level = rest % max_mip_levels;
+        let logical_material = rest / max_mip_levels;
+        if logical_material >= material_count.saturating_mul(3) {
+            return None;
+        }
+        Some(FeedbackEntry {
+            tile_x,
+            tile_y,
+            mip_level,
+            frame_number: logical_material + 1,
+        })
+    }
+}
+
 /// GPU feedback buffer for collecting tile visibility information
 pub struct FeedbackBuffer {
     /// GPU buffer for collecting feedback data from shaders
@@ -21,6 +78,13 @@ pub struct FeedbackBuffer {
     readback_buffer: TrackedBuffer,
     pending_readback: Mutex<Option<Receiver<Result<(), wgpu::BufferAsyncError>>>>,
     forced_not_ready_polls: AtomicU32,
+    /// Hash-set capacity in slots (a power of two, excluding the header word).
+    capacity: u32,
+    layout: FeedbackLayout,
+    /// Samples the most recent readback could not admit. Non-zero means the
+    /// frame's request set was incomplete -- surfaced through `vt_stats`, never
+    /// swallowed.
+    last_overflow: AtomicU32,
 }
 
 /// Feedback entry structure (matches GPU layout)
@@ -38,10 +102,19 @@ pub struct FeedbackEntry {
 }
 
 impl FeedbackBuffer {
-    /// Create new feedback buffer
-    pub fn new(device: &Device, max_tiles: u32) -> Result<Self, String> {
-        let entry_size = std::mem::size_of::<FeedbackEntry>() as u64;
-        let buffer_size = entry_size * max_tiles as u64;
+    /// Create a bounded feedback set.
+    ///
+    /// `requested_slots` is rounded up to a power of two and clamped to
+    /// [`FEEDBACK_MAX_SLOTS`], so the allocation cannot grow with the virtual
+    /// texture. One extra word precedes the table as the overflow header.
+    pub fn new(
+        device: &Device,
+        requested_slots: u32,
+        layout: FeedbackLayout,
+    ) -> Result<Self, String> {
+        let capacity = Self::capacity_for(requested_slots);
+        // Header word + `capacity` key slots, 4 bytes each.
+        let buffer_size = (capacity as u64 + 1) * 4;
 
         // Create GPU feedback buffer
         let feedback_buffer = tracked_create_buffer(
@@ -72,7 +145,29 @@ impl FeedbackBuffer {
             readback_buffer,
             pending_readback: Mutex::new(None),
             forced_not_ready_polls: AtomicU32::new(0),
+            capacity,
+            layout,
+            last_overflow: AtomicU32::new(0),
         })
+    }
+
+    /// Round a requested slot count up to a power of two within the cap.
+    pub fn capacity_for(requested_slots: u32) -> u32 {
+        requested_slots
+            .max(1)
+            .min(FEEDBACK_MAX_SLOTS)
+            .next_power_of_two()
+            .min(FEEDBACK_MAX_SLOTS)
+    }
+
+    /// Hash-set capacity in slots, excluding the overflow header.
+    pub fn capacity(&self) -> u32 {
+        self.capacity
+    }
+
+    /// Samples the most recent readback could not admit.
+    pub fn last_overflow(&self) -> u32 {
+        self.last_overflow.load(Ordering::Acquire)
     }
 
     /// Clear feedback buffer for new frame
@@ -278,33 +373,53 @@ impl FeedbackBuffer {
         Ok(Some(entries))
     }
 
-    /// Parse raw feedback data into deduplicated feedback entries.
+    /// Decode the bounded feedback set into deduplicated feedback entries.
+    ///
+    /// Word 0 is the overflow header; every later non-zero word is a page key.
+    /// Open addressing already guarantees one slot per distinct page, so the
+    /// `HashSet` here only guards against a torn or repeated readback.
     fn parse_feedback_entries(&self, data: &[u8]) -> Vec<FeedbackEntry> {
-        let entry_size = std::mem::size_of::<FeedbackEntry>();
         let mut unique_entries = HashSet::new();
 
-        let mut chunks = data.chunks_exact(entry_size);
-        for chunk in &mut chunks {
-            let entry_bytes = match bytemuck::try_from_bytes::<FeedbackEntry>(chunk) {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            let entry = *entry_bytes;
-
-            if entry.frame_number > 0 && entry.tile_x != u32::MAX && entry.tile_y != u32::MAX {
-                unique_entries.insert((
-                    entry.tile_x,
-                    entry.tile_y,
-                    entry.mip_level,
-                    entry.frame_number,
-                ));
-            }
+        let mut words = data.chunks_exact(4);
+        let overflow = words
+            .next()
+            .and_then(|word| word.try_into().ok())
+            .map(u32::from_le_bytes)
+            .unwrap_or(0);
+        self.last_overflow.store(overflow, Ordering::Release);
+        if overflow > 0 {
+            log::warn!(
+                "feedback_buffer: {} surface samples exceeded the {}-slot feedback set; \
+                 their pages stay in the retained-request set until a later frame admits them",
+                overflow,
+                self.capacity,
+            );
         }
 
-        if !chunks.remainder().is_empty() {
+        for word in &mut words {
+            let Ok(bytes) = <[u8; 4]>::try_from(word) else {
+                continue;
+            };
+            let key = u32::from_le_bytes(bytes);
+            if key == 0 {
+                continue;
+            }
+            let Some(entry) = self.layout.decode(key) else {
+                continue;
+            };
+            unique_entries.insert((
+                entry.tile_x,
+                entry.tile_y,
+                entry.mip_level,
+                entry.frame_number,
+            ));
+        }
+
+        if !words.remainder().is_empty() {
             log::warn!(
                 "feedback_buffer: discarded {} trailing bytes from GPU feedback stream",
-                chunks.remainder().len()
+                words.remainder().len()
             );
         }
 
@@ -359,21 +474,48 @@ mod tests {
         assert_eq!(entry.frame_number, 100);
     }
 
+    fn test_layout() -> FeedbackLayout {
+        FeedbackLayout {
+            base_pages_x: 16,
+            base_pages_y: 16,
+            max_mip_levels: 4,
+            material_count: 2,
+        }
+    }
+
+    /// Mirror of `terrain_vt_feedback_index` in `terrain_pbr_pom.wgsl`.
+    fn gpu_key(
+        layout: FeedbackLayout,
+        family: u32,
+        material: u32,
+        mip: u32,
+        x: u32,
+        y: u32,
+    ) -> u32 {
+        let logical_material = family * layout.material_count + material;
+        (((logical_material * layout.max_mip_levels) + mip) * layout.base_pages_y + y)
+            * layout.base_pages_x
+            + x
+            + 1
+    }
+
     #[test]
     fn test_parse_empty_feedback_data() {
         let Some(device) = crate::core::gpu::create_device_for_test() else {
             return;
         };
 
-        let buffer = FeedbackBuffer::new(&device, 10).unwrap();
+        let buffer = FeedbackBuffer::new(&device, 10, test_layout()).unwrap();
 
         let empty_data = vec![0u8; 0];
         let tiles = buffer.parse_feedback_tile_ids(&empty_data);
         assert!(tiles.is_empty());
 
-        let zero_data = vec![0u8; std::mem::size_of::<FeedbackEntry>()];
+        // Header + one empty slot.
+        let zero_data = vec![0u8; 8];
         let tiles = buffer.parse_feedback_tile_ids(&zero_data);
         assert!(tiles.is_empty());
+        assert_eq!(buffer.last_overflow(), 0);
     }
 
     #[test]
@@ -382,14 +524,10 @@ mod tests {
             return;
         };
 
-        let buffer = FeedbackBuffer::new(&device, 4).unwrap();
-        let entry = FeedbackEntry {
-            tile_x: 3,
-            tile_y: 9,
-            mip_level: 1,
-            frame_number: 77,
-        };
-        let mut bytes = bytemuck::bytes_of(&entry).to_vec();
+        let layout = test_layout();
+        let buffer = FeedbackBuffer::new(&device, 4, layout).unwrap();
+        let mut bytes = 0u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&gpu_key(layout, 0, 0, 1, 3, 9).to_le_bytes());
         bytes.extend_from_slice(&[0xAA, 0xBB]);
 
         let tiles = buffer.parse_feedback_tile_ids(&bytes);
@@ -397,5 +535,64 @@ mod tests {
         assert!(tiles
             .iter()
             .any(|id| id.x == 3 && id.y == 9 && id.mip_level == 1));
+    }
+
+    /// The key alone must round-trip to the page it names, for every family and
+    /// mip: it is the ONLY thing the GPU writes back now.
+    #[test]
+    fn feedback_keys_round_trip_to_their_page() {
+        let layout = test_layout();
+        for family in 0..3u32 {
+            for material in 0..layout.material_count {
+                for mip in 0..layout.max_mip_levels {
+                    for (x, y) in [(0u32, 0u32), (1, 0), (0, 1), (15, 15), (7, 3)] {
+                        let key = gpu_key(layout, family, material, mip, x, y);
+                        let decoded = layout.decode(key).expect("key must decode");
+                        assert_eq!((decoded.tile_x, decoded.tile_y), (x, y));
+                        assert_eq!(decoded.mip_level, mip);
+                        assert_eq!(
+                            decoded.frame_number,
+                            family * layout.material_count + material + 1,
+                            "family {family} material {material}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(layout.decode(0).is_none(), "0 is the empty-slot marker");
+    }
+
+    /// The whole point of win 1: the allocation is a function of the CAPACITY,
+    /// not of the virtual texture. A 2^18 x 2^18 virtual texture asks for
+    /// 100,663,296 slots; the set must still cap at `FEEDBACK_MAX_SLOTS`.
+    #[test]
+    fn feedback_capacity_is_bounded_independently_of_the_virtual_texture() {
+        assert_eq!(FeedbackBuffer::capacity_for(1), 1);
+        assert_eq!(FeedbackBuffer::capacity_for(3000), 4096);
+        assert_eq!(
+            FeedbackBuffer::capacity_for(100_663_296),
+            FEEDBACK_MAX_SLOTS
+        );
+        assert_eq!(FeedbackBuffer::capacity_for(u32::MAX), FEEDBACK_MAX_SLOTS);
+        // Header word + capacity keys, 4 bytes each: 256 KiB, versus the
+        // 1,610,612,736 bytes the direct-mapped table used to demand.
+        let bytes = (FEEDBACK_MAX_SLOTS as u64 + 1) * 4;
+        assert!(bytes < 512 * 1024 * 1024 / 1000, "{bytes}");
+        assert!(FEEDBACK_MAX_SLOTS.is_power_of_two());
+    }
+
+    /// Overflow is reported, never swallowed.
+    #[test]
+    fn feedback_overflow_header_is_surfaced() {
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
+        let layout = test_layout();
+        let buffer = FeedbackBuffer::new(&device, 4, layout).unwrap();
+        let mut bytes = 17u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&gpu_key(layout, 1, 0, 0, 2, 2).to_le_bytes());
+        let entries = buffer.parse_feedback_entries(&bytes);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(buffer.last_overflow(), 17);
     }
 }

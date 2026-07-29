@@ -492,6 +492,9 @@ struct TerrainVTUniforms {
     // w = registered source count. Must match TerrainVTUniformsGpu in
     // src/terrain/renderer/virtual_texture.rs.
     family_info: array<vec4<u32>, 3>,
+    // Bounded feedback set (TESSELLA win 1). x = slot capacity (a power of two),
+    // y = maximum linear probes before a sample is declared overflow, z/w unused.
+    config3: vec4<u32>,
 }
 
 struct TerrainVTFallbackColors {
@@ -500,12 +503,20 @@ struct TerrainVTFallbackColors {
     mask: array<vec4<f32>, 4>,
 }
 
-struct TerrainVTFeedbackEntry {
-    tile_x: u32,
-    tile_y: u32,
-    mip_level: u32,
-    frame_number: u32,
-}
+// TESSELLA win 1: the feedback surface is a BOUNDED set, not a page map.
+//
+// It used to be DIRECT-MAPPED over the whole virtual page pyramid -- one
+// 16-byte slot per (family, material, mip, page_y, page_x). At the acceptance
+// camera's 2^18 x 2^18 virtual texture that is 100,663,296 slots = 1.5 GiB of
+// MAP_READ memory: three times the entire 512 MiB host-visible budget, for a
+// working set of about a thousand pages. It is now a fixed-capacity,
+// open-addressed hash set of 32-bit page keys, so the host-visible footprint is
+// a function of the CAPACITY, never of the virtual texture's size.
+//
+// Layout: slot 0 is a header counting the samples the set could not admit;
+// slots 1 ..= capacity hold `page_index + 1`, with 0 meaning empty. The key
+// alone identifies the page, so the CPU inverts `terrain_vt_feedback_index`
+// rather than reading back separate coordinate words.
 
 @group(6) @binding(6)
 var<uniform> terrain_vt_uniforms: TerrainVTUniforms;
@@ -523,7 +534,7 @@ var terrain_vt_sampler: sampler;
 var terrain_vt_page_table: texture_2d_array<f32>;
 
 @group(6) @binding(11)
-var<storage, read_write> terrain_vt_feedback: array<TerrainVTFeedbackEntry>;
+var<storage, read_write> terrain_vt_feedback: array<atomic<u32>>;
 
 @group(6) @binding(12)
 var material_normal_tex: texture_2d<f32>;
@@ -1549,6 +1560,62 @@ fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
     return det_fma(apply_height_curve01(t), h_max - h_min, h_min);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TESSELLA: explicit screen-space gradients for the deferred visibility resolve
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The forward pass rasterises a 2x2 quad PER TRIANGLE, so `dpdx`/`dpdy` of an
+// interpolated attribute is always that one triangle's own screen gradient --
+// uncovered lanes are helper invocations carrying the same triangle's
+// extrapolated attributes. The visibility resolve shades from a full-screen
+// triangle instead, where a quad can straddle two terrain triangles at different
+// clipmap LODs, so the hardware quad derivative there is a mixture of two
+// surfaces and drives LOD selection, the LOD-aware height normal, the
+// virtual-texture mip and the triplanar footprint to different values than the
+// forward path computed for the same pixel.
+//
+// Pass 2 therefore reconstructs the covering triangle's own quad-aligned
+// gradients and publishes them here. The forward pipeline never writes these,
+// so `terrain_explicit_gradients` stays 0 and every `select` below returns the
+// hardware derivative bit-for-bit: the forward image is unchanged.
+var<private> terrain_explicit_gradients: u32 = 0u;
+var<private> terrain_explicit_ddx_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
+var<private> terrain_explicit_ddy_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
+var<private> terrain_explicit_ddx_world: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+var<private> terrain_explicit_ddy_world: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+
+fn terrain_screen_ddx_uv(uv: vec2<f32>) -> vec2<f32> {
+    return select(
+        dpdxCoarse(uv),
+        terrain_explicit_ddx_uv,
+        terrain_explicit_gradients != 0u,
+    );
+}
+
+fn terrain_screen_ddy_uv(uv: vec2<f32>) -> vec2<f32> {
+    return select(
+        dpdyCoarse(uv),
+        terrain_explicit_ddy_uv,
+        terrain_explicit_gradients != 0u,
+    );
+}
+
+fn terrain_screen_ddx_world(world_pos: vec3<f32>) -> vec3<f32> {
+    return select(
+        dpdxCoarse(world_pos),
+        terrain_explicit_ddx_world,
+        terrain_explicit_gradients != 0u,
+    );
+}
+
+fn terrain_screen_ddy_world(world_pos: vec3<f32>) -> vec3<f32> {
+    return select(
+        dpdyCoarse(world_pos),
+        terrain_explicit_ddy_world,
+        terrain_explicit_gradients != 0u,
+    );
+}
+
 /// Compute LOD from screen-space UV footprint (for LOD-aware Sobel).
 /// Returns LOD level and texel size at that LOD.
 struct LodInfo {
@@ -1562,8 +1629,8 @@ fn compute_height_lod(uv: vec2<f32>) -> LodInfo {
     let max_lod = f32(textureNumLevels(height_tex) - 1u);
     
     // Compute screen-space derivatives of UV
-    let ddx_uv = dpdxCoarse(uv);
-    let ddy_uv = dpdyCoarse(uv);
+    let ddx_uv = terrain_screen_ddx_uv(uv);
+    let ddy_uv = terrain_screen_ddy_uv(uv);
     
     // Footprint in texels (at mip 0)
     let rho = max(length(ddx_uv * dims), length(ddy_uv * dims));
@@ -1722,8 +1789,8 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
 /// Compute geometric normal from screen-space derivatives of world position.
 /// This is the "ground truth" normal that doesn't suffer from mip mismatch.
 fn calculate_normal_ddxddy(world_pos: vec3<f32>) -> vec3<f32> {
-    let ddx_pos = dpdxCoarse(world_pos);
-    let ddy_pos = dpdyCoarse(world_pos);
+    let ddx_pos = terrain_screen_ddx_world(world_pos);
+    let ddy_pos = terrain_screen_ddy_world(world_pos);
     // Cross product gives surface normal (right-hand rule)
     // Note: order matters for winding direction
     let n = det_cross3(ddx_pos, ddy_pos);
@@ -1842,6 +1909,19 @@ fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u
     return (((logical_material * max(terrain_vt_uniforms.config2.x, 1u)) + mip_level) * base_pages_y + tile_y) * base_pages_x + tile_x;
 }
 
+// Integer avalanche (Murmur3 finalizer). Adjacent page keys must land far
+// apart, otherwise a camera's working set -- which is a contiguous run of page
+// indices -- would pile into one region of the table and probe out.
+fn terrain_vt_feedback_hash(key: u32) -> u32 {
+    var h = key;
+    h = h ^ (h >> 16u);
+    h = h * 2246822507u;
+    h = h ^ (h >> 13u);
+    h = h * 3266489909u;
+    h = h ^ (h >> 16u);
+    return h;
+}
+
 fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) {
     if (terrain_vt_uniforms.config2.w == 0u) {
         return;
@@ -1851,15 +1931,44 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
     if (tile_x >= base_pages_x || tile_y >= base_pages_y) {
         return;
     }
-    let index = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y);
-    let material_count = max(terrain_vt_uniforms.config2.y, 1u);
-    let logical_material = family_slot * material_count + material_index;
-    terrain_vt_feedback[index] = TerrainVTFeedbackEntry(
-        tile_x,
-        tile_y,
-        mip_level,
-        logical_material + 1u,
-    );
+    // `+ 1` keeps 0 reserved for "empty slot".
+    let key = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y) + 1u;
+    let capacity = max(terrain_vt_uniforms.config3.x, 1u);
+    let mask = capacity - 1u;
+    let probe_limit = max(terrain_vt_uniforms.config3.y, 1u);
+    var slot = terrain_vt_feedback_hash(key) & mask;
+    var probe = 0u;
+    var admitted = false;
+    loop {
+        if (probe >= probe_limit) {
+            break;
+        }
+        // Slot 0 is the overflow header, so the table starts at index 1.
+        let observed = atomicCompareExchangeWeak(&terrain_vt_feedback[slot + 1u], 0u, key);
+        if (observed.exchanged || observed.old_value == key) {
+            // Inserted by this invocation, or already inserted by another
+            // fragment that saw the same page this frame. Either way the page
+            // is represented exactly once in the set.
+            admitted = true;
+            break;
+        }
+        probe = probe + 1u;
+        if (observed.old_value != 0u) {
+            // A different key owns this slot; linear-probe onward. A spurious
+            // CAS failure (old_value == 0) retries the SAME slot, which is why
+            // the probe counter is bumped before this test.
+            slot = (slot + 1u) & mask;
+        }
+    }
+    if (!admitted) {
+        // Never a silent drop. The sample is counted in the overflow header so
+        // the CPU knows this frame's request set is incomplete and keeps the
+        // retained-request path alive until the page is admitted and resident.
+        atomicAdd(&terrain_vt_feedback[0], 1u);
+    }
+    // One physical record per surface sample, whether or not it was a duplicate
+    // page: this is the counter the visibility gate compares against the
+    // visible-pixel count.
     atomicAdd(&terrain_frame_counters.feedback_records, 1u);
 }
 
@@ -1874,7 +1983,10 @@ fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
         f32(max(terrain_vt_uniforms.config1.y, 1u)),
     );
     let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
-    let desired_mip = terrain_vt_desired_mip(dpdx(uv), dpdy(uv));
+    let desired_mip = terrain_vt_desired_mip(
+        terrain_screen_ddx_uv(uv),
+        terrain_screen_ddy_uv(uv),
+    );
     let page_dims = terrain_vt_page_dims(desired_mip);
     let page_size = vec2<f32>(tile_size * exp2(f32(desired_mip)));
     let page = min(
@@ -2017,8 +2129,8 @@ fn terrain_vt_source_id_triplanar(
     layer: f32,
 ) -> u32 {
     let weights = compute_triplanar_weights(normal, blend_sharpness);
-    let dpdx_world = dpdxCoarse(world_pos) * scale;
-    let dpdy_world = dpdyCoarse(world_pos) * scale;
+    let dpdx_world = terrain_screen_ddx_world(world_pos) * scale;
+    let dpdy_world = terrain_screen_ddy_world(world_pos) * scale;
     var uv = world_pos.yz * scale;
     var ddx_uv = dpdx_world.yz;
     var ddy_uv = dpdy_world.yz;
@@ -2098,8 +2210,8 @@ fn sample_triplanar(
 
     // Compute screen-space derivatives of world position for proper mip selection
     // This ensures correct LOD even when UVs are derived from world coords
-    let dpdx_world = dpdxCoarse(world_pos) * scale;
-    let dpdy_world = dpdyCoarse(world_pos) * scale;
+    let dpdx_world = terrain_screen_ddx_world(world_pos) * scale;
+    let dpdy_world = terrain_screen_ddy_world(world_pos) * scale;
 
     // Extract UV gradients for each projection axis
     let ddx_x = dpdx_world.yz;
@@ -2132,8 +2244,8 @@ fn sample_triplanar_vt_family(
     let uv_x = world_pos.yz * scale;
     let uv_y = world_pos.xz * scale;
     let uv_z = world_pos.xy * scale;
-    let dpdx_world = dpdxCoarse(world_pos) * scale;
-    let dpdy_world = dpdyCoarse(world_pos) * scale;
+    let dpdx_world = terrain_screen_ddx_world(world_pos) * scale;
+    let dpdy_world = terrain_screen_ddy_world(world_pos) * scale;
     let ddx_x = dpdx_world.yz;
     let ddy_x = dpdy_world.yz;
     let ddx_y = dpdx_world.xz;

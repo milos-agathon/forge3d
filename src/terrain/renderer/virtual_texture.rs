@@ -85,7 +85,19 @@ struct TerrainVTUniformsGpu {
     /// w = registered source count. Matches `family_info` in
     /// `terrain_pbr_pom.wgsl`; refreshed every `prepare_frame`.
     family_info: [[u32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
+    /// Bounded feedback set (TESSELLA win 1). x = slot capacity (power of two),
+    /// y = linear probe limit, z/w reserved. Matches `config3` in
+    /// `terrain_pbr_pom.wgsl`.
+    config3: [u32; 4],
 }
+
+/// Size of the `vt_uniforms` buffer allocated in `constructor.rs`.
+///
+/// A uniform buffer smaller than the shader's declared struct is a bind-group
+/// validation failure at pipeline time, so this is derived rather than written
+/// out by hand.
+#[cfg(feature = "extension-module")]
+pub(crate) const VT_UNIFORM_BUFFER_BYTES: u64 = std::mem::size_of::<TerrainVTUniformsGpu>() as u64;
 
 #[cfg(feature = "extension-module")]
 #[repr(C)]
@@ -155,6 +167,13 @@ struct TerrainMaterialVTStats {
     store_pages_fetched_distinct: u32,
     /// The bound store's declared completeness floor (`0` when no store).
     store_min_materialized_mip: u32,
+    /// Slot capacity of the bounded feedback set (TESSELLA win 1).
+    feedback_capacity: u32,
+    /// Surface samples the bounded feedback set could not admit in the frame
+    /// just read back. Non-zero means the frame's request set was incomplete;
+    /// those pages stay in the retained-request set instead of being dropped,
+    /// so this counter is the only place the truncation is visible.
+    feedback_overflow: u32,
     bindless_bc: bool,
     families: [FamilyResidency; VT_FAMILY_COUNT],
 }
@@ -246,6 +265,9 @@ struct TerrainMaterialVTRuntime {
     residency_budget_mb: f32,
     source_generation: u64,
     use_feedback: bool,
+    /// Bounded feedback-set capacity in slots, published to the shader through
+    /// `TerrainVTUniforms.config3.x`.
+    feedback_capacity: u32,
     family_mask: u32,
     layer_fallbacks: [[f32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
     stats: TerrainMaterialVTStats,
@@ -514,6 +536,14 @@ impl TerrainMaterialVT {
         out.insert(
             "store_pages_fetched_distinct".to_string(),
             stats.store_pages_fetched_distinct as f32,
+        );
+        out.insert(
+            "feedback_capacity".to_string(),
+            stats.feedback_capacity as f32,
+        );
+        out.insert(
+            "feedback_overflow".to_string(),
+            stats.feedback_overflow as f32,
         );
         out.insert(
             "store_min_materialized_mip".to_string(),
@@ -971,6 +1001,7 @@ impl TerrainMaterialVT {
             config1: [0, 0, 0, 0],
             config2: [0, 0, 0, 0],
             family_info: [[0, 0, 0, 0]; TERRAIN_VT_FAMILY_COUNT as usize],
+            config3: [0, 0, 0, 0],
         };
         let fallback_colors = TerrainMaterialVTRuntime::default_fallback_colors();
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -1027,6 +1058,12 @@ impl TerrainMaterialVT {
                 if runtime.use_feedback { 1 } else { 0 },
             ],
             family_info,
+            config3: [
+                runtime.feedback_capacity,
+                crate::core::feedback_buffer::FEEDBACK_PROBE_LIMIT,
+                0,
+                0,
+            ],
         };
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
@@ -1284,14 +1321,34 @@ impl TerrainMaterialVTRuntime {
         let mut tile_cache = TileCache::new(budget_pages as usize);
         tile_cache.configure_atlas(atlas_size, atlas_size, slot_size);
 
-        let feedback_capacity = material_count
+        // TESSELLA win 1. The pyramid slot count below is what a DIRECT-MAPPED
+        // feedback table would have needed -- 100,663,296 slots (1.5 GiB of
+        // MAP_READ memory) for the acceptance camera's 2^18 x 2^18 virtual
+        // texture, three times the whole 512 MiB host-visible budget. It is now
+        // only a hint: `FeedbackBuffer` rounds it to a power of two and clamps
+        // it to `FEEDBACK_MAX_SLOTS`, so the host-visible footprint is bounded
+        // no matter how large the virtual texture is. Samples that do not fit
+        // are counted in the set's overflow header and stay in the retained
+        // request set rather than being dropped.
+        let pyramid_slots = material_count
             .saturating_mul(TERRAIN_VT_FAMILY_COUNT)
             .saturating_mul(max_mip_levels)
             .saturating_mul(pages_x0)
             .saturating_mul(pages_y0)
             .max(1);
+        let feedback_layout = crate::core::feedback_buffer::FeedbackLayout {
+            base_pages_x: pages_x0,
+            base_pages_y: pages_y0,
+            max_mip_levels,
+            material_count,
+        };
+        let feedback_capacity = FeedbackBuffer::capacity_for(pyramid_slots);
         let feedback_buffer = if use_feedback {
-            Some(FeedbackBuffer::new(device, feedback_capacity)?)
+            Some(FeedbackBuffer::new(
+                device,
+                feedback_capacity,
+                feedback_layout,
+            )?)
         } else {
             None
         };
@@ -1369,6 +1426,7 @@ impl TerrainMaterialVTRuntime {
             tile_cache,
             family_residency,
             feedback_buffer,
+            feedback_capacity,
             pending_feedback: Default::default(),
             latest_feedback_uvs: Vec::new(),
             feedback_staged: false,
@@ -1750,6 +1808,12 @@ impl TerrainMaterialVTRuntime {
     }
 
     fn refresh_stats(&mut self) {
+        self.stats.feedback_capacity = self.feedback_capacity;
+        self.stats.feedback_overflow = self
+            .feedback_buffer
+            .as_ref()
+            .map(|buffer| buffer.last_overflow())
+            .unwrap_or(0);
         self.stats.resident_pages = self.tile_cache.resident_count() as u32;
         let resident_bytes = self.stats.resident_pages as usize
             * self.slot_size as usize
@@ -2508,5 +2572,46 @@ pub(super) struct TerrainMaterialVT;
 impl TerrainMaterialVT {
     pub fn new() -> Self {
         Self
+    }
+}
+
+#[cfg(all(test, feature = "extension-module"))]
+mod bounded_feedback_tests {
+    use super::*;
+
+    /// The `vt_uniforms` allocation in `constructor.rs` must cover the struct
+    /// the shader declares. It was a hand-written `96` until `config3` was
+    /// added for the bounded feedback set.
+    #[test]
+    fn vt_uniform_buffer_covers_gpu_struct() {
+        assert_eq!(VT_UNIFORM_BUFFER_BYTES, 112);
+        assert_eq!(
+            VT_UNIFORM_BUFFER_BYTES as usize,
+            std::mem::size_of::<TerrainVTUniformsGpu>()
+        );
+        assert_eq!(VT_UNIFORM_BUFFER_BYTES % 16, 0, "std140 vec4 alignment");
+    }
+
+    /// Win 1's load-bearing claim: the host-visible feedback allocation does not
+    /// grow with the virtual texture. The acceptance store is 2^18 x 2^18 with
+    /// 128 px tiles and 8 mips over 3 families, which a direct-mapped table
+    /// would have sized at 100,663,296 slots x 16 B = 1.5 GiB.
+    #[test]
+    fn acceptance_camera_feedback_footprint_is_bounded() {
+        let pages_x0: u32 = (1 << 18) / 128;
+        let pages_y0: u32 = (1 << 18) / 128;
+        let pyramid_slots = 1u32
+            .saturating_mul(TERRAIN_VT_FAMILY_COUNT)
+            .saturating_mul(8)
+            .saturating_mul(pages_x0)
+            .saturating_mul(pages_y0);
+        assert_eq!(pyramid_slots, 100_663_296);
+        assert_eq!(pyramid_slots as u64 * 16, 1_610_612_736);
+
+        let capacity = FeedbackBuffer::capacity_for(pyramid_slots);
+        assert_eq!(capacity, crate::core::feedback_buffer::FEEDBACK_MAX_SLOTS);
+        let host_visible_bytes = (capacity as u64 + 1) * 4;
+        assert_eq!(host_visible_bytes, 262_148);
+        assert!(host_visible_bytes < 512 * 1024 * 1024);
     }
 }

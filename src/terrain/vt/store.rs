@@ -342,8 +342,7 @@ impl MmapPageStore {
             })?
         ];
         read_exact_at(&file, &mut directory_bytes, decoded.directory_offset)?;
-        let mut directory: Vec<DirectoryEntry> =
-            Vec::with_capacity(decoded.page_count as usize);
+        let mut directory: Vec<DirectoryEntry> = Vec::with_capacity(decoded.page_count as usize);
         for chunk in directory_bytes.chunks_exact(DIRECTORY_ENTRY_SIZE) {
             let entry = decode_directory_entry(chunk)?;
             if entry.offset < decoded.data_offset {

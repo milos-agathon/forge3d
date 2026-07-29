@@ -227,8 +227,10 @@ impl TerrainScene {
             &wgpu::BufferDescriptor {
                 label: Some("vt_uniforms"),
                 // Must cover TerrainVTUniformsGpu (3x vec4<u32> config + 3x
-                // vec4<u32> per-family info = 96 bytes).
-                size: 96,
+                // vec4<u32> per-family info + the bounded-feedback config3
+                // vec4<u32> = 112 bytes). `vt_uniform_buffer_covers_gpu_struct`
+                // in virtual_texture.rs fails if this drifts.
+                size: crate::terrain::renderer::virtual_texture::VT_UNIFORM_BUFFER_BYTES,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             },
