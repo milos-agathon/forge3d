@@ -606,26 +606,31 @@ def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
             "of terrain is clearly shadowed"
         )
 
-    plateau = np.where(heightmap > 0.25, np.float32(0.6), np.float32(0.0))
+    curve_heightmap = np.zeros_like(heightmap)
+    curve_heightmap[30:78, 30:78] = np.float32(0.5)
+    curve_heightmap[30, 30] = np.float32(1.0)
+    intermediate = curve_heightmap == np.float32(0.5)
+    assert float(intermediate.mean()) >= 0.1
+
     lut = np.zeros(256, dtype=np.float32)
     curve_cases = (
         (
             "pow",
-            2.5,
+            8.0,
             None,
-            np.power(plateau, np.float32(2.5)).astype(np.float32),
+            np.power(curve_heightmap, np.float32(8.0)).astype(np.float32),
         ),
         (
             "lut",
             1.0,
             lut,
-            lut[np.rint(plateau * 255.0).astype(np.int32)],
+            lut[np.rint(curve_heightmap * 255.0).astype(np.int32)],
         ),
     )
     for mode, power, curve_lut, prewarped in curve_cases:
         curved = render(
             "pcf",
-            terrain=plateau,
+            terrain=curve_heightmap,
             curve_mode=mode,
             curve_power=power,
             curve_lut=curve_lut,
