@@ -39,7 +39,7 @@ mod tone_mapping;
 
 pub use material::PbrMaterialGpu;
 pub use scene_uniforms::PbrSceneUniforms;
-pub use shadow::{create_csm_with_preset, CsmQualityPreset};
+pub use shadow::{create_csm_with_preset, csm_shader_source, CsmQualityPreset};
 pub use textures::{create_pbr_sampler, PbrTextures};
 pub use tone_mapping::{
     exposure_from_stops, tone_map_color, tone_map_shader_source, ToneMappingConfig, ToneMappingMode,

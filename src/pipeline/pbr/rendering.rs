@@ -193,18 +193,8 @@ impl PbrPipelineWithShadows {
             push_constant_ranges: &[],
         });
 
-        // Remap shadows from group(2) to group(3) to allow IBL at group(2) per P4 spec
-        let shadows_source =
-            include_str!("../../shaders/shadows.wgsl").replace("@group(2)", "@group(3)");
-
-        let shader_source = format!(
-            "{}\n{}\n{}\n{}\n{}",
-            include_str!("../../shaders/includes/determinism.wgsl"),
-            include_str!("../../shaders/includes/shadow_moments.wgsl"),
-            shadows_source,
-            include_str!("../../shaders/includes/tonemap_common.wgsl"),
-            include_str!("../../shaders/pbr.wgsl")
-        );
+        // Remap shadows from group(2) to group(3) to allow IBL at group(2) per P4 spec.
+        let shader_source = crate::shader_sources::pbr();
 
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,

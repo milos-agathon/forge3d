@@ -25,6 +25,14 @@ pub use moment_pass::{create_moment_storage_view, MomentGenerationPass};
 // Re-export common shadow types and utilities
 pub use csm_renderer::CsmRenderer as CascadedShadowMaps;
 
+pub(crate) const CSM_SHADER_SOURCE: &str = concat!(
+    include_str!("../shaders/includes/determinism.wgsl"),
+    "\n",
+    include_str!("../shaders/includes/shadow_moments.wgsl"),
+    "\n",
+    include_str!("../shaders/shadows.wgsl")
+);
+
 /// Largest EVSM exponent an `Rgba16Float` moment atlas can carry.
 ///
 /// The moment atlas stores `exp(c * d)` AND its square for `d` in `[0, 1]`, so the
@@ -168,3 +176,6 @@ fn test_visibility_entry() {{
         assert_eq!(both_front, 1.0, "both front-of-mean lobes must be lit");
     }
 }
+
+#[cfg(test)]
+mod msm_tests;

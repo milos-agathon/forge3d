@@ -1009,9 +1009,9 @@ fn sample_shadow_msm_terrain(
     // Simplified MSM: Use first two moments similar to VSM
     let mean = b1;
     
-    // If receiver is closer than mean, it's in shadow
+    // If receiver is closer than mean, it is lit.
     if (receiver_depth <= mean) {
-        return 0.0;
+        return 1.0;
     }
     
     // Calculate variance using first two moments

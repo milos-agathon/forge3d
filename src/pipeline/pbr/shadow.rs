@@ -117,3 +117,24 @@ pub enum CsmQualityPreset {
     /// Ultra quality: 4 cascades, 4096px, Poisson PCF + EVSM
     Ultra,
 }
+
+/// Return the complete shared CSM WGSL module.
+pub fn csm_shader_source() -> &'static str {
+    crate::shadows::CsmRenderer::shader_source()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn public_csm_shader_source_returns_valid_wgsl() {
+        let source = super::csm_shader_source();
+        let module = naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
+    }
+}

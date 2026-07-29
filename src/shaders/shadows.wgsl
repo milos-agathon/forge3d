@@ -269,14 +269,15 @@ fn pcss_blocker_search(
         if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
             sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
             
-            // Sample shadow map depth
-            let shadow_depth = textureSampleLevel(
-                shadow_maps,
-                shadow_sampler,
-                sample_coords,
-                cascade_idx,
-                0.0
-            );
+            // Blocker search needs the stored depth, not a comparison result.
+            let dimensions = textureDimensions(shadow_maps);
+            let texel_coords = vec2<i32>(clamp(
+                sample_coords * vec2<f32>(dimensions),
+                vec2<f32>(0.0),
+                vec2<f32>(dimensions) - vec2<f32>(1.0)
+            ));
+            let shadow_depth =
+                textureLoad(shadow_maps, texel_coords, i32(cascade_idx), 0);
             
             // If this sample is closer than receiver (blocking)
             if (shadow_depth < receiver_depth) {
@@ -565,9 +566,9 @@ fn sample_shadow_msm(
     // This is a practical approximation
     let mean = b1;
     
-    // If receiver is closer than mean, it's in shadow
+    // If receiver is closer than mean, it is lit.
     if (receiver_depth <= mean) {
-        return 0.0;
+        return 1.0;
     }
     
     // Calculate variance using higher moments for better accuracy
