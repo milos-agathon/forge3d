@@ -12,7 +12,7 @@ struct ShadowPassUniforms {
     // Grid params: (grid_resolution, _pad, _pad, _pad) (16 bytes)
     grid_params: vec4<f32>,
     // Height curve params: (mode, strength, power, _pad) (16 bytes)
-    // mode: 0=linear, 1=pow, 2=smoothstep, 3=lut (not supported)
+    // mode: 0=linear, 1=pow, 2=smoothstep, 3=lut
     height_curve: vec4<f32>,
 }
 
@@ -25,31 +25,43 @@ var height_tex: texture_2d<f32>;
 @group(0) @binding(2)
 var height_samp: sampler;
 
+@group(0) @binding(3)
+var height_curve_lut_tex: texture_2d<f32>;
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
 }
 
-/// Apply height curve to normalized height value (matching main shader)
+fn height_curve_lut_sample(t: f32) -> f32 {
+    let dims = textureDimensions(height_curve_lut_tex, 0);
+    let max_x = max(i32(dims.x) - 1, 0);
+    let u = clamp(t, 0.0, 1.0);
+    let x = i32(round(u * f32(max_x)));
+    return textureLoad(height_curve_lut_tex, vec2<i32>(x, 0), 0).r;
+}
+
+/// Apply height curve to normalized height value (matching main shader exactly)
 /// t: input normalized height [0, 1]
 /// Returns: curved normalized height [0, 1]
 fn apply_height_curve(t: f32) -> f32 {
     let mode = u32(u_shadow.height_curve.x + 0.5);
     let strength = clamp(u_shadow.height_curve.y, 0.0, 1.0);
-    let power = max(u_shadow.height_curve.z, 0.01);
-    
+
     if (strength <= 0.0) {
         return t;
     }
-    
+
     var curved = t;
-    if (mode == 1u) { // pow
-        curved = pow(t, power);
-    } else if (mode == 2u) { // smoothstep
+    if (mode == 1u) {
+        let power = max(u_shadow.height_curve.z, 0.01);
+        curved = det_pow(t, power);
+    } else if (mode == 2u) {
         curved = t * t * (3.0 - 2.0 * t);
+    } else if (mode == 3u) {
+        curved = height_curve_lut_sample(t);
     }
-    // mode 3 (lut) not supported in shadow pass, falls back to linear
-    
-    return mix(t, curved, strength);
+
+    return det_mix(t, curved, strength);
 }
 
 /// Vertex shader for shadow depth pass
@@ -118,7 +130,10 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     let world_pos = vec3<f32>(world_xy, world_z);
     
     // Transform to light clip space
-    out.clip_position = u_shadow.light_view_proj * vec4<f32>(world_pos, 1.0);
+    out.clip_position = det_mat4_mul_vec4(
+        u_shadow.light_view_proj,
+        vec4<f32>(world_pos, 1.0),
+    );
     
     return out;
 }

@@ -16,6 +16,7 @@ impl TerrainScene {
         params: &crate::terrain::render_params::TerrainRenderParams,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         heightmap_view: &wgpu::TextureView,
+        height_curve_view: &wgpu::TextureView,
         heightmap_width: u32,
         heightmap_height: u32,
     ) -> Result<ShadowSetup> {
@@ -169,6 +170,7 @@ impl TerrainScene {
             let bind_group = self.render_shadow_depth_passes(
                 encoder,
                 heightmap_view,
+                height_curve_view,
                 heightmap_width,
                 heightmap_height,
                 terrain_spacing,

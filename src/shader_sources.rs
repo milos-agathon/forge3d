@@ -45,6 +45,14 @@ pub(crate) fn terrain() -> String {
     .join("\n")
 }
 
+pub(crate) fn terrain_shadow_depth() -> String {
+    [
+        include_str!("shaders/includes/determinism.wgsl").to_string(),
+        include_str!("shaders/terrain_shadow_depth.wgsl").to_string(),
+    ]
+    .join("\n")
+}
+
 #[cfg(any(test, all(feature = "enable-pbr", feature = "enable-tbn")))]
 pub(crate) fn pbr() -> String {
     let shadows = crate::shadows::CsmRenderer::shader_source().replace("@group(2)", "@group(3)");
@@ -87,7 +95,7 @@ mod tests {
 
     #[test]
     fn assembled_renderer_sources_are_valid_wgsl() {
-        for source in [hybrid_kernel(), terrain()] {
+        for source in [hybrid_kernel(), terrain(), terrain_shadow_depth()] {
             assert_valid_wgsl(&source);
         }
     }
@@ -97,6 +105,7 @@ mod tests {
         for source in [
             pbr(),
             terrain(),
+            terrain_shadow_depth(),
             crate::shadows::CsmRenderer::shader_source().to_owned(),
         ] {
             assert_valid_wgsl(&source);

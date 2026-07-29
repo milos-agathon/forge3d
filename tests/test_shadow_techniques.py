@@ -14,6 +14,17 @@ from forge3d.terrain_params import ShadowSettings
 from forge3d.config import ShadowParams, _SHADOW_TECHNIQUES, validate_shadow_technique, load_renderer_config
 
 
+def test_shadow_depth_height_curve_uses_receiver_primitives():
+    source = (
+        Path(__file__).parent.parent / "src" / "shaders" / "terrain_shadow_depth.wgsl"
+    ).read_text(encoding="utf-8")
+
+    assert "curved = det_pow(t, power);" in source
+    assert "curved = pow(t, power);" not in source
+    assert "curved = height_curve_lut_sample(t);" in source
+    assert "return det_mix(t, curved, strength);" in source
+
+
 class TestShadowTechniqueValidation:
     """Test shadow technique validation in terrain_params.py."""
 
@@ -493,7 +504,15 @@ def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
         flat_mask_map, strength=1.0
     )
 
-    def render(technique: str, *, enabled: bool = True) -> np.ndarray:
+    def render(
+        technique: str,
+        *,
+        enabled: bool = True,
+        terrain: np.ndarray | None = None,
+        curve_mode: str = "linear",
+        curve_power: float = 1.0,
+        curve_lut: np.ndarray | None = None,
+    ) -> np.ndarray:
         shadows = ShadowSettings(
             enabled=enabled,
             technique=technique,
@@ -531,6 +550,10 @@ def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
             fov_y_deg=52.0,
             camera_mode="mesh:zup",
             debug_mode=1 if not enabled else 0,
+            height_curve_mode=curve_mode,
+            height_curve_strength=0.0 if curve_mode == "linear" else 1.0,
+            height_curve_power=curve_power,
+            height_curve_lut=curve_lut,
             overlays=[flat_mask_overlay],
             shadows=shadows,
             pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
@@ -539,7 +562,7 @@ def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
             material_set=material_set,
             env_maps=ibl,
             params=f3d.TerrainRenderParams(config),
-            heightmap=heightmap,
+            heightmap=heightmap if terrain is None else terrain,
         ).to_numpy()
 
     luminance = {
@@ -581,4 +604,43 @@ def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
         assert shadowed >= 0.01, (
             f"{technique.upper()} casts no shadow: only {shadowed:.4f} "
             "of terrain is clearly shadowed"
+        )
+
+    plateau = np.where(heightmap > 0.25, np.float32(0.6), np.float32(0.0))
+    lut = np.zeros(256, dtype=np.float32)
+    curve_cases = (
+        (
+            "pow",
+            2.5,
+            None,
+            np.power(plateau, np.float32(2.5)).astype(np.float32),
+        ),
+        (
+            "lut",
+            1.0,
+            lut,
+            lut[np.rint(plateau * 255.0).astype(np.int32)],
+        ),
+    )
+    for mode, power, curve_lut, prewarped in curve_cases:
+        curved = render(
+            "pcf",
+            terrain=plateau,
+            curve_mode=mode,
+            curve_power=power,
+            curve_lut=curve_lut,
+        )
+        reference = render("pcf", terrain=prewarped)
+        mean_abs = float(
+            np.mean(
+                np.abs(
+                    curved[..., :3].astype(np.float32)
+                    - reference[..., :3].astype(np.float32)
+                )
+            )
+            / 255.0
+        )
+        print(f"{mode}: curved-vs-prewarped MAE={mean_abs:.6f}")
+        assert mean_abs <= 0.01, (
+            f"{mode} caster diverges from the receiver curve: MAE={mean_abs:.6f}"
         )

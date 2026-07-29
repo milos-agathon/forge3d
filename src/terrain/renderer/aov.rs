@@ -589,6 +589,13 @@ impl TerrainScene {
         } else {
             None
         };
+        let height_curve_view = lut_texture_uploaded
+            .as_ref()
+            .map(|(texture, _)| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+            .unwrap_or_else(|| {
+                self._height_curve_identity_texture
+                    .create_view(&wgpu::TextureViewDescriptor::default())
+            });
 
         let requested_msaa = params.msaa_samples.max(1);
         let effective_msaa =
@@ -677,6 +684,7 @@ impl TerrainScene {
                 params,
                 decoded,
                 &height_inputs.heightmap_view,
+                &height_curve_view,
                 height_inputs.width,
                 height_inputs.height,
             )?;
@@ -703,11 +711,6 @@ impl TerrainScene {
             .map(|(_, view)| view)
             .unwrap_or(&self.sky_fallback_view);
 
-        let height_curve_view = lut_texture_uploaded
-            .as_ref()
-            .map(|(_, view)| view as &wgpu::TextureView)
-            .unwrap_or(&self.height_curve_identity_view);
-
         let main_height_view = self.main_pass_height_view(&height_inputs.heightmap_view);
         let pass_bind_groups = self.create_terrain_pass_bind_groups(
             &uniform_buffer,
@@ -722,7 +725,7 @@ impl TerrainScene {
             materials.colormap_view(),
             materials.colormap_sampler(),
             &materials.overlay_buffer,
-            height_curve_view,
+            &height_curve_view,
             height_inputs.water_mask_view_uploaded.as_ref(),
             sky_view,
             height_ao_computed,
@@ -750,7 +753,7 @@ impl TerrainScene {
             materials.colormap_view(),
             materials.colormap_sampler(),
             &materials.overlay_buffer,
-            height_curve_view,
+            &height_curve_view,
             height_inputs.water_mask_view_uploaded.as_ref(),
             height_ao_computed,
             sun_vis_computed,

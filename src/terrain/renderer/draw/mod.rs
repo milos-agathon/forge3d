@@ -281,6 +281,7 @@ impl TerrainScene {
                                 params,
                                 decoded,
                                 &height_inputs.heightmap_view,
+                                &height_curve_view,
                                 height_inputs.width,
                                 height_inputs.height,
                             )?;
@@ -348,6 +349,7 @@ impl TerrainScene {
                                 params,
                                 decoded,
                                 &height_inputs.heightmap_view,
+                                &height_curve_view,
                                 height_inputs.width,
                                 height_inputs.height,
                             )?;
