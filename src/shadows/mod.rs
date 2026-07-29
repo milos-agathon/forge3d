@@ -20,6 +20,9 @@ pub use csm_types::{CascadeStatistics, CsmConfig, CsmUniforms, ShadowCascade};
 
 pub use blur_pass::ShadowBlurPass;
 pub use manager::{ShadowManager, ShadowManagerConfig};
+pub(crate) use manager::{
+    DEFAULT_PCSS_BLOCKER_RADIUS_TEXELS, DEFAULT_PCSS_FILTER_RADIUS_TEXELS, DEFAULT_PCSS_LIGHT_SIZE,
+};
 pub use moment_pass::{create_moment_storage_view, MomentGenerationPass};
 
 // Re-export common shadow types and utilities

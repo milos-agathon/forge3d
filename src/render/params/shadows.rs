@@ -58,10 +58,13 @@ pub struct ShadowParams {
     pub cascades: u32,
     #[serde(default = "ShadowParams::default_contact_hardening")]
     pub contact_hardening: bool,
+    /// Blocker-search radius in shadow-map texels.
     #[serde(default = "ShadowParams::default_pcss_blocker_radius")]
     pub pcss_blocker_radius: f32,
+    /// Base PCF radius in shadow-map texels.
     #[serde(default = "ShadowParams::default_pcss_filter_radius")]
     pub pcss_filter_radius: f32,
+    /// Dimensionless area-light size used by the PCSS penumbra estimate.
     #[serde(default = "ShadowParams::default_light_size")]
     pub light_size: f32,
     #[serde(default = "ShadowParams::default_moment_bias")]
@@ -90,15 +93,15 @@ impl ShadowParams {
     }
 
     const fn default_pcss_blocker_radius() -> f32 {
-        0.03
+        crate::shadows::DEFAULT_PCSS_BLOCKER_RADIUS_TEXELS
     }
 
     const fn default_pcss_filter_radius() -> f32 {
-        0.06
+        crate::shadows::DEFAULT_PCSS_FILTER_RADIUS_TEXELS
     }
 
     const fn default_light_size() -> f32 {
-        0.25
+        crate::shadows::DEFAULT_PCSS_LIGHT_SIZE
     }
 
     const fn default_moment_bias() -> f32 {
@@ -188,5 +191,46 @@ impl Default for ShadowParams {
             light_size: Self::default_light_size(),
             moment_bias: Self::default_moment_bias(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_pcss_texel_radii_reach_shadow_manager_unchanged() {
+        let mut params = ShadowParams::default();
+        let manager = params.to_shadow_manager_config();
+
+        assert_eq!(
+            (
+                params.pcss_blocker_radius,
+                params.pcss_filter_radius,
+                params.light_size,
+            ),
+            (6.0, 4.0, 1.0)
+        );
+        assert_eq!(
+            (
+                manager.pcss_blocker_radius,
+                manager.pcss_filter_radius,
+                manager.light_size,
+            ),
+            (6.0, 4.0, 1.0)
+        );
+
+        params.pcss_blocker_radius = 7.5;
+        params.pcss_filter_radius = 3.25;
+        params.light_size = 1.5;
+        let manager = params.to_shadow_manager_config();
+        assert_eq!(
+            (
+                manager.pcss_blocker_radius,
+                manager.pcss_filter_radius,
+                manager.light_size,
+            ),
+            (7.5, 3.25, 1.5)
+        );
     }
 }

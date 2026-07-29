@@ -148,8 +148,8 @@ impl ShadowManager {
              - Shadow Map Size: {}x{}\n\
              - Cascade Count: {}\n\
              - Total Memory: {:.2} MiB\n\
-             - PCSS Blocker Radius: {:.4}\n\
-             - PCSS Filter Radius: {:.4}\n\
+             - PCSS Blocker Radius (texels): {:.4}\n\
+             - PCSS Filter Radius (texels): {:.4}\n\
              - Light Size: {:.4}\n\
              - Moment Bias: {:.6}\n\
              - Requires Moments: {}",
@@ -382,31 +382,19 @@ impl ShadowManager {
         self.renderer.uniforms.technique_reserved = [0.0; 4];
 
         if matches!(self.config.technique, ShadowTechnique::PCSS) {
-            self.clamp_pcss_radius();
+            self.clamp_pcss_radii();
         }
     }
 
-    fn clamp_pcss_radius(&mut self) {
-        let cascade_count = self.renderer.config.cascade_count as usize;
-        if cascade_count == 0 {
-            return;
-        }
-
-        let min_texel_size = self
-            .renderer
-            .uniforms
-            .cascades
-            .iter()
-            .take(cascade_count)
-            .map(|c| c.texel_size)
-            .fold(f32::MAX, f32::min);
-
-        let max_radius = min_texel_size * super::types::MAX_SEARCH_TEXELS;
-
-        self.renderer.uniforms.technique_params[0] =
-            self.config.pcss_blocker_radius.min(max_radius);
-        self.renderer.uniforms.technique_params[1] =
-            self.config.pcss_filter_radius.min(max_radius * 2.0);
+    fn clamp_pcss_radii(&mut self) {
+        self.renderer.uniforms.technique_params[0] = self
+            .config
+            .pcss_blocker_radius
+            .min(super::types::MAX_PCSS_BLOCKER_RADIUS_TEXELS);
+        self.renderer.uniforms.technique_params[1] = self
+            .config
+            .pcss_filter_radius
+            .min(super::types::MAX_PCSS_FILTER_RADIUS_TEXELS);
     }
 
     fn compute_flags(technique: ShadowTechnique, requires_moments: bool) -> u32 {

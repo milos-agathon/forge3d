@@ -294,24 +294,6 @@ class TestShadowTechniqueDifferentiation:
         
         assert hard_hash != pcf_hash, f"HARD and PCF produced identical output: {hard_hash}"
     
-    @pytest.mark.xfail(reason="PCF vs PCSS differences are subtle in this test scene")
-    @pytest.mark.skipif(
-        not Path("assets/hdri/snow_field_4k.hdr").exists(),
-        reason="HDR asset not available"
-    )
-    def test_pcf_vs_pcss_differ(self, step_dem_path: Path, tmp_path: Path):
-        """PCF and PCSS techniques must produce different outputs."""
-        pcf_path = tmp_path / "pcf.png"
-        pcss_path = tmp_path / "pcss.png"
-        
-        pcf_bytes = self._render_with_technique(step_dem_path, "pcf", pcf_path)
-        pcss_bytes = self._render_with_technique(step_dem_path, "pcss", pcss_path)
-        
-        pcf_hash = hashlib.md5(pcf_bytes).hexdigest()
-        pcss_hash = hashlib.md5(pcss_bytes).hexdigest()
-        
-        assert pcf_hash != pcss_hash, f"PCF and PCSS produced identical output: {pcf_hash}"
-
     @pytest.mark.skipif(
         not Path("assets/hdri/snow_field_4k.hdr").exists(),
         reason="HDR asset not available"
@@ -475,10 +457,10 @@ def _native_pyramid_heightmap(size: int = 128) -> np.ndarray:
     reason="no terrain-capable hardware-backed forge3d runtime",
 )
 @pytest.mark.offscreen
-def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
+def test_native_moment_visibility_semantics_and_pcss_transition_width(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Native VSM/EVSM keep exposed terrain lit and retain the pyramid's cast shadow."""
+    """Native moment filters stay visible and PCSS widens with its light radius."""
     import forge3d as f3d
     from _terrain_runtime import _write_test_hdr
     from forge3d.terrain_params import PomSettings, make_terrain_params_config
@@ -512,6 +494,7 @@ def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
         curve_mode: str = "linear",
         curve_power: float = 1.0,
         curve_lut: np.ndarray | None = None,
+        pcss_light_radius: float = 0.0,
     ) -> np.ndarray:
         shadows = ShadowSettings(
             enabled=enabled,
@@ -528,6 +511,7 @@ def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
             light_bleed_reduction=0.5,
             evsm_exponent=40.0,
             fade_start=1.0,
+            pcss_light_radius=pcss_light_radius,
         )
         config = make_terrain_params_config(
             size_px=(320, 240),
@@ -605,6 +589,49 @@ def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
             f"{technique.upper()} casts no shadow: only {shadowed:.4f} "
             "of terrain is clearly shadowed"
         )
+
+    pcss = {
+        radius: np.dot(
+            render("pcss", pcss_light_radius=radius)[..., :3].astype(np.float32)
+            / 255.0,
+            np.array([0.2126, 0.7152, 0.0722], dtype=np.float32),
+        )
+        for radius in (0.5, 0.99)
+    }
+    pcss_mae = {
+        radius: float(
+            np.mean(np.abs(visibility[terrain] - luminance["pcf"][terrain]))
+        )
+        for radius, visibility in pcss.items()
+    }
+    print(f"PCSS vs PCF MAE: {pcss_mae}")
+    for radius, mae in pcss_mae.items():
+        assert mae >= 0.001, f"PCSS radius {radius} aliases PCF: MAE={mae:.6f}"
+
+    cast_shadow = terrain & (luminance["pcf"] < 0.6)
+    padded = np.pad(cast_shadow, 1)
+    interior = (
+        cast_shadow
+        & padded[:-2, 1:-1]
+        & padded[2:, 1:-1]
+        & padded[1:-1, :-2]
+        & padded[1:-1, 2:]
+    )
+    edge = cast_shadow & ~interior
+    assert edge.any(), "deterministic cast shadow has no measurable edge"
+    edge_band = np.lib.stride_tricks.sliding_window_view(
+        np.pad(edge, 12), (25, 25)
+    ).any(axis=(-2, -1))
+
+    def transition_width(visibility: np.ndarray) -> float:
+        transition = 4.0 * visibility * (1.0 - visibility)
+        return float(transition[edge_band & terrain].sum() / edge.sum())
+
+    widths = {radius: transition_width(visibility) for radius, visibility in pcss.items()}
+    print(f"PCSS transition widths: {widths}")
+    assert widths[0.99] >= widths[0.5] + 0.01, (
+        f"larger PCSS light radius did not widen the cast-shadow transition: {widths}"
+    )
 
     curve_heightmap = np.zeros_like(heightmap)
     curve_heightmap[30:78, 30:78] = np.float32(0.5)

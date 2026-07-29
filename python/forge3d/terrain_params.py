@@ -65,7 +65,7 @@ class ShadowSettings:
     light_bleed_reduction: float
     evsm_exponent: float
     fade_start: float
-    # Optional PCSS light radius (world units). Defaults to hard shadows when zero.
+    # Optional dimensionless PCSS area-light size. Zero selects the renderer minimum.
     pcss_light_radius: float = 0.0
 
     # Shadow technique constants matching Rust ShadowTechnique enum

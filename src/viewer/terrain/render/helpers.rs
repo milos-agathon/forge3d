@@ -411,6 +411,12 @@ impl ViewerTerrainScene {
         // Build CSM uniforms with current technique
         // Use cascade data from CSM renderer if shadow depth passes have been rendered
         let debug_mode = self.pbr_config.debug_mode;
+        let technique_params = [
+            crate::shadows::DEFAULT_PCSS_BLOCKER_RADIUS_TEXELS,
+            crate::shadows::DEFAULT_PCSS_FILTER_RADIUS_TEXELS,
+            0.0005,
+            crate::shadows::DEFAULT_PCSS_LIGHT_SIZE,
+        ];
         let csm_uniforms = if let Some(ref csm) = self.csm_renderer {
             // Copy uniforms from CSM renderer (populated by render_shadow_passes)
             let mut u = csm.uniforms;
@@ -420,7 +426,7 @@ impl ViewerTerrainScene {
                 ShadowTechnique::PCSS => 5,
                 _ => 3,
             };
-            u.technique_params = [0.0, 0.0, 0.0005, 1.0]; // moment_bias, light_size
+            u.technique_params = technique_params;
             u.debug_mode = debug_mode; // P6.2: Debug visualization from pbr_config
             u
         } else {
@@ -439,7 +445,7 @@ impl ViewerTerrainScene {
             u.peter_panning_offset = 0.001;
             u.evsm_positive_exp = crate::shadows::EVSM_MAX_EXPONENT_RGBA16F;
             u.evsm_negative_exp = crate::shadows::EVSM_MAX_EXPONENT_RGBA16F;
-            u.technique_params = [0.0, 0.0, 0.0005, 1.0];
+            u.technique_params = technique_params;
             u.debug_mode = debug_mode; // P6.2: Debug visualization from pbr_config
 
             // Set up default cascade far distances for cascade selection

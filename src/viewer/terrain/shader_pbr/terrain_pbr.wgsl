@@ -74,6 +74,7 @@ struct CsmUniforms {
     _pad1a: f32,
     _pad1b: f32,
     _pad1c: f32,
+    // [blocker radius (texels), filter radius (texels), moment bias, dimensionless light size]
     technique_params: vec4<f32>,
     technique_reserved: vec4<f32>,
     cascade_blend_range: f32,
@@ -412,6 +413,66 @@ fn sample_shadow_msm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx:
     return 0.0;
 }
 
+fn pcss_blocker_search(
+    shadow_coords: vec2<f32>,
+    receiver_depth: f32,
+    cascade_idx: u32,
+    search_radius: f32,
+) -> f32 {
+    var poisson_disk = array<vec2<f32>, 12>(
+        vec2<f32>(-0.94201624, -0.39906216),
+        vec2<f32>(0.94558609, -0.76890725),
+        vec2<f32>(-0.094184101, -0.92938870),
+        vec2<f32>(0.34495938, 0.29387760),
+        vec2<f32>(-0.91588581, 0.45771432),
+        vec2<f32>(-0.81544232, -0.87912464),
+        vec2<f32>(-0.38277543, 0.27676845),
+        vec2<f32>(0.97484398, 0.75648379),
+        vec2<f32>(0.44323325, -0.97511554),
+        vec2<f32>(0.53742981, -0.47373420),
+        vec2<f32>(-0.26496911, -0.41893023),
+        vec2<f32>(0.79197514, 0.19090188)
+    );
+    let texel_size = 1.0 / max(csm_uniforms.shadow_map_size, 1.0);
+    let scaled_search_radius = search_radius * texel_size;
+    let dimensions = textureDimensions(shadow_maps);
+    var blocker_sum = 0.0;
+    var blocker_count = 0.0;
+
+    for (var i = 0; i < 12; i++) {
+        let sample_coords = shadow_coords + poisson_disk[i] * scaled_search_radius;
+        if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
+            sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
+            let texel_coords = vec2<i32>(clamp(
+                sample_coords * vec2<f32>(dimensions),
+                vec2<f32>(0.0),
+                vec2<f32>(dimensions) - vec2<f32>(1.0)
+            ));
+            let shadow_depth =
+                textureLoad(shadow_maps, texel_coords, i32(cascade_idx), 0);
+            if (shadow_depth < receiver_depth) {
+                blocker_sum += shadow_depth;
+                blocker_count += 1.0;
+            }
+        }
+    }
+
+    if (blocker_count > 0.0) {
+        return blocker_sum / blocker_count;
+    }
+    return -1.0;
+}
+
+fn pcss_penumbra_size(
+    receiver_depth: f32,
+    blocker_depth: f32,
+    light_size: f32,
+) -> f32 {
+    let depth_diff = max(receiver_depth - blocker_depth, 0.0);
+    let penumbra = (depth_diff * light_size) / max(blocker_depth, 0.001);
+    return clamp(penumbra, 0.0, 100.0);
+}
+
 // Main CSM shadow sampling with technique dispatch
 fn sample_csm_shadow(world_pos: vec3<f32>, normal: vec3<f32>, cascade_idx: u32) -> f32 {
     // Early out: no cascades means fully lit
@@ -446,7 +507,6 @@ fn sample_csm_shadow(world_pos: vec3<f32>, normal: vec3<f32>, cascade_idx: u32) 
     
     let technique = csm_uniforms.technique;
     let moment_bias = csm_uniforms.technique_params.z;
-    let light_size = csm_uniforms.technique_params.w;
     
     // HARD shadows (technique=0)
     if (technique == 0u) {
@@ -466,18 +526,61 @@ fn sample_csm_shadow(world_pos: vec3<f32>, normal: vec3<f32>, cascade_idx: u32) 
         return shadow_sum / 9.0;
     }
     
-    // PCSS (technique=2): larger kernel with light size scaling
+    // PCSS (technique=2): blocker-dependent penumbra and adaptive PCF
     if (technique == 2u) {
-        let filter_scale = max(light_size, 1.0);
-        let texel_size = (1.0 / max(csm_uniforms.shadow_map_size, 1.0)) * filter_scale;
+        let avg_blocker_depth = pcss_blocker_search(
+            shadow_coords,
+            compare_depth,
+            cascade_idx,
+            min(csm_uniforms.technique_params.x, 50.0)
+        );
+        if (avg_blocker_depth < 0.0) {
+            return 1.0;
+        }
+
+        let penumbra = pcss_penumbra_size(
+            compare_depth,
+            avg_blocker_depth,
+            csm_uniforms.technique_params.w
+        );
+        let filter_radius = min(csm_uniforms.technique_params.y + penumbra, 100.0);
+        var poisson_disk = array<vec2<f32>, 16>(
+            vec2<f32>(-0.94201624, -0.39906216),
+            vec2<f32>(0.94558609, -0.76890725),
+            vec2<f32>(-0.094184101, -0.92938870),
+            vec2<f32>(0.34495938, 0.29387760),
+            vec2<f32>(-0.91588581, 0.45771432),
+            vec2<f32>(-0.81544232, -0.87912464),
+            vec2<f32>(-0.38277543, 0.27676845),
+            vec2<f32>(0.97484398, 0.75648379),
+            vec2<f32>(0.44323325, -0.97511554),
+            vec2<f32>(0.53742981, -0.47373420),
+            vec2<f32>(-0.26496911, -0.41893023),
+            vec2<f32>(0.79197514, 0.19090188),
+            vec2<f32>(-0.24188840, 0.99706507),
+            vec2<f32>(-0.81409955, 0.91437590),
+            vec2<f32>(0.19984126, 0.78641367),
+            vec2<f32>(0.14383161, -0.14100790)
+        );
+        let scaled_filter_radius =
+            filter_radius / max(csm_uniforms.shadow_map_size, 1.0);
         var shadow_sum = 0.0;
-        for (var y = -2; y <= 2; y = y + 1) {
-            for (var x = -2; x <= 2; x = x + 1) {
-                let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                shadow_sum += textureSampleCompare(shadow_maps, shadow_sampler, shadow_coords + offset, i32(cascade_idx), compare_depth);
+        for (var i = 0; i < 16; i++) {
+            let sample_coords = shadow_coords + poisson_disk[i] * scaled_filter_radius;
+            if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
+                sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
+                shadow_sum += textureSampleCompare(
+                    shadow_maps,
+                    shadow_sampler,
+                    sample_coords,
+                    i32(cascade_idx),
+                    clamp(compare_depth, 0.0, 1.0)
+                );
+            } else {
+                shadow_sum += 1.0;
             }
         }
-        return shadow_sum / 25.0;
+        return shadow_sum / 16.0;
     }
     
     // VSM (technique=3)
