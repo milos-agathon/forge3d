@@ -200,6 +200,32 @@ visibility_output[4] = 0.0;";
             "receiver separation did not widen PCSS: near={near_growth}, far={far_growth}"
         );
     }
+
+    #[test]
+    fn shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs() {
+        let source = include_str!("../shaders/includes/shadow_moments.wgsl");
+        let probe = "
+let nan_value = visibility_output[4] / visibility_output[4];
+visibility_output[0] =
+    msm_visibility_from_moments(vec4<f32>(0.5, 0.33333334, 0.25, 0.2), 0.6, 0.0005);
+visibility_output[1] =
+    msm_visibility_from_moments(vec4<f32>(0.5, 0.25, 0.125, 0.0625), 0.7, 0.0);
+visibility_output[2] =
+    msm_visibility_from_moments(vec4<f32>(nan_value), 0.7, 0.0005);
+visibility_output[3] =
+    msm_visibility_from_moments(vec4<f32>(0.5, 0.25, 0.125, 0.0625), nan_value, 0.0005);
+visibility_output[4] =
+    msm_visibility_from_moments(vec4<f32>(0.9, 0.1, 0.9, 0.1), 0.95, 0.0005);";
+        let values = execute_shader_probe(source, "MSM boundary behavior", probe);
+        for value in values {
+            assert!(
+                value.is_finite() && (0.0..=1.0).contains(&value),
+                "MSM returned invalid visibility {value}"
+            );
+        }
+        assert_eq!(values[2], 1.0, "invalid stored moments must fail open");
+        assert_eq!(values[3], 1.0, "invalid receiver depth must fail open");
+    }
 }
 
 #[cfg(test)]

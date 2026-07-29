@@ -1,6 +1,6 @@
 use super::{CsmRenderer, CsmUniforms};
 
-fn execute_msm_front_visibility(source: &str, expression: &str) -> [f32; 2] {
+fn execute_msm_visibility(source: &str, expression: &str, moment_values: [f32; 4]) -> [f32; 2] {
     let context = crate::core::gpu::try_ctx().expect("GPU context");
     let device = &context.device;
     let queue = &context.queue;
@@ -95,7 +95,7 @@ fn test_msm_fragment() -> @location(0) vec4<f32> {{
         },
     )
     .expect("moment texture");
-    let moments = [0.5_f32, 0.26, 0.125, 0.0625]
+    let moments = moment_values
         .into_iter()
         .flat_map(|value| half::f16::from_f32(value).to_le_bytes())
         .collect::<Vec<_>>();
@@ -216,10 +216,32 @@ fn test_msm_fragment() -> @location(0) vec4<f32> {{
 
 #[test]
 fn live_shared_msm_sampler_treats_front_of_mean_as_lit() {
-    let [shared, shared_mean] = execute_msm_front_visibility(
+    let [shared, shared_mean] = execute_msm_visibility(
         CsmRenderer::shader_source(),
         "sample_shadow_msm(vec4<f32>(0.0, 0.0, -0.5, 1.0), 0u, vec3<f32>(0.0, 1.0, 0.0))",
+        [0.5, 0.26, 0.125, 0.0625],
     );
     assert!((shared_mean - 0.5).abs() < 0.01, "shared mean upload");
     assert_eq!(shared, 1.0, "shared MSM front receiver must be lit");
+}
+
+#[test]
+fn live_shared_msm_sampler_consumes_third_and_fourth_moments() {
+    let expression =
+        "sample_shadow_msm(vec4<f32>(0.0, 0.0, 0.2, 1.0), 0u, vec3<f32>(0.0, 1.0, 0.0))";
+    let uniform_distribution = execute_msm_visibility(
+        CsmRenderer::shader_source(),
+        expression,
+        [0.5, 1.0 / 3.0, 0.25, 0.2],
+    )[0];
+    let changed_fourth_moment = execute_msm_visibility(
+        CsmRenderer::shader_source(),
+        expression,
+        [0.5, 1.0 / 3.0, 0.25, 0.196],
+    )[0];
+
+    assert!(
+        (uniform_distribution - changed_fourth_moment).abs() >= 0.02,
+        "MSM ignored BA: first={uniform_distribution}, changed={changed_fourth_moment}"
+    );
 }

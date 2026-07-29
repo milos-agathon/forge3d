@@ -557,38 +557,8 @@ fn sample_shadow_msm(
     // Sample moment map (4 moments in RGBA)
     let moments = textureSample(moment_maps, moment_sampler, shadow_coords.xy, cascade_idx);
     
-    // MSM uses 4 moments: b = [1, x, x^2, x^3]
-    // This allows reconstructing a better approximation of the depth distribution
-    let b0 = 1.0;
-    let b1 = moments.r;  // E[x]
-    let b2 = moments.g;  // E[x^2]
-    let b3 = moments.b;  // E[x^3]
-    let b4 = moments.a;  // E[x^4]
-    
-    // Simplified MSM: Use first two moments similar to VSM
-    // Full MSM would solve Hankel matrix system, but that's expensive
-    // This is a practical approximation
-    let mean = b1;
-    
-    // If receiver is closer than mean, it is lit.
-    if (receiver_depth <= mean) {
-        return 1.0;
-    }
-    
-    // Calculate variance using higher moments for better accuracy
-    let variance = max(b2 - b1 * b1, 0.0001);
-    
-    // Apply Chebyshev inequality
-    var shadow_factor =
-        chebyshev_upper_bound_visibility(mean, variance, receiver_depth);
-    
-    // Apply stronger light leak reduction for MSM
     let moment_bias = csm_uniforms.technique_params.z;
-    if (moment_bias > 0.0) {
-        shadow_factor = reduce_light_leak(shadow_factor, moment_bias * 1.5);
-    }
-    
-    return shadow_factor;
+    return msm_visibility_from_moments(moments, receiver_depth, moment_bias);
 }
 
 // Main shadow calculation function with optional cascade blending

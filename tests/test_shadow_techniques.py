@@ -529,10 +529,10 @@ def _native_pyramid_heightmap(size: int = 128) -> np.ndarray:
     reason="no terrain-capable hardware-backed forge3d runtime",
 )
 @pytest.mark.offscreen
-def test_native_moment_visibility_semantics_and_pcss_transition_width(
+def test_native_moment_visibility_semantics_pcss_transition_width_and_msm_uses_four_moments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Native moment filters stay visible and PCSS widens with its light radius."""
+    """Native MSM uses four moments, moment filters stay visible, and PCSS widens."""
     import forge3d as f3d
     from _terrain_runtime import _write_test_hdr
     from forge3d.terrain_params import PomSettings, make_terrain_params_config
@@ -629,7 +629,7 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
 
     raw = {
         technique: render(technique)[..., :3].astype(np.float32) / 255.0
-        for technique in ("pcf", "vsm", "evsm")
+        for technique in ("pcf", "vsm", "evsm", "msm")
     }
     luminance = {technique: image[..., 0] for technique, image in raw.items()}
     terrain_reference = (
@@ -653,7 +653,7 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
     )
 
     pcf_exposure = float(luminance["pcf"][lit_plain].mean())
-    for technique in ("vsm", "evsm"):
+    for technique in ("vsm", "evsm", "msm"):
         exposure = float(luminance[technique][lit_plain].mean())
         shadowed = float(
             ((luminance[technique] < exposure * 0.6) & cast_shadow).sum()
@@ -671,6 +671,18 @@ def test_native_moment_visibility_semantics_and_pcss_transition_width(
             f"{technique.upper()} casts no shadow: only {shadowed:.4f} "
             "of terrain is clearly shadowed"
         )
+
+    msm_cast_difference = float(
+        np.mean(np.abs(luminance["msm"][cast_shadow] - luminance["vsm"][cast_shadow]))
+    )
+    print(f"MSM vs VSM cast-shadow MAE={msm_cast_difference:.6f}")
+    assert not np.array_equal(raw["msm"], raw["vsm"]), (
+        "MSM and VSM produced byte-identical native output"
+    )
+    assert msm_cast_difference >= 0.005, (
+        "MSM does not visibly consume its third and fourth moments: "
+        f"cast-shadow MAE={msm_cast_difference:.6f}"
+    )
 
     pcss = {
         light_size: (

@@ -382,35 +382,7 @@ fn sample_shadow_evsm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx
 // MSM: Moment shadow maps (4 moments)
 fn sample_shadow_msm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx: u32, moment_bias: f32) -> f32 {
     let moments = textureSample(moment_maps, moment_sampler, shadow_coords, i32(cascade_idx));
-    
-    let z = receiver_depth;
-    let b1 = moments.r;
-    let b2 = moments.g;
-    let b3 = moments.b;
-    let b4 = moments.a;
-    
-    // Hamburger 4MSM approximation
-    let det = b2 * b4 - b3 * b3;
-    if (abs(det) < 0.00001) {
-        return select(1.0, 0.0, z > b1);
-    }
-    
-    let c1 = (b4 * b1 - b3 * b2) / det;
-    let c2 = (b2 * b2 - b1 * b3) / det;
-    
-    // Quadratic: z^2 + c1*z + c2 = 0
-    let discriminant = c1 * c1 - 4.0 * c2;
-    if (discriminant < 0.0) {
-        return select(1.0, 0.0, z > b1);
-    }
-    
-    let sqrt_d = sqrt(discriminant);
-    let z1 = (-c1 - sqrt_d) * 0.5;
-    let z2 = (-c1 + sqrt_d) * 0.5;
-    
-    if (z <= z1) { return 1.0; }
-    if (z <= z2) { return 0.5; }
-    return 0.0;
+    return msm_visibility_from_moments(moments, receiver_depth, moment_bias);
 }
 
 fn pcss_blocker_search(

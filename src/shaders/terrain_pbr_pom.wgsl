@@ -998,35 +998,8 @@ fn sample_shadow_msm_terrain(
     cascade_idx: u32,
     moment_bias: f32
 ) -> f32 {
-    // Sample moment map (4 moments in RGBA)
     let moments = textureSample(moment_maps, moment_sampler, shadow_coords, i32(cascade_idx));
-    
-    // MSM uses 4 moments: E[x], E[x^2], E[x^3], E[x^4]
-    let b1 = moments.r;  // E[x]
-    let b2 = moments.g;  // E[x^2]
-    // b3 and b4 available for more sophisticated reconstruction
-    
-    // Simplified MSM: Use first two moments similar to VSM
-    let mean = b1;
-    
-    // If receiver is closer than mean, it is lit.
-    if (receiver_depth <= mean) {
-        return 1.0;
-    }
-    
-    // Calculate variance using first two moments
-    let variance = max(b2 - b1 * b1, 0.0001);
-    
-    // Apply Chebyshev inequality
-    var shadow_factor =
-        chebyshev_upper_bound_visibility(mean, variance, receiver_depth);
-    
-    // Apply stronger light leak reduction for MSM
-    if (moment_bias > 0.0) {
-        shadow_factor = reduce_light_leak_terrain(shadow_factor, moment_bias * 1.5);
-    }
-    
-    return shadow_factor;
+    return msm_visibility_from_moments(moments, receiver_depth, moment_bias);
 }
 
 fn pcss_blocker_search_terrain(
