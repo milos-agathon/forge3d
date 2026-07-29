@@ -35,9 +35,15 @@
 #     measured run, so a fallback during the 600 frames is a defect rather than
 #     the streamer's start-up transient;
 #   * proves the crack metric is a measurement and not a constant (a control at
-#     1000x relief must make the same detector fire), and proves the dE2000 gate
-#     discriminates at this resolution and DEM (a control translation must
-#     exceed it).
+#     the API's maximum relief must make the same detector fire), and proves the
+#     dE2000 gate discriminates at this resolution and DEM (a control translation
+#     must exceed it).
+#
+# The relief control was DEAD until 2026-07-29: it asked for z_scale 1200
+# against a 0.1-50.0 API ceiling, so it raised ValueError before rendering and
+# no run had ever shown the crack detector firing. At the ceiling (z_scale 50)
+# it now reports 302 cracks and max_gap 2.209 against a 0.1 threshold, versus
+# 0 cracks / max_gap 0.053 at Z_SCALE.
 #
 # WALL CLOCK
 # ----------
@@ -55,10 +61,50 @@
 #   clipmap rebuild + CPU visibility oracle .......... ~20 ms  -> 12 s
 #   hole mask + seam bookkeeping ..................... ~12 ms  -> 7 s
 #                                                              ~= 225 s
-# plus 5 control renders. That leaves ~2.5x headroom. ``wall_clock_s`` is
-# recorded in the evidence; if the measured value exceeds 400 s the knob to turn
-# is DEM_SIZE (which is what the AO term scales with), never the render
-# resolution and never a gate.
+# plus 5 control renders. MEASURED 2026-07-29 on the reference RTX 3070: 793 ms
+# per frame end to end, i.e. ~476 s for 600 frames -- 2.1x the model above, not
+# 225 s. It still fits the 600 s budget, but with 1.26x headroom rather than
+# 2.5x. ``wall_clock_s`` is recorded in the evidence; if the measured value
+# exceeds 400 s the knob to turn is DEM_SIZE (which is what the AO term scales
+# with), never the render resolution and never a gate.
+#
+# THE POP GATE IS RED, AND WHY (measured 2026-07-29, reference RTX 3070)
+# ---------------------------------------------------------------------
+# ``test_600_frame_streaming_flythrough_has_no_pop_or_crack`` fails at
+# transition 1 with max dE2000 = 36.0149. That number is NOT a tile pop. Two
+# independent mechanisms produce it, and both are outside this file:
+#
+# 1. The camera is tied to the clipmap centre (``cam_target = center + DX``),
+#    so every frame translates the whole image by CENTER_STEP_LENGTH_M /
+#    GROUND_PIXEL_M = 353.6 / 27.61 = 12.8 px. A max-pixel dE2000 over a
+#    translating image measures translation, not popping. The fixture is in
+#    fact self-contradictory as committed: the pop control asserts a 16 px
+#    translation must score >= 1.0 while the gate asserts the flythrough's own
+#    12.8 px translation must score < 1.0.
+#    The clipmap mesh centre follows the STREAMING centre, not the camera
+#    (``renderer/streaming.rs:636``, consumed at ``renderer/geometry.rs:601``),
+#    so the confound is removable: hold cam_target fixed and sweep only
+#    ``stream_height_tiles``. Measured that way over 40 frames the mesh still
+#    rebuilds on every frame (39/39 seam-signature changes) and max dE2000 is
+#    2.0554 -- a real, previously invisible pop.
+#
+# 2. That residual 2.0554 is itself an artifact of the fixture's colour ramp.
+#    ``_build_overlay``'s 4-stop terrain colormap renders a HARD colour step:
+#    adjacent pixels differ by up to 35/255 (green [110,144,110] against pink
+#    [145,111,111], with the green channel moving OPPOSITE to the ramp's own
+#    direction), while a 4-stop GREY colormap at the identical stop positions
+#    is smooth (max adjacent delta 2) and a 2-stop terrain colormap is smooth
+#    (3). Through that step, the underlying geometric pop -- max |dRGB| = 1,
+#    i.e. at the 8-bit quantization floor -- is amplified to 5 levels and
+#    dE 2.0554. With a continuous ramp the same 40 frames score 0.3127 (grey)
+#    and 0.8275 (2-stop warm).
+#
+# So the clipmap/geomorph machinery is stable to ~1 LSB frame to frame; the gate
+# is red because of a camera/centre coupling in this file and a colormap-LUT
+# discontinuity in `src/colormap/` + the terrain overlay sampling path. Fixing
+# either in isolation is not enough and neither belongs to this file alone, so
+# the number is reported rather than papered over. Reproducers live in the
+# TESSELLA handoff, not in the tree.
 #
 # RELIEF CEILING (real, and load-bearing for the numbers below)
 # -------------------------------------------------------------
@@ -175,7 +221,15 @@ STREAM_TOTAL_TILES = (2**STREAM_LOD) ** 2  # 64 tiles x 32^2 texels = the 256^2 
 MAX_WARMUP_STEPS = 400
 
 # Controls.
-RELIEF_CONTROL_FACTOR = 1000.0
+# ``TerrainRenderParams`` rejects z_scale outside 0.1-50.0
+# (python/forge3d/terrain_params.py:2037), so the relief control has to live
+# inside that range. The previous value (1000.0) put z_scale at 1200 and the
+# control raised ValueError before it rendered anything -- it had never
+# executed, so nothing had ever demonstrated that the crack detector CAN fire.
+# 50.0 is the largest relief the public API admits -- 41.7x Z_SCALE, and 33x
+# the gap the detector already measures there. It is stated as an absolute
+# z_scale rather than a factor so no float product can drift past the ceiling.
+RELIEF_CONTROL_Z_SCALE = 50.0
 POP_CONTROL_SHIFT_PX = (1.0, 4.0, 16.0)
 POP_CONTROL_ASSERTED_PX = 16.0
 
@@ -406,6 +460,17 @@ def test_committed_camera_frames_multiple_clipmap_regions():
     assert max_center_x + abs(FRAME_MIN_X) < SPAN * 0.5
     assert max_center_y + FRAME_MAX_ABS_Y < SPAN * 0.5
 
+    # The relief control must be constructible. It previously was not: the
+    # control asked for z_scale 1200 against an API ceiling of 50.0, so it died
+    # in ValueError before rendering and the crack detector had never been shown
+    # to fire at all. Asserting it here makes that a fast CPU failure instead of
+    # something only the GPU lane can notice.
+    assert 0.1 <= RELIEF_CONTROL_Z_SCALE <= 50.0, RELIEF_CONTROL_Z_SCALE
+    assert RELIEF_CONTROL_Z_SCALE > Z_SCALE * 10.0, (
+        RELIEF_CONTROL_Z_SCALE,
+        Z_SCALE,
+    )
+
     # Consecutive centres always differ by the full step, and the run covers a
     # large set of distinct positions rather than oscillating between a few.
     steps = [
@@ -598,9 +663,7 @@ def test_crack_detector_fires_when_the_seams_actually_separate():
 
         render_rgba(
             renderer,
-            _params(
-                center, z_scale=Z_SCALE * RELIEF_CONTROL_FACTOR, overlay=overlay
-            ),
+            _params(center, z_scale=RELIEF_CONTROL_Z_SCALE, overlay=overlay),
             dem,
             ibl,
             material_set,
@@ -617,7 +680,7 @@ def test_crack_detector_fires_when_the_seams_actually_separate():
         "flythrough_crack_detector_control",
         {
             "z_scale": Z_SCALE,
-            "control_z_scale": Z_SCALE * RELIEF_CONTROL_FACTOR,
+            "control_z_scale": RELIEF_CONTROL_Z_SCALE,
             "seam_gap_threshold": SEAM_THRESHOLD,
             "max_gap": float(clean["max_gap"]),
             "control_max_gap": float(separated["max_gap"]),

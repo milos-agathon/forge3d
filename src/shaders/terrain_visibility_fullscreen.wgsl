@@ -138,22 +138,58 @@ struct VisibilitySurfaceSample {
     uv: vec2<f32>,
 }
 
+// The rasteriser does not interpolate from the floating-point clip positions
+// the vertex stage emitted. It converts them to framebuffer coordinates and
+// SNAPS each one to a fixed-point sub-pixel grid before building the edge
+// functions, so the barycentrics it hands the fragment stage belong to a
+// slightly different triangle than the fp32 one. Vulkan guarantees at least
+// `subPixelPrecisionBits = 4`; the reference RTX 3070 (and every desktop
+// D3D12/Vulkan rasteriser this path runs on) reports 8, i.e. a 1/256 px grid.
+// Reconstructing from unsnapped positions leaves a residual that is invisible
+// on smooth gradients but flips any hard material threshold the surface
+// crosses, which is exactly where the forward/visibility mismatch used to
+// concentrate.
+const TERRAIN_VISBUFFER_SUBPIXEL: f32 = 256.0;
+
+fn visibility_snap_to_subpixel_grid(framebuffer_xy: vec2<f32>) -> vec2<f32> {
+    return round(framebuffer_xy * TERRAIN_VISBUFFER_SUBPIXEL)
+        / TERRAIN_VISBUFFER_SUBPIXEL;
+}
+
+// Clip space -> framebuffer pixel coordinates, matching the viewport transform
+// the rasteriser applies ((0.5, 0.5) is the centre of the top-left pixel).
+fn visibility_framebuffer_of(clip_xy: vec2<f32>, w: f32, dimensions: vec2<f32>) -> vec2<f32> {
+    let ndc = clip_xy / w;
+    return vec2<f32>(
+        (ndc.x * 0.5 + 0.5) * dimensions.x,
+        (0.5 - ndc.y * 0.5) * dimensions.y,
+    );
+}
+
 // Perspective-correct interpolation of one reconstructed triangle at an
-// arbitrary NDC position. Evaluating it OUTSIDE the triangle is deliberate:
-// that extrapolation is what the rasteriser hands its helper lanes, and it is
-// how the quad-aligned analytic gradients below are formed.
+// arbitrary framebuffer position. Evaluating it OUTSIDE the triangle is
+// deliberate: that extrapolation is what the rasteriser hands its helper lanes,
+// and it is how the quad-aligned analytic gradients below are formed.
+//
+// Barycentric coordinates are invariant under the affine NDC -> framebuffer
+// map, so working in pixel space costs nothing and is the only space in which
+// the sub-pixel snap above is expressible.
 fn visibility_sample_surface(
-    ndc_xy: vec2<f32>,
+    framebuffer_xy: vec2<f32>,
     v0: VisibilityReconstructedVertex,
     v1: VisibilityReconstructedVertex,
     v2: VisibilityReconstructedVertex,
     w: vec3<f32>,
+    dimensions: vec2<f32>,
 ) -> VisibilitySurfaceSample {
     let bary_screen = visibility_barycentrics(
-        ndc_xy,
-        v0.clip.xy / w.x,
-        v1.clip.xy / w.y,
-        v2.clip.xy / w.z,
+        framebuffer_xy,
+        visibility_snap_to_subpixel_grid(
+            visibility_framebuffer_of(v0.clip.xy, w.x, dimensions)),
+        visibility_snap_to_subpixel_grid(
+            visibility_framebuffer_of(v1.clip.xy, w.y, dimensions)),
+        visibility_snap_to_subpixel_grid(
+            visibility_framebuffer_of(v2.clip.xy, w.z, dimensions)),
     );
     let perspective = bary_screen / w;
     let bary = perspective / max(
@@ -175,15 +211,6 @@ fn visibility_pixel_identity(pixel: vec2<i32>) -> u32 {
     let encoded = textureLoad(terrain_visibility_ids, clamped, 0).x;
     let depth = textureLoad(terrain_visibility_depth, clamped, 0);
     return select(encoded, 0u, depth >= 1.0);
-}
-
-// Framebuffer pixel centre -> normalised device coordinates.
-fn visibility_ndc_at(pixel_centre: vec2<f32>, dimensions: vec2<f32>) -> vec2<f32> {
-    let uv_screen = pixel_centre / dimensions;
-    return vec2<f32>(
-        uv_screen.x * 2.0 - 1.0,
-        1.0 - uv_screen.y * 2.0,
-    );
 }
 
 @vertex
@@ -236,7 +263,6 @@ fn fs_visibility_resolve_fullscreen(
     // `@builtin(position).xy` is ALREADY the pixel centre in framebuffer space
     // ((0.5, 0.5) is the centre of the top-left pixel), so adding another half
     // texel shifted every reconstructed attribute one half pixel down-right.
-    let ndc_xy = visibility_ndc_at(input.clip_position.xy, dimensions);
     let payload = encoded - 1u;
     let tile_lod_id = payload >> 16u;
     let primitive = payload & 0xffffu;
@@ -260,7 +286,8 @@ fn fs_visibility_resolve_fullscreen(
         visibility_safe_w(v1.clip.w),
         visibility_safe_w(v2.clip.w),
     );
-    let here = visibility_sample_surface(ndc_xy, v0, v1, v2, w);
+    let here = visibility_sample_surface(
+        input.clip_position.xy, v0, v1, v2, w, dimensions);
 
     // Quad-aligned analytic gradients of THIS pixel's covering triangle. A
     // coarse derivative is evaluated once per 2x2 quad from its top-left lane,
@@ -269,11 +296,11 @@ fn fs_visibility_resolve_fullscreen(
     // the neighbouring pixels' triangles happen to be.
     let quad_origin = vec2<f32>(quad_base) + vec2<f32>(0.5, 0.5);
     let anchor00 = visibility_sample_surface(
-        visibility_ndc_at(quad_origin, dimensions), v0, v1, v2, w);
+        quad_origin, v0, v1, v2, w, dimensions);
     let anchor10 = visibility_sample_surface(
-        visibility_ndc_at(quad_origin + vec2<f32>(1.0, 0.0), dimensions), v0, v1, v2, w);
+        quad_origin + vec2<f32>(1.0, 0.0), v0, v1, v2, w, dimensions);
     let anchor01 = visibility_sample_surface(
-        visibility_ndc_at(quad_origin + vec2<f32>(0.0, 1.0), dimensions), v0, v1, v2, w);
+        quad_origin + vec2<f32>(0.0, 1.0), v0, v1, v2, w, dimensions);
     terrain_explicit_ddx_uv = anchor10.uv - anchor00.uv;
     terrain_explicit_ddy_uv = anchor01.uv - anchor00.uv;
     terrain_explicit_ddx_world = anchor10.world - anchor00.world;
