@@ -353,3 +353,94 @@ class TestShadowTechniqueDifferentiation:
         msm_hash = hashlib.md5(msm_bytes).hexdigest()
         
         assert evsm_hash != msm_hash, f"EVSM and MSM produced identical output: {evsm_hash}"
+
+
+def _viewer_gpu_available() -> bool:
+    try:
+        import forge3d as f3d
+        return bool(f3d.has_gpu())
+    except Exception:
+        return False
+
+
+def _pyramid_dem(path: Path, n: int = 512, pix: float = 20.0) -> Path:
+    """Flat plain with one tall isolated pyramid -> guaranteed long cast shadow."""
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    yy, xx = np.mgrid[0:n, 0:n].astype(np.float32)
+    c = n * 0.35
+    r = np.maximum(np.abs(xx - c), np.abs(yy - c))
+    dem = (np.clip(1.0 - r / (n * 0.12), 0.0, 1.0) * 900.0).astype(np.float32)
+    with rasterio.open(
+        path, "w", driver="GTiff", height=n, width=n, count=1, dtype="float32",
+        crs="EPSG:32610", transform=from_bounds(0, 0, n * pix, n * pix, n, n),
+    ) as dst:
+        dst.write(dem, 1)
+    return path
+
+
+@pytest.mark.skipif(not _rasterio_available(), reason="rasterio not installed")
+@pytest.mark.skipif(not _viewer_gpu_available(), reason="no usable GPU adapter")
+@pytest.mark.viewer
+class TestEvsmExposureParity:
+    """EVSM must light the scene like the other techniques, not black it out.
+
+    Regression guard for the EVSM moment pipeline: the moment atlas is
+    Rgba16Float, so exp(c * depth) with c=40 overflows to +Inf (and exp(-40*d)
+    flushes to zero), which made every EVSM fragment resolve to ~0 visibility.
+    The negative lobe must also be stored negated so its Chebyshev bound is
+    monotonically increasing, otherwise EVSM reports "lit" everywhere instead.
+    """
+
+    HDR = Path("assets/hdri/snow_field_1k.hdr")
+
+    def _render(self, viewer, technique: str, out: Path) -> np.ndarray:
+        import time
+        viewer.send_ipc({
+            "cmd": "set_terrain", "phi": 90.0, "theta": 55.0, "fov": 30.0,
+            "radius": 18000.0, "zscale": 1.0, "sun_azimuth": 270.0,
+            "sun_elevation": 8.0, "sun_intensity": 2.0, "ambient": 0.15,
+            "shadow": 1.0, "background": [1.0, 1.0, 1.0],
+        })
+        viewer.send_ipc({
+            "cmd": "set_terrain_pbr", "enabled": True, "shadow_technique": technique,
+            "shadow_map_res": 2048, "exposure": 1.0, "msaa": 1,
+            "ibl_intensity": 0.02, "hdr_path": str(self.HDR.resolve()),
+        })
+        time.sleep(1.0)
+        viewer.snapshot(str(out), width=640, height=400)
+        from PIL import Image
+        img = np.asarray(Image.open(out).convert("RGB"), dtype=np.float32) / 255.0
+        return 0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]
+
+    @pytest.mark.skipif(not HDR.exists(), reason="HDR asset not available")
+    def test_evsm_is_not_black(self, tmp_path: Path):
+        import forge3d as f3d
+
+        dem = _pyramid_dem(tmp_path / "pyramid.tif")
+        with f3d.open_viewer_async(terrain_path=str(dem), width=640, height=400,
+                                   timeout=45.0) as viewer:
+            lum = {t: self._render(viewer, t, tmp_path / f"{t}.png")
+                   for t in ("pcf", "evsm")}
+
+        means = {}
+        for tech, l in lum.items():
+            terrain = l < 0.97  # exclude the white background
+            assert terrain.any(), f"{tech}: no terrain pixels found"
+            means[tech] = float(l[terrain].mean())
+
+        # EVSM must not be globally darker than PCF by more than 20%.
+        assert means["evsm"] >= means["pcf"] * 0.8, (
+            f"EVSM is broken-dark: terrain mean {means['evsm']:.3f} vs "
+            f"PCF {means['pcf']:.3f}"
+        )
+
+        # ...and it must still cast a real shadow (some pixels clearly darker
+        # than the lit plain), not just return "fully lit" everywhere.
+        terrain = lum["evsm"] < 0.97
+        vals = lum["evsm"][terrain]
+        shadowed = float((vals < np.percentile(vals, 95) * 0.6).mean())
+        assert shadowed >= 0.01, (
+            f"EVSM casts no shadow: only {shadowed:.4f} of terrain is shadowed"
+        )

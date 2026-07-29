@@ -165,12 +165,13 @@ impl MomentGenerationPass {
         evsm_positive_exp: f32,
         evsm_negative_exp: f32,
     ) {
-        // Update parameters
+        // Update parameters. Exponents are clamped to what the Rgba16Float moment
+        // atlas can hold; the sampling side clamps identically.
         let params = MomentGenParams {
             technique: technique.as_u32(),
             cascade_count,
-            evsm_positive_exp,
-            evsm_negative_exp,
+            evsm_positive_exp: super::clamp_evsm_exponent(evsm_positive_exp),
+            evsm_negative_exp: super::clamp_evsm_exponent(evsm_negative_exp),
             shadow_map_size,
             _padding0: 0,
             _padding1: 0,

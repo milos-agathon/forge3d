@@ -121,8 +121,12 @@ impl CsmRenderer {
         self.uniforms.slope_bias = self.config.slope_bias;
         self.uniforms.shadow_map_size = self.config.shadow_map_size as f32;
         self.uniforms.debug_mode = self.config.debug_mode;
-        self.uniforms.evsm_positive_exp = self.config.evsm_positive_exp;
-        self.uniforms.evsm_negative_exp = self.config.evsm_negative_exp;
+        // Must match the clamp applied by MomentGenerationPass::execute, or the
+        // sampler would warp by a different constant than the stored moments.
+        self.uniforms.evsm_positive_exp =
+            crate::shadows::clamp_evsm_exponent(self.config.evsm_positive_exp);
+        self.uniforms.evsm_negative_exp =
+            crate::shadows::clamp_evsm_exponent(self.config.evsm_negative_exp);
         self.uniforms.peter_panning_offset = self.config.peter_panning_offset;
         self.uniforms.cascade_blend_range = self.config.cascade_blend_range;
     }

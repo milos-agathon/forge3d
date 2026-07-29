@@ -366,9 +366,10 @@ fn sample_shadow_evsm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx
     let c_pos = csm_uniforms.evsm_positive_exp;
     let c_neg = csm_uniforms.evsm_negative_exp;
     
-    // Warp receiver depth
+    // Warp receiver depth. The negative lobe is negated to match the moment
+    // atlas (moment_generation.wgsl) so both warps increase with depth.
     let warp_depth_pos = exp(c_pos * receiver_depth);
-    let warp_depth_neg = exp(-c_neg * receiver_depth);
+    let warp_depth_neg = -exp(-c_neg * receiver_depth);
     
     // Positive warp moments
     let pos_mean = moments.r;

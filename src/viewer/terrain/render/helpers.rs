@@ -437,8 +437,8 @@ impl ViewerTerrainScene {
             u.depth_bias = 0.005;
             u.slope_bias = 0.01;
             u.peter_panning_offset = 0.001;
-            u.evsm_positive_exp = 40.0;
-            u.evsm_negative_exp = 5.0;
+            u.evsm_positive_exp = crate::shadows::EVSM_MAX_EXPONENT_RGBA16F;
+            u.evsm_negative_exp = crate::shadows::EVSM_MAX_EXPONENT_RGBA16F;
             u.technique_params = [0.0, 0.0, 0.0005, 1.0];
             u.debug_mode = debug_mode; // P6.2: Debug visualization from pbr_config
 
