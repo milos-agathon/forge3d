@@ -18,7 +18,7 @@ pub use cascade_math::detect_peter_panning;
 pub use csm_renderer::CsmRenderer;
 pub use csm_types::{CascadeStatistics, CsmConfig, CsmUniforms, ShadowCascade};
 
-pub use blur_pass::ShadowBlurPass;
+pub use blur_pass::{ShadowBlurPass, DEFAULT_MOMENT_BLUR_RADIUS};
 pub use manager::{ShadowManager, ShadowManagerConfig};
 pub(crate) use manager::{
     DEFAULT_PCSS_BLOCKER_RADIUS_TEXELS, DEFAULT_PCSS_FILTER_RADIUS_TEXELS, DEFAULT_PCSS_LIGHT_SIZE,
@@ -50,6 +50,13 @@ pub const EVSM_MAX_EXPONENT_RGBA16F: f32 = 5.54;
 /// uniforms that sample it: producer and consumer have to warp by the same constant.
 pub fn clamp_evsm_exponent(exponent: f32) -> f32 {
     exponent.clamp(0.0, EVSM_MAX_EXPONENT_RGBA16F)
+}
+
+pub(crate) fn requires_moment_blur(technique: crate::lighting::types::ShadowTechnique) -> bool {
+    matches!(
+        technique,
+        crate::lighting::types::ShadowTechnique::VSM | crate::lighting::types::ShadowTechnique::MSM
+    )
 }
 
 #[cfg(test)]
@@ -158,11 +165,11 @@ visibility_output[0] = chebyshev_upper_bound_visibility(0.5, 0.01, 0.25);
 visibility_output[1] = chebyshev_upper_bound_visibility(0.5, 0.01, 0.6);
 let moments = vec4<f32>(0.5, 0.26, -0.5, 0.26);
 visibility_output[2] =
-    evsm_visibility_from_moments(moments, 0.25, -0.4, 0.0001);
+    evsm_visibility_from_moments(moments, 0.25, -0.4, vec2<f32>(0.0001));
 visibility_output[3] =
-    evsm_visibility_from_moments(moments, 0.6, -0.75, 0.0001);
+    evsm_visibility_from_moments(moments, 0.6, -0.75, vec2<f32>(0.0001));
 visibility_output[4] =
-    evsm_visibility_from_moments(moments, 0.25, -0.75, 0.0001);";
+    evsm_visibility_from_moments(moments, 0.25, -0.75, vec2<f32>(0.0001));";
         let [front, behind, positive_front, negative_front, both_front] =
             execute_shader_probe(source, "EVSM visibility", probe);
         assert_eq!(front, 1.0, "front-of-mean receiver must be lit");
@@ -179,6 +186,31 @@ visibility_output[4] =
             "the negative lobe's lit shortcut masked the positive lobe"
         );
         assert_eq!(both_front, 1.0, "both front-of-mean lobes must be lit");
+    }
+
+    #[test]
+    fn shared_evsm_minimum_variance_scales_each_warp_derivative() {
+        let source = include_str!("../shaders/includes/shadow_moments.wgsl");
+        let probe = "
+let minimum = evsm_minimum_variance(
+    vec2<f32>(2.0, -0.5),
+    vec2<f32>(4.0, 4.0)
+);
+visibility_output[0] = minimum.x;
+visibility_output[1] = minimum.y;";
+        let [positive, negative, ..] = execute_shader_probe(source, "EVSM minimum variance", probe);
+        assert!((positive - 0.000009).abs() < 1.0e-8);
+        assert!((negative - 0.0000005625).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn spatial_moment_blur_excludes_evsm_light_bleeding() {
+        use crate::lighting::types::ShadowTechnique;
+
+        assert!(requires_moment_blur(ShadowTechnique::VSM));
+        assert!(requires_moment_blur(ShadowTechnique::MSM));
+        assert!(!requires_moment_blur(ShadowTechnique::EVSM));
+        assert!(!requires_moment_blur(ShadowTechnique::PCF));
     }
 
     #[test]

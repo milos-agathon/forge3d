@@ -458,7 +458,9 @@ class TestEvsmExposureParity:
     monotonically increasing, otherwise EVSM reports "lit" everywhere instead.
     """
 
-    def _render(self, viewer, technique: str, out: Path) -> np.ndarray:
+    def _render(
+        self, viewer, technique: str, out: Path, *, debug_mode: int = 0
+    ) -> np.ndarray:
         import time
         viewer.send_ipc({
             "cmd": "set_terrain", "phi": 90.0, "theta": 55.0, "fov": 30.0,
@@ -469,7 +471,7 @@ class TestEvsmExposureParity:
         viewer.send_ipc({
             "cmd": "set_terrain_pbr", "enabled": True, "shadow_technique": technique,
             "shadow_map_res": 2048, "exposure": 1.0, "msaa": 1,
-            "ibl_intensity": 0.0,
+            "ibl_intensity": 0.0, "debug_mode": debug_mode,
         })
         time.sleep(1.0)
         viewer.snapshot(str(out), width=640, height=400)
@@ -507,6 +509,47 @@ class TestEvsmExposureParity:
             f"EVSM casts no shadow: only {shadowed:.4f} of terrain is shadowed"
         )
 
+    def test_evsm_banding_is_bounded_in_raw_visibility(self, tmp_path: Path):
+        import forge3d as f3d
+
+        dem = _pyramid_dem(tmp_path / "pyramid.tif")
+        with f3d.open_viewer_async(
+            terrain_path=str(dem), width=640, height=400, timeout=45.0
+        ) as viewer:
+            visibility = {
+                technique: self._render(
+                    viewer,
+                    technique,
+                    tmp_path / f"{technique}_raw.png",
+                    debug_mode=35,
+                )
+                for technique in ("pcf", "evsm")
+            }
+
+        cast = visibility["pcf"] < 0.6
+        radius = 3
+        neighborhoods = np.lib.stride_tricks.sliding_window_view(
+            np.pad(cast, radius), (2 * radius + 1, 2 * radius + 1)
+        )
+        cast_core = neighborhoods.all(axis=(-2, -1))
+        assert cast_core.sum() >= 500, "PCF cast shadow has no measurable interior"
+
+        evsm = visibility["evsm"]
+        horizontal_pairs = cast_core[:, :-1] & cast_core[:, 1:]
+        vertical_pairs = cast_core[:-1, :] & cast_core[1:, :]
+        jumps = np.concatenate(
+            (
+                np.abs(np.diff(evsm, axis=1))[horizontal_pairs],
+                np.abs(np.diff(evsm, axis=0))[vertical_pairs],
+            )
+        )
+        discontinuity_fraction = float((jumps > 0.2).mean())
+        print(f"EVSM raw-visibility discontinuity fraction={discontinuity_fraction:.6f}")
+        assert discontinuity_fraction <= 0.05, (
+            "EVSM raw visibility contains alternating shadow bands: "
+            f"{discontinuity_fraction:.4f} adjacent interior pairs jump by >0.2"
+        )
+
 
 def _native_terrain_gpu_available() -> bool:
     try:
@@ -529,7 +572,7 @@ def _native_pyramid_heightmap(size: int = 128) -> np.ndarray:
     reason="no terrain-capable hardware-backed forge3d runtime",
 )
 @pytest.mark.offscreen
-def test_native_moment_visibility_semantics_pcss_transition_width_and_msm_uses_four_moments(
+def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """Native MSM uses four moments, moment filters stay visible, and PCSS widens."""

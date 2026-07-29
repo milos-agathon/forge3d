@@ -371,9 +371,18 @@ fn sample_shadow_evsm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx
     // atlas (moment_generation.wgsl) so both warps increase with depth.
     let warp_depth_pos = exp(c_pos * receiver_depth);
     let warp_depth_neg = -exp(-c_neg * receiver_depth);
+    let variance_floor = evsm_minimum_variance(
+        vec2<f32>(warp_depth_pos, warp_depth_neg),
+        vec2<f32>(c_pos, c_neg)
+    );
     
     return clamp(
-        evsm_visibility_from_moments(moments, warp_depth_pos, warp_depth_neg, moment_bias),
+        evsm_visibility_from_moments(
+            moments,
+            warp_depth_pos,
+            warp_depth_neg,
+            variance_floor
+        ),
         0.0,
         1.0
     );

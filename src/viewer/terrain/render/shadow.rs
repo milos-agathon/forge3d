@@ -144,6 +144,32 @@ impl ViewerTerrainScene {
                     csm.config.evsm_positive_exp,
                     csm.config.evsm_negative_exp,
                 );
+
+                if crate::shadows::requires_moment_blur(technique) {
+                    let Some(ref mut blur_pass) = self.moment_blur_pass else {
+                        return;
+                    };
+                    let moment_sample_view = csm
+                        .moment_texture_view()
+                        .expect("moment texture exists for moment techniques");
+                    if let Err(e) = blur_pass.execute(
+                        &self.device,
+                        &self.queue,
+                        encoder,
+                        &moment_sample_view,
+                        moment_texture,
+                        cascade_count,
+                        shadow_map_size,
+                        crate::shadows::DEFAULT_MOMENT_BLUR_RADIUS,
+                    ) {
+                        eprintln!("[terrain_scene] failed to blur moment maps: {e}");
+                        crate::core::degradation::record_degradation(
+                            "allocation_fallback",
+                            "viewer.csm_moment_blur",
+                            "VSM/MSM moment-map filtering unavailable",
+                        );
+                    }
+                }
             }
         }
     }

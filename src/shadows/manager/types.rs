@@ -35,7 +35,7 @@ impl Default for ShadowManagerConfig {
             pcss_filter_radius: DEFAULT_PCSS_FILTER_RADIUS_TEXELS,
             light_size: DEFAULT_PCSS_LIGHT_SIZE,
             moment_bias: 0.0005,
-            blur_kernel_radius: 3, // P0.2/M3: Default blur radius for VSM/EVSM/MSM
+            blur_kernel_radius: super::super::DEFAULT_MOMENT_BLUR_RADIUS,
             max_memory_bytes: DEFAULT_MEMORY_BUDGET_BYTES,
         }
     }

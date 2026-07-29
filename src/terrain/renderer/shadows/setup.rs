@@ -130,6 +130,7 @@ impl TerrainScene {
             technique_enum,
             ShadowTechnique::VSM | ShadowTechnique::EVSM | ShadowTechnique::MSM
         );
+        let requires_moment_blur = crate::shadows::requires_moment_blur(technique_enum);
         if requires_moments && self.moment_pass.is_none() {
             self.moment_pass = Some(crate::shadows::MomentGenerationPass::new(&self.device)?);
             log::info!(
@@ -137,7 +138,14 @@ impl TerrainScene {
                 "Created moment generation pass for technique: {:?}",
                 technique_enum
             );
-        } else if !requires_moments && self.moment_pass.is_some() {
+        }
+        if requires_moment_blur && self.moment_blur_pass.is_none() {
+            self.moment_blur_pass = Some(crate::shadows::ShadowBlurPass::new(&self.device)?);
+        }
+        if !requires_moment_blur {
+            self.moment_blur_pass = None;
+        }
+        if !requires_moments && self.moment_pass.is_some() {
             self.moment_pass = None;
             log::info!(target: "terrain.shadow", "Removed moment generation pass");
         }
@@ -213,6 +221,22 @@ impl TerrainScene {
                         self.csm_renderer.uniforms.evsm_positive_exp,
                         self.csm_renderer.uniforms.evsm_negative_exp,
                     );
+                    if let Some(ref mut blur_pass) = self.moment_blur_pass {
+                        let moment_sample_view = self
+                            .csm_renderer
+                            .moment_texture_view()
+                            .expect("moment texture exists for moment techniques");
+                        blur_pass.execute(
+                            &self.device,
+                            &self.queue,
+                            encoder,
+                            &moment_sample_view,
+                            moment_texture,
+                            self.csm_renderer.config.cascade_count,
+                            self.csm_renderer.config.shadow_map_size,
+                            crate::shadows::DEFAULT_MOMENT_BLUR_RADIUS,
+                        )?;
+                    }
                     log::debug!(
                         target: "terrain.shadow",
                         "Executed moment generation pass for technique {} with {} cascades",

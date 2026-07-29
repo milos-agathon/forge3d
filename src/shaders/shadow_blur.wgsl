@@ -14,28 +14,22 @@ struct BlurParams {
     _padding: vec3<u32>,
 }
 
-// Gaussian weights for radius 4 (9-tap kernel)
-// sigma = radius / 2 for good quality
-const GAUSSIAN_WEIGHTS_9: array<f32, 5> = array<f32, 5>(
-    0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216
-);
-
-// Gaussian weights for radius 2 (5-tap kernel)
-const GAUSSIAN_WEIGHTS_5: array<f32, 3> = array<f32, 3>(
-    0.375, 0.25, 0.0625
-);
-
 fn get_gaussian_weight(offset: u32, radius: u32) -> f32 {
     if (radius <= 2u) {
-        if (offset < 3u) {
-            return GAUSSIAN_WEIGHTS_5[offset];
+        switch offset {
+            case 0u: { return 0.375; }
+            case 1u: { return 0.25; }
+            case 2u: { return 0.0625; }
+            default: { return 0.0; }
         }
-        return 0.0;
-    } else {
-        if (offset < 5u) {
-            return GAUSSIAN_WEIGHTS_9[offset];
-        }
-        return 0.0;
+    }
+    switch offset {
+        case 0u: { return 0.227027; }
+        case 1u: { return 0.1945946; }
+        case 2u: { return 0.1216216; }
+        case 3u: { return 0.054054; }
+        case 4u: { return 0.016216; }
+        default: { return 0.0; }
     }
 }
 

@@ -136,6 +136,7 @@ impl ViewerTerrainScene {
         self.csm_renderer = None;
         self.csm_uniform_buffer = None;
         self.moment_pass = None;
+        self.moment_blur_pass = None;
 
         // Create CSM renderer using the active PBR shadow resolution instead of
         // a hard-coded fallback so terrain shadows remain spatially stable at
@@ -209,6 +210,18 @@ impl ViewerTerrainScene {
                     "allocation_fallback",
                     "viewer.csm_moment",
                     "VSM/EVSM/MSM moment maps unavailable; shadows fall back to hard PCF",
+                );
+                None
+            }
+        };
+        self.moment_blur_pass = match crate::shadows::ShadowBlurPass::new(&self.device) {
+            Ok(pass) => Some(pass),
+            Err(e) => {
+                eprintln!("[terrain_scene] failed to create moment blur pass: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.csm_moment_blur",
+                    "VSM/MSM moment-map filtering unavailable",
                 );
                 None
             }

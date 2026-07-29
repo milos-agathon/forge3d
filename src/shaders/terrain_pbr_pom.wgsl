@@ -978,10 +978,19 @@ fn sample_shadow_evsm_terrain(
     // Warp receiver depth
     let warp_depth_pos = det_exp(c_pos * receiver_depth);
     let warp_depth_neg = -det_exp(-c_neg * receiver_depth);
+    let variance_floor = evsm_minimum_variance(
+        vec2<f32>(warp_depth_pos, warp_depth_neg),
+        vec2<f32>(c_pos, c_neg)
+    );
     
     // Apply each lobe's front-of-mean shortcut independently, then combine.
     var shadow_factor =
-        evsm_visibility_from_moments(moments, warp_depth_pos, warp_depth_neg, 0.0001);
+        evsm_visibility_from_moments(
+            moments,
+            warp_depth_pos,
+            warp_depth_neg,
+            variance_floor
+        );
     
     // Apply light leak reduction
     if (moment_bias > 0.0) {

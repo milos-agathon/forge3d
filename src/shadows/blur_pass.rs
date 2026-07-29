@@ -16,6 +16,8 @@ use wgpu::{
     TextureViewDescriptor, TextureViewDimension,
 };
 
+pub const DEFAULT_MOMENT_BLUR_RADIUS: u32 = 3;
+
 /// Parameters for shadow blur pass
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -24,14 +26,14 @@ struct BlurParams {
     kernel_radius: u32,
     cascade_count: u32,
     texture_size: u32,
-    _padding: [u32; 3],
+    _padding: [u32; 7],
 }
 
 /// Shadow blur pass for VSM/EVSM/MSM moment maps
 pub struct ShadowBlurPass {
     pipeline: ComputePipeline,
     bind_group_layout: BindGroupLayout,
-    params_buffer: TrackedBuffer,
+    params_buffers: [TrackedBuffer; 2],
     // Intermediate texture for two-pass blur
     intermediate_texture: Option<TrackedTexture>,
     intermediate_view: Option<TextureView>,
@@ -103,20 +105,26 @@ impl ShadowBlurPass {
             },
         );
 
-        let params_buffer = tracked_create_buffer(
-            device,
-            &BufferDescriptor {
-                label: Some("shadow_blur_params"),
-                size: std::mem::size_of::<BlurParams>() as u64,
-                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            },
-        )?;
+        let create_params_buffer = |label| {
+            tracked_create_buffer(
+                device,
+                &BufferDescriptor {
+                    label: Some(label),
+                    size: std::mem::size_of::<BlurParams>() as u64,
+                    usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )
+        };
+        let params_buffers = [
+            create_params_buffer("shadow_blur_horizontal_params")?,
+            create_params_buffer("shadow_blur_vertical_params")?,
+        ];
 
         Ok(Self {
             pipeline,
             bind_group_layout,
-            params_buffer,
+            params_buffers,
             intermediate_texture: None,
             intermediate_view: None,
             current_size: 0,
@@ -196,6 +204,7 @@ impl ShadowBlurPass {
             moment_view,
             intermediate_view,
             [1.0, 0.0], // Horizontal
+            &self.params_buffers[0],
             kernel_radius,
             cascade_count,
             shadow_map_size,
@@ -222,6 +231,7 @@ impl ShadowBlurPass {
             intermediate_view,
             &output_view,
             [0.0, 1.0], // Vertical
+            &self.params_buffers[1],
             kernel_radius,
             cascade_count,
             shadow_map_size,
@@ -239,6 +249,7 @@ impl ShadowBlurPass {
         input_view: &TextureView,
         output_view: &TextureView,
         direction: [f32; 2],
+        params_buffer: &TrackedBuffer,
         kernel_radius: u32,
         cascade_count: u32,
         texture_size: u32,
@@ -250,9 +261,9 @@ impl ShadowBlurPass {
             kernel_radius,
             cascade_count,
             texture_size,
-            _padding: [0; 3],
+            _padding: [0; 7],
         };
-        queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[params]));
+        queue.write_buffer(params_buffer, 0, bytemuck::cast_slice(&[params]));
 
         // Create bind group
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
@@ -269,7 +280,7 @@ impl ShadowBlurPass {
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: self.params_buffer.as_entire_binding(),
+                    resource: params_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -298,8 +309,161 @@ mod tests {
     fn test_blur_params_size() {
         assert_eq!(
             std::mem::size_of::<BlurParams>(),
-            32,
-            "BlurParams must be 32 bytes (aligned for GPU)"
+            48,
+            "BlurParams must match WGSL's 48-byte uniform layout"
+        );
+    }
+
+    #[test]
+    fn intermediate_texture_is_cached_and_resized_with_the_atlas() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let mut blur = ShadowBlurPass::new(device).expect("blur pass");
+
+        blur.ensure_intermediate_texture(device, 9, 1)
+            .expect("initial intermediate");
+        let initial_id = blur
+            .intermediate_texture
+            .as_ref()
+            .expect("intermediate texture")
+            .ledger_id();
+
+        blur.ensure_intermediate_texture(device, 9, 1)
+            .expect("cached intermediate");
+        assert_eq!(
+            blur.intermediate_texture
+                .as_ref()
+                .expect("intermediate texture")
+                .ledger_id(),
+            initial_id,
+            "unchanged atlas dimensions must reuse the intermediate texture"
+        );
+
+        blur.ensure_intermediate_texture(device, 13, 2)
+            .expect("resized intermediate");
+        assert_ne!(
+            blur.intermediate_texture
+                .as_ref()
+                .expect("intermediate texture")
+                .ledger_id(),
+            initial_id,
+            "atlas resize must recreate the intermediate texture"
+        );
+        assert_eq!((blur.current_size, blur.current_cascades), (13, 2));
+    }
+
+    #[test]
+    fn separable_blur_filters_both_axes() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let queue = &context.queue;
+        let format_features = context
+            .adapter
+            .get_texture_format_features(TextureFormat::Rgba16Float);
+        assert!(
+            format_features
+                .allowed_usages
+                .contains(TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING),
+            "adapter cannot sample and storage-write Rgba16Float"
+        );
+
+        let size = 9u32;
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("shadow_blur_test_moments"),
+                size: Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::STORAGE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+        )
+        .expect("moment texture");
+        let view = texture.create_view(&TextureViewDescriptor {
+            dimension: Some(TextureViewDimension::D2Array),
+            array_layer_count: Some(1),
+            ..Default::default()
+        });
+
+        let mut values = vec![0.0f32; (size * size * 4) as usize];
+        let center = ((size / 2 * size + size / 2) * 4) as usize;
+        values[center..center + 4].fill(1.0);
+        let bytes = values
+            .into_iter()
+            .flat_map(|value| half::f16::from_f32(value).to_le_bytes())
+            .collect::<Vec<_>>();
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &bytes,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(size * 8),
+                rows_per_image: Some(size),
+            },
+            Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut blur = ShadowBlurPass::new(device).expect("blur pass");
+        device.poll(wgpu::Maintain::Wait);
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            panic!("blur pipeline raised a GPU validation error: {error}");
+        }
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("shadow_blur_test"),
+        });
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        blur.execute(device, queue, &mut encoder, &view, &texture, 1, size, 2)
+            .expect("blur execute");
+        queue.submit(Some(encoder.finish()));
+        device.poll(wgpu::Maintain::Wait);
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            panic!("blur dispatch raised a GPU validation error: {error}");
+        }
+
+        let output = crate::core::hdr::read_hdr_texture(
+            device,
+            queue,
+            &texture,
+            size,
+            size,
+            TextureFormat::Rgba16Float,
+        )
+        .expect("read blurred moments");
+        let sample = |x: u32, y: u32| output[((y * size + x) * 4) as usize];
+        let center_value = sample(size / 2, size / 2);
+        let horizontal = sample(size / 2 + 1, size / 2);
+        let vertical = sample(size / 2, size / 2 + 1);
+        println!(
+            "blur impulse center={center_value}, horizontal={horizontal}, vertical={vertical}"
+        );
+        assert!(
+            horizontal > 0.08,
+            "horizontal pass was not applied: {horizontal}"
+        );
+        assert!(vertical > 0.08, "vertical pass was not applied: {vertical}");
+        assert!(
+            (horizontal - vertical).abs() < 0.01,
+            "separable blur is anisotropic: horizontal={horizontal}, vertical={vertical}"
         );
     }
 }

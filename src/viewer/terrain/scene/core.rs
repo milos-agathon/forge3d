@@ -188,6 +188,7 @@ impl ViewerTerrainScene {
             wboit_size: (0, 0),
             csm_renderer: None,
             moment_pass: None,
+            moment_blur_pass: None,
             csm_uniform_buffer: None,
             shadow_pipeline: None,
             shadow_uniform_buffers: Vec::new(),

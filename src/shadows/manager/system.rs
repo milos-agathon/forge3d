@@ -20,7 +20,7 @@ pub struct ShadowManager {
     moment_sampler: Sampler,
     fallback_moment_texture: Option<TrackedTexture>,
     moment_pass: Option<MomentGenerationPass>,
-    /// P0.2/M3: Blur pass for VSM/EVSM/MSM soft shadows
+    /// P0.2/M3: Blur pass for VSM/MSM soft shadows
     blur_pass: Option<ShadowBlurPass>,
     requires_moments: bool,
     memory_bytes: u64,
@@ -66,8 +66,9 @@ impl ShadowManager {
             None
         };
 
-        // P0.2/M3: Create blur pass for VSM/EVSM/MSM soft shadows
-        let blur_pass = if requires_moments {
+        // Spatial EVSM blur is intentionally excluded: with the fp16-safe
+        // exponent it turns narrow cast shadows into light bleeding.
+        let blur_pass = if super::super::requires_moment_blur(config.technique) {
             Some(ShadowBlurPass::new(device)?)
         } else {
             None
@@ -340,7 +341,8 @@ impl ShadowManager {
             self.config.csm.evsm_negative_exp,
         );
 
-        // P0.2/M3: Apply Gaussian blur to moment maps for soft shadows
+        // P0.2/M3: Apply Gaussian blur to VSM/MSM moment maps. EVSM uses
+        // derivative-scaled variance floors instead to avoid light bleeding.
         if let Some(blur_pass) = &mut self.blur_pass {
             let moment_sample_view = self.renderer.moment_texture_view().unwrap();
             blur_pass.execute(

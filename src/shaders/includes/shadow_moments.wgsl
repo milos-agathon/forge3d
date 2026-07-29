@@ -2,6 +2,7 @@
 const MSM_FINITE_LIMIT: f32 = 1e20;
 const MSM_MATRIX_EPSILON: f32 = 1e-7;
 const MSM_DETERMINANT_EPSILON: f32 = 1e-12;
+const EVSM_MINIMUM_VARIANCE: f32 = 0.000375;
 
 fn chebyshev_upper_bound_visibility(mean: f32, variance: f32, receiver: f32) -> f32 {
     if (receiver <= mean) {
@@ -11,16 +12,25 @@ fn chebyshev_upper_bound_visibility(mean: f32, variance: f32, receiver: f32) -> 
     return variance / (variance + delta * delta);
 }
 
+fn evsm_minimum_variance(
+    warped_receiver: vec2<f32>,
+    exponents: vec2<f32>
+) -> vec2<f32> {
+    let depth_scale =
+        EVSM_MINIMUM_VARIANCE * exponents * abs(warped_receiver);
+    return depth_scale * depth_scale;
+}
+
 fn evsm_visibility_from_moments(
     moments: vec4<f32>,
     positive_receiver: f32,
     negative_receiver: f32,
-    variance_floor: f32
+    variance_floor: vec2<f32>
 ) -> f32 {
     let positive_variance =
-        max(moments.g - moments.r * moments.r, variance_floor);
+        max(moments.g - moments.r * moments.r, variance_floor.x);
     let negative_variance =
-        max(moments.a - moments.b * moments.b, variance_floor);
+        max(moments.a - moments.b * moments.b, variance_floor.y);
     let positive_visibility =
         chebyshev_upper_bound_visibility(moments.r, positive_variance, positive_receiver);
     let negative_visibility =
