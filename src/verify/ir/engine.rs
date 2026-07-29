@@ -1574,7 +1574,7 @@ impl Evaluator<'_> {
                 | "compute_triplanar_weights"
                 | "normalize_for_shadow"
                 | "select_cascade_terrain"
-                | "chebyshev_upper_bound_terrain"
+                | "chebyshev_upper_bound_visibility"
                 | "reduce_light_leak_terrain"
                 | "sample_shadow_evsm_terrain"
                 | "sample_shadow_pcf_terrain"

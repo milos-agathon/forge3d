@@ -393,8 +393,6 @@ class TestEvsmExposureParity:
     monotonically increasing, otherwise EVSM reports "lit" everywhere instead.
     """
 
-    HDR = Path("assets/hdri/snow_field_1k.hdr")
-
     def _render(self, viewer, technique: str, out: Path) -> np.ndarray:
         import time
         viewer.send_ipc({
@@ -406,7 +404,7 @@ class TestEvsmExposureParity:
         viewer.send_ipc({
             "cmd": "set_terrain_pbr", "enabled": True, "shadow_technique": technique,
             "shadow_map_res": 2048, "exposure": 1.0, "msaa": 1,
-            "ibl_intensity": 0.02, "hdr_path": str(self.HDR.resolve()),
+            "ibl_intensity": 0.0,
         })
         time.sleep(1.0)
         viewer.snapshot(str(out), width=640, height=400)
@@ -414,7 +412,6 @@ class TestEvsmExposureParity:
         img = np.asarray(Image.open(out).convert("RGB"), dtype=np.float32) / 255.0
         return 0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]
 
-    @pytest.mark.skipif(not HDR.exists(), reason="HDR asset not available")
     def test_evsm_is_not_black(self, tmp_path: Path):
         import forge3d as f3d
 

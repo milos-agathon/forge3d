@@ -412,21 +412,6 @@ fn sample_shadow_pcss(
     return shadow_factor / sample_count;
 }
 
-// Chebyshev inequality for shadow probability estimation
-// Given moments (mean, variance), estimate probability that depth <= t
-fn chebyshev_upper_bound(mean: f32, variance: f32, t: f32) -> f32 {
-    // If receiver is closer than mean blocker depth, it's in shadow
-    if (t <= mean) {
-        return 0.0;
-    }
-    
-    // Chebyshev inequality: P(x >= t) <= variance / (variance + (t - mean)^2)
-    let d = t - mean;
-    let p_max = variance / (variance + d * d);
-    
-    return p_max;
-}
-
 // Light leak reduction: reduce shadow factor near light sources
 fn reduce_light_leak(shadow_factor: f32, amount: f32) -> f32 {
     // amount is typically moment_bias (technique_params[2])
@@ -466,16 +451,16 @@ fn sample_shadow_vsm(
     let mean = moments.r;      // E[x]
     let mean_sq = moments.g;   // E[x^2]
     
-    // If receiver is closer than mean, it's definitely in shadow
+    // If receiver is closer than mean, it is definitely lit.
     if (receiver_depth <= mean) {
-        return 0.0;
+        return 1.0;
     }
     
     // Calculate variance: Var(x) = E[x^2] - E[x]^2
     let variance = max(mean_sq - mean * mean, 0.0001); // Clamp to avoid division by zero
     
     // Apply Chebyshev inequality
-    var shadow_factor = chebyshev_upper_bound(mean, variance, receiver_depth);
+    var shadow_factor = chebyshev_upper_bound_visibility(mean, variance, receiver_depth);
     
     // Apply light leak reduction
     let moment_bias = csm_uniforms.technique_params.z;
@@ -524,22 +509,9 @@ fn sample_shadow_evsm(
     let warp_depth_pos = exp(c_pos * receiver_depth);
     let warp_depth_neg = -exp(-c_neg * receiver_depth);
     
-    // Positive exponent (moments.rg): E[exp(c * x)], E[exp(c * x)^2]
-    let mean_pos = moments.r;
-    let mean_sq_pos = moments.g;
-    let variance_pos = max(mean_sq_pos - mean_pos * mean_pos, 0.0001);
-    
-    // Negative exponent (moments.ba): E[exp(-c * x)], E[exp(-c * x)^2]
-    let mean_neg = moments.b;
-    let mean_sq_neg = moments.a;
-    let variance_neg = max(mean_sq_neg - mean_neg * mean_neg, 0.0001);
-    
-    // Apply Chebyshev to both warped distributions
-    let shadow_pos = chebyshev_upper_bound(mean_pos, variance_pos, warp_depth_pos);
-    let shadow_neg = chebyshev_upper_bound(mean_neg, variance_neg, warp_depth_neg);
-    
-    // Combine both results (geometric mean reduces light leaks)
-    var shadow_factor = min(shadow_pos, shadow_neg);
+    // Apply each lobe's front-of-mean shortcut independently, then combine.
+    var shadow_factor =
+        evsm_visibility_from_moments(moments, warp_depth_pos, warp_depth_neg, 0.0001);
     
     // Apply light leak reduction
     let moment_bias = csm_uniforms.technique_params.z;
@@ -602,7 +574,8 @@ fn sample_shadow_msm(
     let variance = max(b2 - b1 * b1, 0.0001);
     
     // Apply Chebyshev inequality
-    var shadow_factor = chebyshev_upper_bound(mean, variance, receiver_depth);
+    var shadow_factor =
+        chebyshev_upper_bound_visibility(mean, variance, receiver_depth);
     
     // Apply stronger light leak reduction for MSM
     let moment_bias = csm_uniforms.technique_params.z;

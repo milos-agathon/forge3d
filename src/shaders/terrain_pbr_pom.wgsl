@@ -925,16 +925,6 @@ fn select_cascade_terrain(view_depth: f32) -> u32 {
     return count - 1u;
 }
 
-// P0.2/M3: Chebyshev upper bound for moment-based shadow probability estimation
-fn chebyshev_upper_bound_terrain(mean: f32, variance: f32, t: f32) -> f32 {
-    if (t <= mean) {
-        return 0.0;
-    }
-    let d = t - mean;
-    let p_max = variance / (variance + d * d);
-    return p_max;
-}
-
 // P0.2/M3: Light leak reduction for moment-based shadows
 fn reduce_light_leak_terrain(shadow_factor: f32, amount: f32) -> f32 {
     return clamp(shadow_factor - amount, 0.0, 1.0);
@@ -952,16 +942,16 @@ fn sample_shadow_vsm_terrain(
     let mean = moments.r;      // E[x]
     let mean_sq = moments.g;   // E[x^2]
     
-    // If receiver is closer than mean, it's in shadow
+    // If receiver is closer than mean, it is lit.
     if (receiver_depth <= mean) {
-        return 0.0;
+        return 1.0;
     }
     
     // Calculate variance: Var(x) = E[x^2] - E[x]^2
     let variance = max(mean_sq - mean * mean, 0.0001);
     
     // Apply Chebyshev inequality
-    var shadow_factor = chebyshev_upper_bound_terrain(mean, variance, receiver_depth);
+    var shadow_factor = chebyshev_upper_bound_visibility(mean, variance, receiver_depth);
     
     // Apply light leak reduction
     if (moment_bias > 0.0) {
@@ -989,22 +979,9 @@ fn sample_shadow_evsm_terrain(
     let warp_depth_pos = det_exp(c_pos * receiver_depth);
     let warp_depth_neg = -det_exp(-c_neg * receiver_depth);
     
-    // Positive exponent (moments.rg): E[det_exp(c * x)], E[det_exp(c * x)^2]
-    let mean_pos = moments.r;
-    let mean_sq_pos = moments.g;
-    let variance_pos = max(mean_sq_pos - mean_pos * mean_pos, 0.0001);
-    
-    // Negative exponent (moments.ba): E[det_exp(-c * x)], E[det_exp(-c * x)^2]
-    let mean_neg = moments.b;
-    let mean_sq_neg = moments.a;
-    let variance_neg = max(mean_sq_neg - mean_neg * mean_neg, 0.0001);
-    
-    // Apply Chebyshev to both warped distributions
-    let shadow_pos = chebyshev_upper_bound_terrain(mean_pos, variance_pos, warp_depth_pos);
-    let shadow_neg = chebyshev_upper_bound_terrain(mean_neg, variance_neg, warp_depth_neg);
-    
-    // Combine both results (min reduces light leaks)
-    var shadow_factor = min(shadow_pos, shadow_neg);
+    // Apply each lobe's front-of-mean shortcut independently, then combine.
+    var shadow_factor =
+        evsm_visibility_from_moments(moments, warp_depth_pos, warp_depth_neg, 0.0001);
     
     // Apply light leak reduction
     if (moment_bias > 0.0) {
@@ -1041,7 +1018,8 @@ fn sample_shadow_msm_terrain(
     let variance = max(b2 - b1 * b1, 0.0001);
     
     // Apply Chebyshev inequality
-    var shadow_factor = chebyshev_upper_bound_terrain(mean, variance, receiver_depth);
+    var shadow_factor =
+        chebyshev_upper_bound_visibility(mean, variance, receiver_depth);
     
     // Apply stronger light leak reduction for MSM
     if (moment_bias > 0.0) {

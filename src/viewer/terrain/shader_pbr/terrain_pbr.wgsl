@@ -371,26 +371,11 @@ fn sample_shadow_evsm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx
     let warp_depth_pos = exp(c_pos * receiver_depth);
     let warp_depth_neg = -exp(-c_neg * receiver_depth);
     
-    // Positive warp moments
-    let pos_mean = moments.r;
-    let pos_mean_sq = moments.g;
-    let pos_variance = max(pos_mean_sq - pos_mean * pos_mean, moment_bias);
-    let pos_d = warp_depth_pos - pos_mean;
-    let p_max_pos = pos_variance / (pos_variance + pos_d * pos_d);
-    
-    // Negative warp moments
-    let neg_mean = moments.b;
-    let neg_mean_sq = moments.a;
-    let neg_variance = max(neg_mean_sq - neg_mean * neg_mean, moment_bias);
-    let neg_d = warp_depth_neg - neg_mean;
-    let p_max_neg = neg_variance / (neg_variance + neg_d * neg_d);
-    
-    // Combine: take minimum (most shadow)
-    var shadow = min(p_max_pos, p_max_neg);
-    if (warp_depth_pos <= pos_mean) { shadow = max(shadow, 1.0); }
-    if (warp_depth_neg <= neg_mean) { shadow = max(shadow, 1.0); }
-    
-    return clamp(shadow, 0.0, 1.0);
+    return clamp(
+        evsm_visibility_from_moments(moments, warp_depth_pos, warp_depth_neg, moment_bias),
+        0.0,
+        1.0
+    );
 }
 
 // MSM: Moment shadow maps (4 moments)

@@ -22,6 +22,7 @@ pub(crate) fn hybrid_kernel() -> String {
 pub(crate) fn terrain() -> String {
     [
         include_str!("shaders/includes/determinism.wgsl").to_string(),
+        include_str!("shaders/includes/shadow_moments.wgsl").to_string(),
         include_str!("shaders/lights.wgsl").to_string(),
         include_str!("shaders/brdf/common.wgsl").to_string(),
         include_str!("shaders/brdf/lambert.wgsl").to_string(),

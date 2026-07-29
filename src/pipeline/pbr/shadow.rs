@@ -117,14 +117,3 @@ pub enum CsmQualityPreset {
     /// Ultra quality: 4 cascades, 4096px, Poisson PCF + EVSM
     Ultra,
 }
-
-/// Get WGSL source for CSM integration.
-/// csm.wgsl calls the pinned det_* helpers, so the determinism include must
-/// lead any module built from this source.
-pub fn csm_shader_source() -> &'static str {
-    concat!(
-        include_str!("../../shaders/includes/determinism.wgsl"),
-        "\n",
-        include_str!("../../shaders/csm.wgsl")
-    )
-}
