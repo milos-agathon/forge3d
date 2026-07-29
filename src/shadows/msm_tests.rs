@@ -234,6 +234,11 @@ fn live_shared_msm_sampler_consumes_third_and_fourth_moments() {
         expression,
         [0.5, 1.0 / 3.0, 0.25, 0.2],
     )[0];
+    let changed_third_moment = execute_msm_visibility(
+        CsmRenderer::shader_source(),
+        expression,
+        [0.5, 1.0 / 3.0, 0.245, 0.2],
+    )[0];
     let changed_fourth_moment = execute_msm_visibility(
         CsmRenderer::shader_source(),
         expression,
@@ -241,7 +246,11 @@ fn live_shared_msm_sampler_consumes_third_and_fourth_moments() {
     )[0];
 
     assert!(
+        (uniform_distribution - changed_third_moment).abs() >= 0.02,
+        "MSM ignored its third moment: first={uniform_distribution}, changed={changed_third_moment}"
+    );
+    assert!(
         (uniform_distribution - changed_fourth_moment).abs() >= 0.02,
-        "MSM ignored BA: first={uniform_distribution}, changed={changed_fourth_moment}"
+        "MSM ignored its fourth moment: first={uniform_distribution}, changed={changed_fourth_moment}"
     );
 }
