@@ -13,9 +13,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-#[cfg(feature = "cog_streaming")]
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 const MAGIC: &[u8; 8] = b"F3DVT1\0\0";
 /// v2 records the materialization plan in header bytes 80..92 and drops the
@@ -227,6 +225,247 @@ pub trait VirtualTextureStore: Send + Sync {
     fn min_materialized_mip(&self) -> u32 {
         0
     }
+
+    /// Re-derive this store for the atlas tiling the render params ask for.
+    ///
+    /// `Ok(None)` means "already correct, keep using me". A packed file
+    /// commits to its tiling in the header, so the default implementation
+    /// accepts only its own geometry and reports a mismatch here -- the
+    /// earliest and clearest place to catch render params that disagree with
+    /// the store they were handed. An in-RAM ingest (`MemoryPageStore`) has no
+    /// committed tiling and returns a handle over the same shared mip chain,
+    /// sliced the new way.
+    fn rebind_tile_geometry(
+        &self,
+        tile_size: u32,
+        tile_border: u32,
+    ) -> Result<Option<Arc<dyn VirtualTextureStore>>, String> {
+        let metadata = self.metadata();
+        if metadata.tile_size == tile_size && metadata.tile_border == tile_border {
+            return Ok(None);
+        }
+        Err(format!(
+            "VT store is packed with {}-texel tiles (+{} border); the render params ask for {tile_size} (+{tile_border})",
+            metadata.tile_size, metadata.tile_border
+        ))
+    }
+}
+
+/// RGBA8 bytes per texel for an in-RAM ingest. The renderer's material VT is
+/// RGBA8 at its Python boundary; BC encoding happens on the way to the atlas,
+/// not in the store.
+const INGEST_BYTES_PER_PIXEL: usize = 4;
+
+#[derive(Debug)]
+struct MemoryMip {
+    width: u32,
+    height: u32,
+    data: Vec<u8>,
+}
+
+/// In-RAM virtual-texture store over an image handed to the renderer through
+/// `TerrainRenderer.register_material_vt_source`.
+///
+/// TESSELLA spec item 4 requires every VT source to reach the atlas through
+/// `VirtualTextureStore`. A Python entry point necessarily receives an image
+/// rather than a path, so the ingest boundary converts it into a store handle
+/// on the spot: the mip chain is built once, and from that moment the renderer
+/// has exactly one way to obtain a page (`VirtualTextureStore::page`) and no
+/// in-RAM special case. `page` slices the requested tile out of the chosen
+/// level with the border clamp the atlas slot needs -- the work the renderer's
+/// deleted in-RAM tile branch used to do inline.
+///
+/// The tiling is deliberately NOT fixed at ingest: an in-RAM image has no
+/// committed page grid, so `new` records `tile_size == 0` ("unbound") and
+/// `page` refuses to serve until `rebind_tile_geometry` has produced a handle
+/// for the renderer's actual atlas slot size. Rebinding shares the mip chain
+/// through an `Arc`, so it never copies the image.
+pub struct MemoryPageStore {
+    mips: Arc<Vec<MemoryMip>>,
+    metadata: StoreMetadata,
+    content_hash: [u8; 32],
+}
+
+impl MemoryPageStore {
+    /// Ingest an RGBA8 image. `family_count` is the number of families the
+    /// renderer will address through this handle; each registered source owns
+    /// its own store, so pages are keyed by (mip, x, y) and the family axis of
+    /// the key is not part of this store's address space.
+    pub fn new(rgba: &[u8], virtual_size: (u32, u32), family_count: u32) -> Result<Self, String> {
+        if virtual_size.0 == 0 || virtual_size.1 == 0 {
+            return Err("VT ingest virtual size must be > 0 in both dimensions".to_string());
+        }
+        let expected = virtual_size.0 as usize * virtual_size.1 as usize * INGEST_BYTES_PER_PIXEL;
+        if rgba.len() != expected {
+            return Err(format!(
+                "VT ingest size mismatch: expected {expected} RGBA8 bytes for {}x{}, got {}",
+                virtual_size.0,
+                virtual_size.1,
+                rgba.len()
+            ));
+        }
+        Ok(Self {
+            content_hash: sha256(rgba),
+            mips: Arc::new(build_mip_chain(rgba, virtual_size)),
+            metadata: StoreMetadata {
+                virtual_width: u64::from(virtual_size.0),
+                virtual_height: u64::from(virtual_size.1),
+                // Unbound: `rebind_tile_geometry` supplies the renderer's slot
+                // geometry before any page is served.
+                tile_size: 0,
+                tile_border: 0,
+                family_count,
+                procedural: false,
+                procedural_seed: 0,
+            },
+        })
+    }
+
+    fn level(&self, mip: u8) -> &MemoryMip {
+        // The renderer bounds requests by `max_mip_levels`, which can exceed
+        // the number of distinct levels; the 1x1 tail repeats, matching the
+        // chain the deleted `build_rgba_mip_chain` used to pad out.
+        let index = (mip as usize).min(self.mips.len() - 1);
+        &self.mips[index]
+    }
+}
+
+impl VirtualTextureStore for MemoryPageStore {
+    fn page(&self, key: PageKey) -> Result<PageBytes, String> {
+        if self.metadata.tile_size == 0 {
+            return Err(
+                "in-RAM VT store has no committed tiling; rebind_tile_geometry must run first"
+                    .to_string(),
+            );
+        }
+        if !self.contains(key) {
+            return Err(format!("in-RAM VT store has no page {key:?}"));
+        }
+        let mip = self.level(key.mip);
+        let slot_size = self.metadata.slot_size() as usize;
+        let tile_size = self.metadata.tile_size as i32;
+        let tile_border = self.metadata.tile_border as i32;
+        let mut data = vec![0u8; slot_size * slot_size * INGEST_BYTES_PER_PIXEL];
+        for slot_y in 0..slot_size {
+            let src_y = (key.y as i32 * tile_size + slot_y as i32 - tile_border)
+                .clamp(0, mip.height as i32 - 1) as usize;
+            for slot_x in 0..slot_size {
+                let src_x = (key.x as i32 * tile_size + slot_x as i32 - tile_border)
+                    .clamp(0, mip.width as i32 - 1) as usize;
+                let src = (src_y * mip.width as usize + src_x) * INGEST_BYTES_PER_PIXEL;
+                let dst = (slot_y * slot_size + slot_x) * INGEST_BYTES_PER_PIXEL;
+                data[dst..dst + INGEST_BYTES_PER_PIXEL]
+                    .copy_from_slice(&mip.data[src..src + INGEST_BYTES_PER_PIXEL]);
+            }
+        }
+        PageBytes::new(
+            PageFormat::Rgba8Srgb,
+            self.metadata.slot_size(),
+            self.metadata.slot_size(),
+            data,
+        )
+    }
+
+    fn metadata(&self) -> &StoreMetadata {
+        &self.metadata
+    }
+
+    fn content_hash(&self) -> [u8; 32] {
+        self.content_hash
+    }
+
+    /// Every page of the pyramid is derivable, so the store's page count is
+    /// the size of that pyramid rather than a directory length.
+    fn page_count(&self) -> u64 {
+        (0..self.mips.len() as u32)
+            .map(|mip| {
+                let (x, y) = self.metadata.pages_at_mip(mip);
+                u64::from(x) * u64::from(y)
+            })
+            .sum()
+    }
+
+    /// Bounds-only, no slicing and no digest: the residency planner asks this
+    /// thousands of times per frame.
+    ///
+    /// A mip past the end of the chain is still served (from the repeated 1x1
+    /// tail, see `level`) because the renderer's `max_mip_levels` can exceed
+    /// the chain depth and the page grid is 1x1 there anyway. Rejecting it
+    /// would turn a legal request into a counted store miss and silently drop
+    /// it.
+    fn contains(&self, key: PageKey) -> bool {
+        if self.metadata.tile_size == 0 {
+            return false;
+        }
+        let (pages_x, pages_y) = self.metadata.pages_at_mip(u32::from(key.mip));
+        key.x < pages_x && key.y < pages_y
+    }
+
+    fn rebind_tile_geometry(
+        &self,
+        tile_size: u32,
+        tile_border: u32,
+    ) -> Result<Option<Arc<dyn VirtualTextureStore>>, String> {
+        if tile_size == 0 {
+            return Err("VT atlas tile size must be > 0".to_string());
+        }
+        if self.metadata.tile_size == tile_size && self.metadata.tile_border == tile_border {
+            return Ok(None);
+        }
+        let mut metadata = self.metadata.clone();
+        metadata.tile_size = tile_size;
+        metadata.tile_border = tile_border;
+        Ok(Some(Arc::new(Self {
+            mips: Arc::clone(&self.mips),
+            metadata,
+            content_hash: self.content_hash,
+        })))
+    }
+}
+
+/// Box-filtered RGBA8 mip chain, down to 1x1.
+fn build_mip_chain(data: &[u8], size: (u32, u32)) -> Vec<MemoryMip> {
+    let mut chain = vec![MemoryMip {
+        width: size.0,
+        height: size.1,
+        data: data.to_vec(),
+    }];
+    while {
+        let last = chain.last().unwrap();
+        last.width > 1 || last.height > 1
+    } {
+        let previous = chain.last().unwrap();
+        let next_width = previous.width.max(1).div_ceil(2);
+        let next_height = previous.height.max(1).div_ceil(2);
+        let mut next_data =
+            vec![0u8; next_width as usize * next_height as usize * INGEST_BYTES_PER_PIXEL];
+        for y in 0..next_height {
+            for x in 0..next_width {
+                let mut accum = [0u32; INGEST_BYTES_PER_PIXEL];
+                let mut sample_count = 0u32;
+                for src_y in (y * 2)..((y * 2 + 2).min(previous.height)) {
+                    for src_x in (x * 2)..((x * 2 + 2).min(previous.width)) {
+                        let src = (src_y as usize * previous.width as usize + src_x as usize)
+                            * INGEST_BYTES_PER_PIXEL;
+                        for channel in 0..INGEST_BYTES_PER_PIXEL {
+                            accum[channel] += u32::from(previous.data[src + channel]);
+                        }
+                        sample_count += 1;
+                    }
+                }
+                let dst = (y as usize * next_width as usize + x as usize) * INGEST_BYTES_PER_PIXEL;
+                for channel in 0..INGEST_BYTES_PER_PIXEL {
+                    next_data[dst + channel] = (accum[channel] / sample_count.max(1)) as u8;
+                }
+            }
+        }
+        chain.push(MemoryMip {
+            width: next_width,
+            height: next_height,
+            data: next_data,
+        });
+    }
+    chain
 }
 
 #[derive(Clone, Debug)]
@@ -919,10 +1158,19 @@ mod tests {
         detail_window_pages: 2,
     };
 
-    /// TODO(tessella-evidence): derived analytically from the BC7 mode-6 and
-    /// BC4 constant-block bit layouts plus the SplitMix64 key schedule, not
-    /// from a packer run. Confirm against real packer output and re-paste if
-    /// they differ.
+    /// Confirmed against real packer output on 2026-07-29 -- all four digests
+    /// matched the analytic derivation byte for byte:
+    ///
+    /// ```text
+    /// cargo run --release --bin forge3d-vtpack -- --procedural \
+    ///   --output golden.f3dvt --manifest golden.manifest.json \
+    ///   --virtual-width 262144 --virtual-height 262144 \
+    ///   --tile-size 128 --tile-border 0 --seed 19 \
+    ///   --coarse-min-mip 6 --detail-max-mip 5 --detail-window-pages 8
+    /// ```
+    ///
+    /// (the 8-page detail window is what puts mip-3 page (126,129) inside the
+    /// materialization plan; the run packs 5247 pages, 5247 distinct digests).
     const PROCEDURAL_PAGE_GOLDEN_SHA256: [(u8, u8, u32, u32, &str); 4] = [
         (
             0,
@@ -1362,5 +1610,101 @@ mod tests {
         assert!(cache.get(key(1)).is_none(), "LRU evicted the wrong page");
         assert!(cache.get(key(0)).is_some());
         assert!(cache.get(key(2)).is_some());
+    }
+
+    /// TESSELLA spec item 4: an ingested image is a store like any other.
+    #[test]
+    fn memory_page_store_is_unbound_until_the_atlas_geometry_is_known() {
+        let side = 8u32;
+        let image = (0..side * side)
+            .flat_map(|index| {
+                let x = (index % side) as u8;
+                let y = (index / side) as u8;
+                [x * 16, y * 16, 255 - x * 8, 255]
+            })
+            .collect::<Vec<u8>>();
+        let ingest = MemoryPageStore::new(&image, (side, side), 3).unwrap();
+        let key = PageKey {
+            family: 0,
+            mip: 0,
+            x: 0,
+            y: 0,
+        };
+
+        // Unbound: no committed tiling means no page, loudly.
+        assert_eq!(ingest.metadata().tile_size, 0);
+        assert!(!ingest.contains(key));
+        assert!(ingest
+            .page(key)
+            .unwrap_err()
+            .contains("no committed tiling"));
+
+        let bound = ingest.rebind_tile_geometry(4, 0).unwrap().unwrap();
+        assert_eq!(bound.metadata().tile_size, 4);
+        assert_eq!(bound.metadata().slot_size(), 4);
+        // 8/4 = 2x2 pages at mip 0, 1x1 from mip 1 on.
+        assert_eq!(bound.metadata().pages_at_mip(0), (2, 2));
+        assert!(bound.contains(PageKey { x: 1, y: 1, ..key }));
+        assert!(!bound.contains(PageKey { x: 2, y: 0, ..key }));
+        // Rebinding to the same geometry is a no-op, not a copy.
+        assert!(bound.rebind_tile_geometry(4, 0).unwrap().is_none());
+
+        // Content is keyed by page identity: the four mip-0 tiles are the four
+        // distinct quadrants of the source image, in source order.
+        let mut digests = HashSet::new();
+        for y in 0..2u32 {
+            for x in 0..2u32 {
+                let page = bound.page(PageKey { x, y, ..key }).unwrap();
+                assert_eq!(page.format, PageFormat::Rgba8Srgb);
+                assert_eq!((page.width, page.height), (4, 4));
+                for row in 0..4usize {
+                    let src = ((y as usize * 4 + row) * side as usize + x as usize * 4) * 4;
+                    let dst = row * 4 * 4;
+                    assert_eq!(&page.data[dst..dst + 16], &image[src..src + 16]);
+                }
+                assert!(digests.insert(page.sha256), "page ({x},{y}) aliased");
+            }
+        }
+
+        // A mip past the end of the chain resolves to the repeated 1x1 tail
+        // rather than becoming a counted miss: `max_mip_levels` may exceed the
+        // chain depth and the page grid is 1x1 up there anyway.
+        let deep = PageKey { mip: 40, ..key };
+        assert!(bound.contains(deep));
+        assert_eq!(bound.page(deep).unwrap().data.len(), 4 * 4 * 4);
+
+        // A border widens the slot and clamps at the image edge.
+        let bordered = ingest.rebind_tile_geometry(4, 2).unwrap().unwrap();
+        assert_eq!(bordered.metadata().slot_size(), 8);
+        let page = bordered.page(key).unwrap();
+        assert_eq!((page.width, page.height), (8, 8));
+        // Slot texel (0,0) is source (-2,-2) clamped to (0,0).
+        assert_eq!(&page.data[0..4], &image[0..4]);
+    }
+
+    #[test]
+    fn memory_page_store_rejects_a_buffer_that_disagrees_with_its_virtual_size() {
+        let Err(error) = MemoryPageStore::new(&[0u8; 12], (4, 4), 3) else {
+            panic!("a short buffer was accepted");
+        };
+        assert!(error.contains("expected 64 RGBA8 bytes"), "{error}");
+        assert!(MemoryPageStore::new(&[], (0, 4), 3).is_err());
+    }
+
+    /// A packed file commits to its tiling; asking it for another one is a
+    /// mismatch report, never a silent re-slice.
+    #[test]
+    fn packed_store_refuses_a_tiling_it_was_not_packed_with() {
+        let path = scratch("vt-rebind");
+        let metadata = procedural_metadata();
+        pack_plan(&path, &metadata, &UNIT_PLAN);
+        let store = MmapPageStore::open(&path).unwrap();
+        assert!(store.rebind_tile_geometry(128, 0).unwrap().is_none());
+        let Err(error) = store.rebind_tile_geometry(64, 0) else {
+            panic!("a packed store accepted a foreign tiling");
+        };
+        assert!(error.contains("packed with 128-texel tiles"), "{error}");
+        drop(store);
+        let _ = std::fs::remove_file(&path);
     }
 }

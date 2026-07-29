@@ -9,8 +9,8 @@ pub use procedural::{
     MaterializationBand, MaterializationPlan,
 };
 pub use store::{
-    write_packed_store, MmapPageStore, PackedPage, PageBytes, PageFormat, PageKey, StoreManifest,
-    StoreMetadata, VirtualTextureStore, HEIGHT_FAMILY,
+    write_packed_store, MemoryPageStore, MmapPageStore, PackedPage, PageBytes, PageFormat, PageKey,
+    StoreManifest, StoreMetadata, VirtualTextureStore, HEIGHT_FAMILY,
 };
 
 #[cfg(feature = "cog_streaming")]

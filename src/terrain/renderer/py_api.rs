@@ -935,6 +935,21 @@ impl TerrainRenderer {
             .map_err(PyRuntimeError::new_err)
     }
 
+    /// TESSELLA win 6: the retained VT request set as
+    /// `(family_slot, material_index, mip_level, tile_x, tile_y)` tuples.
+    ///
+    /// The retention gate compares this SET across a forced not-ready feedback
+    /// window; `get_material_vt_stats()["retained_requests"]` only reports its
+    /// cardinality, which cannot tell a preserved set from a silently swapped
+    /// one of the same size.
+    #[pyo3(text_signature = "(self)")]
+    fn read_retained_vt_requests(&self) -> PyResult<Vec<(u32, u32, u32, u32, u32)>> {
+        let material_vt = self.scene.material_vt.lock().map_err(|error| {
+            PyRuntimeError::new_err(format!("Failed to lock material_vt: {error}"))
+        })?;
+        Ok(material_vt.retained_request_set())
+    }
+
     /// Return `(tile_id, triangle_id)` identities for visibility-buffer
     /// pixels. Background pixels return `None`.
     #[pyo3(text_signature = "(self, pixels)")]

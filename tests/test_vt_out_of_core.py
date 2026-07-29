@@ -58,10 +58,14 @@ COARSE_WORKING_SET_PAGES = 3 * (
     PAGES_AT_MIP[COARSE_MIN_MIP] ** 2 + PAGES_AT_MIP[COARSE_MIN_MIP + 1] ** 2
 )
 
-# TODO(tessella-evidence): raise to the measured contributing-tile count from a
-# real GPU-lane run. The per-tile digest cross-check below is the load-bearing
-# assertion and holds for any non-empty set; this floor only guarantees it runs.
-MIN_CONTRIBUTING_TILES = 1
+# Measured on the RTX 3070 Vulkan lane: two independent runs of this test both
+# reported exactly 193 deduplicated contributing tiles for the committed camera
+# (2026-07-29, `evidence/vt_out_of_core.json`), so this floor is the real count
+# rather than a placeholder. The per-tile digest cross-check below is still the
+# load-bearing assertion; the floor is what makes a collapse of the sampled set
+# (e.g. residency regressing to a handful of coarse pages) fail here instead of
+# passing vacuously.
+MIN_CONTRIBUTING_TILES = 193
 
 
 def _build_sparse_store(tmp_path: Path) -> tuple[f3d.VTStore, dict]:

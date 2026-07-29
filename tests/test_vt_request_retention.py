@@ -59,9 +59,31 @@ def test_thirty_not_ready_frames_preserve_requests_and_converge():
         dem = _steep_dem(64)
         _render_rgba(renderer, params, dem, ibl)
         renderer.force_vt_feedback_not_ready_for_test(30)
-        for _ in range(30):
+
+        # SET IDENTITY, not cardinality. `retained_requests` alone cannot tell
+        # a preserved request set from one that was silently dropped and
+        # refilled with different keys at the same count, which is exactly the
+        # failure the `None` feedback branch used to have.
+        baseline = {tuple(key) for key in renderer.read_retained_vt_requests()}
+        # One distinct key per registered source (4 materials x 3 families), so
+        # the comparison below is a real set comparison and not a restatement
+        # of the count.
+        assert len(baseline) == 12, sorted(baseline)
+        assert len({key[3:] for key in baseline}) == 12, sorted(baseline)
+        assert len(baseline) == int(
+            renderer.get_material_vt_stats()["retained_requests"]
+        )
+        for frame in range(30):
             _render_rgba(renderer, params, dem, ibl)
-            assert renderer.get_material_vt_stats()["retained_requests"] >= 1
+            retained = {tuple(key) for key in renderer.read_retained_vt_requests()}
+            assert retained == baseline, {
+                "not_ready_frame": frame,
+                "dropped": sorted(baseline - retained),
+                "invented": sorted(retained - baseline),
+            }
+            assert len(retained) == int(
+                renderer.get_material_vt_stats()["retained_requests"]
+            )
         convergence_frame = 0
         for convergence_frame in range(1, 9):
             _render_rgba(renderer, params, dem, ibl)
@@ -69,18 +91,72 @@ def test_thirty_not_ready_frames_preserve_requests_and_converge():
                 break
         final_stats = renderer.get_material_vt_stats()
         assert final_stats["retained_requests"] == 0
+        assert renderer.read_retained_vt_requests() == []
         record_tessella_result(
             "vt_request_retention",
             {
                 "feedback_not_ready_frames": 30,
                 "convergence_budget_frames": 8,
                 "convergence_frames": convergence_frame,
+                "retained_set_size": len(baseline),
+                "retained_set_identical_every_not_ready_frame": True,
                 "retained_requests_after_convergence": int(
                     final_stats["retained_requests"]
                 ),
                 "tiles_streamed": int(final_stats["tiles_streamed"]),
             },
         )
+
+
+def test_every_vt_source_reaches_the_atlas_through_the_store_trait():
+    """TESSELLA spec item 4, source-level gate (cf. tests/test_allocation_gate.py).
+
+    `register_source(..., data: Vec<u8>, ...)` is replaced by a store handle:
+    the ingest boundary builds a `MemoryPageStore` and the renderer holds no
+    raw image and no `MipImage`. There must be exactly ONE way a VT tile's
+    bytes are obtained anywhere in the renderer -- `store.page(...)` inside
+    `build_tile_data` -- so a future "fast path" that slices an image inline
+    cannot reappear without failing here.
+    """
+
+    root = Path(__file__).resolve().parents[1] / "src"
+    runtime = (root / "terrain/renderer/virtual_texture.rs").read_text(encoding="utf-8")
+    store = (root / "terrain/vt/store.rs").read_text(encoding="utf-8")
+
+    # The in-RAM special case is gone, name and all.
+    forbidden = ("MipImage", "PreparedVTSourcePayload", "VTSourcePayload")
+    offenders = [
+        f"{path.relative_to(root)}:{number}:{line.strip()}"
+        for path in root.rglob("*.rs")
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        for symbol in forbidden
+        if symbol in line
+    ]
+    assert offenders == []
+
+    # Both source kinds are the same type at rest and after preparation.
+    assert "store: Arc<dyn crate::terrain::vt::VirtualTextureStore>," in runtime
+    assert "MemoryPageStore::new(" in runtime
+    assert "MmapPageStore::open(" in runtime
+    assert "rebind_tile_geometry(" in runtime
+
+    # One page-acquisition call site in the whole renderer, and it is the one
+    # inside build_tile_data.
+    page_calls = [
+        number
+        for number, line in enumerate(runtime.splitlines(), 1)
+        if ".store.page(" in line or "store.page(page_key)" in line
+    ]
+    assert len(page_calls) == 1, page_calls
+    build_tile_data = runtime.split("fn build_tile_data(", 1)[1].split(
+        "\n    fn ", 1
+    )[0]
+    assert "source.store.page(page_key)?" in build_tile_data
+
+    # MemoryPageStore is a real implementation of the trait, not a wrapper the
+    # renderer can bypass.
+    assert "impl VirtualTextureStore for MemoryPageStore" in store
+    assert "pub struct MemoryPageStore" in store
 
 
 def test_no_shipped_synthetic_reader_callers():
@@ -146,6 +222,14 @@ def test_public_vt_stats_diagnostics_surface_is_registered():
     from forge3d import diagnostics
 
     assert callable(diagnostics.vt_stats)
+
+
+def test_retained_request_set_accessor_is_registered():
+    assert hasattr(f3d.TerrainRenderer, "read_retained_vt_requests")
+    stub = (
+        Path(__file__).resolve().parents[1] / "python/forge3d/__init__.pyi"
+    ).read_text(encoding="utf-8")
+    assert "def read_retained_vt_requests(" in stub
 
 
 def test_tessella_acceptance_is_a_required_zero_skip_hardware_lane():

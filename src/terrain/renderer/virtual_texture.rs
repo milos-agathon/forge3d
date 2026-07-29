@@ -46,17 +46,17 @@ pub(super) fn bindless_bc_supported(device: &wgpu::Device) -> bool {
             .contains(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING)
 }
 
-#[cfg(feature = "extension-module")]
-#[derive(Clone)]
-enum VTSourcePayload {
-    Resident(Vec<u8>),
-    Store(Arc<dyn crate::terrain::vt::VirtualTextureStore>),
-}
-
+/// A registered VT source.
+///
+/// TESSELLA spec item 4: there is exactly ONE way a source can produce a page
+/// -- `VirtualTextureStore::page`. An image handed in through
+/// `register_source` is converted to a `MemoryPageStore` at the ingest
+/// boundary; a packed file arrives as an `MmapPageStore` through `bind_store`.
+/// The renderer cannot tell them apart and holds no raw image bytes.
 #[derive(Clone)]
 pub(super) struct VTSource {
     pub virtual_size: (u32, u32),
-    payload: VTSourcePayload,
+    store: Arc<dyn crate::terrain::vt::VirtualTextureStore>,
     pub fallback_color: [f32; 4],
     /// VERITAS: stable, device-independent source id
     /// (`family_slot * 4 + material_index + 1`; 0 == SOURCE_ID_NONE).
@@ -109,25 +109,11 @@ struct PageTableEntry {
     mip_bias: f32,
 }
 
-#[cfg(feature = "extension-module")]
-#[derive(Clone)]
-struct MipImage {
-    width: u32,
-    height: u32,
-    data: Vec<u8>,
-}
-
-#[cfg(feature = "extension-module")]
-#[derive(Clone)]
-enum PreparedVTSourcePayload {
-    Resident(Vec<MipImage>),
-    Store(Arc<dyn crate::terrain::vt::VirtualTextureStore>),
-}
-
 #[derive(Clone)]
 struct PreparedVTSource {
     fallback_color: [f32; 4],
-    payload: PreparedVTSourcePayload,
+    /// The source's store, rebound to this runtime's atlas slot geometry.
+    store: Arc<dyn crate::terrain::vt::VirtualTextureStore>,
     /// VERITAS: stable source id + SHA256 of the source payload (both
     /// copied from `VTSource`, assigned at ingest).
     source_id: u32,
@@ -371,19 +357,16 @@ impl TerrainMaterialVT {
                 family = family,
             );
         }
-        if family_supported {
-            let expected_len = virtual_size_px.0 as usize
-                * virtual_size_px.1 as usize
-                * TERRAIN_VT_BYTES_PER_PIXEL;
-            if data.len() != expected_len {
-                return Err(format!(
-                    "VT source data size mismatch for {family}: expected {expected_len} RGBA8 bytes, got {}",
-                    data.len()
-                ));
-            }
-        } else if data.is_empty() {
-            return Err("VT source data must not be empty".to_string());
-        }
+        // Every family is size-checked, including the unsupported ones the
+        // warning above keeps for diagnostics: a source is now an ingested
+        // store handle, and a store cannot be built from a buffer whose length
+        // disagrees with its declared virtual size.
+        let store = crate::terrain::vt::MemoryPageStore::new(
+            &data,
+            virtual_size_px,
+            TERRAIN_VT_FAMILY_COUNT,
+        )
+        .map_err(|error| format!("VT source '{family}': {error}"))?;
 
         if let Some(existing) = self.sources.get(&(material_index, family.clone())) {
             if existing.virtual_size != virtual_size_px {
@@ -401,12 +384,12 @@ impl TerrainMaterialVT {
             .map_or(crate::core::provenance::SOURCE_ID_NONE, |family_slot| {
                 crate::core::provenance::source_id_for(family_slot, material_index)
             });
-        let content_hash = crate::core::provenance::sha256(&data);
+        let content_hash = store.content_hash();
         self.sources.insert(
             (material_index, family),
             VTSource {
                 virtual_size: virtual_size_px,
-                payload: VTSourcePayload::Resident(data),
+                store: Arc::new(store),
                 fallback_color,
                 source_id,
                 content_hash,
@@ -447,7 +430,7 @@ impl TerrainMaterialVT {
                 (STORE_MATERIAL_INDEX, (*family).to_string()),
                 VTSource {
                     virtual_size: (width, height),
-                    payload: VTSourcePayload::Store(store.clone()),
+                    store: store.clone(),
                     fallback_color: fallbacks[family_slot],
                     source_id: crate::core::provenance::source_id_for(
                         family_slot as u32,
@@ -575,26 +558,70 @@ impl TerrainMaterialVT {
         out
     }
 
+    /// TESSELLA win 6: the retained (still-unsatisfied) VT request set, as
+    /// `(family_slot, material_index, mip_level, tile_x, tile_y)` records.
+    ///
+    /// This is the set identity the retention gate asserts on, not just its
+    /// cardinality: across a not-ready feedback window the set must be
+    /// preserved element for element, and a key may only leave it by becoming
+    /// resident. Sorted so a Python-side comparison is stable.
+    pub fn retained_request_set(&self) -> Vec<(u32, u32, u32, u32, u32)> {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return Vec::new();
+        };
+        let mut keys = runtime
+            .pending_feedback
+            .iter()
+            .flatten()
+            .map(|key| {
+                (
+                    key.family_slot,
+                    key.material_index,
+                    key.mip_level,
+                    key.x,
+                    key.y,
+                )
+            })
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys
+    }
+
+    /// Arm the win-6 retention gate: seed an unsatisfied request set, then
+    /// force the feedback map not-ready for `not_ready_frames` frames.
+    ///
+    /// The set is ONE DISTINCT finest-mip key per registered source, walked
+    /// backwards from the far corner of the mip-0 page grid, so no two seeded
+    /// keys share a (family, material) slot OR a tile coordinate. A
+    /// single-key probe would make "the set is preserved" indistinguishable
+    /// from "the count is preserved" -- which is the whole difference the gate
+    /// is there to measure. Finest mip is deliberate: the camera-driven
+    /// request grid sits at a coarser mip and only ever generates COARSER
+    /// ancestors, so nothing here can be satisfied incidentally while the map
+    /// is held not-ready.
     pub fn force_live_retention_probe(&mut self, not_ready_frames: u32) -> Result<(), String> {
         let runtime = self
             .runtime
             .as_mut()
             .ok_or_else(|| "material VT runtime is not initialized".to_string())?;
-        let (&(family_slot, material_index), _) = runtime
-            .sources
-            .iter()
-            .next()
-            .ok_or_else(|| "material VT runtime has no source".to_string())?;
+        let mut slots = runtime.sources.keys().copied().collect::<Vec<_>>();
+        if slots.is_empty() {
+            return Err("material VT runtime has no source".to_string());
+        }
+        slots.sort_unstable();
         let mip_level = 0;
         let (pages_x, pages_y) = runtime.pages_at_mip(mip_level);
-        let key = TileKey {
-            family_slot,
-            material_index,
-            x: pages_x.saturating_sub(1),
-            y: pages_y.saturating_sub(1),
-            mip_level,
-        };
-        runtime.pending_feedback[family_slot as usize].insert(key);
+        for (index, (family_slot, material_index)) in slots.into_iter().enumerate() {
+            let index = index as u32;
+            let key = TileKey {
+                family_slot,
+                material_index,
+                x: pages_x.saturating_sub(1) - (index % pages_x.max(1)),
+                y: pages_y.saturating_sub(1) - ((index / pages_x.max(1)) % pages_y.max(1)),
+                mip_level,
+            };
+            runtime.pending_feedback[family_slot as usize].insert(key);
+        }
         runtime
             .feedback_buffer
             .as_ref()
@@ -967,11 +994,12 @@ impl TerrainMaterialVT {
                 tile_x: key.x,
                 tile_y: key.y,
                 mip_level: key.mip_level,
-                // Per-PAGE digest for store-backed tiles. `source.content_hash`
-                // is a per-source constant (the store's directory hash), so
-                // reporting it would make every tile record identical and a
-                // wrong-tile upload undetectable. In-RAM sources keep the
-                // source hash, which is what they actually sampled.
+                // Per-PAGE digest, recorded by `build_tile_data` for every
+                // tile it uploads. `source.content_hash` is a per-source
+                // constant (the packed store's directory hash, or the ingested
+                // image's hash), so reporting it would make every tile record
+                // identical and a wrong-tile upload undetectable. The fallback
+                // only applies to a tile that has never been built.
                 content_hash: runtime
                     .resident_page_digests
                     .get(&key)
@@ -1278,18 +1306,20 @@ impl TerrainMaterialVTRuntime {
                     layer_for_family.virtual_size
                 ));
             }
+            // One trait, one page path: bind the source's store to THIS
+            // runtime's atlas slot geometry. A packed file rejects a tiling it
+            // was not packed with; an in-RAM ingest re-slices the shared mip
+            // chain without copying it.
+            let store = source
+                .store
+                .rebind_tile_geometry(layer.tile_size, layer.tile_border)
+                .map_err(|error| format!("VT source {:?}: {error}", (material_index, family)))?
+                .unwrap_or_else(|| source.store.clone());
             prepared_sources.insert(
                 (family_slot, *material_index),
                 PreparedVTSource {
                     fallback_color: source.fallback_color,
-                    payload: match &source.payload {
-                        VTSourcePayload::Resident(data) => PreparedVTSourcePayload::Resident(
-                            build_rgba_mip_chain(data, source.virtual_size, max_mip_levels),
-                        ),
-                        VTSourcePayload::Store(store) => {
-                            PreparedVTSourcePayload::Store(store.clone())
-                        }
-                    },
+                    store,
                     source_id: source.source_id,
                     content_hash: source.content_hash,
                 },
@@ -1455,10 +1485,7 @@ impl TerrainMaterialVTRuntime {
         runtime.stats.store_min_materialized_mip = runtime
             .sources
             .values()
-            .filter_map(|source| match &source.payload {
-                PreparedVTSourcePayload::Store(store) => Some(store.min_materialized_mip()),
-                PreparedVTSourcePayload::Resident(_) => None,
-            })
+            .map(|source| source.store.min_materialized_mip())
             .max()
             .unwrap_or(0);
         Ok(runtime)
@@ -1878,65 +1905,70 @@ impl TerrainMaterialVTRuntime {
         }
     }
 
+    /// Fetch `key` from the source's store and normalize it to the atlas
+    /// format.
+    ///
+    /// TESSELLA spec item 4: this is the ONLY place a VT tile's bytes come
+    /// from, and there is exactly one way to get them. Whether the source was
+    /// registered as an in-RAM image (`MemoryPageStore`, which slices and
+    /// returns `Rgba8Srgb`) or opened from a packed file (`MmapPageStore`,
+    /// which returns pre-encoded BC blocks) is invisible here; only the
+    /// page's declared format decides whether it is passed through, encoded,
+    /// or decoded on the way to the atlas.
     fn build_tile_data(
         &mut self,
         source: &PreparedVTSource,
         key: TileKey,
     ) -> Result<TileData, String> {
-        if let PreparedVTSourcePayload::Store(store) = &source.payload {
-            let page_key = Self::page_key(key);
-            // Fatal by design: every request reaching here was resolved through
-            // `store.contains`, so a failure means the directory promised a
-            // page the file cannot produce -- corruption, not a miss.
-            let page = store.page(page_key)?;
-            if page.width != self.slot_size || page.height != self.slot_size {
-                return Err(format!(
-                    "VT store page {:?} is {}x{}, expected {}x{}",
-                    key, page.width, page.height, self.slot_size, self.slot_size
-                ));
-            }
-            // Wrong-tile detector: record the digest of the bytes THIS tile
-            // received, so a contributing-tile record can be checked against
-            // the manifest entry for its own key.
-            self.resident_page_digests.insert(key, page.sha256);
-            self.store_fetched_keys.insert(page_key);
-            self.stats.store_pages_fetched_distinct = self.store_fetched_keys.len() as u32;
-            if self.bindless_bc {
-                let expected = match key.family_slot {
-                    TERRAIN_VT_FAMILY_ALBEDO => crate::terrain::vt::PageFormat::Bc7Srgb,
-                    TERRAIN_VT_FAMILY_NORMAL => crate::terrain::vt::PageFormat::Bc5Unorm,
-                    TERRAIN_VT_FAMILY_MASK => crate::terrain::vt::PageFormat::Bc7Unorm,
-                    _ => {
-                        return Err(format!(
-                            "unsupported material VT family {}",
-                            key.family_slot
-                        ))
-                    }
-                };
-                if page.format != expected {
+        use crate::terrain::vt::PageFormat;
+
+        let page_key = Self::page_key(key);
+        // Fatal by design: every request reaching here was resolved through
+        // `store.contains`, so a failure means the store promised a page it
+        // cannot produce -- corruption, not a miss.
+        let page = source.store.page(page_key)?;
+        if page.width != self.slot_size || page.height != self.slot_size {
+            return Err(format!(
+                "VT store page {:?} is {}x{}, expected {}x{}",
+                key, page.width, page.height, self.slot_size, self.slot_size
+            ));
+        }
+        // Wrong-tile detector: record the digest of the bytes THIS tile
+        // received, so a contributing-tile record can be checked against the
+        // manifest entry for its own key.
+        self.resident_page_digests.insert(key, page.sha256);
+        self.store_fetched_keys.insert(page_key);
+        self.stats.store_pages_fetched_distinct = self.store_fetched_keys.len() as u32;
+
+        let atlas_format = if self.bindless_bc {
+            match key.family_slot {
+                TERRAIN_VT_FAMILY_ALBEDO => PageFormat::Bc7Srgb,
+                TERRAIN_VT_FAMILY_NORMAL => PageFormat::Bc5Unorm,
+                TERRAIN_VT_FAMILY_MASK => PageFormat::Bc7Unorm,
+                _ => {
                     return Err(format!(
-                        "VT store page {:?} uses {:?}; family {} requires {:?}",
-                        key, page.format, key.family_slot, expected
-                    ));
+                        "unsupported material VT family {}",
+                        key.family_slot
+                    ))
                 }
-                return Ok(TileData {
-                    id: self.encode_cache_tile(key),
-                    data: page.data,
-                    width: self.slot_size,
-                    height: self.slot_size,
-                    format: page.format.wgpu(),
-                });
             }
-            let rgba = match page.format {
-                crate::terrain::vt::PageFormat::Bc7Srgb
-                | crate::terrain::vt::PageFormat::Bc7Unorm => {
+        } else {
+            PageFormat::Rgba8Srgb
+        };
+
+        let data = if page.format == atlas_format {
+            page.data
+        } else {
+            match (page.format, atlas_format) {
+                // Packed BC pages on a compatibility adapter: decode to RGBA8.
+                (PageFormat::Bc7Srgb | PageFormat::Bc7Unorm, PageFormat::Rgba8Srgb) => {
                     crate::core::compressed_textures::decode_bc7_rgba8(
                         &page.data,
                         page.width,
                         page.height,
                     )?
                 }
-                crate::terrain::vt::PageFormat::Bc5Unorm => {
+                (PageFormat::Bc5Unorm, PageFormat::Rgba8Srgb) => {
                     let rg = crate::core::compressed_textures::decode_bc5_rg8(
                         &page.data,
                         page.width,
@@ -1957,91 +1989,43 @@ impl TerrainMaterialVTRuntime {
                     }
                     rgba
                 }
-                crate::terrain::vt::PageFormat::Rgba8Srgb => page.data,
-                crate::terrain::vt::PageFormat::R32Float => {
-                    return Err(
-                        "R32Float height page cannot bind to a material VT family".to_string()
-                    )
-                }
-            };
-            return Ok(TileData {
-                id: self.encode_cache_tile(key),
-                data: rgba,
-                width: self.slot_size,
-                height: self.slot_size,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            });
-        }
-        let PreparedVTSourcePayload::Resident(mips) = &source.payload else {
-            unreachable!("store source handled above")
-        };
-        let mip = &mips[key.mip_level as usize];
-        let slot_size = self.slot_size as usize;
-        let tile_size = self.tile_size as i32;
-        let tile_border = self.tile_border as i32;
-        let mut data = vec![0u8; slot_size * slot_size * TERRAIN_VT_BYTES_PER_PIXEL];
-
-        for slot_y in 0..slot_size {
-            for slot_x in 0..slot_size {
-                let src_x = (key.x as i32 * tile_size + slot_x as i32 - tile_border)
-                    .clamp(0, mip.width as i32 - 1) as usize;
-                let src_y = (key.y as i32 * tile_size + slot_y as i32 - tile_border)
-                    .clamp(0, mip.height as i32 - 1) as usize;
-                let src_index = (src_y * mip.width as usize + src_x) * TERRAIN_VT_BYTES_PER_PIXEL;
-                let dst_index = (slot_y * slot_size + slot_x) * TERRAIN_VT_BYTES_PER_PIXEL;
-                data[dst_index..dst_index + TERRAIN_VT_BYTES_PER_PIXEL]
-                    .copy_from_slice(&mip.data[src_index..src_index + TERRAIN_VT_BYTES_PER_PIXEL]);
-            }
-        }
-
-        let (data, format) = if self.bindless_bc {
-            match key.family_slot {
-                TERRAIN_VT_FAMILY_ALBEDO => (
+                // In-RAM ingest on a BC adapter: encode on the way to the
+                // atlas, which is where the compression belongs -- the store
+                // holds the source image, not an atlas format.
+                (PageFormat::Rgba8Srgb, PageFormat::Bc7Srgb | PageFormat::Bc7Unorm) => {
                     crate::core::compressed_textures::encode_bc7_rgba8(
-                        &data,
+                        &page.data,
                         self.slot_size,
                         self.slot_size,
-                    )?,
-                    wgpu::TextureFormat::Bc7RgbaUnormSrgb,
-                ),
-                TERRAIN_VT_FAMILY_NORMAL => {
-                    let rg = data
+                    )?
+                }
+                (PageFormat::Rgba8Srgb, PageFormat::Bc5Unorm) => {
+                    let rg = page
+                        .data
                         .chunks_exact(4)
                         .flat_map(|rgba| [rgba[0], rgba[1]])
                         .collect::<Vec<_>>();
-                    (
-                        crate::core::compressed_textures::encode_bc5_rg8(
-                            &rg,
-                            self.slot_size,
-                            self.slot_size,
-                        )?,
-                        wgpu::TextureFormat::Bc5RgUnorm,
-                    )
+                    crate::core::compressed_textures::encode_bc5_rg8(
+                        &rg,
+                        self.slot_size,
+                        self.slot_size,
+                    )?
                 }
-                TERRAIN_VT_FAMILY_MASK => (
-                    crate::core::compressed_textures::encode_bc7_rgba8(
-                        &data,
-                        self.slot_size,
-                        self.slot_size,
-                    )?,
-                    wgpu::TextureFormat::Bc7RgbaUnorm,
-                ),
-                _ => {
+                (from, to) => {
                     return Err(format!(
-                        "unsupported material VT family {}",
+                        "VT store page {key:?} is {from:?}; family {} needs {to:?} and no conversion exists",
                         key.family_slot
                     ))
                 }
             }
-        } else {
-            (data, wgpu::TextureFormat::Rgba8UnormSrgb)
         };
+
         Ok(TileData {
             id: self.encode_cache_tile(key),
             data,
             width: self.slot_size,
             height: self.slot_size,
-            format,
+            format: atlas_format.wgpu(),
         })
     }
 
@@ -2200,17 +2184,15 @@ impl TerrainMaterialVTRuntime {
         }
     }
 
-    /// The disk store backing this tile, or `None` for an in-RAM source (which
-    /// can synthesize every key of its own mip chain).
+    /// The store backing this tile, or `None` when no source is registered for
+    /// its (family, material) slot.
     fn store_for(&self, key: TileKey) -> Option<Arc<dyn VirtualTextureStore>> {
-        match &self
-            .sources
-            .get(&(key.family_slot, key.material_index))?
-            .payload
-        {
-            PreparedVTSourcePayload::Store(store) => Some(store.clone()),
-            PreparedVTSourcePayload::Resident(_) => None,
-        }
+        Some(
+            self.sources
+                .get(&(key.family_slot, key.material_index))?
+                .store
+                .clone(),
+        )
     }
 
     /// Climb toward coarser mips until the store physically holds the page.
@@ -2441,60 +2423,6 @@ fn pages_for_mip_counts(pages_x0: u32, pages_y0: u32, mip_level: u32) -> (u32, u
         ceil_div(pages_x0.max(1), div).max(1),
         ceil_div(pages_y0.max(1), div).max(1),
     )
-}
-
-#[cfg(feature = "extension-module")]
-fn build_rgba_mip_chain(data: &[u8], size: (u32, u32), max_mip_levels: u32) -> Vec<MipImage> {
-    let mut chain = Vec::with_capacity(max_mip_levels as usize);
-    chain.push(MipImage {
-        width: size.0,
-        height: size.1,
-        data: data.to_vec(),
-    });
-
-    while chain.len() < max_mip_levels as usize {
-        let previous = chain.last().unwrap().clone();
-        if previous.width == 1 && previous.height == 1 {
-            chain.push(previous);
-            continue;
-        }
-
-        let next_width = previous.width.max(1).div_ceil(2);
-        let next_height = previous.height.max(1).div_ceil(2);
-        let mut next_data =
-            vec![0u8; next_width as usize * next_height as usize * TERRAIN_VT_BYTES_PER_PIXEL];
-
-        for y in 0..next_height {
-            for x in 0..next_width {
-                let mut accum = [0u32; TERRAIN_VT_BYTES_PER_PIXEL];
-                let mut sample_count = 0u32;
-                for src_y in (y * 2)..((y * 2 + 2).min(previous.height)) {
-                    for src_x in (x * 2)..((x * 2 + 2).min(previous.width)) {
-                        let src_index = (src_y as usize * previous.width as usize + src_x as usize)
-                            * TERRAIN_VT_BYTES_PER_PIXEL;
-                        for channel in 0..TERRAIN_VT_BYTES_PER_PIXEL {
-                            accum[channel] += previous.data[src_index + channel] as u32;
-                        }
-                        sample_count += 1;
-                    }
-                }
-
-                let dst_index =
-                    (y as usize * next_width as usize + x as usize) * TERRAIN_VT_BYTES_PER_PIXEL;
-                for channel in 0..TERRAIN_VT_BYTES_PER_PIXEL {
-                    next_data[dst_index + channel] = (accum[channel] / sample_count.max(1)) as u8;
-                }
-            }
-        }
-
-        chain.push(MipImage {
-            width: next_width,
-            height: next_height,
-            data: next_data,
-        });
-    }
-
-    chain
 }
 
 #[cfg(feature = "extension-module")]
