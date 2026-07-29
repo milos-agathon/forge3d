@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -23,13 +24,51 @@ from test_terrain_clipmap_streaming import _render_rgba
 
 VIRTUAL_SIDE = 1 << 18
 LOGICAL_MIN_BYTES = 256 * 1024**3
+LOGICAL_BYTES = VIRTUAL_SIDE * VIRTUAL_SIDE * 3 * 4
+
+# The store's recorded materialization plan, pinned by the CLI flags below.
+COARSE_MIN_MIP = 6
+DETAIL_MAX_MIP = 5
+# The CLI default window is 8 pages. The committed gate packs 2 so that the
+# camera's whole coarse working set (3840 pages) plus every page the shader's
+# fine-mip feedback can reach (3 families x 6 mips x 2x2 = 72) stays inside the
+# 8192/128 -> 64x64 = 4096 atlas slots. A wider window would make eviction
+# unavoidable and the no-thrash assertion untestable rather than false.
+DETAIL_WINDOW_PAGES = 2
+
+# 2^18 / 128 = 2048 pages on each axis at mip 0, so the pyramid has 12 levels.
+PAGES_AT_MIP = {mip: max(1, -(-2048 // (1 << mip))) for mip in range(12)}
+EXPECTED_PER_BAND = {
+    mip: (
+        PAGES_AT_MIP[mip] ** 2
+        if mip >= COARSE_MIN_MIP
+        else min(DETAIL_WINDOW_PAGES, PAGES_AT_MIP[mip]) ** 2
+    )
+    for mip in range(12)
+}
+EXPECTED_PAGE_COUNT = 3 * sum(EXPECTED_PER_BAND.values())  # 4167
+# Header (96 B) + one 64-byte directory entry and one 128x128 BC page
+# ((128/4)^2 * 16 = 16384 B) per page.
+EXPECTED_STORE_BYTES = 96 + EXPECTED_PAGE_COUNT * (64 + 16384)
+
+# The camera below sits at desired mip 6 over the full [0,1] UV rect, so the
+# request set is the complete mip-6 and mip-7 grids for all three families:
+# 3 * (32*32 + 16*16) = 3840 pages.
+COARSE_WORKING_SET_PAGES = 3 * (
+    PAGES_AT_MIP[COARSE_MIN_MIP] ** 2 + PAGES_AT_MIP[COARSE_MIN_MIP + 1] ** 2
+)
+
+# TODO(tessella-evidence): raise to the measured contributing-tile count from a
+# real GPU-lane run. The per-tile digest cross-check below is the load-bearing
+# assertion and holds for any non-empty set; this floor only guarantees it runs.
+MIN_CONTRIBUTING_TILES = 1
 
 
 def _build_sparse_store(tmp_path: Path) -> tuple[f3d.VTStore, dict]:
     store_path = tmp_path / "switzerland-procedural.f3dvt"
     manifest_path = tmp_path / "switzerland-procedural.manifest.json"
     root = Path(__file__).resolve().parents[1]
-    result = subprocess.run(
+    subprocess.run(
         [
             "cargo",
             "run",
@@ -53,26 +92,101 @@ def _build_sparse_store(tmp_path: Path) -> tuple[f3d.VTStore, dict]:
             "0",
             "--seed",
             "19",
+            "--coarse-min-mip",
+            str(COARSE_MIN_MIP),
+            "--detail-max-mip",
+            str(DETAIL_MAX_MIP),
+            "--detail-window-pages",
+            str(DETAIL_WINDOW_PAGES),
         ],
         cwd=root,
         check=True,
         capture_output=True,
         text=True,
     )
-    manifest = json.loads(result.stdout)
+    # The manifest carries one digest per page (hundreds of KiB), so it is read
+    # from disk rather than from the packer's stdout summary.
+    manifest = json.loads(manifest_path.read_text())
     return f3d.open_vt_store(store_path), manifest
+
+
+def _manifest_digests(manifest: dict) -> dict[tuple[int, int, int, int], str]:
+    return {
+        (
+            page["key"]["family"],
+            page["key"]["mip"],
+            page["key"]["x"],
+            page["key"]["y"],
+        ): page["sha256"]
+        for page in manifest["pages"]
+    }
 
 
 def test_sparse_store_declares_at_least_256_gib_without_allocating_it(tmp_path):
     store, manifest = _build_sparse_store(tmp_path)
+    assert int(manifest["logical_texel_bytes"]) == LOGICAL_BYTES
     assert int(manifest["logical_texel_bytes"]) >= LOGICAL_MIN_BYTES
     assert manifest["procedural"] is True
     assert manifest["page_order"] == "family,mip,morton2"
-    assert Path(store.path).stat().st_size < 128 * 1024
     assert Path(store.path).read_bytes()[:8] == b"F3DVT1\0\0"
-    assert manifest["page_count"] == 3
-    assert len(manifest["pages"]) == 3
     assert all(len(page["sha256"]) == 64 for page in manifest["pages"])
+
+    # The store materializes an explicit, recorded plan -- not three aliased
+    # pages standing in for the whole address space.
+    assert manifest["min_materialized_mip"] == COARSE_MIN_MIP
+    assert manifest["materialization_plan"] == {
+        "coarse_min_mip": COARSE_MIN_MIP,
+        "detail_max_mip": DETAIL_MAX_MIP,
+        "detail_window_pages": DETAIL_WINDOW_PAGES,
+    }
+    assert manifest["page_count"] == EXPECTED_PAGE_COUNT
+    assert len(manifest["pages"]) == EXPECTED_PAGE_COUNT
+
+    # Anti-degeneracy: no two physical pages may share a payload.
+    assert manifest["distinct_page_digests"] == EXPECTED_PAGE_COUNT
+    assert len({page["sha256"] for page in manifest["pages"]}) == EXPECTED_PAGE_COUNT
+
+    per_band = Counter(
+        (page["key"]["family"], page["key"]["mip"]) for page in manifest["pages"]
+    )
+    for family in range(3):
+        for mip, expected in EXPECTED_PER_BAND.items():
+            assert per_band[(family, mip)] == expected, (family, mip)
+
+    size = Path(store.path).stat().st_size
+    assert size == EXPECTED_STORE_BYTES
+    assert int(manifest["logical_texel_bytes"]) // size > 5_000
+
+
+def test_page_payloads_are_keyed_by_page_identity(tmp_path):
+    """A wrong-tile bug is only detectable if content depends on the full key."""
+
+    _store, manifest = _build_sparse_store(tmp_path)
+    digests = _manifest_digests(manifest)
+    assert len(set(digests.values())) == len(digests)
+
+    # Vary exactly one key component at a time and require the payload to move.
+    coarse_grid = PAGES_AT_MIP[COARSE_MIN_MIP]
+    sampled = 0
+    for y in range(coarse_grid):
+        for x in range(0, coarse_grid - 1, 5):
+            left = digests[(0, COARSE_MIN_MIP, x, y)]
+            right = digests[(0, COARSE_MIN_MIP, x + 1, y)]
+            assert left != right, ("x", x, y)
+            sampled += 1
+    assert sampled >= 200
+
+    for x in range(coarse_grid):
+        assert digests[(0, COARSE_MIN_MIP, x, 0)] != digests[(0, COARSE_MIN_MIP, x, 1)]
+        for family in (1, 2):
+            assert (
+                digests[(family, COARSE_MIN_MIP, x, 0)]
+                != digests[(0, COARSE_MIN_MIP, x, 0)]
+            )
+    for x in range(PAGES_AT_MIP[COARSE_MIN_MIP + 1]):
+        assert (
+            digests[(0, COARSE_MIN_MIP + 1, x, 0)] != digests[(0, COARSE_MIN_MIP, x, 0)]
+        )
 
 
 @pytest.mark.gpu_lane
@@ -112,7 +226,11 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
         vt=TerrainVTSettings(
             enabled=True,
             layers=layers,
-            atlas_size=4096,
+            # 8192/128 -> 64x64 = 4096 atlas slots, so the 3840-page coarse
+            # working set is simultaneously resident and paging never thrashes.
+            # (4096 slots at 4096 would be 1024 -- a guaranteed 3.75x overcommit
+            # that only looked harmless while every page aliased onto one.)
+            atlas_size=8192,
             residency_budget_mb=192.0,
             max_mip_levels=8,
             use_feedback=True,
@@ -132,13 +250,39 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     assert frame.shape == (2160, 3840, 4)
     assert settling_frame <= 8
     assert stats["retained_requests"] == 0
-    assert stats["evictions"] <= stats["tiles_streamed"]
+    assert stats["evictions"] == 0
+    assert stats["cache_misses"] == 0
     public_stats = vt_stats()
     assert all(public_stats[key] == value for key, value in stats.items())
     assert stats["atlas_device_local_bytes"] > 0
     assert stats["atlas_uncompressed_equivalent_bytes"] >= stats["atlas_device_local_bytes"]
     assert stats["atlas_compression_ratio"] >= 1.0
     assert visibility_stats()["fallback_texels"] == 0
+
+    # A store miss is explicit and counted, never a silent substitution: the
+    # committed camera's working set is inside the materialization plan, so it
+    # must be exactly zero.
+    assert stats["store_page_misses"] == 0
+    assert stats["store_min_materialized_mip"] == COARSE_MIN_MIP
+    # Distinct physical pages actually read. An aliasing store would report a
+    # handful no matter how large the camera's working set is.
+    assert stats["store_pages_fetched_distinct"] >= COARSE_WORKING_SET_PAGES
+    # The whole coarse working set is resident at once -- the real no-thrash
+    # claim, and impossible with fewer atlas slots than requested pages.
+    assert stats["resident_pages"] >= COARSE_WORKING_SET_PAGES
+
+    # Wrong-tile detector: the bytes uploaded for a tile must be the bytes the
+    # manifest recorded for THAT key, not for some canonical page. With the old
+    # aliasing store this loop fails on the first non-(0,0) tile.
+    digests = _manifest_digests(manifest)
+    tiles = renderer.read_contributing_tiles()
+    assert len(tiles) >= MIN_CONTRIBUTING_TILES
+    for tile in tiles:
+        key = (tile["family_slot"], tile["mip_level"], tile["tile_x"], tile["tile_y"])
+        assert key in digests, key
+        assert tile["content_hash"] == digests[key], (key, tile["content_hash"])
+    assert len({tile["content_hash"] for tile in tiles}) == len(tiles)
+
     degradations = render_certificate(sign=False)["degradations"]
     assert not {
         "terrain_vt_bc_atlas",
@@ -151,7 +295,7 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     )
     assert peak_host < 512 * 1024**2, {
         "peak_host_visible_bytes": peak_host,
-        "manifest": manifest,
+        "page_count": manifest["page_count"],
         "vt_stats": stats,
     }
     record_tessella_result(
@@ -159,11 +303,22 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
         {
             "logical_texel_bytes": int(manifest["logical_texel_bytes"]),
             "sparse_store_bytes": Path(store.path).stat().st_size,
+            "page_count": int(manifest["page_count"]),
+            "distinct_page_digests": int(manifest["distinct_page_digests"]),
+            "min_materialized_mip": int(manifest["min_materialized_mip"]),
             "settling_frames": settling_frame,
             "retained_requests": int(stats["retained_requests"]),
             "miss_rate": float(stats["miss_rate"]),
+            "evictions": int(stats["evictions"]),
+            "resident_pages": int(stats["resident_pages"]),
+            "store_page_misses": int(stats["store_page_misses"]),
+            "store_pages_fetched_distinct": int(stats["store_pages_fetched_distinct"]),
+            "contributing_tiles_verified": len(tiles),
             "fallback_texels": int(visibility_stats()["fallback_texels"]),
+            # Device-local footprint is declared separately from the
+            # host-visible budget: textures never enter host_visible_bytes.
             "atlas_device_local_bytes": int(stats["atlas_device_local_bytes"]),
+            "device_local_page_table_bytes": 2048 * 2048 * 3 * 1 * 8 * 16,
             "atlas_uncompressed_equivalent_bytes": int(
                 stats["atlas_uncompressed_equivalent_bytes"]
             ),

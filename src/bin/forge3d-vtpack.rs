@@ -1,7 +1,8 @@
 //! Offline TESSELLA virtual-texture packer.
 
 use forge3d::terrain::vt::{
-    write_packed_store, PackedPage, PageBytes, PageFormat, PageKey, StoreMetadata,
+    procedural_page, write_packed_store, MaterializationPlan, PackedPage, PageBytes, PageFormat,
+    PageKey, StoreMetadata,
 };
 use std::path::{Path, PathBuf};
 
@@ -9,12 +10,19 @@ const HELP: &str = "\
 forge3d-vtpack --output STORE [--manifest JSON]
   [--albedo IMAGE --normal IMAGE --mask IMAGE]
   [--procedural --virtual-width N --virtual-height N --seed N]
+  [--coarse-min-mip N --detail-max-mip N --detail-window-pages N]
   [--tile-size N --tile-border N]
 
 Packs Morton-ordered, SHA-256-addressed BC pages. Albedo uses BC7-sRGB,
 normal uses BC5-UNORM, and mask/roughness/metalness uses BC7-UNORM.
---procedural writes a sparse deterministic descriptor; requested pages are
-generated independently without allocating the declared virtual image.
+
+--procedural materializes an explicit, recorded set of pages: every page at
+mip >= --coarse-min-mip, plus a --detail-window-pages square window centred in
+each mip <= --detail-max-mip (0 disables the detail window). Every page's bytes
+are a deterministic function of (--seed, family, mip, x, y), so no two pages
+share a payload. Pages outside that set do not exist and reading one is an
+error -- nothing is aliased onto a canonical page and nothing is synthesized at
+read time. The plan is written into the store header and the manifest.
 ";
 
 #[derive(Debug)]
@@ -30,6 +38,9 @@ struct Args {
     tile_size: u32,
     tile_border: u32,
     seed: u64,
+    coarse_min_mip: u32,
+    detail_max_mip: u32,
+    detail_window_pages: u32,
 }
 
 fn main() {
@@ -44,7 +55,7 @@ fn run() -> Result<(), String> {
         print!("{HELP}");
         return Ok(());
     };
-    let (metadata, pages) = if args.procedural {
+    let (metadata, plan, pages) = if args.procedural {
         let metadata = StoreMetadata {
             virtual_width: args.virtual_width,
             virtual_height: args.virtual_height,
@@ -54,12 +65,20 @@ fn run() -> Result<(), String> {
             procedural: true,
             procedural_seed: args.seed,
         };
-        let pages = pack_procedural_pages(&metadata)?;
-        (metadata, pages)
+        let plan = MaterializationPlan {
+            coarse_min_mip: args.coarse_min_mip,
+            detail_max_mip: args.detail_max_mip,
+            detail_window_pages: args.detail_window_pages,
+        };
+        plan.validate(&metadata)?;
+        let pages = pack_procedural_pages(&metadata, &plan)?;
+        (metadata, plan, pages)
     } else {
-        pack_images(&args)?
+        // Image mode packs the whole pyramid from the source images.
+        let (metadata, pages) = pack_images(&args)?;
+        (metadata, MaterializationPlan::full_pyramid(), pages)
     };
-    let manifest = write_packed_store(&args.output, &metadata, pages)?;
+    let manifest = write_packed_store(&args.output, &metadata, &plan, pages)?;
     let manifest_path = args
         .manifest
         .unwrap_or_else(|| args.output.with_extension("manifest.json"));
@@ -71,63 +90,33 @@ fn run() -> Result<(), String> {
             manifest_path.display()
         )
     })?;
-    println!(
-        "{}",
-        String::from_utf8(json).expect("JSON serialization is UTF-8")
-    );
+    // The manifest carries one digest per page and reaches hundreds of KiB, so
+    // stdout gets a summary and callers read `--manifest` from disk.
+    let summary = serde_json::json!({
+        "manifest": manifest_path.display().to_string(),
+        "store": manifest.path,
+        "page_count": manifest.page_count,
+        "distinct_page_digests": manifest.distinct_page_digests,
+        "min_materialized_mip": manifest.min_materialized_mip,
+        "logical_texel_bytes": manifest.logical_texel_bytes,
+    });
+    println!("{summary}");
     Ok(())
 }
 
-fn pack_procedural_pages(metadata: &StoreMetadata) -> Result<Vec<PackedPage>, String> {
-    let side = metadata.slot_size();
-    let texels = side as usize * side as usize;
-    (0..metadata.family_count)
-        .map(|family| {
-            let family = family as u8;
-            let bytes = match family {
-                0 => {
-                    let mut rgba = Vec::with_capacity(texels * 4);
-                    for index in 0..texels {
-                        let value = (index as u64)
-                            .wrapping_mul(0x9e37_79b9)
-                            .wrapping_add(metadata.procedural_seed)
-                            as u8;
-                        rgba.extend_from_slice(&[value, value.wrapping_add(31), 96, 255]);
-                    }
-                    PageBytes::new(
-                        PageFormat::Bc7Srgb,
-                        side,
-                        side,
-                        forge3d::core::compressed_textures::encode_bc7_rgba8(&rgba, side, side)?,
-                    )?
-                }
-                1 => {
-                    let rg = vec![128; texels * 2];
-                    PageBytes::new(
-                        PageFormat::Bc5Unorm,
-                        side,
-                        side,
-                        forge3d::core::compressed_textures::encode_bc5_rg8(&rg, side, side)?,
-                    )?
-                }
-                _ => {
-                    let rgba = [192, 128, 32, 255].repeat(texels);
-                    PageBytes::new(
-                        PageFormat::Bc7Unorm,
-                        side,
-                        side,
-                        forge3d::core::compressed_textures::encode_bc7_rgba8(&rgba, side, side)?,
-                    )?
-                }
-            };
+/// Materialize exactly the pages `plan` declares, each with content derived
+/// from its own key. `write_packed_store` re-checks the result against the
+/// plan before the file is written.
+fn pack_procedural_pages(
+    metadata: &StoreMetadata,
+    plan: &MaterializationPlan,
+) -> Result<Vec<PackedPage>, String> {
+    plan.keys(metadata)
+        .into_iter()
+        .map(|key| {
             Ok(PackedPage {
-                key: PageKey {
-                    family,
-                    mip: 0,
-                    x: 0,
-                    y: 0,
-                },
-                bytes,
+                key,
+                bytes: procedural_page(metadata, key)?,
             })
         })
         .collect()
@@ -172,6 +161,12 @@ fn parse_args(raw: Vec<String>) -> Result<Option<Args>, String> {
         tile_border: u32::try_from(parse_u64("--tile-border", 4)?)
             .map_err(|_| "--tile-border exceeds u32".to_string())?,
         seed: parse_u64("--seed", 19)?,
+        coarse_min_mip: u32::try_from(parse_u64("--coarse-min-mip", 6)?)
+            .map_err(|_| "--coarse-min-mip exceeds u32".to_string())?,
+        detail_max_mip: u32::try_from(parse_u64("--detail-max-mip", 5)?)
+            .map_err(|_| "--detail-max-mip exceeds u32".to_string())?,
+        detail_window_pages: u32::try_from(parse_u64("--detail-window-pages", 8)?)
+            .map_err(|_| "--detail-window-pages exceeds u32".to_string())?,
     };
     if args.procedural && (args.albedo.is_some() || args.normal.is_some() || args.mask.is_some()) {
         return Err("--procedural cannot be combined with image inputs".to_string());

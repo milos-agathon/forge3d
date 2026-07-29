@@ -1,6 +1,8 @@
-// TESSELLA visibility-only shader extension. Runtime assembly appends this to
-// the proven terrain shader and upgrades the visibility ID packing to preserve
-// 16 bits each for tile/LOD identity and primitive identity.
+// TESSELLA pass 2 (visibility material resolve). `shader_sources::terrain_visbuffer_resolve`
+// appends this file to the shared terrain module, which supplies VertexOutput,
+// FragmentOutput and `shade_main`. It decodes the R32Uint identity written by
+// terrain_visbuffer_write.wgsl (which defines the packing), reconstructs the
+// visible triangle, and shades exactly once per non-background pixel.
 
 @group(7) @binding(0)
 var terrain_visibility_ids: texture_2d<u32>;
@@ -85,6 +87,14 @@ fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     return out;
 }
 
+// A visible triangle's vertices sit in front of the near plane, so `w` is
+// positive in practice. The guard removes the divide-by-zero NaN that nothing
+// upstream rules out statically, matching how `visibility_barycentrics` guards
+// its own denominator below.
+fn visibility_safe_w(w: f32) -> f32 {
+    return select(1e-6, w, abs(w) > 1e-6);
+}
+
 fn visibility_barycentrics(
     p: vec2<f32>,
     a: vec2<f32>,
@@ -153,13 +163,16 @@ fn fs_visibility_resolve_fullscreen(
     let v2 = visibility_reconstruct_vertex(
         u32(i32(terrain_visibility_indices[first + 2u]) + draw_template.base_vertex),
     );
+    let w0 = visibility_safe_w(v0.clip.w);
+    let w1 = visibility_safe_w(v1.clip.w);
+    let w2 = visibility_safe_w(v2.clip.w);
     let bary_screen = visibility_barycentrics(
         ndc_xy,
-        v0.clip.xy / v0.clip.w,
-        v1.clip.xy / v1.clip.w,
-        v2.clip.xy / v2.clip.w,
+        v0.clip.xy / w0,
+        v1.clip.xy / w1,
+        v2.clip.xy / w2,
     );
-    let perspective = bary_screen / vec3<f32>(v0.clip.w, v1.clip.w, v2.clip.w);
+    let perspective = bary_screen / vec3<f32>(w0, w1, w2);
     let bary = perspective / max(
         perspective.x + perspective.y + perspective.z,
         1e-8,

@@ -1274,12 +1274,19 @@ jobs:
             tests/test_bc_encoders.py `
             tests/test_flythrough_popping.py `
             tests/test_vt_request_retention.py `
+            tests/test_tessella_certificate_evidence.py `
             -v --tb=short --junitxml="$junit" *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/pytest.log"
           $pytestCode = $LASTEXITCODE
           python scripts/assert_junit_zero_skips.py "$junit" *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/junit-verifier.log"
           $verifyCode = $LASTEXITCODE
           if ($pytestCode -ne 0) { exit $pytestCode }
           exit $verifyCode
+      - name: Consolidate the nine TESSELLA verification results
+        shell: pwsh
+        run: |
+          python scripts/tessella_evidence_report.py "$env:FORGE3D_TESSELLA_ARTIFACT_DIR" `
+            *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/verification-report.log"
+          exit $LASTEXITCODE
       - name: Upload TESSELLA physical-GPU evidence
         if: always()
         uses: actions/upload-artifact@v4

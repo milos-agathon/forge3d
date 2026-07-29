@@ -167,4 +167,22 @@ mod tests {
         let reference = [255, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(decode_block(&reference), [255; 16]);
     }
+
+    #[test]
+    fn round_trips_a_spec_constructed_eight_value_reference_block() {
+        // A non-degenerate reference block exercising every selector value.
+        // endpoint0 = 240 > endpoint1 = 16 selects the 8-value palette
+        // [240, 16, 208, 176, 144, 112, 80, 48] (the six interpolants are
+        // (a*e0 + b*e1 + 3) / 7 for a = 8-i, b = i-1). The selector bytes are
+        // indices 0..7 repeated twice, packed 3 bits per texel little-endian.
+        // Both literals were derived from the BC4 UNORM layout, not from this
+        // codec, so bit-order drift against an external decoder is caught.
+        const REFERENCE: [u8; BLOCK_BYTES] = [240, 16, 136, 198, 250, 136, 198, 250];
+        const VALUES: [u8; 16] = [
+            240, 16, 208, 176, 144, 112, 80, 48, 240, 16, 208, 176, 144, 112, 80, 48,
+        ];
+
+        assert_eq!(decode_block(&REFERENCE), VALUES);
+        assert_eq!(encode_block(&VALUES), REFERENCE);
+    }
 }

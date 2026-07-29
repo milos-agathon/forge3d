@@ -144,6 +144,17 @@ struct TerrainMaterialVTStats {
     upload_budget_bytes: u64,
     atlas_device_local_bytes: u64,
     atlas_uncompressed_equivalent_bytes: u64,
+    /// Per-frame count of requests the bound store cannot serve at any mip in
+    /// the chain. A store miss is dropped, never substituted, so this counter
+    /// is the only place the loss is visible -- it must be 0 for a camera whose
+    /// working set is inside the store's materialization plan.
+    store_page_misses: u32,
+    /// Session-cumulative number of DISTINCT store page keys actually read.
+    /// With per-key page content this is the anti-degeneracy signal: an
+    /// aliasing store would report a handful regardless of the camera.
+    store_pages_fetched_distinct: u32,
+    /// The bound store's declared completeness floor (`0` when no store).
+    store_min_materialized_mip: u32,
     bindless_bc: bool,
     families: [FamilyResidency; VT_FAMILY_COUNT],
 }
@@ -218,6 +229,13 @@ struct TerrainMaterialVTRuntime {
     page_tables: Vec<Vec<PageTableEntry>>,
     dirty_page_table_layers: HashSet<usize>,
     sources: HashMap<(u32, u32), PreparedVTSource>,
+    /// SHA-256 of the exact page payload uploaded for each resident tile.
+    /// VERITAS reports this instead of the per-source directory hash, so a
+    /// contributing-tile record names the bytes of THAT tile.
+    resident_page_digests: HashMap<TileKey, [u8; 32]>,
+    /// Distinct store keys read this session; backs
+    /// `store_pages_fetched_distinct`.
+    store_fetched_keys: HashSet<crate::terrain::vt::PageKey>,
     tile_cache: TileCache,
     family_residency: FamilyResidencyTracker,
     feedback_buffer: Option<FeedbackBuffer>,
@@ -397,22 +415,25 @@ impl TerrainMaterialVT {
         }
         self.sources.clear();
         let fallbacks = Self::default_family_fallbacks();
-        for material_index in 0..super::core::MATERIAL_LAYER_CAPACITY as u32 {
-            for (family_slot, family) in TERRAIN_VT_SUPPORTED_FAMILIES.iter().enumerate() {
-                self.sources.insert(
-                    (material_index, (*family).to_string()),
-                    VTSource {
-                        virtual_size: (width, height),
-                        payload: VTSourcePayload::Store(store.clone()),
-                        fallback_color: fallbacks[family_slot],
-                        source_id: crate::core::provenance::source_id_for(
-                            family_slot as u32,
-                            material_index,
-                        ),
-                        content_hash: store.content_hash(),
-                    },
-                );
-            }
+        // The on-disk page key is (family, mip, x, y) with no material axis,
+        // so registering the store under several material indices would alias
+        // every layer onto the same pages. One material layer is what the
+        // format honestly supports; `prepare_frame` clamps the count to match.
+        const STORE_MATERIAL_INDEX: u32 = 0;
+        for (family_slot, family) in TERRAIN_VT_SUPPORTED_FAMILIES.iter().enumerate() {
+            self.sources.insert(
+                (STORE_MATERIAL_INDEX, (*family).to_string()),
+                VTSource {
+                    virtual_size: (width, height),
+                    payload: VTSourcePayload::Store(store.clone()),
+                    fallback_color: fallbacks[family_slot],
+                    source_id: crate::core::provenance::source_id_for(
+                        family_slot as u32,
+                        STORE_MATERIAL_INDEX,
+                    ),
+                    content_hash: store.content_hash(),
+                },
+            );
         }
         self.source_generation = self.source_generation.wrapping_add(1);
         self.runtime = None;
@@ -485,6 +506,18 @@ impl TerrainMaterialVT {
                 stats.atlas_uncompressed_equivalent_bytes as f32
                     / stats.atlas_device_local_bytes as f32
             },
+        );
+        out.insert(
+            "store_page_misses".to_string(),
+            stats.store_page_misses as f32,
+        );
+        out.insert(
+            "store_pages_fetched_distinct".to_string(),
+            stats.store_pages_fetched_distinct as f32,
+        );
+        out.insert(
+            "store_min_materialized_mip".to_string(),
+            stats.store_min_materialized_mip as f32,
         );
         out.insert(
             "bindless_bc".to_string(),
@@ -694,8 +727,15 @@ impl TerrainMaterialVT {
             }
         }
 
-        let effective_material_count =
+        let mut effective_material_count =
             material_count.clamp(1, super::core::MATERIAL_LAYER_CAPACITY as u32);
+        if params.vt_store_path.is_some() {
+            // A packed store keys its pages by family only, so extra material
+            // layers could never become resident and would report themselves
+            // as fallback texels. Refuse to advertise capacity that does not
+            // exist rather than degrade silently.
+            effective_material_count = 1;
+        }
         self.ensure_runtime(
             device,
             queue,
@@ -805,13 +845,20 @@ impl TerrainMaterialVT {
                         .sources
                         .contains_key(&(target_family, material_index))
                     {
-                        runtime.pending_feedback[target_family as usize].insert(TileKey {
+                        // Resolve against the store before retaining: a key the
+                        // store cannot materialize would otherwise sit in the
+                        // retained set forever, because residency can never
+                        // clear it.
+                        let Some(retained) = runtime.resolve_feedback_key(TileKey {
                             family_slot: target_family,
                             material_index,
                             x: entry.tile_x,
                             y: entry.tile_y,
                             mip_level: entry.mip_level,
-                        });
+                        }) else {
+                            continue;
+                        };
+                        runtime.pending_feedback[target_family as usize].insert(retained);
                     }
                 }
             }
@@ -890,7 +937,16 @@ impl TerrainMaterialVT {
                 tile_x: key.x,
                 tile_y: key.y,
                 mip_level: key.mip_level,
-                content_hash: source.content_hash,
+                // Per-PAGE digest for store-backed tiles. `source.content_hash`
+                // is a per-source constant (the store's directory hash), so
+                // reporting it would make every tile record identical and a
+                // wrong-tile upload undetectable. In-RAM sources keep the
+                // source hash, which is what they actually sampled.
+                content_hash: runtime
+                    .resident_page_digests
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(source.content_hash),
             });
         }
         tiles.sort_by_key(|tile| {
@@ -1308,6 +1364,8 @@ impl TerrainMaterialVTRuntime {
             page_tables,
             dirty_page_table_layers,
             sources: prepared_sources,
+            resident_page_digests: HashMap::new(),
+            store_fetched_keys: HashSet::new(),
             tile_cache,
             family_residency,
             feedback_buffer,
@@ -1336,6 +1394,15 @@ impl TerrainMaterialVTRuntime {
             atlas_texels * 4
         };
         runtime.stats.bindless_bc = bindless_bc;
+        runtime.stats.store_min_materialized_mip = runtime
+            .sources
+            .values()
+            .filter_map(|source| match &source.payload {
+                PreparedVTSourcePayload::Store(store) => Some(store.min_materialized_mip()),
+                PreparedVTSourcePayload::Resident(_) => None,
+            })
+            .max()
+            .unwrap_or(0);
         Ok(runtime)
     }
 
@@ -1385,6 +1452,7 @@ impl TerrainMaterialVTRuntime {
             .map(|bucket| bucket.len() as u32)
             .sum();
         self.stats.prefetch_requests = 0;
+        self.stats.store_page_misses = 0;
         self.stats.uploaded_bytes = 0;
     }
 
@@ -1420,7 +1488,8 @@ impl TerrainMaterialVTRuntime {
         let end_y = ((uv_max[1] * pages_y as f32).ceil() as i32 - 1).clamp(0, pages_y as i32 - 1);
 
         let mut priorities = HashMap::<TileKey, u64>::new();
-        for (family_slot, material_index) in self.sources.keys().copied() {
+        let source_slots = self.sources.keys().copied().collect::<Vec<_>>();
+        for (family_slot, material_index) in source_slots.iter().copied() {
             for y in start_y..=end_y {
                 for x in start_x..=end_x {
                     let key = TileKey {
@@ -1430,17 +1499,14 @@ impl TerrainMaterialVTRuntime {
                         y: y as u32,
                         mip_level: desired_mip,
                     };
-                    self.insert_prioritized_with_ancestors(
-                        &mut priorities,
+                    let score = request_score(
                         key,
-                        request_score(
-                            key,
-                            desired_mip,
-                            false,
-                            false,
-                            self.page_screen_space_error(key, params),
-                        ),
+                        desired_mip,
+                        false,
+                        false,
+                        self.page_screen_space_error(key, params),
                     );
+                    self.admit_request(&mut priorities, key, score);
                 }
             }
         }
@@ -1449,7 +1515,7 @@ impl TerrainMaterialVTRuntime {
             let requests_before_prefetch = priorities.len();
             let predicted_pages =
                 self.predicted_lod_pages(&predicted_params, desired_mip, predicted_rect);
-            for (family_slot, material_index) in self.sources.keys().copied() {
+            for (family_slot, material_index) in source_slots.iter().copied() {
                 for &(x, y) in &predicted_pages {
                     let key = TileKey {
                         family_slot,
@@ -1458,17 +1524,14 @@ impl TerrainMaterialVTRuntime {
                         y,
                         mip_level: desired_mip,
                     };
-                    self.insert_prioritized_with_ancestors(
-                        &mut priorities,
+                    let score = request_score(
                         key,
-                        request_score(
-                            key,
-                            desired_mip,
-                            false,
-                            true,
-                            self.page_screen_space_error(key, params),
-                        ),
+                        desired_mip,
+                        false,
+                        true,
+                        self.page_screen_space_error(key, params),
                     );
+                    self.admit_request(&mut priorities, key, score);
                 }
             }
             self.stats.prefetch_requests =
@@ -1491,17 +1554,17 @@ impl TerrainMaterialVTRuntime {
                     .sources
                     .contains_key(&(feedback.family_slot, feedback.material_index))
                 {
-                    self.insert_prioritized_with_ancestors(
-                        &mut priorities,
+                    // The shader derives its desired mip from the triplanar
+                    // world UV, so it can name any mip 0..max: this is the
+                    // uncontrolled source of sub-plan keys.
+                    let score = request_score(
                         feedback,
-                        request_score(
-                            feedback,
-                            desired_mip,
-                            true,
-                            false,
-                            self.page_screen_space_error(feedback, params),
-                        ),
+                        desired_mip,
+                        true,
+                        false,
+                        self.page_screen_space_error(feedback, params),
                     );
+                    self.admit_request(&mut priorities, feedback, score);
                 }
             }
         }
@@ -1751,20 +1814,29 @@ impl TerrainMaterialVTRuntime {
         }
     }
 
-    fn build_tile_data(&self, source: &PreparedVTSource, key: TileKey) -> Result<TileData, String> {
+    fn build_tile_data(
+        &mut self,
+        source: &PreparedVTSource,
+        key: TileKey,
+    ) -> Result<TileData, String> {
         if let PreparedVTSourcePayload::Store(store) = &source.payload {
-            let page = store.page(crate::terrain::vt::PageKey {
-                family: key.family_slot as u8,
-                mip: key.mip_level as u8,
-                x: key.x,
-                y: key.y,
-            })?;
+            let page_key = Self::page_key(key);
+            // Fatal by design: every request reaching here was resolved through
+            // `store.contains`, so a failure means the directory promised a
+            // page the file cannot produce -- corruption, not a miss.
+            let page = store.page(page_key)?;
             if page.width != self.slot_size || page.height != self.slot_size {
                 return Err(format!(
                     "VT store page {:?} is {}x{}, expected {}x{}",
                     key, page.width, page.height, self.slot_size, self.slot_size
                 ));
             }
+            // Wrong-tile detector: record the digest of the bytes THIS tile
+            // received, so a contributing-tile record can be checked against
+            // the manifest entry for its own key.
+            self.resident_page_digests.insert(key, page.sha256);
+            self.store_fetched_keys.insert(page_key);
+            self.stats.store_pages_fetched_distinct = self.store_fetched_keys.len() as u32;
             if self.bindless_bc {
                 let expected = match key.family_slot {
                     TERRAIN_VT_FAMILY_ALBEDO => crate::terrain::vt::PageFormat::Bc7Srgb,
@@ -1999,6 +2071,7 @@ impl TerrainMaterialVTRuntime {
     }
 
     fn clear_page_entry(&mut self, key: TileKey) {
+        self.resident_page_digests.remove(&key);
         if key.family_slot >= TERRAIN_VT_FAMILY_COUNT
             || key.material_index >= self.material_count
             || key.mip_level >= self.max_mip_levels
@@ -2018,7 +2091,7 @@ impl TerrainMaterialVTRuntime {
     }
 
     /// VERITAS: replay the shader's residency walk on the CPU page-table
-    /// mirror — climb from `key.mip_level` toward coarser mips and return the
+    /// mirror -- climb from `key.mip_level` toward coarser mips and return the
     /// first resident tile, or `None` when the whole chain is non-resident.
     fn resolve_resident_mip(&self, key: TileKey) -> Option<TileKey> {
         if key.family_slot >= TERRAIN_VT_FAMILY_COUNT || key.material_index >= self.material_count {
@@ -2054,17 +2127,105 @@ impl TerrainMaterialVTRuntime {
         }
     }
 
+    fn page_key(key: TileKey) -> crate::terrain::vt::PageKey {
+        crate::terrain::vt::PageKey {
+            family: key.family_slot as u8,
+            mip: key.mip_level as u8,
+            x: key.x,
+            y: key.y,
+        }
+    }
+
+    /// The disk store backing this tile, or `None` for an in-RAM source (which
+    /// can synthesize every key of its own mip chain).
+    fn store_for(&self, key: TileKey) -> Option<Arc<dyn VirtualTextureStore>> {
+        match &self
+            .sources
+            .get(&(key.family_slot, key.material_index))?
+            .payload
+        {
+            PreparedVTSourcePayload::Store(store) => Some(store.clone()),
+            PreparedVTSourcePayload::Resident(_) => None,
+        }
+    }
+
+    /// Climb toward coarser mips until the store physically holds the page.
+    ///
+    /// Landing on a coarser materialized ancestor is legitimate -- the store
+    /// genuinely has no finer data there. Returning `None` is an explicit
+    /// miss: the caller drops the request and counts it, so the loss is never
+    /// silent and never becomes a wrong-tile read.
+    fn store_resolve(&self, store: &Arc<dyn VirtualTextureStore>, key: TileKey) -> Option<TileKey> {
+        let mut candidate = key;
+        loop {
+            if store.contains(Self::page_key(candidate)) {
+                return Some(candidate);
+            }
+            if candidate.mip_level + 1 >= self.max_mip_levels {
+                return None;
+            }
+            candidate = TileKey {
+                mip_level: candidate.mip_level + 1,
+                x: candidate.x / 2,
+                y: candidate.y / 2,
+                ..candidate
+            };
+        }
+    }
+
+    /// Resolve `key` to the finest page the bound store actually holds, or
+    /// `None` after counting an explicit miss. In-RAM sources pass through.
+    fn resolve_store_key(&mut self, key: TileKey) -> Option<TileKey> {
+        let Some(store) = self.store_for(key) else {
+            return Some(key);
+        };
+        match self.store_resolve(&store, key) {
+            Some(resolved) => Some(resolved),
+            None => {
+                self.stats.store_page_misses = self.stats.store_page_misses.saturating_add(1);
+                None
+            }
+        }
+    }
+
+    /// Feedback keys come from the GPU and can name any mip, so they are
+    /// resolved before entering the retained set: a key the store cannot
+    /// materialize could never be cleared by residency and would pin
+    /// `retained_requests` above zero forever.
+    fn resolve_feedback_key(&mut self, key: TileKey) -> Option<TileKey> {
+        self.resolve_store_key(key)
+    }
+
+    /// Admit one candidate request, resolving it against the store first so a
+    /// key outside the materialization plan can never reach the fatal
+    /// `store.page(...)?` in `build_tile_data`.
+    fn admit_request(&mut self, requests: &mut HashMap<TileKey, u64>, key: TileKey, score: u64) {
+        let Some(resolved) = self.resolve_store_key(key) else {
+            return;
+        };
+        self.insert_prioritized_with_ancestors(requests, resolved, score);
+    }
+
     fn insert_prioritized_with_ancestors(
         &self,
         requests: &mut HashMap<TileKey, u64>,
         mut key: TileKey,
         mut score: u64,
     ) {
+        // Ancestors are generated, not observed, so they can leave the
+        // materialized set; skip the ones the store does not hold rather than
+        // queueing a request that would abort the frame.
+        let store = self.store_for(key);
         loop {
-            requests
-                .entry(key)
-                .and_modify(|current| *current = (*current).max(score))
-                .or_insert(score);
+            if store
+                .as_ref()
+                .is_none_or(|store| store.contains(Self::page_key(key)))
+            {
+                requests
+                    .entry(key)
+                    .and_modify(|current| *current = (*current).max(score))
+                    .or_insert(score);
+            }
             if key.mip_level + 1 >= self.max_mip_levels {
                 break;
             }

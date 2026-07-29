@@ -73,6 +73,32 @@ def test_hzb_reuses_prometheus_terrain_minmax_pyramid():
     assert "build_minmax_mips(" not in geometry
 
 
+def test_two_phase_conservativeness_is_backed_by_the_real_shader():
+    """The CPU conservativeness model in `src/terrain/culling/two_phase.rs` was
+    a hand-written re-implementation of `hzb_cull.wgsl` and would have survived
+    any change to the shader. Lock in both halves of the fix:
+
+    1. `cpu_predicate_tracks_the_compiled_wgsl_source` parses the background
+       cutoff, the depth slack and the MAX reduce out of the same `include_str!`
+       the pipeline compiles, so it fails on shader drift with no GPU at all.
+    2. `hzb_cull_shader_matches_the_cpu_occlusion_predicate` dispatches the real
+       kernel (through the production layout/pipeline constructors) over a
+       synthetic occluder set and compares the accept/reject partition. It is
+       `#[ignore]`d like the 1,000-camera LOD differential and runs in the
+       TESSELLA hardware lane.
+    """
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "src/terrain/culling/two_phase.rs").read_text(encoding="utf-8")
+    assert 'include_str!("../../shaders/hzb_cull.wgsl")' in source
+    assert "const HZB_CULL_SOURCE: &str" in source
+    assert "fn cpu_predicate_tracks_the_compiled_wgsl_source()" in source
+    assert "fn hzb_cull_shader_matches_the_cpu_occlusion_predicate()" in source
+    # The differential must build its pipeline from the production constructors,
+    # not a bespoke copy of the bind-group layout.
+    assert source.count("create_cull_layout(device)") >= 2
+    assert source.count("create_cull_pipeline(device, &layout)") >= 2
+
+
 @requires_terrain
 def test_two_phase_hzb_is_bitwise_identical_to_unculled_render():
     with tempfile.TemporaryDirectory() as td:

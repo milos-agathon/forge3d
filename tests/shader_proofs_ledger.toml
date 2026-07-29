@@ -224,15 +224,21 @@ expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_visbuffer_resolve.wgsl"
-reason = "terrain_visbuffer_resolve.wgsl: visibility texture dimensions and atomic accounting relations are GPU-gated but not yet modeled"
+reason = "terrain_visbuffer_resolve.wgsl: the single relation not yet modeled is the fixed-index read of frame_counters[0..3] from a runtime-sized array<u32>. The shader never queries arrayLength, and validate_contract_semantics rejects a fixed length on a runtime array, so a contract would have to bound that buffer with a length symbol or an invariant. The gid >= textureDimensions early return and the atomic accounting stores are already inside the prover vocabulary, so this waiver covers one clause, not the pass"
 owner = "terrain-streaming"
-expiry = "2027-07-27"
+expiry = "2027-01-28"
+
+[[unproven]]
+path = "src/shaders/terrain_visbuffer_write.wgsl"
+reason = "terrain_visbuffer_write.wgsl: no verifier imprecision applies - the pass is pure bit packing over a flat-interpolated u32 and primitive_index, with no indexing, division or sampling, so nothing in it is unsupported by ir::prove_wgsl. It is unproven only because it has no PROVEN_TARGETS row and contract yet; promote it in src/verify/mod.rs instead of renewing this waiver"
+owner = "terrain-streaming"
+expiry = "2027-01-28"
 
 [[unproven]]
 path = "src/shaders/terrain_visibility_fullscreen.wgsl"
-reason = "terrain_visibility_fullscreen.wgsl: primitive-ID bounds and perspective reconstruction are exact-head GPU and CPU-BVH gated but not yet modeled"
+reason = "terrain_visibility_fullscreen.wgsl: four texel-derived storage indices are not yet modeled because no comparison binds them to an arrayLength - terrain_visibility_templates[tile_index * variant_count + selected_lod], the three terrain_visibility_indices[first + k] loads, and terrain_visibility_vertices[index] inside visibility_reconstruct_vertex, which additionally crosses a helper-function boundary and adds a signed base_vertex. The perspective divides are guarded now (visibility_safe_w), so discharge needs only bounds guards on those four indices plus a PROVEN_TARGETS row, measured against the 300 s verdict budget because it re-proves a second full terrain assembly"
 owner = "terrain-streaming"
-expiry = "2027-07-27"
+expiry = "2027-01-28"
 
 [[unproven]]
 path = "src/shaders/hybrid_kernel.wgsl"
@@ -254,7 +260,7 @@ expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/hzb_cull.wgsl"
-reason = "hzb_cull.wgsl: conservative projected-AABB texture relations are not yet modeled"
+reason = "hzb_cull.wgsl: the projected-AABB and HZB relations are ordinary clamp/min/max and textureLoad forms; what is not yet modeled in cs_main is four storage indices that no comparison binds to an arrayLength - output_args[out_index] and output_instances[out_index] from an unbounded atomicAdd on output_header.draw_count, rejected_indices[rejected_index] from the same pattern on rejected_count, and input_tiles/input_args/input_instances[source_index] where source_index comes from rejected_indices[i] in phase 2. Discharge needs those bounded plus a PROVEN_TARGETS row"
 owner = "render-quality"
 expiry = "2027-01-17"
 

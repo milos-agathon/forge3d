@@ -180,7 +180,9 @@ impl TerrainScene {
                         multisampled: false,
                     },
                     count: if super::super::virtual_texture::bindless_bc_supported(device) {
-                        std::num::NonZeroU32::new(3)
+                        // Must equal the sized `binding_array` emitted by
+                        // `shader_sources::terrain_bindless`.
+                        std::num::NonZeroU32::new(crate::shader_sources::VT_ATLAS_BINDING_COUNT)
                     } else {
                         None
                     },

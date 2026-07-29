@@ -13,6 +13,7 @@ def record_tessella_result(name: str, values: dict[str, Any]) -> None:
     artifact_dir = os.environ.get("FORGE3D_TESSELLA_ARTIFACT_DIR")
     if artifact_dir:
         destination = Path(artifact_dir) / f"{name}.json"
+        destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",

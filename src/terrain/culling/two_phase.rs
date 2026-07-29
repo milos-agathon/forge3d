@@ -10,6 +10,10 @@ use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use std::sync::{Mutex, OnceLock};
 
+/// The compute source both the production pipeline and the shader-differential
+/// test compile, so neither can drift away from the other.
+const HZB_CULL_SOURCE: &str = include_str!("../../shaders/hzb_cull.wgsl");
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CullParams {
@@ -98,40 +102,8 @@ impl TwoPhaseTerrainCuller {
             HzbPyramid::new(device, width, height)?,
         ];
         let max_mip = pyramids[0].mip_count.saturating_sub(1);
-        let shader = crate::core::shader_registry::create_labeled_shader_module(
-            device,
-            "hzb_cull",
-            include_str!("../../shaders/hzb_cull.wgsl"),
-        );
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("terrain.hzb_cull.layout"),
-            entries: &[
-                uniform_entry(0),
-                texture_entry(1),
-                storage_entry(2, false),
-                storage_entry(3, true),
-                storage_entry(4, true),
-                storage_entry(5, true),
-                storage_entry(6, false),
-                storage_entry(7, false),
-                storage_entry(8, false),
-                storage_entry(9, false),
-            ],
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("terrain.hzb_cull.pipeline_layout"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
-        });
-        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
-            device,
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("terrain.hzb_cull.pipeline"),
-                layout: Some(&pipeline_layout),
-                module: &shader,
-                entry_point: "cs_main",
-            },
-        );
+        let layout = create_cull_layout(device);
+        let pipeline = create_cull_pipeline(device, &layout);
         let zero_params = CullParams::zeroed();
         let phase1_params = tracked_create_buffer_init(
             device,
@@ -441,6 +413,52 @@ fn create_draw_resources(
     })
 }
 
+/// The `hzb_cull.wgsl` bind-group layout. Shared with the shader-differential
+/// test so the test cannot drift away from the production binding contract.
+fn create_cull_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("terrain.hzb_cull.layout"),
+        entries: &[
+            uniform_entry(0),
+            texture_entry(1),
+            storage_entry(2, false),
+            storage_entry(3, true),
+            storage_entry(4, true),
+            storage_entry(5, true),
+            storage_entry(6, false),
+            storage_entry(7, false),
+            storage_entry(8, false),
+            storage_entry(9, false),
+        ],
+    })
+}
+
+/// Compile `src/shaders/hzb_cull.wgsl` into the two-phase culling pipeline.
+fn create_cull_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+) -> wgpu::ComputePipeline {
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "hzb_cull",
+        HZB_CULL_SOURCE,
+    );
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("terrain.hzb_cull.pipeline_layout"),
+        bind_group_layouts: &[layout],
+        push_constant_ranges: &[],
+    });
+    crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("terrain.hzb_cull.pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "cs_main",
+        },
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create_bind_group(
     device: &wgpu::Device,
@@ -535,14 +553,40 @@ fn clear_outputs(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::core::resource_tracker::tracked_create_texture;
+    use crate::terrain::clipmap::gpu_lod::TileInfo;
+    use glam::Vec2;
+    use std::collections::BTreeSet;
+
+    /// Depth at or above which `tile_occluded` treats the covered footprint as
+    /// cleared background and bypasses the test entirely.
+    const BACKGROUND_DEPTH: f32 = 0.999999;
+    /// Slack added to the occluder before the depth comparison.
+    const DEPTH_EPSILON: f32 = 0.00001;
+
+    /// The rule `tile_occluded` (src/shaders/hzb_cull.wgsl) applies once the
+    /// covered HZB footprint has been gathered: BOTH phases MAX-reduce the
+    /// footprint and treat a cleared texel as "no occluder". The phase
+    /// difference lives entirely in how the pyramid itself was reduced — min
+    /// over the previous frame, max over the fresh phase-1 depth — which is why
+    /// `phase1_rejects` feeds this the min-reduced block and `phase2_occluded`
+    /// feeds it the raw mip-0 texels.
+    fn shader_occludes(nearest_tile_depth: f32, covered_texels: &[f32]) -> bool {
+        let farthest_occluder = covered_texels.iter().copied().fold(0.0_f32, f32::max);
+        if farthest_occluder >= BACKGROUND_DEPTH {
+            return false;
+        }
+        nearest_tile_depth > farthest_occluder + DEPTH_EPSILON
+    }
+
     fn phase1_rejects(nearest_tile_depth: f32, covered_depths: &[f32]) -> bool {
         let closest_occluder = covered_depths.iter().copied().fold(1.0, f32::min);
-        closest_occluder < 1.0 && nearest_tile_depth > closest_occluder
+        shader_occludes(nearest_tile_depth, &[closest_occluder])
     }
 
     fn phase2_occluded(nearest_tile_depth: f32, covered_depths: &[f32]) -> bool {
-        let farthest_occluder = covered_depths.iter().copied().fold(0.0, f32::max);
-        farthest_occluder < 1.0 && nearest_tile_depth > farthest_occluder
+        shader_occludes(nearest_tile_depth, covered_depths)
     }
 
     #[test]
@@ -557,5 +601,374 @@ mod tests {
     fn max_depth_test_only_culls_when_every_covered_pixel_is_closer() {
         assert!(phase2_occluded(0.8, &[0.2, 0.4, 0.6]));
         assert!(!phase2_occluded(0.8, &[0.2, 1.0, 0.6]));
+    }
+
+    /// Read the float literal that follows `marker` in the compiled WGSL.
+    fn wgsl_float_after(marker: &str) -> f32 {
+        let (_, tail) = HZB_CULL_SOURCE
+            .split_once(marker)
+            .unwrap_or_else(|| panic!("hzb_cull.wgsl no longer contains `{marker}`"));
+        let literal: String = tail
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        literal
+            .parse()
+            .unwrap_or_else(|_| panic!("no float literal after `{marker}`: {literal:?}"))
+    }
+
+    /// The GPU differential below is `#[ignore]`d, so this adapter-free gate is
+    /// what keeps the CPU conservativeness model above honest on every host: it
+    /// fails the moment the shader changes its reduce, its background cutoff or
+    /// its depth slack.
+    #[test]
+    fn cpu_predicate_tracks_the_compiled_wgsl_source() {
+        assert!(
+            HZB_CULL_SOURCE.contains("farthest_occluder = max(farthest_occluder, depth);"),
+            "hzb_cull.wgsl no longer MAX-reduces the covered footprint; the CPU model in \
+             this module is stale"
+        );
+        assert!(HZB_CULL_SOURCE.contains("let occluder = farthest_occluder;"));
+        assert_eq!(wgsl_float_after("if occluder >= "), BACKGROUND_DEPTH);
+        assert_eq!(
+            wgsl_float_after("return nearest_depth > occluder + "),
+            DEPTH_EPSILON
+        );
+    }
+
+    /// Synthetic occluder cases, one per cell of a `GRID`x`GRID` split of the
+    /// HZB: `(nearest tile depth, footprint fill, optional single-texel
+    /// override)`. Chosen to straddle the background cutoff, the depth slack and
+    /// the max reduce in both directions.
+    const CASES: [(f32, f32, Option<(usize, f32)>); 16] = [
+        (0.80, 1.0, None),              // cleared footprint -> background bypass
+        (0.80, 0.20, None),             // fully occluded
+        (0.80, 0.20, Some((137, 1.0))), // one cleared texel -> conservative keep
+        (0.50, 0.90, None),             // tile in front of the occluder
+        (0.80, 0.20, Some((5, 0.60))),  // max reduce picks the farthest occluder
+        (0.50, 0.50, None),             // exactly equal -> keep
+        (0.501, 0.50, None),            // beyond the slack -> reject
+        (0.80, 0.9999, None),           // just below the background cutoff
+        (0.30, 0.20, None),             // shallow tile still behind
+        (0.20, 0.20, None),             // equal at low depth -> keep
+        (0.95, 0.90, None),             // near-background occluder still rejects
+        (0.95, 0.90, Some((255, 1.0))), // ... unless one texel is cleared
+        (0.10, 0.05, None),
+        (0.10, 0.50, None),
+        (0.60, 0.20, Some((0, 0.59))),
+        (0.60, 0.20, Some((0, 0.61))),
+    ];
+
+    const GRID: u32 = 4;
+    const CELL: u32 = 16;
+    const HZB_DIM: u32 = GRID * CELL;
+
+    /// The `CELL`x`CELL` HZB block covered by case `case`.
+    fn footprint(case: usize) -> Vec<f32> {
+        let (_, base, override_texel) = CASES[case];
+        let mut texels = vec![base; (CELL * CELL) as usize];
+        if let Some((index, value)) = override_texel {
+            texels[index] = value;
+        }
+        texels
+    }
+
+    /// The whole synthetic pyramid level: cleared to 1.0, then each case's cell
+    /// painted with that case's footprint.
+    fn synthetic_hzb() -> Vec<f32> {
+        let mut texels = vec![1.0_f32; (HZB_DIM * HZB_DIM) as usize];
+        for case in 0..CASES.len() {
+            let col = case as u32 % GRID;
+            let row = case as u32 / GRID;
+            for (local, value) in footprint(case).into_iter().enumerate() {
+                let x = col * CELL + local as u32 % CELL;
+                let y = row * CELL + local as u32 / CELL;
+                texels[(y * HZB_DIM + x) as usize] = value;
+            }
+        }
+        texels
+    }
+
+    /// One tile per case. With an identity view-projection world space IS clip
+    /// space, so these bounds land exactly on the case's HZB cell: x maps to
+    /// `u = x * 0.5 + 0.5` and y to `v = -y * 0.5 + 0.5`, and every coordinate
+    /// here is a multiple of 0.5 so the mapping is exact in f32.
+    fn synthetic_tiles() -> Vec<TileInfo> {
+        CASES
+            .iter()
+            .enumerate()
+            .map(|(case, (nearest, _, _))| {
+                let col = case as u32 % GRID;
+                let row = case as u32 / GRID;
+                TileInfo::new(
+                    0,
+                    col,
+                    row,
+                    Vec2::new(col as f32 / 2.0 - 1.0, 0.5 - row as f32 / 2.0),
+                    Vec2::new((col + 1) as f32 / 2.0 - 1.0, 1.0 - row as f32 / 2.0),
+                )
+                .with_height_bounds(*nearest, *nearest)
+            })
+            .collect()
+    }
+
+    fn storage_buffer<T: Pod>(
+        device: &wgpu::Device,
+        label: &str,
+        contents: &[T],
+        extra: wgpu::BufferUsages,
+    ) -> TrackedBuffer {
+        tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(contents),
+                usage: wgpu::BufferUsages::STORAGE | extra,
+            },
+        )
+        .expect("synthetic hzb_cull storage buffer")
+    }
+
+    /// Dispatch the REAL `hzb_cull.wgsl` phase-1 kernel over a synthetic
+    /// occluder set and require its accept/reject partition to equal
+    /// [`shader_occludes`]. Without this the CPU conservativeness tests above
+    /// only check a hand-written copy of the predicate and would survive any
+    /// change to the shader.
+    #[test]
+    #[ignore = "requires a physical GPU; the TESSELLA lane runs this exact test"]
+    fn hzb_cull_shader_matches_the_cpu_occlusion_predicate() {
+        let context = crate::core::gpu::try_ctx()
+            .expect("TESSELLA HZB shader differential requires a GPU adapter");
+        let device = context.device.as_ref();
+        let queue = context.queue.as_ref();
+
+        let cases = CASES.len();
+        let expected_occluded: Vec<bool> = CASES
+            .iter()
+            .enumerate()
+            .map(|(case, (nearest, _, _))| shader_occludes(*nearest, &footprint(case)))
+            .collect();
+        let expected_background = (0..cases)
+            .filter(|case| {
+                footprint(*case).iter().copied().fold(0.0_f32, f32::max) >= BACKGROUND_DEPTH
+            })
+            .count();
+        assert!(
+            expected_occluded.iter().filter(|hidden| **hidden).count() >= 4
+                && expected_occluded.iter().filter(|hidden| !**hidden).count() >= 4,
+            "the synthetic case table must exercise both outcomes: {expected_occluded:?}"
+        );
+
+        let hzb = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.hzb_cull.test.hzb"),
+                size: wgpu::Extent3d {
+                    width: HZB_DIM,
+                    height: HZB_DIM,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )
+        .expect("synthetic HZB texture");
+        let hzb_texels = synthetic_hzb();
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &hzb,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(hzb_texels.as_slice()),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(HZB_DIM * 4),
+                rows_per_image: Some(HZB_DIM),
+            },
+            wgpu::Extent3d {
+                width: HZB_DIM,
+                height: HZB_DIM,
+                depth_or_array_layers: 1,
+            },
+        );
+        let hzb_view = hzb.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // `viewport.z` pins the mip to 0 so the kernel reads exactly the level
+        // painted above; `viewport.w` marks the pyramid valid so no tile takes
+        // the projection bypass.
+        let params = CullParams {
+            view_proj: Mat4::IDENTITY.to_cols_array_2d(),
+            height_bounds: [0.0, 1.0, 0.0, 0.0],
+            viewport: [HZB_DIM as f32, HZB_DIM as f32, 0.0, 1.0],
+            control: [1, 1, 0, 0],
+        };
+        let params_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.hzb_cull.test.params"),
+                contents: bytemuck::bytes_of(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )
+        .expect("synthetic hzb_cull params");
+
+        let none = wgpu::BufferUsages::empty();
+        let tiles = synthetic_tiles();
+        let zero_args = vec![DrawIndexedIndirectArgs::zeroed(); cases];
+        let instances: Vec<ClipmapDrawInstance> = (0..cases as u32)
+            .map(|index| ClipmapDrawInstance::identity(index, 0))
+            .collect();
+        let unrejected = vec![u32::MAX; cases];
+        let input_header = storage_buffer(
+            device,
+            "terrain.hzb_cull.test.input_header",
+            &[cases as u32, 0, 0, 0],
+            none,
+        );
+        let input_tiles = storage_buffer(
+            device,
+            "terrain.hzb_cull.test.input_tiles",
+            tiles.as_slice(),
+            none,
+        );
+        let input_args = storage_buffer(
+            device,
+            "terrain.hzb_cull.test.input_args",
+            zero_args.as_slice(),
+            none,
+        );
+        let input_instances = storage_buffer(
+            device,
+            "terrain.hzb_cull.test.input_instances",
+            instances.as_slice(),
+            none,
+        );
+        let output_args = storage_buffer(
+            device,
+            "terrain.hzb_cull.test.output_args",
+            zero_args.as_slice(),
+            none,
+        );
+        let output_instances = storage_buffer(
+            device,
+            "terrain.hzb_cull.test.output_instances",
+            instances.as_slice(),
+            none,
+        );
+        let rejected = storage_buffer(
+            device,
+            "terrain.hzb_cull.test.rejected",
+            unrejected.as_slice(),
+            wgpu::BufferUsages::COPY_SRC,
+        );
+        let output_header = storage_buffer(
+            device,
+            "terrain.hzb_cull.test.output_header",
+            &[0_u32; 4],
+            wgpu::BufferUsages::COPY_SRC,
+        );
+        let readback_size = 16 + (cases * 4) as u64;
+        let readback = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain.hzb_cull.test.readback"),
+                size: readback_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .expect("synthetic hzb_cull readback");
+
+        let layout = create_cull_layout(device);
+        let pipeline = create_cull_pipeline(device, &layout);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.hzb_cull.test.bind_group"),
+            layout: &layout,
+            entries: &[
+                entry(0, &params_buffer),
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&hzb_view),
+                },
+                entry(2, &input_header),
+                entry(3, &input_tiles),
+                entry(4, &input_args),
+                entry(5, &input_instances),
+                entry(6, &output_args),
+                entry(7, &output_instances),
+                entry(8, &rejected),
+                entry(9, &output_header),
+            ],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("terrain.hzb_cull.test.encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("terrain.hzb_cull.test.pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((cases as u32).div_ceil(64), 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&output_header, 0, &readback, 0, 16);
+        encoder.copy_buffer_to_buffer(&rejected, 0, &readback, 16, (cases * 4) as u64);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = readback.slice(..);
+        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).ok();
+        });
+        device.poll(wgpu::Maintain::Wait);
+        pollster::block_on(receiver.receive())
+            .expect("hzb_cull readback callback dropped")
+            .expect("hzb_cull readback map failed");
+        let mapped = slice.get_mapped_range();
+        let header = bytemuck::pod_read_unaligned::<CullHeader>(&mapped[0..16]);
+        let rejected_ids: Vec<u32> = mapped[16..]
+            .chunks_exact(4)
+            .map(|word| u32::from_le_bytes([word[0], word[1], word[2], word[3]]))
+            .collect();
+        drop(mapped);
+        readback.unmap();
+
+        let draw_count = header.draw_count as usize;
+        let rejected_count = header.rejected_count as usize;
+        assert_eq!(
+            header._pad0, 0,
+            "no synthetic tile may take the projection bypass; the CPU model does \
+             not implement it"
+        );
+        assert_eq!(header._pad1 as usize, expected_background);
+        assert_eq!(
+            draw_count + rejected_count,
+            cases,
+            "every tile must be either emitted or rejected exactly once"
+        );
+
+        let gpu_occluded: BTreeSet<usize> = rejected_ids[..rejected_count]
+            .iter()
+            .map(|index| *index as usize)
+            .collect();
+        let cpu_occluded: BTreeSet<usize> = expected_occluded
+            .iter()
+            .enumerate()
+            .filter(|(_, hidden)| **hidden)
+            .map(|(case, _)| case)
+            .collect();
+        assert_eq!(
+            gpu_occluded, cpu_occluded,
+            "hzb_cull.wgsl disagrees with the CPU occlusion predicate"
+        );
     }
 }

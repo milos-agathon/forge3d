@@ -1343,7 +1343,9 @@ struct VertexOutput {
     @location(0) world_position : vec3<f32>,
     @location(1) world_normal : vec3<f32>,
     @location(2) tex_coord : vec2<f32>,
-    // TESSELLA visibility packing: high 24 bits tile, low 8 bits triangle.
+    // TESSELLA visibility identity: ((selected_lod & 0xf) << 12) | (tile_index & 0xfff).
+    // terrain_visbuffer_write.wgsl packs this with the primitive index; no
+    // forward shading path reads it.
     @location(3) @interpolate(flat) tile_id : u32,
 };
 
@@ -4522,34 +4524,11 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     return out;
 }
 
-@fragment
-fn fs_visibility_resolve(input : VertexOutput) -> FragmentOutput {
-    let out = shade_main(input);
-    atomicAdd(&terrain_frame_counters.material_invocations, 1u);
-    terrain_vt_write_surface_feedback(input.tex_coord, 0u);
-    if (terrain_vt_uniforms.config2.w != 0u) {
-        if (terrain_vt_enabled()
-            && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
-            && out.source_id == 0u) {
-            atomicAdd(&terrain_frame_counters.fallback_texels, 1u);
-        }
-    }
-    return out;
-}
-
-// TESSELLA pass 1: depth + primitive identity only. Zero is reserved for
-// background, so the documented ((tile_id << 8) | triangle_id) payload is
-// stored plus one and decoded by subtracting one.
-@fragment
-fn fs_visibility(
-    input: VertexOutput,
-    @builtin(primitive_index) primitive_index: u32,
-) -> @location(0) u32 {
-    let packed = ((input.tile_id & 0x00ffffffu) << 8u)
-        | (primitive_index & 0xffu);
-    return packed + 1u;
-}
-
+// TESSELLA pass 1 (`fs_visibility`) lives in src/shaders/terrain_visbuffer_write.wgsl
+// and pass 2 (`fs_visibility_resolve_fullscreen`) in
+// src/shaders/terrain_visibility_fullscreen.wgsl; both are appended to this
+// module at assembly time by `shader_sources`. Neither is defined here, so the
+// forward module cannot drift from the packing those two files agree on.
 
 // ──────────────────────────────────────────────────────────────────────────
 // BOP-P2-02: Clipmap ring/skirt vertex path.
@@ -4613,7 +4592,10 @@ fn vs_clipmap_main(
     out.world_position = vec3<f32>(instance_position.xy, world_z_original);
     out.world_normal = vec3<f32>(0.0, 0.0, 1.0);
     out.tex_coord = uv;
-    out.tile_id = _tile_id_lod.x;
+    // TESSELLA: the clipmap vertex stage always emits the packed tile/LOD
+    // identity terrain_visbuffer_write.wgsl consumes. No forward shading path
+    // reads tile_id, so both pipelines share this one vertex stage.
+    out.tile_id = ((_tile_id_lod.y & 0xfu) << 12u) | (_tile_id_lod.x & 0xfffu);
     out.clip_position = det_mat4_mul_vec4(
         u_terrain.proj,
         det_mat4_mul_vec4(

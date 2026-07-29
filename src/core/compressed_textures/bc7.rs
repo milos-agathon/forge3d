@@ -100,6 +100,32 @@ mod reference_tests {
             reference
         );
     }
+
+    #[test]
+    fn mode6_matches_a_spec_constructed_gradient_reference_block() {
+        // A non-degenerate reference block: endpoints A = (10,22,34,fe) and
+        // B = (c0,a6,8e,fe), chosen with every channel even so the single
+        // shared p-bit per endpoint reproduces them exactly. The sixteen
+        // texels are the exact mode-6 palette entries for index weights
+        // 0..15, ordered so the 3-bit anchor index is 0. Both literals were
+        // derived from the BC7 mode-6 bit layout (7-bit endpoint pairs, two
+        // p-bits, one 3-bit and fifteen 4-bit selectors, little-endian),
+        // independently of this encoder.
+        const TEXELS: [u8; 64] = [
+            0x10, 0x22, 0x34, 0xfe, 0x1b, 0x2a, 0x3a, 0xfe, 0x29, 0x35, 0x41, 0xfe, 0x34, 0x3d,
+            0x46, 0xfe, 0x3f, 0x45, 0x4c, 0xfe, 0x4a, 0x4d, 0x52, 0xfe, 0x58, 0x58, 0x59, 0xfe,
+            0x63, 0x60, 0x5e, 0xfe, 0x6e, 0x68, 0x64, 0xfe, 0x79, 0x70, 0x69, 0xfe, 0x86, 0x7b,
+            0x70, 0xfe, 0x91, 0x83, 0x76, 0xfe, 0x9c, 0x8b, 0x7c, 0xfe, 0xa7, 0x93, 0x81, 0xfe,
+            0xb5, 0x9e, 0x88, 0xfe, 0xc0, 0xa6, 0x8e, 0xfe,
+        ];
+        const REFERENCE: [u8; 16] = [
+            0x40, 0x04, 0x38, 0x32, 0xd5, 0x1c, 0xff, 0x7f, 0x10, 0x32, 0x54, 0x76, 0x98, 0xba,
+            0xdc, 0xfe,
+        ];
+
+        assert_eq!(decode_bc7_rgba8(&REFERENCE, 4, 4).unwrap(), TEXELS.to_vec());
+        assert_eq!(encode_bc7_rgba8(&TEXELS, 4, 4).unwrap(), REFERENCE.to_vec());
+    }
 }
 
 fn encode_block(pixels: &[[u8; 4]; 16]) -> [u8; BLOCK_BYTES] {

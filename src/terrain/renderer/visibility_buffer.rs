@@ -2,10 +2,14 @@
 //!
 //! Zero is reserved for background. Visible primitives are encoded as
 //! `1 + ((tile_lod_id & 0xffff) << 16) | (triangle_id & 0xffff)`. The extra one
-//! keeps tile zero / triangle zero distinct from background. The material
-//! resolve is a full-screen fragment pass. It reads primitive identity and
-//! depth, reconstructs the visible surface, and invokes POM/material/feedback
-//! exactly once for every non-background visibility pixel.
+//! keeps tile zero / triangle zero distinct from background. That packing is
+//! defined by `src/shaders/terrain_visbuffer_write.wgsl` (pass 1) and decoded
+//! by `src/shaders/terrain_visibility_fullscreen.wgsl` (pass 2); the CPU oracle
+//! below is the third mirror of it. The material resolve is a full-screen
+//! fragment pass. It reads primitive identity and depth, reconstructs the
+//! visible surface, and invokes POM/material/feedback exactly once for every
+//! non-background visibility pixel. `terrain_visbuffer_resolve.wgsl` is the
+//! compute pass that reads those counters back, not the resolve itself.
 
 use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{

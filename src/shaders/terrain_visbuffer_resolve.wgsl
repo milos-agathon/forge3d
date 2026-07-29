@@ -1,6 +1,9 @@
-// TESSELLA visibility resolve accounting. The material resolve is the
-// depth-equal `fs_main` pass; this compute pass proves its one-record-per-
-// visible-pixel contract without sampling or compacting an overdraw stream.
+// TESSELLA visibility resolve accounting. The material resolve itself is the
+// full-screen `fs_visibility_resolve_fullscreen` pass in
+// terrain_visibility_fullscreen.wgsl; this compute pass reads back its
+// one-record-per-visible-pixel contract (visible/background pixel counts plus
+// the frame counters that pass wrote) without sampling or compacting an
+// overdraw stream.
 
 struct VisibilityStats {
     visible_pixels: atomic<u32>,

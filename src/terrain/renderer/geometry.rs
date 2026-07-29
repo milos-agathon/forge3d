@@ -234,7 +234,8 @@ impl TerrainGeometryProvider {
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_vertex_buffer(1, instance_buffer.slice(..));
         pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        if multi_draw_count && first_instance {
+        let multi_draw = use_multi_draw_path(multi_draw_count, first_instance);
+        if multi_draw {
             pass.multi_draw_indexed_indirect_count(
                 indirect_buffer,
                 0,
@@ -255,11 +256,84 @@ impl TerrainGeometryProvider {
                 pass.draw_indexed_indirect(indirect_buffer, u64::from(draw) * stride);
             }
         }
-        if multi_draw_count && first_instance {
+        if multi_draw {
             1
         } else {
             max_draw_count
         }
+    }
+}
+
+/// Decide whether the compacted multi-draw path is usable, recording the
+/// certificate degradation when it is not.
+///
+/// The render certificate drains a *render-local* degradation capture, so the
+/// negotiation-time `capability_absent` entry recorded in `core::capabilities`
+/// never reaches it. The fallback therefore has to say so from inside the
+/// render. Split out of `draw_indirect_buffers` so the "never silently" rule
+/// is unit-testable without constructing a render pass.
+pub(in crate::terrain::renderer) fn use_multi_draw_path(
+    multi_draw_count: bool,
+    first_instance: bool,
+) -> bool {
+    if multi_draw_count && first_instance {
+        return true;
+    }
+    crate::core::degradation::record_degradation(
+        "rendering_fallback",
+        "terrain_multi_draw_indirect",
+        if multi_draw_count {
+            "INDIRECT_FIRST_INSTANCE absent; terrain indirect draws are issued as one draw_indexed_indirect per tile in a CPU loop"
+        } else {
+            "MULTI_DRAW_INDIRECT_COUNT absent; terrain indirect draws are issued as one draw_indexed_indirect per tile in a CPU loop"
+        },
+    );
+    false
+}
+
+#[cfg(test)]
+mod multi_draw_degradation_tests {
+    use super::use_multi_draw_path;
+    use crate::core::degradation::{clear_degradations, degradations_snapshot};
+
+    fn recorded_fallback() -> bool {
+        degradations_snapshot().iter().any(|entry| {
+            entry.kind == "rendering_fallback" && entry.name == "terrain_multi_draw_indirect"
+        })
+    }
+
+    #[test]
+    fn capable_adapter_takes_multi_draw_and_records_nothing() {
+        clear_degradations();
+        assert!(use_multi_draw_path(true, true));
+        assert!(!recorded_fallback(), "{:?}", degradations_snapshot());
+        clear_degradations();
+    }
+
+    #[test]
+    fn absent_multi_draw_count_records_the_cpu_loop_fallback() {
+        clear_degradations();
+        assert!(!use_multi_draw_path(false, true));
+        assert!(recorded_fallback(), "{:?}", degradations_snapshot());
+        let entry = degradations_snapshot()
+            .into_iter()
+            .find(|entry| entry.name == "terrain_multi_draw_indirect")
+            .expect("degradation recorded");
+        assert!(entry.consequence.contains("MULTI_DRAW_INDIRECT_COUNT"));
+        assert!(entry.consequence.contains("draw_indexed_indirect"));
+        clear_degradations();
+    }
+
+    #[test]
+    fn absent_indirect_first_instance_records_the_cpu_loop_fallback() {
+        clear_degradations();
+        assert!(!use_multi_draw_path(true, false));
+        let entry = degradations_snapshot()
+            .into_iter()
+            .find(|entry| entry.name == "terrain_multi_draw_indirect")
+            .expect("degradation recorded");
+        assert!(entry.consequence.contains("INDIRECT_FIRST_INSTANCE"));
+        clear_degradations();
     }
 }
 

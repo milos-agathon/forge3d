@@ -6,9 +6,10 @@
 //! out of the process address space until requested, work on Unix and Windows,
 //! and never require copying the complete virtual image into a `Vec<u8>`.
 
+use super::procedural::MaterializationPlan;
 use crate::core::provenance::sha256;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -17,11 +18,18 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 const MAGIC: &[u8; 8] = b"F3DVT1\0\0";
-const VERSION: u32 = 1;
+/// v2 records the materialization plan in header bytes 80..92 and drops the
+/// v1 aliasing rule (v1 resolved any missing procedural key onto one
+/// canonical page per family, which made every tile byte-identical).
+/// `decode_header` rejects v1 explicitly rather than reading it wrong.
+const VERSION: u32 = 2;
 const HEADER_SIZE: usize = 96;
 const DIRECTORY_ENTRY_SIZE: usize = 64;
 const FLAG_PROCEDURAL: u32 = 1;
 const DEFAULT_CACHE_BYTES: u64 = 64 * 1024 * 1024;
+/// `morton2` interleaves the low 16 bits of each axis, so the directory's
+/// `(family, mip, morton2)` order is only a total order below this bound.
+const MAX_PAGE_AXIS: u32 = 1 << 16;
 pub const HEIGHT_FAMILY: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -140,6 +148,29 @@ impl StoreMetadata {
             * u128::from(self.family_count)
             * 4
     }
+
+    /// Page-grid dimensions at `mip`. Identical by construction to the
+    /// renderer's `pages_for_mip_counts(ceil_div(w, tile), ..., mip)`
+    /// (`terrain/renderer/virtual_texture.rs`); a store completeness claim and
+    /// the renderer's request grid must agree or the zero-fallback gate is
+    /// meaningless. `pages_at_mip_matches_the_renderer_page_grid` locks it.
+    pub fn pages_at_mip(&self, mip: u32) -> (u32, u32) {
+        let tile_size = u64::from(self.tile_size.max(1));
+        let pages_x = self.virtual_width.div_ceil(tile_size).max(1);
+        let pages_y = self.virtual_height.div_ceil(tile_size).max(1);
+        let div = 1u64 << mip.min(63);
+        (
+            u32::try_from(pages_x.div_ceil(div).max(1)).unwrap_or(u32::MAX),
+            u32::try_from(pages_y.div_ceil(div).max(1)).unwrap_or(u32::MAX),
+        )
+    }
+
+    /// Number of mip levels in the store's full page pyramid -- mirrors
+    /// `TerrainMaterialVTRuntime::page_table_mip_levels`.
+    pub fn mip_count(&self) -> u32 {
+        let (pages_x, pages_y) = self.pages_at_mip(0);
+        u32::BITS - pages_x.max(pages_y).max(1).leading_zeros()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -156,6 +187,15 @@ pub struct StoreManifest {
     pub page_count: u64,
     pub procedural: bool,
     pub page_order: String,
+    /// Recorded materialization plan: exactly which keys the store holds.
+    pub materialization_plan: MaterializationPlan,
+    /// `materialization_plan.coarse_min_mip`, hoisted for readers that only
+    /// need the "every page at or above this mip exists" floor.
+    pub min_materialized_mip: u32,
+    /// Number of distinct page payloads. Anti-degeneracy invariant: a store
+    /// whose pages are keyed by page identity has one payload per page, so a
+    /// value below `page_count` means pages are aliasing each other.
+    pub distinct_page_digests: u64,
     pub encodings: Vec<PageFormat>,
     pub directory_sha256: String,
     /// Integrity digest for every physically packed page.
@@ -173,6 +213,20 @@ pub trait VirtualTextureStore: Send + Sync {
     fn metadata(&self) -> &StoreMetadata;
     fn content_hash(&self) -> [u8; 32];
     fn page_count(&self) -> u64;
+
+    /// True when the store can serve this page. Never synthesizes a
+    /// substitute: a `false` here is what lets the renderer count an explicit
+    /// miss instead of hard-failing or silently reading the wrong tile.
+    fn contains(&self, key: PageKey) -> bool {
+        self.page(key).is_ok()
+    }
+
+    /// Coarsest-complete floor: every page at `mip >= min_materialized_mip`
+    /// exists for every family. Stores that can serve any key of the pyramid
+    /// (readers, COG) report 0.
+    fn min_materialized_mip(&self) -> u32 {
+        0
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -187,9 +241,17 @@ struct DirectoryEntry {
     digest: [u8; 32],
 }
 
+/// Bounded LRU page cache.
+///
+/// Recency is a monotonic tick stored beside each entry and indexed by an
+/// ordered map, so `get` re-stamps in O(log n). The previous `VecDeque` scan
+/// was O(n) per hit, which a complete coarse working set (thousands of live
+/// pages, each touched every frame) turns into tens of millions of
+/// comparisons per frame.
 struct PageCache {
-    entries: HashMap<PageKey, PageBytes>,
-    order: VecDeque<PageKey>,
+    entries: HashMap<PageKey, (PageBytes, u64)>,
+    order: BTreeMap<u64, PageKey>,
+    tick: u64,
     used_bytes: u64,
     budget_bytes: u64,
 }
@@ -198,19 +260,22 @@ impl PageCache {
     fn new(budget_bytes: u64) -> Self {
         Self {
             entries: HashMap::new(),
-            order: VecDeque::new(),
+            order: BTreeMap::new(),
+            tick: 0,
             used_bytes: 0,
             budget_bytes: budget_bytes.max(1),
         }
     }
 
     fn get(&mut self, key: PageKey) -> Option<PageBytes> {
-        let page = self.entries.get(&key)?.clone();
-        if let Some(position) = self.order.iter().position(|candidate| *candidate == key) {
-            self.order.remove(position);
-        }
-        self.order.push_back(key);
-        Some(page)
+        let previous = self.entries.get(&key).map(|(_, stamp)| *stamp)?;
+        self.tick += 1;
+        let stamp = self.tick;
+        self.order.remove(&previous);
+        self.order.insert(stamp, key);
+        let entry = self.entries.get_mut(&key)?;
+        entry.1 = stamp;
+        Some(entry.0.clone())
     }
 
     fn insert(&mut self, key: PageKey, page: PageBytes) {
@@ -218,18 +283,22 @@ impl PageCache {
         if bytes > self.budget_bytes {
             return;
         }
+        if let Some((previous, stamp)) = self.entries.remove(&key) {
+            self.order.remove(&stamp);
+            self.used_bytes = self.used_bytes.saturating_sub(previous.data.len() as u64);
+        }
         while self.used_bytes + bytes > self.budget_bytes {
-            let Some(victim) = self.order.pop_front() else {
+            let Some((_, victim)) = self.order.pop_first() else {
                 break;
             };
-            if let Some(removed) = self.entries.remove(&victim) {
+            if let Some((removed, _)) = self.entries.remove(&victim) {
                 self.used_bytes = self.used_bytes.saturating_sub(removed.data.len() as u64);
             }
         }
-        if let Some(previous) = self.entries.insert(key, page) {
-            self.used_bytes = self.used_bytes.saturating_sub(previous.data.len() as u64);
-        }
-        self.order.push_back(key);
+        self.tick += 1;
+        let stamp = self.tick;
+        self.order.insert(stamp, key);
+        self.entries.insert(key, (page, stamp));
         self.used_bytes += bytes;
     }
 }
@@ -238,7 +307,11 @@ pub struct MmapPageStore {
     path: PathBuf,
     file: File,
     metadata: StoreMetadata,
-    directory: HashMap<PageKey, DirectoryEntry>,
+    plan: MaterializationPlan,
+    /// Sorted by `order_key` -- the manifest's committed
+    /// `page_order: "family,mip,morton2"` is load-bearing, not decorative:
+    /// lookup is a binary search over exactly that order.
+    directory: Vec<DirectoryEntry>,
     directory_hash: [u8; 32],
     cache: Mutex<PageCache>,
 }
@@ -269,7 +342,8 @@ impl MmapPageStore {
             })?
         ];
         read_exact_at(&file, &mut directory_bytes, decoded.directory_offset)?;
-        let mut directory = HashMap::with_capacity(decoded.page_count as usize);
+        let mut directory: Vec<DirectoryEntry> =
+            Vec::with_capacity(decoded.page_count as usize);
         for chunk in directory_bytes.chunks_exact(DIRECTORY_ENTRY_SIZE) {
             let entry = decode_directory_entry(chunk)?;
             if entry.offset < decoded.data_offset {
@@ -278,53 +352,70 @@ impl MmapPageStore {
                     entry.key
                 ));
             }
-            if directory.insert(entry.key, entry).is_some() {
-                return Err("duplicate VT page-directory key".to_string());
+            validate_page_axes(entry.key)?;
+            if let Some(previous) = directory.last() {
+                if Self::order_key(entry.key) <= Self::order_key(previous.key) {
+                    return Err(format!(
+                        "VT page directory is not strictly sorted by (family, mip, morton2) at {:?}",
+                        entry.key
+                    ));
+                }
             }
+            directory.push(entry);
         }
-        Ok(Self {
+        let store = Self {
             path,
             file,
             metadata: decoded.metadata,
+            plan: decoded.plan,
             directory,
             directory_hash: sha256(&directory_bytes),
             cache: Mutex::new(PageCache::new(cache_budget_bytes)),
-        })
+        };
+        store.plan.validate(&store.metadata)?;
+        // The declared plan is the invariant every downstream residency
+        // decision leans on, so it is checked against the physical directory
+        // at open rather than trusted.
+        validate_materialization(&store.plan, &store.metadata, |key| {
+            store.entry(key).is_some()
+        })?;
+        Ok(store)
     }
 
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    pub fn materialization_plan(&self) -> MaterializationPlan {
+        self.plan
+    }
+
     pub fn verify(&self) -> Result<(), String> {
-        let mut keys = self.directory.keys().copied().collect::<Vec<_>>();
-        keys.sort_unstable();
-        for key in keys {
-            self.read_page_uncached(key)?;
+        for index in 0..self.directory.len() {
+            self.read_page_uncached(self.directory[index].key)?;
         }
         Ok(())
     }
 
+    fn order_key(key: PageKey) -> (u8, u8, u64) {
+        (key.family, key.mip, morton2(key.x, key.y))
+    }
+
+    fn entry(&self, key: PageKey) -> Option<&DirectoryEntry> {
+        if key.x >= MAX_PAGE_AXIS || key.y >= MAX_PAGE_AXIS {
+            return None;
+        }
+        self.directory
+            .binary_search_by_key(&Self::order_key(key), |entry| Self::order_key(entry.key))
+            .ok()
+            .map(|index| &self.directory[index])
+    }
+
     fn read_page_uncached(&self, key: PageKey) -> Result<PageBytes, String> {
-        let Some(entry) = self.directory.get(&key) else {
-            if self.metadata.procedural {
-                if u32::from(key.family) >= self.metadata.family_count {
-                    return Err(format!(
-                        "procedural VT family {} is out of range",
-                        key.family
-                    ));
-                }
-                // Sparse procedural stores pack one immutable canonical page
-                // per family. Virtual coordinates repeat that physical page;
-                // no request is synthesized in host memory.
-                let canonical = PageKey {
-                    family: key.family,
-                    mip: 0,
-                    x: 0,
-                    y: 0,
-                };
-                return self.read_page_uncached(canonical);
-            }
+        // No aliasing and no synthesis: a key the directory does not hold does
+        // not exist. Callers turn this into a counted miss (see
+        // `TerrainMaterialVTRuntime::store_resolve`), never a substitution.
+        let Some(entry) = self.entry(key) else {
             return Err(format!("VT page not found: {key:?}"));
         };
         let mut data = vec![0u8; entry.length as usize];
@@ -376,6 +467,16 @@ impl VirtualTextureStore for MmapPageStore {
 
     fn page_count(&self) -> u64 {
         self.directory.len() as u64
+    }
+
+    /// Directory-only, no I/O and no digest verification: the residency
+    /// planner asks this thousands of times per frame.
+    fn contains(&self, key: PageKey) -> bool {
+        self.entry(key).is_some()
+    }
+
+    fn min_materialized_mip(&self) -> u32 {
+        self.plan.coarse_min_mip
     }
 }
 
@@ -450,14 +551,22 @@ impl VirtualTextureStore for CogPageStore {
     fn page_count(&self) -> u64 {
         0
     }
+
+    /// The reader synthesizes any height tile of the pyramid on demand, so the
+    /// only key it cannot serve is one from another family.
+    fn contains(&self, key: PageKey) -> bool {
+        key.family == HEIGHT_FAMILY
+    }
 }
 
 pub fn write_packed_store(
     path: impl AsRef<Path>,
     metadata: &StoreMetadata,
+    plan: &MaterializationPlan,
     pages: impl IntoIterator<Item = PackedPage>,
 ) -> Result<StoreManifest, String> {
     validate_metadata(metadata)?;
+    plan.validate(metadata)?;
     let path = path.as_ref();
     let mut pages = pages.into_iter().collect::<Vec<_>>();
     pages.sort_by_key(|page| {
@@ -477,6 +586,7 @@ pub fn write_packed_store(
     let mut directory = Vec::with_capacity(pages.len() * DIRECTORY_ENTRY_SIZE);
     let mut payload = Vec::new();
     let mut encodings = Vec::new();
+    let mut previous_order: Option<(u8, u8, u64)> = None;
     for page in &pages {
         if page.bytes.width != metadata.slot_size() || page.bytes.height != metadata.slot_size() {
             return Err(format!(
@@ -488,6 +598,16 @@ pub fn write_packed_store(
                 metadata.slot_size()
             ));
         }
+        validate_page_axes(page.key)?;
+        let order = (
+            page.key.family,
+            page.key.mip,
+            morton2(page.key.x, page.key.y),
+        );
+        if previous_order == Some(order) {
+            return Err(format!("duplicate VT page-directory key {:?}", page.key));
+        }
+        previous_order = Some(order);
         if !encodings.contains(&page.bytes.format) {
             encodings.push(page.bytes.format);
         }
@@ -504,7 +624,16 @@ pub fn write_packed_store(
         directory.extend_from_slice(&encode_directory_entry(&entry)?);
         payload.extend_from_slice(&page.bytes.data);
     }
-    let header = encode_header(metadata, page_count, directory_offset, data_offset)?;
+    // The plan is a promise the reader will rely on, so refuse to write a
+    // store that does not already keep it.
+    let packed = pages.iter().map(|page| page.key).collect::<HashSet<_>>();
+    validate_materialization(plan, metadata, |key| packed.contains(&key))?;
+    let distinct_page_digests = pages
+        .iter()
+        .map(|page| page.bytes.sha256)
+        .collect::<HashSet<_>>()
+        .len() as u64;
+    let header = encode_header(metadata, plan, page_count, directory_offset, data_offset)?;
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -529,6 +658,9 @@ pub fn write_packed_store(
         page_count,
         procedural: metadata.procedural,
         page_order: "family,mip,morton2".to_string(),
+        materialization_plan: *plan,
+        min_materialized_mip: plan.coarse_min_mip,
+        distinct_page_digests,
         encodings,
         directory_sha256: crate::core::provenance::to_hex(&sha256(&directory)),
         pages: pages
@@ -543,6 +675,7 @@ pub fn write_packed_store(
 
 struct DecodedHeader {
     metadata: StoreMetadata,
+    plan: MaterializationPlan,
     page_count: u64,
     directory_offset: u64,
     data_offset: u64,
@@ -550,6 +683,7 @@ struct DecodedHeader {
 
 fn encode_header(
     metadata: &StoreMetadata,
+    plan: &MaterializationPlan,
     page_count: u64,
     directory_offset: u64,
     data_offset: u64,
@@ -577,6 +711,9 @@ fn encode_header(
     put_u64(&mut bytes, 56, directory_offset);
     put_u64(&mut bytes, 64, data_offset);
     put_u64(&mut bytes, 72, metadata.procedural_seed);
+    put_u32(&mut bytes, 80, plan.coarse_min_mip);
+    put_u32(&mut bytes, 84, plan.detail_max_mip);
+    put_u32(&mut bytes, 88, plan.detail_window_pages);
     Ok(bytes)
 }
 
@@ -605,6 +742,11 @@ fn decode_header(bytes: &[u8; HEADER_SIZE]) -> Result<DecodedHeader, String> {
     validate_metadata(&metadata)?;
     let decoded = DecodedHeader {
         metadata,
+        plan: MaterializationPlan {
+            coarse_min_mip: get_u32(bytes, 80),
+            detail_max_mip: get_u32(bytes, 84),
+            detail_window_pages: get_u32(bytes, 88),
+        },
         page_count: get_u64(bytes, 48),
         directory_offset: get_u64(bytes, 56),
         data_offset: get_u64(bytes, 64),
@@ -673,6 +815,38 @@ fn validate_metadata(metadata: &StoreMetadata) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_page_axes(key: PageKey) -> Result<(), String> {
+    if key.x >= MAX_PAGE_AXIS || key.y >= MAX_PAGE_AXIS {
+        return Err(format!(
+            "VT page {key:?} exceeds the {MAX_PAGE_AXIS}-page Morton addressing limit"
+        ));
+    }
+    Ok(())
+}
+
+/// Check a physical page set against the store's recorded materialization
+/// plan. Shared by `write_packed_store` (refuse to write a store that breaks
+/// its own promise) and `MmapPageStore::open` (refuse to trust one).
+///
+/// Pages beyond the plan are allowed; missing ones are not.
+fn validate_materialization(
+    plan: &MaterializationPlan,
+    metadata: &StoreMetadata,
+    contains: impl Fn(PageKey) -> bool,
+) -> Result<(), String> {
+    for band in plan.bands(metadata) {
+        let want = band.page_count();
+        let got = band.keys().filter(|key| contains(*key)).count() as u64;
+        if got != want {
+            return Err(format!(
+                "VT store declares min_materialized_mip {} but family {} mip {} has {got}/{want} pages",
+                plan.coarse_min_mip, band.family, band.mip
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn morton2(x: u32, y: u32) -> u64 {
     fn spread(value: u32) -> u64 {
         let mut value = u64::from(value & 0x0000_ffff);
@@ -735,7 +909,51 @@ fn get_u64(bytes: &[u8], offset: usize) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terrain::vt::procedural_page;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Small enough to pack in well under a second, while still declaring the
+    /// full 768 GiB address space and exercising both plan bands.
+    const UNIT_PLAN: MaterializationPlan = MaterializationPlan {
+        coarse_min_mip: 9,
+        detail_max_mip: 8,
+        detail_window_pages: 2,
+    };
+
+    /// TODO(tessella-evidence): derived analytically from the BC7 mode-6 and
+    /// BC4 constant-block bit layouts plus the SplitMix64 key schedule, not
+    /// from a packer run. Confirm against real packer output and re-paste if
+    /// they differ.
+    const PROCEDURAL_PAGE_GOLDEN_SHA256: [(u8, u8, u32, u32, &str); 4] = [
+        (
+            0,
+            6,
+            0,
+            0,
+            "1ccda709bf6c08d7297b6e5c57d77b11fc4b3bdc7d7c3f97fbc2848f7f402ee5",
+        ),
+        (
+            1,
+            7,
+            5,
+            11,
+            "5c103e6af812f446d5dcc6c18f5a0bdeb8b38b911b48cab2c6ce61339b1c5351",
+        ),
+        (
+            2,
+            6,
+            31,
+            31,
+            "ba05ea25109cf9c76e710514c5f586a2aa05e1e305d9118401f4b86da4761a15",
+        ),
+        (
+            0,
+            3,
+            126,
+            129,
+            "fdfb7ec785154e81e8c1159ae4b46c2eea9be3ffbffe69c25e26d319c60bc976",
+        ),
+    ];
 
     fn scratch(name: &str) -> PathBuf {
         let nonce = SystemTime::now()
@@ -743,6 +961,66 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("forge3d-{name}-{nonce}.f3dvt"))
+    }
+
+    /// The shipped procedural layout: 2^18 square, 128-texel tiles, no border.
+    fn procedural_metadata() -> StoreMetadata {
+        StoreMetadata {
+            virtual_width: 1 << 18,
+            virtual_height: 1 << 18,
+            tile_size: 128,
+            tile_border: 0,
+            family_count: 3,
+            procedural: true,
+            procedural_seed: 19,
+        }
+    }
+
+    fn plan_pages(metadata: &StoreMetadata, plan: &MaterializationPlan) -> Vec<PackedPage> {
+        plan.keys(metadata)
+            .into_iter()
+            .map(|key| PackedPage {
+                key,
+                bytes: procedural_page(metadata, key).unwrap(),
+            })
+            .collect()
+    }
+
+    fn pack_plan(
+        path: &Path,
+        metadata: &StoreMetadata,
+        plan: &MaterializationPlan,
+    ) -> StoreManifest {
+        write_packed_store(path, metadata, plan, plan_pages(metadata, plan)).unwrap()
+    }
+
+    /// Re-derived here on purpose: this test must not restate
+    /// `procedural::page_tag` by calling it.
+    fn expected_quadrants(seed: u64, key: PageKey) -> [[u8; 4]; 4] {
+        const GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
+        fn mix(mut z: u64) -> u64 {
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        }
+        let mut state = mix(seed ^ GAMMA);
+        for component in [
+            u64::from(key.family),
+            u64::from(key.mip),
+            u64::from(key.x),
+            u64::from(key.y),
+        ] {
+            state = mix(state ^ component.wrapping_mul(GAMMA));
+        }
+        std::array::from_fn(|quadrant| {
+            let h = mix(state ^ (quadrant as u64 + 1).wrapping_mul(GAMMA));
+            [
+                (h as u8) & 0xfe,
+                ((h >> 16) as u8) & 0xfe,
+                ((h >> 32) as u8) & 0xfe,
+                254,
+            ]
+        })
     }
 
     #[test]
@@ -766,9 +1044,11 @@ mod tests {
             crate::core::compressed_textures::encode_bc7_rgba8(&raw, side, side).unwrap(),
         )
         .unwrap();
+        // One hand-packed page: the store makes no completeness claim at all.
         write_packed_store(
             &path,
             &metadata,
+            &MaterializationPlan::none(&metadata),
             [PackedPage {
                 key: PageKey {
                     family: 0,
@@ -799,70 +1079,289 @@ mod tests {
     }
 
     #[test]
-    fn sparse_procedural_store_declares_256_gib_without_allocating_it() {
+    fn sparse_procedural_store_declares_768_gib_and_materializes_only_the_plan() {
         let path = scratch("vt-procedural");
-        let metadata = StoreMetadata {
-            virtual_width: 1 << 18,
-            virtual_height: 1 << 18,
-            tile_size: 128,
-            tile_border: 4,
-            family_count: 3,
-            procedural: true,
-            procedural_seed: 19,
-        };
+        let metadata = procedural_metadata();
+        assert_eq!(metadata.logical_texel_bytes(), 824_633_720_832);
         assert!(metadata.logical_texel_bytes() >= 256u128 * 1024 * 1024 * 1024);
-        let side = metadata.slot_size();
-        let pages = (0..3u8)
-            .map(|family| {
-                let (format, data) = if family == 1 {
-                    (
-                        PageFormat::Bc5Unorm,
-                        crate::core::compressed_textures::encode_bc5_rg8(
-                            &vec![128; side as usize * side as usize * 2],
-                            side,
-                            side,
-                        )
-                        .unwrap(),
-                    )
-                } else {
-                    (
-                        if family == 0 {
-                            PageFormat::Bc7Srgb
-                        } else {
-                            PageFormat::Bc7Unorm
-                        },
-                        crate::core::compressed_textures::encode_bc7_rgba8(
-                            &vec![128; side as usize * side as usize * 4],
-                            side,
-                            side,
-                        )
-                        .unwrap(),
-                    )
-                };
-                PackedPage {
-                    key: PageKey {
-                        family,
-                        mip: 0,
-                        x: 0,
-                        y: 0,
-                    },
-                    bytes: PageBytes::new(format, side, side, data).unwrap(),
-                }
-            })
-            .collect::<Vec<_>>();
-        let manifest = write_packed_store(&path, &metadata, pages).unwrap();
-        assert_eq!(manifest.pages.len(), 3);
+
+        let manifest = pack_plan(&path, &metadata, &UNIT_PLAN);
+        // 3 families x (mips 9..11 complete = 16 + 4 + 1, plus 9 detail
+        // windows of 2x2).
+        assert_eq!(manifest.page_count, 3 * (21 + 36));
+        assert_eq!(manifest.pages.len(), 171);
+        assert_eq!(manifest.min_materialized_mip, 9);
+        assert_eq!(manifest.materialization_plan, UNIT_PLAN);
+        assert_eq!(manifest.page_order, "family,mip,morton2");
+
         let store = MmapPageStore::open(&path).unwrap();
-        let page = store
-            .page(PageKey {
-                family: 1,
-                mip: 4,
-                x: 17,
-                y: 9,
-            })
-            .unwrap();
+        assert_eq!(store.min_materialized_mip(), 9);
+        assert_eq!(store.materialization_plan(), UNIT_PLAN);
+        assert_eq!(store.page_count(), 171);
+        // The exact lookup the pre-TESSELLA store answered by aliasing every
+        // virtual key onto one canonical page per family.
+        let aliased = PageKey {
+            family: 1,
+            mip: 4,
+            x: 17,
+            y: 9,
+        };
+        assert!(!store.contains(aliased));
+        assert!(
+            store.page(aliased).is_err(),
+            "a page outside the materialization plan must not exist"
+        );
+        let materialized = PageKey {
+            family: 1,
+            mip: 9,
+            x: 1,
+            y: 2,
+        };
+        assert!(store.contains(materialized));
+        let page = store.page(materialized).unwrap();
         assert_eq!(page.format, PageFormat::Bc5Unorm);
-        assert_eq!(page.data.len() as u64, page.format.block_bytes(136, 136));
+        assert_eq!(page.data.len() as u64, page.format.block_bytes(128, 128));
+        store.verify().unwrap();
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn every_materialized_page_has_a_distinct_payload() {
+        let path = scratch("vt-distinct");
+        let metadata = procedural_metadata();
+        let manifest = pack_plan(&path, &metadata, &UNIT_PLAN);
+        let digests = manifest
+            .pages
+            .iter()
+            .map(|page| page.sha256.clone())
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            digests.len(),
+            manifest.pages.len(),
+            "physical pages are aliasing each other"
+        );
+        assert_eq!(manifest.distinct_page_digests, manifest.page_count);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn page_payload_decodes_to_the_quadrant_colours_its_key_implies() {
+        let metadata = procedural_metadata();
+        let side = metadata.slot_size();
+        let half = side / 2;
+        let mut sampled = 0usize;
+        for family in 0..3u8 {
+            for (mip, x, y) in [
+                (0u8, 1020u32, 1023u32),
+                (3, 126, 129),
+                (6, 0, 0),
+                (6, 31, 31),
+                (7, 5, 11),
+                (9, 2, 3),
+                (11, 0, 0),
+            ] {
+                let key = PageKey { family, mip, x, y };
+                let page = procedural_page(&metadata, key).unwrap();
+                let expected = expected_quadrants(metadata.procedural_seed, key);
+                // Constant even-valued blocks are lossless through both
+                // codecs, so this is exact equality, not a tolerance band.
+                match page.format {
+                    PageFormat::Bc7Srgb | PageFormat::Bc7Unorm => {
+                        let rgba = crate::core::compressed_textures::decode_bc7_rgba8(
+                            &page.data, side, side,
+                        )
+                        .unwrap();
+                        for (quadrant, colour) in expected.iter().enumerate() {
+                            let cx = (quadrant as u32 % 2) * half + half / 2;
+                            let cy = (quadrant as u32 / 2) * half + half / 2;
+                            let offset = ((cy * side + cx) * 4) as usize;
+                            assert_eq!(
+                                &rgba[offset..offset + 4],
+                                colour,
+                                "{key:?} quadrant {quadrant}"
+                            );
+                        }
+                    }
+                    PageFormat::Bc5Unorm => {
+                        let rg = crate::core::compressed_textures::decode_bc5_rg8(
+                            &page.data, side, side,
+                        )
+                        .unwrap();
+                        for (quadrant, colour) in expected.iter().enumerate() {
+                            let cx = (quadrant as u32 % 2) * half + half / 2;
+                            let cy = (quadrant as u32 / 2) * half + half / 2;
+                            let offset = ((cy * side + cx) * 2) as usize;
+                            assert_eq!(
+                                &rg[offset..offset + 2],
+                                &colour[0..2],
+                                "{key:?} quadrant {quadrant}"
+                            );
+                        }
+                    }
+                    other => panic!("unexpected procedural page format {other:?}"),
+                }
+                sampled += 1;
+            }
+        }
+        assert_eq!(sampled, 21);
+
+        for (family, mip, x, y, golden) in PROCEDURAL_PAGE_GOLDEN_SHA256 {
+            let key = PageKey { family, mip, x, y };
+            let page = procedural_page(&metadata, key).unwrap();
+            assert_eq!(
+                crate::core::provenance::to_hex(&page.sha256),
+                golden,
+                "generator drifted for {key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn morton_order_key_is_injective_and_directory_is_sorted() {
+        // `binary_search_by_key` on `order_key` is only sound if morton2 is
+        // injective over the addressable page range.
+        let mut seen = HashSet::new();
+        for y in 0..64u32 {
+            for x in 0..64u32 {
+                assert!(seen.insert(morton2(x, y)), "morton2 collided at ({x},{y})");
+            }
+        }
+        assert!(validate_page_axes(PageKey {
+            family: 0,
+            mip: 0,
+            x: MAX_PAGE_AXIS,
+            y: 0,
+        })
+        .is_err());
+
+        let path = scratch("vt-sorted");
+        let metadata = procedural_metadata();
+        pack_plan(&path, &metadata, &UNIT_PLAN);
+        let store = MmapPageStore::open(&path).unwrap();
+        assert!(
+            store.directory.windows(2).all(|pair| {
+                MmapPageStore::order_key(pair[0].key) < MmapPageStore::order_key(pair[1].key)
+            }),
+            "the packed directory is not in the committed page_order"
+        );
+        for entry in &store.directory {
+            assert!(
+                store.entry(entry.key).is_some(),
+                "{:?} is unreachable by binary search",
+                entry.key
+            );
+        }
+
+        // An out-of-order file must be rejected, not silently mis-searched.
+        let mut bytes = std::fs::read(&path).unwrap();
+        for offset in 0..DIRECTORY_ENTRY_SIZE {
+            bytes.swap(
+                HEADER_SIZE + offset,
+                HEADER_SIZE + DIRECTORY_ENTRY_SIZE + offset,
+            );
+        }
+        let swapped = scratch("vt-unsorted");
+        std::fs::write(&swapped, &bytes).unwrap();
+        // `unwrap_err` would require Debug on the store, which owns a File.
+        let error = match MmapPageStore::open(&swapped) {
+            Ok(_) => panic!("an unsorted page directory must be rejected at open"),
+            Err(error) => error,
+        };
+        assert!(error.contains("not strictly sorted"), "{error}");
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(swapped).unwrap();
+    }
+
+    #[test]
+    fn pages_at_mip_matches_the_renderer_page_grid() {
+        // Mirror of `ceil_div` + `pages_for_mip_counts` in
+        // `terrain/renderer/virtual_texture.rs`; that copy sits behind the
+        // `extension-module` feature and cannot be called from here.
+        fn renderer_pages(pages0: u32, mip: u32) -> u32 {
+            let div = 1u32.checked_shl(mip).unwrap_or(u32::MAX).max(1);
+            pages0.max(1).div_ceil(div).max(1)
+        }
+        let metadata = procedural_metadata();
+        assert_eq!(metadata.mip_count(), 12);
+        assert_eq!(metadata.pages_at_mip(0), (2048, 2048));
+        for mip in 0..12 {
+            let expected = renderer_pages(2048, mip);
+            assert_eq!(
+                metadata.pages_at_mip(mip),
+                (expected, expected),
+                "mip {mip}"
+            );
+        }
+        // Non-square, non-power-of-two: the identity
+        // ceil(ceil(a/b)/c) == ceil(a/(b*c)) has to hold there too.
+        let odd = StoreMetadata {
+            virtual_width: 300,
+            virtual_height: 1025,
+            tile_size: 128,
+            tile_border: 0,
+            family_count: 1,
+            procedural: false,
+            procedural_seed: 0,
+        };
+        for mip in 0..odd.mip_count() {
+            assert_eq!(
+                odd.pages_at_mip(mip),
+                (renderer_pages(3, mip), renderer_pages(9, mip)),
+                "mip {mip}"
+            );
+        }
+    }
+
+    #[test]
+    fn truncated_materialized_mip_is_rejected_at_open() {
+        let metadata = procedural_metadata();
+
+        // Write side: a plan the page set does not keep is refused outright.
+        let mut pages = plan_pages(&metadata, &UNIT_PLAN);
+        pages.pop();
+        let short = scratch("vt-short");
+        let error = write_packed_store(&short, &metadata, &UNIT_PLAN, pages).unwrap_err();
+        assert!(error.contains("pages"), "{error}");
+
+        // Open side: a header claiming a completeness the file does not have
+        // must fail instead of serving a hole.
+        let path = scratch("vt-truncated");
+        pack_plan(&path, &metadata, &UNIT_PLAN);
+        MmapPageStore::open(&path).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        put_u32(&mut bytes, 80, 8);
+        put_u32(&mut bytes, 84, 7);
+        let patched = scratch("vt-overclaim");
+        std::fs::write(&patched, &bytes).unwrap();
+        let error = match MmapPageStore::open(&patched) {
+            Ok(_) => panic!("a store that over-claims its materialization must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.contains("mip 8 has 4/64 pages"), "{error}");
+
+        let _ = std::fs::remove_file(short);
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(patched).unwrap();
+    }
+
+    #[test]
+    fn page_cache_evicts_the_least_recently_used_page() {
+        let page =
+            |value: u8| PageBytes::new(PageFormat::Rgba8Srgb, 2, 2, vec![value; 16]).unwrap();
+        let key = |x: u32| PageKey {
+            family: 0,
+            mip: 0,
+            x,
+            y: 0,
+        };
+        let mut cache = PageCache::new(32);
+        cache.insert(key(0), page(0));
+        cache.insert(key(1), page(1));
+        // Touch 0 so 1 becomes the least recently used entry.
+        assert!(cache.get(key(0)).is_some());
+        cache.insert(key(2), page(2));
+        assert!(cache.get(key(1)).is_none(), "LRU evicted the wrong page");
+        assert!(cache.get(key(0)).is_some());
+        assert!(cache.get(key(2)).is_some());
     }
 }

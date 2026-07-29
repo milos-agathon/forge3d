@@ -5,6 +5,7 @@
 
 use super::vertex::ClipmapVertex;
 use glam::Vec2;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// Configuration for geo-morphing.
@@ -56,50 +57,53 @@ pub struct DepthSeamAnalysis {
 }
 
 static LAST_SEAM_ANALYSIS: OnceLock<Mutex<SeamAnalysis>> = OnceLock::new();
+static SEAM_ANALYSIS_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// What [`latest_seam_analysis`] reports before any geometry build has run, and
+/// what it falls back to when the lock is poisoned: one crack and invalid
+/// seams, so "nothing was analysed" can never be read as "nothing was wrong".
+fn fail_closed_seam_analysis() -> SeamAnalysis {
+    SeamAnalysis {
+        boundary_vertex_count: 0,
+        depth_sample_count: 0,
+        max_gap: 0.0,
+        avg_gap: 0.0,
+        t_junction_count: 0,
+        crack_count: 1,
+        seams_valid: false,
+    }
+}
 
 pub fn publish_seam_analysis(analysis: SeamAnalysis) {
     if let Ok(mut current) = LAST_SEAM_ANALYSIS
-        .get_or_init(|| {
-            Mutex::new(SeamAnalysis {
-                boundary_vertex_count: 0,
-                depth_sample_count: 0,
-                max_gap: 0.0,
-                avg_gap: 0.0,
-                t_junction_count: 0,
-                crack_count: 1,
-                seams_valid: false,
-            })
-        })
+        .get_or_init(|| Mutex::new(fail_closed_seam_analysis()))
         .lock()
     {
         *current = analysis;
+        SEAM_ANALYSIS_COUNT.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+/// Number of clipmap geometry builds that have published a seam analysis in
+/// this process.
+///
+/// [`SeamAnalysis`] describes the LAST build only, and the clipmap geometry
+/// cache (`src/terrain/renderer/geometry.rs:616-625`) can serve an unbounded
+/// number of frames from a single build, so a caller that samples the analysis
+/// once after a long render loop cannot distinguish "analysed on every frame"
+/// from "analysed once". This counter makes that difference observable. It is
+/// deliberately a free function rather than a [`SeamAnalysis`] field so that
+/// every existing struct literal keeps compiling.
+pub fn seam_analysis_count() -> u64 {
+    SEAM_ANALYSIS_COUNT.load(Ordering::Relaxed)
 }
 
 pub fn latest_seam_analysis() -> SeamAnalysis {
     LAST_SEAM_ANALYSIS
-        .get_or_init(|| {
-            Mutex::new(SeamAnalysis {
-                boundary_vertex_count: 0,
-                depth_sample_count: 0,
-                max_gap: 0.0,
-                avg_gap: 0.0,
-                t_junction_count: 0,
-                crack_count: 1,
-                seams_valid: false,
-            })
-        })
+        .get_or_init(|| Mutex::new(fail_closed_seam_analysis()))
         .lock()
         .map(|analysis| analysis.clone())
-        .unwrap_or(SeamAnalysis {
-            boundary_vertex_count: 0,
-            depth_sample_count: 0,
-            max_gap: 0.0,
-            avg_gap: 0.0,
-            t_junction_count: 0,
-            crack_count: 1,
-            seams_valid: false,
-        })
+        .unwrap_or_else(|_| fail_closed_seam_analysis())
 }
 
 /// Calculate morph weight for a vertex based on distance from LOD boundary.
@@ -563,5 +567,38 @@ mod tests {
         assert!(analysis.sample_count >= 2);
         assert_eq!(analysis.crack_count, 0);
         assert_eq!(analysis.max_depth_gap, 0.0);
+    }
+
+    #[test]
+    fn publish_seam_analysis_counts_every_build() {
+        // `SeamAnalysis` is a mesh-BUILD-time metric that the geometry cache can
+        // replay across arbitrarily many frames. Without a build counter a
+        // caller cannot tell one analysis from six hundred, so "0 cracks over a
+        // 600-frame flythrough" would be unfalsifiable. Strict increase is
+        // asserted (rather than exact deltas) so the test stays correct when the
+        // suite runs multi-threaded.
+        let vertex = |x, y, u, v| ClipmapVertex::new(x, y, u, v, 0.0, 0);
+        let inner = [
+            vertex(-1.0, -1.0, 0.0, 0.0),
+            vertex(1.0, -1.0, 1.0, 0.0),
+            vertex(1.0, 1.0, 1.0, 1.0),
+            vertex(-1.0, 1.0, 0.0, 1.0),
+        ];
+        let outer = [
+            vertex(-1.0, 0.0, 0.0, 0.5),
+            vertex(1.0, 0.0, 1.0, 0.5),
+            vertex(0.0, -1.0, 0.5, 0.0),
+            vertex(0.0, 1.0, 0.5, 1.0),
+        ];
+        let sample = analyze_seams(&inner, &outer, &GeomorphConfig::default());
+
+        let before = seam_analysis_count();
+        publish_seam_analysis(sample.clone());
+        let first = seam_analysis_count();
+        publish_seam_analysis(sample);
+        let second = seam_analysis_count();
+
+        assert!(first > before, "{first} did not exceed {before}");
+        assert!(second > first, "{second} did not exceed {first}");
     }
 }

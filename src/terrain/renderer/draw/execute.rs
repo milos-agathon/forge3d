@@ -246,14 +246,13 @@ impl TerrainScene {
         preserve_background: bool,
     ) -> Result<u32> {
         let geometry = self.geometry_provider()?;
-        let first_instance = self
-            .device
-            .features()
-            .contains(wgpu::Features::INDIRECT_FIRST_INSTANCE);
-        let multi_draw_count = first_instance
-            && self.device.features().contains(
-                wgpu::Features::MULTI_DRAW_INDIRECT | wgpu::Features::MULTI_DRAW_INDIRECT_COUNT,
-            );
+        // TESSELLA: the indirect-draw capability decision lives in
+        // `core::capabilities` so the fallback it implies is named in one place
+        // and recorded from inside the render capture (see below).
+        let granted = self.device.features();
+        let draw_mode = crate::core::capabilities::IndirectDrawMode::negotiate(granted);
+        let first_instance = draw_mode.first_instance;
+        let multi_draw_count = draw_mode.multi_draw_count;
         let half_height = (decoded.clamp.height_range.1 - decoded.clamp.height_range.0).abs()
             * params.z_scale.abs()
             * 0.5;
@@ -275,6 +274,14 @@ impl TerrainScene {
                 first_instance,
             )
         };
+        // Only a frame that actually issues indirect draws may claim the CPU
+        // draw-loop fallback: `culling="none"` and non-clipmap Grid geometry both
+        // leave `indirect` as None and draw once, directly. Recording here (and
+        // not in `TerrainGeometry::draw_indirect_buffers`, which runs up to four
+        // times per frame) keeps the claim exactly as strong as the truth.
+        if indirect.is_some() {
+            draw_mode.record_fallbacks(granted);
+        }
         let hzb_requested = params.culling == "hzb_two_phase";
         let hzb_enabled = hzb_requested
             && render_targets.sample_count == 1

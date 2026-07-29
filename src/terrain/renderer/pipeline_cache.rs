@@ -56,30 +56,46 @@ impl TerrainScene {
         })
     }
 
-    /// Preprocess terrain shader by resolving #include directives
-    /// WGSL doesn't have a preprocessor, so we manually expand includes
+    /// Assemble the forward terrain module. `shader_sources` owns the include
+    /// expansion (WGSL has no preprocessor) and the two virtual-texture atlas
+    /// variants; this layer only picks the variant the device can execute.
     pub(super) fn preprocess_terrain_shader(device: &wgpu::Device) -> String {
-        Self::preprocess_terrain_source(device, crate::shader_sources::terrain())
-    }
-
-    fn preprocess_visibility_shader(device: &wgpu::Device) -> String {
-        Self::preprocess_terrain_source(device, crate::shader_sources::terrain_visibility())
-    }
-
-    fn preprocess_terrain_source(device: &wgpu::Device, source: String) -> String {
-        if super::virtual_texture::bindless_bc_supported(device) {
-            source
-                .replace(
-                    "var terrain_vt_atlas: texture_2d<f32>;",
-                    "var terrain_vt_atlas: binding_array<texture_2d<f32>>;",
-                )
-                .replace(
-                    "textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0)",
-                    "textureSampleLevel(terrain_vt_atlas[family_slot], terrain_vt_sampler, atlas_uv, 0.0)",
-                )
+        if Self::terrain_atlas_is_bindless(device) {
+            crate::shader_sources::terrain_bindless()
         } else {
-            source
+            crate::shader_sources::terrain()
         }
+    }
+
+    /// True when the compiled module indexes the atlas `binding_array`. The
+    /// compatibility path is a capability fallback, so the pipeline that
+    /// compiled it records one — this covers renders that never build a
+    /// virtual-texture runtime, which is what the other two sites
+    /// (`core::capabilities::record_bindless_bc_fallbacks` and the VT runtime
+    /// constructor) key off. `record_degradation` dedups on `(kind, name)`, so
+    /// the identical triple collapses to a single certificate entry.
+    fn terrain_atlas_is_bindless(device: &wgpu::Device) -> bool {
+        let bindless = super::virtual_texture::bindless_bc_supported(device);
+        if !bindless {
+            crate::core::degradation::record_degradation(
+                "rendering_fallback",
+                "terrain_vt_bindless_atlas",
+                "adapter lacks descriptor indexing; using the single-atlas compatibility path",
+            );
+        }
+        bindless
+    }
+
+    /// TESSELLA pass 1 module: terrain + `terrain_visbuffer_write.wgsl`.
+    fn preprocess_visibility_write_shader(device: &wgpu::Device) -> String {
+        crate::shader_sources::terrain_visbuffer_write(Self::terrain_atlas_is_bindless(device))
+    }
+
+    /// TESSELLA pass 2 module: terrain + the full-screen material resolve.
+    /// A distinct source from pass 1, so the certificate's two labels carry
+    /// two different hashes instead of aliasing one module.
+    fn preprocess_visibility_resolve_shader(device: &wgpu::Device) -> String {
+        crate::shader_sources::terrain_visbuffer_resolve(Self::terrain_atlas_is_bindless(device))
     }
 
     pub(super) fn create_render_pipeline(
@@ -238,7 +254,7 @@ impl TerrainScene {
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_visibility_shader(device);
+        let shader_source = Self::preprocess_visibility_write_shader(device);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_visbuffer_write.shader",
@@ -304,7 +320,7 @@ impl TerrainScene {
         visibility_resolve_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_visibility_shader(device);
+        let shader_source = Self::preprocess_visibility_resolve_shader(device);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_visbuffer_resolve.shader",
