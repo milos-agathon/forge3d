@@ -7,7 +7,7 @@
 struct ShadowPassUniforms {
     // Light view-projection matrix for this cascade (64 bytes)
     light_view_proj: mat4x4<f32>,
-    // Terrain params: (min_h, h_range, terrain_width, z_scale) - matches main shader (16 bytes)
+    // Terrain params: (terrain_span, z_scale, min_h, max_h) (16 bytes)
     terrain_params: vec4<f32>,
     // Grid params: (grid_resolution, _pad, _pad, _pad) (16 bytes)
     grid_params: vec4<f32>,
@@ -58,12 +58,11 @@ fn apply_height_curve(t: f32) -> f32 {
 fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     var out: VertexOutput;
     
-    // Extract parameters - MUST match main shader layout: [min_h, h_range, terrain_width, z_scale]
-    let height_min = u_shadow.terrain_params.x;
-    let height_range = u_shadow.terrain_params.y;  // Not used, but kept for clarity
-    let terrain_width = u_shadow.terrain_params.z;
-    let terrain_depth = terrain_width * f32(textureDimensions(height_tex, 0).y) / max(f32(textureDimensions(height_tex, 0).x), 1.0);
-    let z_scale = u_shadow.terrain_params.w;
+    // Extract parameters in the order uploaded by the native terrain renderer.
+    let terrain_span = u_shadow.terrain_params.x;
+    let z_scale = u_shadow.terrain_params.y;
+    let height_min = u_shadow.terrain_params.z;
+    let height_max = u_shadow.terrain_params.w;
     let grid_res = u32(u_shadow.grid_params.x);
     
     // Decode vertex position from index
@@ -111,13 +110,12 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     let texel_clamped = clamp(texel, vec2<i32>(0), vec2<i32>(tex_dims) - vec2<i32>(1));
     let h_raw = textureLoad(height_tex, texel_clamped, 0).r;
     
-    // World position calculation - MUST match main shader (shader_pbr.rs) EXACTLY
-    // Main shader: world_pos = (uv.x * terrain_width, (h - min_h) * z_scale, uv.y * terrain_depth)
-    // No normalization or height curve - main shader doesn't use them either
-    let world_x = uv.x * terrain_width;
-    let world_y = (h_raw - height_min) * z_scale;
-    let world_z = uv.y * terrain_depth;
-    let world_pos = vec3<f32>(world_x, world_y, world_z);
+    // Match terrain_pbr_pom.wgsl::normalize_for_shadow exactly.
+    let world_xy = (uv - vec2<f32>(0.5)) * terrain_span;
+    let height_range = max(height_max - height_min, 1e-6);
+    let height_normalized = clamp((h_raw - height_min) / height_range, 0.0, 1.0);
+    let world_z = apply_height_curve(height_normalized) * z_scale;
+    let world_pos = vec3<f32>(world_xy, world_z);
     
     // Transform to light clip space
     out.clip_position = u_shadow.light_view_proj * vec4<f32>(world_pos, 1.0);

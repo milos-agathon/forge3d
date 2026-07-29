@@ -441,3 +441,144 @@ class TestEvsmExposureParity:
         assert shadowed >= 0.01, (
             f"EVSM casts no shadow: only {shadowed:.4f} of terrain is shadowed"
         )
+
+
+def _native_terrain_gpu_available() -> bool:
+    try:
+        from _terrain_runtime import terrain_rendering_available
+
+        return terrain_rendering_available()
+    except Exception:
+        return False
+
+
+def _native_pyramid_heightmap(size: int = 128) -> np.ndarray:
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    center = size * 0.42
+    radius = np.maximum(np.abs(xx - center), np.abs(yy - center))
+    return np.clip(1.0 - radius / (size * 0.12), 0.0, 1.0).astype(np.float32)
+
+
+@pytest.mark.skipif(
+    not _native_terrain_gpu_available(),
+    reason="no terrain-capable hardware-backed forge3d runtime",
+)
+@pytest.mark.offscreen
+def test_native_moment_visibility_semantics_preserve_lit_plain_and_cast_shadow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Native VSM/EVSM keep exposed terrain lit and retain the pyramid's cast shadow."""
+    import forge3d as f3d
+    from _terrain_runtime import _write_test_hdr
+    from forge3d.terrain_params import PomSettings, make_terrain_params_config
+
+    monkeypatch.setenv("FORGE3D_TERRAIN_SHADOW_DEBUG", "raw")
+    hdr_path = tmp_path / "constant.hdr"
+    _write_test_hdr(hdr_path)
+
+    session = f3d.Session(window=False)
+    renderer = f3d.TerrainRenderer(session)
+    material_set = f3d.MaterialSet.terrain_default()
+    ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=0.0)
+    heightmap = _native_pyramid_heightmap()
+    flat_mask_map = f3d.Colormap1D.from_stops(
+        stops=[
+            (0.0, "#ffffff"),
+            (0.001, "#000000"),
+            (1.0, "#000000"),
+        ],
+        domain=(0.0, 1.0),
+    )
+    flat_mask_overlay = f3d.OverlayLayer.from_colormap1d(
+        flat_mask_map, strength=1.0
+    )
+
+    def render(technique: str, *, enabled: bool = True) -> np.ndarray:
+        shadows = ShadowSettings(
+            enabled=enabled,
+            technique=technique,
+            resolution=2048,
+            cascades=1,
+            max_distance=20.0,
+            softness=1.0,
+            intensity=1.0,
+            slope_scale_bias=0.001,
+            depth_bias=0.0005,
+            normal_bias=0.0002,
+            min_variance=1e-4,
+            light_bleed_reduction=0.5,
+            evsm_exponent=40.0,
+            fade_start=1.0,
+        )
+        config = make_terrain_params_config(
+            size_px=(320, 240),
+            render_scale=1.0,
+            terrain_span=4.0,
+            msaa_samples=1,
+            z_scale=2.0,
+            exposure=1.0,
+            domain=(0.0, 1.0),
+            albedo_mode="colormap",
+            colormap_strength=1.0,
+            ibl_enabled=False,
+            ibl_intensity=0.0,
+            light_azimuth_deg=315.0,
+            light_elevation_deg=12.0,
+            sun_intensity=3.0,
+            cam_radius=6.0,
+            cam_phi_deg=135.0,
+            cam_theta_deg=55.0,
+            fov_y_deg=52.0,
+            camera_mode="mesh:zup",
+            debug_mode=1 if not enabled else 0,
+            overlays=[flat_mask_overlay],
+            shadows=shadows,
+            pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
+        )
+        return renderer.render_terrain_pbr_pom(
+            material_set=material_set,
+            env_maps=ibl,
+            params=f3d.TerrainRenderParams(config),
+            heightmap=heightmap,
+        ).to_numpy()
+
+    luminance = {
+        technique: np.dot(
+            render(technique)[..., :3].astype(np.float32) / 255.0,
+            np.array([0.2126, 0.7152, 0.0722], dtype=np.float32),
+        )
+        for technique in ("pcf", "vsm", "evsm")
+    }
+    terrain_reference = np.dot(
+        render("pcf", enabled=False)[..., :3].astype(np.float32) / 255.0,
+        np.array([0.2126, 0.7152, 0.0722], dtype=np.float32),
+    )
+    terrain = terrain_reference > 0.9
+    assert terrain.any(), "shadow-disabled native render contains no flat terrain"
+
+    lit_plain = terrain & (luminance["pcf"] > 0.9)
+    cast_shadow = terrain & (luminance["pcf"] < 0.6)
+    assert lit_plain.any(), "deterministic pyramid produced no exposed PCF plain"
+    assert float(cast_shadow.sum() / terrain.sum()) >= 0.01, (
+        "deterministic pyramid produced no measurable PCF cast-shadow region"
+    )
+
+    pcf_exposure = float(luminance["pcf"][lit_plain].mean())
+    for technique in ("vsm", "evsm"):
+        exposure = float(luminance[technique][lit_plain].mean())
+        shadowed = float(
+            ((luminance[technique] < exposure * 0.6) & cast_shadow).sum()
+            / terrain.sum()
+        )
+        print(
+            f"{technique}: exposure={exposure:.6f}, "
+            f"pcf={pcf_exposure:.6f}, shadowed={shadowed:.6f}"
+        )
+        assert exposure >= pcf_exposure * 0.8, (
+            f"{technique.upper()} breaks lit exposure: {exposure:.3f} vs "
+            f"PCF {pcf_exposure:.3f}"
+        )
+        assert shadowed >= 0.01, (
+            f"{technique.upper()} casts no shadow: only {shadowed:.4f} "
+            "of terrain is clearly shadowed"
+        )
