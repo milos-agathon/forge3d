@@ -309,7 +309,9 @@ def _clamp_sea_leak(render_dem_path: Path, cache_dir: Path, *, force: bool) -> P
         f"(min {float(np.nanmin(data)):.1f} m), genuine sub-sea px kept: {int(lowland.sum())}"
     )
     data = np.where(leak, 0.0, data)
-    assert float(np.nanmin(np.where(valid, data, np.nan))) >= SEA_FLOOR_M, "clamp failed"
+    clamped_min = float(np.nanmin(np.where(valid, data, np.nan)))
+    if clamped_min < SEA_FLOOR_M:  # not assert: must survive python -O
+        raise RuntimeError(f"sea-leak clamp failed: min {clamped_min:.1f} m below {SEA_FLOOR_M:.0f} m")
     profile.update(dtype="float32", nodata=nodata, compress="lzw")
     output.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(output, "w", **profile) as dst:
