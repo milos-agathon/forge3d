@@ -484,7 +484,7 @@ mod tests {
         .unwrap();
         assert_eq!(cold.report().misses, ["first", "second"]);
 
-        let mut warm = GraphScheduler::new(store.clone(), b"caps".to_vec(), engine.clone());
+        let mut warm = GraphScheduler::new(store, b"caps".to_vec(), engine);
         let mut restored = Vec::new();
         warm.execute_graph(
             &graph,
@@ -504,46 +504,97 @@ mod tests {
             "dependent cached resource must retain its transition barrier"
         );
 
-        let mut changed_builder = RendererGraphBuilder::new();
-        let changed_leaf = changed_builder.add_resource(desc("leaf", false));
-        let changed_middle = changed_builder.add_resource(desc("middle", true));
-        let changed_output = changed_builder.add_resource(desc("output", true));
-        changed_builder
-            .add_pass("first", PassType::Graphics, |pass| {
-                pass.read(changed_leaf)
-                    .write(changed_middle)
-                    .pipeline_descriptor(b"first-pipeline".to_vec())
-                    .uniform_bytes(b"changed-first-uniform".to_vec());
-                Ok(())
-            })
-            .unwrap();
-        changed_builder
-            .add_pass("second", PassType::Graphics, |pass| {
-                pass.read(changed_middle)
-                    .write(changed_output)
-                    .pipeline_descriptor(b"second-pipeline".to_vec())
-                    .uniform_bytes(b"second-uniform".to_vec());
-                Ok(())
-            })
-            .unwrap();
-        let changed_graph = changed_builder.compile().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn all_miss_invalidation_reports_zero_bytes_read() {
+        use crate::core::framegraph_impl::{
+            PassType, RendererGraphBuilder, ResourceDesc, ResourceType,
+        };
+        use wgpu::{Extent3d, TextureFormat, TextureUsages};
+
+        let build_graph = |first_uniform: &[u8]| {
+            let mut builder = RendererGraphBuilder::new();
+            let desc = |name: &str, is_transient: bool| ResourceDesc {
+                name: name.into(),
+                resource_type: ResourceType::ColorAttachment,
+                format: Some(TextureFormat::Rgba8Unorm),
+                extent: Some(Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                }),
+                size: None,
+                usage: Some(TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING),
+                can_alias: false,
+                is_transient,
+            };
+            let leaf = builder.add_resource(desc("leaf", false));
+            let middle = builder.add_resource(desc("middle", true));
+            let output = builder.add_resource(desc("output", true));
+            builder
+                .add_pass("first", PassType::Graphics, |pass| {
+                    pass.read(leaf)
+                        .write(middle)
+                        .pipeline_descriptor(b"first-pipeline".to_vec())
+                        .uniform_bytes(first_uniform.to_vec());
+                    Ok(())
+                })
+                .unwrap();
+            builder
+                .add_pass("second", PassType::Graphics, |pass| {
+                    pass.read(middle)
+                        .write(output)
+                        .pipeline_descriptor(b"second-pipeline".to_vec())
+                        .uniform_bytes(b"second-uniform".to_vec());
+                    Ok(())
+                })
+                .unwrap();
+            (builder.compile().unwrap(), leaf)
+        };
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("forge3d-anamnesis-all-miss-{nonce}"));
+        let store = ContentStore::new(&root, 64 * 1024, true).unwrap();
+        let engine = EngineFingerprint::current().canonical_bytes();
+
+        let (cold_graph, cold_leaf) = build_graph(b"first-uniform");
+        let cold_leaf_keys = BTreeMap::from([(cold_leaf, super::super::leaf_key(b"leaf"))]);
+        let mut cold = GraphScheduler::new(store.clone(), b"caps".to_vec(), engine.clone());
+        cold.execute_graph_with(&cold_graph, &cold_leaf_keys, |pass, action| match action {
+            GraphPassAction::Execute { capture_output, .. } => {
+                assert!(capture_output);
+                Ok(GraphPassOutcome::Executed(pass.name.as_bytes().to_vec()))
+            }
+            GraphPassAction::Restore { .. } => panic!("cold graph cannot restore"),
+        })
+        .unwrap();
+
+        let (changed_graph, changed_leaf) = build_graph(b"changed-first-uniform");
         let changed_leaf_keys = BTreeMap::from([(changed_leaf, super::super::leaf_key(b"leaf"))]);
         let mut changed = GraphScheduler::new(store, b"caps".to_vec(), engine);
         changed
-            .execute_graph(
+            .execute_graph_with(
                 &changed_graph,
                 &changed_leaf_keys,
-                |pass, _| Ok(pass.name.as_bytes().to_vec()),
-                |_, _, _| panic!("changed graph cannot restore a stale pass"),
+                |pass, action| match action {
+                    GraphPassAction::Execute { capture_output, .. } => {
+                        assert!(capture_output);
+                        Ok(GraphPassOutcome::Executed(pass.name.as_bytes().to_vec()))
+                    }
+                    GraphPassAction::Restore { .. } => {
+                        panic!("changed graph cannot restore a stale pass")
+                    }
+                },
             )
             .unwrap();
         assert_eq!(changed.report().hits, Vec::<String>::new());
         assert_eq!(changed.report().misses, ["first", "second"]);
-        assert_eq!(
-            changed.report().bytes_read,
-            0,
-            "all-miss invalidation must not report restored payload bytes"
-        );
+        assert_eq!(changed.report().bytes_read, 0);
         assert!(changed.report().bytes_written > 0);
         fs::remove_dir_all(root).unwrap();
     }
