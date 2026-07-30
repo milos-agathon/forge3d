@@ -523,19 +523,19 @@ class TestEvsmExposureParity:
     def _render(
         self, viewer, technique: str, out: Path, *, debug_mode: int = 0
     ) -> np.ndarray:
-        import time
         viewer.send_ipc({
             "cmd": "set_terrain", "phi": 90.0, "theta": 55.0, "fov": 30.0,
             "radius": 18000.0, "zscale": 1.0, "sun_azimuth": 270.0,
             "sun_elevation": 8.0, "sun_intensity": 2.0, "ambient": 0.15,
             "shadow": 1.0, "background": [1.0, 1.0, 1.0],
         })
+        # Oversample the 640px output without exhausting hosted software
+        # adapters during repeated four-cascade EVSM/PCF round trips.
         viewer.send_ipc({
             "cmd": "set_terrain_pbr", "enabled": True, "shadow_technique": technique,
-            "shadow_map_res": 2048, "exposure": 1.0, "msaa": 1,
+            "shadow_map_res": 1024, "exposure": 1.0, "msaa": 1,
             "ibl_intensity": 0.0, "debug_mode": debug_mode,
         })
-        time.sleep(1.0)
         viewer.snapshot(str(out), width=640, height=400)
         from PIL import Image
         img = np.asarray(Image.open(out).convert("RGB"), dtype=np.float32) / 255.0
