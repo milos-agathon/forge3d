@@ -5,6 +5,7 @@ different techniques (including VSM/EVSM/MSM) produce visually different outputs
 """
 
 import hashlib
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -490,6 +491,21 @@ def _viewer_gpu_available() -> bool:
         return False
 
 
+def _evsm_regression_shadow_map_resolution(platform: str) -> int:
+    """Keep Metal fidelity while bounding hosted Windows software-GPU load."""
+    return 1024 if platform == "win32" else 2048
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    (("win32", 1024), ("darwin", 2048), ("linux", 2048)),
+)
+def test_evsm_regression_shadow_resolution_is_platform_bounded(
+    platform: str, expected: int
+):
+    assert _evsm_regression_shadow_map_resolution(platform) == expected
+
+
 def _pyramid_dem(path: Path, n: int = 512, pix: float = 20.0) -> Path:
     """Flat plain with one tall isolated pyramid -> guaranteed long cast shadow."""
     import rasterio
@@ -529,11 +545,12 @@ class TestEvsmExposureParity:
             "sun_elevation": 8.0, "sun_intensity": 2.0, "ambient": 0.15,
             "shadow": 1.0, "background": [1.0, 1.0, 1.0],
         })
-        # Oversample the 640px output without exhausting hosted software
-        # adapters during repeated four-cascade EVSM/PCF round trips.
+        # Metal needs 2048 for a measurable cast-shadow core; hosted Windows
+        # needs the bounded atlas to survive repeated EVSM/PCF round trips.
         viewer.send_ipc({
             "cmd": "set_terrain_pbr", "enabled": True, "shadow_technique": technique,
-            "shadow_map_res": 1024, "exposure": 1.0, "msaa": 1,
+            "shadow_map_res": _evsm_regression_shadow_map_resolution(sys.platform),
+            "exposure": 1.0, "msaa": 1,
             "ibl_intensity": 0.0, "debug_mode": debug_mode,
         })
         viewer.snapshot(str(out), width=640, height=400)
