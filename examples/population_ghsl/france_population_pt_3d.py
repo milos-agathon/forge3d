@@ -423,6 +423,239 @@ def _prepare_inputs(args: argparse.Namespace, cache_dir: Path) -> tuple[Path, Pa
     return render_dem_path, population_path, overlay_path
 
 
+def _load_dem_grid(render_dem_path: Path, grid_max: int) -> tuple[np.ndarray, np.ndarray]:
+    """Load the render DEM, fill nodata, downsample, normalize 0..1 (TERRAIN ONLY).
+
+    Returns (dem_grid, land_grid). Towers are NEVER part of this normalization:
+    the terrain's 0..1 range is anchored to real elevation so the tallest tower
+    cannot rescale the relief (the LoD2 lesson).
+    """
+    with rasterio.open(render_dem_path) as src:
+        dem = src.read(1, masked=True)
+    data = dem.filled(np.nan).astype(np.float32)
+    finite = np.isfinite(data)
+    if not finite.any():
+        raise RuntimeError("Render DEM has no finite samples")
+    fill = float(np.nanpercentile(data[finite], 1.0))
+    data = np.where(finite, data, fill)
+
+    land = finite.astype(np.float32)
+    scale = min(1.0, grid_max / float(max(data.shape)))
+    if scale < 1.0:
+        new_size = (max(2, round(data.shape[1] * scale)), max(2, round(data.shape[0] * scale)))
+        data = np.asarray(
+            Image.fromarray(data, mode="F").resize(new_size, Image.Resampling.BILINEAR),
+            dtype=np.float32,
+        )
+        land = np.asarray(
+            Image.fromarray(land, mode="F").resize(new_size, Image.Resampling.BILINEAR),
+            dtype=np.float32,
+        )
+    data = data - data.min()
+    data = data / max(float(data.max()), 1e-6)
+    return np.ascontiguousarray(data, dtype=np.float32), land > 0.5
+
+
+def _load_tower_grid(population_path: Path, shape: tuple[int, int]) -> np.ndarray:
+    """Tower heights (world units) on the PT grid.
+
+    Population is MAX-downsampled to the PT grid FIRST (bilinear would smear
+    Paris into a plateau and erase hamlets), then mapped through the tower
+    transform. Returns zeros everywhere when TOWER_WORLD == 0 (--no-towers).
+    """
+    if TOWER_WORLD <= 0.0:
+        return np.zeros(shape, dtype=np.float32)
+    with rasterio.open(population_path) as src:
+        pop = src.read(1).astype(np.float32)
+    pop = _max_downsample(pop, shape)
+    towers = _tower_heights(
+        pop,
+        floor_persons=TOWER_MIN_PERSONS,
+        gamma=TOWER_GAMMA,
+        tower_world=TOWER_WORLD,
+    )
+    n = int((towers > 0).sum())
+    print(
+        f"[towers] {n} tower cells ({100.0 * n / towers.size:.2f}% of grid), "
+        f"tallest {float(towers.max()):.2f} world units "
+        f"(terrain range = {RELIEF_WORLD:g}), floor {TOWER_MIN_PERSONS:g} persons, "
+        f"gamma {TOWER_GAMMA:g}"
+    )
+    return towers
+
+
+def _traced_grid(dem_grid: np.ndarray, towers_world: np.ndarray) -> np.ndarray:
+    """Fuse towers into the traced heightfield.
+
+    The tracer multiplies the grid by ``exaggeration=RELIEF_WORLD`` to get
+    world height, so world-unit towers are divided by RELIEF_WORLD here. This
+    keeps TOWER_WORLD physically meaningful and relief-invariant.
+    """
+    if not towers_world.any():
+        return dem_grid
+    fused = dem_grid + towers_world / float(RELIEF_WORLD)
+    return np.ascontiguousarray(fused, dtype=np.float32)
+
+
+def _p90_land_slope(dem_grid: np.ndarray, land: np.ndarray, relief: float) -> float:
+    """p90 of the world-unit slope the tracer sees, over country land only."""
+    spacing = SPAN_X / (dem_grid.shape[1] - 1)
+    gy, gx = np.gradient(dem_grid * relief, spacing)
+    slope = np.hypot(gx, gy)[land]
+    return float(np.degrees(np.arctan(np.percentile(slope, 90.0))))
+
+
+# --- path tracing ------------------------------------------------------------
+
+
+def _camera_for_grid(
+    rows: int, cols: int, *, tiles: int = 1, tx: int = 0, ty: int = 0, expand: float = 1.0
+) -> dict:
+    """Nadir camera over one cell of an NxN mosaic.
+
+    Every cell keeps the full-frame camera distance (identical relief parallax)
+    and narrows the FOV; ``expand`` > 1 widens the framing so the render covers
+    the cell plus a margin for feathered stitching.
+    """
+    span_z = SPAN_X * rows / cols
+    half_extent = 0.5 * max(SPAN_X, span_z) * CAMERA_MARGIN
+    distance = half_extent / math.tan(math.radians(CAMERA_FOV_Y / 2.0))
+    tile_half = half_extent / tiles
+    # Image up is -Z (north at the top): cell row 0 is the most-negative-Z strip.
+    center_x = -half_extent + (tx + 0.5) * 2.0 * tile_half
+    center_z = -half_extent + (ty + 0.5) * 2.0 * tile_half
+    fov_y = math.degrees(
+        2.0 * math.atan(math.tan(math.radians(CAMERA_FOV_Y / 2.0)) / tiles * expand)
+    )
+    return {
+        "origin": (center_x, distance, center_z),
+        "look_at": (center_x, 0.0, center_z),
+        "up": (0.0, 0.0, -1.0),
+        "fov_y": fov_y,
+        "exposure": 1.0,
+    }
+
+
+def _pt_pass(
+    dem_grid: np.ndarray, render: int, camera: dict, args: argparse.Namespace, *, label: str = "full"
+) -> tuple[np.ndarray, np.ndarray]:
+    spacing = SPAN_X / (dem_grid.shape[1] - 1)
+    out = hybrid_render_terrain_reference(
+        dem_grid,
+        render,
+        render,
+        camera,
+        spacing=(spacing, spacing),
+        exaggeration=RELIEF_WORLD,
+        albedo=PT_ALBEDO,
+        sun_azimuth_deg=SUN_AZIMUTH,
+        sun_elevation_deg=SUN_ELEVATION,
+        sun_intensity=SUN_INTENSITY,
+        env_map=_neutral_sky_env(),
+        env_intensity=ENV_INTENSITY,
+        spp=int(args.spp),
+        max_frames=int(args.max_frames),
+        min_frames=int(args.min_frames),
+        variance_threshold=float(args.variance_threshold),
+        seed=int(args.seed),
+    )
+    print(
+        f"[PT:{label}] converged={out['converged']} frames={out['frames']} "
+        f"variance={out['variance']:.3e} "
+        f"peak_host_visible={out.get('peak_host_visible_bytes', 0) / 2**20:.1f} MiB",
+        flush=True,
+    )
+    rgba = out["rgba"].astype(np.float32) / 255.0
+    hit = np.isfinite(out["depth"])
+    rgb = np.where(hit[:, :, None], rgba[:, :, :3], np.nan).astype(np.float32)
+    return rgb, hit
+
+
+def _cell_weights(size: int, margin: int) -> np.ndarray:
+    """1D trapezoid: 1.0 in the cell interior, linear 0..1 across the margin."""
+    if margin <= 0:
+        return np.ones(size, dtype=np.float32)
+    i = np.arange(size, dtype=np.float32) + 0.5
+    return np.minimum(1.0, np.minimum(i / margin, (size - i) / margin)).astype(np.float32)
+
+
+def _pt_light_field(
+    dem_grid: np.ndarray, args: argparse.Namespace, cell_cache_dir: Path
+) -> tuple[np.ndarray, np.ndarray]:
+    """Light field as a mosaic of feather-blended overlapping camera cells.
+
+    Butt-joined cells leave luminance steps at the stitch lines (each cell views
+    boundary terrain from a slightly different angle). Rendering each cell with
+    a margin and accumulating under a trapezoid weight drops the worst seam to
+    ~1.5x the interior gradient — which matters far more on Egypt's smooth
+    desert than it did on Romania's mountains.
+    """
+    rows, cols = dem_grid.shape
+    tiles = max(1, int(args.tiles))
+    frame = int(args.frame)
+    margin = max(0, int(args.cell_margin)) if tiles > 1 else 0
+    render = frame + 2 * margin
+    estimate = _budget_estimate(dem_grid, render)
+    print(
+        f"[PT] grid={cols}x{rows} cells={tiles}x{tiles} frame={frame} margin={margin} "
+        f"render={render} field={tiles * frame} "
+        f"budget~{estimate / 2**20:.0f} MiB of {BUDGET_BYTES / 2**20:.0f} MiB"
+    )
+    if estimate > BUDGET_BYTES * BUDGET_HEADROOM:
+        raise RuntimeError(
+            f"PT pass would need ~{estimate / 2**20:.0f} MiB against the enforced "
+            f"{BUDGET_BYTES / 2**20:.0f} MiB gate. Lower --frame or --grid-max "
+            "(refusing rather than letting the run fail after the first cells)."
+        )
+
+    cell_cache_dir.mkdir(parents=True, exist_ok=True)
+    if tiles == 1:
+        rgb, hit = _pt_pass(dem_grid, render, _camera_for_grid(rows, cols), args)
+        if not hit.any():
+            raise RuntimeError("Path tracer produced no terrain hits — check camera framing")
+        return rgb, hit
+
+    expand = render / float(frame)
+    field = tiles * frame
+    rgb_acc = np.zeros((field, field, 3), dtype=np.float64)
+    w_acc = np.zeros((field, field), dtype=np.float64)
+    w1d = _cell_weights(render, margin)
+    w2d = np.minimum(w1d[:, None], w1d[None, :]).astype(np.float32)
+    for ty in range(tiles):
+        for tx in range(tiles):
+            # Per-cell cache: a GPU hiccup on a long sequential run becomes a
+            # resume instead of a loss (the device has no in-process recreate
+            # path, so recovery means relaunching this script).
+            cache = cell_cache_dir / f"cell_{tx}_{ty}.npz"
+            if cache.is_file():
+                cached = np.load(cache)
+                cell_rgb, cell_hit = cached["rgb"], cached["hit"]
+                print(f"[PT:cell {tx},{ty}] cached: {cache.name}", flush=True)
+            else:
+                camera = _camera_for_grid(rows, cols, tiles=tiles, tx=tx, ty=ty, expand=expand)
+                cell_rgb, cell_hit = _pt_pass(
+                    dem_grid, render, camera, args, label=f"cell {tx},{ty}"
+                )
+                np.savez_compressed(cache, rgb=cell_rgb, hit=cell_hit)
+            w_cell = np.where(cell_hit, w2d, 0.0).astype(np.float32)
+            y0 = ty * frame - margin
+            x0 = tx * frame - margin
+            sy0, sx0 = max(0, -y0), max(0, -x0)
+            dy0, dx0 = max(0, y0), max(0, x0)
+            sy1 = render - max(0, y0 + render - field)
+            sx1 = render - max(0, x0 + render - field)
+            src_rgb = np.nan_to_num(cell_rgb[sy0:sy1, sx0:sx1], nan=0.0)
+            src_w = w_cell[sy0:sy1, sx0:sx1]
+            rgb_acc[dy0 : dy0 + sy1 - sy0, dx0 : dx0 + sx1 - sx0] += src_rgb * src_w[:, :, None]
+            w_acc[dy0 : dy0 + sy1 - sy0, dx0 : dx0 + sx1 - sx0] += src_w
+    hit = w_acc > 1e-6
+    if not hit.any():
+        raise RuntimeError("Path tracer produced no terrain hits — check camera framing")
+    rgb = np.full((field, field, 3), np.nan, dtype=np.float32)
+    rgb[hit] = (rgb_acc[hit] / w_acc[hit][:, None]).astype(np.float32)
+    return rgb, hit
+
+
 def _self_test() -> int:
     """Pure-function gates; no GPU, no network, no D: writes."""
     # _max_downsample: block maxima survive, shape is exact.
@@ -493,7 +726,54 @@ def main() -> int:
         print(f"Prepared: {render_dem_path}\nPrepared: {population_path}\nPrepared: {overlay_path}")
         return 0
 
-    print("later tasks: towers, trace, modulate, compose")
+    if args.measure_relief:
+        dem_grid, land = _load_dem_grid(render_dem_path, int(args.grid_max))
+        print(f"[relief] grid {dem_grid.shape[1]}x{dem_grid.shape[0]}, land px {int(land.sum())}")
+        for relief in (2.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0, RELIEF_WORLD):
+            print(
+                f"  RELIEF {relief:5.1f} -> p90 land slope "
+                f"{_p90_land_slope(dem_grid, land, relief):5.2f} deg"
+            )
+        return 0
+
+    field_key = (
+        f"g{args.grid_max}_c{args.tiles}_f{args.frame}_m{args.cell_margin}"
+        f"_r{RELIEF_WORLD:g}_s{SUN_AZIMUTH:g}-{SUN_ELEVATION:g}"
+        f"_tw{TOWER_WORLD:g}-{TOWER_GAMMA:g}-{TOWER_MIN_PERSONS:g}"
+    )
+    shade_cache = output_dir / f"pt_light_field_{field_key}.npz"
+    reusable = sorted(output_dir.glob(f"pt_light_field_{field_key}*.npz"))
+    if args.reuse_shade and reusable:
+        shade_cache = reusable[-1]
+        print(f"== Reusing cached PT light field: {shade_cache} ==")
+        cached = np.load(shade_cache)
+        rgb_field, hit = cached["rgb"], cached["hit"]
+    else:
+        print("== Path tracing the light field (PROMETHEUS) ==")
+        dem_grid, land = _load_dem_grid(render_dem_path, int(args.grid_max))
+        towers = _load_tower_grid(population_path, dem_grid.shape)
+        traced = _traced_grid(dem_grid, towers)
+        import hashlib
+
+        grid_hash = hashlib.sha1(np.ascontiguousarray(traced).tobytes()).hexdigest()[:10]
+        print(
+            f"[PT] traced hash {grid_hash} p90 land slope (terrain only) "
+            f"{_p90_land_slope(dem_grid, land, RELIEF_WORLD):.2f} deg at RELIEF {RELIEF_WORLD:g}"
+        )
+        shade_cache = output_dir / f"pt_light_field_{field_key}_{grid_hash}.npz"
+        try:
+            rgb_field, hit = _pt_light_field(
+                traced, args, cache_dir / f"pt_cells_{field_key}_{grid_hash}"
+            )
+        except BaseException as exc:  # noqa: BLE001 - device loss surfaces as a panic
+            if "device" in str(exc).lower() or "Queue::submit" in str(exc):
+                print(f"[PT] device lost: {exc}\n[PT] relaunch to resume from the cell cache")
+                return DEVICE_LOST_EXIT
+            raise
+        np.savez_compressed(shade_cache, rgb=rgb_field, hit=hit)
+        print(f"[PT] light field cached: {shade_cache}")
+
+    print("modulation and compose arrive in Task 5")
     return 2
 
 
