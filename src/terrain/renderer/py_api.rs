@@ -26,6 +26,19 @@ fn terrain_cache_options<'py>(
     let Some(cache) = cache else {
         return Ok(None);
     };
+    if matches!(
+        params
+            .decoded()
+            .shadow
+            .technique
+            .to_ascii_uppercase()
+            .as_str(),
+        "VSM" | "EVSM" | "MSM"
+    ) {
+        return Err(PyRuntimeError::new_err(
+            "native terrain ANAMNESIS rejects moment-shadow techniques until their moment texture is a declared graph output",
+        ));
+    }
     let root = cache.extract::<std::path::PathBuf>().or_else(|_| {
         cache
             .call_method0("__fspath__")?

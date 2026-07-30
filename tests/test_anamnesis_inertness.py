@@ -14,6 +14,7 @@ from forge3d.determinism import (
     write_canonical_hdr,
 )
 from forge3d.helpers.offscreen import render_offscreen_rgba
+from forge3d.terrain_params import ShadowSettings
 
 
 def test_native_recompute_control_is_required_on_physical_gpu_ci():
@@ -347,3 +348,31 @@ def test_native_terrain_cache_restores_all_graph_passes(tmp_path):
     assert changed_report["hit_rate"] == 0.0
     assert changed_report["graph_command_submissions"] == 6
     assert changed.tobytes() != second.tobytes()
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1",
+    reason="set FORGE3D_RUN_GPU_ANAMNESIS=1 on a hardware-backed runner",
+)
+def test_native_terrain_cache_rejects_moment_shadow_techniques(tmp_path):
+    hdr_path = tmp_path / "environment.hdr"
+    write_canonical_hdr(str(hdr_path))
+    renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+    material_set = f3d.MaterialSet.terrain_default()
+    env_maps = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
+    config = _canonical_params_config()(64, 64)
+    config.shadows = ShadowSettings(
+        True, "VSM", 512, 2, 250.0, 1.0, 0.8, 0.002, 0.001, 0.3, 1e-4, 0.5, 9.0, 0.9
+    )
+    params = f3d.TerrainRenderParams(config)
+    heightmap = np.ascontiguousarray(canonical_heightmap(), dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match="rejects moment-shadow techniques"):
+        renderer.render_terrain_pbr_pom(
+            material_set,
+            env_maps,
+            params,
+            heightmap,
+            cache=tmp_path / "native-vsm",
+        )
