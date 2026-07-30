@@ -160,12 +160,16 @@ mod tests {
     }
 
     #[test]
-    fn viewer_sized_moment_shadow_request_is_rejected_without_gpu_allocation() {
+    fn viewer_shadow_budget_is_technique_aware_without_gpu_allocation() {
         let error = validate_shadow_allocation_budget(4096, 4, true)
             .expect_err("4096x4096 four-cascade moment shadows exceed the fixed budget");
         assert_eq!(
             error.to_string(),
             "Memory budget exceeded: shadow resources require 1280.0 MiB, exceeding the 512 MiB shadow budget"
+        );
+        assert!(
+            validate_shadow_allocation_budget(4096, 4, false).is_ok(),
+            "PCF/PCSS only allocate the 256 MiB depth cascade array"
         );
         assert!(validate_shadow_allocation_budget(2048, 4, true).is_ok());
     }

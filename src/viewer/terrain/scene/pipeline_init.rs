@@ -130,13 +130,10 @@ impl ViewerTerrainScene {
     /// P6.2: Initialize Shadow Mapping (CSM) resources
     pub fn init_shadows(&mut self) -> Result<()> {
         let desired_shadow_map_size = self.pbr_config.shadow_map_res.clamp(512, 8192);
-        let requires_moments = matches!(
-            self.pbr_config
-                .shadow_technique
-                .to_ascii_lowercase()
-                .as_str(),
-            "vsm" | "evsm" | "msm"
-        );
+        let requires_moments =
+            crate::viewer::terrain::pbr_renderer::shadow_technique_requires_moments(
+                &self.pbr_config.shadow_technique,
+            );
         self.init_shadows_for_config(desired_shadow_map_size, requires_moments)
     }
 
@@ -150,6 +147,7 @@ impl ViewerTerrainScene {
         if let Some(existing) = self.csm_renderer.as_ref() {
             if existing.config.shadow_map_size == desired_shadow_map_size
                 && existing.config.cascade_count == desired_cascade_count
+                && existing.config.enable_evsm == requires_moments
                 && (!requires_moments
                     || (self.moment_pass.is_some() && self.moment_blur_pass.is_some()))
             {
@@ -169,7 +167,7 @@ impl ViewerTerrainScene {
             depth_bias: 0.0005,
             slope_bias: 0.001,
             peter_panning_offset: 0.0002,
-            enable_evsm: true, // P6.2: Enable moment maps for VSM/EVSM/MSM
+            enable_evsm: requires_moments,
             stabilize_cascades: true,
             cascade_blend_range: 0.1,
             debug_mode: shadow_debug_mode,
@@ -195,39 +193,23 @@ impl ViewerTerrainScene {
         )?;
 
         // Initialize MomentGenerationPass for VSM/EVSM/MSM techniques
-        let moment_pass = match crate::shadows::MomentGenerationPass::new(&self.device) {
-            Ok(p) => Some(p),
-            Err(e) if requires_moments => {
-                return Err(anyhow::anyhow!(
-                    "requested moment shadow technique is unavailable: {e}"
-                ));
-            }
-            Err(e) => {
-                eprintln!("[terrain_scene] failed to create moment generation pass: {e}");
-                crate::core::degradation::record_degradation(
-                    "allocation_fallback",
-                    "viewer.csm_moment",
-                    "VSM/EVSM/MSM moment maps unavailable; shadows fall back to hard PCF",
-                );
-                None
-            }
+        let moment_pass = if requires_moments {
+            Some(
+                crate::shadows::MomentGenerationPass::new(&self.device).map_err(|e| {
+                    anyhow::anyhow!("requested moment shadow technique is unavailable: {e}")
+                })?,
+            )
+        } else {
+            None
         };
-        let moment_blur_pass = match crate::shadows::ShadowBlurPass::new(&self.device) {
-            Ok(pass) => Some(pass),
-            Err(e) if requires_moments => {
-                return Err(anyhow::anyhow!(
-                    "requested moment shadow filtering is unavailable: {e}"
-                ));
-            }
-            Err(e) => {
-                eprintln!("[terrain_scene] failed to create moment blur pass: {e}");
-                crate::core::degradation::record_degradation(
-                    "allocation_fallback",
-                    "viewer.csm_moment_blur",
-                    "VSM/MSM moment-map filtering unavailable",
-                );
-                None
-            }
+        let moment_blur_pass = if requires_moments {
+            Some(
+                crate::shadows::ShadowBlurPass::new(&self.device).map_err(|e| {
+                    anyhow::anyhow!("requested moment shadow filtering is unavailable: {e}")
+                })?,
+            )
+        } else {
+            None
         };
 
         let replacement = ShadowResources {
@@ -236,13 +218,15 @@ impl ViewerTerrainScene {
             moment_pass,
             moment_blur_pass,
         };
+        // Bind groups retain views into the current tracked textures. Release
+        // them before dropping either atlas owner, then rebuild on next render.
+        self.pbr_bind_group = None;
         self.csm_renderer = Some(replacement.csm_renderer);
         self.csm_uniform_buffer = Some(replacement.csm_uniform_buffer);
         self.moment_pass = replacement.moment_pass;
         self.moment_blur_pass = replacement.moment_blur_pass;
-        self.pbr_bind_group = None;
 
-        println!("[terrain_scene] Shadows initialized (VSM/EVSM/MSM enabled)");
+        println!("[terrain_scene] Shadows initialized (moment_maps={requires_moments})");
         Ok(())
     }
 

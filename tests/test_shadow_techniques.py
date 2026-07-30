@@ -27,6 +27,35 @@ def test_shadow_depth_height_curve_uses_receiver_primitives():
     assert "return det_mix(t, curved, strength);" in source
 
 
+def test_viewer_csm_allocation_and_rebuild_are_technique_aware():
+    root = Path(__file__).parent.parent
+    init = (root / "src" / "viewer" / "terrain" / "scene" / "pipeline_init.rs").read_text(
+        encoding="utf-8"
+    )
+    update = (root / "src" / "viewer" / "terrain" / "scene" / "core.rs").read_text(
+        encoding="utf-8"
+    )
+    bindings = (
+        root / "src" / "viewer" / "terrain" / "render" / "helpers.rs"
+    ).read_text(encoding="utf-8")
+
+    assert "enable_evsm: requires_moments" in init
+    assert "existing.config.enable_evsm == requires_moments" in init
+    assert "if requires_moments" in init
+    assert init.index("self.pbr_bind_group = None") < init.index(
+        "self.csm_renderer = Some(replacement.csm_renderer)"
+    )
+    assert "validate_shadow_allocation_budget(" in update
+    assert "requires_moments," in update
+    assert "csm.moment_binding_view()" in bindings
+    parser = (
+        root / "src" / "viewer" / "terrain" / "pbr_renderer" / "mod.rs"
+    ).read_text(encoding="utf-8")
+    assert 'name.eq_ignore_ascii_case("none")' in parser
+    assert "ShadowTechnique::from_name(name)" in parser
+    assert "technique.requires_moments()" in parser
+
+
 class TestShadowTechniqueValidation:
     """Test shadow technique validation in terrain_params.py."""
 

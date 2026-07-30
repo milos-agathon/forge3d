@@ -31,6 +31,7 @@ pub struct CsmRenderer {
     pub shadow_map_views: Vec<TextureView>,
     pub shadow_sampler: Sampler,
     pub evsm_maps: Option<TrackedTexture>,
+    moment_fallback: TrackedTexture,
     pub bind_group: Option<BindGroup>,
 }
 
@@ -57,6 +58,7 @@ impl CsmRenderer {
         let shadow_map_views = create_shadow_map_views(&shadow_maps, &config);
         let shadow_sampler = create_shadow_sampler(device);
         let evsm_maps = create_evsm_maps(device, &config)?;
+        let moment_fallback = create_moment_fallback(device)?;
 
         Ok(Self {
             allocation_size: config.shadow_map_size,
@@ -68,6 +70,7 @@ impl CsmRenderer {
             shadow_map_views,
             shadow_sampler,
             evsm_maps,
+            moment_fallback,
             bind_group: None,
         })
     }
@@ -237,6 +240,25 @@ impl CsmRenderer {
         })
     }
 
+    /// View used to satisfy the fixed PBR moment binding for non-moment techniques.
+    ///
+    /// VSM/EVSM/MSM receive the real atlas; PCF/PCSS receive a one-texel array
+    /// that is never sampled by their shader branches.
+    pub fn moment_binding_view(&self) -> TextureView {
+        self.moment_texture_view().unwrap_or_else(|| {
+            self.moment_fallback.create_view(&TextureViewDescriptor {
+                label: Some("csm_moment_fallback_view"),
+                format: Some(TextureFormat::Rgba16Float),
+                dimension: Some(TextureViewDimension::D2Array),
+                aspect: wgpu::TextureAspect::All,
+                base_mip_level: 0,
+                mip_level_count: Some(1),
+                base_array_layer: 0,
+                array_layer_count: Some(self.moment_fallback.depth_or_array_layers()),
+            })
+        })
+    }
+
     /// Calculate total GPU memory used by the shadow resources
     pub fn total_memory_bytes(&self) -> u64 {
         super::shadow_allocation_bytes(
@@ -396,6 +418,26 @@ fn create_evsm_maps(device: &Device, config: &CsmConfig) -> RenderResult<Option<
     } else {
         Ok(None)
     }
+}
+
+fn create_moment_fallback(device: &Device) -> RenderResult<TrackedTexture> {
+    tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some("csm_moment_fallback"),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: super::MAX_SHADOW_CASCADES,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba16Float,
+            usage: TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+    )
 }
 
 #[cfg(test)]

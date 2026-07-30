@@ -403,16 +403,16 @@ impl ViewerTerrainScene {
             );
         }
 
+        let requires_moments =
+            crate::viewer::terrain::pbr_renderer::shadow_technique_requires_moments(
+                &candidate.shadow_technique,
+            );
         crate::shadows::validate_shadow_allocation_budget(
             candidate.shadow_map_res.clamp(512, 8192),
             4,
-            true,
+            requires_moments,
         )?;
         if candidate.enabled {
-            let requires_moments = matches!(
-                candidate.shadow_technique.to_ascii_lowercase().as_str(),
-                "vsm" | "evsm" | "msm"
-            );
             self.init_shadows_for_config(
                 candidate.shadow_map_res.clamp(512, 8192),
                 requires_moments,

@@ -118,12 +118,14 @@ impl ViewerTerrainScene {
 
         // Execute moment generation pass for VSM/EVSM/MSM techniques
         // This converts the depth maps into moment statistics
-        let technique = match self.pbr_config.shadow_technique.to_lowercase().as_str() {
-            "vsm" => crate::lighting::shadow::ShadowTechnique::VSM,
-            "evsm" => crate::lighting::shadow::ShadowTechnique::EVSM,
-            "msm" => crate::lighting::shadow::ShadowTechnique::MSM,
-            _ => return, // No moment generation needed for HARD/PCF/PCSS
+        let Some(technique) =
+            crate::lighting::shadow::ShadowTechnique::from_name(&self.pbr_config.shadow_technique)
+        else {
+            return;
         };
+        if !technique.requires_moments() {
+            return;
+        }
 
         // Prepare and execute moment pass if we have the resources
         let mut disable_failed_blur = false;
