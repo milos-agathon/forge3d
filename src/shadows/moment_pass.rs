@@ -37,6 +37,8 @@ struct BoundTextureInfo {
     width: u32,
     height: u32,
     layers: u32,
+    sample_count: u32,
+    dimension: wgpu::TextureDimension,
     format: TextureFormat,
     usage: wgpu::TextureUsages,
 }
@@ -47,6 +49,8 @@ impl BoundTextureInfo {
             width: texture.width(),
             height: texture.height(),
             layers: texture.depth_or_array_layers(),
+            sample_count: texture.sample_count(),
+            dimension: texture.dimension(),
             format: texture.format(),
             usage: texture.usage(),
         }
@@ -337,6 +341,18 @@ impl MomentGenerationPass {
 
 fn validate_bound_textures(depth: BoundTextureInfo, moments: BoundTextureInfo) -> RenderResult<()> {
     super::validate_shadow_dimensions(depth.width, depth.layers)?;
+    if depth.sample_count != 1 || moments.sample_count != 1 {
+        return Err(RenderError::render(
+            "moment generation textures must be single-sampled",
+        ));
+    }
+    if depth.dimension != wgpu::TextureDimension::D2
+        || moments.dimension != wgpu::TextureDimension::D2
+    {
+        return Err(RenderError::render(
+            "moment generation textures must use the D2 texture dimension",
+        ));
+    }
     if depth.width != depth.height
         || moments.width != depth.width
         || moments.height != depth.height
@@ -476,6 +492,29 @@ mod tests {
         format: TextureFormat,
         usage: wgpu::TextureUsages,
     ) -> Texture {
+        texture_with_descriptor(
+            device,
+            label,
+            width,
+            height,
+            1,
+            wgpu::TextureDimension::D2,
+            format,
+            usage,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn texture_with_descriptor(
+        device: &Device,
+        label: &'static str,
+        width: u32,
+        height: u32,
+        sample_count: u32,
+        dimension: wgpu::TextureDimension,
+        format: TextureFormat,
+        usage: wgpu::TextureUsages,
+    ) -> Texture {
         device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
@@ -484,8 +523,8 @@ mod tests {
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
+            sample_count,
+            dimension,
             format,
             usage,
             view_formats: &[],
@@ -589,6 +628,26 @@ mod tests {
             TextureFormat::Rgba16Float,
             wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
         );
+        let multisampled_depth = texture_with_descriptor(
+            device,
+            "multisampled_depth",
+            512,
+            512,
+            4,
+            wgpu::TextureDimension::D2,
+            TextureFormat::Depth32Float,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
+        let three_dimensional_moments = texture_with_descriptor(
+            device,
+            "three_dimensional_moments",
+            512,
+            512,
+            1,
+            wgpu::TextureDimension::D3,
+            TextureFormat::Rgba16Float,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
+        );
         let mut generation = MomentGenerationPass::new(device).expect("moment pass");
 
         assert!(generation
@@ -599,6 +658,12 @@ mod tests {
             .is_err());
         assert!(generation
             .prepare_textures_checked(device, &valid_depth, &wrong_extent)
+            .is_err());
+        assert!(generation
+            .prepare_textures_checked(device, &multisampled_depth, &valid_moments)
+            .is_err());
+        assert!(generation
+            .prepare_textures_checked(device, &valid_depth, &three_dimensional_moments)
             .is_err());
     }
 

@@ -382,7 +382,12 @@ impl TerrainScene {
                                 // atlas only. Moment atlases are derived resources,
                                 // so rebuild them from the restored depth on a fresh
                                 // encoder after discarding the skipped producer.
-                                self.generate_shadow_moments(context.encoder())?;
+                                let technique = crate::lighting::types::ShadowTechnique::from_u32(
+                                    self.shadow_technique,
+                                );
+                                if technique.requires_moments() {
+                                    self.generate_shadow_moments(context.encoder())?;
+                                }
                             }
                             Ok::<_, anyhow::Error>(setup)
                         })?;

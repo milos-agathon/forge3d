@@ -26,19 +26,6 @@ fn terrain_cache_options<'py>(
     let Some(cache) = cache else {
         return Ok(None);
     };
-    if matches!(
-        params
-            .decoded()
-            .shadow
-            .technique
-            .to_ascii_uppercase()
-            .as_str(),
-        "VSM" | "EVSM" | "MSM"
-    ) {
-        return Err(PyRuntimeError::new_err(
-            "native terrain ANAMNESIS rejects moment-shadow techniques until their moment texture is a declared graph output",
-        ));
-    }
     let root = cache.extract::<std::path::PathBuf>().or_else(|_| {
         cache
             .call_method0("__fspath__")?
@@ -58,8 +45,14 @@ fn terrain_cache_options<'py>(
         .extract::<Vec<u8>>()?;
     let shadow_projection = PyDict::new_bound(py);
     for key in [
+        "size_px",
         "terrain_span",
         "z_scale",
+        "cam_target",
+        "cam_radius",
+        "cam_phi_deg",
+        "cam_theta_deg",
+        "fov_y_deg",
         "clip",
         "light",
         "shadows",

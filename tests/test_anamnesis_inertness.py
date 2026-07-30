@@ -326,15 +326,16 @@ def test_native_terrain_cache_restores_all_graph_passes(tmp_path):
     assert second_report["bytes_written"] == 0
     assert second_report["hit_rate"] == 1.0
     assert second_report["graph_command_submissions"] == 0
-    assert camera_changed_report["hits"] == ["terrain.shadow"]
+    assert camera_changed_report["hits"] == []
     assert camera_changed_report["misses"] == [
         "terrain.prepare",
+        "terrain.shadow",
         "terrain.forward",
         "terrain.resolve",
     ]
     assert camera_changed_report["bytes_read"] > 0
     assert camera_changed_report["bytes_written"] > 0
-    assert camera_changed_report["graph_command_submissions"] == 4
+    assert camera_changed_report["graph_command_submissions"] == 6
     assert camera_changed.tobytes() != second.tobytes()
     assert camera_restored_report["hits"] == pass_labels
     assert camera_restored_report["misses"] == []
