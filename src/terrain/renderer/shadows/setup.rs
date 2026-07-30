@@ -109,8 +109,12 @@ impl TerrainScene {
             replacement_config.shadow_map_size = settings.resolution;
             replacement_config.cascade_count = settings.cascades;
             replacement_config.enable_evsm = requires_moments;
-            self.csm_renderer = crate::shadows::CsmRenderer::new(&self.device, replacement_config)?;
+            let replacement = crate::shadows::CsmRenderer::new(&self.device, replacement_config)?;
+            // Moment passes may retain bind groups/views into the current CSM
+            // atlas. Drop those dependents before replacing the tracked owner.
+            self.moment_pass = None;
             self.moment_blur_pass = None;
+            self.csm_renderer = replacement;
         }
         Ok(())
     }

@@ -56,6 +56,33 @@ def test_viewer_csm_allocation_and_rebuild_are_technique_aware():
     assert "technique.requires_moments()" in parser
 
 
+def test_shadow_replacements_release_dependents_before_tracked_owners():
+    root = Path(__file__).parent.parent
+    blur = (root / "src" / "shadows" / "blur_pass.rs").read_text(encoding="utf-8")
+    resize = blur.split("fn ensure_intermediate_texture", 1)[1].split(
+        "/// Execute two-pass", 1
+    )[0]
+    owner = resize.index("self.intermediate_texture = Some(texture)")
+    for dependent in (
+        "self.bind_groups = None",
+        "self.intermediate_view = None",
+        "self.moment_view = None",
+        "self.current_atlas_id = None",
+    ):
+        assert resize.index(dependent) < owner, dependent
+
+    setup = (
+        root / "src" / "terrain" / "renderer" / "shadows" / "setup.rs"
+    ).read_text(encoding="utf-8")
+    replace = setup.split("fn ensure_shadow_atlas", 1)[1].split(
+        "pub(in crate::terrain::renderer) fn prepare_shadow_setup", 1
+    )[0]
+    staged = replace.index("let replacement =")
+    owner = replace.index("self.csm_renderer = replacement")
+    assert staged < replace.index("self.moment_pass = None") < owner
+    assert staged < replace.index("self.moment_blur_pass = None") < owner
+
+
 class TestShadowTechniqueValidation:
     """Test shadow technique validation in terrain_params.py."""
 

@@ -182,9 +182,14 @@ impl ShadowBlurPass {
             array_layer_count: Some(cascades),
         });
 
+        // Bind groups retain both the old intermediate and moment views.
+        // Release every dependent handle before dropping the tracked owner.
+        self.bind_groups = None;
+        self.intermediate_view = None;
+        self.moment_view = None;
+        self.current_atlas_id = None;
         self.intermediate_texture = Some(texture);
         self.intermediate_view = Some(view);
-        self.bind_groups = None;
         self.current_size = size;
         self.current_cascades = cascades;
         Ok(())
