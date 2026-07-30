@@ -820,6 +820,8 @@ jobs:
             'tests/test_render_certificate_contract.py',
             'tests/test_recipe_goldens.py::test_certificate_refresh_rejects_capability_degradation',
             'tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression',
+            'tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_is_not_black',
+            'tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_banding_is_bounded_in_raw_visibility',
             'tests/test_m06_full_geospatial_viewer.py',
             'tests/test_terrain_viewer_pbr.py',
             'tests/test_vector_overlay_rendering.py',

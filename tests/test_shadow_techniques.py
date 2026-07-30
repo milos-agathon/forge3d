@@ -5,12 +5,13 @@ different techniques (including VSM/EVSM/MSM) produce visually different outputs
 """
 
 import hashlib
-import sys
+import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from _terrain_runtime import HARDWARE_DEVICE_TYPES, SOFTWARE_ADAPTER_TOKENS
 from forge3d.terrain_params import ShadowSettings
 from forge3d.config import ShadowParams, _SHADOW_TECHNIQUES, validate_shadow_technique, load_renderer_config
 
@@ -483,27 +484,71 @@ class TestShadowTechniqueDifferentiation:
         assert evsm_hash != msm_hash, f"EVSM and MSM produced identical output: {evsm_hash}"
 
 
-def _viewer_gpu_available() -> bool:
+def _is_hardware_viewer_adapter(probe: dict) -> bool:
+    if probe.get("status") != "ok" or probe.get("software_fallback"):
+        return False
+    if str(probe.get("device_type", "")).lower() not in HARDWARE_DEVICE_TYPES:
+        return False
+    name = str(probe.get("name", "")).lower()
+    return not any(token in name for token in SOFTWARE_ADAPTER_TOKENS)
+
+
+def _viewer_hardware_adapter_available() -> bool:
     try:
         import forge3d as f3d
-        return bool(f3d.has_gpu())
+
+        if not f3d.has_gpu():
+            return False
+        return _is_hardware_viewer_adapter(
+            f3d.device_probe(os.environ.get("WGPU_BACKEND"))
+        )
     except Exception:
         return False
 
 
-def _evsm_regression_shadow_map_resolution(platform: str) -> int:
-    """Keep Metal fidelity while bounding hosted Windows software-GPU load."""
-    return 1024 if platform == "win32" else 2048
-
-
 @pytest.mark.parametrize(
-    ("platform", "expected"),
-    (("win32", 1024), ("darwin", 2048), ("linux", 2048)),
+    ("probe", "expected"),
+    (
+        (
+            {
+                "status": "ok",
+                "device_type": "DiscreteGpu",
+                "name": "NVIDIA GeForce RTX 3070",
+                "software_fallback": False,
+            },
+            True,
+        ),
+        (
+            {
+                "status": "ok",
+                "device_type": "Cpu",
+                "name": "Microsoft Basic Render Driver (WARP)",
+                "software_fallback": True,
+            },
+            False,
+        ),
+        (
+            {
+                "status": "ok",
+                "device_type": "DiscreteGpu",
+                "name": "llvmpipe software rasterizer",
+                "software_fallback": False,
+            },
+            False,
+        ),
+        (
+            {
+                "status": "ok",
+                "device_type": "DiscreteGpu",
+                "name": "nominal hardware",
+                "software_fallback": True,
+            },
+            False,
+        ),
+    ),
 )
-def test_evsm_regression_shadow_resolution_is_platform_bounded(
-    platform: str, expected: int
-):
-    assert _evsm_regression_shadow_map_resolution(platform) == expected
+def test_evsm_regression_requires_hardware_adapter(probe: dict, expected: bool):
+    assert _is_hardware_viewer_adapter(probe) is expected
 
 
 def _pyramid_dem(path: Path, n: int = 512, pix: float = 20.0) -> Path:
@@ -524,7 +569,6 @@ def _pyramid_dem(path: Path, n: int = 512, pix: float = 20.0) -> Path:
 
 
 @pytest.mark.skipif(not _rasterio_available(), reason="rasterio not installed")
-@pytest.mark.skipif(not _viewer_gpu_available(), reason="no usable GPU adapter")
 @pytest.mark.viewer
 class TestEvsmExposureParity:
     """EVSM must light the scene like the other techniques, not black it out.
@@ -536,6 +580,13 @@ class TestEvsmExposureParity:
     monotonically increasing, otherwise EVSM reports "lit" everywhere instead.
     """
 
+    @pytest.fixture(autouse=True)
+    def _require_hardware_adapter(self):
+        if not _viewer_hardware_adapter_available():
+            pytest.skip(
+                "EVSM visual-quality regression requires a hardware GPU adapter"
+            )
+
     def _render(
         self, viewer, technique: str, out: Path, *, debug_mode: int = 0
     ) -> np.ndarray:
@@ -545,12 +596,11 @@ class TestEvsmExposureParity:
             "sun_elevation": 8.0, "sun_intensity": 2.0, "ambient": 0.15,
             "shadow": 1.0, "background": [1.0, 1.0, 1.0],
         })
-        # Metal needs 2048 for a measurable cast-shadow core; hosted Windows
-        # needs the bounded atlas to survive repeated EVSM/PCF round trips.
+        # The cast-shadow fidelity oracle requires 2048; software adapters are
+        # routed away from this test by the class capability gate above.
         viewer.send_ipc({
             "cmd": "set_terrain_pbr", "enabled": True, "shadow_technique": technique,
-            "shadow_map_res": _evsm_regression_shadow_map_resolution(sys.platform),
-            "exposure": 1.0, "msaa": 1,
+            "shadow_map_res": 2048, "exposure": 1.0, "msaa": 1,
             "ibl_intensity": 0.0, "debug_mode": debug_mode,
         })
         viewer.snapshot(str(out), width=640, height=400)
