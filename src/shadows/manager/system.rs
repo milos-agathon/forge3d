@@ -61,7 +61,7 @@ impl ShadowManager {
             config.csm.shadow_map_size,
             config.csm.cascade_count,
             config.technique,
-        );
+        )?;
 
         // Create moment generation and blur passes if needed
         let moment_pass = if requires_moments {
@@ -325,10 +325,14 @@ impl ShadowManager {
         };
 
         // Prepare bind group
-        moment_pass.prepare_textures(device, self.renderer.shadow_maps.as_ref(), moment_texture);
+        moment_pass.prepare_textures_checked(
+            device,
+            self.renderer.shadow_maps.as_ref(),
+            moment_texture,
+        )?;
 
         // Execute moment generation compute pass
-        moment_pass.execute(
+        moment_pass.execute_checked(
             queue,
             encoder,
             self.config.technique,

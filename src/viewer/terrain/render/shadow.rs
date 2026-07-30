@@ -131,12 +131,20 @@ impl ViewerTerrainScene {
             (&mut self.moment_pass, &self.csm_renderer)
         {
             if let Some(ref moment_texture) = csm.evsm_maps {
-                moment_pass.prepare_textures(
+                if let Err(error) = moment_pass.prepare_textures_checked(
                     &self.device,
                     csm.shadow_maps.as_ref(),
                     moment_texture,
-                );
-                if let Err(error) = moment_pass.execute(
+                ) {
+                    eprintln!("[terrain_scene] failed to prepare moment maps: {error}");
+                    crate::core::degradation::record_degradation(
+                        "validation_failure",
+                        "viewer.csm_moment_generation",
+                        &error.to_string(),
+                    );
+                    return;
+                }
+                if let Err(error) = moment_pass.execute_checked(
                     &self.queue,
                     encoder,
                     technique,

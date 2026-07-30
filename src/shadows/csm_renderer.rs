@@ -245,21 +245,12 @@ impl CsmRenderer {
 
     /// Calculate total GPU memory used by the shadow resources
     pub fn total_memory_bytes(&self) -> u64 {
-        let depth_bytes = (self.allocation_size as u64)
-            * (self.allocation_size as u64)
-            * (self.allocation_layers as u64)
-            * 4;
-
-        let moment_bytes = if self.evsm_maps.is_some() {
-            (self.allocation_size as u64)
-                * (self.allocation_size as u64)
-                * (self.allocation_layers as u64)
-                * 8 // Rgba16Float = 8 bytes per pixel
-        } else {
-            0
-        };
-
-        depth_bytes + moment_bytes
+        super::shadow_allocation_bytes(
+            self.allocation_size,
+            self.allocation_layers,
+            self.evsm_maps.is_some(),
+        )
+        .expect("CsmRenderer stores validated allocation dimensions")
     }
 
     /// Helper to expose current shadow map resolution
@@ -410,5 +401,42 @@ fn create_evsm_maps(device: &Device, config: &CsmConfig) -> RenderResult<Option<
         Ok(Some(texture))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::*;
+
+    #[test]
+    fn physical_moment_atlas_lifecycle_preserves_requested_sizes_and_full_accounting() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let config_for = |resolution| {
+            let mut config = CsmConfig::default();
+            config.shadow_map_size = resolution;
+            config.cascade_count = 1;
+            config.enable_evsm = true;
+            config
+        };
+        let mut renderer =
+            CsmRenderer::new(&context.device, config_for(512)).expect("CSM renderer");
+
+        for resolution in [512, 1024, 2048] {
+            if renderer.shadow_map_resolution() != resolution {
+                renderer = CsmRenderer::new(&context.device, config_for(resolution))
+                    .expect("CSM renderer");
+            }
+
+            assert_eq!(renderer.shadow_map_resolution(), resolution);
+            assert_eq!(renderer.shadow_maps.width(), resolution);
+            assert_eq!(
+                renderer.evsm_maps.as_ref().expect("moment atlas").width(),
+                resolution
+            );
+            assert_eq!(
+                renderer.total_memory_bytes(),
+                u64::from(resolution) * u64::from(resolution) * 20
+            );
+        }
     }
 }

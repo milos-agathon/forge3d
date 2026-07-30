@@ -178,12 +178,19 @@ impl MomentGenerationPass {
         }));
     }
 
-    pub(crate) fn prepare_textures(
+    /// Validate textures and prepare a bind group for checked execution.
+    ///
+    /// Unlike [`Self::prepare_bind_group`], this rejects incompatible resources
+    /// before creating any texture views or bind groups.
+    pub fn prepare_textures_checked(
         &mut self,
         device: &Device,
         depth_texture: &Texture,
         moment_texture: &Texture,
-    ) {
+    ) -> RenderResult<()> {
+        let depth = BoundTextureInfo::from_texture(depth_texture);
+        let moments = BoundTextureInfo::from_texture(moment_texture);
+        validate_bound_textures(depth, moments)?;
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("moment_generation_depth_view"),
             format: Some(TextureFormat::Depth32Float),
@@ -197,14 +204,37 @@ impl MomentGenerationPass {
         let moment_view =
             create_moment_storage_view(moment_texture, moment_texture.depth_or_array_layers());
         self.prepare_bind_group(device, &depth_view, &moment_view);
-        self.bound_textures = Some((
-            BoundTextureInfo::from_texture(depth_texture),
-            BoundTextureInfo::from_texture(moment_texture),
-        ));
+        self.bound_textures = Some((depth, moments));
+        Ok(())
     }
 
-    /// Update parameters and execute the compute pass
+    /// Update parameters and execute the compute pass.
+    ///
+    /// This is the legacy view-based API. Callers that own the textures should
+    /// prefer [`Self::prepare_textures_checked`] and [`Self::execute_checked`].
     pub fn execute(
+        &self,
+        queue: &Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        technique: ShadowTechnique,
+        cascade_count: u32,
+        shadow_map_size: u32,
+        evsm_positive_exp: f32,
+        evsm_negative_exp: f32,
+    ) {
+        self.encode(
+            queue,
+            encoder,
+            technique,
+            cascade_count,
+            shadow_map_size,
+            evsm_positive_exp,
+            evsm_negative_exp,
+        );
+    }
+
+    /// Validate the bound texture allocation and execute the compute pass.
+    pub fn execute_checked(
         &self,
         queue: &Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -241,20 +271,29 @@ impl MomentGenerationPass {
                 cascade_count
             )));
         }
-        if depth.format != TextureFormat::Depth32Float
-            || !depth.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING)
-        {
-            return Err(RenderError::render(
-                "moment generation depth texture must be sampleable Depth32Float",
-            ));
-        }
-        if moments.format != TextureFormat::Rgba16Float
-            || !moments.usage.contains(wgpu::TextureUsages::STORAGE_BINDING)
-        {
-            return Err(RenderError::render(
-                "moment generation output must be storage-bindable Rgba16Float",
-            ));
-        }
+        validate_bound_textures(depth, moments)?;
+        self.encode(
+            queue,
+            encoder,
+            technique,
+            cascade_count,
+            shadow_map_size,
+            evsm_positive_exp,
+            evsm_negative_exp,
+        );
+        Ok(())
+    }
+
+    fn encode(
+        &self,
+        queue: &Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        technique: ShadowTechnique,
+        cascade_count: u32,
+        shadow_map_size: u32,
+        evsm_positive_exp: f32,
+        evsm_negative_exp: f32,
+    ) {
         // Update parameters. Exponents are clamped to what the Rgba16Float moment
         // atlas can hold; the sampling side clamps identically.
         let params = MomentGenParams {
@@ -276,7 +315,7 @@ impl MomentGenerationPass {
         let bind_group = self
             .bind_group
             .as_ref()
-            .ok_or_else(|| RenderError::render("moment textures must be bound before execution"))?;
+            .expect("Bind group must be prepared before execution");
 
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("moment_generation_pass"),
@@ -293,8 +332,38 @@ impl MomentGenerationPass {
         let dispatch_z = cascade_count;
 
         compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, dispatch_z);
-        Ok(())
     }
+}
+
+fn validate_bound_textures(depth: BoundTextureInfo, moments: BoundTextureInfo) -> RenderResult<()> {
+    super::validate_shadow_dimensions(depth.width, depth.layers)?;
+    if depth.width != depth.height
+        || moments.width != depth.width
+        || moments.height != depth.height
+        || moments.layers != depth.layers
+    {
+        return Err(RenderError::render(format!(
+            "moment generation texture mismatch: depth={}x{}x{}, moments={}x{}x{}",
+            depth.width, depth.height, depth.layers, moments.width, moments.height, moments.layers
+        )));
+    }
+    if depth.format != TextureFormat::Depth32Float
+        || !depth.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING)
+    {
+        return Err(RenderError::render(
+            "moment generation depth texture must be sampleable Depth32Float",
+        ));
+    }
+    let required_moment_usage =
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING;
+    if moments.format != TextureFormat::Rgba16Float
+        || !moments.usage.contains(required_moment_usage)
+    {
+        return Err(RenderError::render(
+            "moment generation output must be sampleable and storage-bindable Rgba16Float",
+        ));
+    }
+    Ok(())
 }
 
 /// Helper to create a storage texture view for moment generation output
@@ -328,7 +397,9 @@ mod dimension_tests {
         let moments = renderer.evsm_maps.as_ref().expect("moment atlas");
         let depth_view = &renderer.shadow_map_views[0];
         let mut generation = MomentGenerationPass::new(device).expect("moment pass");
-        generation.prepare_textures(device, renderer.shadow_maps.as_ref(), moments);
+        generation
+            .prepare_textures_checked(device, renderer.shadow_maps.as_ref(), moments)
+            .expect("valid moment textures");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("moment_1024_contract"),
         });
@@ -349,7 +420,7 @@ mod dimension_tests {
             });
         }
         generation
-            .execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 1024, 9.0, 9.0)
+            .execute_checked(queue, &mut encoder, ShadowTechnique::VSM, 1, 1024, 9.0, 9.0)
             .expect("moment generation");
         queue.submit(Some(encoder.finish()));
         let generated = crate::core::hdr::read_hdr_texture(
@@ -397,6 +468,30 @@ mod dimension_tests {
 mod tests {
     use super::*;
 
+    fn texture(
+        device: &Device,
+        label: &'static str,
+        width: u32,
+        height: u32,
+        format: TextureFormat,
+        usage: wgpu::TextureUsages,
+    ) -> Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[],
+        })
+    }
+
     #[test]
     fn test_moment_pass_creation() {
         let Some(device) = crate::core::gpu::create_device_for_test() else {
@@ -427,7 +522,7 @@ mod tests {
             label: Some("moment_generation_invalid"),
         });
         assert!(generation
-            .execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 512, 9.0, 9.0,)
+            .execute_checked(queue, &mut encoder, ShadowTechnique::VSM, 1, 512, 9.0, 9.0,)
             .is_err());
 
         let mut config = crate::shadows::CsmConfig::default();
@@ -435,16 +530,97 @@ mod tests {
         config.cascade_count = 1;
         config.enable_evsm = true;
         let renderer = crate::shadows::CsmRenderer::new(device, config).expect("CSM renderer");
-        generation.prepare_textures(
+        generation
+            .prepare_textures_checked(
+                device,
+                renderer.shadow_maps.as_ref(),
+                renderer.evsm_maps.as_ref().expect("moment atlas"),
+            )
+            .expect("valid moment textures");
+        assert!(generation
+            .execute_checked(queue, &mut encoder, ShadowTechnique::VSM, 1, 512, 9.0, 9.0,)
+            .is_err());
+        assert!(generation
+            .execute_checked(queue, &mut encoder, ShadowTechnique::PCF, 1, 1024, 9.0, 9.0,)
+            .is_err());
+    }
+
+    #[test]
+    fn checked_prepare_rejects_invalid_resources_before_view_creation() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let valid_depth = texture(
             device,
-            renderer.shadow_maps.as_ref(),
-            renderer.evsm_maps.as_ref().expect("moment atlas"),
+            "valid_depth",
+            512,
+            512,
+            TextureFormat::Depth32Float,
+            wgpu::TextureUsages::TEXTURE_BINDING,
         );
+        let valid_moments = texture(
+            device,
+            "valid_moments",
+            512,
+            512,
+            TextureFormat::Rgba16Float,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
+        );
+        let wrong_depth_format = texture(
+            device,
+            "wrong_depth_format",
+            512,
+            512,
+            TextureFormat::R32Float,
+            wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let incomplete_moment_usage = texture(
+            device,
+            "incomplete_moment_usage",
+            512,
+            512,
+            TextureFormat::Rgba16Float,
+            wgpu::TextureUsages::STORAGE_BINDING,
+        );
+        let wrong_extent = texture(
+            device,
+            "wrong_extent",
+            1024,
+            512,
+            TextureFormat::Rgba16Float,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
+        );
+        let mut generation = MomentGenerationPass::new(device).expect("moment pass");
+
         assert!(generation
-            .execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 512, 9.0, 9.0,)
+            .prepare_textures_checked(device, &wrong_depth_format, &valid_moments)
             .is_err());
         assert!(generation
-            .execute(queue, &mut encoder, ShadowTechnique::PCF, 1, 1024, 9.0, 9.0,)
+            .prepare_textures_checked(device, &valid_depth, &incomplete_moment_usage)
             .is_err());
+        assert!(generation
+            .prepare_textures_checked(device, &valid_depth, &wrong_extent)
+            .is_err());
+    }
+
+    #[test]
+    fn legacy_view_prepare_and_execute_sequence_remains_compatible() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let queue = &context.queue;
+        let mut config = crate::shadows::CsmConfig::default();
+        config.shadow_map_size = 512;
+        config.cascade_count = 1;
+        config.enable_evsm = true;
+        let renderer = crate::shadows::CsmRenderer::new(device, config).expect("CSM renderer");
+        let moment_texture = renderer.evsm_maps.as_ref().expect("moment atlas");
+        let moment_view = create_moment_storage_view(moment_texture, 1);
+        let mut generation = MomentGenerationPass::new(device).expect("moment pass");
+        generation.prepare_bind_group(device, &renderer.shadow_texture_view(), &moment_view);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("legacy_moment_api"),
+        });
+
+        generation.execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 512, 9.0, 9.0);
+        queue.submit(Some(encoder.finish()));
     }
 }

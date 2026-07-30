@@ -40,12 +40,12 @@ impl TerrainScene {
         let shadow_map_size = self.csm_renderer.config.shadow_map_size;
         let positive_exponent = self.csm_renderer.uniforms.evsm_positive_exp;
         let negative_exponent = self.csm_renderer.uniforms.evsm_negative_exp;
-        moment_pass.prepare_textures(
+        moment_pass.prepare_textures_checked(
             &self.device,
             self.csm_renderer.shadow_maps.as_ref(),
             moment_texture,
-        );
-        moment_pass.execute(
+        )?;
+        moment_pass.execute_checked(
             &self.queue,
             encoder,
             technique,

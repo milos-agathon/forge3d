@@ -3,6 +3,10 @@ use crate::core::error::{RenderError, RenderResult};
 use crate::lighting::types::ShadowTechnique;
 
 pub fn enforce_memory_budget(config: &mut ShadowManagerConfig) -> RenderResult<()> {
+    crate::shadows::validate_shadow_dimensions(
+        config.csm.shadow_map_size,
+        config.csm.cascade_count,
+    )?;
     let initial_resolution = config.csm.shadow_map_size;
     let budget_mib = config.max_memory_bytes as f64 / (1024.0 * 1024.0);
 
@@ -11,7 +15,7 @@ pub fn enforce_memory_budget(config: &mut ShadowManagerConfig) -> RenderResult<(
             config.csm.shadow_map_size,
             config.csm.cascade_count,
             config.technique,
-        );
+        )?;
 
         if usage <= config.max_memory_bytes {
             // Log final allocation summary
@@ -74,21 +78,9 @@ pub(super) fn estimate_memory_bytes(
     map_resolution: u32,
     cascades: u32,
     technique: ShadowTechnique,
-) -> u64 {
-    let res = map_resolution as u64;
-    let casc = cascades as u64;
-
-    // Depth32Float: 4 bytes per pixel
-    let depth_bytes = res * res * casc * 4;
-
-    // Moment atlas and the persistent separable-blur intermediate.
-    let moment_bytes = if technique.requires_moments() {
-        res * res * casc * 16
-    } else {
-        0
-    };
-
-    depth_bytes + moment_bytes
+) -> RenderResult<u64> {
+    crate::shadows::validate_shadow_dimensions(map_resolution, cascades)?;
+    crate::shadows::shadow_allocation_bytes(map_resolution, cascades, technique.requires_moments())
 }
 
 #[cfg(test)]
@@ -98,7 +90,7 @@ mod tests {
     #[test]
     fn estimate_includes_persistent_rgba16float_blur_intermediate() {
         assert_eq!(
-            estimate_memory_bytes(4096, 2, ShadowTechnique::VSM),
+            estimate_memory_bytes(4096, 2, ShadowTechnique::VSM).expect("valid dimensions"),
             640 * 1024 * 1024
         );
     }
@@ -113,5 +105,25 @@ mod tests {
 
         assert!(enforce_memory_budget(&mut config).is_err());
         assert_eq!(config.csm.shadow_map_size, MIN_SHADOW_RESOLUTION);
+    }
+
+    #[test]
+    fn budget_rejects_invalid_dimensions_without_downscaling_them() {
+        for resolution in [5_000, u32::MAX] {
+            let mut config = ShadowManagerConfig::default();
+            config.csm.shadow_map_size = resolution;
+            config.csm.cascade_count = 1;
+            config.max_memory_bytes = 1;
+
+            assert!(enforce_memory_budget(&mut config).is_err());
+            assert_eq!(config.csm.shadow_map_size, resolution);
+        }
+
+        let mut config = ShadowManagerConfig::default();
+        config.csm.shadow_map_size = 512;
+        config.csm.cascade_count = 5;
+        assert!(enforce_memory_budget(&mut config).is_err());
+        assert_eq!(config.csm.shadow_map_size, 512);
+        assert_eq!(config.csm.cascade_count, 5);
     }
 }
