@@ -537,8 +537,18 @@ class TestEvsmExposureParity:
         dem = _pyramid_dem(tmp_path / "pyramid.tif")
         with f3d.open_viewer_async(terrain_path=str(dem), width=640, height=400,
                                    timeout=45.0) as viewer:
-            lum = {t: self._render(viewer, t, tmp_path / f"{t}.png")
-                   for t in ("pcf", "evsm")}
+            sequence = [
+                self._render(viewer, technique, tmp_path / f"{index}_{technique}.png")
+                for index, technique in enumerate(("pcf", "evsm", "pcf", "evsm"))
+            ]
+
+        assert np.array_equal(sequence[0], sequence[2]), (
+            "PCF display changed across an EVSM round trip"
+        )
+        assert np.array_equal(sequence[1], sequence[3]), (
+            "EVSM display changed across a PCF round trip"
+        )
+        lum = {"pcf": sequence[0], "evsm": sequence[1]}
 
         means = {}
         for tech, l in lum.items():
@@ -826,20 +836,28 @@ def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
             1.0 / 255.0
         )
 
-    lit_plain = terrain & (luminance["pcf"] > 0.9)
     cast_shadow = terrain & (luminance["pcf"] < 0.6)
-    assert lit_plain.any(), "deterministic pyramid produced no exposed PCF plain"
     assert float(cast_shadow.sum() / terrain.sum()) >= 0.01, (
         "deterministic pyramid produced no measurable PCF cast-shadow region"
     )
+    radius = 3
+    neighborhoods = np.lib.stride_tricks.sliding_window_view(
+        np.pad(cast_shadow, radius, constant_values=False),
+        (2 * radius + 1, 2 * radius + 1),
+    )
+    neighborhood_has_cast = neighborhoods.any(axis=(-2, -1))
+    cast_core = terrain & neighborhoods.all(axis=(-2, -1))
+    far_lit = terrain & ~neighborhood_has_cast & (luminance["pcf"] > 0.99)
+    assert cast_core.sum() >= 500, "native PCF cast shadow has no measurable interior"
+    assert far_lit.sum() >= 5_000, "native PCF has no measurable far-lit terrain"
 
-    pcf_exposure = float(luminance["pcf"][lit_plain].mean())
+    pcf_exposure = float(luminance["pcf"][far_lit].mean())
     for label, image in (
         ("VSM first frame at 512", first_frame_512),
         ("VSM after 1024->2048 resize", resized_high),
         ("VSM after 2048->512 resize", resized_back),
     ):
-        exposure = float(image[lit_plain].mean())
+        exposure = float(image[far_lit].mean())
         shadowed = float(((image < exposure * 0.6) & cast_shadow).sum() / terrain.sum())
         assert exposure >= pcf_exposure * 0.8, (
             f"{label} breaks lit exposure: {exposure:.3f} vs PCF {pcf_exposure:.3f}"
@@ -849,7 +867,7 @@ def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
         )
 
     for technique in ("vsm", "evsm", "msm"):
-        exposure = float(luminance[technique][lit_plain].mean())
+        exposure = float(luminance[technique][far_lit].mean())
         shadowed = float(
             ((luminance[technique] < exposure * 0.6) & cast_shadow).sum()
             / terrain.sum()
@@ -866,6 +884,28 @@ def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
             f"{technique.upper()} casts no shadow: only {shadowed:.4f} "
             "of terrain is clearly shadowed"
         )
+
+    evsm_far_delta = luminance["evsm"][far_lit] - luminance["pcf"][far_lit]
+    evsm_far_abs_delta = float(np.abs(evsm_far_delta).mean())
+    evsm_retained_core = float((luminance["evsm"][cast_core] < 0.6).mean())
+    print(
+        "native EVSM localization: "
+        f"far_mean_delta={evsm_far_delta.mean():.6f}, "
+        f"far_abs_delta={evsm_far_abs_delta:.6f}, "
+        f"retained_core={evsm_retained_core:.6f}"
+    )
+    assert float(evsm_far_delta.mean()) >= -0.02, (
+        "native EVSM globally dims terrain away from the cast shadow: "
+        f"far-lit mean delta={evsm_far_delta.mean():.4f}"
+    )
+    assert evsm_far_abs_delta <= 0.03, (
+        "native EVSM differs from PCF away from the cast shadow: "
+        f"far-lit mean absolute delta={evsm_far_abs_delta:.4f}"
+    )
+    assert evsm_retained_core >= 0.1, (
+        "native EVSM erased the PCF-defined cast-shadow core: "
+        f"only {evsm_retained_core:.4f} remains clearly shadowed"
+    )
 
     msm_cast_difference = float(
         np.mean(np.abs(luminance["msm"][cast_shadow] - luminance["vsm"][cast_shadow]))
