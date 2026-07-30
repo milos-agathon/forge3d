@@ -82,9 +82,13 @@ CAPTION_LINES = [
 ]
 
 # --- population marker (orange overlay) --------------------------------------
-# Same rule family as Egypt: a cell is MARKED populated at >= 1 resident per
-# 3 arcsec source cell — above GHS_POP's disaggregation dust, below a hamlet.
-POPULATION_MIN_PERSONS = 1.0
+# Same rule family as Egypt, but France is not an empty desert: at Egypt's cut
+# (>= 1 resident/cell) the dispersed rural settlement marks ~60% of the land
+# and drowns the steel-blue relief in orange. Swept 1/5/10/25 on the traced
+# probe (2026-07-30): 25 kills the countryside story, 10 reduces towns to
+# isolated dots, 5 keeps the urban network AND the settlement geography (the
+# dense north-west vs the diagonale du vide) with the relief still dominant.
+POPULATION_MIN_PERSONS = 5.0
 
 # --- towers ------------------------------------------------------------------
 # Towers are the signature effect: population ADDED to the heightfield in
@@ -673,6 +677,106 @@ def _pt_light_field(
     return rgb, hit
 
 
+# --- modulation and compose --------------------------------------------------
+
+
+def _center_map_horizontally() -> None:
+    """Make the composer center the subject instead of pinning it left.
+
+    ``LAYOUT["map_x"]`` is a fraction of canvas width, and 0.008 was tuned for
+    Romania, whose 1.37:1 silhouette fills the canvas to within ~11 px. France's
+    render grid is 1.08:1, so the height limit binds first and the constant
+    leaves ALL the slack on one side. Centering needs the resized width, which
+    only exists after the composer's own resize -- so hook that call rather
+    than re-deriving its sizing math here, where it would silently drift out
+    of sync.
+    """
+    original = rom._resize_subject_to_layout
+
+    def centered(subject, canvas_size, *, max_height=None):
+        resized = original(subject, canvas_size, max_height=max_height)
+        canvas_width = max(1, int(canvas_size[0]))
+        slack = max(0, canvas_width - resized.width)
+        rom.LAYOUT = {**rom.LAYOUT, "map_x": (slack / 2.0) / canvas_width}
+        return resized
+
+    rom._resize_subject_to_layout = centered
+
+
+def _shade_on_overlay_grid(
+    rgb_field: np.ndarray,
+    hit: np.ndarray,
+    overlay_size: tuple[int, int],
+    *,
+    modern_grade: bool = False,
+) -> np.ndarray:
+    """Crop the PT field to the terrain hit bbox and upsample to the overlay grid."""
+    luminance = rgb_field @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    luminance = np.where(hit, luminance, np.nan).astype(np.float32)
+    ys, xs = np.nonzero(hit)
+    crop = luminance[int(ys.min()) : int(ys.max()) + 1, int(xs.min()) : int(xs.max()) + 1]
+    finite = np.isfinite(crop)
+    crop = np.where(finite, crop, float(np.nanmedian(crop)))
+
+    high_pct = MODERN_SHADE_HIGH_PCT if modern_grade else SHADE_HIGH_PCT
+    gamma = MODERN_SHADE_GAMMA if modern_grade else SHADE_GAMMA
+    low = float(np.percentile(crop[finite], SHADE_LOW_PCT))
+    high = float(np.percentile(crop[finite], high_pct))
+    shade = np.clip((crop - low) / max(high - low, 1e-6), 0.0, 1.0)
+    shade = np.power(shade, gamma, dtype=np.float32)
+
+    shade_img = Image.fromarray(shade, mode="F").resize(overlay_size, Image.Resampling.BICUBIC)
+    shade_hi = np.clip(np.asarray(shade_img, dtype=np.float32), 0.0, 1.0)
+    if modern_grade:
+        blur = ndimage.gaussian_filter(shade_hi, sigma=SHADE_UNSHARP_SIGMA)
+        shade_hi = np.clip(shade_hi + SHADE_UNSHARP_AMOUNT * (shade_hi - blur), 0.0, 1.0)
+    return shade_hi
+
+
+def _cavity_scale(dem_grid: np.ndarray, overlay_size: tuple[int, int]) -> np.ndarray:
+    curv = ndimage.gaussian_laplace(dem_grid, sigma=CAVITY_SIGMA)
+    norm = float(np.percentile(np.abs(curv), 95.0))
+    c = np.clip(curv / max(norm, 1e-9), -1.0, 1.0)
+    scale = 1.0 - CAVITY_DARKEN * np.maximum(c, 0.0) + CAVITY_LIGHTEN * np.maximum(-c, 0.0)
+    img = Image.fromarray(scale.astype(np.float32), mode="F").resize(
+        overlay_size, Image.Resampling.BICUBIC
+    )
+    return np.asarray(img, dtype=np.float32)
+
+
+def _modulate_overlay(
+    overlay_path: Path,
+    shade: np.ndarray,
+    *,
+    modern_grade: bool = False,
+    cavity: np.ndarray | None = None,
+) -> Image.Image:
+    overlay = np.asarray(Image.open(overlay_path).convert("RGBA"), dtype=np.uint8).copy()
+    rgb = overlay[:, :, :3].astype(np.float32) / 255.0
+
+    hue, saturation, value = rom._rgb_to_hsv_channels(overlay[:, :, :3])
+    markers = rom._builtup_marker_mask(hue, saturation, value)
+
+    floor = MODERN_TERRAIN_FLOOR if modern_grade else TERRAIN_FLOOR
+    gain = MODERN_TERRAIN_GAIN if modern_grade else TERRAIN_GAIN
+    scale = floor + gain * shade
+    marker_scale = MARKER_FLOOR + MARKER_GAIN * shade
+    scale = np.where(markers, marker_scale, scale)
+    if cavity is not None:
+        # cavity is terrain emphasis only; hard-color markers stay exempt
+        scale = scale * np.where(markers, 1.0, cavity)
+    rgb = np.clip(rgb * scale[:, :, None], 0.0, 1.0)
+
+    if modern_grade:
+        lum = (rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32))[:, :, None]
+        graded = np.clip(lum + (rgb - lum) * FINAL_CHROMA, 0.0, 1.0)
+        graded = np.clip(graded * FINAL_BRIGHTNESS, 0.0, 1.0)
+        rgb = np.where(markers[:, :, None], rgb, graded)
+
+    overlay[:, :, :3] = np.round(rgb * 255.0).astype(np.uint8)
+    return Image.fromarray(overlay, mode="RGBA")
+
+
 def _self_test() -> int:
     """Pure-function gates; no GPU, no network, no D: writes."""
     # _max_downsample: block maxima survive, shape is exact.
@@ -790,8 +894,36 @@ def main() -> int:
         np.savez_compressed(shade_cache, rgb=rgb_field, hit=hit)
         print(f"[PT] light field cached: {shade_cache}")
 
-    print("modulation and compose arrive in Task 5")
-    return 2
+    print("== Modulating class overlay by the PT light field ==")
+    with Image.open(overlay_path) as overlay_probe:
+        overlay_size = overlay_probe.size
+    shade = _shade_on_overlay_grid(
+        rgb_field, hit, overlay_size, modern_grade=bool(args.modern_grade)
+    )
+    cavity = None
+    if args.cavity:
+        print("== Cavity shading from the DEM grid ==")
+        cavity_grid, _land = _load_dem_grid(render_dem_path, int(args.grid_max))
+        cavity = _cavity_scale(cavity_grid, overlay_size)
+    raw = _modulate_overlay(
+        overlay_path, shade, modern_grade=bool(args.modern_grade), cavity=cavity
+    )
+
+    if args.raw_only:
+        raw_path = snapshot.with_name(snapshot.stem + "_raw.png")
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep RGBA: the alpha channel IS the country matte, and the composer's
+        # behaviour depends on it. Saving RGB here would make this debug artifact
+        # take a different path through the composer than the real render.
+        raw.save(raw_path)
+        print(f"Raw modulated subject saved to: {raw_path}")
+        return 0
+
+    print("== Composing final plate ==")
+    _center_map_horizontally()
+    rom._compose_snapshot(raw, snapshot)
+    print(f"Success! Map saved to: {snapshot}")
+    return 0
 
 
 if __name__ == "__main__":
