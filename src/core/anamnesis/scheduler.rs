@@ -484,7 +484,7 @@ mod tests {
         .unwrap();
         assert_eq!(cold.report().misses, ["first", "second"]);
 
-        let mut warm = GraphScheduler::new(store, b"caps".to_vec(), engine);
+        let mut warm = GraphScheduler::new(store.clone(), b"caps".to_vec(), engine.clone());
         let mut restored = Vec::new();
         warm.execute_graph(
             &graph,
@@ -503,6 +503,48 @@ mod tests {
             restored[1].2 > 0,
             "dependent cached resource must retain its transition barrier"
         );
+
+        let mut changed_builder = RendererGraphBuilder::new();
+        let changed_leaf = changed_builder.add_resource(desc("leaf", false));
+        let changed_middle = changed_builder.add_resource(desc("middle", true));
+        let changed_output = changed_builder.add_resource(desc("output", true));
+        changed_builder
+            .add_pass("first", PassType::Graphics, |pass| {
+                pass.read(changed_leaf)
+                    .write(changed_middle)
+                    .pipeline_descriptor(b"first-pipeline".to_vec())
+                    .uniform_bytes(b"changed-first-uniform".to_vec());
+                Ok(())
+            })
+            .unwrap();
+        changed_builder
+            .add_pass("second", PassType::Graphics, |pass| {
+                pass.read(changed_middle)
+                    .write(changed_output)
+                    .pipeline_descriptor(b"second-pipeline".to_vec())
+                    .uniform_bytes(b"second-uniform".to_vec());
+                Ok(())
+            })
+            .unwrap();
+        let changed_graph = changed_builder.compile().unwrap();
+        let changed_leaf_keys = BTreeMap::from([(changed_leaf, super::super::leaf_key(b"leaf"))]);
+        let mut changed = GraphScheduler::new(store, b"caps".to_vec(), engine);
+        changed
+            .execute_graph(
+                &changed_graph,
+                &changed_leaf_keys,
+                |pass, _| Ok(pass.name.as_bytes().to_vec()),
+                |_, _, _| panic!("changed graph cannot restore a stale pass"),
+            )
+            .unwrap();
+        assert_eq!(changed.report().hits, Vec::<String>::new());
+        assert_eq!(changed.report().misses, ["first", "second"]);
+        assert_eq!(
+            changed.report().bytes_read,
+            0,
+            "all-miss invalidation must not report restored payload bytes"
+        );
+        assert!(changed.report().bytes_written > 0);
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -346,7 +346,7 @@ def test_native_terrain_cache_restores_all_graph_passes(tmp_path):
         "terrain.forward",
         "terrain.resolve",
     ]
-    assert camera_changed_report["bytes_read"] > 0
+    assert camera_changed_report["bytes_read"] == 0
     assert camera_changed_report["bytes_written"] > 0
     assert camera_changed_report["graph_command_submissions"] == 6
     assert camera_changed.tobytes() != second.tobytes()
