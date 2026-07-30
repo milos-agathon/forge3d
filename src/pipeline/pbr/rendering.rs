@@ -243,3 +243,40 @@ impl PbrPipelineWithShadows {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_evsm_pbr_pipeline_and_bind_group_create_without_validation_errors() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let queue = &context.queue;
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut pbr = PbrPipelineWithShadows::new(
+            device,
+            queue,
+            crate::core::material::PbrMaterial::default(),
+            true,
+        )
+        .expect("PBR pipeline resources");
+        pbr.configure_shadows(device, 3, 256, 0);
+        pbr.set_shadow_technique(device, ShadowTechnique::EVSM);
+
+        pbr.get_or_create_shadow_bind_group(device)
+            .expect("EVSM shadow bind group");
+
+        crate::core::degradation::begin_degradation_capture();
+        pbr.ensure_pipeline(device, TextureFormat::Rgba8Unorm);
+        let captured = crate::core::degradation::finish_degradation_capture();
+        assert!(!captured
+            .iter()
+            .any(|item| item.kind == "validation_error" && item.name == "pbr_render_pipeline"));
+
+        device.poll(wgpu::Maintain::Wait);
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            panic!("live EVSM PBR resources are invalid: {error}");
+        }
+    }
+}

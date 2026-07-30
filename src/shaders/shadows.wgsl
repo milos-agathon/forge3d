@@ -4,11 +4,11 @@
 //   - @binding(0): uniform buffer `CsmUniforms`
 //   - @binding(1): texture_depth_2d_array `shadow_maps` (Depth32Float)
 //   - @binding(2): sampler_comparison `shadow_sampler`
-//   - @binding(3): texture_2d_array<f32> `moment_maps` (Rgba32Float, for VSM/EVSM/MSM)
+//   - @binding(3): texture_2d_array<f32> `moment_maps` (Rgba16Float, for VSM/EVSM/MSM)
 //   - @binding(4): sampler `moment_sampler` (filtering sampler for moment maps)
 // Formats:
 // - Depth maps: Depth32Float
-// - Moment maps: Rgba32Float (VSM uses 2 channels, EVSM/MSM use 4)
+// - Moment maps: Rgba16Float (VSM uses 2 channels, EVSM/MSM use 4)
 // Address Space: `uniform`, `fragment`
 // Provides high-quality shadows for directional lights with pluggable techniques
 
@@ -62,7 +62,7 @@ struct CsmUniforms {
 
 // Convert world position to light space for cascade
 fn world_to_light_space(world_pos: vec3<f32>, cascade_idx: u32) -> vec4<f32> {
-    let light_space_pos = csm_uniforms.cascades[cascade_idx].light_projection * vec4<f32>(world_pos, 1.0);
+    let light_space_pos = csm_uniforms.cascades[cascade_idx].light_view_proj * vec4<f32>(world_pos, 1.0);
     return light_space_pos;
 }
 
@@ -239,6 +239,10 @@ fn pcss_blocker_search(
     cascade_idx: u32,
     search_radius: f32
 ) -> f32 {
+    let layer_count = textureNumLayers(shadow_maps);
+    if (cascade_idx >= layer_count) {
+        return -1.0;
+    }
     // Poisson disk for blocker search (using first 12 samples for performance)
     var poisson_disk = array<vec2<f32>, 12>(
         vec2<f32>(-0.94201624, -0.39906216),
@@ -693,7 +697,7 @@ fn shadow_vs_main(input: ShadowVertexInput, @builtin(instance_index) cascade_idx
     var out: ShadowVertexOutput;
     
     // Transform vertex to light space for current cascade
-    out.clip_position = csm_uniforms.cascades[cascade_idx].light_projection * vec4<f32>(input.position, 1.0);
+    out.clip_position = csm_uniforms.cascades[cascade_idx].light_view_proj * vec4<f32>(input.position, 1.0);
     
     return out;
 }

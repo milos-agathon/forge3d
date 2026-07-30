@@ -227,12 +227,22 @@ class TestShadowMemoryBudget:
                 }
             )
 
-    @pytest.mark.parametrize("map_size", (-1, 0, 511, 513, 16384))
+    @pytest.mark.parametrize("map_size", (-1, 0, 255, 257))
     def test_public_renderer_rejects_invalid_shadow_dimensions(self, map_size: int):
-        with pytest.raises(ValueError, match="power of two between 512 and 8192"):
+        with pytest.raises(ValueError, match="greater than zero|power of two|at least 256"):
             load_renderer_config(
                 {"shadows": {"map_size": map_size, "cascades": 1}}
             )
+
+    def test_public_renderer_preserves_legacy_small_shadow_maps(self):
+        hard = load_renderer_config(
+            {"shadows": {"technique": "hard", "map_size": 128, "cascades": 1}}
+        )
+        filtered = load_renderer_config(
+            {"shadows": {"technique": "pcf", "map_size": 256, "cascades": 1}}
+        )
+        assert hard.shadows.map_size == 128
+        assert filtered.shadows.map_size == 256
 
     def test_memory_budget_normal_config(self):
         """Normal shadow config should pass memory budget check."""

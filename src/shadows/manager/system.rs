@@ -220,7 +220,7 @@ impl ShadowManager {
                 binding: 3,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
-                    sample_type: TextureSampleType::Float { filterable: false },
+                    sample_type: TextureSampleType::Float { filterable: true },
                     view_dimension: TextureViewDimension::D2Array,
                     multisampled: false,
                 },
@@ -253,7 +253,7 @@ impl ShadowManager {
             let layer_count = self.config.csm.cascade_count.max(1).min(4);
             texture.create_view(&TextureViewDescriptor {
                 label: Some("shadow_moment_fallback_view"),
-                format: Some(TextureFormat::Rgba32Float),
+                format: Some(TextureFormat::Rgba16Float),
                 dimension: Some(TextureViewDimension::D2Array),
                 aspect: TextureAspect::All,
                 base_mip_level: 0,
@@ -423,7 +423,7 @@ impl ShadowManager {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba32Float,
+                format: TextureFormat::Rgba16Float,
                 usage: TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             },

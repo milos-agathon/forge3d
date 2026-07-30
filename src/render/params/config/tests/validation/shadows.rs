@@ -9,11 +9,27 @@ fn shadows_require_power_of_two_map() {
 }
 
 #[test]
-fn shadows_map_size_must_be_supported() {
+fn shadows_map_size_must_be_nonzero() {
     let mut cfg = RendererConfig::default();
     cfg.shadows.map_size = 0;
     let err = cfg.validate().unwrap_err();
-    assert!(err.to_string().contains("between 512 and 8192"));
+    assert!(err.to_string().contains("greater than zero"));
+}
+
+#[test]
+fn hard_shadows_preserve_small_power_of_two_maps() {
+    let mut cfg = RendererConfig::default();
+    cfg.shadows.technique = ShadowTechnique::Hard;
+    cfg.shadows.map_size = 128;
+    cfg.validate().expect("small hard-shadow atlas");
+}
+
+#[test]
+fn filtered_shadows_preserve_256_maps() {
+    let mut cfg = RendererConfig::default();
+    cfg.shadows.technique = ShadowTechnique::Pcf;
+    cfg.shadows.map_size = 256;
+    cfg.validate().expect("256px filtered atlas");
 }
 
 #[test]
@@ -95,5 +111,5 @@ fn shadows_filtered_techniques_recommend_min_resolution() {
     cfg.shadows.technique = ShadowTechnique::Pcf;
     cfg.shadows.map_size = 128;
     let err = cfg.validate().unwrap_err();
-    assert!(err.to_string().contains("between 512 and 8192"));
+    assert!(err.to_string().contains("at least 256"));
 }

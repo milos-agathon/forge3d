@@ -1026,6 +1026,10 @@ fn pcss_blocker_search_terrain(
     cascade_idx: u32,
     search_radius: f32,
 ) -> f32 {
+    let layer_count = textureNumLayers(shadow_maps);
+    if (cascade_idx >= layer_count) {
+        return -1.0;
+    }
     var poisson_disk = array<vec2<f32>, 12>(
         vec2<f32>(-0.94201624, -0.39906216),
         vec2<f32>(0.94558609, -0.76890725),

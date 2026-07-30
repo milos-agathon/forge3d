@@ -375,7 +375,7 @@ fn sample_shadow_evsm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx
         vec2<f32>(warp_depth_pos, warp_depth_neg),
         vec2<f32>(c_pos, c_neg)
     );
-    
+
     let variance_visibility = clamp(
         evsm_visibility_from_moments(
             moments,

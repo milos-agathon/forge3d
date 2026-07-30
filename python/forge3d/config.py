@@ -548,11 +548,18 @@ class RendererConfig:
         for idx, light in enumerate(self.lighting.lights):
             light.validate(idx)
         if self.shadows.enabled:
-            if not 512 <= self.shadows.map_size <= 8192 or (
-                self.shadows.map_size & (self.shadows.map_size - 1)
+            if self.shadows.map_size <= 0:
+                raise ValueError(
+                    "shadows.map_size must be greater than zero when shadows are enabled"
+                )
+            if self.shadows.map_size & (self.shadows.map_size - 1):
+                raise ValueError("shadows.map_size must be a power of two")
+            if (
+                self.shadows.technique in {"pcss", "pcf", "vsm", "evsm", "msm"}
+                and self.shadows.map_size < 256
             ):
                 raise ValueError(
-                    "shadows.map_size must be a power of two between 512 and 8192"
+                    "shadows.map_size should be at least 256 for filtered techniques"
                 )
             if not (1 <= self.shadows.cascades <= 4):
                 raise ValueError("shadows.cascades must be within [1, 4]")

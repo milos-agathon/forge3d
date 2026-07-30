@@ -504,7 +504,10 @@ impl Evaluator<'_> {
                 }
             }
             Expression::ImageLoad {
-                image, coordinate, ..
+                image,
+                coordinate,
+                array_index,
+                ..
             } => {
                 let coordinate_handle = *coordinate;
                 let image = self.eval_expr(function_ref, frame, *image)?;
@@ -513,7 +516,17 @@ impl Evaluator<'_> {
                         frame.relations.insert(handle, relation);
                     }
                 }
-                let coordinate = self.eval_expr(function_ref, frame, coordinate_handle)?;
+                let mut coordinate = self.eval_expr(function_ref, frame, coordinate_handle)?;
+                if let Some(array_index) = array_index {
+                    let layer = self.eval_expr(function_ref, frame, *array_index)?;
+                    coordinate = match coordinate {
+                        Value::Composite(mut coordinates) => {
+                            coordinates.push(layer);
+                            Value::Composite(coordinates)
+                        }
+                        coordinate => Value::Composite(vec![coordinate, layer]),
+                    };
+                }
                 self.image_load(
                     function_ref,
                     frame,
@@ -521,6 +534,7 @@ impl Evaluator<'_> {
                     image,
                     coordinate_handle,
                     coordinate,
+                    *array_index,
                 )
             }
             Expression::ImageQuery {
@@ -553,10 +567,27 @@ impl Evaluator<'_> {
                 ..
             } => Value::Int { lo: 1, hi: 32 },
             Expression::ImageQuery {
+                image,
                 query: naga::ImageQuery::NumLayers,
-                ..
-            }
-            | Expression::ImageQuery {
+            } => match self.eval_expr(function_ref, frame, *image)? {
+                Value::Image {
+                    name, dimensions, ..
+                } => {
+                    let axis = dimensions.len().saturating_sub(1);
+                    frame
+                        .relations
+                        .insert(handle, Relation::ImageDimension(name, axis));
+                    dimensions
+                        .get(axis)
+                        .map(|&(lo, hi)| Value::Int {
+                            lo: lo as i64,
+                            hi: hi as i64,
+                        })
+                        .unwrap_or(Value::Opaque)
+                }
+                _ => Value::Opaque,
+            },
+            Expression::ImageQuery {
                 query: naga::ImageQuery::NumSamples,
                 ..
             } => Value::Int {
@@ -646,6 +677,9 @@ impl Evaluator<'_> {
         left: &Value,
         right: &Value,
     ) -> (Option<Value>, Option<Relation>) {
+        if left_handle == right_handle {
+            return (square_value(left), None);
+        }
         for (relation_handle, source_handle, relation_value, source_value) in [
             (left_handle, right_handle, left, right),
             (right_handle, left_handle, right, left),
@@ -834,6 +868,31 @@ impl Evaluator<'_> {
         denominator_handle: Handle<Expression>,
         numerator: &Value,
     ) -> Option<Value> {
+        let function = function_ref.function(self.module);
+        if let Expression::Binary {
+            op: BinaryOperator::Add,
+            left,
+            right,
+        } = function.expressions[denominator_handle]
+        {
+            let residual = if left == numerator_handle {
+                frame.values.get(&right)
+            } else if right == numerator_handle {
+                frame.values.get(&left)
+            } else {
+                None
+            };
+            if let (Value::Float(numerator), Some(Value::Float(residual))) = (numerator, residual) {
+                if numerator.is_finite_only()
+                    && residual.is_finite_only()
+                    && numerator.lo >= 0.0
+                    && residual.lo >= 0.0
+                    && (numerator.lo > 0.0 || residual.lo > 0.0)
+                {
+                    return Some(Value::Float(Interval::new(0.0, 1.0)));
+                }
+            }
+        }
         let numerator_place = self.place_of_expr(function_ref, numerator_handle)?;
         let Relation::Offset(source, offset) = frame.relations.get(&denominator_handle)? else {
             return None;
@@ -892,6 +951,18 @@ impl Evaluator<'_> {
         relation_value
             .clone()
             .unary_float(|value| value.max(Interval::constant(0.0)))
+    }
+}
+
+fn square_value(value: &Value) -> Option<Value> {
+    match value {
+        Value::Float(value) => Some(Value::Float(value.square())),
+        Value::Composite(values) => values
+            .iter()
+            .map(square_value)
+            .collect::<Option<Vec<_>>>()
+            .map(Value::Composite),
+        _ => None,
     }
 }
 

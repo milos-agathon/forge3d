@@ -203,6 +203,27 @@ impl ShadowBlurPass {
         technique: crate::lighting::types::ShadowTechnique,
         evsm_positive_exp: f32,
     ) -> RenderResult<()> {
+        if moment_texture.format() != TextureFormat::Rgba16Float {
+            return Err(RenderError::render(
+                "moment blur requires an Rgba16Float atlas",
+            ));
+        }
+        if moment_texture.dimension() != TextureDimension::D2 {
+            return Err(RenderError::render(
+                "moment blur requires a D2 texture or D2 array atlas",
+            ));
+        }
+        if moment_texture.sample_count() != 1 {
+            return Err(RenderError::render(
+                "moment blur requires a single-sampled atlas",
+            ));
+        }
+        let required_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
+        if !moment_texture.usage().contains(required_usage) {
+            return Err(RenderError::render(
+                "moment blur atlas requires TEXTURE_BINDING and STORAGE_BINDING usage",
+            ));
+        }
         if shadow_map_size == 0 || cascade_count == 0 {
             return Err(RenderError::render(
                 "moment blur dimensions and cascade count must be nonzero",
@@ -405,6 +426,37 @@ mod tests {
         .expect("moment texture")
     }
 
+    fn test_texture(
+        device: &Device,
+        format: TextureFormat,
+        usage: TextureUsages,
+        dimension: TextureDimension,
+        sample_count: u32,
+    ) -> TrackedTexture {
+        tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("shadow_blur_invalid_moments"),
+                size: Extent3d {
+                    width: 4,
+                    height: if dimension == TextureDimension::D1 {
+                        1
+                    } else {
+                        4
+                    },
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count,
+                dimension,
+                format,
+                usage,
+                view_formats: &[],
+            },
+        )
+        .expect("invalid-contract texture")
+    }
+
     #[test]
     fn test_blur_params_size() {
         assert_eq!(
@@ -515,7 +567,7 @@ mod tests {
             size,
             2,
             crate::lighting::types::ShadowTechnique::VSM,
-            9.0,
+            crate::shadows::EVSM_MAX_EXPONENT_RGBA16F,
         )
         .expect("blur execute");
         queue.submit(Some(encoder.finish()));
@@ -573,7 +625,7 @@ mod tests {
                     size,
                     radius,
                     crate::lighting::types::ShadowTechnique::VSM,
-                    9.0,
+                    crate::shadows::EVSM_MAX_EXPONENT_RGBA16F,
                 )
                 .is_err(),
                 "invalid ({cascades}, {size}, {radius}) was accepted"
@@ -593,9 +645,66 @@ mod tests {
                 8,
                 2,
                 crate::lighting::types::ShadowTechnique::VSM,
-                9.0,
+                crate::shadows::EVSM_MAX_EXPONENT_RGBA16F,
             )
             .is_err());
+    }
+
+    #[test]
+    fn execute_rejects_invalid_texture_contracts_before_view_creation() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let queue = &context.queue;
+        let mut blur = ShadowBlurPass::new(device).expect("blur pass");
+        let cases = [
+            test_texture(
+                device,
+                TextureFormat::Rgba8Unorm,
+                TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+                TextureDimension::D2,
+                1,
+            ),
+            test_texture(
+                device,
+                TextureFormat::Rgba16Float,
+                TextureUsages::TEXTURE_BINDING,
+                TextureDimension::D2,
+                1,
+            ),
+            test_texture(
+                device,
+                TextureFormat::Rgba16Float,
+                TextureUsages::TEXTURE_BINDING,
+                TextureDimension::D1,
+                1,
+            ),
+            test_texture(
+                device,
+                TextureFormat::Rgba16Float,
+                TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+                TextureDimension::D2,
+                4,
+            ),
+        ];
+
+        for texture in &cases {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("shadow_blur_invalid_contract"),
+            });
+            assert!(blur
+                .execute(
+                    device,
+                    queue,
+                    &mut encoder,
+                    texture,
+                    1,
+                    4,
+                    2,
+                    crate::lighting::types::ShadowTechnique::VSM,
+                    crate::shadows::EVSM_MAX_EXPONENT_RGBA16F,
+                )
+                .is_err());
+        }
     }
 
     #[test]
@@ -650,7 +759,7 @@ mod tests {
                 9,
                 2,
                 crate::lighting::types::ShadowTechnique::VSM,
-                9.0,
+                crate::shadows::EVSM_MAX_EXPONENT_RGBA16F,
             )
             .expect("blur execute");
         };

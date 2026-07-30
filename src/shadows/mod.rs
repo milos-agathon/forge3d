@@ -38,12 +38,9 @@ pub(crate) const CSM_SHADER_SOURCE: &str = concat!(
 
 /// Largest EVSM exponent an `Rgba16Float` moment atlas can carry.
 ///
-/// Both EVSM lobes are normalized into `[-1, 1]`. The remaining fp16 constraint is
-/// keeping their squared moments above the normal range near the middle of the
-/// depth interval; 9 leaves useful precision while preserving a strong warp.
-pub const EVSM_MAX_EXPONENT_RGBA16F: f32 = 9.0;
-pub(crate) const MIN_SHADOW_MAP_SIZE: u32 = 512;
-pub(crate) const MAX_SHADOW_MAP_SIZE: u32 = 8192;
+/// Keeps `exp(2c)` below the largest finite binary16 value (65504).
+pub const EVSM_MAX_EXPONENT_RGBA16F: f32 = 5.5;
+pub(crate) const MIN_SHADOW_MAP_SIZE: u32 = 1;
 pub(crate) const MAX_SHADOW_CASCADES: u32 = 4;
 pub(crate) const MAX_SHADOW_ALLOCATION_BYTES: u64 = 512 * 1024 * 1024;
 
@@ -51,11 +48,9 @@ pub(crate) fn validate_shadow_dimensions(
     resolution: u32,
     cascades: u32,
 ) -> crate::core::error::RenderResult<()> {
-    if !(MIN_SHADOW_MAP_SIZE..=MAX_SHADOW_MAP_SIZE).contains(&resolution)
-        || !resolution.is_power_of_two()
-    {
+    if resolution < MIN_SHADOW_MAP_SIZE || !resolution.is_power_of_two() {
         return Err(crate::core::error::RenderError::render(format!(
-            "shadow resolution must be a power of two between {MIN_SHADOW_MAP_SIZE} and {MAX_SHADOW_MAP_SIZE}, got {resolution}"
+            "shadow resolution must be a positive power of two, got {resolution}"
         )));
     }
     if !(1..=MAX_SHADOW_CASCADES).contains(&cascades) {
@@ -128,14 +123,16 @@ mod tests {
 
     #[test]
     fn shadow_dimensions_reject_invalid_requests_before_allocation() {
-        for resolution in [0, 511, 513, 16_384, u32::MAX] {
+        for resolution in [0, 3, 511, 513, u32::MAX] {
             assert!(validate_shadow_dimensions(resolution, 1).is_err());
         }
         for cascades in [0, 5, u32::MAX] {
-            assert!(validate_shadow_dimensions(512, cascades).is_err());
+            assert!(validate_shadow_dimensions(128, cascades).is_err());
         }
+        assert!(validate_shadow_dimensions(1, 1).is_ok());
+        assert!(validate_shadow_dimensions(128, 1).is_ok());
         assert!(validate_shadow_dimensions(512, 1).is_ok());
-        assert!(validate_shadow_dimensions(8192, 4).is_ok());
+        assert!(validate_shadow_dimensions(16_384, 4).is_ok());
     }
 
     #[test]
@@ -246,7 +243,7 @@ fn test_evsm_half_uniform(@builtin(global_invocation_id) id: vec3<u32>) {{
     }}
     let input = evsm_inputs[id.x];
     evsm_outputs[id.x] =
-        evsm_moment_leak_control(input.xy, input.z, 9.0, input.w);
+        evsm_moment_leak_control(input.xy, input.z, 5.5, input.w);
 }}",
             include_str!("../shaders/includes/shadow_moments.wgsl"),
             depths.len()
@@ -269,10 +266,10 @@ fn test_evsm_half_uniform(@builtin(global_invocation_id) id: vec3<u32>) {{
         let inputs = depths
             .iter()
             .map(|&depth| {
-                let receiver = (9.0 * (depth - 1.0)).exp();
+                let receiver = (EVSM_MAX_EXPONENT_RGBA16F * (depth - 1.0)).exp();
                 let stored_mean = half::f16::from_f32(receiver).to_f32();
                 let stored_mean_squared = half::f16::from_f32(receiver * receiver).to_f32();
-                let minimum_variance = (0.000375 * 9.0 * receiver).powi(2);
+                let minimum_variance = (0.000375 * EVSM_MAX_EXPONENT_RGBA16F * receiver).powi(2);
                 [stored_mean, stored_mean_squared, receiver, minimum_variance]
             })
             .collect::<Vec<_>>();
@@ -364,6 +361,12 @@ fn test_evsm_half_uniform(@builtin(global_invocation_id) id: vec3<u32>) {{
         }
         let midpoint_second_moment = (-EVSM_MAX_EXPONENT_RGBA16F).exp();
         assert!(midpoint_second_moment >= 0.00006103515625);
+        let endpoint = (2.0 * EVSM_MAX_EXPONENT_RGBA16F).exp();
+        let endpoint_f16 = half::f16::from_f32(endpoint);
+        assert!(endpoint <= f32::from(half::f16::MAX));
+        assert!(endpoint_f16.is_finite());
+        let negative_endpoint = (-2.0 * EVSM_MAX_EXPONENT_RGBA16F).exp();
+        assert_ne!(half::f16::from_f32(negative_endpoint).to_bits(), 0);
     }
 
     #[test]
@@ -416,7 +419,7 @@ visibility_output[1] = minimum.y;";
     fn shared_evsm_moment_leak_control_preserves_a_soft_penumbra() {
         let source = include_str!("../shaders/includes/shadow_moments.wgsl");
         let probe = "
-let exponent = 9.0;
+let exponent = 5.5;
 let near_depth = exp(exponent * (0.45 - 1.0));
 let far_depth = exp(exponent * (0.55 - 1.0));
 let mean = 0.5 * (near_depth + far_depth);
@@ -426,7 +429,7 @@ visibility_output[0] = evsm_moment_leak_control(
     moments, exp(exponent * (0.4 - 1.0)), exponent, 0.000001
 );
 visibility_output[1] = evsm_moment_leak_control(
-    moments, exp(exponent * (0.52 - 1.0)), exponent, 0.000001
+    moments, exp(exponent * (0.515 - 1.0)), exponent, 0.000001
 );
 visibility_output[2] = evsm_moment_leak_control(
     moments, exp(exponent * (0.75 - 1.0)), exponent, 0.000001
@@ -502,9 +505,9 @@ visibility_output[0] =
         let probe = "
 let moments = vec2<f32>(0.0111083984, 0.000123381615);
 visibility_output[0] =
-    evsm_moment_leak_control(moments, 0.0111591, 9.0, 0.00000000146);
+    evsm_moment_leak_control(moments, 0.0111591, 5.5, 0.00000000146);
 visibility_output[1] =
-    evsm_moment_leak_control(moments, 0.017422374, 9.0, 0.00000000346);";
+    evsm_moment_leak_control(moments, 0.017422374, 5.5, 0.00000000346);";
         let [near, far, ..] =
             execute_shader_probe(source, "EVSM half-uncertainty transition", probe);
         assert!(
@@ -549,11 +552,11 @@ visibility_output[2] = evsm_visibility_from_moments(
     vec4<f32>(0.5, 0.26, -0.5, 0.26), 0.6, -0.6, vec2<f32>(nan_value)
 );
 visibility_output[3] = min(
-    evsm_moment_leak_control(vec2<f32>(infinity), 0.5, 9.0, 0.0001),
-    evsm_moment_leak_control(vec2<f32>(0.5, 0.26), 0.5, 9.0, nan_value)
+    evsm_moment_leak_control(vec2<f32>(infinity), 0.5, 5.5, 0.0001),
+    evsm_moment_leak_control(vec2<f32>(0.5, 0.26), 0.5, 5.5, nan_value)
 );
 visibility_output[4] = min(
-    evsm_moment_leak_control(vec2<f32>(0.5, 0.26), infinity, 9.0, 0.0001),
+    evsm_moment_leak_control(vec2<f32>(0.5, 0.26), infinity, 5.5, 0.0001),
     evsm_moment_leak_control(vec2<f32>(0.5, 0.26), 0.5, infinity, 0.0001)
 );";
         let visibility = execute_shader_probe(source, "EVSM non-finite inputs", probe);

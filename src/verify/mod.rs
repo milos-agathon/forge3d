@@ -76,6 +76,13 @@ const PROVEN_TARGETS: &[Target] = &[
         kind: "lemma",
     },
     Target {
+        module: "shadow_moments",
+        path: "src/shaders/includes/shadow_moments.wgsl",
+        entry: "chebyshev_upper_bound_visibility",
+        contract: "shaders/contracts/shadow_moments.toml",
+        kind: "lemma",
+    },
+    Target {
         module: "line_aa",
         path: "src/shaders/line_aa.wgsl",
         entry: "fs_main",
@@ -407,6 +414,9 @@ fn embedded_contract(path: &str) -> Option<&'static str> {
         "shaders/contracts/polygon_fill.toml" => {
             include_str!("../../shaders/contracts/polygon_fill.toml")
         }
+        "shaders/contracts/shadow_moments.toml" => {
+            include_str!("../../shaders/contracts/shadow_moments.toml")
+        }
         "shaders/contracts/pt_shade.toml" => include_str!("../../shaders/contracts/pt_shade.toml"),
         "shaders/contracts/pt_shade_guard.toml" => {
             include_str!("../../shaders/contracts/pt_shade_guard.toml")
@@ -433,6 +443,9 @@ fn embedded_shader(path: &str) -> Option<&'static str> {
         "src/shaders/gi/composite.wgsl" => include_str!("../shaders/gi/composite.wgsl"),
         "src/shaders/includes/determinism.wgsl" => {
             include_str!("../shaders/includes/determinism.wgsl")
+        }
+        "src/shaders/includes/shadow_moments.wgsl" => {
+            include_str!("../shaders/includes/shadow_moments.wgsl")
         }
         "src/shaders/line_aa.wgsl" => include_str!("../shaders/line_aa.wgsl"),
         "src/shaders/overlays.wgsl" => include_str!("../shaders/overlays.wgsl"),
@@ -844,6 +857,21 @@ mod tests {
         let target = PROVEN_TARGETS
             .iter()
             .find(|target| target.module == "gi_composite")
+            .unwrap();
+        let verdict = verify_target(*target, None).unwrap();
+        assert_eq!(
+            verdict.proof_status,
+            "proven",
+            "{}",
+            serde_json::to_string_pretty(&verdict.alarms).unwrap()
+        );
+    }
+
+    #[test]
+    fn shadow_moment_checkpoint_is_proven() {
+        let target = PROVEN_TARGETS
+            .iter()
+            .find(|target| target.module == "shadow_moments")
             .unwrap();
         let verdict = verify_target(*target, None).unwrap();
         assert_eq!(
