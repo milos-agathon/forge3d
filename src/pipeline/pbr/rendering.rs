@@ -250,9 +250,15 @@ mod tests {
 
     #[test]
     fn live_evsm_pbr_pipeline_and_bind_group_create_without_validation_errors() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "live EVSM PBR pipeline",
+                &crate::shader_sources::pbr(),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let mut pbr = PbrPipelineWithShadows::new(
             device,

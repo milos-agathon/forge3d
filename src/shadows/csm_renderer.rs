@@ -410,7 +410,13 @@ mod allocation_tests {
 
     #[test]
     fn physical_moment_atlas_lifecycle_preserves_requested_sizes_and_full_accounting() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "physical moment atlas lifecycle",
+                CsmRenderer::shader_source(),
+            );
+            return;
+        };
         let config_for = |resolution| {
             let mut config = CsmConfig::default();
             config.shadow_map_size = resolution;
@@ -418,13 +424,11 @@ mod allocation_tests {
             config.enable_evsm = true;
             config
         };
-        let mut renderer =
-            CsmRenderer::new(&context.device, config_for(512)).expect("CSM renderer");
+        let mut renderer = CsmRenderer::new(&device, config_for(512)).expect("CSM renderer");
 
         for resolution in [512, 1024, 2048] {
             if renderer.shadow_map_resolution() != resolution {
-                renderer = CsmRenderer::new(&context.device, config_for(resolution))
-                    .expect("CSM renderer");
+                renderer = CsmRenderer::new(&device, config_for(resolution)).expect("CSM renderer");
             }
 
             assert_eq!(renderer.shadow_map_resolution(), resolution);

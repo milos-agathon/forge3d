@@ -468,8 +468,14 @@ mod tests {
 
     #[test]
     fn intermediate_texture_is_cached_and_resized_with_the_atlas() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "shadow blur intermediate lifecycle",
+                include_str!("../shaders/shadow_blur.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
         let mut blur = ShadowBlurPass::new(device).expect("blur pass");
 
         blur.ensure_intermediate_texture(device, 9, 1)
@@ -506,18 +512,15 @@ mod tests {
 
     #[test]
     fn separable_blur_filters_both_axes() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
-        let format_features = context
-            .adapter
-            .get_texture_format_features(TextureFormat::Rgba16Float);
-        assert!(
-            format_features
-                .allowed_usages
-                .contains(TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING),
-            "adapter cannot sample and storage-write Rgba16Float"
-        );
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "separable shadow blur",
+                include_str!("../shaders/shadow_blur.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
 
         let size = 9u32;
         let texture = test_moment_texture(device, size, 1);
@@ -605,9 +608,15 @@ mod tests {
 
     #[test]
     fn execute_rejects_invalid_or_mismatched_atlas_dimensions() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "shadow blur dimension validation",
+                include_str!("../shaders/shadow_blur.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
         let texture = test_moment_texture(device, 9, 1);
         let mut blur = ShadowBlurPass::new(device).expect("blur pass");
 
@@ -652,9 +661,15 @@ mod tests {
 
     #[test]
     fn execute_rejects_invalid_texture_contracts_before_view_creation() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "shadow blur texture contract validation",
+                include_str!("../shaders/shadow_blur.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
         let mut blur = ShadowBlurPass::new(device).expect("blur pass");
         let cases = [
             test_texture(
@@ -709,9 +724,15 @@ mod tests {
 
     #[test]
     fn execute_rejects_invalid_evsm_exponents() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "shadow blur EVSM exponent validation",
+                include_str!("../shaders/shadow_blur.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
         let texture = test_moment_texture(device, 9, 1);
         let mut blur = ShadowBlurPass::new(device).expect("blur pass");
 
@@ -739,9 +760,15 @@ mod tests {
 
     #[test]
     fn bind_groups_follow_atlas_resource_identity() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "shadow blur atlas identity",
+                include_str!("../shaders/shadow_blur.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
         let first = test_moment_texture(device, 9, 1);
         let second = test_moment_texture(device, 9, 1);
         let mut blur = ShadowBlurPass::new(device).expect("blur pass");

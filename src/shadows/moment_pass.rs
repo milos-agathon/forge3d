@@ -402,9 +402,19 @@ mod dimension_tests {
 
     #[test]
     fn generation_and_blur_cover_a_1024_moment_atlas() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "1024 moment generation",
+                include_str!("../shaders/moment_generation.wgsl"),
+            );
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "1024 moment blur",
+                include_str!("../shaders/shadow_blur.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
         let mut config = crate::shadows::CsmConfig::default();
         config.shadow_map_size = 1024;
         config.cascade_count = 1;
@@ -538,6 +548,10 @@ mod tests {
     #[test]
     fn test_moment_pass_creation() {
         let Some(device) = crate::core::gpu::create_device_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "moment pass creation",
+                include_str!("../shaders/moment_generation.wgsl"),
+            );
             return;
         };
         let _pass = MomentGenerationPass::new(&device).expect("alloc");
@@ -557,9 +571,15 @@ mod tests {
 
     #[test]
     fn execute_rejects_unbound_and_mismatched_allocations() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "moment allocation validation",
+                include_str!("../shaders/moment_generation.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
         let mut generation = MomentGenerationPass::new(device).expect("moment pass");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("moment_generation_invalid"),
@@ -590,8 +610,14 @@ mod tests {
 
     #[test]
     fn checked_prepare_rejects_invalid_resources_before_view_creation() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "moment texture contract validation",
+                include_str!("../shaders/moment_generation.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
         let valid_depth = texture(
             device,
             "valid_depth",
@@ -673,9 +699,15 @@ mod tests {
 
     #[test]
     fn legacy_view_prepare_and_execute_sequence_remains_compatible() {
-        let context = crate::core::gpu::try_ctx().expect("GPU context");
-        let device = &context.device;
-        let queue = &context.queue;
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            crate::shader_sources::assert_valid_wgsl_without_gpu(
+                "legacy moment pass sequence",
+                include_str!("../shaders/moment_generation.wgsl"),
+            );
+            return;
+        };
+        let device = &device;
+        let queue = &queue;
         let mut config = crate::shadows::CsmConfig::default();
         config.shadow_map_size = 512;
         config.cascade_count = 1;

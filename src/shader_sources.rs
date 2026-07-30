@@ -79,19 +79,26 @@ pub(crate) fn pbr() -> String {
 }
 
 #[cfg(test)]
+pub(crate) fn assert_valid_wgsl(source: &str) {
+    let module = naga::front::wgsl::parse_str(source)
+        .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
+}
+
+#[cfg(test)]
+pub(crate) fn assert_valid_wgsl_without_gpu(label: &str, source: &str) {
+    assert_valid_wgsl(source);
+    eprintln!("{label}: live GPU unavailable; validated the WGSL contract statically");
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn assert_valid_wgsl(source: &str) {
-        let module = naga::front::wgsl::parse_str(source)
-            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
-        naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
-    }
 
     #[test]
     fn assembled_renderer_sources_are_valid_wgsl() {

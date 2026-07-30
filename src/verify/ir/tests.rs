@@ -623,6 +623,18 @@ fn terrain_renderer_source_hash_is_pinned() {
 }
 
 #[test]
+fn determinism_source_hash_is_pinned() {
+    let actual = super::engine::stable_hash(
+        include_str!("../../shaders/includes/determinism.wgsl").as_bytes(),
+    );
+    assert_eq!(
+        actual,
+        super::engine::PINNED_DETERMINISM_SOURCE_HASH,
+        "{actual:#018x}"
+    );
+}
+
+#[test]
 fn hybrid_renderer_source_hash_is_pinned() {
     let actual = super::engine::stable_hash(crate::shader_sources::hybrid_kernel().as_bytes());
     assert_eq!(
