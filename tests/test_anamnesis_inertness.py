@@ -33,9 +33,21 @@ def test_native_recompute_control_is_required_on_physical_gpu_ci():
         "scripts/assert_junit_zero_skips.py",
         "anamnesis-p0-adapter.json",
         '$actual | Set-Content "$env:RUNNER_TEMP/anamnesis-checked-out-head.txt"',
+        "Get-PSDrive -PSProvider FileSystem",
+        "Sort-Object Free -Descending",
+        '$scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"',
+        "FORGE3D_ANAMNESIS_SCRATCH_DIR",
+        "FORGE3D_ANAMNESIS_BASE_TEMP",
+        '--basetemp="$env:FORGE3D_ANAMNESIS_BASE_TEMP"',
+        "name: Clean ANAMNESIS scratch",
+        "(Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch'",
     )
     for fragment in required_fragments:
         assert fragment in production_job
+    assert production_job.count("--basetemp=") == 1
+    assert production_job.index(
+        "name: Upload ANAMNESIS production evidence"
+    ) < production_job.index("name: Clean ANAMNESIS scratch")
 
 
 def test_cache_none_is_byte_identical_to_enabled_cold_render(tmp_path):

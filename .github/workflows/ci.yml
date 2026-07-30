@@ -669,7 +669,6 @@ jobs:
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       RUN_M06_VIEWER_CI: '1'
       RUN_LIMES_GPU_CI: '1'
-      FORGE3D_VIEWER_BINARY: ${{ github.workspace }}/target/release/interactive_viewer.exe
       FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
 
     steps:
@@ -683,6 +682,22 @@ jobs:
           "FORGE3D_M06_ARTIFACT_DIR=$artifactDir" | Add-Content $env:GITHUB_ENV
           $env:FORGE3D_M06_ARTIFACT_DIR = $artifactDir
           New-Item -ItemType Directory -Force $env:FORGE3D_M06_ARTIFACT_DIR | Out-Null
+          $scratchDrive = Get-PSDrive -PSProvider FileSystem |
+            Where-Object { $null -ne $_.Free -and $_.Root } |
+            Sort-Object Free -Descending |
+            Select-Object -First 1
+          if ($null -eq $scratchDrive) { throw 'No filesystem drive is available for M-06 scratch data' }
+          $scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $scratchDir = Join-Path $scratchDrive.Root "forge3d-ci-scratch/$scratchScope"
+          $targetDir = Join-Path $scratchDir 'cargo-target'
+          $viewerBinary = Join-Path $targetDir 'release/interactive_viewer.exe'
+          New-Item -ItemType Directory -Force $targetDir | Out-Null
+          "FORGE3D_M06_SCRATCH_DIR=$scratchDir" | Add-Content $env:GITHUB_ENV
+          "CARGO_TARGET_DIR=$targetDir" | Add-Content $env:GITHUB_ENV
+          "FORGE3D_VIEWER_BINARY=$viewerBinary" | Add-Content $env:GITHUB_ENV
+          $env:FORGE3D_M06_SCRATCH_DIR = $scratchDir
+          $env:CARGO_TARGET_DIR = $targetDir
+          $env:FORGE3D_VIEWER_BINARY = $viewerBinary
           "initialized=$(Get-Date -Format o)" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/sentinel.txt"
           @{
             repository = $env:GITHUB_REPOSITORY
@@ -697,6 +712,7 @@ jobs:
             required_labels = @('self-hosted', 'Windows', 'X64', 'forge3d-gpu', 'gpu-nvidia')
             required_backend = 'vulkan'
             installed_wheel_required = $true
+            scratch_dir = $scratchDir
           } | ConvertTo-Json -Depth 4 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/run-context.json"
 
       - uses: actions/checkout@v4
@@ -880,6 +896,24 @@ jobs:
           name: m06-full-geospatial-viewer-evidence
           path: ${{ runner.temp }}/forge3d-m06-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
+      - name: Clean M-06 build scratch
+        if: always()
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FORGE3D_M06_SCRATCH_DIR)) {
+            Write-Warning 'M-06 scratch was not initialized; there is no scoped path to clean'
+            exit 0
+          }
+          $scratchDir = [IO.Path]::GetFullPath($env:FORGE3D_M06_SCRATCH_DIR)
+          $expectedLeaf = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $parentDir = Split-Path -Parent $scratchDir
+          if ((Split-Path -Leaf $scratchDir) -ne $expectedLeaf -or
+              (Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch') {
+            throw "Refusing to clean unexpected M-06 scratch path: $scratchDir"
+          }
+          if (Test-Path -LiteralPath $scratchDir) {
+            Remove-Item -LiteralPath $scratchDir -Recurse -Force
+          }
 
   # ============================================================================
   # COMPENDIUM F3DZ physical-GPU acceptance
@@ -911,6 +945,19 @@ jobs:
           "FORGE3D_F3DZ_ARTIFACT_DIR=$artifactDir" | Add-Content $env:GITHUB_ENV
           $env:FORGE3D_F3DZ_ARTIFACT_DIR = $artifactDir
           New-Item -ItemType Directory -Force $artifactDir | Out-Null
+          $scratchDrive = Get-PSDrive -PSProvider FileSystem |
+            Where-Object { $null -ne $_.Free -and $_.Root } |
+            Sort-Object Free -Descending |
+            Select-Object -First 1
+          if ($null -eq $scratchDrive) { throw 'No filesystem drive is available for F3DZ scratch data' }
+          $scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $scratchDir = Join-Path $scratchDrive.Root "forge3d-ci-scratch/$scratchScope"
+          $targetDir = Join-Path $scratchDir 'cargo-target'
+          New-Item -ItemType Directory -Force $targetDir | Out-Null
+          "FORGE3D_F3DZ_SCRATCH_DIR=$scratchDir" | Add-Content $env:GITHUB_ENV
+          "CARGO_TARGET_DIR=$targetDir" | Add-Content $env:GITHUB_ENV
+          $env:FORGE3D_F3DZ_SCRATCH_DIR = $scratchDir
+          $env:CARGO_TARGET_DIR = $targetDir
           git rev-parse HEAD | Set-Content "$artifactDir/checked-out-head.txt"
           @{
             repository = $env:GITHUB_REPOSITORY
@@ -920,6 +967,7 @@ jobs:
             runner_arch = $env:RUNNER_ARCH
             required_backend = 'vulkan'
             required_labels = @('self-hosted', 'Windows', 'X64', 'forge3d-gpu', 'gpu-nvidia')
+            scratch_dir = $scratchDir
           } | ConvertTo-Json -Depth 4 | Set-Content "$artifactDir/run-context.json"
       - uses: actions/download-artifact@v4
         with:
@@ -958,6 +1006,24 @@ jobs:
           name: f3dz-physical-gpu-evidence
           path: ${{ runner.temp }}/forge3d-f3dz-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
+      - name: Clean F3DZ build scratch
+        if: always()
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FORGE3D_F3DZ_SCRATCH_DIR)) {
+            Write-Warning 'F3DZ scratch was not initialized; there is no scoped path to clean'
+            exit 0
+          }
+          $scratchDir = [IO.Path]::GetFullPath($env:FORGE3D_F3DZ_SCRATCH_DIR)
+          $expectedLeaf = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $parentDir = Split-Path -Parent $scratchDir
+          if ((Split-Path -Leaf $scratchDir) -ne $expectedLeaf -or
+              (Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch') {
+            throw "Refusing to clean unexpected F3DZ scratch path: $scratchDir"
+          }
+          if (Test-Path -LiteralPath $scratchDir) {
+            Remove-Item -LiteralPath $scratchDir -Recurse -Force
+          }
 
   # ============================================================================
   # ANAMNESIS physical cross-backend portability
@@ -1140,6 +1206,20 @@ jobs:
       FORGE3D_RUN_GPU_ANAMNESIS: '1'
 
     steps:
+      - name: Initialize isolated ANAMNESIS scratch
+        shell: pwsh
+        run: |
+          $scratchDrive = Get-PSDrive -PSProvider FileSystem |
+            Where-Object { $null -ne $_.Free -and $_.Root } |
+            Sort-Object Free -Descending |
+            Select-Object -First 1
+          if ($null -eq $scratchDrive) { throw 'No filesystem drive is available for ANAMNESIS scratch data' }
+          $scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $scratchDir = Join-Path $scratchDrive.Root "forge3d-ci-scratch/$scratchScope"
+          $baseTemp = Join-Path $scratchDir 'pytest'
+          New-Item -ItemType Directory -Force $baseTemp | Out-Null
+          "FORGE3D_ANAMNESIS_SCRATCH_DIR=$scratchDir" | Add-Content $env:GITHUB_ENV
+          "FORGE3D_ANAMNESIS_BASE_TEMP=$baseTemp" | Add-Content $env:GITHUB_ENV
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -1170,7 +1250,7 @@ jobs:
         env:
           FORGE3D_ANAMNESIS_RESULT_PATH: ${{ runner.temp }}/anamnesis-production-result.json
         run: |
-          python -m pytest tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance -v --tb=short
+          python -m pytest tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance -v --tb=short --basetemp="$env:FORGE3D_ANAMNESIS_BASE_TEMP"
       - name: Reject native final-frame stale hits
         shell: pwsh
         run: |
@@ -1203,6 +1283,24 @@ jobs:
             ${{ runner.temp }}/anamnesis-p0-adapter.json
             ${{ runner.temp }}/anamnesis-checked-out-head.txt
           if-no-files-found: error
+      - name: Clean ANAMNESIS scratch
+        if: always()
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FORGE3D_ANAMNESIS_SCRATCH_DIR)) {
+            Write-Warning 'ANAMNESIS scratch was not initialized; there is no scoped path to clean'
+            exit 0
+          }
+          $scratchDir = [IO.Path]::GetFullPath($env:FORGE3D_ANAMNESIS_SCRATCH_DIR)
+          $expectedLeaf = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $parentDir = Split-Path -Parent $scratchDir
+          if ((Split-Path -Leaf $scratchDir) -ne $expectedLeaf -or
+              (Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch') {
+            throw "Refusing to clean unexpected ANAMNESIS scratch path: $scratchDir"
+          }
+          if (Test-Path -LiteralPath $scratchDir) {
+            Remove-Item -LiteralPath $scratchDir -Recurse -Force
+          }
 
   # ============================================================================
   # Documentation Build

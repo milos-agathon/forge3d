@@ -66,3 +66,17 @@ def test_python_and_m06_restore_only_their_fixture_bundles() -> None:
     assert "needs: [build-wheels, prepare-lfs-fixtures]" in m06_job
     assert "m06-dem.zip" in m06_job
     assert "python-tiffs.zip" not in m06_job
+    assert "Get-PSDrive -PSProvider FileSystem" in m06_job
+    assert "Sort-Object Free -Descending" in m06_job
+    assert (
+        '$scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"'
+        in m06_job
+    )
+    assert "FORGE3D_M06_SCRATCH_DIR" in m06_job
+    assert '"CARGO_TARGET_DIR=$targetDir"' in m06_job
+    assert '"FORGE3D_VIEWER_BINARY=$viewerBinary"' in m06_job
+    assert "name: Clean M-06 build scratch" in m06_job
+    assert "(Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch'" in m06_job
+    assert m06_job.index("name: Upload M-06 evidence") < m06_job.index(
+        "name: Clean M-06 build scratch"
+    )
