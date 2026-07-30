@@ -3,7 +3,12 @@
 Date: 2026-07-30
 Status: approved (brainstorm complete)
 Deliverable: `examples/population_ghsl/france_population_pt_3d.py` + final plate
-`examples/out/france_population_pt/france_population_pt.png`
+`D:/france_population_pt/out/france_population_pt.png`
+
+**Storage constraint (user directive)**: every generated file — DEM/tile
+caches, reprojected rasters, cached heightfields, probe renders, light-field
+tiles, and the final plate — lives under `D:/france_population_pt/`. Nothing
+generated is written to C:.
 
 ## Goal
 
