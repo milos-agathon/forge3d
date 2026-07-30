@@ -426,45 +426,76 @@ let mean = 0.5 * (near_depth + far_depth);
 let mean_squared = 0.5 * (near_depth * near_depth + far_depth * far_depth);
 let moments = vec2<f32>(mean, mean_squared);
 visibility_output[0] = evsm_moment_leak_control(
-    moments, exp(exponent * (0.4 - 1.0)), exponent, 0.000001
+    moments, exp(exponent * (0.508 - 1.0)), exponent, 0.000001
 );
 visibility_output[1] = evsm_moment_leak_control(
-    moments, exp(exponent * (0.515 - 1.0)), exponent, 0.000001
+    moments, exp(exponent * (0.511 - 1.0)), exponent, 0.000001
 );
 visibility_output[2] = evsm_moment_leak_control(
-    moments, exp(exponent * (0.75 - 1.0)), exponent, 0.000001
+    moments, exp(exponent * (0.514 - 1.0)), exponent, 0.000001
 );
-let uniform_depth = exp(exponent * (0.5 - 1.0));
 visibility_output[3] = evsm_moment_leak_control(
+    moments, exp(exponent * (0.517 - 1.0)), exponent, 0.000001
+);
+visibility_output[4] = evsm_moment_leak_control(
+    moments, exp(exponent * (0.520 - 1.0)), exponent, 0.000001
+);";
+        let curve = execute_shader_probe(source, "EVSM moment leak control", probe);
+        assert!(
+            curve.windows(2).all(|pair| pair[0] > pair[1]),
+            "mixed-moment visibility is not a decreasing curve: {curve:?}"
+        );
+        assert!(
+            curve[0] > 0.95,
+            "mixed moments enter the transition too early: {curve:?}"
+        );
+        assert!(
+            curve[4] < 0.05,
+            "mixed moments did not converge to shadow: {curve:?}"
+        );
+        let soft_indices = curve
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &visibility)| {
+                (visibility > 0.05 && visibility < 0.95).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            soft_indices.len() >= 3,
+            "mixed moments collapsed to fewer than three soft samples: {curve:?}"
+        );
+        let transition_width =
+            (soft_indices[soft_indices.len() - 1] - soft_indices[0]) as f32 * 0.003;
+        assert!(
+            transition_width >= 0.006,
+            "mixed-moment transition collapsed below 0.006 depth: width={transition_width}, curve={curve:?}"
+        );
+    }
+
+    #[test]
+    fn shared_evsm_uniform_distribution_does_not_widen() {
+        let source = include_str!("../shaders/includes/shadow_moments.wgsl");
+        let probe = "
+let exponent = 5.5;
+let uniform_depth = exp(exponent * (0.5 - 1.0));
+visibility_output[0] = evsm_moment_leak_control(
     vec2<f32>(uniform_depth, uniform_depth * uniform_depth),
     exp(exponent * (0.499 - 1.0)),
     exponent,
     0.000001
 );
-visibility_output[4] = evsm_moment_leak_control(
+visibility_output[1] = evsm_moment_leak_control(
     vec2<f32>(uniform_depth, uniform_depth * uniform_depth),
     exp(exponent * (0.55 - 1.0)),
     exponent,
     0.000001
 );";
-        let [front, penumbra, shadow, uniform_front, uniform_shadow] =
-            execute_shader_probe(source, "EVSM moment leak control", probe);
-        assert_eq!(front, 1.0);
-        assert_eq!(
-            uniform_front, 1.0,
-            "variance floor widened a uniform distribution"
-        );
+        let [front, shadow, ..] =
+            execute_shader_probe(source, "EVSM uniform moment transition", probe);
+        assert_eq!(front, 1.0, "variance floor widened a uniform distribution");
         assert!(
-            uniform_shadow < 0.05,
-            "uniform moments leaked behind their occluder: {uniform_shadow}"
-        );
-        assert!(
-            penumbra > 0.05 && penumbra < 0.95,
-            "mixed moments did not retain a soft penumbra: {penumbra}"
-        );
-        assert!(
-            shadow < penumbra && shadow < 0.05,
-            "visibility did not converge to shadow: penumbra={penumbra}, shadow={shadow}"
+            shadow < 0.05,
+            "uniform moments leaked behind their occluder: {shadow}"
         );
     }
 

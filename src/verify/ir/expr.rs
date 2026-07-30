@@ -218,6 +218,7 @@ impl Evaluator<'_> {
                             left_handle,
                             right_handle,
                             &left,
+                            &right,
                         )
                         .or_else(|| divide_values(left.clone(), right.clone(), minimum))
                         .or_else(|| eval_int_binary(left, right, *op))
@@ -867,6 +868,7 @@ impl Evaluator<'_> {
         numerator_handle: Handle<Expression>,
         denominator_handle: Handle<Expression>,
         numerator: &Value,
+        denominator: &Value,
     ) -> Option<Value> {
         let function = function_ref.function(self.module);
         if let Expression::Binary {
@@ -882,14 +884,20 @@ impl Evaluator<'_> {
             } else {
                 None
             };
-            if let (Value::Float(numerator), Some(Value::Float(residual))) = (numerator, residual) {
+            if let (
+                Value::Float(numerator),
+                Some(Value::Float(residual)),
+                Value::Float(denominator),
+            ) = (numerator, residual, denominator)
+            {
                 if numerator.is_finite_only()
                     && residual.is_finite_only()
                     && numerator.lo >= 0.0
                     && residual.lo >= 0.0
-                    && (numerator.lo > 0.0 || residual.lo > 0.0)
                 {
-                    return Some(Value::Float(Interval::new(0.0, 1.0)));
+                    return Some(Value::Float(
+                        numerator.fraction_with_nonnegative_residual(*residual, *denominator),
+                    ));
                 }
             }
         }

@@ -740,14 +740,17 @@ impl Evaluator<'_> {
             let layer_fits_signed_index = coordinates
                 .last()
                 .is_some_and(|&(lo, hi)| lo >= 0 && hi <= i32::MAX as i64);
-            if layer_fits_signed_index
-                && matches!(
-                    layer_relation,
-                    Some(Relation::InImage(image) | Relation::InImageAxes(image, _))
-                        if self.same_dimensions(&image, &name)
-                )
-            {
-                relation_mask |= 1u8 << dimensions.len().saturating_sub(1);
+            let layer_axis = dimensions.len().saturating_sub(1);
+            let layer_bit = 1u8 << layer_axis;
+            let layer_axis_is_proven = match layer_relation {
+                Some(Relation::InImage(image)) => self.same_dimensions(&image, &name),
+                Some(Relation::InImageAxes(image, mask)) => {
+                    self.same_dimensions(&image, &name) && mask & layer_bit != 0
+                }
+                _ => false,
+            };
+            if layer_fits_signed_index && layer_axis_is_proven {
+                relation_mask |= layer_bit;
             }
         }
         let in_bounds = coordinates.len() == dimensions.len()

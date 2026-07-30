@@ -32,16 +32,43 @@ fn strict_positive_branch_excludes_zero_denominator() {
 }
 
 #[test]
-fn positive_fraction_of_sum_is_unit_bounded() {
+fn positive_fraction_does_not_bypass_subnormal_ftz() {
     let source =
         "fn main(value: f32, delta: f32) -> f32 { return value / (value + delta * delta); }";
     let proof = prove_wgsl(
         source,
         "main",
-        &contract("\"value:value:0.000001:1\", \"value:delta:-1:1\"", "0:1"),
+        &contract("\"value:value:1e-45:1e-45\", \"value:delta:0:0\"", "0:1"),
     )
     .unwrap();
-    assert!(proof.alarms.is_empty(), "{:?}", proof.alarms);
+    assert!(
+        proof
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "possible_nan_or_inf"),
+        "{:?}",
+        proof.alarms
+    );
+}
+
+#[test]
+fn positive_fraction_preserves_native_division_ulp_margin_near_one() {
+    let source =
+        "fn main(value: f32, delta: f32) -> f32 { return value / (value + delta * delta); }";
+    let proof = prove_wgsl(
+        source,
+        "main",
+        &contract("\"value:value:1:1\", \"value:delta:0:0\"", "0:1"),
+    )
+    .unwrap();
+    assert!(
+        proof
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "output_range"),
+        "{:?}",
+        proof.alarms
+    );
 }
 
 #[test]
@@ -244,6 +271,22 @@ fn main(layer: u32) -> vec4<f32> {
         "{:?}",
         proof.alarms
     );
+
+    for axis in ["x", "y"] {
+        let wrong_dimension_guard = guarded.replace(
+            "textureNumLayers(image)",
+            &format!("textureDimensions(image).{axis}"),
+        );
+        let proof = prove_wgsl(&wrong_dimension_guard, "main", &contract).unwrap();
+        assert!(
+            proof
+                .alarms
+                .iter()
+                .any(|alarm| alarm.kind == "possible_oob"),
+            "{axis}-dimension guard incorrectly proved the array layer: {:?}",
+            proof.alarms
+        );
+    }
 }
 
 #[test]
