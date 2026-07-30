@@ -208,6 +208,221 @@ def _budget_estimate(dem_grid: np.ndarray, render: int) -> float:
     return BYTES_PER_GRID_TEXEL * texels + BYTES_PER_FRAME_PIXEL * float(render) ** 2
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    parser.add_argument("--snapshot", type=Path, default=None)
+    parser.add_argument("--dem-zoom", type=int, default=None)
+    parser.add_argument("--grid-max", type=int, default=4096, help="Max DEM edge fed to the tracer")
+    parser.add_argument(
+        "--frame", type=int, default=596,
+        help="PT cell edge in pixels (596: the 4096² budget ceiling is render<=722)",
+    )
+    parser.add_argument("--cell-margin", type=int, default=48, help="Feather overlap per cell edge")
+    parser.add_argument("--tiles", type=int, default=8, help="Camera cells per axis")
+    parser.add_argument("--spp", type=int, default=1, help="spp>=4 on big grids trips Windows TDR")
+    parser.add_argument("--max-frames", type=int, default=3072)
+    parser.add_argument("--min-frames", type=int, default=32)
+    parser.add_argument("--variance-threshold", type=float, default=1e-3)
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--relief", type=float, default=None, help="Override RELIEF_WORLD")
+    parser.add_argument("--sun-elevation", type=float, default=None)
+    parser.add_argument("--sun-azimuth", type=float, default=None)
+    parser.add_argument("--tower-world", type=float, default=None, help="Override TOWER_WORLD")
+    parser.add_argument("--tower-gamma", type=float, default=None, help="Override TOWER_GAMMA")
+    parser.add_argument("--tower-min", type=float, default=None, help="Override TOWER_MIN_PERSONS")
+    parser.add_argument("--no-towers", action="store_true", help="Trace terrain only (A/B probe)")
+    parser.add_argument("--tag", type=str, default="", help="Suffix for cache/output names")
+    parser.add_argument("--population-min", type=float, default=POPULATION_MIN_PERSONS)
+    parser.add_argument("--modern-grade", action="store_true")
+    parser.add_argument("--cavity", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--prep-only", action="store_true")
+    parser.add_argument("--raw-only", action="store_true")
+    parser.add_argument("--measure-relief", action="store_true",
+                        help="Land-only p90 world-slope table on the TERRAIN-ONLY grid, then stop")
+    parser.add_argument("--reuse-shade", action="store_true")
+    parser.add_argument("--test", action="store_true",
+                        help="Fast low-res pass (grid 768, one cell at 640) for look checks")
+    parser.add_argument("--self-test", action="store_true")
+    return parser.parse_args()
+
+
+def _neutral_sky_env(height: int = 32, width: int = 64) -> np.ndarray:
+    """Small lat-long environment: pale blue zenith -> warm-white horizon -> grey ground."""
+    zenith = np.array([0.62, 0.72, 0.92], dtype=np.float32) * 1.1
+    horizon = np.array([1.00, 0.99, 0.96], dtype=np.float32) * 0.85
+    ground = np.array([0.28, 0.28, 0.29], dtype=np.float32)
+    rows = np.linspace(1.0, -1.0, height, dtype=np.float32)
+    env_rows = np.empty((height, 3), dtype=np.float32)
+    up = np.clip(rows, 0.0, 1.0)[:, None] ** 0.65
+    env_rows[:] = horizon[None, :] * (1.0 - up) + zenith[None, :] * up
+    below = rows < 0.0
+    down = np.clip(-rows[below], 0.0, 1.0)[:, None] ** 0.5
+    env_rows[below] = horizon[None, :] * (1.0 - down) + ground[None, :] * down
+    return np.repeat(env_rows[:, None, :], width, axis=1)
+
+
+def _clamp_sea_leak(render_dem_path: Path, cache_dir: Path, *, force: bool) -> Path:
+    """Replace leaked bathymetry with sea level; keep genuine sub-sea land.
+
+    France's lowest land is ~-10 m (Camargue, Nord polders). The DEM
+    normalization runs on min/max, so a fringe of Atlantic/Mediterranean
+    bathymetry through the generalized coastline would silently flatten every
+    slope on the plate.
+    """
+    output = cache_dir / f"{render_dem_path.stem}_sealeak_clamped.tif"
+    if rom._is_fresh(output, [render_dem_path]) and not force:
+        return output
+    with rasterio.open(render_dem_path) as src:
+        profile = src.profile.copy()
+        dem = src.read(1, masked=True)
+        nodata = src.nodata if src.nodata is not None else -9999.0
+    data = dem.filled(np.nan).astype(np.float32)
+    valid = np.isfinite(data)
+    leak = valid & (data < SEA_FLOOR_M)
+    lowland = valid & (data < 0.0) & (data >= SEA_FLOOR_M)
+    print(
+        f"[dem] sea leak clamped: {int(leak.sum())} px below {SEA_FLOOR_M:.0f} m "
+        f"(min {float(np.nanmin(data)):.1f} m), genuine sub-sea px kept: {int(lowland.sum())}"
+    )
+    data = np.where(leak, 0.0, data)
+    assert float(np.nanmin(np.where(valid, data, np.nan))) >= SEA_FLOOR_M, "clamp failed"
+    profile.update(dtype="float32", nodata=nodata, compress="lzw")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(output, "w", **profile) as dst:
+        dst.write(np.where(valid, data, nodata).astype(np.float32), 1)
+    return output
+
+
+def _write_population_on_dem_grid(
+    boundary_wgs84, dem_path: Path, output: Path, *, force: bool
+) -> Path:
+    """Reproject GHS_POP onto the DEM grid with MAX (the Egypt lesson).
+
+    The 3 arcsec source (~90 m) is finer than the ~250 m Lambert-93 render
+    cell; NEAREST keeps 1 sample in ~8 and silently deletes hamlets. MAX is
+    the honest reducer for a threshold marker + tower map.
+
+    Prints the INSEE sanity gate: the masked SUM should land near
+    metropolitan France 2020 (~65 M). MAX-reduced cells can't be summed for
+    that check, so the gate sums the SOURCE window under the mask.
+    """
+    if rom._is_fresh(output, [POPULATION_SOURCE, dem_path]) and not force:
+        return output
+
+    with rasterio.open(dem_path) as dem, rasterio.open(POPULATION_SOURCE) as src:
+        dem_data = dem.read(1, masked=True)
+        destination = np.zeros((dem.height, dem.width), dtype=np.float32)
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=destination,
+            src_transform=src.transform,
+            src_crs=src.crs,
+            src_nodata=src.nodata if src.nodata is not None else 0.0,
+            dst_transform=dem.transform,
+            dst_crs=dem.crs,
+            dst_nodata=0.0,
+            init_dest_nodata=True,
+            resampling=Resampling.max,
+        )
+        # SUM pass for the population-total gate (same window, honest reducer
+        # for totals). Only used for the printed sanity check.
+        totals = np.zeros((dem.height, dem.width), dtype=np.float32)
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=totals,
+            src_transform=src.transform,
+            src_crs=src.crs,
+            src_nodata=src.nodata if src.nodata is not None else 0.0,
+            dst_transform=dem.transform,
+            dst_crs=dem.crs,
+            dst_nodata=0.0,
+            init_dest_nodata=True,
+            resampling=Resampling.sum,
+        )
+        boundary_dem = gpd.GeoSeries([boundary_wgs84], crs="EPSG:4326").to_crs(dem.crs).iloc[0]
+        outside = geometry_mask(
+            [boundary_dem],
+            out_shape=(dem.height, dem.width),
+            transform=dem.transform,
+            invert=False,
+        )
+        dead = np.asarray(dem_data.mask) | outside
+        destination[dead] = 0.0
+        totals[dead] = 0.0
+        profile = dem.profile.copy()
+        profile.update(driver="GTiff", count=1, dtype="float32", nodata=0.0, compress="lzw")
+
+    total_m = float(totals.sum()) / 1e6
+    inhabited = destination >= POPULATION_MIN_PERSONS
+    print(
+        f"[pop] reprojected (max) -> {int(inhabited.sum())} cells >= "
+        f"{POPULATION_MIN_PERSONS:g} residents, peak cell {float(destination.max()):.0f}, "
+        f"masked total {total_m:.1f} M (INSEE metro 2020 ~65 M)"
+    )
+    if not (55.0 <= total_m <= 75.0):
+        raise RuntimeError(
+            f"masked population total {total_m:.1f} M is outside the 55-75 M sanity "
+            "band — wrong mask, wrong window or wrong source"
+        )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(output, "w", **profile) as dst:
+        dst.write(destination, 1)
+    return output
+
+
+def _prepare_inputs(args: argparse.Namespace, cache_dir: Path) -> tuple[Path, Path, Path]:
+    """Return (render DEM, population raster, light-free overlay), building caches."""
+    rom._configure_region(FRANCE_REGION)
+    rom.CAPTION_LINES = list(CAPTION_LINES)
+    rom.TITLE_LINES = list(TITLE_LINES)  # _configure_region says "Built-up areas"
+    rom.SNAPSHOT_SIZE = SNAPSHOT_SIZE
+    # PROMETHEUS owns ALL shadowing (design decision: pure PT, no viewer pass).
+    rom.TERRAIN_CAST_SHADOW = {**rom.TERRAIN_CAST_SHADOW, "enabled": False}
+
+    threshold = float(args.population_min)
+
+    def _france_active_mask(population, valid, source_path):  # noqa: ANN001,ARG001
+        return valid & np.isfinite(population) & (population >= threshold)
+
+    rom._builtup_active_mask = _france_active_mask
+    rom.OVERLAY_STYLE_VERSION = (
+        "france-population-overlay-pt-lightfree"
+        f"-src{POPULATION_SOURCE.stem}"
+        f"-minpop{threshold:.2f}"
+        f"-marker{int(rom.BUILTUP_COLOR[0])}-{int(rom.BUILTUP_COLOR[1])}-{int(rom.BUILTUP_COLOR[2])}"
+        f"-terrainpal{';'.join('-'.join(str(int(c)) for c in color) for color in rom.TERRAIN_PALETTE)}"
+        "-castshadow0-sealeakclamp-bboxmetro"
+    )
+
+    dem_zoom = int(args.dem_zoom if args.dem_zoom is not None else FRANCE_REGION.dem_zoom)
+    print("== Preparing France inputs (cached) ==")
+    boundary_zip = rom._download(
+        rom.NATURAL_EARTH, cache_dir / "ne_10m_admin_0_countries.zip", force=args.force
+    )
+    boundary_wgs84 = rom._country_geometry(boundary_zip, "EPSG:4326")
+    dem_path = rom._build_dem(boundary_zip, cache_dir, dem_zoom, force=args.force)
+    render_dem_path = rom._prepare_render_dem(dem_path, cache_dir, force=args.force)
+    render_dem_path = _clamp_sea_leak(render_dem_path, cache_dir, force=args.force)
+    population_path = _write_population_on_dem_grid(
+        boundary_wgs84,
+        render_dem_path,
+        cache_dir / f"fra_population_on_{render_dem_path.stem}_v1.tif",
+        force=args.force,
+    )
+    overlay_path = rom._build_overlay(
+        population_path,
+        render_dem_path,
+        cache_dir / f"france_population_overlay_pt_lightfree_p{threshold:g}_v1.png",
+        force=args.force,
+    )
+    with rasterio.open(render_dem_path) as src:
+        print(f"[dem] render grid {src.width}x{src.height} in {FRANCE_CRS}")
+    return render_dem_path, population_path, overlay_path
+
+
 def _self_test() -> int:
     """Pure-function gates; no GPU, no network, no D: writes."""
     # _max_downsample: block maxima survive, shape is exact.
@@ -235,8 +450,52 @@ def _self_test() -> int:
     return 0
 
 
+def main() -> int:
+    global RELIEF_WORLD, SUN_ELEVATION, SUN_AZIMUTH, TOWER_WORLD, TOWER_GAMMA, TOWER_MIN_PERSONS
+    args = _parse_args()
+    if args.self_test:
+        return _self_test()
+    if args.relief is not None:
+        RELIEF_WORLD = float(args.relief)
+    if args.sun_elevation is not None:
+        SUN_ELEVATION = float(args.sun_elevation)
+    if args.sun_azimuth is not None:
+        SUN_AZIMUTH = float(args.sun_azimuth)
+    if args.tower_world is not None:
+        TOWER_WORLD = float(args.tower_world)
+    if args.tower_gamma is not None:
+        TOWER_GAMMA = float(args.tower_gamma)
+    if args.tower_min is not None:
+        TOWER_MIN_PERSONS = float(args.tower_min)
+    if args.no_towers:
+        TOWER_WORLD = 0.0
+    if args.test:
+        args.grid_max = min(args.grid_max, 768)
+        args.tiles = 1
+        args.frame = min(args.frame, 640)
+        args.cell_margin = 0
+        args.max_frames = min(args.max_frames, 1024)
+        args.variance_threshold = max(args.variance_threshold, 4e-3)
+
+    output_dir = Path(args.output_dir).resolve()
+    cache_dir = Path(args.cache_dir).resolve()
+    tag = f"_{args.tag}" if args.tag else ""
+    snapshot = (
+        args.snapshot.resolve()
+        if args.snapshot is not None
+        else output_dir / f"france_population_pt{tag}.png"
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    render_dem_path, population_path, overlay_path = _prepare_inputs(args, cache_dir)
+    if args.prep_only:
+        print(f"Prepared: {render_dem_path}\nPrepared: {population_path}\nPrepared: {overlay_path}")
+        return 0
+
+    print("later tasks: towers, trace, modulate, compose")
+    return 2
+
+
 if __name__ == "__main__":
-    if "--self-test" in sys.argv:
-        raise SystemExit(_self_test())
-    print("prep/trace stages arrive in later tasks; only --self-test is wired")
-    raise SystemExit(2)
+    raise SystemExit(main())
