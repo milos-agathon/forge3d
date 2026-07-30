@@ -11,11 +11,20 @@ def _workflow() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
 
 
-def test_ci_downloads_lfs_once_and_shares_one_artifact() -> None:
+def test_ci_downloads_verified_lfs_media_once_and_shares_one_artifact() -> None:
     workflow = _workflow()
 
-    assert workflow.count("git lfs pull") == 1
+    assert "git lfs pull" not in workflow
     assert "lfs: true" not in workflow
+    assert (
+        "https://media.githubusercontent.com/media/milos-agathon/forge3d/"
+        "92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
+    ) in workflow
+    assert workflow.count("sha256sum --check -") == 1
+    assert "cff39b4e02d7ba13c48f3d8b1a4080d40ada753ade62fa951459fe4e01e98b48" in workflow
+    assert "875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3" in workflow
+    assert "d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478" in workflow
+    assert "is still an LFS pointer" in workflow
     assert workflow.count("name: lfs-fixture-bundles") == 3
     assert workflow.count("uses: actions/upload-artifact@v4") >= 1
     assert "retention-days: 1" in workflow

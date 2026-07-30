@@ -42,10 +42,16 @@ jobs:
       - name: Download the required LFS objects once
         shell: bash
         run: |
-          git lfs install --local
-          git lfs pull \
-            --include="assets/tif/Mount_Fuji_30m.tif,assets/tif/dem_rainier.tif,assets/tif/switzerland_dem.tif" \
-            --exclude=""
+          media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
+          while read -r sha256 fixture; do
+            curl --fail --location --retry 3 \
+              --output "$fixture" "$media_base/$fixture"
+            echo "$sha256  $fixture" | sha256sum --check -
+          done <<'EOF'
+          cff39b4e02d7ba13c48f3d8b1a4080d40ada753ade62fa951459fe4e01e98b48 assets/tif/Mount_Fuji_30m.tif
+          875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3 assets/tif/dem_rainier.tif
+          d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478 assets/tif/switzerland_dem.tif
+          EOF
 
           for fixture in \
             assets/tif/Mount_Fuji_30m.tif \
