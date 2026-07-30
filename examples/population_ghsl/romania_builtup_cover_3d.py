@@ -891,6 +891,8 @@ def _load_font(
                 "Baskerville.ttc",
                 "Georgia Bold.ttf",
                 "Times New Roman Bold.ttf",
+                "georgiab.ttf",  # Windows file names, see non-bold list
+                "timesbd.ttf",
             ]
             if bold
             else [
@@ -899,6 +901,11 @@ def _load_font(
                 "Baskerville.ttc",
                 "Georgia.ttf",
                 "Times New Roman.ttf",
+                # Windows installs resolve by FILE name (lowercase 8.3-era
+                # names); without these the composer silently falls back to
+                # PIL's tiny bitmap font and the plate titles come out ~10 px.
+                "georgia.ttf",
+                "times.ttf",
             ]
         )
     else:
