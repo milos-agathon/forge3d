@@ -568,25 +568,43 @@ class TestEvsmExposureParity:
         with f3d.open_viewer_async(
             terrain_path=str(dem), width=640, height=400, timeout=45.0
         ) as viewer:
-            visibility = {
-                technique: self._render(
+            terrain_reference = self._render(
+                viewer, "pcf", tmp_path / "pcf_reference.png"
+            )
+            raw_sequence = [
+                self._render(
                     viewer,
                     technique,
-                    tmp_path / f"{technique}_raw.png",
+                    tmp_path / f"{index}_{technique}_raw.png",
                     debug_mode=35,
                 )
-                for technique in ("pcf", "evsm")
-            }
+                for index, technique in enumerate(("pcf", "evsm", "pcf", "evsm"))
+            ]
 
-        cast = visibility["pcf"] < 0.6
+        assert np.array_equal(raw_sequence[0], raw_sequence[2]), (
+            "PCF raw visibility changed across an EVSM round trip"
+        )
+        assert np.array_equal(raw_sequence[1], raw_sequence[3]), (
+            "EVSM raw visibility changed across a PCF round trip"
+        )
+        pcf, evsm = raw_sequence[:2]
+        terrain = terrain_reference < 0.97
+        assert terrain.sum() >= 50_000, "viewer framing has too little terrain"
+
+        cast = terrain & (pcf < 0.6)
         radius = 3
         neighborhoods = np.lib.stride_tricks.sliding_window_view(
-            np.pad(cast, radius), (2 * radius + 1, 2 * radius + 1)
+            np.pad(cast, radius, constant_values=False),
+            (2 * radius + 1, 2 * radius + 1),
         )
-        cast_core = neighborhoods.all(axis=(-2, -1))
+        neighborhood_has_cast = neighborhoods.any(axis=(-2, -1))
+        cast_core = terrain & neighborhoods.all(axis=(-2, -1))
+        shadow_edge = terrain & neighborhood_has_cast & ~cast_core
+        far_lit = terrain & ~neighborhood_has_cast & (pcf > 0.99)
         assert cast_core.sum() >= 500, "PCF cast shadow has no measurable interior"
+        assert shadow_edge.sum() >= 1_000, "PCF cast shadow has no measurable edge"
+        assert far_lit.sum() >= 10_000, "PCF has no measurable far-lit terrain"
 
-        evsm = visibility["evsm"]
         horizontal_pairs = cast_core[:, :-1] & cast_core[:, 1:]
         vertical_pairs = cast_core[:-1, :] & cast_core[1:, :]
         jumps = np.concatenate(
@@ -617,38 +635,45 @@ class TestEvsmExposureParity:
             "EVSM artifact suppression erased the PCF-defined cast-shadow core: "
             f"only {retained_shadow:.4f} remains clearly shadowed"
         )
-        penumbra = (visibility["pcf"] > 0.01) & (visibility["pcf"] < 0.99)
-        evsm_difference = np.abs(visibility["evsm"] - visibility["pcf"])
-        evsm_soft = (
-            (visibility["evsm"] > 0.05)
-            & (visibility["evsm"] < 0.95)
+        far_lit_delta = evsm[far_lit] - pcf[far_lit]
+        far_lit_abs_delta = float(np.abs(far_lit_delta).mean())
+        assert float(far_lit_delta.mean()) >= -0.02, (
+            "EVSM globally dims terrain away from the cast shadow: "
+            f"far-lit mean delta={far_lit_delta.mean():.4f}"
         )
-        differentiated_soft_pixels = int(
-            (
-                penumbra
-                & (evsm_difference > 0.01)
-                & evsm_soft
-            ).sum()
+        assert far_lit_abs_delta <= 0.03, (
+            "EVSM differs from PCF away from the cast shadow: "
+            f"far-lit mean absolute delta={far_lit_abs_delta:.4f}"
         )
-        evsm_only_soft_pixels = int((evsm_soft & ~penumbra).sum())
-        mean_penumbra_difference = float(evsm_difference[penumbra].mean())
+
+        evsm_difference = np.abs(evsm - pcf)
+        differentiated_soft = (
+            shadow_edge
+            & (evsm_difference > 0.01)
+            & (evsm > 0.05)
+            & (evsm < 0.95)
+        )
+        differentiated_soft_pixels = int(differentiated_soft.sum())
+        soft_fraction = float(differentiated_soft_pixels / shadow_edge.sum())
+        mean_edge_difference = float(evsm_difference[shadow_edge].mean())
         print(
-            "EVSM soft transition: "
-            f"mean_pcf_delta={mean_penumbra_difference:.6f}, "
-            f"differentiated={differentiated_soft_pixels}, "
-            f"evsm_only={evsm_only_soft_pixels}"
+            "EVSM localized soft transition: "
+            f"mean_edge_delta={mean_edge_difference:.6f}, "
+            f"far_lit_delta={far_lit_abs_delta:.6f}, "
+            f"soft_pixels={differentiated_soft_pixels}, "
+            f"soft_fraction={soft_fraction:.6f}"
         )
-        assert mean_penumbra_difference >= 0.05, (
-            "EVSM's moment-native penumbra is too close to PCF: "
-            f"mean difference={mean_penumbra_difference:.4f}"
+        assert mean_edge_difference >= 0.03, (
+            "EVSM's moment-native shadow edge is too close to PCF: "
+            f"mean edge difference={mean_edge_difference:.4f}"
         )
-        assert differentiated_soft_pixels >= 1000, (
-            "EVSM produces no materially distinct soft transition: "
-            f"{differentiated_soft_pixels} differentiated penumbra pixels"
+        assert mean_edge_difference >= far_lit_abs_delta + 0.02, (
+            "EVSM's difference is not localized to the shadow edge: "
+            f"edge={mean_edge_difference:.4f}, far-lit={far_lit_abs_delta:.4f}"
         )
-        assert evsm_only_soft_pixels >= 500, (
-            "EVSM has no soft transition outside PCF's penumbra: "
-            f"{evsm_only_soft_pixels} EVSM-only soft pixels"
+        assert differentiated_soft_pixels >= 500 and soft_fraction >= 0.05, (
+            "EVSM produces no materially localized soft transition: "
+            f"{differentiated_soft_pixels} pixels ({soft_fraction:.4f} of edge)"
         )
 
 

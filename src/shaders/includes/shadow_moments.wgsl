@@ -4,11 +4,10 @@ const MSM_MATRIX_EPSILON: f32 = 1e-7;
 const MSM_DETERMINANT_EPSILON: f32 = 1e-12;
 const EVSM_MINIMUM_VARIANCE: f32 = 0.000375;
 const EVSM_MAX_EXPONENT_RGBA16F: f32 = 9.0;
-// Maximum normalized-depth span assigned to a mixed-distribution penumbra.
-const EVSM_MAX_DEPTH_TRANSITION: f32 = 0.03;
-// Span three sigmas, starting two sigmas toward the occluder from the mean.
-const EVSM_EDGE_SIGMA_SCALE: f32 = 3.0;
-const EVSM_OCCLUDER_SIGMA_SCALE: f32 = 2.0;
+const EVSM_FP16_UNIT_ROUNDOFF: f32 = 0.00048828125;
+const EVSM_FP16_MIN_SUBNORMAL_HALF: f32 = 0.0000000298023223876953125;
+const EVSM_FINITE_LIMIT: f32 = 65504.0;
+const EVSM_VISIBILITY_CONTRAST_POWER: f32 = 48.0;
 
 fn chebyshev_upper_bound_visibility(mean: f32, variance: f32, receiver: f32) -> f32 {
     if (receiver <= mean) {
@@ -27,21 +26,68 @@ fn evsm_minimum_variance(
     return depth_scale * depth_scale;
 }
 
+// Returns conservative mean-upper and variance-upper bounds for independently
+// rounded Rgba16Float first and second moments.
+fn evsm_fp16_moment_bounds(quantized: vec2<f32>) -> vec2<f32> {
+    let error = (
+        EVSM_FP16_UNIT_ROUNDOFF * abs(quantized)
+        + vec2<f32>(EVSM_FP16_MIN_SUBNORMAL_HALF)
+    ) / (1.0 - EVSM_FP16_UNIT_ROUNDOFF);
+    let mean_lower = quantized.x - error.x;
+    let mean_upper = quantized.x + error.x;
+    let square_lower = select(
+        min(mean_lower * mean_lower, mean_upper * mean_upper),
+        0.0,
+        mean_lower <= 0.0 && mean_upper >= 0.0
+    );
+    let variance_upper =
+        max(quantized.y + error.y - square_lower, 0.0);
+    return vec2<f32>(mean_upper, variance_upper);
+}
+
+fn evsm_reduce_light_bleed(visibility: f32) -> f32 {
+    if (!(visibility >= 0.0) || !(visibility <= 1.0)) {
+        return 1.0;
+    }
+    // A smooth contrast curve suppresses high-probability light leaks without
+    // introducing the discontinuity of a hard light-bleed cutoff.
+    return pow(visibility, EVSM_VISIBILITY_CONTRAST_POWER);
+}
+
 fn evsm_visibility_from_moments(
     moments: vec4<f32>,
     positive_receiver: f32,
     negative_receiver: f32,
     variance_floor: vec2<f32>
 ) -> f32 {
-    let positive_variance =
-        max(moments.g - moments.r * moments.r, variance_floor.x);
-    let negative_variance =
-        max(moments.a - moments.b * moments.b, variance_floor.y);
+    if (
+        !all(abs(moments) <= vec4<f32>(EVSM_FINITE_LIMIT))
+        || !(abs(positive_receiver) <= EVSM_FINITE_LIMIT)
+        || !(abs(negative_receiver) <= EVSM_FINITE_LIMIT)
+        || !all(abs(variance_floor) <= vec2<f32>(EVSM_FINITE_LIMIT))
+        || !all(variance_floor >= vec2<f32>(0.0))
+    ) {
+        return 1.0;
+    }
+    let positive_bounds = evsm_fp16_moment_bounds(moments.rg);
+    let negative_bounds = evsm_fp16_moment_bounds(moments.ba);
+    let positive_variance = max(positive_bounds.y, variance_floor.x);
+    let negative_variance = max(negative_bounds.y, variance_floor.y);
     let positive_visibility =
-        chebyshev_upper_bound_visibility(moments.r, positive_variance, positive_receiver);
+        chebyshev_upper_bound_visibility(
+            positive_bounds.x,
+            positive_variance,
+            positive_receiver
+        );
     let negative_visibility =
-        chebyshev_upper_bound_visibility(moments.b, negative_variance, negative_receiver);
-    return min(positive_visibility, negative_visibility);
+        chebyshev_upper_bound_visibility(
+            negative_bounds.x,
+            negative_variance,
+            negative_receiver
+        );
+    return evsm_reduce_light_bleed(
+        min(positive_visibility, negative_visibility)
+    );
 }
 
 fn evsm_moment_leak_control(
@@ -53,50 +99,22 @@ fn evsm_moment_leak_control(
     if (
         !(positive_exponent > 0.0)
         || !(positive_exponent <= EVSM_MAX_EXPONENT_RGBA16F)
-        || positive_moments.x != positive_moments.x
-        || positive_moments.y != positive_moments.y
-        || positive_receiver != positive_receiver
+        || !all(abs(positive_moments) <= vec2<f32>(EVSM_FINITE_LIMIT))
+        || !(abs(positive_receiver) <= EVSM_FINITE_LIMIT)
+        || !(minimum_variance >= 0.0)
+        || !(minimum_variance <= EVSM_FINITE_LIMIT)
     ) {
         return 1.0;
     }
 
-    let minimum_warp = exp(-positive_exponent);
-    let positive_mean = clamp(positive_moments.x, minimum_warp, 1.0);
-    let receiver = clamp(positive_receiver, minimum_warp, 1.0);
-
-    let mean_depth =
-        1.0 + log(positive_mean) / positive_exponent;
-    let receiver_depth =
-        1.0 + log(receiver) / positive_exponent;
-    let variance = max(
-        positive_moments.y - positive_mean * positive_mean,
-        minimum_variance
+    let moment_bounds = evsm_fp16_moment_bounds(positive_moments);
+    let variance = max(moment_bounds.y, minimum_variance);
+    let visibility = chebyshev_upper_bound_visibility(
+        moment_bounds.x,
+        variance,
+        positive_receiver
     );
-    let warp_derivative =
-        max(positive_exponent * positive_mean, 0.000001);
-    let edge_depth_sigma =
-        sqrt(max(variance - minimum_variance, 0.0)) / warp_derivative;
-    let floor_depth_sigma = sqrt(minimum_variance) / warp_derivative;
-    if (edge_depth_sigma <= floor_depth_sigma) {
-        return select(0.0, 1.0, receiver_depth <= mean_depth);
-    }
-    let transition_width = min(
-        EVSM_EDGE_SIGMA_SCALE * edge_depth_sigma,
-        EVSM_MAX_DEPTH_TRANSITION
-    );
-    let support_offset = min(
-        EVSM_OCCLUDER_SIGMA_SCALE * edge_depth_sigma,
-        EVSM_MAX_DEPTH_TRANSITION
-    );
-    let occluder_depth = mean_depth - support_offset;
-    if (receiver_depth <= occluder_depth) {
-        return 1.0;
-    }
-    return 1.0 - smoothstep(
-        0.0,
-        transition_width,
-        receiver_depth - occluder_depth
-    );
+    return evsm_reduce_light_bleed(visibility);
 }
 
 fn msm_visibility_from_moments(

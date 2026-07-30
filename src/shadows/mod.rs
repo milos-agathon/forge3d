@@ -230,6 +230,125 @@ fn test_visibility_entry() {{
         result
     }
 
+    fn execute_evsm_half_uniform_probe(depths: &[f32]) -> Vec<f32> {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let queue = &context.queue;
+        let source = format!(
+            "{}
+@group(0) @binding(30) var<storage, read> evsm_inputs: array<vec4<f32>>;
+@group(0) @binding(31) var<storage, read_write> evsm_outputs: array<f32>;
+
+@compute @workgroup_size(64)
+fn test_evsm_half_uniform(@builtin(global_invocation_id) id: vec3<u32>) {{
+    if (id.x >= {}u) {{
+        return;
+    }}
+    let input = evsm_inputs[id.x];
+    evsm_outputs[id.x] =
+        evsm_moment_leak_control(input.xy, input.z, 9.0, input.w);
+}}",
+            include_str!("../shaders/includes/shadow_moments.wgsl"),
+            depths.len()
+        );
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("evsm-half-uniform-contract"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("evsm-half-uniform-contract"),
+            layout: None,
+            module: &module,
+            entry_point: "test_evsm_half_uniform",
+        });
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            panic!("EVSM half-uniform shader probe failed: {error}");
+        }
+
+        let inputs = depths
+            .iter()
+            .map(|&depth| {
+                let receiver = (9.0 * (depth - 1.0)).exp();
+                let stored_mean = half::f16::from_f32(receiver).to_f32();
+                let stored_mean_squared = half::f16::from_f32(receiver * receiver).to_f32();
+                let minimum_variance = (0.000375 * 9.0 * receiver).powi(2);
+                [stored_mean, stored_mean_squared, receiver, minimum_variance]
+            })
+            .collect::<Vec<_>>();
+        let input = crate::core::resource_tracker::tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("evsm-half-uniform-input"),
+                contents: bytemuck::cast_slice(&inputs),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )
+        .expect("input buffer");
+        let byte_size = (depths.len() * std::mem::size_of::<f32>()) as u64;
+        let output = crate::core::resource_tracker::tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("evsm-half-uniform-output"),
+                size: byte_size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )
+        .expect("output buffer");
+        let readback = crate::core::resource_tracker::tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("evsm-half-uniform-readback"),
+                size: byte_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .expect("readback buffer");
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("evsm-half-uniform-contract"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 30,
+                    resource: input.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 31,
+                    resource: output.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("evsm-half-uniform-contract"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("evsm-half-uniform-contract"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((depths.len() as u32).div_ceil(64), 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&output, 0, &readback, 0, byte_size);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = readback.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).expect("map callback receiver");
+        });
+        device.poll(wgpu::Maintain::Wait);
+        receiver.recv().expect("map callback").expect("map result");
+        let mapped = slice.get_mapped_range();
+        let result = bytemuck::cast_slice::<u8, f32>(&mapped).to_vec();
+        drop(mapped);
+        readback.unmap();
+        result
+    }
+
     #[test]
     fn evsm_exponent_clamp_keeps_normalized_moments_representable_in_rgba16f() {
         assert_eq!(clamp_evsm_exponent(-1.0), 0.0);
@@ -268,12 +387,12 @@ visibility_output[4] =
             "behind-mean Chebyshev result was {behind}"
         );
         assert!(
-            (positive_front - 0.5).abs() < 1.0e-5,
-            "the positive lobe's lit shortcut masked the negative lobe"
+            positive_front.abs() < 1.0e-5,
+            "dual-lobe bleed reduction did not preserve the negative lobe: {positive_front}"
         );
         assert!(
-            (negative_front - 0.5).abs() < 1.0e-5,
-            "the negative lobe's lit shortcut masked the positive lobe"
+            negative_front.abs() < 1.0e-5,
+            "dual-lobe bleed reduction did not preserve the positive lobe: {negative_front}"
         );
         assert_eq!(both_front, 1.0, "both front-of-mean lobes must be lit");
     }
@@ -307,7 +426,7 @@ visibility_output[0] = evsm_moment_leak_control(
     moments, exp(exponent * (0.4 - 1.0)), exponent, 0.000001
 );
 visibility_output[1] = evsm_moment_leak_control(
-    moments, exp(exponent * (0.5 - 1.0)), exponent, 0.000001
+    moments, exp(exponent * (0.52 - 1.0)), exponent, 0.000001
 );
 visibility_output[2] = evsm_moment_leak_control(
     moments, exp(exponent * (0.75 - 1.0)), exponent, 0.000001
@@ -344,6 +463,101 @@ visibility_output[4] = evsm_moment_leak_control(
             shadow < penumbra && shadow < 0.05,
             "visibility did not converge to shadow: penumbra={penumbra}, shadow={shadow}"
         );
+    }
+
+    #[test]
+    fn shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver() {
+        let depths = [0.1, 0.45, 0.5, 0.7, 0.9];
+        let visibility = execute_evsm_half_uniform_probe(&depths);
+        for (depth, value) in depths.into_iter().zip(visibility) {
+            assert_eq!(
+                value, 1.0,
+                "uniform moments falsely shadowed their receiver at depth {depth}: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_evsm_chebyshev_is_conservative_for_uniform_half_moments() {
+        let source = include_str!("../shaders/includes/shadow_moments.wgsl");
+        let probe = "
+let receiver = 0.0111089965;
+let moments = vec4<f32>(
+    0.0111083984, 0.000123381615, -0.0111083984, 0.000123381615
+);
+let minimum = vec2<f32>(0.0000000014057148);
+visibility_output[0] =
+    evsm_visibility_from_moments(moments, receiver, -receiver, minimum);";
+        let [visibility, ..] =
+            execute_shader_probe(source, "EVSM conservative half Chebyshev", probe);
+        assert_eq!(
+            visibility, 1.0,
+            "half rounding made a uniform receiver self-shadow: {visibility}"
+        );
+    }
+
+    #[test]
+    fn shared_evsm_uniform_half_uncertainty_has_a_bounded_transition() {
+        let source = include_str!("../shaders/includes/shadow_moments.wgsl");
+        let probe = "
+let moments = vec2<f32>(0.0111083984, 0.000123381615);
+visibility_output[0] =
+    evsm_moment_leak_control(moments, 0.0111591, 9.0, 0.00000000146);
+visibility_output[1] =
+    evsm_moment_leak_control(moments, 0.017422374, 9.0, 0.00000000346);";
+        let [near, far, ..] =
+            execute_shader_probe(source, "EVSM half-uncertainty transition", probe);
+        assert!(
+            near > 0.05 && near < 0.95,
+            "half uncertainty produced a hard near-receiver transition: {near}"
+        );
+        assert!(
+            far < 0.05,
+            "half uncertainty leaked far behind a uniform occluder: {far}"
+        );
+    }
+
+    #[test]
+    fn shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows() {
+        let depths = (0..=10_000)
+            .map(|i| i as f32 / 10_000.0)
+            .collect::<Vec<_>>();
+        let visibility = execute_evsm_half_uniform_probe(&depths);
+        let false_shadows = visibility.iter().filter(|&&value| value != 1.0).count();
+        let minimum_visibility = visibility.iter().copied().fold(1.0, f32::min);
+        assert_eq!(
+            false_shadows, 0,
+            "{false_shadows} of 10001 uniform depths were falsely shadowed"
+        );
+        assert_eq!(minimum_visibility, 1.0);
+    }
+
+    #[test]
+    fn shared_evsm_helpers_fail_open_for_non_finite_inputs() {
+        let source = include_str!("../shaders/includes/shadow_moments.wgsl");
+        let probe = "
+let zero = visibility_output[4];
+let nan_value = zero / zero;
+let infinity = 1.0 / zero;
+visibility_output[0] = evsm_visibility_from_moments(
+    vec4<f32>(nan_value), 0.5, -0.5, vec2<f32>(0.0001)
+);
+visibility_output[1] = evsm_visibility_from_moments(
+    vec4<f32>(0.5, 0.26, -0.5, 0.26), nan_value, -0.5, vec2<f32>(0.0001)
+);
+visibility_output[2] = evsm_visibility_from_moments(
+    vec4<f32>(0.5, 0.26, -0.5, 0.26), 0.6, -0.6, vec2<f32>(nan_value)
+);
+visibility_output[3] = min(
+    evsm_moment_leak_control(vec2<f32>(infinity), 0.5, 9.0, 0.0001),
+    evsm_moment_leak_control(vec2<f32>(0.5, 0.26), 0.5, 9.0, nan_value)
+);
+visibility_output[4] = min(
+    evsm_moment_leak_control(vec2<f32>(0.5, 0.26), infinity, 9.0, 0.0001),
+    evsm_moment_leak_control(vec2<f32>(0.5, 0.26), 0.5, infinity, 0.0001)
+);";
+        let visibility = execute_shader_probe(source, "EVSM non-finite inputs", probe);
+        assert_eq!(visibility, [1.0; 5], "invalid EVSM inputs must fail open");
     }
 
     #[test]
