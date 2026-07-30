@@ -491,7 +491,7 @@ mod tests {
         height: u32,
         format: TextureFormat,
         usage: wgpu::TextureUsages,
-    ) -> Texture {
+    ) -> crate::core::resource_tracker::TrackedTexture {
         texture_with_descriptor(
             device,
             label,
@@ -514,21 +514,25 @@ mod tests {
         dimension: wgpu::TextureDimension,
         format: TextureFormat,
         usage: wgpu::TextureUsages,
-    ) -> Texture {
-        device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    ) -> crate::core::resource_tracker::TrackedTexture {
+        crate::core::resource_tracker::tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count,
+                dimension,
+                format,
+                usage,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count,
-            dimension,
-            format,
-            usage,
-            view_formats: &[],
-        })
+        )
+        .expect("test texture")
     }
 
     #[test]

@@ -26,36 +26,36 @@ fn test_msm_fragment() -> @location(0) vec4<f32> {{
 }}"
     );
 
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("msm-front-visibility-contract"),
-        source: wgpu::ShaderSource::Wgsl(source.into()),
-    });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("msm-front-visibility-contract"),
-        layout: None,
-        vertex: wgpu::VertexState {
-            module: &module,
-            entry_point: "test_msm_vertex",
-            buffers: &[],
+    let module = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "msm-front-visibility-contract",
+        &source,
+    );
+    let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("msm-front-visibility-contract"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: "test_msm_vertex",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: "test_msm_fragment",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
         },
-        fragment: Some(wgpu::FragmentState {
-            module: &module,
-            entry_point: "test_msm_fragment",
-            targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-    });
-    if let Some(error) = pollster::block_on(device.pop_error_scope()) {
-        panic!("MSM visibility harness failed: {error}");
-    }
+    );
     device.push_error_scope(wgpu::ErrorFilter::Validation);
 
     let render_target = crate::core::resource_tracker::tracked_create_texture(

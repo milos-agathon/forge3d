@@ -156,20 +156,17 @@ fn test_visibility_entry() {{
     {probe_body}
 }}"
         );
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("evsm-visibility-contract"),
-            source: wgpu::ShaderSource::Wgsl(source.into()),
-        });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("evsm-visibility-contract"),
-            layout: None,
-            module: &module,
-            entry_point: "test_visibility_entry",
-        });
-        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
-            panic!("{label} shader probe failed: {error}");
-        }
+        let module =
+            crate::core::shader_registry::create_labeled_shader_module(device, label, &source);
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: None,
+                module: &module,
+                entry_point: "test_visibility_entry",
+            },
+        );
         let output = crate::core::resource_tracker::tracked_create_buffer(
             device,
             &wgpu::BufferDescriptor {
@@ -248,20 +245,20 @@ fn test_evsm_half_uniform(@builtin(global_invocation_id) id: vec3<u32>) {{
             include_str!("../shaders/includes/shadow_moments.wgsl"),
             depths.len()
         );
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("evsm-half-uniform-contract"),
-            source: wgpu::ShaderSource::Wgsl(source.into()),
-        });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("evsm-half-uniform-contract"),
-            layout: None,
-            module: &module,
-            entry_point: "test_evsm_half_uniform",
-        });
-        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
-            panic!("EVSM half-uniform shader probe failed: {error}");
-        }
+        let module = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "evsm-half-uniform-contract",
+            &source,
+        );
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("evsm-half-uniform-contract"),
+                layout: None,
+                module: &module,
+                entry_point: "test_evsm_half_uniform",
+            },
+        );
 
         let inputs = depths
             .iter()
