@@ -74,6 +74,22 @@ pub(crate) fn shadow_allocation_bytes(
         .ok_or_else(|| crate::core::error::RenderError::render("shadow allocation size overflow"))
 }
 
+pub(crate) fn validate_shadow_allocation_budget(
+    resolution: u32,
+    cascades: u32,
+    requires_moments: bool,
+) -> crate::core::error::RenderResult<()> {
+    validate_shadow_dimensions(resolution, cascades)?;
+    let allocation_bytes = shadow_allocation_bytes(resolution, cascades, requires_moments)?;
+    if allocation_bytes > MAX_SHADOW_ALLOCATION_BYTES {
+        return Err(crate::core::error::RenderError::budget(format!(
+            "shadow resources require {:.1} MiB, exceeding the 512 MiB shadow budget",
+            allocation_bytes as f64 / (1024.0 * 1024.0)
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_shadow_device_limits(
     device: &wgpu::Device,
     resolution: u32,
@@ -141,6 +157,17 @@ mod tests {
             shadow_allocation_bytes(4096, 2, true).expect("valid allocation"),
             640 * 1024 * 1024
         );
+    }
+
+    #[test]
+    fn viewer_sized_moment_shadow_request_is_rejected_without_gpu_allocation() {
+        let error = validate_shadow_allocation_budget(4096, 4, true)
+            .expect_err("4096x4096 four-cascade moment shadows exceed the fixed budget");
+        assert_eq!(
+            error.to_string(),
+            "Memory budget exceeded: shadow resources require 1280.0 MiB, exceeding the 512 MiB shadow budget"
+        );
+        assert!(validate_shadow_allocation_budget(2048, 4, true).is_ok());
     }
 
     fn execute_shader_probe(source: &str, label: &str, probe_body: &str) -> Option<[f32; 5]> {

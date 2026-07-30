@@ -642,7 +642,7 @@ impl Viewer {
                 }
             }
 
-            terrain_viewer.set_terrain_pbr(
+            if let Err(error) = terrain_viewer.set_terrain_pbr(
                 enabled,
                 hdr_path,
                 ibl_intensity,
@@ -663,7 +663,9 @@ impl Viewer {
                 volumetrics,
                 denoise,
                 debug_mode,
-            );
+            ) {
+                eprintln!("[scene_review] terrain PBR preset rejected: {error}");
+            }
         }
 
         if let Some(cfg) = sky {

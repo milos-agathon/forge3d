@@ -307,9 +307,12 @@ impl ViewerTerrainScene {
         volumetrics: Option<crate::viewer::viewer_enums::ViewerVolumetricsConfig>,
         denoise: Option<crate::viewer::viewer_enums::ViewerDenoiseConfig>,
         debug_mode: Option<u32>,
-    ) {
-        // Update config
-        self.pbr_config.apply_updates(
+    ) -> Result<()> {
+        // Stage every configuration change first. Shadow resources are also
+        // staged before this candidate is published, so a rejected allocation
+        // cannot leave the scene configured for resources it does not own.
+        let mut candidate = self.pbr_config.clone();
+        candidate.apply_updates(
             enabled,
             hdr_path,
             ibl_intensity,
@@ -330,7 +333,7 @@ impl ViewerTerrainScene {
 
         // Handle specialized config updates
         if let Some(lens) = lens_effects {
-            self.pbr_config.apply_lens_effects(
+            candidate.apply_lens_effects(
                 lens.enabled,
                 lens.vignette_strength,
                 lens.vignette_radius,
@@ -341,7 +344,7 @@ impl ViewerTerrainScene {
         }
 
         if let Some(d) = dof {
-            self.pbr_config.apply_dof(
+            candidate.apply_dof(
                 d.enabled,
                 d.f_stop,
                 d.focus_distance,
@@ -353,7 +356,7 @@ impl ViewerTerrainScene {
         }
 
         if let Some(mb) = motion_blur {
-            self.pbr_config.apply_motion_blur(
+            candidate.apply_motion_blur(
                 mb.enabled,
                 mb.samples,
                 mb.shutter_open,
@@ -385,7 +388,7 @@ impl ViewerTerrainScene {
                     },
                 )
                 .collect::<Vec<_>>();
-            self.pbr_config.apply_volumetrics(
+            candidate.apply_volumetrics(
                 v.enabled,
                 &v.mode,
                 v.density,
@@ -399,6 +402,23 @@ impl ViewerTerrainScene {
                 &density_volumes,
             );
         }
+
+        crate::shadows::validate_shadow_allocation_budget(
+            candidate.shadow_map_res.clamp(512, 8192),
+            4,
+            true,
+        )?;
+        if candidate.enabled {
+            let requires_moments = matches!(
+                candidate.shadow_technique.to_ascii_lowercase().as_str(),
+                "vsm" | "evsm" | "msm"
+            );
+            self.init_shadows_for_config(
+                candidate.shadow_map_res.clamp(512, 8192),
+                requires_moments,
+            )?;
+        }
+        self.pbr_config = candidate;
 
         // Re-init specialized passes if enabled
         if self.pbr_config.lens_effects.enabled {
@@ -416,13 +436,10 @@ impl ViewerTerrainScene {
             update_terrain_volumetrics_report(TerrainVolumetricsReport::default());
         }
 
-        if self.pbr_config.enabled {
-            self.init_shadows();
-        }
-
         println!(
             "[terrain_pbr] updated: {}",
             self.pbr_config.to_display_string()
         );
+        Ok(())
     }
 }

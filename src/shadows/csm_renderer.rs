@@ -38,17 +38,11 @@ impl CsmRenderer {
     /// Create a new CSM renderer
     pub fn new(device: &Device, config: CsmConfig) -> RenderResult<Self> {
         super::validate_shadow_device_limits(device, config.shadow_map_size, config.cascade_count)?;
-        let allocation_bytes = super::shadow_allocation_bytes(
+        super::validate_shadow_allocation_budget(
             config.shadow_map_size,
             config.cascade_count,
             config.enable_evsm,
         )?;
-        if allocation_bytes > super::MAX_SHADOW_ALLOCATION_BYTES {
-            return Err(crate::core::error::RenderError::budget(format!(
-                "shadow resources require {:.1} MiB, exceeding the 512 MiB shadow budget",
-                allocation_bytes as f64 / (1024.0 * 1024.0)
-            )));
-        }
         let uniform_buffer = tracked_create_buffer(
             device,
             &BufferDescriptor {
