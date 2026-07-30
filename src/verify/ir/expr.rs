@@ -152,7 +152,12 @@ impl Evaluator<'_> {
                                 .within(0.0, 1.0)
                                 .then(|| frame.relations.get(&source).cloned())?
                         })
-                        .filter(|relation| matches!(relation, Relation::ImageUpperIndex(_)))
+                        .filter(|relation| {
+                            matches!(
+                                relation,
+                                Relation::ImageUpperIndex(_) | Relation::ImageUpperIndexAxis(_, _)
+                            )
+                        })
                 } else {
                     None
                 };
@@ -181,13 +186,18 @@ impl Evaluator<'_> {
                                 .insert(handle, Relation::Difference(left, right));
                         }
                         if is_uniform_one(&right) {
-                            if let Some(
-                                Relation::ImageDimensions(name) | Relation::ImageDimension(name, _),
-                            ) = frame.relations.get(&left_handle).cloned()
-                            {
-                                frame
-                                    .relations
-                                    .insert(handle, Relation::ImageUpperIndex(name));
+                            match frame.relations.get(&left_handle).cloned() {
+                                Some(Relation::ImageDimensions(name)) => {
+                                    frame
+                                        .relations
+                                        .insert(handle, Relation::ImageUpperIndex(name));
+                                }
+                                Some(Relation::ImageDimension(name, axis)) => {
+                                    frame
+                                        .relations
+                                        .insert(handle, Relation::ImageUpperIndexAxis(name, axis));
+                                }
+                                _ => {}
                             }
                         }
                         left.clone()
@@ -294,7 +304,12 @@ impl Evaluator<'_> {
                     | naga::MathFunction::Trunc => frame.relations.get(&arg_handle).cloned(),
                     _ => None,
                 }
-                .filter(|relation| matches!(relation, Relation::ImageUpperIndex(_)));
+                .filter(|relation| {
+                    matches!(
+                        relation,
+                        Relation::ImageUpperIndex(_) | Relation::ImageUpperIndexAxis(_, _)
+                    )
+                });
                 let clamp_relation = if *fun == naga::MathFunction::Clamp
                     && arg1.as_ref().is_some_and(|low| low.within(0.0, 0.0))
                 {
@@ -302,6 +317,9 @@ impl Evaluator<'_> {
                         Some(Relation::ImageUpperIndex(name)) => {
                             Some(Relation::InImage(name.clone()))
                         }
+                        Some(Relation::ImageUpperIndexAxis(name, axis)) => Some(
+                            Relation::InImageAxes(name.clone(), 1u8.checked_shl(*axis as u32)?),
+                        ),
                         _ => None,
                     })
                 } else {

@@ -64,6 +64,7 @@ pub(super) enum Relation {
     ImageDimensions(String),
     ImageDimension(String, usize),
     ImageUpperIndex(String),
+    ImageUpperIndexAxis(String, usize),
     InImage(String),
     InImageAxes(String, u8),
     /// A value is known to be strictly smaller than this symbolic dimension.
@@ -743,7 +744,6 @@ impl Evaluator<'_> {
             let layer_axis = dimensions.len().saturating_sub(1);
             let layer_bit = 1u8 << layer_axis;
             let layer_axis_is_proven = match layer_relation {
-                Some(Relation::InImage(image)) => self.same_dimensions(&image, &name),
                 Some(Relation::InImageAxes(image, mask)) => {
                     self.same_dimensions(&image, &name) && mask & layer_bit != 0
                 }
@@ -1184,6 +1184,9 @@ impl Evaluator<'_> {
             });
             let component_image = match relation {
                 Some(Relation::ImageUpperIndex(image)) => Some(image),
+                Some(Relation::ImageUpperIndexAxis(image, bound_axis)) if bound_axis == axis => {
+                    Some(image)
+                }
                 Some(Relation::LessThan(bound)) => {
                     self.image_with_symbolic_axis_bound(function_ref, &bound, axis)
                 }

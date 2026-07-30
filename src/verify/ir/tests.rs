@@ -287,6 +287,36 @@ fn main(layer: u32) -> vec4<f32> {
             proof.alarms
         );
     }
+
+    let clamped = r#"
+@group(0) @binding(0) var image: texture_2d_array<f32>;
+fn main(layer: u32) -> vec4<f32> {
+    let upper = max(i32(textureNumLayers(image)) - 1, 0);
+    let safe_layer = clamp(i32(layer), 0, upper);
+    return textureLoad(image, vec2<i32>(0), safe_layer, 0);
+}
+"#;
+    let proof = prove_wgsl(clamped, "main", &contract).unwrap();
+    assert!(
+        proof.alarms.is_empty(),
+        "actual layer clamp was not proved: {:?}",
+        proof.alarms
+    );
+    for axis in ["x", "y"] {
+        let wrong_dimension_clamp = clamped.replace(
+            "textureNumLayers(image)",
+            &format!("textureDimensions(image).{axis}"),
+        );
+        let proof = prove_wgsl(&wrong_dimension_clamp, "main", &contract).unwrap();
+        assert!(
+            proof
+                .alarms
+                .iter()
+                .any(|alarm| alarm.kind == "possible_oob"),
+            "{axis}-dimension clamp incorrectly proved the array layer: {:?}",
+            proof.alarms
+        );
+    }
 }
 
 #[test]
