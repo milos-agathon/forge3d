@@ -246,43 +246,62 @@ impl PbrPipelineWithShadows {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(windows))]
     use super::*;
 
     #[test]
     fn live_evsm_pbr_pipeline_and_bind_group_create_without_validation_errors() {
-        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
-            crate::shader_sources::assert_valid_wgsl_without_gpu(
-                "live EVSM PBR pipeline",
-                &crate::shader_sources::pbr(),
+        let shader_source = crate::shader_sources::pbr();
+        crate::shader_sources::assert_valid_wgsl(&shader_source);
+
+        // GitHub-hosted Windows exposes only a virtual graphics path here, and
+        // requesting a wgpu device can terminate the test process in the driver
+        // before Rust receives an error. The exact assembled shader contract is
+        // still checked above; live creation remains covered on macOS and
+        // other non-Windows adapters.
+        #[cfg(windows)]
+        {
+            eprintln!(
+                "live EVSM PBR pipeline: hosted Windows device creation is unsafe; \
+                 validated the exact assembled WGSL contract statically"
             );
             return;
-        };
-        let device = &device;
-        let queue = &queue;
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut pbr = PbrPipelineWithShadows::new(
-            device,
-            queue,
-            crate::core::material::PbrMaterial::default(),
-            true,
-        )
-        .expect("PBR pipeline resources");
-        pbr.configure_shadows(device, 3, 256, 0);
-        pbr.set_shadow_technique(device, ShadowTechnique::EVSM);
+        }
 
-        pbr.get_or_create_shadow_bind_group(device)
-            .expect("EVSM shadow bind group");
+        #[cfg(not(windows))]
+        {
+            let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+                crate::shader_sources::assert_valid_wgsl_without_gpu(
+                    "live EVSM PBR pipeline",
+                    &shader_source,
+                );
+                return;
+            };
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let mut pbr = PbrPipelineWithShadows::new(
+                &device,
+                &queue,
+                crate::core::material::PbrMaterial::default(),
+                true,
+            )
+            .expect("PBR pipeline resources");
+            pbr.configure_shadows(&device, 3, 256, 0);
+            pbr.set_shadow_technique(&device, ShadowTechnique::EVSM);
 
-        crate::core::degradation::begin_degradation_capture();
-        pbr.ensure_pipeline(device, TextureFormat::Rgba8Unorm);
-        let captured = crate::core::degradation::finish_degradation_capture();
-        assert!(!captured
-            .iter()
-            .any(|item| item.kind == "validation_error" && item.name == "pbr_render_pipeline"));
+            pbr.get_or_create_shadow_bind_group(&device)
+                .expect("EVSM shadow bind group");
 
-        device.poll(wgpu::Maintain::Wait);
-        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
-            panic!("live EVSM PBR resources are invalid: {error}");
+            crate::core::degradation::begin_degradation_capture();
+            pbr.ensure_pipeline(&device, TextureFormat::Rgba8Unorm);
+            let captured = crate::core::degradation::finish_degradation_capture();
+            assert!(!captured
+                .iter()
+                .any(|item| item.kind == "validation_error" && item.name == "pbr_render_pipeline"));
+
+            device.poll(wgpu::Maintain::Wait);
+            if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+                panic!("live EVSM PBR resources are invalid: {error}");
+            }
         }
     }
 }
