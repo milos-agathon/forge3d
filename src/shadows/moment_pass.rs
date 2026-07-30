@@ -11,7 +11,7 @@ use wgpu::{
     TextureView, TextureViewDimension,
 };
 
-use crate::core::error::RenderResult;
+use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::lighting::types::ShadowTechnique;
 
@@ -32,12 +32,34 @@ struct MomentGenParams {
     _padding4: u32,
 }
 
+#[derive(Clone, Copy)]
+struct BoundTextureInfo {
+    width: u32,
+    height: u32,
+    layers: u32,
+    format: TextureFormat,
+    usage: wgpu::TextureUsages,
+}
+
+impl BoundTextureInfo {
+    fn from_texture(texture: &Texture) -> Self {
+        Self {
+            width: texture.width(),
+            height: texture.height(),
+            layers: texture.depth_or_array_layers(),
+            format: texture.format(),
+            usage: texture.usage(),
+        }
+    }
+}
+
 /// Moment generation compute pass
 pub struct MomentGenerationPass {
     pipeline: ComputePipeline,
     bind_group_layout: BindGroupLayout,
     params_buffer: TrackedBuffer,
     bind_group: Option<BindGroup>,
+    bound_textures: Option<(BoundTextureInfo, BoundTextureInfo)>,
 }
 
 impl MomentGenerationPass {
@@ -124,6 +146,7 @@ impl MomentGenerationPass {
             bind_group_layout,
             params_buffer,
             bind_group: None,
+            bound_textures: None,
         })
     }
 
@@ -134,6 +157,7 @@ impl MomentGenerationPass {
         depth_view: &TextureView,
         moment_view: &TextureView,
     ) {
+        self.bound_textures = None;
         self.bind_group = Some(device.create_bind_group(&BindGroupDescriptor {
             label: Some("moment_gen_bind_group"),
             layout: &self.bind_group_layout,
@@ -154,6 +178,31 @@ impl MomentGenerationPass {
         }));
     }
 
+    pub(crate) fn prepare_textures(
+        &mut self,
+        device: &Device,
+        depth_texture: &Texture,
+        moment_texture: &Texture,
+    ) {
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("moment_generation_depth_view"),
+            format: Some(TextureFormat::Depth32Float),
+            dimension: Some(TextureViewDimension::D2Array),
+            aspect: wgpu::TextureAspect::DepthOnly,
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            base_array_layer: 0,
+            array_layer_count: Some(depth_texture.depth_or_array_layers()),
+        });
+        let moment_view =
+            create_moment_storage_view(moment_texture, moment_texture.depth_or_array_layers());
+        self.prepare_bind_group(device, &depth_view, &moment_view);
+        self.bound_textures = Some((
+            BoundTextureInfo::from_texture(depth_texture),
+            BoundTextureInfo::from_texture(moment_texture),
+        ));
+    }
+
     /// Update parameters and execute the compute pass
     pub fn execute(
         &self,
@@ -164,7 +213,48 @@ impl MomentGenerationPass {
         shadow_map_size: u32,
         evsm_positive_exp: f32,
         evsm_negative_exp: f32,
-    ) {
+    ) -> RenderResult<()> {
+        super::validate_shadow_dimensions(shadow_map_size, cascade_count)?;
+        if !technique.requires_moments() {
+            return Err(RenderError::render(format!(
+                "{} does not produce moment shadows",
+                technique.name()
+            )));
+        }
+        let (depth, moments) = self
+            .bound_textures
+            .ok_or_else(|| RenderError::render("moment textures must be bound before execution"))?;
+        let requested = (shadow_map_size, shadow_map_size, cascade_count);
+        if (depth.width, depth.height, depth.layers) != requested
+            || (moments.width, moments.height, moments.layers) != requested
+        {
+            return Err(RenderError::render(format!(
+                "moment generation texture mismatch: depth={}x{}x{}, moments={}x{}x{}, requested={}x{}x{}",
+                depth.width,
+                depth.height,
+                depth.layers,
+                moments.width,
+                moments.height,
+                moments.layers,
+                shadow_map_size,
+                shadow_map_size,
+                cascade_count
+            )));
+        }
+        if depth.format != TextureFormat::Depth32Float
+            || !depth.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING)
+        {
+            return Err(RenderError::render(
+                "moment generation depth texture must be sampleable Depth32Float",
+            ));
+        }
+        if moments.format != TextureFormat::Rgba16Float
+            || !moments.usage.contains(wgpu::TextureUsages::STORAGE_BINDING)
+        {
+            return Err(RenderError::render(
+                "moment generation output must be storage-bindable Rgba16Float",
+            ));
+        }
         // Update parameters. Exponents are clamped to what the Rgba16Float moment
         // atlas can hold; the sampling side clamps identically.
         let params = MomentGenParams {
@@ -186,7 +276,7 @@ impl MomentGenerationPass {
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("Bind group must be prepared before execution");
+            .ok_or_else(|| RenderError::render("moment textures must be bound before execution"))?;
 
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("moment_generation_pass"),
@@ -203,6 +293,7 @@ impl MomentGenerationPass {
         let dispatch_z = cascade_count;
 
         compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, dispatch_z);
+        Ok(())
     }
 }
 
@@ -236,9 +327,8 @@ mod dimension_tests {
         let renderer = crate::shadows::CsmRenderer::new(device, config).expect("CSM renderer");
         let moments = renderer.evsm_maps.as_ref().expect("moment atlas");
         let depth_view = &renderer.shadow_map_views[0];
-        let moment_view = create_moment_storage_view(moments, 1);
         let mut generation = MomentGenerationPass::new(device).expect("moment pass");
-        generation.prepare_bind_group(device, &renderer.shadow_texture_view(), &moment_view);
+        generation.prepare_textures(device, renderer.shadow_maps.as_ref(), moments);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("moment_1024_contract"),
         });
@@ -258,7 +348,9 @@ mod dimension_tests {
                 occlusion_query_set: None,
             });
         }
-        generation.execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 1024, 9.0, 9.0);
+        generation
+            .execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 1024, 9.0, 9.0)
+            .expect("moment generation");
         queue.submit(Some(encoder.finish()));
         let generated = crate::core::hdr::read_hdr_texture(
             device,
@@ -323,5 +415,36 @@ mod tests {
             48,
             "MomentGenParams must be 48 bytes (aligned for WGSL vec3)"
         );
+    }
+
+    #[test]
+    fn execute_rejects_unbound_and_mismatched_allocations() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let queue = &context.queue;
+        let mut generation = MomentGenerationPass::new(device).expect("moment pass");
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("moment_generation_invalid"),
+        });
+        assert!(generation
+            .execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 512, 9.0, 9.0,)
+            .is_err());
+
+        let mut config = crate::shadows::CsmConfig::default();
+        config.shadow_map_size = 1024;
+        config.cascade_count = 1;
+        config.enable_evsm = true;
+        let renderer = crate::shadows::CsmRenderer::new(device, config).expect("CSM renderer");
+        generation.prepare_textures(
+            device,
+            renderer.shadow_maps.as_ref(),
+            renderer.evsm_maps.as_ref().expect("moment atlas"),
+        );
+        assert!(generation
+            .execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 512, 9.0, 9.0,)
+            .is_err());
+        assert!(generation
+            .execute(queue, &mut encoder, ShadowTechnique::PCF, 1, 1024, 9.0, 9.0,)
+            .is_err());
     }
 }

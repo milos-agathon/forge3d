@@ -1,8 +1,8 @@
 use super::types::*;
+use crate::core::error::{RenderError, RenderResult};
 use crate::lighting::types::ShadowTechnique;
-use log::warn;
 
-pub fn enforce_memory_budget(config: &mut ShadowManagerConfig) {
+pub fn enforce_memory_budget(config: &mut ShadowManagerConfig) -> RenderResult<()> {
     let initial_resolution = config.csm.shadow_map_size;
     let budget_mib = config.max_memory_bytes as f64 / (1024.0 * 1024.0);
 
@@ -35,21 +35,19 @@ pub fn enforce_memory_budget(config: &mut ShadowManagerConfig) {
                     config.csm.cascade_count
                 );
             }
-            break;
+            return Ok(());
         }
 
         let next_res = (config.csm.shadow_map_size / 2).max(MIN_SHADOW_RESOLUTION);
         if next_res == config.csm.shadow_map_size {
-            // Hit minimum resolution; cannot downscale further
-            warn!(
-                "Shadow atlas exceeds {:.1} MiB budget at minimum resolution ({}px, {:.2} MiB, technique: {:?}, cascades: {})",
+            return Err(RenderError::budget(format!(
+                "shadow atlas exceeds {:.1} MiB budget at minimum resolution ({}px, {:.2} MiB, technique: {:?}, cascades: {})",
                 budget_mib,
                 next_res,
                 usage as f64 / (1024.0 * 1024.0),
                 config.technique.name(),
                 config.csm.cascade_count
-            );
-            break;
+            )));
         }
 
         // Single downscaling step
@@ -103,5 +101,17 @@ mod tests {
             estimate_memory_bytes(4096, 2, ShadowTechnique::VSM),
             640 * 1024 * 1024
         );
+    }
+
+    #[test]
+    fn budget_never_downscales_below_the_supported_shadow_minimum() {
+        let mut config = ShadowManagerConfig::default();
+        config.technique = ShadowTechnique::VSM;
+        config.csm.shadow_map_size = 512;
+        config.csm.cascade_count = 1;
+        config.max_memory_bytes = 1;
+
+        assert!(enforce_memory_budget(&mut config).is_err());
+        assert_eq!(config.csm.shadow_map_size, MIN_SHADOW_RESOLUTION);
     }
 }

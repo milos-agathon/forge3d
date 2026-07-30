@@ -42,6 +42,64 @@ pub(crate) const CSM_SHADER_SOURCE: &str = concat!(
 /// keeping their squared moments above the normal range near the middle of the
 /// depth interval; 9 leaves useful precision while preserving a strong warp.
 pub const EVSM_MAX_EXPONENT_RGBA16F: f32 = 9.0;
+pub(crate) const MIN_SHADOW_MAP_SIZE: u32 = 512;
+pub(crate) const MAX_SHADOW_MAP_SIZE: u32 = 8192;
+pub(crate) const MAX_SHADOW_CASCADES: u32 = 4;
+pub(crate) const MAX_SHADOW_ALLOCATION_BYTES: u64 = 512 * 1024 * 1024;
+
+pub(crate) fn validate_shadow_dimensions(
+    resolution: u32,
+    cascades: u32,
+) -> crate::core::error::RenderResult<()> {
+    if !(MIN_SHADOW_MAP_SIZE..=MAX_SHADOW_MAP_SIZE).contains(&resolution)
+        || !resolution.is_power_of_two()
+    {
+        return Err(crate::core::error::RenderError::render(format!(
+            "shadow resolution must be a power of two between {MIN_SHADOW_MAP_SIZE} and {MAX_SHADOW_MAP_SIZE}, got {resolution}"
+        )));
+    }
+    if !(1..=MAX_SHADOW_CASCADES).contains(&cascades) {
+        return Err(crate::core::error::RenderError::render(format!(
+            "shadow cascade count must be within 1..={MAX_SHADOW_CASCADES}, got {cascades}"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn shadow_allocation_bytes(
+    resolution: u32,
+    cascades: u32,
+    requires_moments: bool,
+) -> crate::core::error::RenderResult<u64> {
+    let bytes_per_texel = if requires_moments { 20_u64 } else { 4_u64 };
+    u64::from(resolution)
+        .checked_mul(u64::from(resolution))
+        .and_then(|pixels| pixels.checked_mul(u64::from(cascades)))
+        .and_then(|pixels| pixels.checked_mul(bytes_per_texel))
+        .ok_or_else(|| crate::core::error::RenderError::render("shadow allocation size overflow"))
+}
+
+pub(crate) fn validate_shadow_device_limits(
+    device: &wgpu::Device,
+    resolution: u32,
+    cascades: u32,
+) -> crate::core::error::RenderResult<()> {
+    validate_shadow_dimensions(resolution, cascades)?;
+    let limits = device.limits();
+    if resolution > limits.max_texture_dimension_2d {
+        return Err(crate::core::error::RenderError::device(format!(
+            "shadow resolution {resolution} exceeds device max_texture_dimension_2d {}",
+            limits.max_texture_dimension_2d
+        )));
+    }
+    if cascades > limits.max_texture_array_layers {
+        return Err(crate::core::error::RenderError::device(format!(
+            "shadow cascade count {cascades} exceeds device max_texture_array_layers {}",
+            limits.max_texture_array_layers
+        )));
+    }
+    Ok(())
+}
 
 /// Clamp an EVSM exponent to the range the moment atlas can actually represent.
 ///
@@ -67,6 +125,26 @@ pub(crate) fn requires_moment_blur(technique: crate::lighting::types::ShadowTech
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shadow_dimensions_reject_invalid_requests_before_allocation() {
+        for resolution in [0, 511, 513, 16_384, u32::MAX] {
+            assert!(validate_shadow_dimensions(resolution, 1).is_err());
+        }
+        for cascades in [0, 5, u32::MAX] {
+            assert!(validate_shadow_dimensions(512, cascades).is_err());
+        }
+        assert!(validate_shadow_dimensions(512, 1).is_ok());
+        assert!(validate_shadow_dimensions(8192, 4).is_ok());
+    }
+
+    #[test]
+    fn moment_shadow_allocation_counts_depth_atlas_and_intermediate() {
+        assert_eq!(
+            shadow_allocation_bytes(4096, 2, true).expect("valid allocation"),
+            640 * 1024 * 1024
+        );
+    }
 
     fn execute_shader_probe(source: &str, label: &str, probe_body: &str) -> [f32; 5] {
         let context = crate::core::gpu::try_ctx().expect("GPU context");

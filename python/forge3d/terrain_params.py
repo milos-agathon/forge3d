@@ -106,11 +106,6 @@ class ShadowSettings:
         valid_resolutions = {512, 1024, 2048, 4096, 8192}
         if self.resolution not in valid_resolutions:
             raise ValueError("resolution must be power of 2 between 512-8192")
-        # The native terrain shadow mesh and fp16 moment pipeline require at
-        # least a 2048² atlas for stable coverage. Normalize smaller requests
-        # here so validation, memory accounting, and native uniforms agree.
-        self.resolution = max(self.resolution, 2048)
-
         if not 1 <= self.cascades <= 4:
             raise ValueError("cascades must be 1-4")
 
@@ -156,10 +151,7 @@ class ShadowSettings:
 
     def _estimate_memory_bytes(self) -> int:
         """Estimate GPU memory for shadow resources."""
-        # Native terrain keeps a 2048px minimum atlas for stable raster/moment
-        # coverage; budget the physical allocation rather than the request.
-        resolution = max(self.resolution, 2048)
-        pixels = resolution * resolution * self.cascades
+        pixels = self.resolution * self.resolution * self.cascades
         depth_bytes = pixels * 4  # Depth32Float
         # All moment techniques use an Rgba16Float atlas and an equally-sized
         # persistent intermediate for the separable blur.

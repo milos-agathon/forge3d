@@ -35,7 +35,7 @@ impl ShadowManager {
         );
         config.csm.enable_evsm = requires_moments;
 
-        budget::enforce_memory_budget(&mut config);
+        budget::enforce_memory_budget(&mut config)?;
 
         let renderer = CsmRenderer::new(device, config.csm.clone())?;
 
@@ -319,18 +319,13 @@ impl ShadowManager {
             None => return Ok(()),
         };
 
-        // Get depth and moment views
-        let depth_view = self.renderer.shadow_texture_view();
         let moment_texture = match &self.renderer.evsm_maps {
             Some(tex) => tex,
             None => return Ok(()),
         };
 
-        let moment_view =
-            super::super::create_moment_storage_view(moment_texture, self.config.csm.cascade_count);
-
         // Prepare bind group
-        moment_pass.prepare_bind_group(device, &depth_view, &moment_view);
+        moment_pass.prepare_textures(device, self.renderer.shadow_maps.as_ref(), moment_texture);
 
         // Execute moment generation compute pass
         moment_pass.execute(
@@ -341,7 +336,7 @@ impl ShadowManager {
             self.config.csm.shadow_map_size,
             self.config.csm.evsm_positive_exp,
             self.config.csm.evsm_negative_exp,
-        );
+        )?;
 
         // Apply Gaussian blur to all moment techniques.
         if let Some(blur_pass) = &mut self.blur_pass {

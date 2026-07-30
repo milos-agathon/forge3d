@@ -479,6 +479,8 @@ impl TerrainScene {
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
+        let (certificate_capture, _allocation_scope) =
+            self.begin_certificate_capture("terrain.render_internal_with_aov");
         let decoded = params.decoded();
         self.ensure_shadow_atlas(&decoded.shadow)?;
         let (height_height, height_width) = heightmap.as_array().dim();
@@ -516,8 +518,6 @@ impl TerrainScene {
         )?
         .plan;
         debug_assert_eq!(graph.labels.len(), 4);
-        let (certificate_capture, _allocation_scope) =
-            self.begin_certificate_capture("terrain.render_internal_with_aov");
         let mut timing = self.take_render_timing();
         let height_inputs = graph.execute_with_barriers("terrain.prepare", |_barriers| {
             self.prepare_frame_lighting(decoded)?;

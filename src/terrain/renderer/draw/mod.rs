@@ -378,7 +378,6 @@ impl TerrainScene {
                                     shadow_layers,
                                     wgpu::TextureAspect::DepthOnly,
                                 )?;
-                                self.generate_shadow_moments(context.encoder())?;
                             }
                             Ok::<_, anyhow::Error>(setup)
                         })?;

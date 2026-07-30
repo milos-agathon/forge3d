@@ -212,6 +212,28 @@ class TestValidateShadowTechnique:
 class TestShadowMemoryBudget:
     """Test shadow memory budget validation."""
 
+    def test_public_renderer_budget_counts_all_moment_textures(self):
+        params = ShadowParams(technique="evsm", map_size=2048, cascades=2)
+        assert params.atlas_memory_bytes() == 160 * 1024 * 1024
+
+        with pytest.raises(ValueError, match="exceeds 256 MiB"):
+            load_renderer_config(
+                {
+                    "shadows": {
+                        "technique": "evsm",
+                        "map_size": 4096,
+                        "cascades": 1,
+                    }
+                }
+            )
+
+    @pytest.mark.parametrize("map_size", (-1, 0, 511, 513, 16384))
+    def test_public_renderer_rejects_invalid_shadow_dimensions(self, map_size: int):
+        with pytest.raises(ValueError, match="power of two between 512 and 8192"):
+            load_renderer_config(
+                {"shadows": {"map_size": map_size, "cascades": 1}}
+            )
+
     def test_memory_budget_normal_config(self):
         """Normal shadow config should pass memory budget check."""
         # 4096x4096 * 4 cascades * 4 bytes = 256 MiB (within 512 MiB budget)
@@ -269,7 +291,7 @@ class TestShadowMemoryBudget:
                 fade_start=1.0,
             )
 
-    def test_budget_uses_native_terrain_resolution_floor(self):
+    def test_budget_preserves_requested_native_terrain_resolution(self):
         settings = ShadowSettings(
             enabled=True, technique="PCF", resolution=1024, cascades=1,
             max_distance=4000.0, softness=1.5, intensity=0.8,
@@ -277,8 +299,8 @@ class TestShadowMemoryBudget:
             min_variance=1e-4, light_bleed_reduction=0.5,
             evsm_exponent=40.0, fade_start=1.0,
         )
-        assert settings.resolution == 2048
-        assert settings._estimate_memory_bytes() == 16 * 1024 * 1024
+        assert settings.resolution == 1024
+        assert settings._estimate_memory_bytes() == 4 * 1024 * 1024
 
 
 def _create_step_dem(width: int = 256, height: int = 256, cliff_height: float = 100.0) -> np.ndarray:
@@ -750,18 +772,20 @@ def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
             heightmap=heightmap if terrain is None else terrain,
         ).to_numpy()
 
+    first_frame_512 = (
+        render("vsm", shadow_resolution=512)[..., 0].astype(np.float32) / 255.0
+    )
     raw = {
         technique: render(technique)[..., :3].astype(np.float32) / 255.0
         for technique in ("pcf", "vsm", "evsm", "msm")
     }
-    # Reconfigure a live renderer in both directions. Each transition must
-    # recreate matching depth/moment/blur resources, while graph-cache restores
-    # must regenerate moments after restoring the cached depth atlas.
+    # Reconfigure a live renderer through three physical atlas sizes. Each
+    # transition must recreate matching depth/moment/blur resources.
     resized_high = (
         render("vsm", shadow_resolution=2048)[..., 0].astype(np.float32) / 255.0
     )
     resized_back = (
-        render("vsm", shadow_resolution=1024)[..., 0].astype(np.float32) / 255.0
+        render("vsm", shadow_resolution=512)[..., 0].astype(np.float32) / 255.0
     )
     luminance = {technique: image[..., 0] for technique, image in raw.items()}
     terrain_reference = (
@@ -786,8 +810,9 @@ def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
 
     pcf_exposure = float(luminance["pcf"][lit_plain].mean())
     for label, image in (
+        ("VSM first frame at 512", first_frame_512),
         ("VSM after 1024->2048 resize", resized_high),
-        ("VSM after 2048->1024 resize", resized_back),
+        ("VSM after 2048->512 resize", resized_back),
     ):
         exposure = float(image[lit_plain].mean())
         shadowed = float(((image < exposure * 0.6) & cast_shadow).sum() / terrain.sum())

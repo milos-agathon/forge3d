@@ -14,12 +14,6 @@ fn terrain_shadow_uniform_params(
     )
 }
 
-fn effective_shadow_resolution(
-    settings: &crate::terrain::render_params::ShadowSettingsNative,
-) -> u32 {
-    settings.resolution.max(2048)
-}
-
 pub(in crate::terrain::renderer) struct ShadowSetup {
     pub(in crate::terrain::renderer) eye: glam::Vec3,
     pub(in crate::terrain::renderer) view_matrix: glam::Mat4,
@@ -46,9 +40,11 @@ impl TerrainScene {
         let shadow_map_size = self.csm_renderer.config.shadow_map_size;
         let positive_exponent = self.csm_renderer.uniforms.evsm_positive_exp;
         let negative_exponent = self.csm_renderer.uniforms.evsm_negative_exp;
-        let depth_view = self.csm_renderer.shadow_texture_view();
-        let moment_view = crate::shadows::create_moment_storage_view(moment_texture, cascade_count);
-        moment_pass.prepare_bind_group(&self.device, &depth_view, &moment_view);
+        moment_pass.prepare_textures(
+            &self.device,
+            self.csm_renderer.shadow_maps.as_ref(),
+            moment_texture,
+        );
         moment_pass.execute(
             &self.queue,
             encoder,
@@ -57,7 +53,7 @@ impl TerrainScene {
             shadow_map_size,
             positive_exponent,
             negative_exponent,
-        );
+        )?;
         if let Some(blur_pass) = self.moment_blur_pass.as_mut() {
             blur_pass.execute(
                 &self.device,
@@ -84,24 +80,33 @@ impl TerrainScene {
         &mut self,
         settings: &crate::terrain::render_params::ShadowSettingsNative,
     ) -> Result<()> {
-        if settings.resolution == 0 || settings.cascades == 0 || settings.cascades > 4 {
-            anyhow::bail!(
-                "invalid shadow atlas dimensions: resolution={}, cascades={}; expected nonzero resolution and 1..=4 cascades",
-                settings.resolution,
-                settings.cascades
-            );
-        }
         let requires_moments = matches!(
             settings.technique.to_uppercase().as_str(),
             "VSM" | "EVSM" | "MSM"
         );
-        let effective_resolution = effective_shadow_resolution(settings);
-        let atlas_mismatch = self.csm_renderer.allocation_size != effective_resolution
+        crate::shadows::validate_shadow_device_limits(
+            &self.device,
+            settings.resolution,
+            settings.cascades,
+        )?;
+        let requested_bytes = crate::shadows::shadow_allocation_bytes(
+            settings.resolution,
+            settings.cascades,
+            requires_moments,
+        )?;
+        if requested_bytes > crate::shadows::MAX_SHADOW_ALLOCATION_BYTES {
+            return Err(crate::core::error::RenderError::budget(format!(
+                "shadow resources require {:.1} MiB, exceeding the 512 MiB terrain shadow budget",
+                requested_bytes as f64 / (1024.0 * 1024.0)
+            ))
+            .into());
+        }
+        let atlas_mismatch = self.csm_renderer.allocation_size != settings.resolution
             || self.csm_renderer.allocation_layers != settings.cascades
             || self.csm_renderer.evsm_maps.is_some() != requires_moments;
         if atlas_mismatch {
             let mut replacement_config = self.csm_renderer.config.clone();
-            replacement_config.shadow_map_size = effective_resolution;
+            replacement_config.shadow_map_size = settings.resolution;
             replacement_config.cascade_count = settings.cascades;
             replacement_config.enable_evsm = requires_moments;
             self.csm_renderer = crate::shadows::CsmRenderer::new(&self.device, replacement_config)?;
@@ -203,7 +208,7 @@ impl TerrainScene {
 
         self.csm_renderer.config.cascade_count = cascade_count;
         self.csm_renderer.config.cascade_splits = cascade_splits.clone();
-        self.csm_renderer.config.shadow_map_size = effective_shadow_resolution(shadow_settings);
+        self.csm_renderer.config.shadow_map_size = shadow_settings.resolution;
         self.csm_renderer.config.max_shadow_distance = shadow_far;
         self.csm_renderer.config.depth_bias = shadow_settings.depth_bias;
         self.csm_renderer.config.slope_bias = shadow_settings.slope_scale_bias;
@@ -335,14 +340,5 @@ mod tests {
         let (params, reserved) = terrain_shadow_uniform_params(&settings);
         assert_eq!(params[3], 2.75);
         assert_eq!(reserved, [0.75, 0.0, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn native_terrain_shadow_atlas_has_a_2048_quality_floor() {
-        let settings = crate::terrain::render_params::ShadowSettingsNative {
-            resolution: 1024,
-            ..Default::default()
-        };
-        assert_eq!(effective_shadow_resolution(&settings), 2048);
     }
 }

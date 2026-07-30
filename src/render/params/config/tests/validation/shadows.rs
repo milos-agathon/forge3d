@@ -9,11 +9,11 @@ fn shadows_require_power_of_two_map() {
 }
 
 #[test]
-fn shadows_map_size_must_be_nonzero() {
+fn shadows_map_size_must_be_supported() {
     let mut cfg = RendererConfig::default();
     cfg.shadows.map_size = 0;
     let err = cfg.validate().unwrap_err();
-    assert!(err.to_string().contains("greater than zero"));
+    assert!(err.to_string().contains("between 512 and 8192"));
 }
 
 #[test]
@@ -95,5 +95,5 @@ fn shadows_filtered_techniques_recommend_min_resolution() {
     cfg.shadows.technique = ShadowTechnique::Pcf;
     cfg.shadows.map_size = 128;
     let err = cfg.validate().unwrap_err();
-    assert!(err.to_string().contains("at least 256"));
+    assert!(err.to_string().contains("between 512 and 8192"));
 }

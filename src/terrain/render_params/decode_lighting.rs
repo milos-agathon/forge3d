@@ -168,6 +168,16 @@ fn validate_pcss_controls(
     Ok(())
 }
 
+fn validate_shadow_dimensions(resolution: i64, cascades: i64) -> PyResult<(u32, u32)> {
+    let resolution = u32::try_from(resolution)
+        .map_err(|_| PyValueError::new_err("resolution must fit in u32"))?;
+    let cascades =
+        u32::try_from(cascades).map_err(|_| PyValueError::new_err("cascades must fit in u32"))?;
+    crate::shadows::validate_shadow_dimensions(resolution, cascades)
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    Ok((resolution, cascades))
+}
+
 pub(super) fn parse_shadow_settings(shadows: &Bound<'_, PyAny>) -> PyResult<ShadowSettingsNative> {
     let softness = shadows.getattr("softness")?.extract().unwrap_or(0.01);
     let pcss_light_radius = shadows
@@ -196,17 +206,18 @@ pub(super) fn parse_shadow_settings(shadows: &Bound<'_, PyAny>) -> PyResult<Shad
         pcss_filter_radius,
         light_size,
     )?;
+    let (resolution, cascades) = validate_shadow_dimensions(
+        shadows.getattr("resolution")?.extract::<i64>()?,
+        shadows.getattr("cascades")?.extract::<i64>()?,
+    )?;
     Ok(ShadowSettingsNative {
         enabled: shadows.getattr("enabled")?.extract().unwrap_or(true),
         technique: shadows
             .getattr("technique")?
             .extract::<String>()
             .unwrap_or_else(|_| "PCSS".to_string()),
-        resolution: shadows
-            .getattr("resolution")?
-            .extract::<i64>()
-            .unwrap_or(2048) as u32,
-        cascades: shadows.getattr("cascades")?.extract::<i64>().unwrap_or(1) as u32,
+        resolution,
+        cascades,
         max_distance: shadows.getattr("max_distance")?.extract().unwrap_or(3000.0),
         softness,
         pcss_light_radius,
@@ -225,7 +236,7 @@ pub(super) fn parse_shadow_settings(shadows: &Bound<'_, PyAny>) -> PyResult<Shad
 
 #[cfg(test)]
 mod tests {
-    use super::validate_pcss_controls;
+    use super::{validate_pcss_controls, validate_shadow_dimensions};
 
     #[test]
     fn native_pcss_boundary_rejects_non_finite_controls() {
@@ -237,5 +248,19 @@ mod tests {
         ] {
             assert!(validate_pcss_controls(values[0], values[1], values[2], values[3]).is_err());
         }
+    }
+
+    #[test]
+    fn native_shadow_decode_rejects_signed_and_unbounded_dimensions() {
+        for resolution in [-1, 0, 511, 513, 16_384, i64::MAX] {
+            assert!(validate_shadow_dimensions(resolution, 1).is_err());
+        }
+        for cascades in [-1, 0, 5, i64::MAX] {
+            assert!(validate_shadow_dimensions(512, cascades).is_err());
+        }
+        assert_eq!(
+            validate_shadow_dimensions(512, 1).expect("valid dimensions"),
+            (512, 1)
+        );
     }
 }

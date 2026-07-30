@@ -2,7 +2,7 @@ use super::super::CsmConfig;
 use crate::lighting::types::ShadowTechnique;
 
 pub const DEFAULT_MEMORY_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
-pub const MIN_SHADOW_RESOLUTION: u32 = 256;
+pub const MIN_SHADOW_RESOLUTION: u32 = crate::shadows::MIN_SHADOW_MAP_SIZE;
 pub const DEFAULT_PCSS_BLOCKER_RADIUS_TEXELS: f32 = 6.0;
 pub const DEFAULT_PCSS_FILTER_RADIUS_TEXELS: f32 = 4.0;
 pub const DEFAULT_PCSS_LIGHT_SIZE: f32 = 1.0;

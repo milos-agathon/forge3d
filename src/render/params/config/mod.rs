@@ -97,28 +97,12 @@ impl RendererConfig {
         }
 
         if self.shadows.enabled {
-            if self.shadows.map_size == 0 {
-                return Err(ConfigError::new(
-                    "shadows.map_size must be greater than zero when shadows are enabled",
-                ));
-            }
-            if !self.shadows.is_power_of_two_map() {
-                return Err(ConfigError::new(
-                    "shadows.map_size must be a power of two when shadows are enabled",
-                ));
-            }
-            if matches!(
-                self.shadows.technique,
-                ShadowTechnique::Pcss
-                    | ShadowTechnique::Pcf
-                    | ShadowTechnique::Vsm
-                    | ShadowTechnique::Evsm
-                    | ShadowTechnique::Msm
-                    | ShadowTechnique::Csm
-            ) && self.shadows.map_size < 256
+            if !(crate::shadows::MIN_SHADOW_MAP_SIZE..=crate::shadows::MAX_SHADOW_MAP_SIZE)
+                .contains(&self.shadows.map_size)
+                || !self.shadows.is_power_of_two_map()
             {
                 return Err(ConfigError::new(
-                    "shadows.map_size should be at least 256 for filtered techniques",
+                    "shadows.map_size must be a power of two between 512 and 8192",
                 ));
             }
             if self.shadows.cascades == 0 || self.shadows.cascades > 4 {
