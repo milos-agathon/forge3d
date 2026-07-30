@@ -18,7 +18,7 @@ all forced by the subject:
   (``TOWER_WORLD / relief``), so changing relief never rescales towers and
   towers never rescale the terrain normalization (the LoD2 lesson).
 * **Budget.** France's near-square grid is bigger than Egypt's: at 4096² the
-  19 B/texel + 366 B/frame-px law caps the per-cell render at 693 px, so the
+  19 B/texel + 366 B/frame-px law caps the per-cell render at 722 px, so the
   default frame is 596 (Egypt's 672 would be refused at the gate).
 * **Storage.** Every generated file lives under ``D:/france_population_pt/``
   (user directive; C: is full).
@@ -148,7 +148,7 @@ CAVITY_LIGHTEN = 0.03
 # --- memory gate -------------------------------------------------------------
 # Measured law (2026-07-17): tracked total ~ 19 B/grid-texel + 366 B/frame-px
 # against the enforced 512 MiB budget. Solve BEFORE launching. At 4096² the
-# frame+2*margin ceiling is 693 px -> default frame 596 with margin 48.
+# frame+2*margin ceiling is 722 px -> default frame 596 with margin 48.
 BYTES_PER_GRID_TEXEL = 19.0
 BYTES_PER_FRAME_PIXEL = 366.0
 BUDGET_BYTES = 512 * 2**20
