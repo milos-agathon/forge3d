@@ -65,6 +65,7 @@ impl TerrainScene {
             self.begin_certificate_capture("terrain.render_internal");
         let mut timing = self.take_render_timing();
         let decoded = params.decoded();
+        self.ensure_shadow_atlas(&decoded.shadow)?;
 
         self.prepare_frame_lighting(decoded)?;
         let height_inputs =
@@ -185,6 +186,15 @@ impl TerrainScene {
             .cascades
             .max(1)
             .min(self.csm_renderer.allocation_layers);
+        let mut shadow_declaration = cache
+            .map(|options| options.shadow_bytes.clone())
+            .unwrap_or_else(|| declaration_uniforms.clone());
+        shadow_declaration.extend_from_slice(&shadow_width.to_le_bytes());
+        shadow_declaration.extend_from_slice(&shadow_layers.to_le_bytes());
+        shadow_declaration.push(u8::from(decoded.shadow.enabled));
+        shadow_declaration
+            .extend_from_slice(&(decoded.shadow.technique.len() as u32).to_le_bytes());
+        shadow_declaration.extend_from_slice(decoded.shadow.technique.as_bytes());
         let graph_bundle = super::render_graph::build_terrain_render_graph(
             params.size_px.0,
             params.size_px.1,
@@ -198,9 +208,7 @@ impl TerrainScene {
             false,
             super::render_graph::TerrainPassDeclarations {
                 prepare: prepare_declaration,
-                shadow: cache
-                    .map(|options| options.shadow_bytes.clone())
-                    .unwrap_or_else(|| declaration_uniforms.clone()),
+                shadow: shadow_declaration,
                 forward: declaration_uniforms,
                 resolve: resolve_declaration,
                 prepared_output_size: prepared_bytes.len() as u64,
@@ -370,6 +378,7 @@ impl TerrainScene {
                                     shadow_layers,
                                     wgpu::TextureAspect::DepthOnly,
                                 )?;
+                                self.generate_shadow_moments(context.encoder())?;
                             }
                             Ok::<_, anyhow::Error>(setup)
                         })?;

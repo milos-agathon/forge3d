@@ -250,6 +250,36 @@ class TestShadowMemoryBudget:
         )
         assert high_res._estimate_memory_bytes() > low_res._estimate_memory_bytes()
 
+    def test_vsm_budget_includes_persistent_blur_intermediate(self):
+        with pytest.raises(ValueError, match="exceed memory budget"):
+            ShadowSettings(
+                enabled=True,
+                technique="VSM",
+                resolution=4096,
+                cascades=2,
+                max_distance=4000.0,
+                softness=1.5,
+                intensity=0.8,
+                slope_scale_bias=0.001,
+                depth_bias=0.0005,
+                normal_bias=0.0002,
+                min_variance=1e-4,
+                light_bleed_reduction=0.5,
+                evsm_exponent=40.0,
+                fade_start=1.0,
+            )
+
+    def test_budget_uses_native_terrain_resolution_floor(self):
+        settings = ShadowSettings(
+            enabled=True, technique="PCF", resolution=1024, cascades=1,
+            max_distance=4000.0, softness=1.5, intensity=0.8,
+            slope_scale_bias=0.001, depth_bias=0.0005, normal_bias=0.0002,
+            min_variance=1e-4, light_bleed_reduction=0.5,
+            evsm_exponent=40.0, fade_start=1.0,
+        )
+        assert settings.resolution == 2048
+        assert settings._estimate_memory_bytes() == 16 * 1024 * 1024
+
 
 def _create_step_dem(width: int = 256, height: int = 256, cliff_height: float = 100.0) -> np.ndarray:
     """Create a synthetic step-DEM with a sharp cliff for shadow testing.
@@ -544,10 +574,43 @@ class TestEvsmExposureParity:
             )
         )
         discontinuity_fraction = float((jumps > 0.2).mean())
-        print(f"EVSM raw-visibility discontinuity fraction={discontinuity_fraction:.6f}")
+        p99_jump = float(np.quantile(jumps, 0.99))
+        max_jump = float(jumps.max())
+        retained_shadow = float((evsm[cast_core] < 0.6).mean())
+        print(
+            "EVSM raw visibility: "
+            f"discontinuity={discontinuity_fraction:.6f}, "
+            f"p99_jump={p99_jump:.6f}, max_jump={max_jump:.6f}, "
+            f"retained_shadow={retained_shadow:.6f}"
+        )
         assert discontinuity_fraction <= 0.05, (
             "EVSM raw visibility contains alternating shadow bands: "
             f"{discontinuity_fraction:.4f} adjacent interior pairs jump by >0.2"
+        )
+        assert p99_jump <= 0.25 and max_jump <= 0.5, (
+            "EVSM raw visibility still contains severe alternating slabs: "
+            f"p99 jump={p99_jump:.4f}, max jump={max_jump:.4f}"
+        )
+        assert retained_shadow >= 0.1, (
+            "EVSM artifact suppression erased the PCF-defined cast-shadow core: "
+            f"only {retained_shadow:.4f} remains clearly shadowed"
+        )
+        penumbra = (visibility["pcf"] > 0.01) & (visibility["pcf"] < 0.99)
+        evsm_difference = np.abs(visibility["evsm"] - visibility["pcf"])
+        differentiated_soft_pixels = int(
+            (
+                penumbra
+                & (evsm_difference > 0.01)
+                & (visibility["evsm"] > 0.05)
+                & (visibility["evsm"] < 0.95)
+            ).sum()
+        )
+        assert float(evsm_difference[penumbra].mean()) >= 0.001, (
+            "EVSM's depth occlusion guard reduced the technique to PCF"
+        )
+        assert differentiated_soft_pixels >= 100, (
+            "EVSM produces no distinct soft transition after its occlusion guard: "
+            f"{differentiated_soft_pixels} differentiated penumbra pixels"
         )
 
 
@@ -613,11 +676,12 @@ def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
         pcss_filter_radius: float = 4.0,
         light_size: float = 1.0,
         pcss_light_radius: float = 0.0,
+        shadow_resolution: int = 1024,
     ) -> np.ndarray:
         shadows = ShadowSettings(
             enabled=enabled,
             technique=technique,
-            resolution=2048,
+            resolution=shadow_resolution,
             cascades=1,
             max_distance=20.0,
             softness=1.0,
@@ -674,6 +738,15 @@ def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
         technique: render(technique)[..., :3].astype(np.float32) / 255.0
         for technique in ("pcf", "vsm", "evsm", "msm")
     }
+    # Reconfigure a live renderer in both directions. Each transition must
+    # recreate matching depth/moment/blur resources, while graph-cache restores
+    # must regenerate moments after restoring the cached depth atlas.
+    resized_high = (
+        render("vsm", shadow_resolution=2048)[..., 0].astype(np.float32) / 255.0
+    )
+    resized_back = (
+        render("vsm", shadow_resolution=1024)[..., 0].astype(np.float32) / 255.0
+    )
     luminance = {technique: image[..., 0] for technique, image in raw.items()}
     terrain_reference = (
         render("pcf", enabled=False)[..., 0].astype(np.float32) / 255.0
@@ -696,6 +769,19 @@ def test_native_vsm_casts_shadow_moment_visibility_pcss_and_msm(
     )
 
     pcf_exposure = float(luminance["pcf"][lit_plain].mean())
+    for label, image in (
+        ("VSM after 1024->2048 resize", resized_high),
+        ("VSM after 2048->1024 resize", resized_back),
+    ):
+        exposure = float(image[lit_plain].mean())
+        shadowed = float(((image < exposure * 0.6) & cast_shadow).sum() / terrain.sum())
+        assert exposure >= pcf_exposure * 0.8, (
+            f"{label} breaks lit exposure: {exposure:.3f} vs PCF {pcf_exposure:.3f}"
+        )
+        assert shadowed >= 0.01, (
+            f"{label} casts no shadow: only {shadowed:.4f} of terrain is clearly shadowed"
+        )
+
     for technique in ("vsm", "evsm", "msm"):
         exposure = float(luminance[technique][lit_plain].mean())
         shadowed = float(

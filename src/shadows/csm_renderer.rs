@@ -211,7 +211,7 @@ impl CsmRenderer {
             base_mip_level: 0,
             mip_level_count: Some(1),
             base_array_layer: 0,
-            array_layer_count: Some(self.config.cascade_count),
+            array_layer_count: Some(self.allocation_layers),
         })
     }
 
@@ -226,22 +226,22 @@ impl CsmRenderer {
                 base_mip_level: 0,
                 mip_level_count: Some(1),
                 base_array_layer: 0,
-                array_layer_count: Some(self.config.cascade_count),
+                array_layer_count: Some(self.allocation_layers),
             })
         })
     }
 
     /// Calculate total GPU memory used by the shadow resources
     pub fn total_memory_bytes(&self) -> u64 {
-        let depth_bytes = (self.config.shadow_map_size as u64)
-            * (self.config.shadow_map_size as u64)
-            * (self.config.cascade_count as u64)
+        let depth_bytes = (self.allocation_size as u64)
+            * (self.allocation_size as u64)
+            * (self.allocation_layers as u64)
             * 4;
 
         let moment_bytes = if self.evsm_maps.is_some() {
-            (self.config.shadow_map_size as u64)
-                * (self.config.shadow_map_size as u64)
-                * (self.config.cascade_count as u64)
+            (self.allocation_size as u64)
+                * (self.allocation_size as u64)
+                * (self.allocation_layers as u64)
                 * 8 // Rgba16Float = 8 bytes per pixel
         } else {
             0
@@ -252,7 +252,7 @@ impl CsmRenderer {
 
     /// Helper to expose current shadow map resolution
     pub fn shadow_map_resolution(&self) -> u32 {
-        self.config.shadow_map_size
+        self.allocation_size
     }
 
     /// Get WGSL shader source for CSM
@@ -390,7 +390,8 @@ fn create_evsm_maps(device: &Device, config: &CsmConfig) -> RenderResult<Option<
                 format: TextureFormat::Rgba16Float,
                 usage: TextureUsages::RENDER_ATTACHMENT
                     | TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::STORAGE_BINDING,
+                    | TextureUsages::STORAGE_BINDING
+                    | TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
         )?;

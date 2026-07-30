@@ -27,12 +27,11 @@ fn generate_vsm_moments(depth: f32) -> vec4<f32> {
 }
 
 // EVSM: Exponential warp for positive and negative
-// The moment atlas is Rgba16Float, so the caller must keep the exponents inside
-// EVSM_MAX_EXPONENT_RGBA16F (see src/shadows/mod.rs); exp(c*d)^2 saturates to
-// +Inf beyond that and every Chebyshev bound downstream becomes NaN.
+// Normalize both lobes into [-1, 1] so their squared moments cannot overflow
+// Rgba16Float. The caller still clamps the exponent to preserve fp16 precision.
 fn generate_evsm_moments(depth: f32, pos_exp: f32, neg_exp: f32) -> vec4<f32> {
-    // Positive exponential warp
-    let pos_warped = exp(pos_exp * depth);
+    // Shift the positive warp so its largest value is one.
+    let pos_warped = exp(pos_exp * (depth - 1.0));
     let pos_m1 = pos_warped;
     let pos_m2 = pos_warped * pos_warped;
 

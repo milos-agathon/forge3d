@@ -38,11 +38,10 @@ pub(crate) const CSM_SHADER_SOURCE: &str = concat!(
 
 /// Largest EVSM exponent an `Rgba16Float` moment atlas can carry.
 ///
-/// The moment atlas stores `exp(c * d)` AND its square for `d` in `[0, 1]`, so the
-/// binding constraint is `exp(2 * c) <= 65504` => `c <= 5.545`. Above that the second
-/// moment saturates to `+Inf`, `E[x^2] - E[x]^2` becomes `NaN`, and every Chebyshev
-/// bound downstream collapses - which renders the whole scene as if fully shadowed.
-pub const EVSM_MAX_EXPONENT_RGBA16F: f32 = 5.54;
+/// Both EVSM lobes are normalized into `[-1, 1]`. The remaining fp16 constraint is
+/// keeping their squared moments above the normal range near the middle of the
+/// depth interval; 9 leaves useful precision while preserving a strong warp.
+pub const EVSM_MAX_EXPONENT_RGBA16F: f32 = 9.0;
 
 /// Clamp an EVSM exponent to the range the moment atlas can actually represent.
 ///
@@ -55,7 +54,9 @@ pub fn clamp_evsm_exponent(exponent: f32) -> f32 {
 pub(crate) fn requires_moment_blur(technique: crate::lighting::types::ShadowTechnique) -> bool {
     matches!(
         technique,
-        crate::lighting::types::ShadowTechnique::VSM | crate::lighting::types::ShadowTechnique::MSM
+        crate::lighting::types::ShadowTechnique::VSM
+            | crate::lighting::types::ShadowTechnique::EVSM
+            | crate::lighting::types::ShadowTechnique::MSM
     )
 }
 
@@ -148,13 +149,18 @@ fn test_visibility_entry() {{
     }
 
     #[test]
-    fn evsm_exponent_clamp_keeps_squared_moment_finite_in_rgba16f() {
+    fn evsm_exponent_clamp_keeps_normalized_moments_representable_in_rgba16f() {
         assert_eq!(clamp_evsm_exponent(-1.0), 0.0);
         assert_eq!(clamp_evsm_exponent(40.0), EVSM_MAX_EXPONENT_RGBA16F);
 
-        let largest_squared_moment = (2.0 * EVSM_MAX_EXPONENT_RGBA16F).exp();
-        assert!(largest_squared_moment.is_finite());
-        assert!(largest_squared_moment <= 65_504.0);
+        for depth in [0.0_f32, 0.5, 1.0] {
+            let positive = (EVSM_MAX_EXPONENT_RGBA16F * (depth - 1.0)).exp();
+            let negative = (-EVSM_MAX_EXPONENT_RGBA16F * depth).exp();
+            assert!(positive <= 1.0 && negative <= 1.0);
+            assert!(positive.is_finite() && negative.is_finite());
+        }
+        let midpoint_second_moment = (-EVSM_MAX_EXPONENT_RGBA16F).exp();
+        assert!(midpoint_second_moment >= 0.00006103515625);
     }
 
     #[test]
@@ -204,12 +210,27 @@ visibility_output[1] = minimum.y;";
     }
 
     #[test]
-    fn spatial_moment_blur_excludes_evsm_light_bleeding() {
+    fn shared_evsm_light_leak_cap_is_lit_in_front_and_shadowed_behind_mean() {
+        let source = include_str!("../shaders/includes/shadow_moments.wgsl");
+        let probe = "
+let exponent = 9.0;
+let mean = exp(exponent * (0.5 - 1.0));
+let front = exp(exponent * (0.4 - 1.0));
+let behind = exp(exponent * (0.6 - 1.0));
+visibility_output[0] = evsm_light_leak_cap(mean, front, exponent);
+visibility_output[1] = evsm_light_leak_cap(mean, behind, exponent);";
+        let [front, behind, ..] = execute_shader_probe(source, "EVSM light-leak cap", probe);
+        assert_eq!(front, 1.0);
+        assert_eq!(behind, 0.0);
+    }
+
+    #[test]
+    fn spatial_moment_blur_covers_every_moment_technique() {
         use crate::lighting::types::ShadowTechnique;
 
         assert!(requires_moment_blur(ShadowTechnique::VSM));
         assert!(requires_moment_blur(ShadowTechnique::MSM));
-        assert!(!requires_moment_blur(ShadowTechnique::EVSM));
+        assert!(requires_moment_blur(ShadowTechnique::EVSM));
         assert!(!requires_moment_blur(ShadowTechnique::PCF));
     }
 

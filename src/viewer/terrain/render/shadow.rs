@@ -126,6 +126,7 @@ impl ViewerTerrainScene {
         };
 
         // Prepare and execute moment pass if we have the resources
+        let mut disable_failed_blur = false;
         if let (Some(ref mut moment_pass), Some(ref csm)) =
             (&mut self.moment_pass, &self.csm_renderer)
         {
@@ -149,28 +150,30 @@ impl ViewerTerrainScene {
                     let Some(ref mut blur_pass) = self.moment_blur_pass else {
                         return;
                     };
-                    let moment_sample_view = csm
-                        .moment_texture_view()
-                        .expect("moment texture exists for moment techniques");
                     if let Err(e) = blur_pass.execute(
                         &self.device,
                         &self.queue,
                         encoder,
-                        &moment_sample_view,
                         moment_texture,
                         cascade_count,
                         shadow_map_size,
                         crate::shadows::DEFAULT_MOMENT_BLUR_RADIUS,
+                        technique,
+                        csm.config.evsm_positive_exp,
                     ) {
+                        disable_failed_blur = true;
                         eprintln!("[terrain_scene] failed to blur moment maps: {e}");
                         crate::core::degradation::record_degradation(
                             "allocation_fallback",
                             "viewer.csm_moment_blur",
-                            "VSM/MSM moment-map filtering unavailable",
+                            "moment-map filtering unavailable",
                         );
                     }
                 }
             }
+        }
+        if disable_failed_blur {
+            self.moment_blur_pass = None;
         }
     }
 }

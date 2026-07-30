@@ -119,10 +119,12 @@ impl ShadowParams {
         let cascades = self.cascades.max(1) as u64;
         let resolution = self.map_size.max(1) as u64;
         let depth_bytes = cascades * resolution * resolution * 4;
-        let moment_bytes = match self.technique {
-            ShadowTechnique::Vsm => cascades * resolution * resolution * 8,
-            ShadowTechnique::Evsm | ShadowTechnique::Msm => cascades * resolution * resolution * 16,
-            _ => 0,
+        // All moment techniques use one Rgba16Float atlas plus one persistent
+        // Rgba16Float intermediate for the separable blur.
+        let moment_bytes = if self.requires_moments() {
+            cascades * resolution * resolution * 16
+        } else {
+            0
         };
         depth_bytes + moment_bytes
     }
@@ -232,5 +234,17 @@ mod tests {
             ),
             (7.5, 3.25, 1.5)
         );
+    }
+
+    #[test]
+    fn vsm_memory_includes_persistent_blur_intermediate() {
+        let params = ShadowParams {
+            technique: ShadowTechnique::Vsm,
+            map_size: 4096,
+            cascades: 2,
+            ..Default::default()
+        };
+
+        assert_eq!(params.atlas_memory_bytes(), 640 * 1024 * 1024);
     }
 }

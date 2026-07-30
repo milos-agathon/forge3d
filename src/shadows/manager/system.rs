@@ -57,7 +57,11 @@ impl ShadowManager {
             Some(Self::create_fallback_moment_texture(device)?)
         };
 
-        let memory_bytes = renderer.total_memory_bytes();
+        let memory_bytes = budget::estimate_memory_bytes(
+            config.csm.shadow_map_size,
+            config.csm.cascade_count,
+            config.technique,
+        );
 
         // Create moment generation and blur passes if needed
         let moment_pass = if requires_moments {
@@ -66,8 +70,6 @@ impl ShadowManager {
             None
         };
 
-        // Spatial EVSM blur is intentionally excluded: with the fp16-safe
-        // exponent it turns narrow cast shadows into light bleeding.
         let blur_pass = if super::super::requires_moment_blur(config.technique) {
             Some(ShadowBlurPass::new(device)?)
         } else {
@@ -341,19 +343,18 @@ impl ShadowManager {
             self.config.csm.evsm_negative_exp,
         );
 
-        // P0.2/M3: Apply Gaussian blur to VSM/MSM moment maps. EVSM uses
-        // derivative-scaled variance floors instead to avoid light bleeding.
+        // Apply Gaussian blur to all moment techniques.
         if let Some(blur_pass) = &mut self.blur_pass {
-            let moment_sample_view = self.renderer.moment_texture_view().unwrap();
             blur_pass.execute(
                 device,
                 queue,
                 encoder,
-                &moment_sample_view,
                 moment_texture,
                 self.config.csm.cascade_count,
                 self.config.csm.shadow_map_size,
                 self.config.blur_kernel_radius,
+                self.config.technique,
+                self.config.csm.evsm_positive_exp,
             )?;
         }
 

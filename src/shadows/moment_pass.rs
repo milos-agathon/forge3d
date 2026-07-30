@@ -221,6 +221,87 @@ pub fn create_moment_storage_view(moment_texture: &Texture, cascade_count: u32) 
 }
 
 #[cfg(test)]
+mod dimension_tests {
+    use super::*;
+
+    #[test]
+    fn generation_and_blur_cover_a_1024_moment_atlas() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let queue = &context.queue;
+        let mut config = crate::shadows::CsmConfig::default();
+        config.shadow_map_size = 1024;
+        config.cascade_count = 1;
+        config.enable_evsm = true;
+        let renderer = crate::shadows::CsmRenderer::new(device, config).expect("CSM renderer");
+        let moments = renderer.evsm_maps.as_ref().expect("moment atlas");
+        let depth_view = &renderer.shadow_map_views[0];
+        let moment_view = create_moment_storage_view(moments, 1);
+        let mut generation = MomentGenerationPass::new(device).expect("moment pass");
+        generation.prepare_bind_group(device, &renderer.shadow_texture_view(), &moment_view);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("moment_1024_contract"),
+        });
+        {
+            let _clear = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("moment_1024_depth_clear"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        }
+        generation.execute(queue, &mut encoder, ShadowTechnique::VSM, 1, 1024, 9.0, 9.0);
+        queue.submit(Some(encoder.finish()));
+        let generated = crate::core::hdr::read_hdr_texture(
+            device,
+            queue,
+            moments,
+            1024,
+            1024,
+            TextureFormat::Rgba16Float,
+        )
+        .expect("generated moment readback");
+        assert!(generated[0] > 0.99, "1024 moment atlas generation failed");
+
+        let mut blur = crate::shadows::ShadowBlurPass::new(device).expect("blur pass");
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("moment_1024_blur"),
+        });
+        blur.execute(
+            device,
+            queue,
+            &mut encoder,
+            moments,
+            1,
+            1024,
+            crate::shadows::DEFAULT_MOMENT_BLUR_RADIUS,
+            ShadowTechnique::VSM,
+            9.0,
+        )
+        .expect("blur");
+        queue.submit(Some(encoder.finish()));
+        let output = crate::core::hdr::read_hdr_texture(
+            device,
+            queue,
+            moments,
+            1024,
+            1024,
+            TextureFormat::Rgba16Float,
+        )
+        .expect("moment readback");
+        assert!(output[0] > 0.99, "1024 moment atlas was not populated");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

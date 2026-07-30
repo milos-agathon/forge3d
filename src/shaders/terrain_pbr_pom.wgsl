@@ -976,7 +976,7 @@ fn sample_shadow_evsm_terrain(
     let c_neg = csm_uniforms.evsm_negative_exp;
     
     // Warp receiver depth
-    let warp_depth_pos = det_exp(c_pos * receiver_depth);
+    let warp_depth_pos = det_exp(c_pos * (receiver_depth - 1.0));
     let warp_depth_neg = -det_exp(-c_neg * receiver_depth);
     let variance_floor = evsm_minimum_variance(
         vec2<f32>(warp_depth_pos, warp_depth_neg),
@@ -991,6 +991,24 @@ fn sample_shadow_evsm_terrain(
             warp_depth_neg,
             variance_floor
         );
+    shadow_factor = min(
+        shadow_factor,
+        evsm_light_leak_cap(moments.r, warp_depth_pos, c_pos)
+    );
+    let texel_size = 1.0 / max(csm_uniforms.shadow_map_size, 1.0);
+    var occlusion_guard = 0.0;
+    for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+            occlusion_guard += textureSampleCompare(
+                shadow_maps,
+                shadow_sampler,
+                shadow_coords + vec2<f32>(f32(x), f32(y)) * texel_size,
+                i32(cascade_idx),
+                receiver_depth
+            );
+        }
+    }
+    shadow_factor = min(shadow_factor, occlusion_guard / 9.0);
     
     // Apply light leak reduction
     if (moment_bias > 0.0) {

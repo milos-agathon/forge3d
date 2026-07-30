@@ -68,26 +68,40 @@ pub fn enforce_memory_budget(config: &mut ShadowManagerConfig) {
 ///
 /// Memory breakdown:
 /// - Depth atlas: Depth32Float = 4 bytes/pixel × resolution² × cascades
-/// - Moment textures (VSM/EVSM/MSM): Rgba32Float = 16 bytes/pixel × resolution² × cascades
+/// - Moment atlas (VSM/EVSM/MSM): Rgba16Float = 8 bytes/pixel
+/// - Persistent blur intermediate: Rgba16Float = 8 bytes/pixel
 ///
-/// Note: VSM technically only needs 2 channels (mean, variance), but we use Rgba32Float
-/// for all moment techniques to simplify the implementation and allow future extensions.
 /// Does not account for texture padding/alignment; actual GPU usage may be slightly higher.
-fn estimate_memory_bytes(map_resolution: u32, cascades: u32, technique: ShadowTechnique) -> u64 {
+pub(super) fn estimate_memory_bytes(
+    map_resolution: u32,
+    cascades: u32,
+    technique: ShadowTechnique,
+) -> u64 {
     let res = map_resolution as u64;
     let casc = cascades as u64;
 
     // Depth32Float: 4 bytes per pixel
     let depth_bytes = res * res * casc * 4;
 
-    // Moment texture bytes (all use Rgba32Float in current implementation)
+    // Moment atlas and the persistent separable-blur intermediate.
     let moment_bytes = if technique.requires_moments() {
-        // Rgba32Float: 4 channels × 4 bytes = 16 bytes per pixel
-        // Used for VSM (2 channels used), EVSM (4 channels), MSM (4 channels)
         res * res * casc * 16
     } else {
         0
     };
 
     depth_bytes + moment_bytes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn estimate_includes_persistent_rgba16float_blur_intermediate() {
+        assert_eq!(
+            estimate_memory_bytes(4096, 2, ShadowTechnique::VSM),
+            640 * 1024 * 1024
+        );
+    }
 }

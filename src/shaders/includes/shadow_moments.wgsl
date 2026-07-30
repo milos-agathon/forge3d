@@ -38,6 +38,25 @@ fn evsm_visibility_from_moments(
     return min(positive_visibility, negative_visibility);
 }
 
+fn evsm_light_leak_cap(
+    positive_mean: f32,
+    positive_receiver: f32,
+    positive_exponent: f32
+) -> f32 {
+    // A blurred distribution can otherwise assign high probability behind a
+    // blocker (the classic VSM light-leak failure). Decode the normalized
+    // positive mean and conservatively cap visibility behind it. The smooth
+    // transition also makes fp16 mean quantization visually continuous.
+    let minimum_warp = exp(-positive_exponent);
+    let mean_depth =
+        1.0 + log(max(positive_mean, minimum_warp)) / positive_exponent;
+    let receiver_depth =
+        1.0 + log(max(positive_receiver, minimum_warp)) / positive_exponent;
+    let occluder_visibility =
+        1.0 - smoothstep(0.0005, 0.003, receiver_depth - mean_depth);
+    return occluder_visibility;
+}
+
 fn msm_visibility_from_moments(
     moments: vec4<f32>,
     receiver_depth: f32,

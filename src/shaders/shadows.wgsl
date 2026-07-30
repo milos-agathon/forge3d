@@ -511,7 +511,7 @@ fn sample_shadow_evsm(
     let c_neg = csm_uniforms.evsm_negative_exp;
     
     // Warp receiver depth
-    let warp_depth_pos = exp(c_pos * receiver_depth);
+    let warp_depth_pos = exp(c_pos * (receiver_depth - 1.0));
     let warp_depth_neg = -exp(-c_neg * receiver_depth);
     let variance_floor = evsm_minimum_variance(
         vec2<f32>(warp_depth_pos, warp_depth_neg),
@@ -526,6 +526,14 @@ fn sample_shadow_evsm(
             warp_depth_neg,
             variance_floor
         );
+    shadow_factor = min(
+        shadow_factor,
+        evsm_light_leak_cap(moments.r, warp_depth_pos, c_pos)
+    );
+    shadow_factor = min(
+        shadow_factor,
+        sample_shadow_pcf(light_space_pos, cascade_idx, world_normal)
+    );
     
     // Apply light leak reduction
     let moment_bias = csm_uniforms.technique_params.z;

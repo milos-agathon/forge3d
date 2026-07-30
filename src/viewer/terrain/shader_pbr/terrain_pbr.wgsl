@@ -341,6 +341,27 @@ fn select_cascade(view_depth: f32) -> u32 {
     return count - 1u;
 }
 
+fn sample_shadow_pcf_guard(
+    shadow_coords: vec2<f32>,
+    receiver_depth: f32,
+    cascade_idx: u32
+) -> f32 {
+    let texel_size = 1.0 / max(csm_uniforms.shadow_map_size, 1.0);
+    var visibility = 0.0;
+    for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+            visibility += textureSampleCompare(
+                shadow_maps,
+                shadow_sampler,
+                shadow_coords + vec2<f32>(f32(x), f32(y)) * texel_size,
+                i32(cascade_idx),
+                receiver_depth
+            );
+        }
+    }
+    return visibility / 9.0;
+}
+
 // VSM: Chebyshev upper bound
 fn sample_shadow_vsm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx: u32, moment_bias: f32) -> f32 {
     let moments = textureSample(moment_maps, moment_sampler, shadow_coords, i32(cascade_idx));
@@ -369,14 +390,14 @@ fn sample_shadow_evsm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx
     
     // Warp receiver depth. The negative lobe is negated to match the moment
     // atlas (moment_generation.wgsl) so both warps increase with depth.
-    let warp_depth_pos = exp(c_pos * receiver_depth);
+    let warp_depth_pos = exp(c_pos * (receiver_depth - 1.0));
     let warp_depth_neg = -exp(-c_neg * receiver_depth);
     let variance_floor = evsm_minimum_variance(
         vec2<f32>(warp_depth_pos, warp_depth_neg),
         vec2<f32>(c_pos, c_neg)
     );
     
-    return clamp(
+    let variance_visibility = clamp(
         evsm_visibility_from_moments(
             moments,
             warp_depth_pos,
@@ -385,6 +406,14 @@ fn sample_shadow_evsm(shadow_coords: vec2<f32>, receiver_depth: f32, cascade_idx
         ),
         0.0,
         1.0
+    );
+    let moment_visibility = min(
+        variance_visibility,
+        evsm_light_leak_cap(moments.r, warp_depth_pos, c_pos)
+    );
+    return min(
+        moment_visibility,
+        sample_shadow_pcf_guard(shadow_coords, receiver_depth, cascade_idx)
     );
 }
 
