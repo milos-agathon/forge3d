@@ -98,6 +98,13 @@ POPULATION_MIN_PERSONS = 1.0
 #   TOWER_WORLD — world-unit height of the p99.9 population cell. SPAN_X=100,
 #     so 2.5 world units ≈ 2.5% of the map width. Terrain world height is
 #     RELIEF_WORLD (dem01 max = 1.0), so towers stay a fraction of Mont Blanc.
+# Swept 3x3 (world 1.5/2.5/4.0 x gamma 1.0/1.6/2.4) + floor 10/25/50 at
+# RELIEF 5 (2026-07-30, judged on Paris/Lyon/Marseille crops + full field):
+# 1.5/g1.0 speckles Paris into undifferentiated texture, 4.0/g2.4 collapses
+# it to one monolithic shadow; 2.5/g1.6 gives the spire cluster + coherent SE
+# streak with suburbs subordinate. Floor 10 -> 7.4% tower cells (needle
+# carpet over northern France), floor 50 -> 0.5% (Brittany/Normandy bald);
+# floor 25 -> 2.2%, cities present, no carpet.
 TOWER_MIN_PERSONS = 25.0
 TOWER_GAMMA = 1.6
 TOWER_WORLD = 2.5
@@ -111,15 +118,25 @@ SEA_FLOOR_M = -15.0
 
 # --- PT scene ----------------------------------------------------------------
 SPAN_X = 100.0  # world units across the DEM grid's x extent
-# Settled by --measure-relief probes in Task 4 (map-maker p90 band, Alps kept
-# sculpted without crushing the Paris basin). 7.0 is the starting default.
-RELIEF_WORLD = 7.0
+# Settled by --measure-relief + eye probes (2026-07-30). Land-only p90
+# world-slope at the production grid (4096x3801):
+#     RELIEF   2.0   4.0   5.0   6.0   7.0   8.0
+#     p90 deg 40.55 59.70 64.95 68.72 71.54 73.71
+# The calibrated register anchor (Switzerland v6) is ~62 deg -> between 4 and
+# 5. Probes at 4/5/6: 4 leaves the Paris basin featureless, 6 drowns the
+# southern Alps in shadow mass; 5 keeps Massif Central/Vosges/Jura sculpted
+# with the Alps legible.
+RELIEF_WORLD = 5.0
 CAMERA_FOV_Y = 8.0  # quasi-orthographic nadir (relief parallax < 0.5%)
 CAMERA_MARGIN = 1.06
 # Measured PT convention (quadrant probe, 2026-07-12): light compass =
-# sun_azimuth + 90, so 225 = NW light with shadows falling SE. MUST be
-# re-verified on THIS terrain in Task 4 before the production trace.
+# sun_azimuth + 90, so 225 = NW light with shadows falling SE. Re-verified on
+# THIS terrain (2026-07-30, 10 tallest well-separated peaks at RELIEF 5):
+# mean flank luminance NW 0.400 / NE 0.364 / SW 0.327 / SE 0.253 ->
+# brightest NW, darkest SE. PASS.
 SUN_AZIMUTH = 225.0
+# Probed 12/16/20 at the winning tower combo: 12 darkens the whole terrain,
+# 20 shortens the signature tower streaks; 16 keeps both.
 SUN_ELEVATION = 16.0
 SUN_INTENSITY = 3.2
 ENV_INTENSITY = 0.62
