@@ -48,7 +48,11 @@ pub const EVSM_MAX_EXPONENT_RGBA16F: f32 = 9.0;
 /// Must be applied identically to the moment-generation pass and to the shader
 /// uniforms that sample it: producer and consumer have to warp by the same constant.
 pub fn clamp_evsm_exponent(exponent: f32) -> f32 {
-    exponent.clamp(0.0, EVSM_MAX_EXPONENT_RGBA16F)
+    if exponent.is_finite() {
+        exponent.clamp(0.0, EVSM_MAX_EXPONENT_RGBA16F)
+    } else {
+        0.0
+    }
 }
 
 pub(crate) fn requires_moment_blur(technique: crate::lighting::types::ShadowTechnique) -> bool {
@@ -152,6 +156,8 @@ fn test_visibility_entry() {{
     fn evsm_exponent_clamp_keeps_normalized_moments_representable_in_rgba16f() {
         assert_eq!(clamp_evsm_exponent(-1.0), 0.0);
         assert_eq!(clamp_evsm_exponent(40.0), EVSM_MAX_EXPONENT_RGBA16F);
+        assert_eq!(clamp_evsm_exponent(f32::NAN), 0.0);
+        assert_eq!(clamp_evsm_exponent(f32::INFINITY), 0.0);
 
         for depth in [0.0_f32, 0.5, 1.0] {
             let positive = (EVSM_MAX_EXPONENT_RGBA16F * (depth - 1.0)).exp();
@@ -210,18 +216,56 @@ visibility_output[1] = minimum.y;";
     }
 
     #[test]
-    fn shared_evsm_light_leak_cap_is_lit_in_front_and_shadowed_behind_mean() {
+    fn shared_evsm_moment_leak_control_preserves_a_soft_penumbra() {
         let source = include_str!("../shaders/includes/shadow_moments.wgsl");
         let probe = "
 let exponent = 9.0;
-let mean = exp(exponent * (0.5 - 1.0));
-let front = exp(exponent * (0.4 - 1.0));
-let behind = exp(exponent * (0.6 - 1.0));
-visibility_output[0] = evsm_light_leak_cap(mean, front, exponent);
-visibility_output[1] = evsm_light_leak_cap(mean, behind, exponent);";
-        let [front, behind, ..] = execute_shader_probe(source, "EVSM light-leak cap", probe);
+let near_depth = exp(exponent * (0.45 - 1.0));
+let far_depth = exp(exponent * (0.55 - 1.0));
+let mean = 0.5 * (near_depth + far_depth);
+let mean_squared = 0.5 * (near_depth * near_depth + far_depth * far_depth);
+let moments = vec2<f32>(mean, mean_squared);
+visibility_output[0] = evsm_moment_leak_control(
+    moments, exp(exponent * (0.4 - 1.0)), exponent, 0.000001
+);
+visibility_output[1] = evsm_moment_leak_control(
+    moments, exp(exponent * (0.5 - 1.0)), exponent, 0.000001
+);
+visibility_output[2] = evsm_moment_leak_control(
+    moments, exp(exponent * (0.75 - 1.0)), exponent, 0.000001
+);
+let uniform_depth = exp(exponent * (0.5 - 1.0));
+visibility_output[3] = evsm_moment_leak_control(
+    vec2<f32>(uniform_depth, uniform_depth * uniform_depth),
+    exp(exponent * (0.499 - 1.0)),
+    exponent,
+    0.000001
+);
+visibility_output[4] = evsm_moment_leak_control(
+    vec2<f32>(uniform_depth, uniform_depth * uniform_depth),
+    exp(exponent * (0.55 - 1.0)),
+    exponent,
+    0.000001
+);";
+        let [front, penumbra, shadow, uniform_front, uniform_shadow] =
+            execute_shader_probe(source, "EVSM moment leak control", probe);
         assert_eq!(front, 1.0);
-        assert_eq!(behind, 0.0);
+        assert_eq!(
+            uniform_front, 1.0,
+            "variance floor widened a uniform distribution"
+        );
+        assert!(
+            uniform_shadow < 0.05,
+            "uniform moments leaked behind their occluder: {uniform_shadow}"
+        );
+        assert!(
+            penumbra > 0.05 && penumbra < 0.95,
+            "mixed moments did not retain a soft penumbra: {penumbra}"
+        );
+        assert!(
+            shadow < penumbra && shadow < 0.05,
+            "visibility did not converge to shadow: penumbra={penumbra}, shadow={shadow}"
+        );
     }
 
     #[test]

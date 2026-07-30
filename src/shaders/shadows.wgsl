@@ -528,11 +528,12 @@ fn sample_shadow_evsm(
         );
     shadow_factor = min(
         shadow_factor,
-        evsm_light_leak_cap(moments.r, warp_depth_pos, c_pos)
-    );
-    shadow_factor = min(
-        shadow_factor,
-        sample_shadow_pcf(light_space_pos, cascade_idx, world_normal)
+        evsm_moment_leak_control(
+            moments.rg,
+            warp_depth_pos,
+            c_pos,
+            variance_floor.x
+        )
     );
     
     // Apply light leak reduction

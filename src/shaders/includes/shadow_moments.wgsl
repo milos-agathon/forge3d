@@ -3,6 +3,12 @@ const MSM_FINITE_LIMIT: f32 = 1e20;
 const MSM_MATRIX_EPSILON: f32 = 1e-7;
 const MSM_DETERMINANT_EPSILON: f32 = 1e-12;
 const EVSM_MINIMUM_VARIANCE: f32 = 0.000375;
+const EVSM_MAX_EXPONENT_RGBA16F: f32 = 9.0;
+// Maximum normalized-depth span assigned to a mixed-distribution penumbra.
+const EVSM_MAX_DEPTH_TRANSITION: f32 = 0.03;
+// Span three sigmas, starting two sigmas toward the occluder from the mean.
+const EVSM_EDGE_SIGMA_SCALE: f32 = 3.0;
+const EVSM_OCCLUDER_SIGMA_SCALE: f32 = 2.0;
 
 fn chebyshev_upper_bound_visibility(mean: f32, variance: f32, receiver: f32) -> f32 {
     if (receiver <= mean) {
@@ -38,23 +44,59 @@ fn evsm_visibility_from_moments(
     return min(positive_visibility, negative_visibility);
 }
 
-fn evsm_light_leak_cap(
-    positive_mean: f32,
+fn evsm_moment_leak_control(
+    positive_moments: vec2<f32>,
     positive_receiver: f32,
-    positive_exponent: f32
+    positive_exponent: f32,
+    minimum_variance: f32
 ) -> f32 {
-    // A blurred distribution can otherwise assign high probability behind a
-    // blocker (the classic VSM light-leak failure). Decode the normalized
-    // positive mean and conservatively cap visibility behind it. The smooth
-    // transition also makes fp16 mean quantization visually continuous.
+    if (
+        !(positive_exponent > 0.0)
+        || !(positive_exponent <= EVSM_MAX_EXPONENT_RGBA16F)
+        || positive_moments.x != positive_moments.x
+        || positive_moments.y != positive_moments.y
+        || positive_receiver != positive_receiver
+    ) {
+        return 1.0;
+    }
+
     let minimum_warp = exp(-positive_exponent);
+    let positive_mean = clamp(positive_moments.x, minimum_warp, 1.0);
+    let receiver = clamp(positive_receiver, minimum_warp, 1.0);
+
     let mean_depth =
-        1.0 + log(max(positive_mean, minimum_warp)) / positive_exponent;
+        1.0 + log(positive_mean) / positive_exponent;
     let receiver_depth =
-        1.0 + log(max(positive_receiver, minimum_warp)) / positive_exponent;
-    let occluder_visibility =
-        1.0 - smoothstep(0.0005, 0.003, receiver_depth - mean_depth);
-    return occluder_visibility;
+        1.0 + log(receiver) / positive_exponent;
+    let variance = max(
+        positive_moments.y - positive_mean * positive_mean,
+        minimum_variance
+    );
+    let warp_derivative =
+        max(positive_exponent * positive_mean, 0.000001);
+    let edge_depth_sigma =
+        sqrt(max(variance - minimum_variance, 0.0)) / warp_derivative;
+    let floor_depth_sigma = sqrt(minimum_variance) / warp_derivative;
+    if (edge_depth_sigma <= floor_depth_sigma) {
+        return select(0.0, 1.0, receiver_depth <= mean_depth);
+    }
+    let transition_width = min(
+        EVSM_EDGE_SIGMA_SCALE * edge_depth_sigma,
+        EVSM_MAX_DEPTH_TRANSITION
+    );
+    let support_offset = min(
+        EVSM_OCCLUDER_SIGMA_SCALE * edge_depth_sigma,
+        EVSM_MAX_DEPTH_TRANSITION
+    );
+    let occluder_depth = mean_depth - support_offset;
+    if (receiver_depth <= occluder_depth) {
+        return 1.0;
+    }
+    return 1.0 - smoothstep(
+        0.0,
+        transition_width,
+        receiver_depth - occluder_depth
+    );
 }
 
 fn msm_visibility_from_moments(

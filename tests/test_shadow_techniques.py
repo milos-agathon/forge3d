@@ -597,20 +597,36 @@ class TestEvsmExposureParity:
         )
         penumbra = (visibility["pcf"] > 0.01) & (visibility["pcf"] < 0.99)
         evsm_difference = np.abs(visibility["evsm"] - visibility["pcf"])
+        evsm_soft = (
+            (visibility["evsm"] > 0.05)
+            & (visibility["evsm"] < 0.95)
+        )
         differentiated_soft_pixels = int(
             (
                 penumbra
                 & (evsm_difference > 0.01)
-                & (visibility["evsm"] > 0.05)
-                & (visibility["evsm"] < 0.95)
+                & evsm_soft
             ).sum()
         )
-        assert float(evsm_difference[penumbra].mean()) >= 0.001, (
-            "EVSM's depth occlusion guard reduced the technique to PCF"
+        evsm_only_soft_pixels = int((evsm_soft & ~penumbra).sum())
+        mean_penumbra_difference = float(evsm_difference[penumbra].mean())
+        print(
+            "EVSM soft transition: "
+            f"mean_pcf_delta={mean_penumbra_difference:.6f}, "
+            f"differentiated={differentiated_soft_pixels}, "
+            f"evsm_only={evsm_only_soft_pixels}"
         )
-        assert differentiated_soft_pixels >= 100, (
-            "EVSM produces no distinct soft transition after its occlusion guard: "
+        assert mean_penumbra_difference >= 0.05, (
+            "EVSM's moment-native penumbra is too close to PCF: "
+            f"mean difference={mean_penumbra_difference:.4f}"
+        )
+        assert differentiated_soft_pixels >= 1000, (
+            "EVSM produces no materially distinct soft transition: "
             f"{differentiated_soft_pixels} differentiated penumbra pixels"
+        )
+        assert evsm_only_soft_pixels >= 500, (
+            "EVSM has no soft transition outside PCF's penumbra: "
+            f"{evsm_only_soft_pixels} EVSM-only soft pixels"
         )
 
 

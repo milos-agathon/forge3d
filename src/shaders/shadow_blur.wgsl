@@ -37,7 +37,7 @@ fn get_gaussian_weight(offset: u32, radius: u32) -> f32 {
 }
 
 fn evsm_sample_weight(center: vec4<f32>, sample: vec4<f32>) -> f32 {
-    if (params.technique != 4u || params.evsm_positive_exp <= 0.0) {
+    if (params.technique != 4u || !(params.evsm_positive_exp > 0.0)) {
         return 1.0;
     }
     let minimum_warp = exp(-params.evsm_positive_exp);

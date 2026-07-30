@@ -218,6 +218,13 @@ impl ShadowBlurPass {
                 "moment blur radius {kernel_radius} exceeds maximum {MAX_MOMENT_BLUR_RADIUS}"
             )));
         }
+        if technique == crate::lighting::types::ShadowTechnique::EVSM
+            && (!evsm_positive_exp.is_finite() || evsm_positive_exp <= 0.0)
+        {
+            return Err(RenderError::render(
+                "EVSM moment blur exponent must be finite and greater than zero",
+            ));
+        }
         if moment_texture.width() != shadow_map_size
             || moment_texture.height() != shadow_map_size
             || moment_texture.depth_or_array_layers() != cascade_count
@@ -232,6 +239,7 @@ impl ShadowBlurPass {
                 cascade_count
             )));
         }
+        let evsm_positive_exp = super::clamp_evsm_exponent(evsm_positive_exp);
 
         self.ensure_intermediate_texture(device, shadow_map_size, cascade_count)?;
         self.ensure_bind_groups(device, moment_texture)?;
@@ -588,6 +596,36 @@ mod tests {
                 9.0,
             )
             .is_err());
+    }
+
+    #[test]
+    fn execute_rejects_invalid_evsm_exponents() {
+        let context = crate::core::gpu::try_ctx().expect("GPU context");
+        let device = &context.device;
+        let queue = &context.queue;
+        let texture = test_moment_texture(device, 9, 1);
+        let mut blur = ShadowBlurPass::new(device).expect("blur pass");
+
+        for exponent in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("shadow_blur_invalid_evsm_exponent"),
+            });
+            assert!(
+                blur.execute(
+                    device,
+                    queue,
+                    &mut encoder,
+                    &texture,
+                    1,
+                    9,
+                    2,
+                    crate::lighting::types::ShadowTechnique::EVSM,
+                    exponent,
+                )
+                .is_err(),
+                "invalid EVSM exponent {exponent:?} was accepted"
+            );
+        }
     }
 
     #[test]
