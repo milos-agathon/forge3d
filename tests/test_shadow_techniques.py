@@ -82,6 +82,22 @@ def test_shadow_replacements_release_dependents_before_tracked_owners():
     assert staged < replace.index("self.moment_pass = None") < owner
     assert staged < replace.index("self.moment_blur_pass = None") < owner
 
+    viewer = (
+        root / "src" / "viewer" / "terrain" / "scene" / "pipeline_init.rs"
+    ).read_text(encoding="utf-8")
+    replace = viewer.split("let replacement = ShadowResources", 1)[1].split(
+        'println!("[terrain_scene] Shadows initialized',
+        1,
+    )[0]
+    owner = replace.index("self.csm_renderer = Some(replacement.csm_renderer)")
+    assert replace.index("self.pbr_bind_group = None") < owner
+    assert replace.index("self.moment_pass = None") < owner
+    assert replace.index("self.moment_blur_pass = None") < owner
+    assert owner < replace.index("self.moment_pass = replacement.moment_pass")
+    assert owner < replace.index(
+        "self.moment_blur_pass = replacement.moment_blur_pass"
+    )
+
 
 class TestShadowTechniqueValidation:
     """Test shadow technique validation in terrain_params.py."""

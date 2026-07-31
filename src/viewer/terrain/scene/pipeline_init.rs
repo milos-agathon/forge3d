@@ -219,8 +219,11 @@ impl ViewerTerrainScene {
             moment_blur_pass,
         };
         // Bind groups retain views into the current tracked textures. Release
-        // them before dropping either atlas owner, then rebuild on next render.
+        // the PBR and moment passes before dropping either atlas owner, then
+        // rebuild them against the replacements.
         self.pbr_bind_group = None;
+        self.moment_pass = None;
+        self.moment_blur_pass = None;
         self.csm_renderer = Some(replacement.csm_renderer);
         self.csm_uniform_buffer = Some(replacement.csm_uniform_buffer);
         self.moment_pass = replacement.moment_pass;

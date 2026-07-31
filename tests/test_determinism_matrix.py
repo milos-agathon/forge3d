@@ -156,6 +156,7 @@ def test_shadow_shader_changes_reach_push_and_pull_request_matrix_triggers():
     pull_request_paths = workflow.split("  pull_request:", 1)[1].split("jobs:", 1)[0]
     for trigger_paths in (push_paths, pull_request_paths):
         assert "'src/shaders/shadows.wgsl'" in trigger_paths
+        assert "'src/shaders/includes/shadow_moments.wgsl'" in trigger_paths
         assert "'src/shaders/csm.wgsl'" not in trigger_paths
 
 
