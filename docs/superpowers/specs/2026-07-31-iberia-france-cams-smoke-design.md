@@ -17,11 +17,11 @@ established editorial plate style.
 | Layer | Dataset | Variable(s) | Notes |
 | --- | --- | --- | --- |
 | Smoke field | `cams-global-atmospheric-composition-forecasts` | `organic_matter_aerosol_optical_depth_550nm` (`omaod550`) | The app's AOD tracer for dates ≥ May 2026. 0.4°, 00/12 UTC runs, 3-hourly leadtimes assembled into a continuous series for 2026-07-24..31, bbox-subset. |
-| Fires | `cams-global-fire-emissions-gfas` | `frpfire` (wildfire radiative power) | The app's GFAS v1.2 fire layer. 0.1° daily. Replaces FIRMS entirely: cluster positions, intensities, per-day activity, counters. |
+| Fires | NASA FIRMS VIIRS NRT (SNPP/NOAA-20/NOAA-21) | per-detection lat/lon/FRP | **Amended 2026-07-31:** ADS froze the GFAS dataset on 2025-12-03 (moved to the ECMWF Data Portal), so July 2026 is unavailable there. User-approved substitute: the FRP observations GFAS itself assimilates. Drives cluster positions, intensities, per-day activity, counters. |
 | Wind | `cams-global-atmospheric-composition-forecasts` | `10m_u_component_of_wind`, `10m_v_component_of_wind` | Same dataset/runs as the AOD so every moving element is CAMS. Drives BOTH the streamline trails and any engine wind sampling. |
 
-Credit line: `Copernicus Atmosphere Monitoring Service (CAMS) · GFAS v1.2 ·
-ECMWF · forge3d` under the Copernicus licence.
+Credit line: `Copernicus Atmosphere Monitoring Service (CAMS) · ECMWF ·
+NASA FIRMS (VIIRS) · forge3d` under the Copernicus licence.
 
 ### Credentials protocol (hard requirement)
 
@@ -72,8 +72,8 @@ counters/footer.
 ## Counters (grounded only)
 
 - Date/time UTC ticking through 2026-07-24..30.
-- Total fire radiative power (GW) from GFAS for the current day.
-- Active GFAS fire cells count.
+- Cumulative VIIRS fire detections (FIRMS, real per-day counts).
+- Current-day VIIRS detections.
 - No burned-area estimate (not in the mandated data).
 
 ## Calibration & validation
