@@ -150,6 +150,15 @@ def test_f3dz_stream_hashes_run_on_two_hosted_platforms():
     assert "f3dz-determinism-${{ matrix.os }}" in workflow
 
 
+def test_shadow_shader_changes_reach_push_and_pull_request_matrix_triggers():
+    workflow = WORKFLOW.read_text()
+    push_paths = workflow.split("  push:", 1)[1].split("  pull_request:", 1)[0]
+    pull_request_paths = workflow.split("  pull_request:", 1)[1].split("jobs:", 1)[0]
+    for trigger_paths in (push_paths, pull_request_paths):
+        assert "'src/shaders/shadows.wgsl'" in trigger_paths
+        assert "'src/shaders/csm.wgsl'" not in trigger_paths
+
+
 def test_dupla_aggregation_accepts_verified_and_explicit_absence(tmp_path):
     (tmp_path / "dupla-proof-nvidia.json").write_text(json.dumps(_dupla_proof()))
     (tmp_path / "dupla-proof-intel.ABSENT").write_text("no physical adapter\n")
