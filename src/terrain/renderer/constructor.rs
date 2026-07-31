@@ -528,6 +528,7 @@ impl TerrainScene {
             shadow_pcss_radius: 0.0,
             shadow_technique: 1,
             moment_pass: None,
+            moment_blur_pass: None,
             fog_bind_group_layout,
             fog_uniform_buffer,
             water_reflection_bind_group_layout,

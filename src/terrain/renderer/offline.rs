@@ -702,12 +702,21 @@ impl TerrainScene {
                 &state.params,
                 &state.decoded,
             )?;
+            let height_curve_view = state
+                .height_curve_lut_uploaded
+                .as_ref()
+                .map(|(texture, _)| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+                .unwrap_or_else(|| {
+                    self._height_curve_identity_texture
+                        .create_view(&wgpu::TextureViewDescriptor::default())
+                });
 
             let shadow_setup = self.prepare_shadow_setup(
                 &mut encoder,
                 &state.params,
                 &state.decoded,
                 &state.height_inputs.heightmap_view,
+                &height_curve_view,
                 state.height_inputs.width,
                 state.height_inputs.height,
             )?;
@@ -729,12 +738,6 @@ impl TerrainScene {
                 .map(|(_, view)| view)
                 .unwrap_or(&self.sky_fallback_view);
 
-            let height_curve_view = state
-                .height_curve_lut_uploaded
-                .as_ref()
-                .map(|(_, view)| view)
-                .unwrap_or(&self.height_curve_identity_view);
-
             let main_height_view = self.main_pass_height_view(&state.height_inputs.heightmap_view);
             let pass_bind_groups = self.create_terrain_pass_bind_groups(
                 &uniform_buffer,
@@ -749,7 +752,7 @@ impl TerrainScene {
                 state.materials.colormap_view(),
                 state.materials.colormap_sampler(),
                 &state.materials.overlay_buffer,
-                height_curve_view,
+                &height_curve_view,
                 state.height_inputs.water_mask_view_uploaded.as_ref(),
                 sky_view,
                 height_ao_computed,
@@ -777,7 +780,7 @@ impl TerrainScene {
                 state.materials.colormap_view(),
                 state.materials.colormap_sampler(),
                 &state.materials.overlay_buffer,
-                height_curve_view,
+                &height_curve_view,
                 state.height_inputs.water_mask_view_uploaded.as_ref(),
                 height_ao_computed,
                 sun_vis_computed,

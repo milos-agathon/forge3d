@@ -479,6 +479,10 @@ impl TerrainScene {
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
+        let (certificate_capture, _allocation_scope) =
+            self.begin_certificate_capture("terrain.render_internal_with_aov");
+        let decoded = params.decoded();
+        self.ensure_shadow_atlas(&decoded.shadow)?;
         let (height_height, height_width) = heightmap.as_array().dim();
         let mut declaration_uniforms = Vec::new();
         declaration_uniforms.extend_from_slice(&params.size_px.0.to_le_bytes());
@@ -514,10 +518,7 @@ impl TerrainScene {
         )?
         .plan;
         debug_assert_eq!(graph.labels.len(), 4);
-        let (certificate_capture, _allocation_scope) =
-            self.begin_certificate_capture("terrain.render_internal_with_aov");
         let mut timing = self.take_render_timing();
-        let decoded = params.decoded();
         let height_inputs = graph.execute_with_barriers("terrain.prepare", |_barriers| {
             self.prepare_frame_lighting(decoded)?;
             let inputs =
@@ -589,6 +590,13 @@ impl TerrainScene {
         } else {
             None
         };
+        let height_curve_view = lut_texture_uploaded
+            .as_ref()
+            .map(|(texture, _)| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+            .unwrap_or_else(|| {
+                self._height_curve_identity_texture
+                    .create_view(&wgpu::TextureViewDescriptor::default())
+            });
 
         let requested_msaa = params.msaa_samples.max(1);
         let effective_msaa =
@@ -677,6 +685,7 @@ impl TerrainScene {
                 params,
                 decoded,
                 &height_inputs.heightmap_view,
+                &height_curve_view,
                 height_inputs.width,
                 height_inputs.height,
             )?;
@@ -703,11 +712,6 @@ impl TerrainScene {
             .map(|(_, view)| view)
             .unwrap_or(&self.sky_fallback_view);
 
-        let height_curve_view = lut_texture_uploaded
-            .as_ref()
-            .map(|(_, view)| view as &wgpu::TextureView)
-            .unwrap_or(&self.height_curve_identity_view);
-
         let main_height_view = self.main_pass_height_view(&height_inputs.heightmap_view);
         let pass_bind_groups = self.create_terrain_pass_bind_groups(
             &uniform_buffer,
@@ -722,7 +726,7 @@ impl TerrainScene {
             materials.colormap_view(),
             materials.colormap_sampler(),
             &materials.overlay_buffer,
-            height_curve_view,
+            &height_curve_view,
             height_inputs.water_mask_view_uploaded.as_ref(),
             sky_view,
             height_ao_computed,
@@ -750,7 +754,7 @@ impl TerrainScene {
             materials.colormap_view(),
             materials.colormap_sampler(),
             &materials.overlay_buffer,
-            height_curve_view,
+            &height_curve_view,
             height_inputs.water_mask_view_uploaded.as_ref(),
             height_ao_computed,
             sun_vis_computed,

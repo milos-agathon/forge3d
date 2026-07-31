@@ -46,8 +46,9 @@ on:
     branches: [main]
     paths:
       - 'src/shaders/includes/determinism.wgsl'
+      - 'src/shaders/includes/shadow_moments.wgsl'
       - 'src/shaders/includes/tonemap_common.wgsl'
-      - 'src/shaders/csm.wgsl'
+      - 'src/shaders/shadows.wgsl'
       - 'src/shaders/lighting_ibl.wgsl'
       - 'src/shaders/terrain_pbr_pom.wgsl'
       - 'src/core/gpu.rs'
@@ -86,8 +87,9 @@ on:
   pull_request:
     paths:
       - 'src/shaders/includes/determinism.wgsl'
+      - 'src/shaders/includes/shadow_moments.wgsl'
       - 'src/shaders/includes/tonemap_common.wgsl'
-      - 'src/shaders/csm.wgsl'
+      - 'src/shaders/shadows.wgsl'
       - 'src/shaders/lighting_ibl.wgsl'
       - 'src/shaders/terrain_pbr_pom.wgsl'
       - 'src/core/gpu.rs'

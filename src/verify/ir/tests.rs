@@ -32,6 +32,46 @@ fn strict_positive_branch_excludes_zero_denominator() {
 }
 
 #[test]
+fn positive_fraction_does_not_bypass_subnormal_ftz() {
+    let source =
+        "fn main(value: f32, delta: f32) -> f32 { return value / (value + delta * delta); }";
+    let proof = prove_wgsl(
+        source,
+        "main",
+        &contract("\"value:value:1e-45:1e-45\", \"value:delta:0:0\"", "0:1"),
+    )
+    .unwrap();
+    assert!(
+        proof
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "possible_nan_or_inf"),
+        "{:?}",
+        proof.alarms
+    );
+}
+
+#[test]
+fn positive_fraction_preserves_native_division_ulp_margin_near_one() {
+    let source =
+        "fn main(value: f32, delta: f32) -> f32 { return value / (value + delta * delta); }";
+    let proof = prove_wgsl(
+        source,
+        "main",
+        &contract("\"value:value:1:1\", \"value:delta:0:0\"", "0:1"),
+    )
+    .unwrap();
+    assert!(
+        proof
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "output_range"),
+        "{:?}",
+        proof.alarms
+    );
+}
+
+#[test]
 fn explicitly_allowed_nan_output_still_rejects_infinity() {
     let parsed = parse_contract("[module]\npath = \"tests/data/shader_proofs/fixture.wgsl\"\nowner = \"test\"\nexpiry = \"2027-01-17\"\n\n[[entry]]\nname = \"main\"\nproof_status = \"proven\"\ninputs = [\"value:dummy:0:0\"]\noutputs = [\"return:0:1:nan\"]\n").unwrap();
     let nan = prove_wgsl(
@@ -199,6 +239,87 @@ fn texture_load_uses_declared_dimensions_and_sample_range() {
 }
 
 #[test]
+fn array_texture_load_uses_runtime_layer_count_guard() {
+    let guarded = r#"
+@group(0) @binding(0) var image: texture_2d_array<f32>;
+fn main(layer: u32) -> vec4<f32> {
+    if (layer >= textureNumLayers(image)) {
+        return vec4<f32>(0.0);
+    }
+    return textureLoad(image, vec2<i32>(0), i32(layer), 0);
+}
+"#;
+    let contract = parse_contract(
+        "[module]\npath = \"tests/data/shader_proofs/fixture.wgsl\"\nowner = \"test\"\nexpiry = \"2027-01-17\"\n\n[[entry]]\nname = \"main\"\nproof_status = \"proven\"\ninputs = [\"value:layer:0:3\", \"texture:image:0:1:3:image.width:image.height:image.layers\"]\noutputs = [\"return:0:1\"]\n",
+    )
+    .unwrap()
+    .entries
+    .remove(0);
+    let proof = prove_wgsl(guarded, "main", &contract).unwrap();
+    assert!(proof.alarms.is_empty(), "{:?}", proof.alarms);
+
+    let unguarded = guarded.replace(
+        "    if (layer >= textureNumLayers(image)) {\n        return vec4<f32>(0.0);\n    }\n",
+        "",
+    );
+    let proof = prove_wgsl(&unguarded, "main", &contract).unwrap();
+    assert!(
+        proof
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "possible_oob"),
+        "{:?}",
+        proof.alarms
+    );
+
+    for axis in ["x", "y"] {
+        let wrong_dimension_guard = guarded.replace(
+            "textureNumLayers(image)",
+            &format!("textureDimensions(image).{axis}"),
+        );
+        let proof = prove_wgsl(&wrong_dimension_guard, "main", &contract).unwrap();
+        assert!(
+            proof
+                .alarms
+                .iter()
+                .any(|alarm| alarm.kind == "possible_oob"),
+            "{axis}-dimension guard incorrectly proved the array layer: {:?}",
+            proof.alarms
+        );
+    }
+
+    let clamped = r#"
+@group(0) @binding(0) var image: texture_2d_array<f32>;
+fn main(layer: u32) -> vec4<f32> {
+    let upper = max(i32(textureNumLayers(image)) - 1, 0);
+    let safe_layer = clamp(i32(layer), 0, upper);
+    return textureLoad(image, vec2<i32>(0), safe_layer, 0);
+}
+"#;
+    let proof = prove_wgsl(clamped, "main", &contract).unwrap();
+    assert!(
+        proof.alarms.is_empty(),
+        "actual layer clamp was not proved: {:?}",
+        proof.alarms
+    );
+    for axis in ["x", "y"] {
+        let wrong_dimension_clamp = clamped.replace(
+            "textureNumLayers(image)",
+            &format!("textureDimensions(image).{axis}"),
+        );
+        let proof = prove_wgsl(&wrong_dimension_clamp, "main", &contract).unwrap();
+        assert!(
+            proof
+                .alarms
+                .iter()
+                .any(|alarm| alarm.kind == "possible_oob"),
+            "{axis}-dimension clamp incorrectly proved the array layer: {:?}",
+            proof.alarms
+        );
+    }
+}
+
+#[test]
 fn rounded_unit_coordinate_is_bounded_by_texture_dimensions() {
     let source = r#"
 @group(0) @binding(0) var image: texture_2d<f32>;
@@ -219,6 +340,28 @@ fn entry_point_output_ranges_are_checked() {
     let source = "@fragment fn main(@location(0) value: f32) -> @location(0) f32 { return value; }";
     let parsed = parse_contract("[module]\npath = \"tests/data/shader_proofs/fixture.wgsl\"\nowner = \"test\"\nexpiry = \"2027-01-17\"\n\n[[entry]]\nname = \"main\"\nproof_status = \"proven\"\ninputs = [\"value:value:0:2\"]\noutputs = [\"location0:0:1\"]\n").unwrap();
     let proof = prove_wgsl(source, "main", &parsed.entries[0]).unwrap();
+    assert!(
+        proof
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "output_range"),
+        "{:?}",
+        proof.alarms
+    );
+}
+
+#[test]
+fn private_global_initializer_seeds_entry_output() {
+    let source = "var<private> value: u32 = 3u; @fragment fn main(@location(0) dummy: u32) -> @location(0) u32 { return value + dummy; }";
+    let parsed = parse_contract(
+        "[module]\npath = \"tests/data/shader_proofs/fixture.wgsl\"\nowner = \"test\"\nexpiry = \"2027-01-17\"\n\n[[entry]]\nname = \"main\"\nproof_status = \"proven\"\ninputs = [\"value:dummy:0:0\"]\noutputs = [\"location0:3:3\"]\n",
+    )
+    .unwrap();
+    let proof = prove_wgsl(source, "main", &parsed.entries[0]).unwrap();
+    assert!(proof.alarms.is_empty(), "{:?}", proof.alarms);
+
+    let mutant = source.replace("= 3u", "= 4u");
+    let proof = prove_wgsl(&mutant, "main", &parsed.entries[0]).unwrap();
     assert!(
         proof
             .alarms
@@ -475,6 +618,18 @@ fn terrain_renderer_source_hash_is_pinned() {
     assert_eq!(
         actual,
         super::engine::PINNED_TERRAIN_SOURCE_HASH,
+        "{actual:#018x}"
+    );
+}
+
+#[test]
+fn determinism_source_hash_is_pinned() {
+    let actual = super::engine::stable_hash(
+        include_str!("../../shaders/includes/determinism.wgsl").as_bytes(),
+    );
+    assert_eq!(
+        actual,
+        super::engine::PINNED_DETERMINISM_SOURCE_HASH,
         "{actual:#018x}"
     );
 }

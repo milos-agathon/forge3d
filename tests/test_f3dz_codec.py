@@ -192,10 +192,25 @@ def test_physical_gpu_ci_contract_is_zero_skip_and_records_benchmark() -> None:
     workflow = (
         Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml"
     ).read_text(encoding="utf-8")
-    assert "test-f3dz-gpu:" in workflow
-    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in workflow
-    assert "FORGE3D_REQUIRE_F3DZ_GPU: '1'" in workflow
-    assert "python -m pytest tests/test_f3dz_codec.py" in workflow
-    assert "scripts/assert_junit_zero_skips.py" in workflow
-    assert "cargo bench --bench f3dz_bench" in workflow
-    assert "f3dz-physical-gpu-evidence" in workflow
+    job = workflow.split("  test-f3dz-gpu:", 1)[1].split(
+        "\n  test-anamnesis-portability-seed:", 1
+    )[0]
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
+    assert "FORGE3D_REQUIRE_F3DZ_GPU: '1'" in job
+    assert "python -m pytest tests/test_f3dz_codec.py" in job
+    assert "scripts/assert_junit_zero_skips.py" in job
+    assert "cargo bench --bench f3dz_bench" in job
+    assert "f3dz-physical-gpu-evidence" in job
+    assert "Get-PSDrive -PSProvider FileSystem" in job
+    assert "Sort-Object Free -Descending" in job
+    assert (
+        '$scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"'
+        in job
+    )
+    assert "FORGE3D_F3DZ_SCRATCH_DIR" in job
+    assert '"CARGO_TARGET_DIR=$targetDir"' in job
+    assert "name: Clean F3DZ build scratch" in job
+    assert "(Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch'" in job
+    assert job.index("name: Upload F3DZ physical-GPU evidence") < job.index(
+        "name: Clean F3DZ build scratch"
+    )
