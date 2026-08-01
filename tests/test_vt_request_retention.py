@@ -196,7 +196,11 @@ def test_gpu_lod_and_visibility_shaders_have_live_callsites():
     assert "encode_visibility_resolve_pass" in execute
     assert "pass.draw(0..3, 0..1)" in execute
     pipeline = (root / "src/terrain/renderer/pipeline_cache.rs").read_text()
-    assert 'entry_point: "vs_visibility_fullscreen"' in pipeline
+    resolve_pipeline = pipeline.split(
+        "create_clipmap_visibility_resolve_pipeline(", 1
+    )[1]
+    assert 'entry_point: "vs_clipmap_main"' in resolve_pipeline
+    assert 'entry_point: "fs_visibility_geometry"' in resolve_pipeline
     shader = (
         root / "src/shaders/terrain_visibility_fullscreen.wgsl"
     ).read_text()
