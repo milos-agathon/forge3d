@@ -85,9 +85,8 @@ struct TerrainVTUniformsGpu {
     /// w = registered source count. Matches `family_info` in
     /// `terrain_pbr_pom.wgsl`; refreshed every `prepare_frame`.
     family_info: [[u32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
-    /// Bounded feedback set (TESSELLA win 1). x = slot capacity (power of two),
-    /// y = linear probe limit, z/w reserved. Matches `config3` in
-    /// `terrain_pbr_pom.wgsl`.
+    /// Bounded feedback append (TESSELLA win 1). x = slot capacity (power of
+    /// two), y/z/w reserved. Matches `config3` in `terrain_pbr_pom.wgsl`.
     config3: [u32; 4],
 }
 
@@ -1086,12 +1085,7 @@ impl TerrainMaterialVT {
                 if runtime.use_feedback { 1 } else { 0 },
             ],
             family_info,
-            config3: [
-                runtime.feedback_capacity,
-                crate::core::feedback_buffer::FEEDBACK_PROBE_LIMIT,
-                0,
-                0,
-            ],
+            config3: [runtime.feedback_capacity, 0, 0, 0],
         };
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
@@ -2542,8 +2536,8 @@ mod bounded_feedback_tests {
 
         let capacity = FeedbackBuffer::capacity_for(pyramid_slots);
         assert_eq!(capacity, crate::core::feedback_buffer::FEEDBACK_MAX_SLOTS);
-        let host_visible_bytes = (capacity as u64 + 1) * 4;
-        assert_eq!(host_visible_bytes, 262_148);
+        let host_visible_bytes = (capacity as u64 + 2) * 4;
+        assert_eq!(host_visible_bytes, 262_152);
         assert!(host_visible_bytes < 512 * 1024 * 1024);
     }
 }

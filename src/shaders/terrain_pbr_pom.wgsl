@@ -492,8 +492,8 @@ struct TerrainVTUniforms {
     // w = registered source count. Must match TerrainVTUniformsGpu in
     // src/terrain/renderer/virtual_texture.rs.
     family_info: array<vec4<u32>, 3>,
-    // Bounded feedback set (TESSELLA win 1). x = slot capacity (a power of two),
-    // y = maximum linear probes before a sample is declared overflow, z/w unused.
+    // Bounded feedback append (TESSELLA win 1). x = slot capacity (a power of
+    // two), y/z/w unused.
     config3: vec4<u32>,
 }
 
@@ -509,14 +509,16 @@ struct TerrainVTFallbackColors {
 // 16-byte slot per (family, material, mip, page_y, page_x). At the acceptance
 // camera's 2^18 x 2^18 virtual texture that is 100,663,296 slots = 1.5 GiB of
 // MAP_READ memory: three times the entire 512 MiB host-visible budget, for a
-// working set of about a thousand pages. It is now a fixed-capacity,
-// open-addressed hash set of 32-bit page keys, so the host-visible footprint is
-// a function of the CAPACITY, never of the virtual texture's size.
+// working set of about a thousand pages. It is now a fixed-capacity append
+// buffer of 32-bit page keys, so the host-visible footprint is a function of
+// the CAPACITY, never of the virtual texture's size. Duplicate samples are
+// intentional: the CPU deduplicates the bounded readback with its normal
+// HashSet path.
 //
-// Layout: slot 0 is a header counting the samples the set could not admit;
-// slots 1 ..= capacity hold `page_index + 1`, with 0 meaning empty. The key
-// alone identifies the page, so the CPU inverts `terrain_vt_feedback_index`
-// rather than reading back separate coordinate words.
+// Layout: word 0 is an atomic append count, word 1 is an explicit overflow
+// count, and words 2 ..= capacity + 1 hold `page_index + 1`. The key alone
+// identifies the page, so the CPU inverts `terrain_vt_feedback_index` rather
+// than reading back separate coordinate words.
 
 @group(6) @binding(6)
 var<uniform> terrain_vt_uniforms: TerrainVTUniforms;
@@ -1999,19 +2001,6 @@ fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u
     return (((logical_material * max(terrain_vt_uniforms.config2.x, 1u)) + mip_level) * base_pages_y + tile_y) * base_pages_x + tile_x;
 }
 
-// Integer avalanche (Murmur3 finalizer). Adjacent page keys must land far
-// apart, otherwise a camera's working set -- which is a contiguous run of page
-// indices -- would pile into one region of the table and probe out.
-fn terrain_vt_feedback_hash(key: u32) -> u32 {
-    var h = key;
-    h = h ^ (h >> 16u);
-    h = h * 2246822507u;
-    h = h ^ (h >> 13u);
-    h = h * 3266489909u;
-    h = h ^ (h >> 16u);
-    return h;
-}
-
 fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) {
     if (terrain_vt_uniforms.config2.w == 0u) {
         return;
@@ -2021,40 +2010,20 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
     if (tile_x >= base_pages_x || tile_y >= base_pages_y) {
         return;
     }
-    // `+ 1` keeps 0 reserved for "empty slot".
+    // `+ 1` keeps 0 reserved for an empty slot in malformed/partial readback.
     let key = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y) + 1u;
     let capacity = max(terrain_vt_uniforms.config3.x, 1u);
-    let mask = capacity - 1u;
-    let probe_limit = max(terrain_vt_uniforms.config3.y, 1u);
-    var slot = terrain_vt_feedback_hash(key) & mask;
-    var probe = 0u;
-    var admitted = false;
-    loop {
-        if (probe >= probe_limit) {
-            break;
-        }
-        // Slot 0 is the overflow header, so the table starts at index 1.
-        let observed = atomicCompareExchangeWeak(&terrain_vt_feedback[slot + 1u], 0u, key);
-        if (observed.exchanged || observed.old_value == key) {
-            // Inserted by this invocation, or already inserted by another
-            // fragment that saw the same page this frame. Either way the page
-            // is represented exactly once in the set.
-            admitted = true;
-            break;
-        }
-        probe = probe + 1u;
-        if (observed.old_value != 0u) {
-            // A different key owns this slot; linear-probe onward. A spurious
-            // CAS failure (old_value == 0) retries the SAME slot, which is why
-            // the probe counter is bumped before this test.
-            slot = (slot + 1u) & mask;
-        }
-    }
-    if (!admitted) {
-        // Never a silent drop. The sample is counted in the overflow header so
-        // the CPU knows this frame's request set is incomplete and keeps the
-        // retained-request path alive until the page is admitted and resident.
-        atomicAdd(&terrain_vt_feedback[0], 1u);
+    // A bounded append uses only operations supported by every shader backend:
+    // reserve one slot with atomicAdd, then publish the key with atomicStore.
+    // Duplicates are expected and are removed by the CPU readback parser.
+    let append_slot = atomicAdd(&terrain_vt_feedback[0], 1u);
+    if (append_slot < capacity) {
+        atomicStore(&terrain_vt_feedback[append_slot + 2u], key);
+    } else {
+        // Never a silent drop. The explicit overflow counter tells the CPU the
+        // request set was incomplete, so retained requests remain eligible for
+        // a later frame.
+        atomicAdd(&terrain_vt_feedback[1], 1u);
     }
     // One physical record per surface sample, whether or not it was a duplicate
     // page: this is the counter the visibility gate compares against the

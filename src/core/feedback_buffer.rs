@@ -22,8 +22,11 @@ use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue
 /// `pixels / tile_area` summed over the mip chain).
 pub const FEEDBACK_MAX_SLOTS: u32 = 1 << 16;
 
-/// Linear probes before a sample is declared overflow. Mirrored by
-/// `terrain_vt_write_feedback` through `TerrainVTUniforms.config3.y`.
+/// Legacy linear-probe limit retained for Rust source compatibility.
+///
+/// The bounded feedback path now appends with an atomic counter; therefore
+/// `TerrainVTUniforms.config3.y` is reserved and this value is not read.
+#[deprecated(note = "bounded VT feedback no longer probes; config3.y is reserved")]
 pub const FEEDBACK_PROBE_LIMIT: u32 = 8;
 
 /// Page-index layout the GPU keys were built from, used to invert
@@ -78,7 +81,7 @@ pub struct FeedbackBuffer {
     readback_buffer: TrackedBuffer,
     pending_readback: Mutex<Option<Receiver<Result<(), wgpu::BufferAsyncError>>>>,
     forced_not_ready_polls: AtomicU32,
-    /// Hash-set capacity in slots (a power of two, excluding the header word).
+    /// Append capacity in slots, excluding the two header words.
     capacity: u32,
     layout: FeedbackLayout,
     /// Samples the most recent readback could not admit. Non-zero means the
@@ -106,15 +109,16 @@ impl FeedbackBuffer {
     ///
     /// `requested_slots` is rounded up to a power of two and clamped to
     /// [`FEEDBACK_MAX_SLOTS`], so the allocation cannot grow with the virtual
-    /// texture. One extra word precedes the table as the overflow header.
+    /// texture. Two words precede the table: the append count and the explicit
+    /// overflow count.
     pub fn new(
         device: &Device,
         requested_slots: u32,
         layout: FeedbackLayout,
     ) -> Result<Self, String> {
         let capacity = Self::capacity_for(requested_slots);
-        // Header word + `capacity` key slots, 4 bytes each.
-        let buffer_size = (capacity as u64 + 1) * 4;
+        // Append-count + overflow headers + `capacity` key slots, 4 bytes each.
+        let buffer_size = (capacity as u64 + 2) * 4;
 
         // Create GPU feedback buffer
         let feedback_buffer = tracked_create_buffer(
@@ -160,7 +164,7 @@ impl FeedbackBuffer {
             .min(FEEDBACK_MAX_SLOTS)
     }
 
-    /// Hash-set capacity in slots, excluding the overflow header.
+    /// Append capacity in slots, excluding the two header words.
     pub fn capacity(&self) -> u32 {
         self.capacity
     }
@@ -375,13 +379,19 @@ impl FeedbackBuffer {
 
     /// Decode the bounded feedback set into deduplicated feedback entries.
     ///
-    /// Word 0 is the overflow header; every later non-zero word is a page key.
-    /// Open addressing already guarantees one slot per distinct page, so the
-    /// `HashSet` here only guards against a torn or repeated readback.
+    /// Word 0 is the append count, word 1 is the explicit overflow header, and
+    /// every later non-zero word is a page key. The GPU uses a bounded append,
+    /// so duplicate samples are expected; the `HashSet` is the authoritative
+    /// CPU-side deduplication step.
     fn parse_feedback_entries(&self, data: &[u8]) -> Vec<FeedbackEntry> {
         let mut unique_entries = HashSet::new();
 
         let mut words = data.chunks_exact(4);
+        let append_count = words
+            .next()
+            .and_then(|word| word.try_into().ok())
+            .map(u32::from_le_bytes)
+            .unwrap_or(0);
         let overflow = words
             .next()
             .and_then(|word| word.try_into().ok())
@@ -397,7 +407,14 @@ impl FeedbackBuffer {
             );
         }
 
-        for word in &mut words {
+        // Only the slots reserved by the append counter are valid. The clear
+        // command normally leaves the rest zero, but clamping here prevents a
+        // stale or malformed tail from becoming a request on readback.
+        let entry_limit = append_count.min(self.capacity) as usize;
+        for (slot, word) in (&mut words).enumerate() {
+            if slot >= entry_limit {
+                continue;
+            }
             let Ok(bytes) = <[u8; 4]>::try_from(word) else {
                 continue;
             };
@@ -511,23 +528,27 @@ mod tests {
         let tiles = buffer.parse_feedback_tile_ids(&empty_data);
         assert!(tiles.is_empty());
 
-        // Header + one empty slot.
-        let zero_data = vec![0u8; 8];
+        // Two headers + one empty slot.
+        let zero_data = vec![0u8; 12];
         let tiles = buffer.parse_feedback_tile_ids(&zero_data);
         assert!(tiles.is_empty());
         assert_eq!(buffer.last_overflow(), 0);
     }
 
     #[test]
-    fn test_parse_feedback_trailing_bytes() {
+    fn test_parse_feedback_deduplicates_and_clamps_tail() {
         let Some(device) = crate::core::gpu::create_device_for_test() else {
             return;
         };
 
         let layout = test_layout();
         let buffer = FeedbackBuffer::new(&device, 4, layout).unwrap();
-        let mut bytes = 0u32.to_le_bytes().to_vec();
-        bytes.extend_from_slice(&gpu_key(layout, 0, 0, 1, 3, 9).to_le_bytes());
+        let mut bytes = 2u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        let key = gpu_key(layout, 0, 0, 1, 3, 9).to_le_bytes();
+        bytes.extend_from_slice(&key);
+        bytes.extend_from_slice(&key);
+        bytes.extend_from_slice(&gpu_key(layout, 0, 0, 1, 4, 9).to_le_bytes());
         bytes.extend_from_slice(&[0xAA, 0xBB]);
 
         let tiles = buffer.parse_feedback_tile_ids(&bytes);
@@ -574,9 +595,9 @@ mod tests {
             FEEDBACK_MAX_SLOTS
         );
         assert_eq!(FeedbackBuffer::capacity_for(u32::MAX), FEEDBACK_MAX_SLOTS);
-        // Header word + capacity keys, 4 bytes each: 256 KiB, versus the
+        // Two header words + capacity keys, 4 bytes each: 256 KiB, versus the
         // 1,610,612,736 bytes the direct-mapped table used to demand.
-        let bytes = (FEEDBACK_MAX_SLOTS as u64 + 1) * 4;
+        let bytes = (FEEDBACK_MAX_SLOTS as u64 + 2) * 4;
         assert!(bytes < 512 * 1024 * 1024 / 1000, "{bytes}");
         assert!(FEEDBACK_MAX_SLOTS.is_power_of_two());
     }
@@ -589,7 +610,8 @@ mod tests {
         };
         let layout = test_layout();
         let buffer = FeedbackBuffer::new(&device, 4, layout).unwrap();
-        let mut bytes = 17u32.to_le_bytes().to_vec();
+        let mut bytes = 1u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&17u32.to_le_bytes());
         bytes.extend_from_slice(&gpu_key(layout, 1, 0, 0, 2, 2).to_le_bytes());
         let entries = buffer.parse_feedback_entries(&bytes);
         assert_eq!(entries.len(), 1);

@@ -41,6 +41,10 @@ def test_terrain_shader_declares_vt_sampling_and_feedback_bindings() -> None:
     )
     for token in required_tokens:
         assert token in source, f"Missing terrain VT shader token: {token}"
+    assert "atomicCompareExchangeWeak" not in source
+    assert "atomicAdd(&terrain_vt_feedback[0], 1u)" in source
+    assert "atomicStore(&terrain_vt_feedback[append_slot + 2u], key)" in source
+    assert "atomicAdd(&terrain_vt_feedback[1], 1u)" in source
 
 
 def test_vt_layer_family_defaults() -> None:
