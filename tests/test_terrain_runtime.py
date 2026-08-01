@@ -56,7 +56,7 @@ def test_mapscene_allows_the_explicit_hosted_windows_gpu_override(monkeypatch) -
 
 
 def test_terrain_rendering_available_short_circuits_on_hosted_macos_ci(monkeypatch) -> None:
-    terrain_runtime.terrain_rendering_available.cache_clear()
+    terrain_runtime._terrain_rendering_unavailable_reason.cache_clear()
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setattr(terrain_runtime.platform, "system", lambda: "Darwin")
 
@@ -68,11 +68,11 @@ def test_terrain_rendering_available_short_circuits_on_hosted_macos_ci(monkeypat
     try:
         assert terrain_runtime.terrain_rendering_available() is False
     finally:
-        terrain_runtime.terrain_rendering_available.cache_clear()
+        terrain_runtime._terrain_rendering_unavailable_reason.cache_clear()
 
 
 def test_terrain_rendering_available_uses_child_probe(monkeypatch) -> None:
-    terrain_runtime.terrain_rendering_available.cache_clear()
+    terrain_runtime._terrain_rendering_unavailable_reason.cache_clear()
     # This unit test exercises the child-probe plumbing itself; the hosted-CI
     # blanket guards would short-circuit before subprocess.run on GitHub
     # runners, so disable them explicitly for the mock scenario.
@@ -105,4 +105,4 @@ def test_terrain_rendering_available_uses_child_probe(monkeypatch) -> None:
         assert child_pythonpath[0] == str(repo / "tests")
         assert str(repo / "python") not in child_pythonpath
     finally:
-        terrain_runtime.terrain_rendering_available.cache_clear()
+        terrain_runtime._terrain_rendering_unavailable_reason.cache_clear()
