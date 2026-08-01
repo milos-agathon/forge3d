@@ -443,15 +443,6 @@ def test_committed_camera_frames_multiple_clipmap_regions():
     )
     assert FIXED_CAM_TARGET == expected_target
 
-    # The remaining assertions construct native GPU resources.  Skip before
-    # the first allocation on hosted runners without a terrain-safe adapter;
-    # ``terrain_rendering_available`` still raises on the strict TESSELLA lane.
-    if not terrain_rendering_available():
-        pytest.skip("requires the TESSELLA physical-GPU lane")
-    overlay = build_overlay()
-    params = _params(z_scale=Z_SCALE, overlay=overlay)
-    assert tuple(params.cam_target) == expected_target
-
     # Every frame regenerates the clipmap: the streaming centre step clears
     # ClipmapLevel::update_center's half-cell threshold with margin.
     assert CENTER_STEP_LENGTH_M > REGENERATION_THRESHOLD_M, (
@@ -485,6 +476,16 @@ def test_committed_camera_frames_multiple_clipmap_regions():
     assert max(steps) == pytest.approx(CENTER_STEP_LENGTH_M)
     centers = {_center_at(index) for index in range(FRAMES)}
     assert len(centers) >= MIN_DISTINCT_CENTERS, len(centers)
+
+    # Overlay construction below creates the native GPU-backed LUT. Skip
+    # before that first allocation on hosted runners without a terrain-safe
+    # adapter; ``terrain_rendering_available`` still raises on the strict
+    # TESSELLA lane.
+    if not terrain_rendering_available():
+        pytest.skip("requires the TESSELLA physical-GPU lane")
+    overlay = build_overlay()
+    params = _params(z_scale=Z_SCALE, overlay=overlay)
+    assert tuple(params.cam_target) == expected_target
 
 
 # ---------------------------------------------------------------------------
