@@ -55,6 +55,12 @@ owner = "precision"
 expiry = "2027-07-18"
 
 [[unproven]]
+path = "src/shaders/includes/shadow_moments.wgsl"
+reason = "includes/shadow_moments.wgsl: EVSM and MSM helper domains, fp16 rounding, and negative-lobe monotonicity are not yet modeled"
+owner = "render-quality"
+expiry = "2027-07-30"
+
+[[unproven]]
 path = "src/shaders/brdf/ashikhmin_shirley.wgsl"
 reason = "brdf/ashikhmin_shirley.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
@@ -141,12 +147,6 @@ expiry = "2027-01-17"
 [[unproven]]
 path = "src/shaders/clouds.wgsl"
 reason = "clouds.wgsl: texture/resource dimension and sampling relations are not yet modeled"
-owner = "render-quality"
-expiry = "2027-01-17"
-
-[[unproven]]
-path = "src/shaders/csm.wgsl"
-reason = "csm.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 

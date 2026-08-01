@@ -91,9 +91,10 @@ impl TerrainScene {
         crate::shader_sources::terrain_visbuffer_write(Self::terrain_atlas_is_bindless(device))
     }
 
-    /// TESSELLA pass 2 module: terrain + the full-screen material resolve.
-    /// A distinct source from pass 1, so the certificate's two labels carry
-    /// two different hashes instead of aliasing one module.
+    /// TESSELLA pass 2 module: terrain + visibility resolve helpers. The
+    /// runtime entry point replays clipmap geometry at equal depth; keeping a
+    /// distinct source from pass 1 gives the certificate two hashes instead of
+    /// aliasing one module.
     fn preprocess_visibility_resolve_shader(device: &wgpu::Device) -> String {
         crate::shader_sources::terrain_visbuffer_resolve(Self::terrain_atlas_is_bindless(device))
     }
@@ -351,12 +352,15 @@ impl TerrainScene {
                         layout: Some(&pipeline_layout),
                         vertex: wgpu::VertexState {
                             module: &shader,
-                            entry_point: "vs_visibility_fullscreen",
-                            buffers: &[],
+                            entry_point: "vs_clipmap_main",
+                            buffers: &[
+                                crate::terrain::clipmap::ClipmapVertex::desc(),
+                                crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::desc(),
+                            ],
                         },
                         fragment: Some(wgpu::FragmentState {
                             module: &shader,
-                            entry_point: "fs_visibility_resolve_fullscreen",
+                            entry_point: "fs_visibility_geometry",
                             targets: &[Some(wgpu::ColorTargetState {
                                 format: color_format,
                                 blend: None,
@@ -364,7 +368,13 @@ impl TerrainScene {
                             })],
                         }),
                         primitive: wgpu::PrimitiveState::default(),
-                        depth_stencil: None,
+                        depth_stencil: Some(wgpu::DepthStencilState {
+                            format: TERRAIN_DEPTH_FORMAT,
+                            depth_write_enabled: false,
+                            depth_compare: wgpu::CompareFunction::Equal,
+                            stencil: wgpu::StencilState::default(),
+                            bias: wgpu::DepthBiasState::default(),
+                        }),
                         multisample: wgpu::MultisampleState::default(),
                         multiview: None,
                     },

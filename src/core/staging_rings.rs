@@ -307,7 +307,9 @@ impl StagingRing {
                 layout: wgpu::ImageDataLayout {
                     offset,
                     bytes_per_row: Some(padded_bytes_per_row),
-                    rows_per_image: Some(height),
+                    // ImageDataLayout uses compression-block rows for
+                    // block-compressed textures, not texel rows.
+                    rows_per_image: Some(block_rows),
                 },
             },
             wgpu::ImageCopyTexture {

@@ -1,8 +1,9 @@
-// TESSELLA pass 2 (visibility material resolve). `shader_sources::terrain_visbuffer_resolve`
+// TESSELLA pass 2 visibility resolve module. `shader_sources::terrain_visbuffer_resolve`
 // appends this file to the shared terrain module, which supplies VertexOutput,
-// FragmentOutput and `shade_main`. It decodes the R32Uint identity written by
-// terrain_visbuffer_write.wgsl (which defines the packing), reconstructs the
-// visible triangle, and shades exactly once per non-background pixel.
+// FragmentOutput and `shade_main`. The runtime depth-equal geometry entry point
+// replays the R32Uint identity written by terrain_visbuffer_write.wgsl (which
+// defines the packing); the fullscreen reconstruction below remains a static
+// contract/debug path.
 
 @group(7) @binding(0)
 var terrain_visibility_ids: texture_2d<u32>;
@@ -329,6 +330,36 @@ fn fs_visibility_resolve_fullscreen(
                 && out.source_id == 0u) {
                 atomicAdd(&terrain_frame_counters.fallback_texels, 1u);
             }
+        }
+    }
+    return out;
+}
+
+// Depth-equal geometry resolve. Replaying the exact pass-1 clipmap vertex
+// path preserves the fixed-function interpolants and quad derivatives that a
+// full-screen reconstruction cannot reproduce bit-for-bit. The visibility ID
+// check keeps overlapping/equal-depth geometry from paying the material cost
+// more than once.
+@fragment
+fn fs_visibility_geometry(
+    input: VertexOutput,
+    @builtin(primitive_index) primitive_index: u32,
+) -> FragmentOutput {
+    let pixel = vec2<i32>(input.clip_position.xy);
+    let encoded = textureLoad(terrain_visibility_ids, pixel, 0).x;
+    let expected = (((input.tile_id & 0xffffu) << 16u)
+        | (primitive_index & 0xffffu)) + 1u;
+    if (encoded != expected) {
+        discard;
+    }
+    let out = shade_main(input);
+    atomicAdd(&terrain_frame_counters.material_invocations, 1u);
+    terrain_vt_write_surface_feedback(input.tex_coord, 0u);
+    if (terrain_vt_uniforms.config2.w != 0u) {
+        if (terrain_vt_enabled()
+            && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
+            && out.source_id == 0u) {
+            atomicAdd(&terrain_frame_counters.fallback_texels, 1u);
         }
     }
     return out;

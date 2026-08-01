@@ -68,6 +68,7 @@ pub struct TerrainScene {
     pub(super) shadow_pcss_radius: f32,
     pub(super) shadow_technique: u32,
     pub(super) moment_pass: Option<crate::shadows::MomentGenerationPass>,
+    pub(super) moment_blur_pass: Option<crate::shadows::ShadowBlurPass>,
     pub(super) fog_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) fog_uniform_buffer: TrackedBuffer,
     pub(super) water_reflection_bind_group_layout: wgpu::BindGroupLayout,

@@ -335,7 +335,7 @@ impl FeedbackBuffer {
         if self
             .forced_not_ready_polls
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
-                (remaining > 0).then_some(remaining - 1)
+                remaining.checked_sub(1)
             })
             .is_ok()
         {

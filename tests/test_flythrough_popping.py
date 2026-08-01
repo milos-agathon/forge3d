@@ -68,43 +68,16 @@
 # exceeds 400 s the knob to turn is DEM_SIZE (which is what the AO term scales
 # with), never the render resolution and never a gate.
 #
-# THE POP GATE IS RED, AND WHY (measured 2026-07-29, reference RTX 3070)
-# ---------------------------------------------------------------------
-# ``test_600_frame_streaming_flythrough_has_no_pop_or_crack`` fails at
-# transition 1 with max dE2000 = 36.0149. That number is NOT a tile pop. Two
-# independent mechanisms produce it, and both are outside this file:
-#
-# 1. The camera is tied to the clipmap centre (``cam_target = center + DX``),
-#    so every frame translates the whole image by CENTER_STEP_LENGTH_M /
-#    GROUND_PIXEL_M = 353.6 / 27.61 = 12.8 px. A max-pixel dE2000 over a
-#    translating image measures translation, not popping. The fixture is in
-#    fact self-contradictory as committed: the pop control asserts a 16 px
-#    translation must score >= 1.0 while the gate asserts the flythrough's own
-#    12.8 px translation must score < 1.0.
-#    The clipmap mesh centre follows the STREAMING centre, not the camera
-#    (``renderer/streaming.rs:636``, consumed at ``renderer/geometry.rs:601``),
-#    so the confound is removable: hold cam_target fixed and sweep only
-#    ``stream_height_tiles``. Measured that way over 40 frames the mesh still
-#    rebuilds on every frame (39/39 seam-signature changes) and max dE2000 is
-#    2.0554 -- a real, previously invisible pop.
-#
-# 2. That residual 2.0554 is itself an artifact of the fixture's colour ramp.
-#    ``_build_overlay``'s 4-stop terrain colormap renders a HARD colour step:
-#    adjacent pixels differ by up to 35/255 (green [110,144,110] against pink
-#    [145,111,111], with the green channel moving OPPOSITE to the ramp's own
-#    direction), while a 4-stop GREY colormap at the identical stop positions
-#    is smooth (max adjacent delta 2) and a 2-stop terrain colormap is smooth
-#    (3). Through that step, the underlying geometric pop -- max |dRGB| = 1,
-#    i.e. at the 8-bit quantization floor -- is amplified to 5 levels and
-#    dE 2.0554. With a continuous ramp the same 40 frames score 0.3127 (grey)
-#    and 0.8275 (2-stop warm).
-#
-# So the clipmap/geomorph machinery is stable to ~1 LSB frame to frame; the gate
-# is red because of a camera/centre coupling in this file and a colormap-LUT
-# discontinuity in `src/colormap/` + the terrain overlay sampling path. Fixing
-# either in isolation is not enough and neither belongs to this file alone, so
-# the number is reported rather than papered over. Reproducers live in the
-# TESSELLA handoff, not in the tree.
+# POP-GATE FIXTURE CONTRACT
+# -------------------------
+# The measured frames hold the camera at its first-frame target while only the
+# streaming/clipmap centre moves. The mesh still rebuilds every frame, but the
+# dE2000 comparison no longer mistakes a 12.8 px camera translation for a pop.
+# The overlay likewise uses one continuous two-stop ramp: the shared four-stop
+# terrain ramp has a hard LUT colour step that amplifies a one-LSB geometry
+# change above the perceptual threshold. The negative control below retains an
+# intentional camera translation and proves that the unchanged dE < 1 gate can
+# still fail.
 #
 # RELIEF CEILING (real, and load-bearing for the numbers below)
 # -------------------------------------------------------------
@@ -213,6 +186,11 @@ CENTER_X_AMPLITUDE_STEPS = 19
 CENTER_Y_AMPLITUDE_STEPS = 23
 MIN_DISTINCT_CENTERS = 500
 STREAM_ALTITUDE_M = 3_000.0
+FIXED_CAM_TARGET = (
+    -CENTER_X_AMPLITUDE_STEPS * CENTER_STEP_M + CAM_TARGET_DX,
+    -CENTER_Y_AMPLITUDE_STEPS * CENTER_STEP_M,
+    0.0,
+)
 
 STREAM_LOD = 3
 STREAM_TILE_RESOLUTION = 32
@@ -261,16 +239,25 @@ def _region_outer_radii() -> list[float]:
 
 
 def _regions_on_screen() -> int:
-    """Clipmap regions the committed frame intersects.
+    """Minimum clipmap regions the fixed frame intersects over the run.
 
-    The frame is an axis-aligned rectangle around the look-at point and the
-    regions are concentric squares around the clipmap centre, so a region
-    boundary is on screen exactly when its radius is inside the frame's
-    Chebyshev reach.
+    The frame is fixed in world space while the regions move with the streaming
+    centre, so evaluate the relative Chebyshev reach at every committed centre.
     """
-    reach = max(abs(FRAME_MIN_X), abs(FRAME_MAX_X), FRAME_MAX_ABS_Y)
     boundaries = _region_outer_radii()[:-1]
-    return 1 + sum(1 for radius in boundaries if radius < reach)
+    counts = []
+    for index in range(FRAMES):
+        center_x, center_y = _center_at(index)
+        target_x = FIXED_CAM_TARGET[0] - center_x
+        target_y = FIXED_CAM_TARGET[1] - center_y
+        reach = max(
+            abs(target_x - HALF_WIDTH_M),
+            abs(target_x + HALF_WIDTH_M),
+            abs(target_y - HALF_HEIGHT_M),
+            abs(target_y + HALF_HEIGHT_M),
+        )
+        counts.append(1 + sum(1 for radius in boundaries if radius < reach))
+    return min(counts)
 
 
 def _center_at(index: int) -> tuple[float, float]:
@@ -292,13 +279,13 @@ def _center_at(index: int) -> tuple[float, float]:
     )
 
 
-def _params(center: tuple[float, float], *, z_scale: float, overlay, shading="forward"):
+def _params(*, z_scale: float, overlay, shading="forward"):
     return flythrough_params(
         size_px=SIZE,
         terrain_span=SPAN,
         camera_mode=MODE,
         cam_radius=CAM_RADIUS,
-        cam_target=(center[0] + CAM_TARGET_DX, center[1], 0.0),
+        cam_target=FIXED_CAM_TARGET,
         theta_deg=CAM_THETA_DEG,
         phi_deg=CAM_PHI_DEG,
         fov_y_deg=FOV_Y_DEG,
@@ -435,7 +422,11 @@ def test_committed_camera_frames_multiple_clipmap_regions():
     # Every pixel is terrain: the frame's right edge stays inside the +x limit
     # that make_ring's short strips actually cover.
     covered = clipmap_covered_positive_x_limit(SPAN, CENTER_RESOLUTION)
-    assert FRAME_MAX_X < covered, (FRAME_MAX_X, covered)
+    max_relative_x = max(
+        FIXED_CAM_TARGET[0] + HALF_WIDTH_M - _center_at(index)[0]
+        for index in range(FRAMES)
+    )
+    assert max_relative_x < covered, (max_relative_x, covered)
 
     # Two ring boundaries permanently on screen -> three regions.
     assert _regions_on_screen() >= MIN_REGIONS_ON_SCREEN, {
@@ -445,6 +436,15 @@ def test_committed_camera_frames_multiple_clipmap_regions():
     }
     assert FRAME_MAX_ABS_Y > radii[0], (FRAME_MAX_ABS_Y, radii[0])
     assert FRAME_MIN_X < -radii[1], (FRAME_MIN_X, radii[1])
+    expected_target = (
+        _center_at(0)[0] + CAM_TARGET_DX,
+        _center_at(0)[1],
+        0.0,
+    )
+    assert FIXED_CAM_TARGET == expected_target
+    overlay = build_overlay()
+    params = _params(z_scale=Z_SCALE, overlay=overlay)
+    assert tuple(params.cam_target) == expected_target
 
     # Every frame regenerates the clipmap: the streaming centre step clears
     # ClipmapLevel::update_center's half-cell threshold with margin.
@@ -455,10 +455,8 @@ def test_committed_camera_frames_multiple_clipmap_regions():
 
     # The framed ground never leaves the DEM footprint, so no ring boundary on
     # screen is silently flattened by the UV clamp.
-    max_center_x = CENTER_X_AMPLITUDE_STEPS * CENTER_STEP_M
-    max_center_y = CENTER_Y_AMPLITUDE_STEPS * CENTER_STEP_M
-    assert max_center_x + abs(FRAME_MIN_X) < SPAN * 0.5
-    assert max_center_y + FRAME_MAX_ABS_Y < SPAN * 0.5
+    assert abs(FIXED_CAM_TARGET[0]) + HALF_WIDTH_M < SPAN * 0.5
+    assert abs(FIXED_CAM_TARGET[1]) + HALF_HEIGHT_M < SPAN * 0.5
 
     # The relief control must be constructible. It previously was not: the
     # control asked for z_scale 1200 against an API ceiling of 50.0, so it died
@@ -524,7 +522,7 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             )
             frame = render_rgba(
                 renderer,
-                _params(center, z_scale=Z_SCALE, overlay=overlay),
+                _params(z_scale=Z_SCALE, overlay=overlay),
                 dem,
                 ibl,
                 material_set,
@@ -654,7 +652,7 @@ def test_crack_detector_fires_when_the_seams_actually_separate():
 
         render_rgba(
             renderer,
-            _params(center, z_scale=Z_SCALE, overlay=overlay),
+            _params(z_scale=Z_SCALE, overlay=overlay),
             dem,
             ibl,
             material_set,
@@ -663,7 +661,7 @@ def test_crack_detector_fires_when_the_seams_actually_separate():
 
         render_rgba(
             renderer,
-            _params(center, z_scale=RELIEF_CONTROL_Z_SCALE, overlay=overlay),
+            _params(z_scale=RELIEF_CONTROL_Z_SCALE, overlay=overlay),
             dem,
             ibl,
             material_set,
@@ -717,7 +715,7 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
         reference_lab = srgb_to_lab(
             render_rgba(
                 renderer,
-                _params(center, z_scale=Z_SCALE, overlay=overlay),
+                _params(z_scale=Z_SCALE, overlay=overlay),
                 dem,
                 ibl,
                 material_set,
@@ -791,7 +789,7 @@ def test_visibility_shading_is_identical_and_hole_free_at_flythrough_settings():
         _warm_streaming_to_full_residency(forward_renderer, center)
         forward = render_rgba(
             forward_renderer,
-            _params(center, z_scale=Z_SCALE, overlay=overlay),
+            _params(z_scale=Z_SCALE, overlay=overlay),
             dem,
             ibl,
             material_set,
@@ -802,7 +800,7 @@ def test_visibility_shading_is_identical_and_hole_free_at_flythrough_settings():
         _warm_streaming_to_full_residency(visibility_renderer, center)
         visibility = render_rgba(
             visibility_renderer,
-            _params(center, z_scale=Z_SCALE, overlay=overlay, shading="visibility"),
+            _params(z_scale=Z_SCALE, overlay=overlay, shading="visibility"),
             dem,
             ibl,
             material_set,

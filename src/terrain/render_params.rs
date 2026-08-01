@@ -33,9 +33,10 @@ use native_effects::{
     BloomSettingsNative, FogSettingsNative, HeightAoSettingsNative, ReflectionSettingsNative,
     SunVisibilitySettingsNative,
 };
+pub(crate) use native_lighting::ShadowSettingsNative;
 use native_lighting::{
     ClampSettingsNative, LightSettingsNative, LodSettingsNative, PomSettingsNative,
-    SamplingSettingsNative, ShadowSettingsNative, TriplanarSettingsNative,
+    SamplingSettingsNative, TriplanarSettingsNative,
 };
 pub(crate) use native_material::MaterialLayerSettingsNative;
 use native_material::{DetailSettingsNative, MaterialNoiseSettingsNative};

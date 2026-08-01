@@ -26,7 +26,6 @@ import math
 import numpy as np
 
 import forge3d as f3d
-from _terrain_runtime import _build_overlay
 from forge3d.terrain_params import PomSettings, make_terrain_params_config
 
 # Background clear colour of the terrain render pass (linear 0.1/0.1/0.15).
@@ -351,8 +350,11 @@ def flythrough_params(
 
 
 def build_overlay():
-    """The shared colormap overlay, built once and reused across 600 params."""
-    return _build_overlay()
+    """A continuous terrain ramp, built once and reused across 600 params."""
+    cmap = f3d.Colormap1D.from_stops(
+        stops=[(0.0, "#18391f"), (1.0, "#f3f5f9")], domain=(0.0, 1.0)
+    )
+    return f3d.OverlayLayer.from_colormap1d(cmap, strength=1.0)
 
 
 def render_rgba(renderer, params, heightmap, ibl, material_set) -> np.ndarray:

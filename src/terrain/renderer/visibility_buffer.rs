@@ -8,8 +8,10 @@
 //! below is the third mirror of it. The material resolve is a full-screen
 //! fragment pass. It reads primitive identity and depth, reconstructs the
 //! visible surface, and invokes POM/material/feedback exactly once for every
-//! non-background visibility pixel. `terrain_visbuffer_resolve.wgsl` is the
-//! compute pass that reads those counters back, not the resolve itself.
+//! non-background visibility pixel. The runtime resolve replays the original
+//! clipmap geometry against the pass-1 depth/identity buffer; the fullscreen
+//! helper remains in the module for shader-contract coverage. `terrain_visbuffer_resolve.wgsl`
+//! is the compute pass that reads those counters back, not the resolve itself.
 
 use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{
@@ -129,7 +131,12 @@ impl CpuVisibilityOracle {
     fn intersect(&self, ray: &crate::picking::Ray) -> Option<(u32, u32)> {
         let mut closest = f32::INFINITY;
         let mut identity = None;
-        let mut stack = vec![0u32];
+        // `build_recursive` appends each parent after its children, so the
+        // root is the final node rather than node zero. Starting at node zero
+        // only traverses the first leaf and made the CPU oracle report misses
+        // for every pixel outside that leaf.
+        let root = self.bvh.nodes.len().checked_sub(1)? as u32;
+        let mut stack = vec![root];
         while let Some(node_index) = stack.pop() {
             let node = self.bvh.nodes.get(node_index as usize)?;
             if !ray_aabb(ray, node.aabb_min, node.aabb_max, closest) {
@@ -218,6 +225,46 @@ fn ray_triangle(
     }
     let distance = edge2.dot(q) * inv_det;
     (distance > 0.0).then_some(distance)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_oracle_traverses_the_postorder_bvh_root() {
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for triangle in 0..6u32 {
+            let x = triangle as f32 * 2.0;
+            let first = vertices.len() as u32;
+            vertices.extend([[x, 0.0, 0.0], [x + 1.0, 0.0, 0.0], [x, 1.0, 0.0]]);
+            indices.push([first, first + 1, first + 2]);
+        }
+        let mesh = crate::accel::cpu_bvh::MeshCPU::new(vertices, indices);
+        let bvh = crate::accel::cpu_bvh::build_bvh_cpu(
+            &mesh,
+            &crate::accel::cpu_bvh::BuildOptions::default(),
+        )
+        .expect("build test BVH");
+        assert!(bvh.nodes.len() > 1);
+        assert!(bvh.nodes[0].is_leaf());
+        let oracle = CpuVisibilityOracle {
+            mesh,
+            bvh,
+            identities: (0..6).map(|triangle| (triangle, 0)).collect(),
+            inv_view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
+            viewport: (1, 1),
+        };
+
+        assert_eq!(
+            oracle.intersect(&crate::picking::Ray::new(
+                [10.25, 0.25, 1.0],
+                [0.0, 0.0, -1.0],
+            )),
+            Some((5, 0)),
+        );
+    }
 }
 
 #[repr(C)]

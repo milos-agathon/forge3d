@@ -60,24 +60,29 @@ pub(super) fn prove_wgsl(
             )
         })
         .collect();
+    let initializer_evaluator = Evaluator {
+        source,
+        module: &module,
+        info: &info,
+        contract,
+        alarms: Vec::new(),
+    };
     let globals = module
         .global_variables
         .iter()
         .map(|(_, global)| {
             let name = global.name.as_deref().unwrap_or("");
-            // A `var<private>` is re-initialized to its WGSL initializer at the
-            // start of every invocation, so that constant IS its entry value --
-            // strictly more precise than the unknown a contract-less global
-            // would otherwise get, and sound because `Statement::Store` already
-            // models every later write. Without this, a `select(hw, private, f)`
-            // wrapper joins a bounded branch with an unknown one and poisons
-            // the result. Contract-declared globals keep the contract's range.
-            if contract.input(name).is_none() {
-                if let Some(value) = global.init.and_then(|init| const_init_value(&module, init)) {
-                    return value;
-                }
+            let fallback = || seed_value(&module, global.ty, name, contract, None);
+            if contract.input(name).is_some() {
+                return fallback();
             }
-            seed_value(&module, global.ty, name, contract, None)
+            match global
+                .init
+                .map(|initializer| initializer_evaluator.eval_const(initializer))
+            {
+                Some(value) if !matches!(value, Value::Opaque) => value,
+                _ => fallback(),
+            }
         })
         .collect();
     let arg_abs_min = root
@@ -231,51 +236,6 @@ fn input_range(input: &InputContract) -> Option<(f32, f32)> {
         | InputContract::Buffer { range, .. }
         | InputContract::BufferField(range) => Some((range.min, range.max)),
         _ => None,
-    }
-}
-
-/// Abstract value of a module-scope constant initializer expression, or `None`
-/// when the initializer is not a literal/zero/compose/splat tree this evaluator
-/// can read exactly. Returning `None` falls back to the contract seed, so an
-/// unrecognised form can only lose precision, never soundness.
-fn const_init_value(module: &naga::Module, init: Handle<naga::Expression>) -> Option<Value> {
-    match &module.const_expressions[init] {
-        naga::Expression::Literal(literal) => match literal {
-            naga::Literal::F32(value) => Some(Value::Float(Interval::constant(*value))),
-            naga::Literal::F64(value) => Some(Value::Float(Interval::constant(*value as f32))),
-            naga::Literal::U32(value) => Some(Value::Int {
-                lo: i64::from(*value),
-                hi: i64::from(*value),
-            }),
-            naga::Literal::I32(value) => Some(Value::Int {
-                lo: i64::from(*value),
-                hi: i64::from(*value),
-            }),
-            naga::Literal::Bool(value) => Some(Value::Bool {
-                can_false: !*value,
-                can_true: *value,
-            }),
-            _ => None,
-        },
-        naga::Expression::ZeroValue(ty) => Some(Value::zero(module, *ty)),
-        naga::Expression::Splat { size, value } => {
-            let component = const_init_value(module, *value)?;
-            Some(Value::Composite(vec![component; lanes(*size)]))
-        }
-        naga::Expression::Compose { components, .. } => components
-            .iter()
-            .map(|component| const_init_value(module, *component))
-            .collect::<Option<Vec<_>>>()
-            .map(Value::Composite),
-        _ => None,
-    }
-}
-
-fn lanes(size: naga::VectorSize) -> usize {
-    match size {
-        naga::VectorSize::Bi => 2,
-        naga::VectorSize::Tri => 3,
-        naga::VectorSize::Quad => 4,
     }
 }
 

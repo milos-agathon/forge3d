@@ -2095,7 +2095,11 @@ impl TerrainMaterialVTRuntime {
                 } else {
                     tile_data.width * TERRAIN_VT_BYTES_PER_PIXEL as u32
                 }),
-                rows_per_image: Some(tile_data.height),
+                rows_per_image: Some(if self.bindless_bc {
+                    tile_data.height.div_ceil(4)
+                } else {
+                    tile_data.height
+                }),
             },
             wgpu::Extent3d {
                 width: tile_data.width,

@@ -73,6 +73,12 @@ def _validated_adapter_pair(probe: dict[str, Any], viewer: dict[str, Any]) -> di
 
 
 def _viewer_binary() -> Path:
+    override = os.environ.get("FORGE3D_VIEWER_BINARY")
+    if override is not None:
+        assert override.strip(), "FORGE3D_VIEWER_BINARY must not be empty"
+        path = Path(override)
+        assert path.is_file(), f"FORGE3D_VIEWER_BINARY does not exist: {path}"
+        return path
     suffix = ".exe" if os.name == "nt" else ""
     path = ROOT / "target" / "release" / f"interactive_viewer{suffix}"
     assert path.is_file(), f"fresh release viewer is required: {path}"

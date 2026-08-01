@@ -692,7 +692,7 @@ def _mapscene_shadow_settings(shadow_config: Any) -> Any:
         resolution=shadow_config.map_size if shadow_config else 4096,
         cascades=shadow_config.cascades if shadow_config else 3,
         max_distance=4000.0,
-        softness=shadow_config.light_size if shadow_config else 1.5,
+        softness=1.5,
         intensity=0.8,
         slope_scale_bias=0.001,
         depth_bias=shadow_config.moment_bias if shadow_config else 0.0005,
@@ -701,6 +701,9 @@ def _mapscene_shadow_settings(shadow_config: Any) -> Any:
         light_bleed_reduction=0.5,
         evsm_exponent=40.0,
         fade_start=1.0,
+        pcss_blocker_radius=shadow_config.pcss_blocker_radius if shadow_config else 6.0,
+        pcss_filter_radius=shadow_config.pcss_filter_radius if shadow_config else 4.0,
+        light_size=shadow_config.light_size if shadow_config else 1.0,
     )
     settings.validate_for_terrain()
     return settings

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 import sys
 from datetime import date
@@ -24,6 +25,12 @@ from _toml_compat import load_toml
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 CERT_DIR = TESTS / "golden" / "certificates"
+
+
+def _cargo_alias_features(alias: str | list[str]) -> set[str]:
+    tokens = shlex.split(alias) if isinstance(alias, str) else alias
+    index = tokens.index("--features")
+    return set(tokens[index + 1].split(","))
 
 # Make sibling helpers importable regardless of pytest rootdir insertion order.
 for _p in (str(TESTS), str(ROOT / "scripts")):
@@ -195,13 +202,28 @@ def test_c_every_feature_referenced_and_ci_list_curated():
 
     # Clippy covers the portable surface plus extension-module without PROJ's
     # system dependency.
-    alias_text = (ROOT / ".cargo" / "config.toml").read_text(encoding="utf-8")
-    m = re.search(r'"([A-Za-z0-9_\-]*extension-module[A-Za-z0-9_,\-]*)"', alias_text)
-    assert m, "could not locate forge3d-clippy feature list in .cargo/config.toml"
-    alias_features = set(m.group(1).split(","))
+    alias = load_toml(ROOT / ".cargo" / "config.toml")["alias"]["forge3d-clippy"]
+    alias_features = _cargo_alias_features(alias)
     assert alias_features == PORTABLE_CI_CARGO_FEATURES | {"extension-module"}, (
         f"forge3d-clippy feature drift: {sorted(alias_features)}"
     )
+
+
+def test_clippy_alias_feature_parser_accepts_string_and_array_forms():
+    expected = {"extension-module", "default", "enable-pbr"}
+    for alias in [
+        "clippy --workspace --features extension-module,default,enable-pbr -- -D warnings",
+        [
+            "clippy",
+            "--workspace",
+            "--features",
+            "extension-module,default,enable-pbr",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    ]:
+        assert _cargo_alias_features(alias) == expected
 
 
 # ---------------------------------------------------------------------------

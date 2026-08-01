@@ -353,7 +353,7 @@ struct CsmUniforms {
     _pad1a: f32,
     _pad1b: f32,
     _pad1c: f32,
-    // technique_params: [pcss_blocker_radius, pcss_filter_radius, moment_bias, light_size]
+    // [blocker radius (texels), max filter radius (texels), moment bias, light radius (texels)]
     technique_params: vec4<f32>,       // 16 bytes, offset 720
     technique_reserved: vec4<f32>,     // 16 bytes, offset 736
     cascade_blend_range: f32,          // 4 bytes, offset 752
@@ -946,16 +946,6 @@ fn select_cascade_terrain(view_depth: f32) -> u32 {
     return count - 1u;
 }
 
-// P0.2/M3: Chebyshev upper bound for moment-based shadow probability estimation
-fn chebyshev_upper_bound_terrain(mean: f32, variance: f32, t: f32) -> f32 {
-    if (t <= mean) {
-        return 0.0;
-    }
-    let d = t - mean;
-    let p_max = variance / (variance + d * d);
-    return p_max;
-}
-
 // P0.2/M3: Light leak reduction for moment-based shadows
 fn reduce_light_leak_terrain(shadow_factor: f32, amount: f32) -> f32 {
     return clamp(shadow_factor - amount, 0.0, 1.0);
@@ -973,16 +963,16 @@ fn sample_shadow_vsm_terrain(
     let mean = moments.r;      // E[x]
     let mean_sq = moments.g;   // E[x^2]
     
-    // If receiver is closer than mean, it's in shadow
+    // If receiver is closer than mean, it is lit.
     if (receiver_depth <= mean) {
-        return 0.0;
+        return 1.0;
     }
     
     // Calculate variance: Var(x) = E[x^2] - E[x]^2
     let variance = max(mean_sq - mean * mean, 0.0001);
     
     // Apply Chebyshev inequality
-    var shadow_factor = chebyshev_upper_bound_terrain(mean, variance, receiver_depth);
+    var shadow_factor = chebyshev_upper_bound_visibility(mean, variance, receiver_depth);
     
     // Apply light leak reduction
     if (moment_bias > 0.0) {
@@ -1007,25 +997,30 @@ fn sample_shadow_evsm_terrain(
     let c_neg = csm_uniforms.evsm_negative_exp;
     
     // Warp receiver depth
-    let warp_depth_pos = det_exp(c_pos * receiver_depth);
+    let warp_depth_pos = det_exp(c_pos * (receiver_depth - 1.0));
     let warp_depth_neg = -det_exp(-c_neg * receiver_depth);
+    let variance_floor = evsm_minimum_variance(
+        vec2<f32>(warp_depth_pos, warp_depth_neg),
+        vec2<f32>(c_pos, c_neg)
+    );
     
-    // Positive exponent (moments.rg): E[det_exp(c * x)], E[det_exp(c * x)^2]
-    let mean_pos = moments.r;
-    let mean_sq_pos = moments.g;
-    let variance_pos = max(mean_sq_pos - mean_pos * mean_pos, 0.0001);
-    
-    // Negative exponent (moments.ba): E[det_exp(-c * x)], E[det_exp(-c * x)^2]
-    let mean_neg = moments.b;
-    let mean_sq_neg = moments.a;
-    let variance_neg = max(mean_sq_neg - mean_neg * mean_neg, 0.0001);
-    
-    // Apply Chebyshev to both warped distributions
-    let shadow_pos = chebyshev_upper_bound_terrain(mean_pos, variance_pos, warp_depth_pos);
-    let shadow_neg = chebyshev_upper_bound_terrain(mean_neg, variance_neg, warp_depth_neg);
-    
-    // Combine both results (min reduces light leaks)
-    var shadow_factor = min(shadow_pos, shadow_neg);
+    // Apply each lobe's front-of-mean shortcut independently, then combine.
+    var shadow_factor =
+        evsm_visibility_from_moments(
+            moments,
+            warp_depth_pos,
+            warp_depth_neg,
+            variance_floor
+        );
+    shadow_factor = min(
+        shadow_factor,
+        evsm_moment_leak_control(
+            moments.rg,
+            warp_depth_pos,
+            c_pos,
+            variance_floor.x
+        )
+    );
     
     // Apply light leak reduction
     if (moment_bias > 0.0) {
@@ -1042,34 +1037,85 @@ fn sample_shadow_msm_terrain(
     cascade_idx: u32,
     moment_bias: f32
 ) -> f32 {
-    // Sample moment map (4 moments in RGBA)
     let moments = textureSample(moment_maps, moment_sampler, shadow_coords, i32(cascade_idx));
-    
-    // MSM uses 4 moments: E[x], E[x^2], E[x^3], E[x^4]
-    let b1 = moments.r;  // E[x]
-    let b2 = moments.g;  // E[x^2]
-    // b3 and b4 available for more sophisticated reconstruction
-    
-    // Simplified MSM: Use first two moments similar to VSM
-    let mean = b1;
-    
-    // If receiver is closer than mean, it's in shadow
-    if (receiver_depth <= mean) {
-        return 0.0;
+    return msm_visibility_from_moments(moments, receiver_depth, moment_bias);
+}
+
+fn pcss_blocker_search_terrain(
+    shadow_coords: vec2<f32>,
+    receiver_depth: f32,
+    cascade_idx: u32,
+    search_radius: f32,
+) -> f32 {
+    let layer_count = textureNumLayers(shadow_maps);
+    if (cascade_idx >= layer_count) {
+        return -1.0;
     }
-    
-    // Calculate variance using first two moments
-    let variance = max(b2 - b1 * b1, 0.0001);
-    
-    // Apply Chebyshev inequality
-    var shadow_factor = chebyshev_upper_bound_terrain(mean, variance, receiver_depth);
-    
-    // Apply stronger light leak reduction for MSM
-    if (moment_bias > 0.0) {
-        shadow_factor = reduce_light_leak_terrain(shadow_factor, moment_bias * 1.5);
+    var poisson_disk = array<vec2<f32>, 12>(
+        vec2<f32>(-0.94201624, -0.39906216),
+        vec2<f32>(0.94558609, -0.76890725),
+        vec2<f32>(-0.094184101, -0.92938870),
+        vec2<f32>(0.34495938, 0.29387760),
+        vec2<f32>(-0.91588581, 0.45771432),
+        vec2<f32>(-0.81544232, -0.87912464),
+        vec2<f32>(-0.38277543, 0.27676845),
+        vec2<f32>(0.97484398, 0.75648379),
+        vec2<f32>(0.44323325, -0.97511554),
+        vec2<f32>(0.53742981, -0.47373420),
+        vec2<f32>(-0.26496911, -0.41893023),
+        vec2<f32>(0.79197514, 0.19090188)
+    );
+    let texel_size = 1.0 / max(csm_uniforms.shadow_map_size, 1.0);
+    let scaled_search_radius = search_radius * texel_size;
+    let dimensions = textureDimensions(shadow_maps);
+    var blocker_sum = 0.0;
+    var blocker_count = 0.0;
+
+    for (var i = 0; i < 12; i++) {
+        let sample_coords = shadow_coords + poisson_disk[i] * scaled_search_radius;
+        if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
+            sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
+            let texel_coords = vec2<i32>(clamp(
+                sample_coords * vec2<f32>(dimensions),
+                vec2<f32>(0.0),
+                vec2<f32>(dimensions) - vec2<f32>(1.0)
+            ));
+            let shadow_depth =
+                textureLoad(shadow_maps, texel_coords, i32(cascade_idx), 0);
+            if (shadow_depth < receiver_depth) {
+                blocker_sum += shadow_depth;
+                blocker_count += 1.0;
+            }
+        }
     }
-    
-    return shadow_factor;
+
+    if (blocker_count > 0.0) {
+        return blocker_sum / blocker_count;
+    }
+    return -1.0;
+}
+
+fn pcss_penumbra_size_terrain(
+    receiver_depth: f32,
+    blocker_depth: f32,
+    light_size: f32,
+) -> f32 {
+    let depth_diff = max(receiver_depth - blocker_depth, 0.0);
+    let penumbra = (depth_diff * light_size) / max(blocker_depth, 0.001);
+    return clamp(penumbra, 0.0, 100.0);
+}
+
+fn pcss_light_size_texels_terrain(
+    light_size_texels: f32,
+    legacy_world_radius: f32,
+    cascade_texel_size: f32,
+) -> f32 {
+    if (legacy_world_radius > 0.0) {
+        // Legacy public pcss_light_radius is world-space. Convert against the
+        // selected cascade so the penumbra calculation remains texel-space.
+        return legacy_world_radius / max(cascade_texel_size, 0.000001);
+    }
+    return max(light_size_texels, 0.0);
 }
 
 /// Sample shadow map with technique-based filtering
@@ -1100,7 +1146,9 @@ fn sample_shadow_pcf_terrain(
     let depth_01 = ndc.z;
     
     // Check if outside shadow map bounds
-    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || shadow_coords.y < 0.0 || shadow_coords.y > 1.0) {
+    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
+        shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
+        depth_01 < 0.0 || depth_01 > 1.0) {
         return 1.0; // No shadow outside bounds
     }
     
@@ -1123,9 +1171,8 @@ fn sample_shadow_pcf_terrain(
     // technique=5: MSM (Moment Shadow Maps)
     let technique = csm_uniforms.technique;
     
-    // Extract technique parameters: [pcss_blocker_radius, pcss_filter_radius, moment_bias, light_size]
+    // PCSS x/y radii are in shadow-map texels; z is moment bias and w is light size.
     let moment_bias = csm_uniforms.technique_params.z;
-    let light_size = csm_uniforms.technique_params.w;
     
     // HARD shadows (technique=0): single sample, no filtering
     if (technique == 0u) {
@@ -1161,28 +1208,71 @@ fn sample_shadow_pcf_terrain(
         return shadow_sum / 9.0;
     }
     
-    // PCSS (technique=2): larger kernel with light radius scaling for variable penumbra
+    // PCSS (technique=2): blocker-dependent penumbra and adaptive PCF
     if (technique == 2u) {
-        let pcss_kernel_size = 5;
-        let pcss_radius = 2;
-        let filter_scale = max(light_size, 1.0);
-        let texel_size_uv = (1.0 / max(csm_uniforms.shadow_map_size, 1.0)) * filter_scale;
+        let avg_blocker_depth = pcss_blocker_search_terrain(
+            shadow_coords,
+            compare_depth,
+            cascade_idx,
+            min(csm_uniforms.technique_params.x, 50.0)
+        );
+        if (avg_blocker_depth < 0.0) {
+            return 1.0;
+        }
+
+        let penumbra = pcss_penumbra_size_terrain(
+            compare_depth,
+            avg_blocker_depth,
+            pcss_light_size_texels_terrain(
+                csm_uniforms.technique_params.w,
+                csm_uniforms.technique_reserved.x,
+                cascade.texel_size
+            )
+        );
+        // The configured filter radius is a texel-space upper bound. Keeping
+        // the blocker-derived radius below it preserves contact hardening.
+        let max_filter_radius = min(csm_uniforms.technique_params.y, 100.0);
+        let filter_radius = min(
+            max(penumbra, min(max_filter_radius, 1.0)),
+            max_filter_radius
+        );
+        var poisson_disk = array<vec2<f32>, 16>(
+            vec2<f32>(-0.94201624, -0.39906216),
+            vec2<f32>(0.94558609, -0.76890725),
+            vec2<f32>(-0.094184101, -0.92938870),
+            vec2<f32>(0.34495938, 0.29387760),
+            vec2<f32>(-0.91588581, 0.45771432),
+            vec2<f32>(-0.81544232, -0.87912464),
+            vec2<f32>(-0.38277543, 0.27676845),
+            vec2<f32>(0.97484398, 0.75648379),
+            vec2<f32>(0.44323325, -0.97511554),
+            vec2<f32>(0.53742981, -0.47373420),
+            vec2<f32>(-0.26496911, -0.41893023),
+            vec2<f32>(0.79197514, 0.19090188),
+            vec2<f32>(-0.24188840, 0.99706507),
+            vec2<f32>(-0.81409955, 0.91437590),
+            vec2<f32>(0.19984126, 0.78641367),
+            vec2<f32>(0.14383161, -0.14100790)
+        );
+        let scaled_filter_radius =
+            filter_radius / max(csm_uniforms.shadow_map_size, 1.0);
         var shadow_sum = 0.0;
-        for (var y = -pcss_radius; y <= pcss_radius; y = y + 1) {
-            for (var x = -pcss_radius; x <= pcss_radius; x = x + 1) {
-                let offset = vec2<f32>(f32(x), f32(y)) * texel_size_uv;
-                let sample_coords = shadow_coords + offset;
-                let depth_sample = textureSampleCompare(
+        for (var i = 0; i < 16; i++) {
+            let sample_coords = shadow_coords + poisson_disk[i] * scaled_filter_radius;
+            if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
+                sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
+                shadow_sum += textureSampleCompare(
                     shadow_maps,
                     shadow_sampler,
                     sample_coords,
                     i32(cascade_idx),
-                    compare_depth
+                    clamp(compare_depth, 0.0, 1.0)
                 );
-                shadow_sum = shadow_sum + depth_sample;
+            } else {
+                shadow_sum += 1.0;
             }
         }
-        return shadow_sum / 25.0;
+        return shadow_sum / 16.0;
     }
     
     // VSM (technique=3): Variance Shadow Maps using moment texture
@@ -4562,16 +4652,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // Activated by compile-time DEBUG_SHADOW_RAW or runtime csm_uniforms.debug_mode == 2
     // ──────────────────────────────────────────────────────────────────────────
     if (TERRAIN_USE_SHADOWS && (DEBUG_SHADOW_RAW || csm_debug_mode == SHADOW_DEBUG_RAW)) {
-        // Show raw shadow_visibility as grayscale
-        // Black = fully shadowed (0.0), White = fully lit (1.0)
-        // Red tint = in shadow (visibility < 0.5)
-        if (shadow_visibility < 0.5) {
-            // In shadow - show as red-tinted grayscale
-            final_color = vec3<f32>(shadow_visibility * 2.0, shadow_visibility * 0.5, shadow_visibility * 0.5);
-        } else {
-            // Lit - show as grayscale
-            final_color = vec3<f32>(shadow_visibility, shadow_visibility, shadow_visibility);
-        }
+        // Linear grayscale: each output channel is the visibility value.
+        final_color = vec3<f32>(shadow_visibility);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -4584,7 +4666,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let output_srgb_eotf = u_overlay.params5.z > 0.5;
     let offline_hdr_output = u_overlay.params5.w > 0.5;
     var encoded_color: vec3<f32>;
-    if (offline_hdr_output) {
+    if (TERRAIN_USE_SHADOWS && (DEBUG_SHADOW_RAW || csm_debug_mode == SHADOW_DEBUG_RAW)) {
+        encoded_color = final_color;
+    } else if (offline_hdr_output) {
         encoded_color = final_color;
     } else if (output_srgb_eotf) {
         // P6: Exact sRGB EOTF - clamp to [0,1] first, then apply exact curve

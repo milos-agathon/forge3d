@@ -158,7 +158,11 @@ impl TerrainScene {
                 wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(if format.is_compressed() { 16 } else { 4 }),
-                    rows_per_image: Some(side),
+                    rows_per_image: Some(if format.is_compressed() {
+                        side / 4
+                    } else {
+                        side
+                    }),
                 },
                 wgpu::Extent3d {
                     width: side,
@@ -571,6 +575,7 @@ impl TerrainScene {
             shadow_pcss_radius: 0.0,
             shadow_technique: 1,
             moment_pass: None,
+            moment_blur_pass: None,
             fog_bind_group_layout,
             fog_uniform_buffer,
             water_reflection_bind_group_layout,

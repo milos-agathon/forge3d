@@ -422,6 +422,23 @@ impl TerrainScene {
                     water_reflection_bind_group,
                     material_layer_bind_group,
                     preserve_background,
+                    phase1_source,
+                    multi_draw_count,
+                    first_instance,
+                )?;
+                self.encode_visibility_resolve_pass(
+                    encoder,
+                    render_targets,
+                    bind_group,
+                    ibl_bind_group,
+                    shadow_bind_group,
+                    fog_bind_group,
+                    water_reflection_bind_group,
+                    material_layer_bind_group,
+                    true,
+                    phase2_source,
+                    multi_draw_count,
+                    first_instance,
                 )?;
             }
             self.stage_visibility_stats(encoder)?;
@@ -480,6 +497,9 @@ impl TerrainScene {
                 water_reflection_bind_group,
                 material_layer_bind_group,
                 preserve_background,
+                draw_source,
+                multi_draw_count,
+                first_instance,
             )?;
             self.stage_visibility_stats(encoder)?;
         } else if geometry.is_clipmap() && render_targets.sample_count == 1 {
@@ -575,6 +595,9 @@ impl TerrainScene {
         water_reflection_bind_group: &wgpu::BindGroup,
         material_layer_bind_group: &wgpu::BindGroup,
         preserve_color: bool,
+        draw_source: TerrainDrawSource<'_>,
+        multi_draw_count: bool,
+        first_instance: bool,
     ) -> Result<()> {
         let resolve_bind_group = self.visibility_resolve_bind_group(&render_targets.depth_view)?;
         let pipeline_cache = self
@@ -601,7 +624,7 @@ impl TerrainScene {
             .as_ref()
             .map(|_| &render_targets.internal_view);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("terrain.visibility.fullscreen_resolve"),
+            label: Some("terrain.visibility.geometry_resolve"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: color_view,
                 resolve_target,
@@ -619,7 +642,14 @@ impl TerrainScene {
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: None,
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &render_targets.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             timestamp_writes: None,
             occlusion_query_set: None,
         });
@@ -633,7 +663,16 @@ impl TerrainScene {
         pass.set_bind_group(5, water_reflection_bind_group, &[]);
         pass.set_bind_group(6, material_layer_bind_group, &[]);
         pass.set_bind_group(7, &resolve_bind_group, &[]);
-        pass.draw(0..3, 0..1);
+        let geometry = self.geometry_provider()?;
+        match draw_source {
+            TerrainDrawSource::Direct => geometry.draw(&mut pass),
+            TerrainDrawSource::Lod(resources) => {
+                geometry.draw_indirect(&mut pass, resources, multi_draw_count, first_instance);
+            }
+            TerrainDrawSource::Culled(resources) => {
+                geometry.draw_culled(&mut pass, resources, multi_draw_count, first_instance);
+            }
+        }
         Ok(())
     }
 
