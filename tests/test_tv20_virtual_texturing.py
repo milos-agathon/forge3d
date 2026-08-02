@@ -45,6 +45,8 @@ def test_terrain_shader_declares_vt_sampling_and_feedback_bindings() -> None:
     assert "atomicAdd(&terrain_vt_feedback[0], 1u)" in source
     assert "atomicStore(&terrain_vt_feedback[append_slot + 2u], key)" in source
     assert "atomicAdd(&terrain_vt_feedback[1], 1u)" in source
+    assert "let desired_entry = textureLoad(" in source
+    assert "if (desired_entry.z > 0.5)" in source
     assert "terrain_vt_page_table_layer(family_slot, material_index)," in source
     assert "i32(mip_level)," in source
 
