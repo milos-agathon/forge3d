@@ -86,7 +86,8 @@ struct TerrainVTUniformsGpu {
     /// `terrain_pbr_pom.wgsl`; refreshed every `prepare_frame`.
     family_info: [[u32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
     /// Bounded feedback append (TESSELLA win 1). x = slot capacity (power of
-    /// two), y/z/w reserved. Matches `config3` in `terrain_pbr_pom.wgsl`.
+    /// two), y/z = physical page-table base width/height, w reserved. Matches
+    /// `config3` in `terrain_pbr_pom.wgsl`.
     config3: [u32; 4],
 }
 
@@ -223,6 +224,8 @@ struct TerrainMaterialVTRuntime {
     max_mip_levels: u32,
     pages_x0: u32,
     pages_y0: u32,
+    page_table_width: u32,
+    page_table_height: u32,
     atlas_textures: Vec<TrackedTexture>,
     atlas_views: Vec<wgpu::TextureView>,
     bindless_bc: bool,
@@ -1113,7 +1116,12 @@ impl TerrainMaterialVT {
                 if runtime.use_feedback { 1 } else { 0 },
             ],
             family_info,
-            config3: [runtime.feedback_capacity, 0, 0, 0],
+            config3: [
+                runtime.feedback_capacity,
+                runtime.page_table_width,
+                runtime.page_table_height,
+                0,
+            ],
         };
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
@@ -1278,6 +1286,7 @@ impl TerrainMaterialVTRuntime {
 
         let page_table_descriptor =
             page_table_texture_descriptor(pages_x0, pages_y0, material_count, max_mip_levels);
+        let (page_table_width, page_table_height) = page_table_physical_size(pages_x0, pages_y0);
         let page_table_texture =
             tracked_create_texture(device, &page_table_descriptor).map_err(|e| e.to_string())?;
         let page_table_view = page_table_texture.create_view(&wgpu::TextureViewDescriptor {
@@ -1285,7 +1294,7 @@ impl TerrainMaterialVTRuntime {
             format: Some(wgpu::TextureFormat::Rgba32Float),
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             base_mip_level: 0,
-            mip_level_count: Some(max_mip_levels),
+            mip_level_count: Some(1),
             base_array_layer: 0,
             array_layer_count: Some(TERRAIN_VT_FAMILY_COUNT * material_count),
             ..Default::default()
@@ -1404,7 +1413,7 @@ impl TerrainMaterialVTRuntime {
             }
         }
 
-        // Upload the complete zero-filled page-table pyramid on first use.
+        // Upload the complete zero-filled page-table atlas on first use.
         // Deferring these writes relies on the backend's lazy WebGPU
         // initialization clear for the entire texture view; on the protected
         // NVIDIA path that first-read clear can be a large, single-frame GPU
@@ -1423,6 +1432,8 @@ impl TerrainMaterialVTRuntime {
             max_mip_levels,
             pages_x0,
             pages_y0,
+            page_table_width,
+            page_table_height,
             atlas_textures,
             atlas_views,
             bindless_bc,
@@ -1847,9 +1858,12 @@ impl TerrainMaterialVTRuntime {
         dirty_layers.sort_unstable();
 
         for layer_index in dirty_layers {
-            let (array_layer, mip_level) = page_table_subresource(layer_index, self.max_mip_levels);
+            let (array_layer, _) = page_table_subresource(layer_index, self.max_mip_levels);
             let entries = &self.page_tables[layer_index];
+            let mip_level = layer_index as u32 % self.max_mip_levels;
             let (pages_x, pages_y) = self.pages_at_mip(mip_level);
+            let (region_x, region_y) =
+                page_table_region_origin(self.page_table_width, self.page_table_height, mip_level);
             // Keep each deferred queue write below one staging-ring-sized
             // chunk. The first page-table upload covers every family and mip;
             // submitting each row chunk prevents one 64 MiB mip-0 copy from
@@ -1876,10 +1890,10 @@ impl TerrainMaterialVTRuntime {
                 queue.write_texture(
                     wgpu::ImageCopyTexture {
                         texture: &self.page_table_texture,
-                        mip_level,
+                        mip_level: 0,
                         origin: wgpu::Origin3d {
-                            x: 0,
-                            y: row_start as u32,
+                            x: region_x,
+                            y: region_y + row_start as u32,
                             z: array_layer,
                         },
                         aspect: wgpu::TextureAspect::All,
@@ -2423,18 +2437,25 @@ fn page_table_texture_descriptor(
     material_count: u32,
     max_mip_levels: u32,
 ) -> wgpu::TextureDescriptor<'static> {
-    // Logical page grids ceil-halve; physical texture mips floor-halve. Pad
-    // the base extent so every logical odd-sized mip fits its subresource.
-    let physical_width = pages_x0.next_power_of_two();
-    let physical_height = pages_y0.next_power_of_two();
+    // Logical page grids ceil-halve. Store mip rectangles in a single-level
+    // tail atlas instead of a mipmapped image: the protected NVIDIA Vulkan
+    // path loses the device when sampling the latter. The tail row is half
+    // the physical height; its mip rectangles are packed left-to-right.
+    let (physical_width, physical_height) = page_table_physical_size(pages_x0, pages_y0);
+    let tail_width = page_table_tail_width(physical_width, max_mip_levels);
     wgpu::TextureDescriptor {
         label: Some("terrain.material_vt.page_table"),
         size: wgpu::Extent3d {
-            width: physical_width,
-            height: physical_height,
+            width: physical_width.max(tail_width),
+            height: physical_height
+                + if max_mip_levels > 1 {
+                    physical_height.div_ceil(2)
+                } else {
+                    0
+                },
             depth_or_array_layers: TERRAIN_VT_FAMILY_COUNT * material_count,
         },
-        mip_level_count: max_mip_levels,
+        mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba32Float,
@@ -2444,9 +2465,33 @@ fn page_table_texture_descriptor(
 }
 
 #[cfg(feature = "extension-module")]
+fn page_table_physical_size(pages_x0: u32, pages_y0: u32) -> (u32, u32) {
+    (pages_x0.next_power_of_two(), pages_y0.next_power_of_two())
+}
+
+#[cfg(feature = "extension-module")]
+fn page_table_tail_width(base_width: u32, max_mip_levels: u32) -> u32 {
+    (1..max_mip_levels)
+        .map(|mip_level| (base_width >> mip_level.min(31)).max(1))
+        .fold(0u32, u32::saturating_add)
+        .max(1)
+}
+
+#[cfg(feature = "extension-module")]
+fn page_table_region_origin(base_width: u32, base_height: u32, mip_level: u32) -> (u32, u32) {
+    if mip_level == 0 {
+        return (0, 0);
+    }
+    let tail_x = (1..mip_level)
+        .map(|prior_mip| (base_width >> prior_mip.min(31)).max(1))
+        .fold(0u32, u32::saturating_add);
+    (tail_x, base_height)
+}
+
+#[cfg(feature = "extension-module")]
 fn page_table_subresource(layer_index: usize, max_mip_levels: u32) -> (u32, u32) {
-    let layer_index = layer_index as u32;
-    (layer_index / max_mip_levels, layer_index % max_mip_levels)
+    let max_mip_levels = max_mip_levels.max(1);
+    ((layer_index as u32) / max_mip_levels, 0)
 }
 
 #[cfg(feature = "extension-module")]
@@ -2568,17 +2613,23 @@ mod bounded_feedback_tests {
     }
 
     #[test]
-    fn acceptance_page_table_uses_mips_instead_of_full_size_layers() {
+    fn acceptance_page_table_packs_mips_without_a_mipmapped_image() {
         // The packed acceptance store uses one shared logical material.
         let descriptor = page_table_texture_descriptor(2048, 2048, 1, 8);
         assert_eq!(descriptor.size.depth_or_array_layers, 3);
-        assert_eq!(descriptor.mip_level_count, 8);
+        assert_eq!(descriptor.mip_level_count, 1);
+        assert_eq!(descriptor.size.width, 2048);
+        assert_eq!(descriptor.size.height, 3072);
         assert_eq!(page_table_subresource(0, 8), (0, 0));
-        assert_eq!(page_table_subresource(7, 8), (0, 7));
+        assert_eq!(page_table_subresource(7, 8), (0, 0));
         assert_eq!(page_table_subresource(8, 8), (1, 0));
+        assert_eq!(page_table_region_origin(2048, 2048, 0), (0, 0));
+        assert_eq!(page_table_region_origin(2048, 2048, 1), (0, 2048));
+        assert_eq!(page_table_region_origin(2048, 2048, 2), (1024, 2048));
+        assert_eq!(page_table_region_origin(2048, 2048, 7), (2016, 2048));
 
         let bytes = crate::core::resource_tracker::calculate_texture_descriptor_size(&descriptor);
-        assert_eq!(bytes, 268_431_360);
+        assert_eq!(bytes, 301_989_888);
         assert!(bytes < 512 * 1024 * 1024);
     }
 
@@ -2586,13 +2637,25 @@ mod bounded_feedback_tests {
     fn odd_logical_page_grids_fit_every_physical_mip() {
         let descriptor = page_table_texture_descriptor(13, 9, 2, 4);
         assert_eq!(descriptor.size.width, 16);
-        assert_eq!(descriptor.size.height, 16);
+        assert_eq!(descriptor.size.height, 24);
         assert_eq!(descriptor.size.depth_or_array_layers, 6);
 
-        for mip_level in 0..descriptor.mip_level_count {
+        for mip_level in 0..4 {
             let (logical_width, logical_height) = pages_for_mip_counts(13, 9, mip_level);
-            assert!(logical_width <= descriptor.size.width >> mip_level);
-            assert!(logical_height <= descriptor.size.height >> mip_level);
+            let (origin_x, origin_y) = page_table_region_origin(16, 16, mip_level);
+            assert!(origin_x + logical_width <= descriptor.size.width);
+            assert!(origin_y + logical_height <= descriptor.size.height);
+        }
+        assert_eq!(page_table_texture_descriptor(1, 1, 1, 1).size.height, 1);
+
+        let tall = page_table_texture_descriptor(1, 33, 1, 6);
+        assert_eq!(tall.size.width, 5);
+        assert_eq!(tall.size.height, 96);
+        for mip_level in 0..6 {
+            let (logical_width, logical_height) = pages_for_mip_counts(1, 33, mip_level);
+            let (origin_x, origin_y) = page_table_region_origin(1, 64, mip_level);
+            assert!(origin_x + logical_width <= tall.size.width);
+            assert!(origin_y + logical_height <= tall.size.height);
         }
     }
 

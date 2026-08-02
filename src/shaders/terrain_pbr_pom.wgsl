@@ -487,14 +487,13 @@ struct TerrainVTUniforms {
     config1: vec4<u32>,
     config2: vec4<u32>,
     // TerrainVtFamilyInfo: per-family single source of truth, refreshed each
-    // frame from CPU residency state. x = enabled (0/1), y = page-table
-    // array-layer
-    // offset, z = atlas layer (0 while families share one atlas layer),
+    // frame from CPU residency state. x = enabled (0/1), y = page-table array-
+    // layer offset, z = atlas layer (0 while families share one atlas layer),
     // w = registered source count. Must match TerrainVTUniformsGpu in
     // src/terrain/renderer/virtual_texture.rs.
     family_info: array<vec4<u32>, 3>,
     // Bounded feedback append (TESSELLA win 1). x = slot capacity (a power of
-    // two), y/z/w unused.
+    // two), y/z = physical page-table base width/height, w unused.
     config3: vec4<u32>,
 }
 
@@ -1993,6 +1992,41 @@ fn terrain_vt_page_table_layer(family_slot: u32, material_index: u32) -> i32 {
     return i32(family_base + material_index);
 }
 
+// The page table is a single-level atlas: mip zero occupies the base region
+// and finer tail regions are packed left-to-right below it. This avoids the
+// mipmapped Rgba32Float image path that loses the protected Vulkan device.
+fn terrain_vt_page_table_origin(mip_level: u32) -> vec2<u32> {
+    if (mip_level == 0u) {
+        return vec2<u32>(0u, 0u);
+    }
+    let base_width = max(terrain_vt_uniforms.config3.y, 1u);
+    let base_height = max(terrain_vt_uniforms.config3.z, 1u);
+    var tail_x = 0u;
+    var prior_mip = 1u;
+    loop {
+        if (prior_mip >= mip_level) {
+            break;
+        }
+        tail_x = tail_x + max(base_width >> min(prior_mip, 31u), 1u);
+        prior_mip = prior_mip + 1u;
+    }
+    return vec2<u32>(tail_x, base_height);
+}
+
+fn terrain_vt_page_table_load(
+    page: vec2<i32>,
+    layer: i32,
+    mip_level: u32,
+) -> vec4<f32> {
+    let origin = terrain_vt_page_table_origin(mip_level);
+    return textureLoad(
+        terrain_vt_page_table,
+        page + vec2<i32>(origin),
+        layer,
+        0,
+    );
+}
+
 fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) -> u32 {
     let base_pages_x = max(terrain_vt_uniforms.config1.z, 1u);
     let base_pages_y = max(terrain_vt_uniforms.config1.w, 1u);
@@ -2053,28 +2087,25 @@ fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
     // for a fully resident page avoids contending on the global feedback
     // counters for every pixel of a settled frame.
     atomicAdd(&terrain_frame_counters.feedback_records, 1u);
-    let desired_entry = textureLoad(
-        terrain_vt_page_table,
+    let desired_entry = terrain_vt_page_table_load(
         vec2<i32>(i32(page.x), i32(page.y)),
         terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_ALBEDO, material_index),
-        i32(desired_mip),
+        desired_mip,
     );
     var all_families_resident = desired_entry.z > 0.5;
     if (all_families_resident && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_NORMAL)) {
-        let normal_entry = textureLoad(
-            terrain_vt_page_table,
+        let normal_entry = terrain_vt_page_table_load(
             vec2<i32>(i32(page.x), i32(page.y)),
             terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_NORMAL, material_index),
-            i32(desired_mip),
+            desired_mip,
         );
         all_families_resident = normal_entry.z > 0.5;
     }
     if (all_families_resident && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_MASK)) {
-        let mask_entry = textureLoad(
-            terrain_vt_page_table,
+        let mask_entry = terrain_vt_page_table_load(
             vec2<i32>(i32(page.x), i32(page.y)),
             terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_MASK, material_index),
-            i32(desired_mip),
+            desired_mip,
         );
         all_families_resident = mask_entry.z > 0.5;
     }
@@ -2131,11 +2162,10 @@ fn terrain_vt_resolve_family_uv(
         let page_dims = terrain_vt_page_dims(mip_level);
         let page_size = vec2<f32>(tile_size * exp2(f32(mip_level)), tile_size * exp2(f32(mip_level)));
         let page = min(vec2<u32>(virtual_texel / page_size), page_dims - vec2<u32>(1u, 1u));
-        let entry = textureLoad(
-            terrain_vt_page_table,
+        let entry = terrain_vt_page_table_load(
             vec2<i32>(i32(page.x), i32(page.y)),
             terrain_vt_page_table_layer(family_slot, material_index),
-            i32(mip_level),
+            mip_level,
         );
         if (entry.z > 0.5) {
             let page_origin = vec2<f32>(f32(page.x), f32(page.y)) * page_size;
@@ -2189,11 +2219,10 @@ fn terrain_vt_resolve_source_id(
         let page_dims = terrain_vt_page_dims(mip_level);
         let page_size = vec2<f32>(tile_size * exp2(f32(mip_level)), tile_size * exp2(f32(mip_level)));
         let page = min(vec2<u32>(virtual_texel / page_size), page_dims - vec2<u32>(1u, 1u));
-        let entry = textureLoad(
-            terrain_vt_page_table,
+        let entry = terrain_vt_page_table_load(
             vec2<i32>(i32(page.x), i32(page.y)),
             terrain_vt_page_table_layer(family_slot, material_index),
-            i32(mip_level),
+            mip_level,
         );
         if (entry.z > 0.5) {
             return family_slot * TERRAIN_VT_MATERIAL_CAPACITY + material_index + 1u;
