@@ -80,7 +80,7 @@ struct TerrainVTUniformsGpu {
     config1: [u32; 4],
     config2: [u32; 4],
     /// Per-family info (`TerrainVtFamilyInfo`): the single source of truth the
-    /// shader reads per family. x = enabled (0/1), y = page-table layer
+    /// shader reads per family. x = enabled (0/1), y = page-table array-layer
     /// offset, z = atlas layer (0 while all families share one atlas layer),
     /// w = registered source count. Matches `family_info` in
     /// `terrain_pbr_pom.wgsl`; refreshed every `prepare_frame`.
@@ -1060,7 +1060,7 @@ impl TerrainMaterialVT {
                 } else {
                     0
                 },
-                slot_u32 * runtime.material_count * runtime.max_mip_levels,
+                slot_u32 * runtime.material_count,
                 0,
                 source_count,
             ];
@@ -1248,34 +1248,18 @@ impl TerrainMaterialVTRuntime {
                 .map_err(|e| e.to_string())?
         };
 
-        let page_table_texture = tracked_create_texture(
-            device,
-            &wgpu::TextureDescriptor {
-                label: Some("terrain.material_vt.page_table"),
-                size: wgpu::Extent3d {
-                    width: pages_x0,
-                    height: pages_y0,
-                    depth_or_array_layers: TERRAIN_VT_FAMILY_COUNT
-                        * material_count
-                        * max_mip_levels,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba32Float,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            },
-        )
-        .map_err(|e| e.to_string())?;
+        let page_table_descriptor =
+            page_table_texture_descriptor(pages_x0, pages_y0, material_count, max_mip_levels);
+        let page_table_texture =
+            tracked_create_texture(device, &page_table_descriptor).map_err(|e| e.to_string())?;
         let page_table_view = page_table_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.material_vt.page_table.view"),
             format: Some(wgpu::TextureFormat::Rgba32Float),
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             base_mip_level: 0,
-            mip_level_count: Some(1),
+            mip_level_count: Some(max_mip_levels),
             base_array_layer: 0,
-            array_layer_count: Some(TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels),
+            array_layer_count: Some(TERRAIN_VT_FAMILY_COUNT * material_count),
             ..Default::default()
         });
 
@@ -1376,37 +1360,6 @@ impl TerrainMaterialVTRuntime {
         } else {
             None
         };
-
-        // Route the VT footprint through the 512 MiB resource registry so the
-        // budget tracker sees the atlas, page table, and feedback buffers.
-        let memory_tracker = crate::core::memory_tracker::global_tracker();
-        let page_table_layers = TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels;
-        if bindless_bc {
-            for format in [
-                wgpu::TextureFormat::Bc7RgbaUnormSrgb,
-                wgpu::TextureFormat::Bc5RgUnorm,
-                wgpu::TextureFormat::Bc7RgbaUnorm,
-            ] {
-                memory_tracker.track_texture_allocation(atlas_size, atlas_size, format);
-            }
-        } else {
-            memory_tracker.track_texture_allocation(
-                atlas_size,
-                atlas_size,
-                wgpu::TextureFormat::Rgba8UnormSrgb,
-            );
-        }
-        memory_tracker.track_texture_allocation(
-            pages_x0,
-            pages_y0.saturating_mul(page_table_layers),
-            wgpu::TextureFormat::Rgba32Float,
-        );
-        if let Some(feedback) = feedback_buffer.as_ref() {
-            let feedback_bytes = feedback.buffer().size();
-            memory_tracker.track_buffer_allocation(feedback_bytes, false);
-            // The readback staging buffer is host-visible (MAP_READ).
-            memory_tracker.track_buffer_allocation(feedback_bytes, true);
-        }
 
         let mut page_tables = Vec::with_capacity(
             (TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels) as usize,
@@ -1859,7 +1812,7 @@ impl TerrainMaterialVTRuntime {
         dirty_layers.sort_unstable();
 
         for layer_index in dirty_layers {
-            let mip_level = (layer_index as u32) % self.max_mip_levels;
+            let (array_layer, mip_level) = page_table_subresource(layer_index, self.max_mip_levels);
             let entries = &self.page_tables[layer_index];
             let (pages_x, pages_y) = self.pages_at_mip(mip_level);
             let packed_entries = entries
@@ -1876,11 +1829,11 @@ impl TerrainMaterialVTRuntime {
             queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &self.page_table_texture,
-                    mip_level: 0,
+                    mip_level,
                     origin: wgpu::Origin3d {
                         x: 0,
                         y: 0,
-                        z: layer_index as u32,
+                        z: array_layer,
                     },
                     aspect: wgpu::TextureAspect::All,
                 },
@@ -2386,26 +2339,7 @@ impl TerrainMaterialVTRuntime {
 #[cfg(feature = "extension-module")]
 impl Drop for TerrainMaterialVTRuntime {
     fn drop(&mut self) {
-        // Release the footprint reported to the 512 MiB resource registry in
-        // `TerrainMaterialVTRuntime::new`.
-        let memory_tracker = crate::core::memory_tracker::global_tracker();
-        let page_table_layers = TERRAIN_VT_FAMILY_COUNT * self.material_count * self.max_mip_levels;
-        memory_tracker.free_texture_allocation(
-            self.atlas_size,
-            self.atlas_size,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
-        memory_tracker.free_texture_allocation(
-            self.pages_x0,
-            self.pages_y0.saturating_mul(page_table_layers),
-            wgpu::TextureFormat::Rgba32Float,
-        );
-        if let Some(feedback) = self.feedback_buffer.as_ref() {
-            let feedback_bytes = feedback.buffer().size();
-            memory_tracker.free_buffer_allocation(feedback_bytes, false);
-            memory_tracker.free_buffer_allocation(feedback_bytes, true);
-        }
-        memory_tracker.clear_resident_tiles();
+        crate::core::memory_tracker::global_tracker().clear_resident_tiles();
     }
 }
 
@@ -2421,6 +2355,39 @@ fn pages_for_mip_counts(pages_x0: u32, pages_y0: u32, mip_level: u32) -> (u32, u
         ceil_div(pages_x0.max(1), div).max(1),
         ceil_div(pages_y0.max(1), div).max(1),
     )
+}
+
+#[cfg(feature = "extension-module")]
+fn page_table_texture_descriptor(
+    pages_x0: u32,
+    pages_y0: u32,
+    material_count: u32,
+    max_mip_levels: u32,
+) -> wgpu::TextureDescriptor<'static> {
+    // Logical page grids ceil-halve; physical texture mips floor-halve. Pad
+    // the base extent so every logical odd-sized mip fits its subresource.
+    let physical_width = pages_x0.next_power_of_two();
+    let physical_height = pages_y0.next_power_of_two();
+    wgpu::TextureDescriptor {
+        label: Some("terrain.material_vt.page_table"),
+        size: wgpu::Extent3d {
+            width: physical_width,
+            height: physical_height,
+            depth_or_array_layers: TERRAIN_VT_FAMILY_COUNT * material_count,
+        },
+        mip_level_count: max_mip_levels,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    }
+}
+
+#[cfg(feature = "extension-module")]
+fn page_table_subresource(layer_index: usize, max_mip_levels: u32) -> (u32, u32) {
+    let layer_index = layer_index as u32;
+    (layer_index / max_mip_levels, layer_index % max_mip_levels)
 }
 
 #[cfg(feature = "extension-module")]
@@ -2539,5 +2506,34 @@ mod bounded_feedback_tests {
         let host_visible_bytes = (capacity as u64 + 2) * 4;
         assert_eq!(host_visible_bytes, 262_152);
         assert!(host_visible_bytes < 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn acceptance_page_table_uses_mips_instead_of_full_size_layers() {
+        // The packed acceptance store uses one shared logical material.
+        let descriptor = page_table_texture_descriptor(2048, 2048, 1, 8);
+        assert_eq!(descriptor.size.depth_or_array_layers, 3);
+        assert_eq!(descriptor.mip_level_count, 8);
+        assert_eq!(page_table_subresource(0, 8), (0, 0));
+        assert_eq!(page_table_subresource(7, 8), (0, 7));
+        assert_eq!(page_table_subresource(8, 8), (1, 0));
+
+        let bytes = crate::core::resource_tracker::calculate_texture_descriptor_size(&descriptor);
+        assert_eq!(bytes, 268_431_360);
+        assert!(bytes < 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn odd_logical_page_grids_fit_every_physical_mip() {
+        let descriptor = page_table_texture_descriptor(13, 9, 2, 4);
+        assert_eq!(descriptor.size.width, 16);
+        assert_eq!(descriptor.size.height, 16);
+        assert_eq!(descriptor.size.depth_or_array_layers, 6);
+
+        for mip_level in 0..descriptor.mip_level_count {
+            let (logical_width, logical_height) = pages_for_mip_counts(13, 9, mip_level);
+            assert!(logical_width <= descriptor.size.width >> mip_level);
+            assert!(logical_height <= descriptor.size.height >> mip_level);
+        }
     }
 }
