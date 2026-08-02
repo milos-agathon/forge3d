@@ -150,7 +150,7 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "075a1db02bf8",
+    "git_sha": "e5a29fa0b37d",
     "version": "1.34.0",
     "wgsl_module_hashes": {
       "terrain.offline.accumulate.pipeline": "cd37fc252033f64ac13406bfef71e937c11a6087a120f416eb24ba5d79e61126",
@@ -165,7 +165,7 @@
   "passes": [
     {
       "draw_calls": 4,
-      "gpu_ms": 3.0904319286346436,
+      "gpu_ms": 12.53990364074707,
       "label": "terrain.offline.accumulate_batch"
     },
     {
@@ -178,7 +178,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "473932c0e3e9157a57e2d1e5a06eb4fbc6d1b4a991902a0b73ae7583e6ac1a7b9d794121390afd223b6bee5b7f29e798f5129a8c367484c1c98e1f72ad061c04",
+    "sig": "f9ca7f47924f9895ae2df939dd78a1cd7643ebdf5b1e31d98331908284a65937f45adf5b107ef6e07b6c857efcfdeb9a250977a1daccac663f96c15e99188f0d",
     "signed_fields": [
       "adapter",
       "allocations",

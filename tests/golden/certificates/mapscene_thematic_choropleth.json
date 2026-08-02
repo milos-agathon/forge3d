@@ -150,7 +150,7 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "075a1db02bf8",
+    "git_sha": "e5a29fa0b37d",
     "version": "1.34.0",
     "wgsl_module_hashes": {
       "line_aa.wgsl": "0ebdc403a1ef64bff361ef867fc6ccdf71b3f5367d5a59b7c3c888eb74fde085",
@@ -163,7 +163,7 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 3.339263916015625,
+      "gpu_ms": 6.13375997543335,
       "label": "terrain.shadow"
     },
     {
@@ -178,7 +178,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sun_visibility"
     },
     {
@@ -188,7 +188,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.19865599274635315,
+      "gpu_ms": 0.2314240038394928,
       "label": "terrain.main"
     },
     {
@@ -198,17 +198,17 @@
     },
     {
       "draw_calls": 4,
-      "gpu_ms": 0.016383999958634377,
+      "gpu_ms": 0.01945599913597107,
       "label": "vector.polygon_fill"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.024576,
+      "gpu_ms": 0.032768,
       "label": "vector.oit"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.006144,
+      "gpu_ms": 0.01024,
       "label": "vector.oit.compose"
     },
     {
@@ -221,7 +221,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "45871c9470097a71ab3e37af6d72f7d345712a9cdd0519f2d27d2e03809da1eaaf1725403d29d2297530f1e4c8a603e8cb0a846b913b6b330c9690080f048c01",
+    "sig": "6ec8abd754c50aa1b613da3a8c223e839af09f7b77aa9a224c1acaf52801e3bbc5baf3011a0cbb50d3729059a80d48463a2d92c3952f5ad47b526304a7c49703",
     "signed_fields": [
       "adapter",
       "allocations",
