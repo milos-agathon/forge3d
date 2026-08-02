@@ -17,6 +17,11 @@ permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  # Keep reviewed certificate refreshes isolated from ordinary CI cancellation.
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.update_recipe_certificates && format('certificate-refresh-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('manual-{0}', github.ref_name) || format('push-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.update_recipe_certificates) }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -307,6 +312,7 @@ jobs:
         with:
           name: wheels-${{ matrix.platform.os }}
           path: dist/*.whl
+          retention-days: 1
 
   # ============================================================================
   # Python Tests (pytest)
@@ -318,9 +324,7 @@ jobs:
     timeout-minutes: 35
     strategy:
       fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && '{"include":[{"os":"ubuntu-latest","python-version":"3.10"},{"os":"ubuntu-latest","python-version":"3.11"},{"os":"ubuntu-latest","python-version":"3.12"},{"os":"ubuntu-latest","python-version":"3.13"},{"os":"windows-latest","python-version":"3.11"},{"os":"macos-latest","python-version":"3.11"}]}' || '{"os":["windows-latest","ubuntu-latest","macos-latest"],"python-version":["3.10","3.11","3.12","3.13"]}') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -432,6 +436,7 @@ jobs:
           name: terminus-fuzzer-evidence
           path: target/terminus-fuzz-evidence/
           if-no-files-found: error
+          retention-days: 7
 
   # ============================================================================
   # Linux aarch64 Wheel Smoke Test (QEMU)
@@ -594,6 +599,7 @@ jobs:
           name: golden-lane-marker
           path: golden-out/
           if-no-files-found: error
+          retention-days: 7
 
       - name: Run software-allowed recipe goldens
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1'
@@ -608,6 +614,7 @@ jobs:
         with:
           name: visual-golden-diffs
           path: tests/artifacts/
+          retention-days: 7
 
   refresh-recipe-certificates:
     name: Refresh Recipe Certificates
@@ -651,6 +658,7 @@ jobs:
           name: refreshed-recipe-certificates
           path: tests/golden/certificates/*.json
           if-no-files-found: error
+          retention-days: 90
 
   # ============================================================================
   # M-06 Option-2 Full Geospatial Viewer acceptance
@@ -896,6 +904,7 @@ jobs:
           name: m06-full-geospatial-viewer-evidence
           path: ${{ runner.temp }}/forge3d-m06-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
+          retention-days: 90
       - name: Clean M-06 build scratch
         if: always()
         shell: pwsh
@@ -1006,6 +1015,7 @@ jobs:
           name: f3dz-physical-gpu-evidence
           path: ${{ runner.temp }}/forge3d-f3dz-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
+          retention-days: 90
       - name: Clean F3DZ build scratch
         if: always()
         shell: pwsh
@@ -1104,6 +1114,7 @@ jobs:
             anamnesis-portability-producer-adapter.json
             anamnesis-portability-producer-machine-id.txt
           if-no-files-found: error
+          retention-days: 90
 
   test-anamnesis-portability:
     name: ANAMNESIS Physical Consume (Windows DX12)
@@ -1187,6 +1198,7 @@ jobs:
             anamnesis-portability-consumer-adapter.json
             anamnesis-portability-consumer-machine-id.txt
           if-no-files-found: error
+          retention-days: 90
 
   # ============================================================================
   # ANAMNESIS production acceptance
@@ -1283,6 +1295,7 @@ jobs:
             ${{ runner.temp }}/anamnesis-p0-adapter.json
             ${{ runner.temp }}/anamnesis-checked-out-head.txt
           if-no-files-found: error
+          retention-days: 90
       - name: Clean ANAMNESIS scratch
         if: always()
         shell: pwsh
@@ -1319,28 +1332,6 @@ jobs:
 
       - name: Build Rust docs
         run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts --no-deps
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install Sphinx dependencies
-        run: |
-          pip install sphinx sphinx-rtd-theme myst-parser numpy pillow ipywidgets pooch
-
-      - name: Build Sphinx docs
-        run: |
-          cd docs
-          make html
-
-      - name: Upload docs artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: documentation
-          path: |
-            target/doc/
-            docs/_build/html/
 
   # ============================================================================
   # Final Status
