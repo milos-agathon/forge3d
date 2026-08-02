@@ -322,7 +322,11 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
             # Device-local footprint is declared separately from the
             # host-visible budget: textures never enter host_visible_bytes.
             "atlas_device_local_bytes": int(stats["atlas_device_local_bytes"]),
-            "device_local_page_table_bytes": 2048 * 2048 * 3 * 1 * 8 * 16,
+            "device_local_page_table_bytes": sum(
+                (2048 >> mip) ** 2 for mip in range(8)
+            )
+            * 3
+            * 16,  # three families; packed stores share one logical material
             "atlas_uncompressed_equivalent_bytes": int(
                 stats["atlas_uncompressed_equivalent_bytes"]
             ),

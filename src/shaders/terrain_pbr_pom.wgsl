@@ -487,7 +487,8 @@ struct TerrainVTUniforms {
     config1: vec4<u32>,
     config2: vec4<u32>,
     // TerrainVtFamilyInfo: per-family single source of truth, refreshed each
-    // frame from CPU residency state. x = enabled (0/1), y = page-table layer
+    // frame from CPU residency state. x = enabled (0/1), y = page-table
+    // array-layer
     // offset, z = atlas layer (0 while families share one atlas layer),
     // w = registered source count. Must match TerrainVTUniformsGpu in
     // src/terrain/renderer/virtual_texture.rs.
@@ -1987,10 +1988,9 @@ fn terrain_vt_page_dims(mip_level: u32) -> vec2<u32> {
     );
 }
 
-fn terrain_vt_page_table_layer(family_slot: u32, material_index: u32, mip_level: u32) -> i32 {
-    let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
+fn terrain_vt_page_table_layer(family_slot: u32, material_index: u32) -> i32 {
     let family_base = terrain_vt_uniforms.family_info[min(family_slot, 2u)].y;
-    return i32(family_base + material_index * max_mip_levels + mip_level);
+    return i32(family_base + material_index);
 }
 
 fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) -> u32 {
@@ -2105,8 +2105,8 @@ fn terrain_vt_resolve_family_uv(
         let entry = textureLoad(
             terrain_vt_page_table,
             vec2<i32>(i32(page.x), i32(page.y)),
-            terrain_vt_page_table_layer(family_slot, material_index, mip_level),
-            0,
+            terrain_vt_page_table_layer(family_slot, material_index),
+            i32(mip_level),
         );
         if (entry.z > 0.5) {
             let page_origin = vec2<f32>(f32(page.x), f32(page.y)) * page_size;
@@ -2163,8 +2163,8 @@ fn terrain_vt_resolve_source_id(
         let entry = textureLoad(
             terrain_vt_page_table,
             vec2<i32>(i32(page.x), i32(page.y)),
-            terrain_vt_page_table_layer(family_slot, material_index, mip_level),
-            0,
+            terrain_vt_page_table_layer(family_slot, material_index),
+            i32(mip_level),
         );
         if (entry.z > 0.5) {
             return family_slot * TERRAIN_VT_MATERIAL_CAPACITY + material_index + 1u;
