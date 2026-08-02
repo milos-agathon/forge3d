@@ -1376,11 +1376,14 @@ impl TerrainMaterialVTRuntime {
             }
         }
 
-        // Newly-created WebGPU textures are zero-initialized, matching the
-        // default (non-resident) page-table entries. Upload only layers that
-        // receive entries; `set_page_entry` and `clear_page_entry` mark those
-        // layers dirty as residency changes.
-        let dirty_page_table_layers = HashSet::new();
+        // Upload the complete zero-filled page-table pyramid on first use.
+        // Deferring these writes relies on the backend's lazy WebGPU
+        // initialization clear for the entire texture view; on the protected
+        // NVIDIA path that first-read clear can be a large, single-frame GPU
+        // operation and trip the device watchdog. Explicitly publishing the
+        // non-resident entries keeps the initialization work in the ordinary
+        // upload path, while subsequent frames remain layer-scoped.
+        let dirty_page_table_layers = (0..page_tables.len()).collect();
 
         let mut runtime = Self {
             virtual_size: layer.virtual_size,
