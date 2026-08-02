@@ -843,15 +843,7 @@ impl TerrainMaterialVT {
             queue.submit(Some(vt_upload_encoder.finish()));
             device.poll(wgpu::Maintain::Wait);
         }
-        let page_tables_dirty = !runtime.dirty_page_table_layers.is_empty();
-        runtime.upload_page_tables(queue.as_ref());
-        if page_tables_dirty {
-            let page_table_encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("terrain.material_vt.page_table_uploads"),
-                });
-            queue.submit(Some(page_table_encoder.finish()));
-        }
+        runtime.upload_page_tables(device.as_ref(), queue.as_ref());
         runtime.refresh_stats();
         self.last_stats = runtime.stats;
 
@@ -1850,7 +1842,7 @@ impl TerrainMaterialVTRuntime {
         );
     }
 
-    fn upload_page_tables(&mut self, queue: &wgpu::Queue) {
+    fn upload_page_tables(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let mut dirty_layers = self.dirty_page_table_layers.drain().collect::<Vec<_>>();
         dirty_layers.sort_unstable();
 
@@ -1858,6 +1850,14 @@ impl TerrainMaterialVTRuntime {
             let (array_layer, mip_level) = page_table_subresource(layer_index, self.max_mip_levels);
             let entries = &self.page_tables[layer_index];
             let (pages_x, pages_y) = self.pages_at_mip(mip_level);
+            // Keep each deferred queue write below one staging-ring-sized
+            // chunk. The first page-table upload covers every family and mip;
+            // submitting each row chunk prevents one 64 MiB mip-0 copy from
+            // sharing a submit with the first terrain draw on Windows Vulkan.
+            let row_bytes = pages_x as usize * 16;
+            let rows_per_chunk = (8 * 1024 * 1024 / row_bytes.max(1))
+                .max(1)
+                .min(pages_y as usize);
             let packed_entries = entries
                 .iter()
                 .map(|entry| {
@@ -1869,29 +1869,40 @@ impl TerrainMaterialVTRuntime {
                     ]
                 })
                 .collect::<Vec<_>>();
-            queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    texture: &self.page_table_texture,
-                    mip_level,
-                    origin: wgpu::Origin3d {
-                        x: 0,
-                        y: 0,
-                        z: array_layer,
+            for row_start in (0..pages_y as usize).step_by(rows_per_chunk) {
+                let rows = rows_per_chunk.min(pages_y as usize - row_start);
+                let entry_start = row_start * pages_x as usize;
+                let entry_end = (row_start + rows) * pages_x as usize;
+                queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &self.page_table_texture,
+                        mip_level,
+                        origin: wgpu::Origin3d {
+                            x: 0,
+                            y: row_start as u32,
+                            z: array_layer,
+                        },
+                        aspect: wgpu::TextureAspect::All,
                     },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                bytemuck::cast_slice(&packed_entries),
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(pages_x * 16),
-                    rows_per_image: Some(pages_y),
-                },
-                wgpu::Extent3d {
-                    width: pages_x,
-                    height: pages_y,
-                    depth_or_array_layers: 1,
-                },
-            );
+                    bytemuck::cast_slice(&packed_entries[entry_start..entry_end]),
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(pages_x * 16),
+                        rows_per_image: Some(rows as u32),
+                    },
+                    wgpu::Extent3d {
+                        width: pages_x,
+                        height: rows as u32,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                let page_table_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("terrain.material_vt.page_table_upload"),
+                    });
+                queue.submit(Some(page_table_encoder.finish()));
+                device.poll(wgpu::Maintain::Wait);
+            }
         }
     }
 
