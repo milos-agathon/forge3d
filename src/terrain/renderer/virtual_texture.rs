@@ -1376,7 +1376,11 @@ impl TerrainMaterialVTRuntime {
             }
         }
 
-        let dirty_page_table_layers = (0..page_tables.len()).collect();
+        // Newly-created WebGPU textures are zero-initialized, matching the
+        // default (non-resident) page-table entries. Upload only layers that
+        // receive entries; `set_page_entry` and `clear_page_entry` mark those
+        // layers dirty as residency changes.
+        let dirty_page_table_layers = HashSet::new();
 
         let mut runtime = Self {
             virtual_size: layer.virtual_size,
