@@ -24,9 +24,9 @@ pub const FEEDBACK_MAX_SLOTS: u32 = 1 << 16;
 
 /// Legacy linear-probe limit retained for Rust source compatibility.
 ///
-/// The bounded feedback path now appends with an atomic counter; therefore
-/// `TerrainVTUniforms.config3.y` is reserved and this value is not read.
-#[deprecated(note = "bounded VT feedback no longer probes; config3.y is reserved")]
+/// The bounded feedback path now appends with an atomic counter; this value is
+/// not read. `TerrainVTUniforms.config3.y/z` carry page-table atlas dimensions.
+#[deprecated(note = "bounded VT feedback no longer probes; this value is unused")]
 pub const FEEDBACK_PROBE_LIMIT: u32 = 8;
 
 /// Page-index layout the GPU keys were built from, used to invert
