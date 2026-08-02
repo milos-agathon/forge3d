@@ -126,6 +126,10 @@ on:
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   SCENE: terra_determinata_v1
 
