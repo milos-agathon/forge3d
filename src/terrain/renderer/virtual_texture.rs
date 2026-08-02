@@ -812,25 +812,46 @@ impl TerrainMaterialVT {
 
         let requests =
             runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback);
-        // Keep the first VT upload/initialization submission separate from the
-        // 4K terrain draw. `queue.write_texture` defers its copies until the
-        // next queue submit; combining the complete page-table pyramid and
-        // the initial atlas working set with the visibility pass can trip the
-        // Windows Vulkan watchdog on the protected RTX3070 lane.
-        let mut vt_upload_encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("terrain.material_vt.uploads"),
-            });
-        for key in requests {
-            runtime.ensure_tile_resident(
-                &mut vt_upload_encoder,
-                device.as_ref(),
-                queue.as_ref(),
-                key,
-            )?;
+        // Keep VT uploads separate from the 4K terrain draw. `queue.write_*`
+        // copies are deferred until submit, so a single encoder can both trip
+        // the Windows Vulkan watchdog and reuse staging-ring offsets before
+        // earlier copies execute. Bound each batch to one 8 MiB ring buffer.
+        let max_staging_tile_bytes = if runtime.bindless_bc {
+            let blocks_per_side = runtime.slot_size.div_ceil(4) as usize;
+            blocks_per_side
+                .saturating_mul(blocks_per_side)
+                .saturating_mul(16)
+        } else {
+            runtime.slot_size as usize * runtime.slot_size as usize * TERRAIN_VT_BYTES_PER_PIXEL
+        };
+        let upload_batch_tiles = (8 * 1024 * 1024 / max_staging_tile_bytes.max(1))
+            .max(1)
+            .min(512);
+        for request_batch in requests.chunks(upload_batch_tiles) {
+            let mut vt_upload_encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("terrain.material_vt.uploads"),
+                });
+            for &key in request_batch {
+                runtime.ensure_tile_resident(
+                    &mut vt_upload_encoder,
+                    device.as_ref(),
+                    queue.as_ref(),
+                    key,
+                )?;
+            }
+            queue.submit(Some(vt_upload_encoder.finish()));
+            device.poll(wgpu::Maintain::Wait);
         }
+        let page_tables_dirty = !runtime.dirty_page_table_layers.is_empty();
         runtime.upload_page_tables(queue.as_ref());
-        queue.submit(Some(vt_upload_encoder.finish()));
+        if page_tables_dirty {
+            let page_table_encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("terrain.material_vt.page_table_uploads"),
+                });
+            queue.submit(Some(page_table_encoder.finish()));
+        }
         runtime.refresh_stats();
         self.last_stats = runtime.stats;
 
