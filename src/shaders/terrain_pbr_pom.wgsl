@@ -2025,10 +2025,6 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
         // a later frame.
         atomicAdd(&terrain_vt_feedback[1], 1u);
     }
-    // One physical record per surface sample, whether or not it was a duplicate
-    // page: this is the counter the visibility gate compares against the
-    // visible-pixel count.
-    atomicAdd(&terrain_frame_counters.feedback_records, 1u);
 }
 
 fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
@@ -2052,6 +2048,20 @@ fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
         vec2<u32>(fract(uv) * virtual_size / page_size),
         page_dims - vec2<u32>(1u),
     );
+    // Count every covered surface sample exactly once. The bounded append is
+    // only needed when the desired page is not resident; skipping it for a
+    // resident page avoids contending on the global feedback counters for
+    // every pixel of a settled frame.
+    atomicAdd(&terrain_frame_counters.feedback_records, 1u);
+    let desired_entry = textureLoad(
+        terrain_vt_page_table,
+        vec2<i32>(i32(page.x), i32(page.y)),
+        terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_ALBEDO, material_index),
+        i32(desired_mip),
+    );
+    if (desired_entry.z > 0.5) {
+        return;
+    }
     // One physical record represents this surface sample. CPU readback fans
     // it out to all enabled material families.
     terrain_vt_write_feedback(
