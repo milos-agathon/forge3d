@@ -150,35 +150,35 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "e5a29fa0b37d",
+    "git_sha": "bd3af69549e0",
     "version": "1.34.0",
     "wgsl_module_hashes": {
       "line_aa.wgsl": "0ebdc403a1ef64bff361ef867fc6ccdf71b3f5367d5a59b7c3c888eb74fde085",
       "polygon_fill.wgsl": "75693f644f709f14a914b3d0acec9d5c0b5668365363a1eafe08aecd15c75c5a",
       "terrain.shadow_depth.shader": "5cb47cb163eba8496ca4c80b931f961d2d51c752cbddbf116690106bfa2a8ce0",
-      "terrain_pbr_pom.shader": "fa14c1624775c4ff267bd7d56281b8dcd69ed7282272d33d8a1d9a2d7dd9e442",
+      "terrain_pbr_pom.shader": "122a8073702abd4257853bb9edbebe353735c2a153b5e14d88cd8d87f368cb50",
       "vf.Vector.OIT.Compose": "934b46d4b65e4911a49ba0b29b6c2deea2662d8eac1db0cab40a78677a88122d"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 6.13375997543335,
+      "gpu_ms": 1.6547839641571045,
       "label": "terrain.shadow"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.material_vt"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.height_ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.sun_visibility"
     },
     {
@@ -188,27 +188,27 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.2314240038394928,
+      "gpu_ms": 0.048128001391887665,
       "label": "terrain.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.resolve"
     },
     {
       "draw_calls": 4,
-      "gpu_ms": 0.01945599913597107,
+      "gpu_ms": 0.004095999989658594,
       "label": "vector.polygon_fill"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.032768,
+      "gpu_ms": 0.008192,
       "label": "vector.oit"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.01024,
+      "gpu_ms": 0.002048,
       "label": "vector.oit.compose"
     },
     {
@@ -221,7 +221,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "6ec8abd754c50aa1b613da3a8c223e839af09f7b77aa9a224c1acaf52801e3bbc5baf3011a0cbb50d3729059a80d48463a2d92c3952f5ad47b526304a7c49703",
+    "sig": "d001f1f7ef398483acad09361c5944104951820b668f18eeaa16dd4f5db06b43816811d62d10a732880e79ba4521600d3f58467d7b30e0809520b1417279db08",
     "signed_fields": [
       "adapter",
       "allocations",
