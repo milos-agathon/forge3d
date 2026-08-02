@@ -812,10 +812,25 @@ impl TerrainMaterialVT {
 
         let requests =
             runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback);
+        // Keep the first VT upload/initialization submission separate from the
+        // 4K terrain draw. `queue.write_texture` defers its copies until the
+        // next queue submit; combining the complete page-table pyramid and
+        // the initial atlas working set with the visibility pass can trip the
+        // Windows Vulkan watchdog on the protected RTX3070 lane.
+        let mut vt_upload_encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("terrain.material_vt.uploads"),
+            });
         for key in requests {
-            runtime.ensure_tile_resident(encoder, device.as_ref(), queue.as_ref(), key)?;
+            runtime.ensure_tile_resident(
+                &mut vt_upload_encoder,
+                device.as_ref(),
+                queue.as_ref(),
+                key,
+            )?;
         }
         runtime.upload_page_tables(queue.as_ref());
+        queue.submit(Some(vt_upload_encoder.finish()));
         runtime.refresh_stats();
         self.last_stats = runtime.stats;
 
