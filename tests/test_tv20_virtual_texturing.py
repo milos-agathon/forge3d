@@ -46,7 +46,10 @@ def test_terrain_shader_declares_vt_sampling_and_feedback_bindings() -> None:
     assert "atomicStore(&terrain_vt_feedback[append_slot + 2u], key)" in source
     assert "atomicAdd(&terrain_vt_feedback[1], 1u)" in source
     assert "let desired_entry = textureLoad(" in source
-    assert "if (desired_entry.z > 0.5)" in source
+    assert "terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_NORMAL, material_index)," in source
+    assert "terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_MASK, material_index)," in source
+    assert "var all_families_resident = desired_entry.z > 0.5;" in source
+    assert "if (all_families_resident)" in source
     assert "terrain_vt_page_table_layer(family_slot, material_index)," in source
     assert "i32(mip_level)," in source
 

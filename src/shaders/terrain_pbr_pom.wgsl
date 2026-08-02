@@ -2049,9 +2049,9 @@ fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
         page_dims - vec2<u32>(1u),
     );
     // Count every covered surface sample exactly once. The bounded append is
-    // only needed when the desired page is not resident; skipping it for a
-    // resident page avoids contending on the global feedback counters for
-    // every pixel of a settled frame.
+    // only needed when an enabled family misses the desired page; skipping it
+    // for a fully resident page avoids contending on the global feedback
+    // counters for every pixel of a settled frame.
     atomicAdd(&terrain_frame_counters.feedback_records, 1u);
     let desired_entry = textureLoad(
         terrain_vt_page_table,
@@ -2059,7 +2059,26 @@ fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
         terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_ALBEDO, material_index),
         i32(desired_mip),
     );
-    if (desired_entry.z > 0.5) {
+    var all_families_resident = desired_entry.z > 0.5;
+    if (all_families_resident && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_NORMAL)) {
+        let normal_entry = textureLoad(
+            terrain_vt_page_table,
+            vec2<i32>(i32(page.x), i32(page.y)),
+            terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_NORMAL, material_index),
+            i32(desired_mip),
+        );
+        all_families_resident = normal_entry.z > 0.5;
+    }
+    if (all_families_resident && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_MASK)) {
+        let mask_entry = textureLoad(
+            terrain_vt_page_table,
+            vec2<i32>(i32(page.x), i32(page.y)),
+            terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_MASK, material_index),
+            i32(desired_mip),
+        );
+        all_families_resident = mask_entry.z > 0.5;
+    }
+    if (all_families_resident) {
         return;
     }
     // One physical record represents this surface sample. CPU readback fans
