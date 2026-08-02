@@ -2331,8 +2331,13 @@ impl TerrainMaterialVTRuntime {
     }
 
     fn page_table_mip_levels(pages_x0: u32, pages_y0: u32) -> u32 {
-        let max_dim = pages_x0.max(pages_y0).max(1);
-        u32::BITS - max_dim.leading_zeros()
+        let mut max_dim = pages_x0.max(pages_y0).max(1);
+        let mut levels = 1;
+        while max_dim > 1 {
+            max_dim = max_dim.div_ceil(2);
+            levels += 1;
+        }
+        levels
     }
 }
 
@@ -2535,5 +2540,12 @@ mod bounded_feedback_tests {
             assert!(logical_width <= descriptor.size.width >> mip_level);
             assert!(logical_height <= descriptor.size.height >> mip_level);
         }
+    }
+
+    #[test]
+    fn non_power_of_two_page_grids_keep_the_coarsest_mip() {
+        assert_eq!(TerrainMaterialVTRuntime::page_table_mip_levels(13, 9), 5);
+        assert_eq!(TerrainMaterialVTRuntime::page_table_mip_levels(16, 1), 5);
+        assert_eq!(TerrainMaterialVTRuntime::page_table_mip_levels(1, 1), 1);
     }
 }
