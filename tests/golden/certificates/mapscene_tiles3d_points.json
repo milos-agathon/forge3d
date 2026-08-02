@@ -147,7 +147,7 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "bd3af69549e0",
+    "git_sha": "ebecf76f8309",
     "version": "1.34.0",
     "wgsl_module_hashes": {
       "point_instanced.wgsl": "e8159414ae314a3988323cde19c5f4e0ebbc61f01dead822d25e3b386f438dfc",
@@ -160,7 +160,7 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 5.944320201873779,
+      "gpu_ms": 4.640768051147461,
       "label": "terrain.shadow"
     },
     {
@@ -185,7 +185,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.2314240038394928,
+      "gpu_ms": 0.22732800245285034,
       "label": "terrain.main"
     },
     {
@@ -195,17 +195,17 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.037888,
+      "gpu_ms": 0.031744,
       "label": "vector.oit"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.011264,
+      "gpu_ms": 0.008192,
       "label": "vector.oit.compose"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.01024,
+      "gpu_ms": 0.009216,
       "label": "vector.edl"
     },
     {
@@ -218,7 +218,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "0aea87172cdccd5fe593648e9bb5c31f7102cbd47a9bf4dbcfe1e24a3e4d1dd96bef8251fbc5a2934e7f0034203657606d1be7fa268ba283230fea1f4819b808",
+    "sig": "ef115da6b68b28e2b5239a6a923448692d448545d37a664b3ea3a41ca474978e2170a5d8234bb5fdd0affe09ca61654ee346924853bca1f86ac146c33b44d102",
     "signed_fields": [
       "adapter",
       "allocations",
