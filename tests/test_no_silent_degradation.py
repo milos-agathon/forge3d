@@ -389,16 +389,64 @@ def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
         "\n  # ============================================================================\n  # Rust Tests", 1
     )[0]
     assert "anamnesis: ${{ steps.filter.outputs.anamnesis }}" in paths_job
-    for path in (
+    anamnesis_paths = paths_job.split("            anamnesis:\n", 1)[1]
+    for broad_path in (
+        "'.github/workflows/ci.yml'",
         "'src/**'",
         "'python/**'",
+    ):
+        assert broad_path not in anamnesis_paths
+    for path in (
+        "'src/core/anamnesis/**'",
+        "'src/core/framegraph_impl/**'",
+        "'src/core/ibl.rs'",
+        "'src/core/ibl/**'",
+        "'src/core/session.rs'",
+        "'src/core/shader_registry.rs'",
+        "'src/core/hdr.rs'",
+        "'src/core/tonemap.rs'",
+        "'src/core/resource_tracker.rs'",
+        "'src/core/material.rs'",
+        "'src/core/hdr_readback.rs'",
+        "'src/core/provenance.rs'",
+        "'src/formats/hdr.rs'",
+        "'src/lighting/types.rs'",
+        "'src/lighting/light_buffer/**'",
+        "'src/offscreen/**'",
+        "'src/path_tracing/**'",
+        "'src/shader_sources.rs'",
+        "'src/shadows/**'",
+        "'src/py_functions/adjudication.rs'",
+        "'src/py_functions/mod.rs'",
+        "'src/render/material_set.rs'",
+        "'src/render/material_set/**'",
+        "'src/terrain/renderer/**'",
+        "'src/terrain/render_params/**'",
+        "'src/py_module/classes.rs'",
+        "'src/py_module/functions/rendering.rs'",
+        "'src/py_types/frame.rs'",
+        "'src/lib.rs'",
+        "'src/util/memory_budget.rs'",
+        "'src/py_module/functions/anamnesis.rs'",
+        "'python/forge3d/anamnesis.py'",
+        "'python/forge3d/determinism.py'",
+        "'python/forge3d/_native.py'",
+        "'python/forge3d/_gpu.py'",
+        "'src/shaders/adjudication_raster.wgsl'",
+        "'src/shaders/ao_from_aovs.wgsl'",
+        "'src/shaders/pt_*.wgsl'",
+        "'src/shaders/terrain_*.wgsl'",
+        "'src/shaders/heightfield_*.wgsl'",
+        "'src/shaders/brdf/**'",
+        "'src/shaders/includes/determinism.wgsl'",
+        "'src/shaders/shadow_blur.wgsl'",
         "'scripts/check_anamnesis_portability.py'",
         "'scripts/terrain_ci_probe.py'",
         "'scripts/assert_junit_zero_skips.py'",
         "'tests/anamnesis_gpu_acceptance.py'",
         "'tests/goldens/determinism/**'",
     ):
-        assert path in paths_job
+        assert path in anamnesis_paths
 
     required = (
         "github.event_name == 'workflow_dispatch'",
