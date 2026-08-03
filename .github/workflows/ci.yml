@@ -5,6 +5,8 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  schedule:
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       update_recipe_certificates:
@@ -19,7 +21,7 @@ permissions:
 
 concurrency:
   # Keep reviewed certificate refreshes isolated from ordinary CI cancellation.
-  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.update_recipe_certificates && format('certificate-refresh-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('manual-{0}', github.ref_name) || format('push-{0}', github.run_id) }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.update_recipe_certificates && format('certificate-refresh-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('manual-{0}', github.ref_name) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.update_recipe_certificates) }}
 
 env:
@@ -96,6 +98,7 @@ jobs:
     outputs:
       terrain_goldens: ${{ steps.filter.outputs.terrain_goldens }}
       f3dz: ${{ steps.filter.outputs.f3dz }}
+      anamnesis: ${{ steps.filter.outputs.anamnesis }}
 
     steps:
       - uses: actions/checkout@v4
@@ -147,6 +150,22 @@ jobs:
               - 'tests/data/codec_corpus/**'
               - 'tests/test_f3dz_codec.py'
               - 'tools/f3dz_determinism_report.py'
+            anamnesis:
+              - '.github/workflows/ci.yml'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - 'pyproject.toml'
+              - '.cargo/**'
+              - 'src/**'
+              - 'python/**'
+              - 'scripts/check_anamnesis_portability.py'
+              - 'scripts/terrain_ci_probe.py'
+              - 'scripts/assert_junit_zero_skips.py'
+              - 'tests/anamnesis_gpu_acceptance.py'
+              - 'tests/anamnesis_irrelevant_inputs.toml'
+              - 'tests/test_anamnesis_*.py'
+              - 'tests/goldens/determinism/**'
 
   # ============================================================================
   # Rust Tests (cargo test)
@@ -381,6 +400,50 @@ jobs:
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: python scripts/ci_pytest_lane.py -v --tb=short
+
+  # ============================================================================
+  # Accounted slow Python tests (one hosted representative)
+  # ============================================================================
+  test-python-slow:
+    name: Test Python Slow (ubuntu, 3.11)
+    needs: [build-wheels, prepare-lfs-fixtures]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Download shared LFS fixture artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: lfs-fixture-bundles
+
+      - name: Restore Python TIFF fixtures
+        run: python -m zipfile -e lfs-fixture-bundles/python-tiffs.zip .
+
+      - name: Download Linux wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux
+          path: dist/
+
+      - name: Install wheel and slow-lane dependencies
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          pip install pytest numpy pillow
+
+      - name: Run accounted slow Python lane
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: python scripts/ci_pytest_lane.py --slow-lane -v --tb=short
 
   # ============================================================================
   # TERMINUS deterministic CPU-only robustness fuzzer
@@ -1043,7 +1106,12 @@ jobs:
   # ============================================================================
   test-anamnesis-portability-seed:
     name: ANAMNESIS Physical Seed (Windows Vulkan)
-    needs: build-wheels
+    needs: [build-wheels, terrain-golden-paths]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.anamnesis == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 20
     env:
@@ -1118,7 +1186,12 @@ jobs:
 
   test-anamnesis-portability:
     name: ANAMNESIS Physical Consume (Windows DX12)
-    needs: [build-wheels, test-anamnesis-portability-seed]
+    needs: [build-wheels, terrain-golden-paths, test-anamnesis-portability-seed]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.anamnesis == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 20
     env:
@@ -1208,7 +1281,12 @@ jobs:
   # ============================================================================
   test-anamnesis-production:
     name: ANAMNESIS 600-frame Production (NVIDIA Vulkan)
-    needs: build-wheels
+    needs: [build-wheels, terrain-golden-paths]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.anamnesis == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 50
     env:
@@ -1338,7 +1416,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
+    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-python-slow, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -1354,20 +1432,47 @@ jobs:
           # aggregator. `absent` (no usable adapter) still reports as job
           # `success` and is surfaced by the lane line below, not swallowed.
           echo "golden lane: ${{ needs.test-golden-images.outputs.lane || 'skipped(paths)' }}"
+          anamnesis_required="${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.terrain-golden-paths.outputs.anamnesis == 'true' }}"
+          echo "ANAMNESIS physical lanes required: $anamnesis_required"
+          golden_failed=0
+          if [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; then
+            golden_failed=1
+          fi
+          refresh_failed=0
+          if [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; then
+            refresh_failed=1
+          fi
+          f3dz_failed=0
+          if [ "${{ needs.test-f3dz-gpu.result }}" != "success" ] && [ "${{ needs.test-f3dz-gpu.result }}" != "skipped" ]; then
+            f3dz_failed=1
+          fi
+          anamnesis_failed=0
+          if [ "$anamnesis_required" = "true" ]; then
+            if [ "${{ needs.test-anamnesis-portability-seed.result }}" != "success" ] || \
+               [ "${{ needs.test-anamnesis-portability.result }}" != "success" ] || \
+               [ "${{ needs.test-anamnesis-production.result }}" != "success" ]; then
+              anamnesis_failed=1
+            fi
+          else
+            if [ "${{ needs.test-anamnesis-portability-seed.result }}" != "skipped" ] || \
+               [ "${{ needs.test-anamnesis-portability.result }}" != "skipped" ] || \
+               [ "${{ needs.test-anamnesis-production.result }}" != "skipped" ]; then
+              anamnesis_failed=1
+            fi
+          fi
           if [ "${{ needs.prepare-lfs-fixtures.result }}" != "success" ] || \
              [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
              [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \
              [ "${{ needs.test-python.result }}" != "success" ] || \
+             [ "${{ needs.test-python-slow.result }}" != "success" ] || \
              [ "${{ needs.test-terminus-fuzz.result }}" != "success" ] || \
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
-             { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
-             { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
+             [ "$golden_failed" -ne 0 ] || \
+             [ "$refresh_failed" -ne 0 ] || \
              [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
-             { [ "${{ needs.test-f3dz-gpu.result }}" != "success" ] && [ "${{ needs.test-f3dz-gpu.result }}" != "skipped" ]; } || \
-             [ "${{ needs.test-anamnesis-portability-seed.result }}" != "success" ] || \
-             [ "${{ needs.test-anamnesis-portability.result }}" != "success" ] || \
-             [ "${{ needs.test-anamnesis-production.result }}" != "success" ] || \
+             [ "$f3dz_failed" -ne 0 ] || \
+             [ "$anamnesis_failed" -ne 0 ] || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1

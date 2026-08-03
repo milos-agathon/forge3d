@@ -49,7 +49,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
     assert "format('certificate-refresh-{0}', github.run_id)" in body
     assert "format('pr-{0}', github.event.pull_request.number)" in body
     assert "format('manual-{0}', github.ref_name)" in body
-    assert "format('push-{0}', github.run_id)" in body
+    assert "format('run-{0}', github.run_id)" in body
     assert (
         "cancel-in-progress: ${{ github.event_name == 'pull_request' || "
         "(github.event_name == 'workflow_dispatch' && !inputs.update_recipe_certificates) }}"
