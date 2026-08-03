@@ -25,7 +25,7 @@ def test_ci_downloads_verified_lfs_media_once_and_shares_one_artifact() -> None:
     assert "875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3" in workflow
     assert "d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478" in workflow
     assert "is still an LFS pointer" in workflow
-    assert workflow.count("name: lfs-fixture-bundles") == 3
+    assert workflow.count("name: lfs-fixture-bundles") == 4
     assert workflow.count("uses: actions/upload-artifact@v4") >= 1
     assert "retention-days: 1" in workflow
 
@@ -50,7 +50,10 @@ def test_ci_lfs_manifest_contains_only_lane_fixtures() -> None:
 def test_python_and_m06_restore_only_their_fixture_bundles() -> None:
     workflow = _workflow()
     python_job = workflow.split("  test-python:", 1)[1].split(
-        "  test-terminus-fuzz:", 1
+        "\n  # ============================================================================\n  # Accounted slow Python tests (one hosted representative)", 1
+    )[0]
+    slow_job = workflow.split("  test-python-slow:", 1)[1].split(
+        "\n  # ============================================================================\n  # TERMINUS", 1
     )[0]
     golden_job = workflow.split("  test-golden-images:", 1)[1].split(
         "  refresh-recipe-certificates:", 1
@@ -59,9 +62,12 @@ def test_python_and_m06_restore_only_their_fixture_bundles() -> None:
         "  build-docs:", 1
     )[0]
 
-    assert "needs: [build-wheels, prepare-lfs-fixtures]" in python_job
-    assert "python-tiffs.zip" in python_job
-    assert "forge3d.pdb" not in python_job
+    for job in (python_job, slow_job):
+        assert "needs: [build-wheels, prepare-lfs-fixtures]" in job
+        assert job.count(".zip") == 1
+        assert "python-tiffs.zip" in job
+        assert "m06-dem.zip" not in job
+        assert "forge3d.pdb" not in job
     assert "lfs-fixture-bundles" not in golden_job
     assert "needs: [build-wheels, prepare-lfs-fixtures]" in m06_job
     assert "m06-dem.zip" in m06_job
