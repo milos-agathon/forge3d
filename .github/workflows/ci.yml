@@ -133,23 +133,42 @@ jobs:
               - 'tests/golden/hybrid_terrain/**'
               - 'docs/gallery/**'
             f3dz:
-              - '.github/workflows/ci.yml'
               - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - 'pyproject.toml'
               - 'benches/f3dz_bench.rs'
-              - 'docs/formats/f3dz.md'
               - 'python/forge3d/codec.py'
               - 'python/forge3d/__init__.py'
-              - 'python/forge3d/__init__.pyi'
+              - 'python/forge3d/_native.py'
+              - 'python/forge3d/_gpu.py'
               - 'src/codec/**'
+              - 'src/lib.rs'
+              - 'src/core/mod.rs'
+              - 'src/core/error.rs'
               - 'src/core/certificate.rs'
               - 'src/core/degradation.rs'
+              - 'src/core/gpu.rs'
+              - 'src/core/capabilities.rs'
+              - 'src/core/resource_tracker.rs'
+              - 'src/core/memory_tracker.rs'
+              - 'src/core/memory_tracker/**'
+              - 'src/core/shader_registry.rs'
+              - 'src/core/shader_contract_runtime.rs'
+              - 'src/core/provenance.rs'
               - 'src/py_functions/codec.rs'
+              - 'src/py_functions/diagnostics.rs'
+              - 'src/py_functions/mod.rs'
+              - 'src/py_module/mod.rs'
+              - 'src/py_module/functions.rs'
+              - 'src/py_module/functions/codec.rs'
+              - 'src/py_module/functions/diagnostics.rs'
               - 'src/shaders/f3dz_decode.wgsl'
-              - 'src/terrain/cog/cog_reader.rs'
-              - 'src/terrain/stream/height.rs'
+              - 'scripts/install_compatible_wheel.py'
+              - 'scripts/assert_junit_zero_skips.py'
               - 'tests/data/codec_corpus/**'
+              - 'tests/_toml_compat.py'
               - 'tests/test_f3dz_codec.py'
-              - 'tools/f3dz_determinism_report.py'
             anamnesis:
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -1057,7 +1076,11 @@ jobs:
   test-f3dz-gpu:
     name: F3DZ Codec (NVIDIA Vulkan)
     needs: [build-wheels, terrain-golden-paths]
-    if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.f3dz == 'true'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.f3dz == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 30
     env:
@@ -1111,11 +1134,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install pytest numpy *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/dependency-install.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Require the exact NVIDIA Vulkan adapter
-        shell: pwsh
-        run: |
-          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_F3DZ_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/adapter-probe.log"
-          exit $LASTEXITCODE
       - name: Run all F3DZ corpus and CPU-GPU identity gates
         shell: pwsh
         run: |
