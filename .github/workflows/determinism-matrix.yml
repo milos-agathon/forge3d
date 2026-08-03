@@ -127,7 +127,7 @@ on:
       - '.github/workflows/determinism-matrix.yml'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -174,6 +174,7 @@ jobs:
           name: f3dz-determinism-${{ matrix.os }}
           path: f3dz-determinism/
           if-no-files-found: error
+          retention-days: 7
 
   render:
     name: render (${{ matrix.leg }})
@@ -294,6 +295,7 @@ jobs:
           name: determinism-hash-${{ matrix.leg }}
           path: hash-out/
           if-no-files-found: error
+          retention-days: 7
 
   wasm-policy:
     name: render (wasm) — relaxed-SIMD policy gate
@@ -323,6 +325,7 @@ jobs:
           name: determinism-hash-wasm
           path: hash-out/
           if-no-files-found: error
+          retention-days: 7
 
   anamnesis-seed:
     name: anamnesis golden-store seed (linux/vulkan)
@@ -408,6 +411,7 @@ jobs:
             anamnesis-seed-adapter.json
             ANAMNESIS.ABSENT
           if-no-files-found: error
+          retention-days: 7
 
   anamnesis-portability:
     name: anamnesis portability consume (windows)
@@ -483,6 +487,7 @@ jobs:
             anamnesis-consumer.jsonl
             ANAMNESIS.CONSUMER.ABSENT
           if-no-files-found: warn
+          retention-days: 7
 
   diff:
     name: diff hashes (zero-byte tolerance)
