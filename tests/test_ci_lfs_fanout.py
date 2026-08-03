@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from scripts.ci_pytest_lane import default_lane_files
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
@@ -167,3 +169,51 @@ def test_m06_path_filter_and_aggregator_contract() -> None:
     )[1]
     assert '[ "$m06_failed" -ne 0 ] || \\' in final_gate
     assert "needs.test-m06-full-geospatial-viewer.result" not in final_gate
+
+
+def test_m06_acceptance_keeps_only_unique_physical_coverage() -> None:
+    workflow = _workflow()
+    m06_job = workflow.split("  test-m06-full-geospatial-viewer:", 1)[1].split(
+        "\n  # ============================================================================\n  # COMPENDIUM F3DZ", 1
+    )[0]
+    acceptance = m06_job.split(
+        "      - name: Run M-06 source and live acceptance", 1
+    )[1].split("      - name: Summarize public M-06 evidence", 1)[0]
+
+    assert "      - name: Run M-06 Rust ABI and adapter gates" not in m06_job
+    canonical_lane = set(default_lane_files())
+    for redundant in (
+        "tests/test_m06_anchoring_boundary.py",
+        "tests/test_world_coord_f32_gate.py",
+        "tests/test_m06_viewer_matrix_contract.py",
+        "tests/test_m06_single_rebase_contract.py",
+        "tests/test_m06_temporal_resource_contract.py",
+        "tests/test_m06_scene_review_transaction.py",
+        "tests/test_m06_command_transaction.py",
+        "tests/test_m06_python_viewer_contracts.py",
+        "tests/test_gis_raster.py",
+        "tests/test_gis_crs_affine.py",
+        "tests/test_3dtiles_parse.py",
+        "tests/test_buildings_cityjson.py",
+        "tests/test_viewer_ipc.py",
+        "tests/test_api_contracts.py",
+        "tests/test_install_smoke.py",
+        "tests/test_allocation_gate.py",
+        "tests/test_no_silent_degradation.py",
+        "tests/test_certificate_verifier.py",
+        "tests/test_render_certificate_contract.py",
+        "tests/test_recipe_goldens.py::test_certificate_refresh_rejects_capability_degradation",
+        "tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression",
+    ):
+        assert redundant.split("::", 1)[0] in canonical_lane
+        assert f"'{redundant}'" not in acceptance
+
+    for physical in (
+        "tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_is_not_black",
+        "tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_banding_is_bounded_in_raw_visibility",
+        "tests/test_m06_full_geospatial_viewer.py",
+        "tests/test_terrain_viewer_pbr.py",
+        "tests/test_vector_overlay_rendering.py",
+        "tests/test_vector_coverage.py",
+    ):
+        assert f"'{physical}'" in acceptance

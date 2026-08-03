@@ -967,20 +967,6 @@ jobs:
           }
           exit $code
 
-      - name: Run M-06 Rust ABI and adapter gates
-        shell: pwsh
-        run: |
-          $features = 'default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts'
-          $filters = @('terrain_uniform_abi_tests', 'backend_request_tests', 'camera::anchor::tests')
-          $filters -join "`n" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rust-test-filters.txt"
-          $failed = 0
-          foreach ($filter in $filters) {
-            cargo test --release --features $features $filter -- --test-threads=1 *>&1 | Tee-Object -Append "$env:FORGE3D_M06_ARTIFACT_DIR/rust-gates.log"
-            if ($LASTEXITCODE -ne 0) { $failed = $LASTEXITCODE; break }
-          }
-          "rust_gates=$failed" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rust-gates-exit-code.txt"
-          exit $failed
-
       - name: Require the exact NVIDIA Vulkan adapter
         shell: pwsh
         run: |
@@ -996,27 +982,6 @@ jobs:
           New-Item -ItemType Directory -Force $hdriDir | Out-Null
           python -c "from pathlib import Path; from tests.test_terrain_viewer_pbr import write_asymmetric_test_hdr; write_asymmetric_test_hdr(Path('assets/hdri/brown_photostudio_02_4k.hdr'))"
           $tests = @(
-            'tests/test_m06_anchoring_boundary.py',
-            'tests/test_world_coord_f32_gate.py',
-            'tests/test_m06_viewer_matrix_contract.py',
-            'tests/test_m06_single_rebase_contract.py',
-            'tests/test_m06_temporal_resource_contract.py',
-            'tests/test_m06_scene_review_transaction.py',
-            'tests/test_m06_command_transaction.py',
-            'tests/test_m06_python_viewer_contracts.py',
-            'tests/test_gis_raster.py',
-            'tests/test_gis_crs_affine.py',
-            'tests/test_3dtiles_parse.py',
-            'tests/test_buildings_cityjson.py',
-            'tests/test_viewer_ipc.py',
-            'tests/test_api_contracts.py',
-            'tests/test_install_smoke.py',
-            'tests/test_allocation_gate.py',
-            'tests/test_no_silent_degradation.py',
-            'tests/test_certificate_verifier.py',
-            'tests/test_render_certificate_contract.py',
-            'tests/test_recipe_goldens.py::test_certificate_refresh_rejects_capability_degradation',
-            'tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression',
             'tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_is_not_black',
             'tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_banding_is_bounded_in_raw_visibility',
             'tests/test_m06_full_geospatial_viewer.py',
