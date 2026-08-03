@@ -69,7 +69,7 @@ def test_python_and_m06_restore_only_their_fixture_bundles() -> None:
         assert "m06-dem.zip" not in job
         assert "forge3d.pdb" not in job
     assert "lfs-fixture-bundles" not in golden_job
-    assert "needs: [build-wheels, prepare-lfs-fixtures]" in m06_job
+    assert "needs: [build-wheels, prepare-lfs-fixtures, terrain-golden-paths]" in m06_job
     assert "m06-dem.zip" in m06_job
     assert "python-tiffs.zip" not in m06_job
     assert "Get-PSDrive -PSProvider FileSystem" in m06_job
@@ -86,3 +86,84 @@ def test_python_and_m06_restore_only_their_fixture_bundles() -> None:
     assert m06_job.index("name: Upload M-06 evidence") < m06_job.index(
         "name: Clean M-06 build scratch"
     )
+
+
+def test_m06_path_filter_and_aggregator_contract() -> None:
+    workflow = _workflow()
+    paths_job = workflow.split("  terrain-golden-paths:", 1)[1].split(
+        "\n  # ============================================================================\n  # Rust Tests", 1
+    )[0]
+    assert "m06: ${{ steps.filter.outputs.m06 }}" in paths_job
+    m06_paths = paths_job.split("            m06:\n", 1)[1].split(
+        "\n            f3dz:\n", 1
+    )[0]
+    for pattern in (
+        "Cargo.toml",
+        "Cargo.lock",
+        "build.rs",
+        ".cargo/config.toml",
+        "pyproject.toml",
+        "pytest.ini",
+        "conftest.py",
+        "src/**",
+        "python/forge3d/**",
+        "scripts/install_compatible_wheel.py",
+        "scripts/terrain_ci_probe.py",
+        "scripts/assert_junit_zero_skips.py",
+        "scripts/summarize_m06_evidence.py",
+        "scripts/ci_pytest_lane.py",
+        "tests/*.py",
+        "tests/*.toml",
+        "tests/golden/certificates/**",
+        "tests/golden/recipes/mapscene_terrain_raster.png",
+        "tests/data/vector_torture/cases.json",
+        "assets/lidar/MtStHelens.laz",
+        "assets/tif/switzerland_dem.tif",
+        "assets/fonts/**",
+        "assets/geoid/egm96_n120.bin",
+    ):
+        assert f"              - '{pattern}'" in m06_paths
+    for broad_pattern in (
+        ".github/workflows/ci.yml",
+        "docs/**",
+        "examples/**",
+        "python/**",
+        "tests/**",
+        "assets/**",
+    ):
+        assert f"              - '{broad_pattern}'" not in m06_paths
+
+    m06_job = workflow.split("  test-m06-full-geospatial-viewer:", 1)[1].split(
+        "\n  # ============================================================================\n  # COMPENDIUM F3DZ", 1
+    )[0]
+    assert "needs: [build-wheels, prepare-lfs-fixtures, terrain-golden-paths]" in m06_job
+    assert "if: >-" in m06_job
+    for clause in (
+        "github.event_name == 'workflow_dispatch'",
+        "github.event_name == 'schedule'",
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+        "needs.terrain-golden-paths.outputs.m06 == 'true'",
+    ):
+        assert clause in m06_job
+
+    aggregate = workflow.split("  ci-success:", 1)[1]
+    assert "m06_required=" in aggregate
+    required_branch, skip_tail = aggregate.split(
+        'if [ "$m06_required" = "true" ]; then', 1
+    )[1].split("\n          else\n", 1)
+    skip_branch = skip_tail.split("\n          fi\n          if ", 1)[0]
+    success_check = (
+        '${{ needs.test-m06-full-geospatial-viewer.result }}" != "success"'
+    )
+    skipped_check = (
+        '${{ needs.test-m06-full-geospatial-viewer.result }}" != "skipped"'
+    )
+    assert success_check in required_branch
+    assert success_check not in skip_branch
+    assert skipped_check in skip_branch
+    assert skipped_check not in required_branch
+    final_gate = aggregate.split(
+        'if [ "${{ needs.prepare-lfs-fixtures.result }}" != "success" ] ||', 1
+    )[1]
+    assert '[ "$m06_failed" -ne 0 ] || \\' in final_gate
+    assert "needs.test-m06-full-geospatial-viewer.result" not in final_gate

@@ -97,6 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       terrain_goldens: ${{ steps.filter.outputs.terrain_goldens }}
+      m06: ${{ steps.filter.outputs.m06 }}
       f3dz: ${{ steps.filter.outputs.f3dz }}
       anamnesis: ${{ steps.filter.outputs.anamnesis }}
 
@@ -132,6 +133,30 @@ jobs:
               - 'tests/golden/adjudication/**'
               - 'tests/golden/hybrid_terrain/**'
               - 'docs/gallery/**'
+            m06:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - '.cargo/config.toml'
+              - 'pyproject.toml'
+              - 'pytest.ini'
+              - 'conftest.py'
+              - 'src/**'
+              - 'python/forge3d/**'
+              - 'scripts/install_compatible_wheel.py'
+              - 'scripts/terrain_ci_probe.py'
+              - 'scripts/assert_junit_zero_skips.py'
+              - 'scripts/summarize_m06_evidence.py'
+              - 'scripts/ci_pytest_lane.py'
+              - 'tests/*.py'
+              - 'tests/*.toml'
+              - 'tests/golden/certificates/**'
+              - 'tests/golden/recipes/mapscene_terrain_raster.png'
+              - 'tests/data/vector_torture/cases.json'
+              - 'assets/lidar/MtStHelens.laz'
+              - 'assets/tif/switzerland_dem.tif'
+              - 'assets/fonts/**'
+              - 'assets/geoid/egm96_n120.bin'
             f3dz:
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -804,12 +829,19 @@ jobs:
   # ============================================================================
   # M-06 Option-2 Full Geospatial Viewer acceptance
   #
-  # This is a required, zero-skip hardware lane. An unavailable adapter, a
-  # stale/missing release viewer, or a skipped acceptance test is a hard error.
+  # This lane is required and zero-skip when M-06 dependency paths select it on
+  # PRs/develop pushes, and always on main, schedules, and manual runs. An
+  # unavailable adapter, a stale/missing release viewer, or a skipped
+  # acceptance test is a hard error whenever the lane is required.
   # ============================================================================
   test-m06-full-geospatial-viewer:
     name: M-06 Full Geospatial Viewer (NVIDIA Vulkan)
-    needs: [build-wheels, prepare-lfs-fixtures]
+    needs: [build-wheels, prepare-lfs-fixtures, terrain-golden-paths]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.m06 == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 35
     env:
@@ -1511,6 +1543,8 @@ jobs:
           echo "golden lane: ${{ needs.test-golden-images.outputs.lane || 'skipped(paths)' }}"
           anamnesis_required="${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.terrain-golden-paths.outputs.anamnesis == 'true' }}"
           echo "ANAMNESIS physical lanes required: $anamnesis_required"
+          m06_required="${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.terrain-golden-paths.outputs.m06 == 'true' }}"
+          echo "M-06 full geospatial viewer required: $m06_required"
           golden_failed=0
           if [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; then
             golden_failed=1
@@ -1537,6 +1571,16 @@ jobs:
               anamnesis_failed=1
             fi
           fi
+          m06_failed=0
+          if [ "$m06_required" = "true" ]; then
+            if [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ]; then
+              m06_failed=1
+            fi
+          else
+            if [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "skipped" ]; then
+              m06_failed=1
+            fi
+          fi
           if [ "${{ needs.prepare-lfs-fixtures.result }}" != "success" ] || \
              [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
              [ "${{ needs.test-rust.result }}" != "success" ] || \
@@ -1547,7 +1591,7 @@ jobs:
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
              [ "$golden_failed" -ne 0 ] || \
              [ "$refresh_failed" -ne 0 ] || \
-             [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
+             [ "$m06_failed" -ne 0 ] || \
              [ "$f3dz_failed" -ne 0 ] || \
              [ "$anamnesis_failed" -ne 0 ] || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
