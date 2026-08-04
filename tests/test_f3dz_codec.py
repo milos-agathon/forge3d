@@ -220,12 +220,15 @@ def test_physical_gpu_ci_contract_is_zero_skip_and_records_benchmark() -> None:
     job = workflow.split("  test-f3dz-gpu:", 1)[1].split(
         "\n  test-anamnesis-portability-seed:", 1
     )[0]
-    assert "needs: [build-wheels, terrain-golden-paths]" in job
+    assert "needs: [build-wheel-windows, terrain-golden-paths]" in job
     assert "if: >-" in job
-    assert "github.event_name == 'workflow_dispatch'" in job
     assert "github.event_name == 'schedule'" in job
-    assert "github.event_name == 'push'" in job
-    assert "github.ref == 'refs/heads/main'" in job
+    assert "inputs.scope == 'full'" in job
+    assert "inputs.scope == 'f3dz'" in job
+    assert "github.event_name == 'pull_request'" in job
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in job
+    assert "contains(github.event.pull_request.labels.*.name, 'run-physical')" in job
+    assert "github.event_name == 'push'" not in job
     assert "needs.terrain-golden-paths.outputs.f3dz == 'true'" in job
 
     f3dz_paths = workflow.split("            f3dz:\n", 1)[1].split(
@@ -272,7 +275,6 @@ def test_physical_gpu_ci_contract_is_zero_skip_and_records_benchmark() -> None:
     for path in required_paths:
         assert f"              - '{path}'" in f3dz_paths
     excluded_paths = (
-        ".github/workflows/ci.yml",
         "docs/formats/f3dz.md",
         "tools/f3dz_determinism_report.py",
         ".cargo/**",
@@ -283,12 +285,24 @@ def test_physical_gpu_ci_contract_is_zero_skip_and_records_benchmark() -> None:
     )
     for path in excluded_paths:
         assert f"              - '{path}'" not in f3dz_paths
+    for workflow_path in (
+        ".github/workflows/ci.yml",
+        ".github/workflows/build-wheel.yml",
+    ):
+        assert f"              - '{workflow_path}'" in f3dz_paths
     assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
     assert "FORGE3D_REQUIRE_F3DZ_GPU: '1'" in job
     assert "python scripts/terrain_ci_probe.py" not in job
     assert "python -m pytest tests/test_f3dz_codec.py" in job
     assert "scripts/assert_junit_zero_skips.py" in job
     assert "cargo bench --bench f3dz_bench" in job
+    benchmark = job.split(
+        "      - name: Record separate source benchmark (nightly/full only)", 1
+    )[1].split("\n      - name: Upload F3DZ physical-GPU evidence", 1)[0]
+    assert "github.event_name == 'schedule'" in benchmark
+    assert "inputs.scope == 'full'" in benchmark
+    assert "source-benchmark-not-installed-wheel-acceptance" in benchmark
+    assert "benchmark-provenance.json" in benchmark
     assert "f3dz-physical-gpu-evidence" in job
     assert "Get-PSDrive -PSProvider FileSystem" in job
     assert "Sort-Object Free -Descending" in job
