@@ -68,9 +68,15 @@ run immediately; PR concurrency cancels the obsolete run.
 `Full Acceptance Summary` validates every selected hosted and physical family.
 It is a reporting/acceptance context, not the global merge gate.
 
-There is no TESSELLA job on `main`. Its path classifier is reserved as a
-fail-closed contract: any future TESSELLA physical job must consume the
-`tessella` path output or an explicit manual scope and must not run on every PR.
+There is no TESSELLA job on `main`. Its path classifier and protected-base test
+reserve a fail-closed admission contract: a candidate may add only the exact
+`test-tessella-gpu` plus `full-acceptance-summary` pair. Scheduled runs select
+the lane directly. Manual runs must use `full` or the explicit `tessella` scope.
+Pull requests must simultaneously use an internal branch, carry the
+`run-physical` label, and match the `tessella` path output; ordinary pushes,
+external PRs, unlabeled PRs, and path misses cannot allocate the NVIDIA/Vulkan
+runner. The contract also requires an exact-head checkout, zero-skip
+verification, and 90-day physical evidence.
 
 ## Certificate refresh
 
