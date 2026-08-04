@@ -17,6 +17,11 @@ request to `main` or `develop`. It requires:
 - the representative slow lane, TERMINUS, Linux aarch64 install smoke, docs,
   and path-selected hosted visual goldens.
 
+The preflight validates the evaluated event state (the proposed merge on pull
+requests), so policy tests added on the base branch are available to older PR
+heads. Wheels, source tests, and acceptance evidence remain built from the
+exact PR head SHA.
+
 The exhaustive 3 operating systems by 4 Python versions suite runs only in the
 nightly schedule or a manual `full` dispatch. It replaces, rather than
 duplicates, the ordinary PR Python lanes in those runs.
@@ -27,8 +32,9 @@ acceptance family is selected.
 
 After this policy first lands on the base branch, each already-open pull
 request needs one new `pull_request` event so it receives the new required
-context. Use **Update branch**, rebase/merge the current base branch into the PR,
-or push a new commit. Future PRs receive the check automatically.
+context. Add or remove the harmless `ci` label, use **Update branch**,
+rebase/merge the current base branch into the PR, or push a new commit. Future
+PRs receive the check automatically.
 
 ## Hosted determinism
 

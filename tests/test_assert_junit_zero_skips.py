@@ -274,29 +274,35 @@ def _checkout_refs(workflow_text: str) -> list[str | None]:
 
 def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
     root = Path(__file__).resolve().parents[1]
-    exact_refs = (
-        "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
-        "ref: ${{ inputs.ref }}",
-    )
+    pr_head_ref = "${{ github.event.pull_request.head.sha || github.sha }}"
+    reusable_ref = "${{ inputs.ref }}"
     # Semantic discovery avoids the old brittle checkout-count assertion: adding
     # a properly pinned job must not break every Python lane, while an unpinned
     # checkout in any PR-reachable reusable workflow must still fail preflight.
-    for name in (
-        "ci.yml",
-        "build-wheel.yml",
-        "test-python-wheel.yml",
-        "determinism-matrix.yml",
-    ):
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    ci_jobs = yaml.load(ci, Loader=yaml.BaseLoader)["jobs"]
+    assert _checkout_refs(yaml.dump({"jobs": {"preflight": ci_jobs["preflight"]}})) == [
+        "${{ github.sha }}"
+    ]
+    for job_name, job in ci_jobs.items():
+        if job_name == "preflight" or not isinstance(job, dict):
+            continue
+        for index, checkout_ref in enumerate(
+            _checkout_refs(yaml.dump({"jobs": {job_name: job}})), start=1
+        ):
+            assert checkout_ref == pr_head_ref, (
+                f"ci.yml:{job_name} checkout step {index} is not exact-head pinned"
+            )
+
+    for name in ("build-wheel.yml", "test-python-wheel.yml", "determinism-matrix.yml"):
         workflow = (root / ".github" / "workflows" / name).read_text(encoding="utf-8")
         checkout_refs = _checkout_refs(workflow)
         assert checkout_refs, f"{name} has no checkout provenance to verify"
         for index, checkout_ref in enumerate(checkout_refs, start=1):
-            assert checkout_ref in {ref.removeprefix("ref: ") for ref in exact_refs}, (
+            assert checkout_ref == reusable_ref, (
                 f"{name} checkout step {index} is not exact-head pinned"
             )
 
-    ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    ci_jobs = yaml.load(ci, Loader=yaml.BaseLoader)["jobs"]
     for reusable in ("build-wheel.yml", "test-python-wheel.yml", "determinism-matrix.yml"):
         callers = [
             job
@@ -306,14 +312,39 @@ def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
         ]
         assert callers, f"CI does not call {reusable}"
         for caller in callers:
-            assert caller.get("with", {}).get("ref") == (
-                "${{ github.event.pull_request.head.sha || github.sha }}"
-            )
+            assert caller.get("with", {}).get("ref") == pr_head_ref
 
     certificate = (
         root / ".github" / "workflows" / "certificate-refresh.yml"
     ).read_text(encoding="utf-8")
     assert _checkout_refs(certificate) == ["${{ github.sha }}"]
+
+
+def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    jobs = yaml.load(workflow, Loader=yaml.BaseLoader)["jobs"]
+    preflight = jobs["preflight"]
+    assert _checkout_refs(yaml.dump({"jobs": {"preflight": preflight}})) == [
+        "${{ github.sha }}"
+    ]
+    run_blocks = "\n".join(
+        step.get("run", "") for step in preflight["steps"] if isinstance(step, dict)
+    )
+    assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in run_blocks
+
+    pr_head_ref = "${{ github.event.pull_request.head.sha || github.sha }}"
+    for job_name, job in jobs.items():
+        if job_name == "preflight" or not isinstance(job, dict):
+            continue
+        for checkout_ref in _checkout_refs(yaml.dump({"jobs": {job_name: job}})):
+            assert checkout_ref == pr_head_ref
+        if isinstance(job.get("uses"), str) and job["uses"].startswith(
+            "./.github/workflows/"
+        ):
+            assert job.get("with", {}).get("ref") == pr_head_ref
 
 
 def test_checkout_contract_cannot_be_satisfied_by_a_comment_or_sibling_key():

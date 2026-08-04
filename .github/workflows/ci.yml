@@ -45,9 +45,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      # Preflight validates the evaluated event state. On pull requests this is
+      # the synthetic merge commit, so base-added policy tests are available to
+      # legacy PR heads. Every source/artifact job below remains exact-head.
+      - name: Checkout evaluated workflow state
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+
+      - name: Prove evaluated preflight checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       - uses: actions/setup-python@v5
         with:
