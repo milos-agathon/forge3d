@@ -46,7 +46,7 @@
       "src/terrain/renderer/constructor.rs:493": 1048576,
       "src/terrain/renderer/constructor.rs:494": 1048576,
       "src/terrain/renderer/constructor.rs:499": 4,
-      "src/terrain/renderer/constructor.rs:504": 16,
+      "src/terrain/renderer/constructor.rs:504": 4,
       "src/terrain/renderer/constructor.rs:505": 8,
       "sun_vis.uniform_buffer": 64,
       "terrain.ao_debug_fallback": 4,
@@ -90,10 +90,10 @@
       "vt_atlas_fallback": 48,
       "vt_fallback_colors": 256,
       "vt_feedback_fallback": 16,
-      "vt_page_table_fallback": 64,
+      "vt_page_table_fallback": 16,
       "vt_uniforms": 112
     },
-    "peak_device_local_bytes": 474214462,
+    "peak_device_local_bytes": 474214402,
     "peak_host_visible_bytes": 46080
   },
   "capabilities": {
@@ -132,17 +132,17 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "ebecf76f8309",
+    "git_sha": "943a8130955f",
     "version": "1.34.0",
     "wgsl_module_hashes": {
       "terrain.shadow_depth.shader": "5cb47cb163eba8496ca4c80b931f961d2d51c752cbddbf116690106bfa2a8ce0",
-      "terrain_pbr_pom.shader": "122a8073702abd4257853bb9edbebe353735c2a153b5e14d88cd8d87f368cb50"
+      "terrain_pbr_pom.shader": "01cd23b5869b1ad32facf1d2530b3f1bf75f380599444ec58ccde6288482733a"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 4.139008045196533,
+      "gpu_ms": 5.0032639503479,
       "label": "terrain.shadow"
     },
     {
@@ -167,7 +167,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.22118400037288666,
+      "gpu_ms": 0.2252800017595291,
       "label": "terrain.main"
     },
     {
@@ -185,7 +185,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "14483284955e2414881e27e06cf785366477fd21f65d2ac7758873271c36ce090d11abd23d4eab76a72d4032e6e28aadd8580412a29fb239296f3c3756800d02",
+    "sig": "30199abf4ca29bf680cb864303d4856eb9344a775fac079e8699d3ffc713294196472b8124df03ef4722f67494baaa63a467a0fb2e23526a93a8a7ef09f20e0e",
     "signed_fields": [
       "adapter",
       "allocations",

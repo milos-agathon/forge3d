@@ -69,7 +69,7 @@
       "src/terrain/renderer/constructor.rs:493": 1048576,
       "src/terrain/renderer/constructor.rs:494": 1048576,
       "src/terrain/renderer/constructor.rs:499": 4,
-      "src/terrain/renderer/constructor.rs:504": 16,
+      "src/terrain/renderer/constructor.rs:504": 4,
       "src/terrain/renderer/constructor.rs:505": 8,
       "ssao-blur-settings": 40,
       "ssao-depth": 24576,
@@ -125,10 +125,10 @@
       "vt_atlas_fallback": 48,
       "vt_fallback_colors": 256,
       "vt_feedback_fallback": 16,
-      "vt_page_table_fallback": 64,
+      "vt_page_table_fallback": 16,
       "vt_uniforms": 112
     },
-    "peak_device_local_bytes": 474214462,
+    "peak_device_local_bytes": 474214402,
     "peak_host_visible_bytes": 33792
   },
   "capabilities": {
@@ -167,19 +167,19 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "ebecf76f8309",
+    "git_sha": "943a8130955f",
     "version": "1.34.0",
     "wgsl_module_hashes": {
       "overlays_shader": "3f7493a10d4734daa97dedac61a21ab27ebc20e1c9353018abb40f31fdfa803d",
       "terrain.shadow_depth.shader": "5cb47cb163eba8496ca4c80b931f961d2d51c752cbddbf116690106bfa2a8ce0",
-      "terrain_pbr_pom.shader": "122a8073702abd4257853bb9edbebe353735c2a153b5e14d88cd8d87f368cb50",
+      "terrain_pbr_pom.shader": "01cd23b5869b1ad32facf1d2530b3f1bf75f380599444ec58ccde6288482733a",
       "text_overlay_shader": "06e0fd5a97f2ad8d44664a1dc8f0e7fdd90231f032a863f7e23315314cb8e0df"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 1.6537599563598633,
+      "gpu_ms": 1.6547839641571045,
       "label": "terrain.shadow"
     },
     {
@@ -189,7 +189,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.height_ao"
     },
     {
@@ -209,17 +209,17 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.resolve"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0030720001086592674,
       "label": "scene.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.008191999979317188,
+      "gpu_ms": 0.0071680000983178616,
       "label": "scene.readback_copy"
     },
     {
@@ -232,7 +232,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "a97e997694ecebe1ca32856e23ae919b47acf3d39506d64a8a4ef58e5a18871a9181ea996e674d6605ebb262c22f5e5a89fe628687294e56479118b1cc4c5607",
+    "sig": "527c27296e82bd770f937c5ac0df06aaf6568d67600c0340bcff07354109be5495746d0cc0c32fa0be0a3b4cfc9518d5770706bc02c7825151766ce9b16c220b",
     "signed_fields": [
       "adapter",
       "allocations",
