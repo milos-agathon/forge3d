@@ -22,9 +22,7 @@ BC5_MEAN_ANGLE_GATE = 1.0
 BC5_MAX_ANGLE_GATE = 4.0
 
 # The fixtures are hash-derived, so their bytes are part of the gate.
-HARD_ALBEDO_SHA256 = (
-    "58c09a0bd9e16469f4a285515aa7f67a8a0f2693f8a01e2038839651ff541925"
-)
+HARD_ALBEDO_SHA256 = "58c09a0bd9e16469f4a285515aa7f67a8a0f2693f8a01e2038839651ff541925"
 STEEP_NORMALS_RG_SHA256 = (
     "3b3ee1b94f97d540d9a330be32d1b862ac5857cc9a12b25bc647c8affcf014db"
 )
@@ -37,27 +35,19 @@ def _bc7_roundtrip(source: np.ndarray):
         f3d.decode_bc7_rgba8(encoded, width, height), dtype=np.uint8
     ).reshape(source.shape)
     measured_ssim = float(ssim(source[..., :3], decoded[..., :3]))
-    delta = delta_e_2000(
-        srgb_to_lab(source[..., :3]), srgb_to_lab(decoded[..., :3])
-    )
+    delta = delta_e_2000(srgb_to_lab(source[..., :3]), srgb_to_lab(decoded[..., :3]))
     return encoded, measured_ssim, delta
 
 
 def _bc5_roundtrip(normals: np.ndarray):
     side = normals.shape[0]
-    rg = (
-        np.round((normals[..., :2] * 0.5 + 0.5) * 255.0)
-        .clip(0, 255)
-        .astype(np.uint8)
-    )
+    rg = np.round((normals[..., :2] * 0.5 + 0.5) * 255.0).clip(0, 255).astype(np.uint8)
     encoded = f3d.encode_bc5_rg8(rg.tobytes(), side, side)
     decoded = np.frombuffer(
         f3d.decode_bc5_rg8(encoded, side, side), dtype=np.uint8
     ).reshape(side, side, 2)
     decoded_xy = decoded.astype(np.float64) / 127.5 - 1.0
-    decoded_z = np.sqrt(
-        np.maximum(1.0 - np.sum(decoded_xy * decoded_xy, axis=-1), 0.0)
-    )
+    decoded_z = np.sqrt(np.maximum(1.0 - np.sum(decoded_xy * decoded_xy, axis=-1), 0.0))
     decoded_normals = np.dstack([decoded_xy, decoded_z])
     dots = np.clip(np.sum(normals * decoded_normals, axis=-1), -1.0, 1.0)
     return rg, encoded, np.degrees(np.arccos(dots))
@@ -76,6 +66,7 @@ def test_bc7_mode6_clears_the_fidelity_gate_on_a_demanding_albedo():
     record_tessella_result(
         "bc7_fidelity",
         {
+            "texture_family": "albedo",
             "fixture": "hard_albedo_256",
             "source_bytes": source.nbytes,
             "encoded_bytes": len(encoded),
@@ -123,6 +114,7 @@ def test_bc5_normal_angular_error_clears_gate_on_steep_normals():
     record_tessella_result(
         "bc5_fidelity",
         {
+            "texture_family": "normal",
             "fixture": "steep_normals_256",
             "source_bytes": rg.nbytes,
             "encoded_bytes": len(encoded),
@@ -142,9 +134,10 @@ def test_bc5_flat_baseline_is_easier_than_the_gate_fixture():
     _, flat_encoded, flat_angular = _bc5_roundtrip(flat_normals())
 
     assert float(flat_angular.mean()) < float(steep_angular.mean())
-    assert normal_tilt_degrees(flat_normals()).max() < normal_tilt_degrees(
-        steep_normals()
-    ).max()
+    assert (
+        normal_tilt_degrees(flat_normals()).max()
+        < normal_tilt_degrees(steep_normals()).max()
+    )
     record_tessella_result(
         "bc5_fidelity_flat_baseline",
         {

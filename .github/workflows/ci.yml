@@ -24,6 +24,7 @@ on:
           - m06
           - f3dz
           - anamnesis
+          - tessella
 
 permissions:
   contents: read
@@ -371,14 +372,27 @@ jobs:
               - 'tests/test_anamnesis_*.py'
               - 'tests/goldens/determinism/**'
               - '.github/workflows/determinism-matrix.yml'
-            # No TESSELLA physical job exists on main. This explicit output is
-            # a contract guard: any future lane must consume this scope (or a
-            # deliberate manual scope) and may not run on every PR.
+            # TESSELLA's physical lane consumes this classifier for reviewed
+            # internal PRs; manual runs use the dedicated tessella scope.
             tessella:
               - 'src/terrain/renderer/virtual_texture.rs'
               - 'src/core/feedback_buffer.rs'
               - 'src/core/screen_space_effects/hzb.rs'
               - 'src/shaders/hzb_build.wgsl'
+              - 'src/shaders/hzb_cull.wgsl'
+              - 'src/terrain/culling/two_phase.rs'
+              - 'scripts/tessella_evidence_contract.py'
+              - 'scripts/tessella_evidence_provenance.py'
+              - 'scripts/tessella_evidence_report.py'
+              - 'scripts/tessella_evidence_thresholds.py'
+              - 'tests/test_vt_out_of_core.py'
+              - 'tests/test_hzb_culling.py'
+              - 'tests/test_visibility_buffer.py'
+              - 'tests/test_bc_encoders.py'
+              - 'tests/test_flythrough_popping.py'
+              - 'tests/test_vt_request_retention.py'
+              - 'tests/test_tessella_certificate_evidence.py'
+              - 'tests/test_tessella_evidence_report.py'
               - 'tests/test_terrain_vt_pbr_families.py'
               - 'tests/test_tv20_virtual_texturing.py'
 
@@ -1591,7 +1605,7 @@ jobs:
     needs: [build-wheel-windows, terrain-golden-paths]
     if: >-
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.scope == 'full') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'tessella')) ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
        contains(github.event.pull_request.labels.*.name, 'run-physical') &&
@@ -1654,6 +1668,13 @@ jobs:
             terrain::clipmap::gpu_lod::tests::gpu_and_cpu_select_identical_tile_sets_for_1000_cameras `
             -- --ignored --exact --nocapture *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/gpu-cpu-lod-differential.log"
           exit $LASTEXITCODE
+      - name: Require the real-shader HZB conservativeness differential
+        shell: pwsh
+        run: |
+          cargo test --release --lib `
+            terrain::culling::two_phase::tests::hzb_cull_shader_matches_the_cpu_occlusion_predicate `
+            -- --ignored --exact --nocapture *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/hzb-conservativeness-differential.log"
+          exit $LASTEXITCODE
       - name: Run all six TESSELLA acceptance gates
         shell: pwsh
         run: |
@@ -1685,6 +1706,7 @@ jobs:
           name: tessella-physical-gpu-evidence
           path: ${{ runner.temp }}/forge3d-tessella-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
+          retention-days: 90
 
   # ============================================================================
   # Hosted determinism families. These consume the exact platform wheels above
@@ -1860,7 +1882,7 @@ jobs:
           m06_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'm06')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.m06 == 'true') }}"
           f3dz_physical_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'f3dz')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.f3dz == 'true') }}"
           anamnesis_physical_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'anamnesis')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.anamnesis == 'true') }}"
-          tessella_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.tessella == 'true') }}"
+          tessella_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'tessella')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.tessella == 'true') }}"
           render_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism')) || needs.terrain-golden-paths.outputs.determinism_render == 'true' }}"
           f3dz_hosted_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism' || inputs.scope == 'f3dz')) || needs.terrain-golden-paths.outputs.determinism_f3dz == 'true' }}"
           anamnesis_hosted_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism' || inputs.scope == 'anamnesis')) || needs.terrain-golden-paths.outputs.determinism_anamnesis == 'true' }}"

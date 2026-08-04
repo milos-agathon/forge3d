@@ -16,7 +16,7 @@ from _terrain_runtime import (
     tessella_inert_shadows,
 )
 from forge3d.diagnostics import render_certificate, visibility_stats, vt_stats
-from forge3d.mem import memory_metrics
+from forge3d.mem import get_budget_policy, memory_metrics
 from forge3d.terrain_params import (
     PomSettings,
     TerrainVTSettings,
@@ -268,8 +268,33 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     public_stats = vt_stats()
     assert all(public_stats[key] == value for key, value in stats.items())
     assert stats["atlas_device_local_bytes"] > 0
-    assert stats["atlas_uncompressed_equivalent_bytes"] >= stats["atlas_device_local_bytes"]
+    assert (
+        stats["atlas_uncompressed_equivalent_bytes"]
+        >= stats["atlas_device_local_bytes"]
+    )
     assert stats["atlas_compression_ratio"] >= 1.0
+    assert stats["bindless_bc"] == 1.0
+    family_footprints = {
+        family: {
+            "uncompressed": int(stats[f"atlas_uncompressed_equivalent_bytes_{family}"]),
+            "device_local": int(stats[f"atlas_device_local_bytes_{family}"]),
+            "ratio": float(stats[f"atlas_compression_ratio_{family}"]),
+        }
+        for family in ("albedo", "normal", "mask")
+    }
+    assert {
+        family: values["ratio"] for family, values in family_footprints.items()
+    } == {
+        "albedo": 4.0,
+        "normal": 2.0,
+        "mask": 4.0,
+    }
+    assert sum(item["uncompressed"] for item in family_footprints.values()) == int(
+        stats["atlas_uncompressed_equivalent_bytes"]
+    )
+    assert sum(item["device_local"] for item in family_footprints.values()) == int(
+        stats["atlas_device_local_bytes"]
+    )
     assert visibility_stats()["fallback_texels"] == 0
 
     # A store miss is explicit and counted, never a silent substitution: the
@@ -296,16 +321,17 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
         assert tile["content_hash"] == digests[key], (key, tile["content_hash"])
     assert len({tile["content_hash"] for tile in tiles}) == len(tiles)
 
-    degradations = render_certificate(sign=False)["degradations"]
+    certificate = render_certificate(sign=False)
+    degradations = certificate["degradations"]
     assert not {
         "terrain_vt_bc_atlas",
         "terrain_vt_bindless_atlas",
     }.intersection(entry["name"] for entry in degradations), degradations
     metrics = memory_metrics()
-    peak_host = max(
-        metrics.get("peak_host_visible_bytes", 0),
-        metrics.get("host_visible_bytes", 0),
-    )
+    assert get_budget_policy() == "enforce", metrics
+    assert metrics.get("budget_policy") == "enforce", metrics
+    peak_host = int(certificate["allocations"]["peak_host_visible_bytes"])
+    assert peak_host > 0, certificate["allocations"]
     assert peak_host < 512 * 1024**2, {
         "peak_host_visible_bytes": peak_host,
         "page_count": manifest["page_count"],
@@ -314,6 +340,8 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     record_tessella_result(
         "vt_out_of_core",
         {
+            "width": int(frame.shape[1]),
+            "height": int(frame.shape[0]),
             "logical_texel_bytes": int(manifest["logical_texel_bytes"]),
             "sparse_store_bytes": Path(store.path).stat().st_size,
             "page_count": int(manifest["page_count"]),
@@ -338,6 +366,18 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
                 stats["atlas_uncompressed_equivalent_bytes"]
             ),
             "atlas_compression_ratio": float(stats["atlas_compression_ratio"]),
+            **{
+                f"atlas_device_local_bytes_{family}": values["device_local"]
+                for family, values in family_footprints.items()
+            },
+            **{
+                f"atlas_uncompressed_equivalent_bytes_{family}": values["uncompressed"]
+                for family, values in family_footprints.items()
+            },
+            **{
+                f"atlas_compression_ratio_{family}": values["ratio"]
+                for family, values in family_footprints.items()
+            },
             "peak_host_visible_bytes": int(peak_host),
         },
     )

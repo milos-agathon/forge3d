@@ -21,6 +21,7 @@ requires_terrain = pytest.mark.skipif(
 )
 
 WIN2_SIZE = (3840, 2160)
+HZB_SPEEDUP_GATE = 1.8
 
 
 def _canyon_dem(size: int = 96) -> np.ndarray:
@@ -43,7 +44,9 @@ def _win2_params(culling: str):
 
 def _terrain_main_gpu_ms() -> float:
     passes = render_certificate(sign=False)["passes"]
-    return float(next(item["gpu_ms"] for item in passes if item["label"] == "terrain.main"))
+    return float(
+        next(item["gpu_ms"] for item in passes if item["label"] == "terrain.main")
+    )
 
 
 def test_culling_parameter_contract():
@@ -66,9 +69,7 @@ def test_culling_parameter_contract():
 
 def test_hzb_reuses_prometheus_terrain_minmax_pyramid():
     root = Path(__file__).resolve().parents[1]
-    geometry = (root / "src/terrain/renderer/geometry.rs").read_text(
-        encoding="utf-8"
-    )
+    geometry = (root / "src/terrain/renderer/geometry.rs").read_text(encoding="utf-8")
     assert "TerrainMinMaxPyramid::from_heightfield" in geometry
     assert "build_minmax_mips(" not in geometry
 
@@ -110,9 +111,7 @@ def test_two_phase_hzb_is_bitwise_identical_to_unculled_render():
         baseline_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         baseline_timings = []
         for _ in range(7):
-            baseline = _render_rgba(
-                baseline_renderer, _win2_params("none"), dem, ibl
-            )
+            baseline = _render_rgba(baseline_renderer, _win2_params("none"), dem, ibl)
             baseline_timings.append(_terrain_main_gpu_ms())
         baseline_gpu_ms = float(np.median(baseline_timings[2:]))
 
@@ -129,38 +128,23 @@ def test_two_phase_hzb_is_bitwise_identical_to_unculled_render():
     stats = culling_stats()
     assert stats["cull_percent"] >= 60.0, stats
     assert stats["phase1_drawn"] + stats["phase2_recovered"] == stats["final_drawn"]
-    # DEVIATION from 19-tessella.md, which asks for >= 1.8x. Recorded, not
-    # quietly relaxed.
-    #
-    # The culling itself is not the limit: this camera culls ~95% of the
-    # frustum-passing tiles (asserted above) and the render is bitwise
-    # identical to culling="none". The limit is that the ~16 tiles that SURVIVE
-    # still cost ~10.6 ms of irreducible fragment shading at 3840x2160, while
-    # the ~330 culled tiles only accounted for ~8.5 ms of the baseline. Removing
-    # the frame's redundant second HZB pyramid build (worth 0.36 ms) took the
-    # speedup from 1.362x to ~1.76x; even at ZERO HZB overhead the ceiling on
-    # this hardware is ~1.76x, so 1.8x is not reachable by making the culling
-    # better. A sweep of 12 alternative canyon/valley cameras and DEMs was all
-    # worse: added surface complexity raises the surviving tile count and
-    # collapses cull_percent to 14-22%.
-    #
-    # 1.6x is set below the worst observed run (1.70x; median ~1.75x, range
-    # 1.70-1.83x), so it still fails on a genuine regression. The measured
-    # speedup is reported in the evidence record either way.
-    HZB_SPEEDUP_GATE = 1.6
+    certificate = render_certificate(sign=False)
+    assert "timestamp_query" in certificate["capabilities"]["granted"], certificate[
+        "capabilities"
+    ]
+    assert baseline_gpu_ms > 0.0 and culled_gpu_ms > 0.0
     assert baseline_gpu_ms / culled_gpu_ms >= HZB_SPEEDUP_GATE, {
         "baseline_gpu_ms": baseline_gpu_ms,
         "culled_gpu_ms": culled_gpu_ms,
         "gate": HZB_SPEEDUP_GATE,
-        "spec_gate": 1.8,
     }
-    certificate = render_certificate(sign=False)
     assert "hzb_cull" in certificate["engine"]["wgsl_module_hashes"]
     assert "p5.hzb.build.shader" in certificate["engine"]["wgsl_module_hashes"]
     record_tessella_result(
         "hzb_occlusion",
         {
             "cull_percent": float(stats["cull_percent"]),
+            "frustum_passing": int(stats["frustum_passing"]),
             "phase1_drawn": int(stats["phase1_drawn"]),
             "phase1_rejected": int(stats["phase1_rejected"]),
             "phase2_recovered": int(stats["phase2_recovered"]),
@@ -168,6 +152,8 @@ def test_two_phase_hzb_is_bitwise_identical_to_unculled_render():
             "baseline_gpu_ms": baseline_gpu_ms,
             "culled_gpu_ms": culled_gpu_ms,
             "speedup": baseline_gpu_ms / culled_gpu_ms,
+            "speedup_gate": HZB_SPEEDUP_GATE,
+            "timestamp_query": True,
             "bitwise_identical": True,
         },
     )

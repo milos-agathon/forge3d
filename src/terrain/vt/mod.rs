@@ -1,5 +1,6 @@
 //! TESSELLA disk-backed virtual-texture stores.
 
+pub(crate) mod footprint;
 mod procedural;
 pub(crate) mod requests;
 mod store;

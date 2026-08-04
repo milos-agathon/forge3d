@@ -142,6 +142,8 @@ struct TerrainMaterialVTStats {
     upload_budget_bytes: u64,
     atlas_device_local_bytes: u64,
     atlas_uncompressed_equivalent_bytes: u64,
+    atlas_device_local_bytes_by_family: [u64; VT_FAMILY_COUNT],
+    atlas_uncompressed_equivalent_bytes_by_family: [u64; VT_FAMILY_COUNT],
     /// Per-frame count of requests the bound store cannot serve at any mip in
     /// the chain. A store miss is dropped, never substituted, so this counter
     /// is the only place the loss is visible -- it must be 0 for a camera whose
@@ -541,6 +543,24 @@ impl TerrainMaterialVT {
         let mut resident_bytes_total = 0u64;
         for (slot, name) in TERRAIN_VT_SUPPORTED_FAMILIES.iter().enumerate() {
             let family = stats.families[slot];
+            let atlas_device_local = stats.atlas_device_local_bytes_by_family[slot];
+            let atlas_uncompressed = stats.atlas_uncompressed_equivalent_bytes_by_family[slot];
+            out.insert(
+                format!("atlas_device_local_bytes_{name}"),
+                atlas_device_local as f32,
+            );
+            out.insert(
+                format!("atlas_uncompressed_equivalent_bytes_{name}"),
+                atlas_uncompressed as f32,
+            );
+            out.insert(
+                format!("atlas_compression_ratio_{name}"),
+                if atlas_device_local == 0 {
+                    0.0
+                } else {
+                    atlas_uncompressed as f32 / atlas_device_local as f32
+                },
+            );
             out.insert(
                 format!("resident_tiles_{name}"),
                 family.resident_tiles as f32,
@@ -1467,13 +1487,25 @@ impl TerrainMaterialVTRuntime {
         runtime.stats.cache_budget_mb = residency_budget_mb;
         runtime.stats.source_count = runtime.sources.len() as u32;
         let atlas_texels = u64::from(atlas_size) * u64::from(atlas_size);
-        runtime.stats.atlas_uncompressed_equivalent_bytes =
-            atlas_texels * u64::from(TERRAIN_VT_FAMILY_COUNT) * 4;
-        runtime.stats.atlas_device_local_bytes = if bindless_bc {
-            atlas_texels * u64::from(TERRAIN_VT_FAMILY_COUNT)
+        if bindless_bc {
+            let footprints =
+                crate::terrain::vt::footprint::compressed_material_atlas_footprints(atlas_texels);
+            let material_families = TERRAIN_VT_FAMILY_COUNT as usize;
+            runtime.stats.atlas_uncompressed_equivalent_bytes_by_family[..material_families]
+                .copy_from_slice(&footprints.uncompressed);
+            runtime.stats.atlas_device_local_bytes_by_family[..material_families]
+                .copy_from_slice(&footprints.device_local);
+            runtime.stats.atlas_uncompressed_equivalent_bytes =
+                footprints.uncompressed.iter().sum();
+            runtime.stats.atlas_device_local_bytes = footprints.device_local.iter().sum();
         } else {
-            atlas_texels * 4
-        };
+            // The compatibility path owns one shared RGBA8 atlas. Its slots are
+            // dynamically shared by all families, so a per-family attribution
+            // would be invented evidence; the family fields remain zero and
+            // the exact aggregate ratio is 1:1.
+            runtime.stats.atlas_uncompressed_equivalent_bytes = atlas_texels * 4;
+            runtime.stats.atlas_device_local_bytes = atlas_texels * 4;
+        }
         runtime.stats.bindless_bc = bindless_bc;
         runtime.stats.store_min_materialized_mip = runtime
             .sources

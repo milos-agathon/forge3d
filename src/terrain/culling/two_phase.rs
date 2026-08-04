@@ -86,8 +86,13 @@ pub struct TwoPhaseTerrainCuller {
     stats_readback: TrackedBuffer,
     width: u32,
     height: u32,
+    mip_bias: u32,
     max_mip: u32,
     stats: CullingStats,
+}
+
+fn terrain_hzb_extent(extent: u32) -> u32 {
+    (extent / 2).max(1)
 }
 
 impl TwoPhaseTerrainCuller {
@@ -97,10 +102,16 @@ impl TwoPhaseTerrainCuller {
         height: u32,
         input: &GpuLodDrawResources,
     ) -> RenderResult<Self> {
+        // The terrain pyramid begins at the full-resolution depth buffer's mip
+        // 1. The initial HZB pass therefore fuses the depth copy and first MAX
+        // reduction instead of allocating or writing a full-resolution R32F mip.
+        let hzb_width = terrain_hzb_extent(width);
+        let hzb_height = terrain_hzb_extent(height);
         let pyramids = [
-            HzbPyramid::new(device, width, height)?,
-            HzbPyramid::new(device, width, height)?,
+            HzbPyramid::new_max_reduced(device, hzb_width, hzb_height)?,
+            HzbPyramid::new_max_reduced(device, hzb_width, hzb_height)?,
         ];
+        let mip_bias = u32::from(width > 1 || height > 1);
         let max_mip = pyramids[0].mip_count.saturating_sub(1);
         let layout = create_cull_layout(device);
         let pipeline = create_cull_pipeline(device, &layout);
@@ -206,6 +217,7 @@ impl TwoPhaseTerrainCuller {
             stats_readback,
             width,
             height,
+            mip_bias,
             max_mip,
             stats: CullingStats::default(),
         })
@@ -240,17 +252,12 @@ impl TwoPhaseTerrainCuller {
     /// Build the pyramid phase 2 tests against, and that the NEXT frame's
     /// phase 1 then reuses as its predictor.
     ///
-    /// The frame used to reduce this same 3840x2160 depth buffer a SECOND time
-    /// with a min reduce, purely to hand phase 1 a more aggressive predictor.
-    /// Two full-screen pyramid builds per frame is real GPU time and the second
-    /// one buys nothing that survives: every phase-1 reject is re-tested against
-    /// a fresh max-reduced pyramid in phase 2, so the phase-1 predictor cannot
-    /// change the rendered image at all -- only how much work phase 2 has to
-    /// undo. The max-reduced pyramid built here is a strictly conservative
-    /// predictor (it rejects only genuinely occluded tiles), so reusing it drops
-    /// a full-screen reduce AND the phase-2 recovery the min reduce used to
-    /// cause. Measured on the committed canyon camera at 3840x2160: 10.98 ms ->
-    /// 10.62 ms in `terrain.main`, with `cull_percent` unchanged at 95.38.
+    /// The MAX-reduced pyramid built here is strictly conservative and is reused
+    /// by the next frame's phase 1. Terrain culling never needs full-resolution
+    /// mip 0: the half-sized allocation begins at the former mip 1, and the
+    /// initial copy pass proportionally MAX-reduces the full-resolution depth
+    /// directly into it. This saves the full 3840x2160 R32Float allocation and
+    /// write/read while preserving the conservative higher-mip chain.
     pub fn build_phase2_hzb(
         &self,
         device: &wgpu::Device,
@@ -349,7 +356,7 @@ impl TwoPhaseTerrainCuller {
                 self.max_mip as f32,
                 u32::from(valid) as f32,
             ],
-            control: [phase, u32::from(first_instance), 0, 0],
+            control: [phase, u32::from(first_instance), self.mip_bias, 0],
         }
     }
 
@@ -571,12 +578,10 @@ mod tests {
     const DEPTH_EPSILON: f32 = 0.00001;
 
     /// The rule `tile_occluded` (src/shaders/hzb_cull.wgsl) applies once the
-    /// covered HZB footprint has been gathered: BOTH phases MAX-reduce the
-    /// footprint and treat a cleared texel as "no occluder". The phase
-    /// difference lives entirely in how the pyramid itself was reduced — min
-    /// over the previous frame, max over the fresh phase-1 depth — which is why
-    /// `phase1_rejects` feeds this the min-reduced block and `phase2_occluded`
-    /// feeds it the raw mip-0 texels.
+    /// covered HZB footprint has been gathered: BOTH phases use a MAX-reduced
+    /// conservative pyramid and treat a cleared texel as "no occluder". Phase 1
+    /// reads the previous frame under its previous view-projection; phase 2 reads
+    /// the fresh phase-1 depth under the current view-projection.
     fn shader_occludes(nearest_tile_depth: f32, covered_texels: &[f32]) -> bool {
         let farthest_occluder = covered_texels.iter().copied().fold(0.0_f32, f32::max);
         if farthest_occluder >= BACKGROUND_DEPTH {
@@ -585,20 +590,32 @@ mod tests {
         nearest_tile_depth > farthest_occluder + DEPTH_EPSILON
     }
 
-    fn phase1_rejects(nearest_tile_depth: f32, covered_depths: &[f32]) -> bool {
-        let closest_occluder = covered_depths.iter().copied().fold(1.0, f32::min);
-        shader_occludes(nearest_tile_depth, &[closest_occluder])
-    }
-
     fn phase2_occluded(nearest_tile_depth: f32, covered_depths: &[f32]) -> bool {
         shader_occludes(nearest_tile_depth, covered_depths)
+    }
+
+    fn relative_hzb_mip(requested_mip: u32, mip_bias: u32, max_mip: u32) -> u32 {
+        requested_mip.saturating_sub(mip_bias).min(max_mip)
+    }
+
+    #[test]
+    fn half_resolution_pyramid_maps_full_resolution_mips_without_unwritten_levels() {
+        assert_eq!(terrain_hzb_extent(3840), 1920);
+        assert_eq!(terrain_hzb_extent(2160), 1080);
+        assert_eq!(terrain_hzb_extent(5), 2);
+        assert_eq!(terrain_hzb_extent(1), 1);
+        assert_eq!(relative_hzb_mip(0, 1, 11), 0);
+        assert_eq!(relative_hzb_mip(1, 1, 11), 0);
+        assert_eq!(relative_hzb_mip(2, 1, 11), 1);
+        assert_eq!(relative_hzb_mip(12, 1, 11), 11);
+        assert_eq!(relative_hzb_mip(0, 0, 0), 0);
     }
 
     #[test]
     fn fresh_hzb_recovers_previous_frame_false_negative() {
         let previous = [0.2, 0.2, 0.2, 0.2];
         let fresh = [0.2, 0.2, 1.0, 1.0];
-        assert!(phase1_rejects(0.8, &previous));
+        assert!(phase2_occluded(0.8, &previous));
         assert!(!phase2_occluded(0.8, &fresh));
     }
 
@@ -629,12 +646,16 @@ mod tests {
     /// its depth slack.
     #[test]
     fn cpu_predicate_tracks_the_compiled_wgsl_source() {
+        naga::front::wgsl::parse_str(HZB_CULL_SOURCE).expect("valid HZB cull WGSL");
         assert!(
             HZB_CULL_SOURCE.contains("farthest_occluder = max(farthest_occluder, depth);"),
             "hzb_cull.wgsl no longer MAX-reduces the covered footprint; the CPU model in \
              this module is stale"
         );
         assert!(HZB_CULL_SOURCE.contains("let occluder = farthest_occluder;"));
+        assert!(HZB_CULL_SOURCE
+            .contains("let relative_mip = requested_mip - min(requested_mip, params.control.z);"));
+        assert!(HZB_CULL_SOURCE.contains("let mip = min(relative_mip, u32(params.viewport.z));"));
         assert_eq!(wgsl_float_after("if occluder >= "), BACKGROUND_DEPTH);
         assert_eq!(
             wgsl_float_after("return nearest_depth > occluder + "),

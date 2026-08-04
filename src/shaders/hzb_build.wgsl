@@ -1,8 +1,8 @@
 // HZB (Hierarchical Z-Buffer) build shader
-// Generates a min-depth mipmap pyramid for accelerated occlusion queries (P5)
+// Generates a configurable depth pyramid for accelerated occlusion queries (P5)
 
 // ============================================================================
-// Copy pass: Depth texture -> R32Float mip 0
+// Generic copy pass: Depth texture -> R32Float mip 0.
 // ============================================================================
 
 @group(0) @binding(0) var depth_in: texture_depth_2d;
@@ -14,9 +14,34 @@ fn cs_copy(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.x || gid.y >= dims.y) {
         return;
     }
-    
-    let depth = textureLoad(depth_in, vec2<u32>(gid.xy), 0);
+
+    let depth = textureLoad(depth_in, gid.xy, 0);
     textureStore(hzb_out, gid.xy, vec4<f32>(depth, 0.0, 0.0, 0.0));
+}
+
+// Terrain allocates a half-sized pyramid. Fuse the copy with the first
+// conservative MAX reduction and never materialize a full-resolution R32Float
+// mip. Proportional bounds preserve odd edges.
+@compute @workgroup_size(8, 8, 1)
+fn cs_copy_max_reduce(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let dst_dims = textureDimensions(hzb_out);
+    if (gid.x >= dst_dims.x || gid.y >= dst_dims.y) {
+        return;
+    }
+
+    let src_dims = textureDimensions(depth_in);
+    let src_lo = gid.xy * src_dims / dst_dims;
+    let src_hi = min(
+        ((gid.xy + 1u) * src_dims + dst_dims - 1u) / dst_dims,
+        src_dims,
+    );
+    var reduced = 0.0;
+    for (var y = src_lo.y; y < src_hi.y; y++) {
+        for (var x = src_lo.x; x < src_hi.x; x++) {
+            reduced = max(reduced, textureLoad(depth_in, vec2<u32>(x, y), 0));
+        }
+    }
+    textureStore(hzb_out, gid.xy, vec4<f32>(reduced, 0.0, 0.0, 0.0));
 }
 
 // ============================================================================

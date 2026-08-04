@@ -64,7 +64,15 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         "types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]"
         in trigger
     )
-    for scope in ("core", "full", "determinism", "m06", "f3dz", "anamnesis"):
+    for scope in (
+        "core",
+        "full",
+        "determinism",
+        "m06",
+        "f3dz",
+        "anamnesis",
+        "tessella",
+    ):
         assert f"          - {scope}" in trigger
 
     preflight = _job(workflow, "preflight")
@@ -283,6 +291,20 @@ def test_tessella_cannot_become_an_unscoped_pr_job() -> None:
         "src/core/feedback_buffer.rs",
         "src/core/screen_space_effects/hzb.rs",
         "src/shaders/hzb_build.wgsl",
+        "src/shaders/hzb_cull.wgsl",
+        "src/terrain/culling/two_phase.rs",
+        "scripts/tessella_evidence_contract.py",
+        "scripts/tessella_evidence_provenance.py",
+        "scripts/tessella_evidence_report.py",
+        "scripts/tessella_evidence_thresholds.py",
+        "tests/test_vt_out_of_core.py",
+        "tests/test_hzb_culling.py",
+        "tests/test_visibility_buffer.py",
+        "tests/test_bc_encoders.py",
+        "tests/test_flythrough_popping.py",
+        "tests/test_vt_request_retention.py",
+        "tests/test_tessella_certificate_evidence.py",
+        "tests/test_tessella_evidence_report.py",
         "tests/test_terrain_vt_pbr_families.py",
         "tests/test_tv20_virtual_texturing.py",
     ):
@@ -343,20 +365,10 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
         ),
         "test-anamnesis-portability": expected_condition("anamnesis", "anamnesis"),
         "test-anamnesis-production": expected_condition("anamnesis", "anamnesis"),
+        "test-tessella-gpu": expected_condition("tessella", "tessella"),
     }
     for job_name, condition in expected.items():
         assert normalize(jobs[job_name]["if"]) == condition
-
-    assert normalize(jobs["test-tessella-gpu"]["if"]) == normalize(
-        """
-        github.event_name == 'schedule' ||
-        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full') ||
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name == github.repository &&
-         contains(github.event.pull_request.labels.*.name, 'run-physical') &&
-         needs.terrain-golden-paths.outputs.tessella == 'true')
-        """
-    )
 
     def selected(
         event: str,
