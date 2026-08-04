@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -8,7 +9,11 @@ import yaml
 from scripts.ci_pytest_lane import default_lane_files
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(
+    os.environ.get(
+        "FORGE3D_CI_CONTRACT_ROOT", Path(__file__).resolve().parents[1]
+    )
+)
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 

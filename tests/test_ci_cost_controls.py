@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 import yaml
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(
+    os.environ.get(
+        "FORGE3D_CI_CONTRACT_ROOT", Path(__file__).resolve().parents[1]
+    )
+)
 UPLOAD_STEP = re.compile(
     r"(?ms)^      - (?:name|uses):.*?"
     r"(?=^      - (?:name|uses):|^  [A-Za-z0-9_-]+:|\Z)"
@@ -68,10 +73,29 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert f"          - {scope}" in trigger
 
     preflight = _job(workflow, "preflight")
-    assert "name: Checkout evaluated workflow state" in preflight
-    assert "ref: ${{ github.sha }}" in preflight
-    assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in preflight
-    assert "base-added policy tests are available" in preflight
+    if "name: Checkout trusted CI contracts" in preflight:
+        live_base_ref = (
+            "ref: ${{ github.event_name == 'pull_request' && "
+            "format('refs/heads/{0}', github.base_ref) || github.sha }}"
+        )
+        assert preflight.count(live_base_ref) == 1
+        assert "name: Snapshot live policy base" in preflight
+        assert "id: policy-base" in preflight
+        assert 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"' in preflight
+        assert "ref: ${{ steps.policy-base.outputs.sha }}" in preflight
+        assert "path: .ci-contracts" in preflight
+        assert "POLICY_BASE_SHA: ${{ steps.policy-base.outputs.sha }}" in preflight
+        assert 'test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"' in preflight
+        assert 'git merge --no-commit --no-ff "$PR_HEAD_SHA"' in preflight
+        assert 'test "$(git rev-parse MERGE_HEAD)" = "$PR_HEAD_SHA"' in preflight
+        assert "working-directory: .ci-contracts" in preflight
+        assert "FORGE3D_CI_CONTRACT_ROOT: ${{ github.workspace }}" in preflight
+        assert "PYTHONPATH: ${{ github.workspace }}/.ci-contracts" in preflight
+    else:
+        assert "name: Checkout evaluated workflow state" in preflight
+        assert "ref: ${{ github.sha }}" in preflight
+        assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in preflight
+        assert "base-added policy tests are available" in preflight
     assert "tests/test_ci_cost_controls.py" in preflight
     assert "tests/test_ci_lfs_fanout.py" in preflight
     assert "tests/test_determinism_matrix.py" in preflight
