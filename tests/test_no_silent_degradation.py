@@ -361,6 +361,133 @@ def test_e_unrun_accounting_is_exhaustive_and_honest():
     )
 
 
+def test_e_slow_lane_is_marker_selected_and_accounted():
+    default_args = ci_pytest_lane.build_pytest_args([])
+    slow_args = ci_pytest_lane.build_pytest_args(
+        [ci_pytest_lane.SLOW_LANE_SELECTOR]
+    )
+    assert default_args[default_args.index("-m") + 1] == "not slow"
+    assert slow_args[slow_args.index("-m") + 1] == "slow"
+    assert ci_pytest_lane.SLOW_LANE_SELECTOR not in slow_args
+
+    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    slow_job = ci_yml.split("  test-python-slow:", 1)[1].split(
+        "\n  # ============================================================================\n  # TERMINUS", 1
+    )[0]
+    assert "python scripts/ci_pytest_lane.py --slow-lane" in slow_job
+    aggregate = ci_yml.split("  ci-success:", 1)[1]
+    assert "test-python-slow" in aggregate.split("\n    runs-on:", 1)[0]
+
+
+def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
+    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    paths_job = ci_yml.split("  terrain-golden-paths:", 1)[1].split(
+        "\n  # ============================================================================\n  # Rust Tests", 1
+    )[0]
+    assert "anamnesis: ${{ steps.filter.outputs.anamnesis }}" in paths_job
+    anamnesis_paths = paths_job.split("            anamnesis:\n", 1)[1]
+    for broad_path in (
+        "'.github/workflows/ci.yml'",
+        "'src/**'",
+        "'python/**'",
+    ):
+        assert broad_path not in anamnesis_paths
+    for path in (
+        "'src/core/anamnesis/**'",
+        "'src/core/framegraph_impl/**'",
+        "'src/core/ibl.rs'",
+        "'src/core/ibl/**'",
+        "'src/core/session.rs'",
+        "'src/core/shader_registry.rs'",
+        "'src/core/hdr.rs'",
+        "'src/core/tonemap.rs'",
+        "'src/core/resource_tracker.rs'",
+        "'src/core/material.rs'",
+        "'src/core/hdr_readback.rs'",
+        "'src/core/provenance.rs'",
+        "'src/formats/hdr.rs'",
+        "'src/lighting/types.rs'",
+        "'src/lighting/light_buffer/**'",
+        "'src/offscreen/**'",
+        "'src/path_tracing/**'",
+        "'src/shader_sources.rs'",
+        "'src/shadows/**'",
+        "'src/py_functions/adjudication.rs'",
+        "'src/py_functions/mod.rs'",
+        "'src/render/material_set.rs'",
+        "'src/render/material_set/**'",
+        "'src/terrain/renderer/**'",
+        "'src/terrain/render_params/**'",
+        "'src/py_module/classes.rs'",
+        "'src/py_module/functions/rendering.rs'",
+        "'src/py_types/frame.rs'",
+        "'src/lib.rs'",
+        "'src/util/memory_budget.rs'",
+        "'src/py_module/functions/anamnesis.rs'",
+        "'python/forge3d/anamnesis.py'",
+        "'python/forge3d/determinism.py'",
+        "'python/forge3d/_native.py'",
+        "'python/forge3d/_gpu.py'",
+        "'src/shaders/adjudication_raster.wgsl'",
+        "'src/shaders/ao_from_aovs.wgsl'",
+        "'src/shaders/pt_*.wgsl'",
+        "'src/shaders/terrain_*.wgsl'",
+        "'src/shaders/heightfield_*.wgsl'",
+        "'src/shaders/brdf/**'",
+        "'src/shaders/includes/determinism.wgsl'",
+        "'src/shaders/shadow_blur.wgsl'",
+        "'scripts/check_anamnesis_portability.py'",
+        "'scripts/terrain_ci_probe.py'",
+        "'scripts/assert_junit_zero_skips.py'",
+        "'tests/anamnesis_gpu_acceptance.py'",
+        "'tests/goldens/determinism/**'",
+    ):
+        assert path in anamnesis_paths
+
+    required = (
+        "github.event_name == 'workflow_dispatch'",
+        "github.event_name == 'schedule'",
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+        "needs.terrain-golden-paths.outputs.anamnesis == 'true'",
+    )
+    for job_name in (
+        "test-anamnesis-portability-seed",
+        "test-anamnesis-portability",
+        "test-anamnesis-production",
+    ):
+        job = ci_yml.split(f"  {job_name}:", 1)[1].split(
+            "\n    runs-on:", 1
+        )[0]
+        for fragment in required:
+            assert fragment in job
+    production = ci_yml.split("  test-anamnesis-production:", 1)[1].split(
+        "\n  # ============================================================================\n  # Documentation Build", 1
+    )[0]
+    assert "test_real_gpu_600_frame_acceptance" in production
+    aggregate = ci_yml.split("  ci-success:", 1)[1]
+    assert "anamnesis_required" in aggregate
+    required_branch, skip_tail = aggregate.split(
+        'if [ "$anamnesis_required" = "true" ]; then', 1
+    )[1].split("\n          else\n", 1)
+    skip_branch = skip_tail.split("\n          fi\n          if ", 1)[0]
+    for job_name in (
+        "test-anamnesis-portability-seed",
+        "test-anamnesis-portability",
+        "test-anamnesis-production",
+    ):
+        result_prefix = f"needs.{job_name}.result "
+        success_check = result_prefix + '}}" != "success"'
+        skipped_check = result_prefix + '}}" != "skipped"'
+        assert success_check in required_branch
+        assert success_check not in skip_branch
+        assert skipped_check in skip_branch
+        assert skipped_check not in required_branch
+
+
 # ---------------------------------------------------------------------------
 # (f) visual-golden lane honesty
 # ---------------------------------------------------------------------------
