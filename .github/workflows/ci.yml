@@ -128,7 +128,7 @@ jobs:
       - name: Download the required LFS objects once
         shell: bash
         run: |
-          media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
+          media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/19028116dfbe9b954eac63e0a211be0d544226aa"
           while read -r sha256 fixture; do
             curl --fail --location --retry 3 \
               --output "$fixture" "$media_base/$fixture"
@@ -137,12 +137,14 @@ jobs:
           cff39b4e02d7ba13c48f3d8b1a4080d40ada753ade62fa951459fe4e01e98b48 assets/tif/Mount_Fuji_30m.tif
           875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3 assets/tif/dem_rainier.tif
           d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478 assets/tif/switzerland_dem.tif
+          575e4b57d69d5db1bc16d5cd7edc8c83c570e280717e9e7ca225c060fd0aeb3d assets/tif/moon_south_pole_lola.tif
           EOF
 
           for fixture in \
             assets/tif/Mount_Fuji_30m.tif \
             assets/tif/dem_rainier.tif \
-            assets/tif/switzerland_dem.tif; do
+            assets/tif/switzerland_dem.tif \
+            assets/tif/moon_south_pole_lola.tif; do
             if [ "$(wc -c < "$fixture")" -le 1024 ]; then
               echo "::error::$fixture is still an LFS pointer"
               exit 1
@@ -156,7 +158,8 @@ jobs:
           zip -q lfs-fixture-bundles/python-tiffs.zip \
             assets/tif/Mount_Fuji_30m.tif \
             assets/tif/dem_rainier.tif \
-            assets/tif/switzerland_dem.tif
+            assets/tif/switzerland_dem.tif \
+            assets/tif/moon_south_pole_lola.tif
           zip -q lfs-fixture-bundles/m06-dem.zip \
             assets/tif/switzerland_dem.tif
 

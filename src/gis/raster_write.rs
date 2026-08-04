@@ -181,10 +181,13 @@ impl CrsSpec {
             })
             .transpose()?;
         if iau_with_wkt {
-            validate_iau_wkt_body(
-                authority_pair.as_ref().expect("IAU authority is present"),
-                wkt.as_deref().expect("IAU WKT is present"),
-            )?;
+            let (Some(authority_pair), Some(wkt)) = (authority_pair.as_ref(), wkt.as_deref())
+            else {
+                return Err(GisError::InvalidCrs(
+                    "IAU CRS dict must include both name/code and WKT".to_string(),
+                ));
+            };
+            validate_iau_wkt_body(authority_pair, wkt)?;
         }
         if authority_pair.is_none() && wkt.is_none() {
             return Err(GisError::InvalidCrs(

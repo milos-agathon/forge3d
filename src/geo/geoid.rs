@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 
 use super::units::{Angle, Degree, Egm96, Ellipsoidal, Height, Length, Metre, Orthometric};
 
-const EGM96_NMAX: usize = 120;
+const NMAX: usize = 120;
 const MARS_AREOID_NMAX: usize = 179;
 /// WGS84(G873) constants exactly as in NGA F477.
 const GM: f64 = 3.986_004_418e14;
@@ -41,7 +41,13 @@ const MARS_AREOID_BIN: &[u8] = include_bytes!(concat!(
     "/assets/geoid/mars_areoid_n179.bin"
 ));
 
-/// Compact body-independent spherical-harmonic surface.
+/// The original Earth model is intentionally retained as its own instance.
+/// SELENE's contract requires the existing EGM96 path to remain bit-identical.
+struct Egm96Model {
+    surface: SphericalHarmonicSurface,
+}
+
+/// Compact body-independent spherical-harmonic surface shared by Earth and Mars.
 pub struct SphericalHarmonicSurface {
     nmax: usize,
     coefficient_nmin: usize,
@@ -55,6 +61,17 @@ pub struct SphericalHarmonicSurface {
 fn read_u32(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(b[at..at + 4].try_into().expect("bounds checked"))
 }
+
+static MODEL: Lazy<Egm96Model> = Lazy::new(|| {
+    let mut surface = SphericalHarmonicSurface::parse(EGM96_BIN, b"F3DEGM96", 2);
+    assert_eq!(surface.nmax, NMAX, "geoid asset degree mismatch");
+    // Subtract the normal field's even zonals (stored positively as +Jn/√(2n+1),
+    // matching F477's DHCSIN which ADDS them to the negative C̄n0).
+    for (n, j) in [(2usize, J2), (4, J4), (6, J6), (8, J8), (10, J10)] {
+        surface.coefficients[pot_index(n, 0)].0 += j / ((2 * n + 1) as f64).sqrt();
+    }
+    Egm96Model { surface }
+});
 
 impl SphericalHarmonicSurface {
     fn parse(b: &[u8], magic: &[u8; 8], coefficient_nmin: usize) -> Self {
@@ -94,11 +111,13 @@ impl SphericalHarmonicSurface {
         }
     }
 
+    #[inline(always)]
     fn coefficient(&self, n: usize, m: usize) -> (f64, f64) {
         let offset = self.coefficient_nmin * (self.coefficient_nmin + 1) / 2;
         self.coefficients[harmonic_index(n, m) - offset]
     }
 
+    #[inline(always)]
     fn degree_sum(&self, basis: &HarmonicBasis, n: usize) -> f64 {
         let mut sum = 0.0;
         for m in 0..=n {
@@ -108,17 +127,6 @@ impl SphericalHarmonicSurface {
         sum
     }
 }
-
-static EGM96_MODEL: Lazy<SphericalHarmonicSurface> = Lazy::new(|| {
-    let mut model = SphericalHarmonicSurface::parse(EGM96_BIN, b"F3DEGM96", 2);
-    assert_eq!(model.nmax, EGM96_NMAX, "geoid asset degree mismatch");
-    // Subtract the normal field's even zonals (stored positively as +Jn/√(2n+1),
-    // matching F477's DHCSIN which ADDS them to the negative C̄n0).
-    for (n, j) in [(2usize, J2), (4, J4), (6, J6), (8, J8), (10, J10)] {
-        model.coefficients[pot_index(n, 0)].0 += j / ((2 * n + 1) as f64).sqrt();
-    }
-    model
-});
 
 static MARS_AREOID_MODEL: Lazy<SphericalHarmonicSurface> = Lazy::new(|| {
     let model = SphericalHarmonicSurface::parse(MARS_AREOID_BIN, b"F3DAREO1", 0);
@@ -225,7 +233,7 @@ fn harmonic_basis(
 /// EGM96 geoid undulation N(φ, λ) in metres. `lat_deg` is geodetic latitude,
 /// `lon_deg` longitude (either ±180 or 0..360 convention).
 pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
-    let model = &*EGM96_MODEL;
+    let model = &MODEL.surface;
     let lat = lat_deg.to_radians();
     let lon = lon_deg.to_radians();
 
@@ -242,13 +250,13 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
     let gamma = GEQT * (1.0 + SOMIGLIANA_K * t1) / (1.0 - E2 * t1).sqrt();
 
     let theta = core::f64::consts::FRAC_PI_2 - lat_gc;
-    let basis = harmonic_basis(theta.cos(), theta.sin(), lon, model.nmax);
+    let basis = harmonic_basis(theta.cos(), theta.sin(), lon, NMAX);
 
     // Height anomaly on the ellipsoid from the disturbing potential.
     let ar = AE / r;
     let mut arn = ar;
     let mut a_sum = 0.0;
-    for n in 2..=model.nmax {
+    for n in 2..=NMAX {
         arn *= ar;
         a_sum += model.degree_sum(&basis, n) * arn;
     }
@@ -256,7 +264,7 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
 
     // NGA correction model (centimetres), degrees 0..=NMAX.
     let mut corr_sum = 0.0;
-    for n in 0..=model.nmax {
+    for n in 0..=NMAX {
         for m in 0..=n {
             let (c, s) = model.corrections[corr_index(n, m)];
             corr_sum += basis.pnm[harmonic_index(n, m)] * (c * basis.cosml[m] + s * basis.sinml[m]);
