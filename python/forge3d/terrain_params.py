@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import math
 from numbers import Integral
 from typing import List, Optional, Tuple, Sequence
 
@@ -65,8 +66,14 @@ class ShadowSettings:
     light_bleed_reduction: float
     evsm_exponent: float
     fade_start: float
-    # Optional PCSS light radius (world units). Defaults to hard shadows when zero.
+    # Legacy PCSS light radius in world units. When non-zero it takes precedence
+    # over light_size and is converted per cascade using that cascade's texel size.
     pcss_light_radius: float = 0.0
+    # PCSS search radius, maximum adaptive filter radius, and area-light radius
+    # in shadow-map texels.
+    pcss_blocker_radius: float = 6.0
+    pcss_filter_radius: float = 4.0
+    light_size: float = 1.0
 
     # Shadow technique constants matching Rust ShadowTechnique enum
     # ALL_TECHNIQUES: Full set recognized by config layer
@@ -99,7 +106,6 @@ class ShadowSettings:
         valid_resolutions = {512, 1024, 2048, 4096, 8192}
         if self.resolution not in valid_resolutions:
             raise ValueError("resolution must be power of 2 between 512-8192")
-
         if not 1 <= self.cascades <= 4:
             raise ValueError("cascades must be 1-4")
 
@@ -109,8 +115,17 @@ class ShadowSettings:
         if self.softness < 0.0:
             raise ValueError("softness must be >= 0")
 
-        if self.pcss_light_radius < 0.0:
-            raise ValueError("pcss_light_radius must be >= 0")
+        for name, value, allow_zero in (
+            ("pcss_light_radius", self.pcss_light_radius, True),
+            ("pcss_blocker_radius", self.pcss_blocker_radius, True),
+            ("pcss_filter_radius", self.pcss_filter_radius, True),
+            ("light_size", self.light_size, False),
+        ):
+            if not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
+            if value < 0.0 or (not allow_zero and value == 0.0):
+                operator = ">=" if allow_zero else ">"
+                raise ValueError(f"{name} must be {operator} 0")
 
         if self.intensity < 0.0:
             raise ValueError("intensity must be >= 0")
@@ -138,11 +153,10 @@ class ShadowSettings:
         """Estimate GPU memory for shadow resources."""
         pixels = self.resolution * self.resolution * self.cascades
         depth_bytes = pixels * 4  # Depth32Float
-        # Moment maps for VSM/EVSM/MSM techniques
-        if self.technique == "VSM":
-            moment_bytes = pixels * 8  # 2 channels * 4 bytes
-        elif self.technique in {"EVSM", "MSM"}:
-            moment_bytes = pixels * 16  # 4 channels * 4 bytes
+        # All moment techniques use an Rgba16Float atlas and an equally-sized
+        # persistent intermediate for the separable blur.
+        if self.technique in {"VSM", "EVSM", "MSM"}:
+            moment_bytes = pixels * 16  # atlas (8) + blur intermediate (8)
         else:
             moment_bytes = 0
         return depth_bytes + moment_bytes

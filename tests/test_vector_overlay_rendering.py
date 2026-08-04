@@ -29,7 +29,8 @@ _IPC_BUFFERS: dict[int, bytes] = {}
 def find_viewer_binary() -> Path:
     """Find the release viewer used by the integration lane."""
     override = os.environ.get("FORGE3D_VIEWER_BINARY")
-    if override:
+    if override is not None:
+        assert override.strip(), "FORGE3D_VIEWER_BINARY must not be empty"
         binary = Path(override)
         assert binary.is_file(), f"FORGE3D_VIEWER_BINARY does not exist: {binary}"
         return binary

@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # scripts/ci_pytest_lane.py
-# CENSOR Task 13: the default CI Python test lane. Runs the WHOLE tests/ tree
-# except the files enumerated in tests/UNRUN.toml (each with a documented,
-# owner-attributed, non-expired reason). This is the single honest source of
-# "what Python CI runs by default" -- tests/test_no_silent_degradation.py
-# imports unrun_files() from here so the UNRUN accounting gate stays truthful.
+# CENSOR Task 13: the default CI Python lane selects all accounted test files
+# except tests/UNRUN.toml entries with `not slow`; `--slow-lane` selects those
+# same accounted files with `slow`. This is the single honest source of "what
+# Python CI runs" -- tests/test_no_silent_degradation.py imports unrun_files()
+# from here so the UNRUN accounting gate stays truthful.
 # RELEVANT FILES: tests/UNRUN.toml, tests/_toml_compat.py, .github/workflows/ci.yml
-"""Run pytest over tests/ minus the UNRUN allowlist, forwarding extra argv."""
+"""Run an explicitly accounted pytest lane, forwarding extra argv."""
 from __future__ import annotations
 
 import subprocess
@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 UNRUN_TOML = TESTS / "UNRUN.toml"
+SLOW_LANE_SELECTOR = "--slow-lane"
 
 # tests/_toml_compat.py is the shared loader (stdlib tomllib on >=3.11, tiny
 # hand-rolled fallback on 3.10 where CI still runs).
@@ -47,14 +48,21 @@ def default_lane_files() -> list[str]:
     return [f for f in _all_test_files() if f not in unrun]
 
 
-def build_pytest_args(passthrough: list[str]) -> list[str]:
-    """Compose the pytest argv: the explicit run-list + passthrough.
+def build_pytest_args(passthrough: list[str], *, slow: bool = False) -> list[str]:
+    """Compose the pytest argv: explicit files, marker selection, passthrough.
 
     We pass the file list explicitly rather than `tests/ --ignore=<file>`
     to make the lane's accounting directly inspectable and to prevent UNRUN
     files that fail at collection time from ever being imported.
+
+    ``--slow-lane`` is private to this wrapper.  It selects the same accounted
+    files with the ``slow`` marker and is removed before pytest sees argv.
     """
-    return [*default_lane_files(), *passthrough]
+    forwarded = list(passthrough)
+    if SLOW_LANE_SELECTOR in forwarded:
+        slow = True
+        forwarded.remove(SLOW_LANE_SELECTOR)
+    return [*default_lane_files(), "-m", "slow" if slow else "not slow", *forwarded]
 
 
 def _github_escape(message: str) -> str:

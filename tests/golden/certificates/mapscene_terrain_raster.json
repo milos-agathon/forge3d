@@ -16,8 +16,8 @@
       "Light Storage Buffer 2": 1280,
       "colormap1d-lut": 1024,
       "csm_evsm_maps": 134217728,
-      "csm_shadow_maps": 67108864,
-      "csm_uniforms": 864,
+      "csm_shadow_maps": 335544320,
+      "csm_uniforms": 1728,
       "forge3d-readback-staging": 32768,
       "gpu_timing.readback_slot0": 512,
       "gpu_timing.readback_slot1": 512,
@@ -91,7 +91,7 @@
       "vt_page_table_fallback": 64,
       "vt_uniforms": 96
     },
-    "peak_device_local_bytes": 236597694,
+    "peak_device_local_bytes": 474214322,
     "peak_host_visible_bytes": 33792
   },
   "capabilities": {
@@ -124,17 +124,17 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "411171758b01",
+    "git_sha": "5e6cc4e52ea3",
     "version": "1.34.0",
     "wgsl_module_hashes": {
-      "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.shader": "7f3892bcc05b6baaae3eb0da209a8242a7c13454a807a3cab4bc068408e2b10b"
+      "terrain.shadow_depth.shader": "5cb47cb163eba8496ca4c80b931f961d2d51c752cbddbf116690106bfa2a8ce0",
+      "terrain_pbr_pom.shader": "ff5778bc9f4ba1abc8b00460c2be2055c45f52cf2bb5ebdb97d4c17abedd6d82"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 1.6353280544281006,
+      "gpu_ms": 1.6629760265350342,
       "label": "terrain.shadow"
     },
     {
@@ -144,7 +144,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.height_ao"
     },
     {
@@ -159,7 +159,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.02969600073993206,
+      "gpu_ms": 0.030719999223947525,
       "label": "terrain.main"
     },
     {
@@ -177,7 +177,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "e94c53d9942f140cca97b566a8d03627434fc0882d33461930c0ea6d61e384b99df8719310ad64641967d56d75ebbdc521c05a66b744e0e4d2a402e3d518bf08",
+    "sig": "ceceff79ca3e956be2eeec190d2f1a8361989d53d3ac58a12d1d57f3d2fead17fbdaa696c59c277c8d8f5e921d2e4bf9b41e7f79793a1fe4b35ec5e8b787f207",
     "signed_fields": [
       "adapter",
       "allocations",
