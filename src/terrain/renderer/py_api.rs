@@ -58,8 +58,14 @@ fn terrain_cache_options<'py>(
         .extract::<Vec<u8>>()?;
     let shadow_projection = PyDict::new_bound(py);
     for key in [
+        "size_px",
         "terrain_span",
         "z_scale",
+        "cam_target",
+        "cam_radius",
+        "cam_phi_deg",
+        "cam_theta_deg",
+        "fov_y_deg",
         "clip",
         "light",
         "shadows",

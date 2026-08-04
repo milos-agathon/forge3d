@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import sys
@@ -9,7 +10,10 @@ import pytest
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "check_determinism_hashes.py"
 DUPLA_SCRIPT = Path(__file__).parents[1] / "scripts" / "run_dupla_proof.py"
-WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "determinism-matrix.yml"
+CONTRACT_ROOT = Path(
+    os.environ.get("FORGE3D_CI_CONTRACT_ROOT", Path(__file__).parents[1])
+)
+WORKFLOW = CONTRACT_ROOT / ".github" / "workflows" / "determinism-matrix.yml"
 SCENE = "terra_determinata_v1"
 SHA = "d" * 64
 
@@ -148,6 +152,44 @@ def test_f3dz_stream_hashes_run_on_two_hosted_platforms():
     assert "test_error_bound_stored_page_error_nan_and_determinism" in workflow
     assert "test_cross_platform_determinism_hashes" in workflow
     assert "f3dz-determinism-${{ matrix.os }}" in workflow
+
+
+def test_shadow_shader_changes_select_only_the_render_family_in_ci():
+    ci = (WORKFLOW.parent / "ci.yml").read_text()
+    classifier = ci.split("            determinism_render:\n", 1)[1].split(
+        "\n            determinism_f3dz:\n", 1
+    )[0]
+    assert "'src/shaders/shadows.wgsl'" in classifier
+    assert "'src/shaders/includes/shadow_moments.wgsl'" in classifier
+    assert "'src/shaders/csm.wgsl'" not in classifier
+
+    caller = ci.split("  determinism-render:", 1)[1].split(
+        "\n  determinism-f3dz:", 1
+    )[0]
+    assert "needs.terrain-golden-paths.outputs.determinism_render == 'true'" in caller
+    assert "uses: ./.github/workflows/determinism-matrix.yml" in caller
+    assert "run_render: true" in caller
+
+
+def test_matrix_reuses_caller_wheels_instead_of_rebuilding_extensions():
+    workflow = WORKFLOW.read_text()
+    assert "  workflow_call:" in workflow
+    assert "maturin develop" not in workflow
+    assert "PyO3/maturin-action" not in workflow
+    for artifact in ("wheels-linux", "wheels-windows"):
+        assert artifact in workflow
+    assert "'macos'" in workflow
+    assert "ref: ${{ inputs.ref }}" in workflow
+    assert "FORGE3D_NO_BOOTSTRAP: '1'" in workflow
+    anamnesis = workflow.split("  anamnesis-seed:", 1)[1].split(
+        "\n  anamnesis-portability:", 1
+    )[0]
+    assert anamnesis.index("Classify the hosted Vulkan adapter") < anamnesis.index(
+        "Gate ANAMNESIS incrementality"
+    )
+    summary = workflow.split("  diff:", 1)[1]
+    for family in ("f3dz-stream", "render", "wasm-policy", "anamnesis-seed", "anamnesis-portability"):
+        assert f"needs.{family}.result" in summary
 
 
 def test_dupla_aggregation_accepts_verified_and_explicit_absence(tmp_path):
