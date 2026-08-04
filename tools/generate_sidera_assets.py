@@ -26,6 +26,9 @@ BSC_URL = (
     "https://vizier.cds.unistra.fr/viz-bin/asu-tsv?"
     "-source=V%2F50%2Fcatalog&-out=HR,RAJ2000,DEJ2000,Vmag,B-V&-out.max=unlimited"
 )
+MOON_TEXTURE_URL = (
+    "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_2k.jpg"
+)
 SITES = (
     ("amsterdam", 52.3676, 4.9041, 0.0),
     ("mauna_kea", 19.8207, -155.4681, 4.205),
@@ -88,6 +91,16 @@ def generate_catalog() -> None:
     print(f"{output}: {len(stars)} stars, {output.stat().st_size} bytes")
 
 
+def generate_moon_texture() -> None:
+    from PIL import Image
+
+    source = urllib.request.urlopen(MOON_TEXTURE_URL, timeout=60).read()
+    image = Image.open(io.BytesIO(source)).convert("L").resize((128, 64), Image.Resampling.LANCZOS)
+    output = ASTRO / "moon_albedo.bin"
+    output.write_bytes(b"F3DMAP01" + struct.pack("<II", *image.size) + image.tobytes())
+    print(f"{output}: {image.width}x{image.height}, {output.stat().st_size} bytes")
+
+
 def generate_vsop() -> None:
     output = ASTRO / "vsop87d.bin"
     sections: list[tuple[int, int, list[tuple[float, float, float]]]] = []
@@ -145,6 +158,7 @@ def generate_moon() -> None:
 def generate_horizons() -> None:
     output = ROOT / "tests" / "data" / "horizons_vectors.dat"
     rows = []
+    served_ephemerides: set[str] = set()
     for site, latitude, longitude, height_km in SITES:
         for body, command in BODIES:
             parameters = {
@@ -168,6 +182,14 @@ def generate_horizons() -> None:
             }
             url = HORIZONS_URL + "?" + urllib.parse.urlencode(parameters)
             result = json.load(urllib.request.urlopen(url, timeout=60))["result"]
+            # Keep the response preamble: it is the only place the ephemeris
+            # version Horizons actually served appears. Writing a hardcoded
+            # "DE441" into the file header would let the provenance drift the
+            # first time JPL rolls its default.
+            preamble = result.split("$$SOE", 1)[0]
+            for token in preamble.replace("/", " ").split():
+                if token.startswith("DE") and token[2:].split("-")[0].isdigit():
+                    served_ephemerides.add(token.strip("*,;"))
             block = result.split("$$SOE", 1)[1].split("$$EOE", 1)[0]
             body_rows = list(csv.reader(io.StringIO(block.strip())))
             if len(body_rows) != len(EPOCHS):
@@ -205,16 +227,24 @@ def generate_horizons() -> None:
     phase_block = phase_result.split("$$SOE", 1)[1].split("$$EOE", 1)[0]
     phase_rows = list(csv.reader(io.StringIO(phase_block.strip())))
 
-    header = """# JPL Horizons topocentric observer vectors, generated 2026-07-26.
-# Ephemeris: DE441; center: coord@399; frame: ICRF; apparent: AIRLESS.
-# Quantities: 4,10,13,20,24,30,49; angular format: decimal degrees; CSV.
-# Generator: tools/generate_sidera_assets.py --horizons
-# 5 WGS84 sites x 8 UTC epochs = 40 epoch/site combinations x 7 bodies.
-# columns: site utc body lat_deg lon_deg height_m az_deg alt_deg illum_percent
-#          angular_diameter_arcsec distance_au range_rate_km_s phase_angle_deg
-#          tdb_minus_ut_seconds ut1_minus_utc_seconds
-# @moon_phase rows are geocentric: utc illum_percent diameter_arcsec distance_au phase_deg.
-"""
+    # Every quantitative claim in the header is derived from what was actually
+    # requested and actually served, so re-running with a different ephemeris,
+    # site list or epoch list cannot leave a stale provenance record behind.
+    generated = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    ephemeris = ", ".join(sorted(served_ephemerides)) or "unreported by Horizons"
+    header = (
+        f"# JPL Horizons topocentric observer vectors, generated {generated}.\n"
+        f"# Ephemeris: {ephemeris}; center: coord@399; frame: ICRF; apparent: AIRLESS.\n"
+        "# Quantities: 4,10,13,20,24,30,49; angular format: decimal degrees; CSV.\n"
+        "# Generator: tools/generate_sidera_assets.py --horizons\n"
+        f"# {len(SITES)} WGS84 sites x {len(EPOCHS)} UTC epochs = "
+        f"{len(SITES) * len(EPOCHS)} epoch/site combinations x {len(BODIES)} bodies "
+        f"= {len(rows)} vectors.\n"
+        "# columns: site utc body lat_deg lon_deg height_m az_deg alt_deg illum_percent\n"
+        "#          angular_diameter_arcsec distance_au range_rate_km_s phase_angle_deg\n"
+        "#          tdb_minus_ut_seconds ut1_minus_utc_seconds\n"
+        "# @moon_phase rows are geocentric: utc illum_percent diameter_arcsec distance_au phase_deg.\n"
+    )
     with output.open("w", encoding="ascii", newline="\n") as stream:
         stream.write(header)
         for row in rows:
@@ -294,6 +324,7 @@ if __name__ == "__main__":
     parser.add_argument("--vsop", action="store_true")
     parser.add_argument("--moon", action="store_true")
     parser.add_argument("--catalog", action="store_true")
+    parser.add_argument("--moon-texture", action="store_true")
     parser.add_argument("--horizons", action="store_true")
     parser.add_argument("--delta-t", action="store_true")
     options = parser.parse_args()
@@ -303,6 +334,8 @@ if __name__ == "__main__":
         generate_moon()
     if options.catalog:
         generate_catalog()
+    if options.moon_texture:
+        generate_moon_texture()
     if options.horizons:
         generate_horizons()
     if options.delta_t:

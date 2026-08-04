@@ -95,11 +95,14 @@ pub fn earth_velocity(jd_tt: f64) -> Result<DVec3, AstroError> {
 
 fn theory() -> Result<&'static Theory, AstroError> {
     static THEORY: OnceLock<Result<Theory, AstroError>> = OnceLock::new();
-    THEORY.get_or_init(parse).as_ref().map_err(Clone::clone)
+    THEORY
+        .get_or_init(|| parse_bytes(DATA))
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
-fn parse() -> Result<Theory, AstroError> {
-    let mut input = Cursor::new(DATA);
+fn parse_bytes(data: &[u8]) -> Result<Theory, AstroError> {
+    let mut input = Cursor::new(data);
     let mut magic = [0; 8];
     input
         .read_exact(&mut magic)
@@ -145,7 +148,7 @@ fn parse() -> Result<Theory, AstroError> {
             terms,
         });
     }
-    if input.position() != DATA.len() as u64 {
+    if input.position() != data.len() as u64 {
         return Err(AstroError::InvalidData("vsop87d.bin"));
     }
     Ok(Theory { bodies, sections })
@@ -181,4 +184,125 @@ fn read_f64(input: &mut Cursor<&[u8]>) -> Result<f64, AstroError> {
         .read_exact(&mut bytes)
         .map_err(|_| AstroError::InvalidData("vsop87d.bin"))?;
     Ok(f64::from_le_bytes(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const J2000_TT: f64 = 2_451_545.0;
+
+    /// The committed asset must parse to the six declared bodies with the full
+    /// L/B/R power series each, and consume every byte (the parser already
+    /// rejects a trailing-byte mismatch, so reaching `Ok` proves exactness).
+    #[test]
+    fn committed_theory_round_trips_with_every_body_and_series() {
+        let theory = theory().expect("committed VSOP87D asset parses");
+        assert_eq!(theory.bodies.len(), 6);
+        let mut names: Vec<&[u8]> = theory.bodies.iter().map(|body| &body.name[..]).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec![&b"ear"[..], b"jup", b"mar", b"mer", b"sat", b"ven"]
+        );
+        let mut total_terms = 0usize;
+        for body in &theory.bodies {
+            let mut coordinates = [0usize; 3];
+            for index in &body.sections {
+                let section = &theory.sections[*index];
+                coordinates[section.coordinate] += 1;
+                total_terms += section.terms.len();
+                assert!(!section.terms.is_empty());
+                assert!((0..=5).contains(&section.power));
+            }
+            // VSOP87D publishes L0..L5, B0..B5, R0..R5 for every planet.
+            assert!(
+                coordinates.iter().all(|count| *count >= 5),
+                "{} has thin series {coordinates:?}",
+                String::from_utf8_lossy(&body.name)
+            );
+        }
+        assert!(total_terms > 20_000, "only {total_terms} terms committed");
+    }
+
+    /// Earth's heliocentric distance oscillates between the published
+    /// perihelion and aphelion; J2000.0 falls two days before perihelion.
+    #[test]
+    fn earth_radius_vector_brackets_the_published_orbit() {
+        let r = heliocentric_ecliptic(VsopBody::Earth, J2000_TT)
+            .unwrap()
+            .length();
+        assert!((r - 0.983_3).abs() < 1e-3, "J2000 Earth radius {r} AU");
+        let mut min = f64::INFINITY;
+        let mut max: f64 = 0.0;
+        for day in 0..366 {
+            let r = heliocentric_ecliptic(VsopBody::Earth, J2000_TT + f64::from(day))
+                .unwrap()
+                .length();
+            min = min.min(r);
+            max = max.max(r);
+        }
+        assert!((min - 0.983_29).abs() < 1e-3, "perihelion {min} AU");
+        assert!((max - 1.016_71).abs() < 1e-3, "aphelion {max} AU");
+    }
+
+    /// Each body's radius vector must stay inside its published perihelion and
+    /// aphelion over a full revolution — an independent check that each series
+    /// is wired to the right coefficients. `(a, e)` from the JPL planetary
+    /// fact sheets; the bracket is widened by 1% to absorb the fact that these
+    /// are mean elements while VSOP87D returns osculating positions.
+    #[test]
+    fn planet_radius_vectors_stay_within_published_perihelion_and_aphelion() {
+        let cases = [
+            (VsopBody::Mercury, 0.387_1, 0.205_6, 88),
+            (VsopBody::Venus, 0.723_3, 0.006_8, 225),
+            (VsopBody::Earth, 1.000_0, 0.016_7, 365),
+            (VsopBody::Mars, 1.523_7, 0.093_4, 687),
+            (VsopBody::Jupiter, 5.203_0, 0.048_9, 4_333),
+            (VsopBody::Saturn, 9.537_0, 0.056_5, 10_759),
+        ];
+        for (body, semi_major_axis, eccentricity, period_days) in cases {
+            let mut min = f64::INFINITY;
+            let mut max: f64 = 0.0;
+            for step in 0..=period_days {
+                let r = heliocentric_ecliptic(body, J2000_TT + f64::from(step))
+                    .unwrap()
+                    .length();
+                min = min.min(r);
+                max = max.max(r);
+            }
+            let perihelion = semi_major_axis * (1.0 - eccentricity);
+            let aphelion = semi_major_axis * (1.0 + eccentricity);
+            assert!(
+                (min - perihelion).abs() < semi_major_axis * 0.01,
+                "perihelion {min} AU vs published {perihelion} AU"
+            );
+            assert!(
+                (max - aphelion).abs() < semi_major_axis * 0.01,
+                "aphelion {max} AU vs published {aphelion} AU"
+            );
+        }
+    }
+
+    /// The finite-difference Earth velocity must match the published mean
+    /// orbital speed of 29.78 km/s (0.0172 AU/day).
+    #[test]
+    fn earth_velocity_is_the_published_orbital_speed() {
+        let speed = earth_velocity(J2000_TT).unwrap().length();
+        assert!((speed - 0.017_2).abs() < 5e-4, "{speed} AU/day");
+    }
+
+    #[test]
+    fn truncated_or_corrupt_assets_are_rejected() {
+        assert_eq!(
+            parse_bytes(&DATA[..DATA.len() - 1]).unwrap_err(),
+            AstroError::InvalidData("vsop87d.bin")
+        );
+        let mut wrong_magic = DATA.to_vec();
+        wrong_magic[0] = b'X';
+        assert_eq!(
+            parse_bytes(&wrong_magic).unwrap_err(),
+            AstroError::InvalidData("vsop87d.bin")
+        );
+    }
 }

@@ -1,5 +1,8 @@
 format_version = 1
 validity = "2000-01-01 through 2050-12-31 UTC"
+# Required upstream copyright/permission notices for everything redistributed
+# from this directory (moon_terms.bin is MIT and needs its notice shipped).
+third_party_notices = "THIRD_PARTY_NOTICES.md"
 
 [[asset]]
 path = "delta_t_fit.dat"
@@ -24,16 +27,16 @@ source = "IMCCE VSOP87D heliocentric ecliptic theory, all terms for Earth and Me
 source_url = "https://ftp.imcce.fr/pub/ephem/planets/vsop87/"
 license = "IMCCE public astronomical theory data"
 model = "25,659 VSOP87D periodic terms; body coverage intentionally ends at Saturn"
-max_horizons_position_error_arcsec = 2.13
+max_horizons_position_error_arcsec = 2.15
 sha256 = "463ab9b3855f9249bb9e64db159e9695154b0ee80cfcde82824ffb860399443e"
 
 [[asset]]
 path = "moon_terms.bin"
 source = "Meeus Astronomical Algorithms tables 47.A/47.B, via astronomia's MIT-licensed transcription"
 source_url = "https://github.com/commenthol/astronomia/blob/master/src/moonposition.js"
-license = "MIT"
+license = "MIT (notice reproduced in THIRD_PARTY_NOTICES.md)"
 model = "60 longitude/radius terms and 60 latitude terms"
-max_horizons_topocentric_position_error_arcsec = 22.30
+max_horizons_topocentric_position_error_arcsec = 4.70
 sha256 = "4242e9c3d0c2f30d7f7864555160e88ec3cb01d0ffb6333bd945706dcae5d685"
 
 [[asset]]
@@ -44,3 +47,11 @@ license = "public-domain astronomical catalog data"
 model = "9,096 valid FK5/J2000 epoch-2000 records; RA, Dec, Johnson V, and B-V; no proper motion"
 nominal_limiting_magnitude = 6.5
 sha256 = "72e4ac8502ac0ce21b3c1f2f679ea3f8e08f17a443240dd944984c87064d2ba8"
+
+[[asset]]
+path = "moon_albedo.bin"
+source = "NASA Scientific Visualization Studio CGI Moon Kit 2025 color map, LRO WAC/LOLA"
+source_url = "https://svs.gsfc.nasa.gov/4720/"
+license = "NASA public data; credit NASA Scientific Visualization Studio"
+model = "128x64 8-bit luminance, Lanczos downsampled from lroc_color_2k.jpg for display texturing"
+sha256 = "1cff7fd23c1af7fc1ecb3c26cdc7b110d16b74e20f876eda4218ddf7f7e6fe6c"

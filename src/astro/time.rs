@@ -1,10 +1,22 @@
 //! UTC, TT, and Julian-date handling.
 //!
-//! ΔT follows the Espenak–Meeus NASA polynomial fit committed in
-//! `assets/astro/delta_t_fit.dat`. The stored decimal coefficients reproduce
-//! the cited polynomial to much better than one second over 2000–2050; this is
-//! a fit residual, not a claim that future Earth rotation is predictable to
-//! one second.
+//! TAI−UTC comes from the committed IERS leap-second table
+//! (`assets/astro/leap_seconds.dat`); TT = TAI + 32.184 s exactly.
+//!
+//! ΔT (TT−UT1) comes from `assets/astro/delta_t_fit.dat`: a piecewise-linear
+//! (degree-1) fit whose nodes are monthly TT−UT1 values retrieved from JPL
+//! Horizons' EOP series by `tools/generate_sidera_assets.py --delta-t`. Two
+//! declarations, both load-bearing:
+//!
+//! * **Stated residual.** Between nodes the interpolant is exact at the ends
+//!   and the residual is bounded by the monthly curvature of ΔT, which is far
+//!   below one second; `tests/test_astro_ephemeris.py` gates the fit directly
+//!   against the `tdb_minus_ut_seconds` and `ut1_minus_utc_seconds` columns of
+//!   the committed Horizons oracle at every epoch in the file.
+//! * **What this is not.** Beyond the published EOP series Horizons holds
+//!   UT1−UTC fixed, and SIDERA inherits that convention verbatim. Future ΔT is
+//!   therefore a *convention shared with the oracle*, not a prediction of Earth
+//!   rotation — nobody can predict UT1 to a second decades ahead.
 
 use super::{AstroError, MAX_YEAR, MIN_YEAR};
 use std::sync::OnceLock;
@@ -274,5 +286,100 @@ mod tests {
         let before = UtcDateTime::new(2004, 12, 31, 23, 59, 59.0).unwrap();
         let after = UtcDateTime::new(2005, 1, 1, 0, 0, 0.0).unwrap();
         assert!((delta_t_seconds(after).unwrap() - delta_t_seconds(before).unwrap()).abs() < 0.1);
+    }
+
+    /// Julian-day identities from Meeus, *Astronomical Algorithms* 2nd ed.,
+    /// chapter 7, restricted to epochs inside SIDERA's public window.
+    #[test]
+    fn julian_day_matches_textbook_epochs() {
+        let cases = [
+            // J2000.0 itself is 2000 January 1.5 TT; at 12h UTC the UTC-based
+            // Julian day is exactly 2451545.0.
+            ((2000, 1, 1, 12, 0), 2_451_545.0),
+            ((2000, 1, 1, 0, 0), 2_451_544.5),
+            ((2000, 1, 1, 18, 0), 2_451_545.25),
+            // 50 Julian years later: 18263 days (13 leap days: 2000..=2048).
+            ((2050, 1, 1, 0, 0), 2_469_807.5),
+            ((2050, 12, 31, 0, 0), 2_470_171.5),
+            // Month rollover through the Julian/Gregorian `month <= 2` branch.
+            ((2004, 2, 29, 0, 0), 2_453_064.5),
+            ((2004, 3, 1, 0, 0), 2_453_065.5),
+        ];
+        for ((year, month, day, hour, minute), expected) in cases {
+            let utc = UtcDateTime::new(year, month, day, hour, minute, 0.0).unwrap();
+            let actual = julian_day_utc(utc);
+            assert!(
+                (actual - expected).abs() < 1e-9,
+                "{year}-{month}-{day} {hour}:{minute} gave JD {actual}, expected {expected}"
+            );
+        }
+    }
+
+    /// The three scales must be ordered TT > TAI > UTC >~ UT1 and separated by
+    /// exactly the committed leap-second offset plus 32.184 s.
+    #[test]
+    fn tt_utc_and_ut1_offsets_are_the_declared_constants() {
+        let utc = UtcDateTime::new(2026, 7, 26, 22, 0, 0.0).unwrap();
+        let jd_utc = julian_day_utc(utc);
+        let tai_minus_utc = tai_minus_utc_seconds(utc).unwrap();
+        assert_eq!(tai_minus_utc, 37.0, "2026 sits after the 2017-01-01 leap");
+        // Julian dates are ~2.46e6, so one f64 ulp is already ~4e-5 s; the
+        // tolerances below are set by that, not by the algorithm.
+        let tt_minus_utc = (julian_day_tt(utc).unwrap() - jd_utc) * 86_400.0;
+        assert!(
+            (tt_minus_utc - (37.0 + 32.184)).abs() < 1e-3,
+            "{tt_minus_utc} s"
+        );
+        // UT1 trails TT by ΔT, which is ~69 s in this era.
+        let delta_t = (julian_day_tt(utc).unwrap() - julian_day_ut1(utc).unwrap()) * 86_400.0;
+        assert!((delta_t - delta_t_seconds(utc).unwrap()).abs() < 1e-3);
+        assert!((60.0..80.0).contains(&delta_t), "ΔT {delta_t} s out of era");
+    }
+
+    /// The committed fit must be continuous at every one of its ~613 monthly
+    /// node boundaries, not just the one hand-picked in 2005.
+    #[test]
+    fn delta_t_fit_is_continuous_at_every_node() {
+        let fits = delta_t_fit().unwrap();
+        assert!(fits.len() > 600, "only {} segments committed", fits.len());
+        let mut worst: f64 = 0.0;
+        for pair in fits.windows(2) {
+            let (left, right) = (&pair[0], &pair[1]);
+            assert!(
+                (left.end - right.start).abs() < 1e-9,
+                "gap between {} and {}",
+                left.end,
+                right.start
+            );
+            let t = left.end - left.origin;
+            let from_left = left
+                .coefficients
+                .iter()
+                .rev()
+                .fold(0.0, |value, coefficient| value * t + coefficient);
+            worst = worst.max((from_left - right.coefficients[0]).abs());
+        }
+        assert!(worst < 1e-6, "worst node discontinuity {worst} s");
+    }
+
+    /// Leap seconds must be monotonically increasing and land on the six IERS
+    /// steps that fall inside the window.
+    #[test]
+    fn leap_second_table_is_monotonic_and_complete() {
+        let table = leap_seconds().unwrap();
+        assert_eq!(table.len(), 6);
+        assert_eq!(table[0].offset, 32.0);
+        assert_eq!(table[table.len() - 1].offset, 37.0);
+        for pair in table.windows(2) {
+            assert!(pair[1].offset > pair[0].offset);
+            assert!(
+                (pair[0].year, pair[0].month, pair[0].day)
+                    < (pair[1].year, pair[1].month, pair[1].day)
+            );
+        }
+        // A positive leap second is a legal 60.999... UTC second on that day.
+        assert!(UtcDateTime::new(2016, 12, 31, 23, 59, 60.5).is_ok());
+        assert!(UtcDateTime::new(2016, 12, 30, 23, 59, 60.5).is_err());
+        assert!(UtcDateTime::new(2016, 12, 31, 22, 59, 60.5).is_err());
     }
 }

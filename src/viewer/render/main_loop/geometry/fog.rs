@@ -69,7 +69,7 @@ impl Viewer {
             absorption: 1.0,
             sun_direction: [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
             sun_intensity: if sun_dir_ws.y > 0.0 {
-                self.sky_sun_intensity.max(0.0)
+                (self.lit_sun_intensity * self.lit_directional_scale).max(0.0)
             } else {
                 0.0
             },

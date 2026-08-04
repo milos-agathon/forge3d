@@ -1,8 +1,18 @@
 //! Meeus-class 60-term lunar longitude, distance, and latitude theory.
 //!
 //! The complete tables from *Astronomical Algorithms*, chapter 47, are
-//! committed in compact form. SIDERA declares a 30 arcsecond maximum
-//! topocentric position error over 2000–2050 and gates it against Horizons.
+//! committed in compact form (`assets/astro/moon_terms.bin`). The declared
+//! truncation is that of the published tables themselves — nothing further is
+//! dropped — and the *measured* maximum topocentric error over the committed
+//! 2000–2050 Horizons oracle is the figure carried in
+//! `assets/astro/MANIFEST.toml`, gated by
+//! `tests/test_astro_ephemeris.py::test_manifest_truncation_budgets_are_gates_not_prose`.
+//! SIDERA's DoD threshold for the Moon is the looser 30 arcseconds.
+//!
+//! Note that this module returns the *geometric* geocentric position; the
+//! light-time retardation that makes it apparent is applied by
+//! [`super::apparent_geocentric_equatorial`], which deliberately does not add
+//! annual aberration for the Moon.
 
 use super::AstroError;
 use glam::DVec3;
@@ -149,11 +159,14 @@ fn polynomial(t: f64, coefficients: &[f64]) -> f64 {
 
 fn theory() -> Result<&'static Theory, AstroError> {
     static THEORY: OnceLock<Result<Theory, AstroError>> = OnceLock::new();
-    THEORY.get_or_init(parse).as_ref().map_err(Clone::clone)
+    THEORY
+        .get_or_init(|| parse_bytes(DATA))
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
-fn parse() -> Result<Theory, AstroError> {
-    let mut input = Cursor::new(DATA);
+fn parse_bytes(data: &[u8]) -> Result<Theory, AstroError> {
+    let mut input = Cursor::new(data);
     let mut magic = [0; 8];
     input
         .read_exact(&mut magic)
@@ -178,7 +191,7 @@ fn parse() -> Result<Theory, AstroError> {
             latitude: read_i32(&mut input)?,
         });
     }
-    if input.position() != DATA.len() as u64 {
+    if input.position() != data.len() as u64 {
         return Err(AstroError::InvalidData("moon_terms.bin"));
     }
     Ok(Theory {
@@ -209,4 +222,93 @@ fn read_i32(input: &mut Cursor<&[u8]>) -> Result<i32, AstroError> {
         .read_exact(&mut bytes)
         .map_err(|_| AstroError::InvalidData("moon_terms.bin"))?;
     Ok(i32::from_le_bytes(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Meeus tables 47.A and 47.B are 60 rows each; the committed asset must
+    /// carry both in full and consume every byte.
+    #[test]
+    fn committed_theory_round_trips_with_the_full_meeus_tables() {
+        let theory = theory().expect("committed lunar asset parses");
+        assert_eq!(theory.longitude_radius.len(), 60);
+        assert_eq!(theory.latitude.len(), 60);
+        // Table 47.A row 1: D=0 M=0 M'=1 F=0, Sigma-l 6288774, Sigma-r -20905355.
+        let first = &theory.longitude_radius[0];
+        assert_eq!(first.argument, [0, 0, 1, 0]);
+        assert_eq!((first.longitude, first.radius), (6_288_774, -20_905_355));
+        // Table 47.B row 1: D=0 M=0 M'=0 F=1, Sigma-b 5128122.
+        let first_latitude = &theory.latitude[0];
+        assert_eq!(first_latitude.argument, [0, 0, 0, 1]);
+        assert_eq!(first_latitude.latitude, 5_128_122);
+        // The eccentricity correction only ever sees |M| <= 2.
+        assert!(theory
+            .longitude_radius
+            .iter()
+            .all(|term| term.argument[1].abs() <= 2));
+        assert!(theory
+            .latitude
+            .iter()
+            .all(|term| term.argument[1].abs() <= 2));
+    }
+
+    /// Meeus example 47.a: 1992 April 12, 0h TD. Published results are
+    /// lambda = 133.162655 deg, beta = -3.229126 deg, Delta = 368409.7 km.
+    /// The epoch is outside SIDERA's public window on purpose — the kernel
+    /// takes a raw Julian date, so the textbook identity is checked where the
+    /// textbook states it.
+    #[test]
+    fn matches_meeus_example_47a() {
+        let coordinates = geocentric_ecliptic(2_448_724.5).unwrap();
+        let direction = coordinates.ecliptic_of_date_au.normalize();
+        let longitude = direction
+            .y
+            .atan2(direction.x)
+            .to_degrees()
+            .rem_euclid(360.0);
+        let latitude = direction.z.asin().to_degrees();
+        assert!(
+            (longitude - 133.162_655).abs() < 1e-3,
+            "lambda {longitude} deg"
+        );
+        assert!((latitude + 3.229_126).abs() < 1e-3, "beta {latitude} deg");
+        assert!(
+            (coordinates.distance_km - 368_409.7).abs() < 1.0,
+            "Delta {} km",
+            coordinates.distance_km
+        );
+    }
+
+    /// The lunar distance must stay inside the published perigee/apogee range
+    /// over a full anomalistic cycle.
+    #[test]
+    fn distance_stays_within_the_published_perigee_apogee_range() {
+        let mut min = f64::INFINITY;
+        let mut max: f64 = 0.0;
+        for day in 0..400 {
+            let km = geocentric_ecliptic(2_451_545.0 + f64::from(day))
+                .unwrap()
+                .distance_km;
+            min = min.min(km);
+            max = max.max(km);
+        }
+        assert!((356_000.0..362_000.0).contains(&min), "perigee {min} km");
+        assert!((404_000.0..407_000.0).contains(&max), "apogee {max} km");
+    }
+
+    #[test]
+    fn truncated_or_corrupt_assets_are_rejected() {
+        assert_eq!(
+            parse_bytes(&DATA[..DATA.len() - 1]).unwrap_err(),
+            AstroError::InvalidData("moon_terms.bin")
+        );
+        let mut wrong_magic = DATA.to_vec();
+        wrong_magic[3] = b'X';
+        assert_eq!(
+            parse_bytes(&wrong_magic).unwrap_err(),
+            AstroError::InvalidData("moon_terms.bin")
+        );
+    }
 }

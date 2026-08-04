@@ -35,6 +35,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 *azimuth_deg,
                 *elevation_deg,
             );
+            viewer.sky_sun_direction_ws = viewer.lit_sun_direction_ws;
+            viewer.lit_directional_scale = 1.0;
+            viewer.night_instance_count = 0;
             viewer.update_lit_uniform();
             viewer.sync_terrain_sun_to_lit();
             true

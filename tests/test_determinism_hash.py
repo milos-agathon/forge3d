@@ -8,6 +8,7 @@
 # .github/workflows/determinism-matrix.yml
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -116,6 +117,44 @@ def test_matches_committed_golden(tmp_path):
         f"Zero-byte tolerance: if this diverges the pipeline picked up a "
         f"nondeterminism source (or the scene changed; regenerate the golden "
         f"deliberately and document why)."
+    )
+
+
+def test_sidera_night_golden_is_in_the_determinism_inventory(tmp_path):
+    """SIDERA's night sky joins this harness: same inventory, same tolerance.
+
+    The full cross-process gate lives in ``tests/test_astro_night_golden.py``
+    (it needs a GPU but not terrain, so it must not inherit this module's
+    terrain skip). What is asserted here is membership: the golden has a
+    SHA-256 sidecar alongside ``terra_determinata_v1``, that sidecar matches the
+    committed PNG, and a fresh backend-pinned process still reproduces it.
+    """
+    sidecar = GOLDEN_PATH.parent / "sidera_night.sha256"
+    png = Path(__file__).parent / "golden" / "sidera_night.png"
+    assert sidecar.exists(), f"missing {sidecar}; the night golden is not inventoried"
+    committed = sidecar.read_text().split()[0].strip()
+    assert hashlib.sha256(png.read_bytes()).hexdigest() == committed
+
+    env = dict(os.environ)
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=_local_backend())
+    env.pop("FORGE3D_UPDATE_SIDERA_GOLDEN", None)
+    destination = tmp_path / "sidera_night_replay.png"
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from forge3d import _forge3d as native;"
+            f"native._astro_night_golden_frame().save({str(destination)!r})",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    actual = hashlib.sha256(destination.read_bytes()).hexdigest()
+    assert actual == committed, (
+        f"SIDERA night golden diverged on {_local_backend()}\n"
+        f"  golden: {committed}\n  actual: {actual}"
     )
 
 

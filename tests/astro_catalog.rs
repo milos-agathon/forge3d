@@ -47,6 +47,20 @@ fn catalog_photometry_and_per_frame_transform_are_finite() {
                 .iter()
                 .all(|component| component.is_finite())
     }));
+
+    // The physical irradiance must be exactly the cited photometric value with
+    // NO rendering ramp baked in; the ramp lives in its own field. Daylight
+    // must therefore zero `visibility` while leaving `irradiance_w_m2` intact.
+    let daylight = star_instances(utc, observer, Angle::new(30.0)).expect("instances");
+    for (night, day) in instances.iter().zip(&daylight) {
+        assert_eq!(night.visibility, 1.0);
+        assert_eq!(day.visibility, 0.0);
+        assert_eq!(night.irradiance_w_m2, day.irradiance_w_m2);
+        assert_eq!(
+            night.irradiance_w_m2,
+            magnitude_to_irradiance(f64::from(night.v_magnitude))
+        );
+    }
 }
 
 #[test]
@@ -71,4 +85,34 @@ fn catalog_instances_are_apparent_not_mean_place() {
     let actual = star_instances(utc, observer, Angle::new(-18.0)).unwrap()[0];
     assert!((actual.azimuth.value() - expected.0.value()).abs() < 1.0e-10);
     assert!((actual.altitude.value() - expected.1.value()).abs() < 1.0e-10);
+
+    // Agreeing with a mirror of the same pipeline proves nothing on its own:
+    // both could skip every reduction. Assert the reductions actually move the
+    // star, so a stubbed `star_instances` that returned the mean place would
+    // fail here even though the mirror above would still agree with it.
+    let mean_place = frames::equatorial_to_horizontal(
+        j2000,
+        observer,
+        frames::gast(julian_day_ut1(utc).unwrap(), jd_tt),
+    );
+    let displacement_arcmin = separation_arcmin(
+        actual.azimuth.value(),
+        actual.altitude.value(),
+        mean_place.0.value(),
+        mean_place.1.value(),
+    );
+    assert!(
+        displacement_arcmin > 15.0,
+        "J2000 -> apparent moved only {displacement_arcmin}'"
+    );
+}
+
+fn separation_arcmin(az_a: f64, alt_a: f64, az_b: f64, alt_b: f64) -> f64 {
+    let delta_azimuth = (az_a - az_b).to_radians();
+    let (alt_a, alt_b) = (alt_a.to_radians(), alt_b.to_radians());
+    (alt_a.sin() * alt_b.sin() + alt_a.cos() * alt_b.cos() * delta_azimuth.cos())
+        .clamp(-1.0, 1.0)
+        .acos()
+        .to_degrees()
+        * 60.0
 }

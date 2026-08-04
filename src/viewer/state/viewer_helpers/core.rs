@@ -39,7 +39,7 @@ impl Viewer {
             sun_direction_vs.y,
             sun_direction_vs.z,
             if self.lit_sun_direction_ws[1] > 0.0 {
-                self.lit_sun_intensity
+                self.lit_sun_intensity * self.lit_directional_scale
             } else {
                 0.0
             },
@@ -69,7 +69,7 @@ impl Viewer {
                 azimuth,
                 elevation,
                 if elevation > 0.0 {
-                    self.lit_sun_intensity
+                    self.lit_sun_intensity * self.lit_directional_scale
                 } else {
                     0.0
                 },
@@ -87,14 +87,40 @@ impl Viewer {
         let sun = observation.bodies[0].1;
         let azimuth = sun.azimuth.value() as f32;
         let elevation = sun.altitude.value() as f32;
+        if observation.revision != self.astro_night_revision {
+            let instances = crate::astro::night::instances(&observation);
+            self.queue.write_buffer(
+                &self.night_instances,
+                0,
+                bytemuck::cast_slice(instances.as_slice()),
+            );
+            self.night_instance_count = instances.len() as u32;
+            self.astro_night_revision = observation.revision;
+        }
         if observation.revision != self.astro_observation_revision {
             let azimuth_rad = azimuth.to_radians();
             let elevation_rad = elevation.to_radians();
-            self.lit_sun_direction_ws = [
+            self.sky_sun_direction_ws = [
                 elevation_rad.cos() * azimuth_rad.sin(),
                 elevation_rad.sin(),
                 elevation_rad.cos() * azimuth_rad.cos(),
             ];
+            let moon = observation.bodies[1].1;
+            if elevation > 0.0 {
+                self.lit_sun_direction_ws = self.sky_sun_direction_ws;
+                self.lit_directional_scale = 1.0;
+            } else {
+                self.lit_sun_direction_ws = crate::astro::night::horizontal_direction(
+                    moon.azimuth.value(),
+                    moon.altitude.value(),
+                )
+                .as_vec3()
+                .to_array();
+                self.lit_directional_scale = crate::astro::night::normalized_moonlight(
+                    observation.moon_phase.phase_angle.value(),
+                    moon.altitude.value(),
+                );
+            }
             self.update_lit_uniform();
             self.astro_observation_revision = observation.revision;
         }

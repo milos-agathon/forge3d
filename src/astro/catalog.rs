@@ -15,7 +15,20 @@ use std::sync::OnceLock;
 const DATA: &[u8] = include_bytes!("../../assets/astro/bright_stars.bin");
 const HEADER_BYTES: usize = 12;
 const RECORD_BYTES: usize = 16;
-const V_ZERO_IRRADIANCE_W_M2: f64 = 3.6e-8;
+/// Band-integrated Johnson V irradiance of a V = 0 star above the atmosphere.
+///
+/// Derived, not guessed: Allen's *Astrophysical Quantities* (Cox, 4th ed.,
+/// table 15.7) tabulates the V zero point as a **spectral flux density**
+/// `f_λ(0) = 3.63e-9 erg cm⁻² s⁻¹ Å⁻¹ = 3.63e-12 W m⁻² Å⁻¹`, over an effective
+/// bandwidth `Δλ ≈ 880 Å` centred at 0.545 µm. Integrating gives
+/// `3.63e-12 × 880 ≈ 3.19e-9 W m⁻²`.
+///
+/// The per-Ångström figure is nearly 11× larger than the integrated one, and
+/// quoting it as an irradiance would put the Sun's V-band irradiance above the
+/// whole solar constant — see `sun_v_band_irradiance_is_below_the_solar_constant`.
+const V_ZERO_IRRADIANCE_W_M2: f64 = 3.19e-9;
+/// Substituted where the BSC5 leaves B−V blank; 0.65 is the solar value.
+const DEFAULT_B_V: f32 = 0.65;
 
 #[derive(Clone, Copy, Debug)]
 pub struct CatalogStar {
@@ -47,7 +60,14 @@ impl CatalogStar {
 pub struct StarInstance {
     pub azimuth: Angle<Degree>,
     pub altitude: Angle<Degree>,
+    /// Johnson V-band irradiance above the atmosphere, W/m², from the cited
+    /// zero point. This is a photometric quantity: no rendering ramp is baked
+    /// into it. The declared twilight ramp is kept separately in
+    /// [`StarInstance::visibility`] so the two can never be confused.
     pub irradiance_w_m2: f64,
+    /// Declared SIDERA twilight ramp in `[0, 1]` — a *rendering* model keyed to
+    /// solar depression, not a sky-luminance claim. See [`twilight_visibility`].
+    pub visibility: f64,
     pub linear_rgb: [f32; 3],
     pub v_magnitude: f32,
 }
@@ -84,16 +104,78 @@ pub fn star_instances(
             StarInstance {
                 azimuth,
                 altitude,
-                irradiance_w_m2: magnitude_to_irradiance(star.v_magnitude as f64) * visibility,
-                linear_rgb: bv_to_linear_rgb(star.b_v().unwrap_or(0.65)),
+                irradiance_w_m2: magnitude_to_irradiance(star.v_magnitude as f64),
+                visibility,
+                // The BSC5 leaves B-V blank for a few hundred entries; those
+                // are drawn at the solar-analogue colour rather than dropped.
+                linear_rgb: bv_to_linear_rgb(star.b_v().unwrap_or(DEFAULT_B_V)),
                 v_magnitude: star.v_magnitude,
             }
         })
         .collect())
 }
 
-/// Johnson V-band irradiance using the 3.6e−8 W/m² zero point tabulated in
-/// Allen's Astrophysical Quantities (Cox, 4th ed.).
+/// Star displacement, in arcminutes, caused by removing precession alone.
+///
+/// DoD gate 5 is stated about *star positions*, so it is measured here on the
+/// real rendered set: every catalog star is taken through
+/// [`star_instances`]'s exact reduction chain twice, once with
+/// [`frames::precess_j2000_to_date`] and once without, and the horizontal
+/// separation of the two is reported. Returns `(min, median, max)`.
+///
+/// Precession is a rotation about the ecliptic pole, so the displacement scales
+/// with a star's angular distance from that pole: the minimum is near zero by
+/// geometry and the median is the honest summary of the rendered sky.
+pub fn precession_ablation_arcminutes(
+    utc: time::UtcDateTime,
+    observer: Observer,
+) -> Result<(f64, f64, f64), AstroError> {
+    let jd_tt = time::julian_day_tt(utc)?;
+    let sidereal = frames::gast(time::julian_day_ut1(utc)?, jd_tt);
+    let velocity_equatorial = glam::DMat3::from_rotation_x(frames::mean_obliquity(jd_tt))
+        * super::vsop::earth_velocity(jd_tt)?;
+    let mut displacements: Vec<f64> = bright_star_catalog()?
+        .iter()
+        .map(|star| {
+            let ra = star.ra_j2000().radians();
+            let dec = star.dec_j2000().radians();
+            let j2000 = DVec3::new(dec.cos() * ra.cos(), dec.cos() * ra.sin(), dec.sin());
+            let horizontal = |mean: DVec3| {
+                let true_place = frames::nutate_mean_to_true(mean, jd_tt);
+                let apparent = frames::annual_aberration(true_place, velocity_equatorial);
+                frames::equatorial_to_horizontal(apparent, observer, sidereal)
+            };
+            let with = horizontal(frames::precess_j2000_to_date(j2000, jd_tt));
+            let without = horizontal(j2000);
+            separation_arcminutes(with, without)
+        })
+        .collect();
+    if displacements.is_empty() {
+        return Err(AstroError::InvalidData("bright_stars.bin"));
+    }
+    displacements.sort_by(f64::total_cmp);
+    Ok((
+        displacements[0],
+        displacements[displacements.len() / 2],
+        displacements[displacements.len() - 1],
+    ))
+}
+
+fn separation_arcminutes(
+    a: (Angle<Degree>, Angle<Degree>),
+    b: (Angle<Degree>, Angle<Degree>),
+) -> f64 {
+    let delta_azimuth = (a.0.value() - b.0.value()).to_radians();
+    let (alt_a, alt_b) = (a.1.radians(), b.1.radians());
+    (alt_a.sin() * alt_b.sin() + alt_a.cos() * alt_b.cos() * delta_azimuth.cos())
+        .clamp(-1.0, 1.0)
+        .acos()
+        .to_degrees()
+        * 60.0
+}
+
+/// Band-integrated Johnson V irradiance in W/m² for a given V magnitude, from
+/// the zero point derived at [`V_ZERO_IRRADIANCE_W_M2`].
 pub fn magnitude_to_irradiance(v_magnitude: f64) -> f64 {
     V_ZERO_IRRADIANCE_W_M2 * 10.0_f64.powf(-0.4 * v_magnitude)
 }
@@ -202,5 +284,34 @@ mod tests {
             parse_catalog(&data).unwrap_err(),
             AstroError::InvalidData("bright_stars.bin")
         );
+    }
+
+    /// Anchors the photometric zero point's *absolute* scale, which the
+    /// magnitude-ratio tests cannot see because the constant cancels in a
+    /// ratio. The Sun is V = −26.74; its V-band irradiance must be a sensible
+    /// fraction of the 1361 W/m² total solar irradiance, and certainly not
+    /// larger than it. The per-Ångström Allen figure fails this by ~11×.
+    #[test]
+    fn sun_v_band_irradiance_is_below_the_solar_constant() {
+        const SOLAR_CONSTANT_W_M2: f64 = 1_361.0;
+        let sun = magnitude_to_irradiance(-26.74);
+        assert!(
+            sun < SOLAR_CONSTANT_W_M2,
+            "V-band alone would be {sun} W/m^2, above the whole solar constant"
+        );
+        // The V passband is ~88 nm of a spectrum peaking near 500 nm, so a
+        // low-double-digit percentage of the total is the expected order.
+        let fraction = sun / SOLAR_CONSTANT_W_M2;
+        assert!(
+            (0.05..0.25).contains(&fraction),
+            "V-band fraction of the solar constant is {fraction}"
+        );
+    }
+
+    /// Magnitudes are logarithmic: five of them are exactly a factor 100.
+    #[test]
+    fn five_magnitudes_are_a_factor_of_one_hundred() {
+        let ratio = magnitude_to_irradiance(0.0) / magnitude_to_irradiance(5.0);
+        assert!((ratio - 100.0).abs() < 1e-12, "{ratio}");
     }
 }

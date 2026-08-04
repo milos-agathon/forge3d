@@ -4,7 +4,7 @@ use forge3d::astro::time::{julian_day_tt, julian_day_ut1, UtcDateTime};
 use forge3d::astro::{body_position, moon_phase, Body, Observer};
 use forge3d::geo::units::{Angle, Degree};
 use forge3d::lighting::ephemeris::sun_position;
-use glam::{DMat3, DVec3};
+use glam::DMat3;
 
 #[test]
 fn positions_meet_committed_horizons_thresholds() {
@@ -102,17 +102,24 @@ fn positions_meet_committed_horizons_thresholds() {
 fn precession_and_lunar_parallax_are_load_bearing() {
     let utc = UtcDateTime::new(2026, 7, 26, 22, 0, 0.0).unwrap();
     let jd_tt = julian_day_tt(utc).unwrap();
-    let star = DVec3::X;
-    let precession_arcminutes = star
-        .angle_between(frames::precess_j2000_to_date(star, jd_tt))
-        .to_degrees()
-        * 60.0;
-    assert!(
-        precession_arcminutes > 20.0,
-        "{precession_arcminutes} arcminutes"
-    );
-
     let observer = Observer::new(Angle::<Degree>::new(52.3676), Angle::new(4.9041), 0.0).unwrap();
+
+    // Measured on the rendered catalog through the real reduction chain, as
+    // DoD 5 states ("2026-epoch star positions"). A synthetic axis vector
+    // would pass this gate even if `star_instances` skipped precession.
+    let (min, median, max) =
+        forge3d::astro::catalog::precession_ablation_arcminutes(utc, observer).unwrap();
+    assert!(max > 20.0, "max star displacement {max} arcminutes");
+    assert!(
+        median > 15.0,
+        "median star displacement {median} arcminutes"
+    );
+    // Precession rotates about the ecliptic pole, so some star must sit close
+    // enough to that axis to be nearly unmoved. If the minimum were also large
+    // the "ablation" would be measuring something other than precession.
+    assert!(min < 5.0, "min star displacement {min} arcminutes");
+    assert!(min <= median && median <= max);
+
     let sidereal = frames::gast(julian_day_ut1(utc).unwrap(), jd_tt);
     let lunar = moon::geocentric_ecliptic(jd_tt).unwrap();
     let (dpsi, deps, obliquity) = frames::nutation(jd_tt);
@@ -133,7 +140,11 @@ fn precession_and_lunar_parallax_are_load_bearing() {
         "{parallax_arcminutes} arcminutes"
     );
     println!(
-        "ablation displacements arcminutes: precession={precession_arcminutes}, lunar_parallax={parallax_arcminutes}"
+        "ablation displacements arcminutes: precession over {} catalog stars \
+         min={min:.3} median={median:.3} max={max:.3}, lunar_parallax={parallax_arcminutes:.3}",
+        forge3d::astro::catalog::bright_star_catalog()
+            .unwrap()
+            .len()
     );
 }
 

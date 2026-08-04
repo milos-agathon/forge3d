@@ -6,6 +6,8 @@
 pub mod catalog;
 pub mod frames;
 pub mod moon;
+pub mod night;
+pub(crate) mod night_gpu;
 pub mod observation;
 pub mod time;
 pub mod vsop;
@@ -152,11 +154,31 @@ pub fn moon_phase(utc: time::UtcDateTime) -> Result<MoonPhase, AstroError> {
     })
 }
 
+/// Apparent geocentric true-equatorial vector, in AU.
+///
+/// The Sun and the planets take the classical retarded-position-plus-annual-
+/// aberration reduction. The Moon does not: it shares Earth's barycentric
+/// velocity, so the +20.5" annual aberration is cancelled almost exactly by the
+/// barycentric light-time displacement of the Moon over the same 1.3 s. Only
+/// the residual geocentric retardation (about 0.7") survives, and that is what
+/// the lunar light-time loop below applies. Adding annual aberration on top of
+/// it would double-count the effect. Cf. Meeus, *Astronomical Algorithms*
+/// 2nd ed., ch. 23 (Sun/planets) and ch. 47 (Moon).
 fn apparent_geocentric_equatorial(body: Body, jd_tt: f64) -> Result<DVec3, AstroError> {
     let earth = vsop::heliocentric_ecliptic(vsop::VsopBody::Earth, jd_tt)?;
-    let ecliptic = match body {
-        Body::Sun => -earth,
-        Body::Moon => moon::geocentric_ecliptic(jd_tt)?.ecliptic_of_date_au,
+    let (ecliptic, aberrate) = match body {
+        // The Sun's 20.5" light-time retardation is exactly the annual
+        // aberration; it is applied once, as aberration.
+        Body::Sun => (-earth, true),
+        Body::Moon => {
+            let mut light_time = 0.0;
+            let mut geocentric = DVec3::ZERO;
+            for _ in 0..3 {
+                geocentric = moon::geocentric_ecliptic(jd_tt - light_time)?.ecliptic_of_date_au;
+                light_time = geocentric.length() / LIGHT_SPEED_AU_PER_DAY;
+            }
+            (geocentric, false)
+        }
         _ => {
             let planet = match body {
                 Body::Mercury => vsop::VsopBody::Mercury,
@@ -172,16 +194,21 @@ fn apparent_geocentric_equatorial(body: Body, jd_tt: f64) -> Result<DVec3, Astro
                 geocentric = vsop::heliocentric_ecliptic(planet, jd_tt - light_time)? - earth;
                 light_time = geocentric.length() / LIGHT_SPEED_AU_PER_DAY;
             }
-            geocentric
+            (geocentric, true)
         }
     };
     let distance = ecliptic.length();
     let mean_obliquity = frames::mean_obliquity(jd_tt);
     let mean_equatorial = DMat3::from_rotation_x(mean_obliquity) * ecliptic;
     let true_equatorial = frames::nutate_mean_to_true(mean_equatorial, jd_tt);
-    let velocity_ecliptic = vsop::earth_velocity(jd_tt)?;
-    let velocity_equatorial = DMat3::from_rotation_x(mean_obliquity) * velocity_ecliptic;
-    Ok(frames::annual_aberration(true_equatorial, velocity_equatorial) * distance)
+    let apparent = if aberrate {
+        let velocity_ecliptic = vsop::earth_velocity(jd_tt)?;
+        let velocity_equatorial = DMat3::from_rotation_x(mean_obliquity) * velocity_ecliptic;
+        frames::annual_aberration(true_equatorial, velocity_equatorial)
+    } else {
+        true_equatorial
+    };
+    Ok(apparent * distance)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

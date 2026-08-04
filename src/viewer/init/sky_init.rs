@@ -20,11 +20,41 @@ pub struct SkyResources {
     pub sky_camera: TrackedBuffer,
     pub sky_output: TrackedTexture,
     pub sky_output_view: TextureView,
+    pub night_pipeline: wgpu::RenderPipeline,
+    pub night_instances: TrackedBuffer,
+    pub night_bind_group: wgpu::BindGroup,
+    pub night_moon_texture: TrackedTexture,
+}
+
+/// The one definition of the sky output texture.
+///
+/// `Viewer::resize_render_targets` recreates this texture, so init and resize
+/// must build it from the same descriptor: the SIDERA night overlay draws into
+/// `sky_output_view` as a colour attachment, and a resize that silently dropped
+/// `RENDER_ATTACHMENT` would fail wgpu validation on the next frame.
+pub fn sky_output_descriptor(width: u32, height: u32) -> wgpu::TextureDescriptor<'static> {
+    wgpu::TextureDescriptor {
+        label: Some("viewer.sky.output"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    }
 }
 
 /// Create sky compute pipeline and resources
 pub fn create_sky_resources(
     device: &Arc<Device>,
+    queue: &wgpu::Queue,
     width: u32,
     height: u32,
 ) -> RenderResult<SkyResources> {
@@ -60,7 +90,7 @@ pub fn create_sky_resources(
         label: Some("viewer.sky.bgl1"),
         entries: &[wgpu::BindGroupLayoutEntry {
             binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
+            visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
@@ -118,24 +148,14 @@ pub fn create_sky_resources(
     )?;
 
     // Sky output texture
-    let sky_output = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.sky.output"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-    )?;
+    let sky_output = tracked_create_texture(device, &sky_output_descriptor(width, height))?;
     let sky_output_view = sky_output.create_view(&wgpu::TextureViewDescriptor::default());
+    let night = crate::astro::night_gpu::create_resources(
+        device,
+        queue,
+        &sky_bgl1,
+        wgpu::TextureFormat::Rgba8Unorm,
+    )?;
 
     Ok(SkyResources {
         sky_bind_group_layout0: sky_bgl0,
@@ -145,6 +165,10 @@ pub fn create_sky_resources(
         sky_camera,
         sky_output,
         sky_output_view,
+        night_pipeline: night.pipeline,
+        night_instances: night.instances,
+        night_bind_group: night.bind_group,
+        night_moon_texture: night.moon_texture,
     })
 }
 
@@ -162,13 +186,14 @@ mod tests {
             eprintln!("No GPU adapter available, skipping viewer sky pipeline test");
             return;
         };
-        let Ok((device, _queue)) =
+        let Ok((device, queue)) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
         else {
             eprintln!("Could not request GPU device, skipping viewer sky pipeline test");
             return;
         };
 
-        let _resources = create_sky_resources(&Arc::new(device), 16, 16).expect("sky resources");
+        let _resources =
+            create_sky_resources(&Arc::new(device), &queue, 16, 16).expect("sky resources");
     }
 }
