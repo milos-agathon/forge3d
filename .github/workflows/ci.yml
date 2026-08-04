@@ -45,25 +45,59 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # Preflight validates the evaluated event state. On pull requests this is
-      # the synthetic merge commit, so base-added policy tests are available to
-      # legacy PR heads. Every source/artifact job below remains exact-head.
-      - name: Checkout evaluated workflow state
+      # Pull-request activity payloads can retain an old base SHA and expose the
+      # legacy PR head as github.sha. Start from the live base branch instead,
+      # then integrate the immutable PR head locally. Every source/artifact job
+      # below remains exact-head.
+      - name: Checkout live policy base
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.base_ref) || github.sha }}
+          fetch-depth: 0
 
-      - name: Prove evaluated preflight checkout
+      - name: Snapshot live policy base
+        id: policy-base
         shell: bash
-        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Execute the validator from a second base-owned checkout so a candidate
+      # cannot weaken the tests or helper modules that judge its merged tree.
+      - name: Checkout trusted CI contracts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.policy-base.outputs.sha }}
+          path: .ci-contracts
+
+      - name: Materialize current-base candidate tree
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          POLICY_BASE_SHA: ${{ steps.policy-base.outputs.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"
+          git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pull/${PR_NUMBER}/head"
+          test "$(git rev-parse refs/remotes/pull/${PR_NUMBER}/head)" = "$PR_HEAD_SHA"
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-commit --no-ff "$PR_HEAD_SHA"
+          test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$PR_HEAD_SHA"
+          printf 'policy_base_sha=%s\ncandidate_head_sha=%s\n' \
+            "$POLICY_BASE_SHA" "$PR_HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Validate workflow and cost-control contracts
+        working-directory: .ci-contracts
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_CI_CONTRACT_ROOT: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}/.ci-contracts
         run: |
           python -m pip install pytest pyyaml
           python -m pytest \

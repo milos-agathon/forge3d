@@ -73,6 +73,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert f"          - {scope}" in trigger
 
     preflight = _job(workflow, "preflight")
+    assert "name: Checkout trusted CI contracts" in preflight
     if "name: Checkout trusted CI contracts" in preflight:
         live_base_ref = (
             "ref: ${{ github.event_name == 'pull_request' && "
@@ -86,6 +87,11 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert "path: .ci-contracts" in preflight
         assert "POLICY_BASE_SHA: ${{ steps.policy-base.outputs.sha }}" in preflight
         assert 'test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"' in preflight
+        assert 'git config --local user.name "github-actions[bot]"' in preflight
+        assert (
+            'git config --local user.email '
+            '"41898282+github-actions[bot]@users.noreply.github.com"' in preflight
+        )
         assert 'git merge --no-commit --no-ff "$PR_HEAD_SHA"' in preflight
         assert 'test "$(git rev-parse MERGE_HEAD)" = "$PR_HEAD_SHA"' in preflight
         assert "working-directory: .ci-contracts" in preflight
