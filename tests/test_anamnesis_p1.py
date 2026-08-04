@@ -109,6 +109,9 @@ def test_p1_portability_and_production_lanes_fail_closed():
         assert "probe_status" in job
         assert 'exit "$probe_status"' in job
         assert "grep -Eq" not in job
+    assert hosted_seed.index("Classify the hosted Vulkan adapter") < hosted_seed.index(
+        "Gate ANAMNESIS incrementality"
+    )
 
     physical_seed = _job(
         ci, "test-anamnesis-portability-seed", "test-anamnesis-portability"
@@ -116,7 +119,7 @@ def test_p1_portability_and_production_lanes_fail_closed():
     physical_consumer = _job(
         ci, "test-anamnesis-portability", "test-anamnesis-production"
     )
-    production = _job(ci, "test-anamnesis-production", "build-docs")
+    production = _job(ci, "test-anamnesis-production", "determinism-render")
     physical_runner = (
         "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]"
     )
