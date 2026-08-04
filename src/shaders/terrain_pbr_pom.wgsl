@@ -487,11 +487,14 @@ struct TerrainVTUniforms {
     config1: vec4<u32>,
     config2: vec4<u32>,
     // TerrainVtFamilyInfo: per-family single source of truth, refreshed each
-    // frame from CPU residency state. x = enabled (0/1), y = page-table layer
-    // offset, z/w = virtual width/height. All families share one atlas layer.
-    // Must match TerrainVTUniformsGpu in
+    // frame from CPU residency state. x = enabled (0/1), y = page-table array-
+    // layer offset, z = atlas layer (0 while families share one atlas layer),
+    // w = registered source count. Must match TerrainVTUniformsGpu in
     // src/terrain/renderer/virtual_texture.rs.
     family_info: array<vec4<u32>, 3>,
+    // Bounded feedback append (TESSELLA win 1). x = slot capacity (a power of
+    // two), y/z = physical page-table base width/height, w unused.
+    config3: vec4<u32>,
 }
 
 struct TerrainVTFallbackColors {
@@ -500,12 +503,22 @@ struct TerrainVTFallbackColors {
     mask: array<vec4<f32>, 4>,
 }
 
-struct TerrainVTFeedbackEntry {
-    tile_x: u32,
-    tile_y: u32,
-    mip_level: u32,
-    frame_number: u32,
-}
+// TESSELLA win 1: the feedback surface is a BOUNDED set, not a page map.
+//
+// It used to be DIRECT-MAPPED over the whole virtual page pyramid -- one
+// 16-byte slot per (family, material, mip, page_y, page_x). At the acceptance
+// camera's 2^18 x 2^18 virtual texture that is 100,663,296 slots = 1.5 GiB of
+// MAP_READ memory: three times the entire 512 MiB host-visible budget, for a
+// working set of about a thousand pages. It is now a fixed-capacity append
+// buffer of 32-bit page keys, so the host-visible footprint is a function of
+// the CAPACITY, never of the virtual texture's size. Duplicate samples are
+// intentional: the CPU deduplicates the bounded readback with its normal
+// HashSet path.
+//
+// Layout: word 0 is an atomic append count, word 1 is an explicit overflow
+// count, and words 2 ..= capacity + 1 hold `page_index + 1`. The key alone
+// identifies the page, so the CPU inverts `terrain_vt_feedback_index` rather
+// than reading back separate coordinate words.
 
 @group(6) @binding(6)
 var<uniform> terrain_vt_uniforms: TerrainVTUniforms;
@@ -523,7 +536,7 @@ var terrain_vt_sampler: sampler;
 var terrain_vt_page_table: texture_2d_array<f32>;
 
 @group(6) @binding(11)
-var<storage, read_write> terrain_vt_feedback: array<TerrainVTFeedbackEntry>;
+var<storage, read_write> terrain_vt_feedback: array<atomic<u32>>;
 
 @group(6) @binding(12)
 var material_normal_tex: texture_2d<f32>;
@@ -536,6 +549,16 @@ var material_mask_tex: texture_2d<f32>;
 
 @group(6) @binding(15)
 var material_map_samp: sampler;
+
+struct TerrainFrameCounters {
+    material_invocations: atomic<u32>,
+    feedback_records: atomic<u32>,
+    fallback_texels: atomic<u32>,
+    forward_material_invocations: atomic<u32>,
+}
+
+@group(6) @binding(16)
+var<storage, read_write> terrain_frame_counters: TerrainFrameCounters;
 struct TerrainMaterialNoise {
     snow_macro: f32,
     snow_detail: f32,
@@ -1423,6 +1446,10 @@ struct VertexOutput {
     @location(0) world_position : vec3<f32>,
     @location(1) world_normal : vec3<f32>,
     @location(2) tex_coord : vec2<f32>,
+    // TESSELLA visibility identity: ((selected_lod & 0xf) << 12) | (tile_index & 0xfff).
+    // terrain_visbuffer_write.wgsl packs this with the primitive index; no
+    // forward shading path reads it.
+    @location(3) @interpolate(flat) tile_id : u32,
 };
 
 struct FragmentOutput {
@@ -1595,6 +1622,7 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     out.world_position = world_pos;
     out.world_normal = vec3<f32>(0.0, 0.0, 1.0); // Z-up, recalculated in fragment shader
     out.tex_coord = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    out.tile_id = 0u;
     
     if (camera_mode == 1u) {
         // MESH MODE: Apply view and projection matrices for proper perspective
@@ -1624,6 +1652,62 @@ fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
     return det_fma(apply_height_curve01(t), h_max - h_min, h_min);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TESSELLA: explicit screen-space gradients for the deferred visibility resolve
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The forward pass rasterises a 2x2 quad PER TRIANGLE, so `dpdx`/`dpdy` of an
+// interpolated attribute is always that one triangle's own screen gradient --
+// uncovered lanes are helper invocations carrying the same triangle's
+// extrapolated attributes. The visibility resolve shades from a full-screen
+// triangle instead, where a quad can straddle two terrain triangles at different
+// clipmap LODs, so the hardware quad derivative there is a mixture of two
+// surfaces and drives LOD selection, the LOD-aware height normal, the
+// virtual-texture mip and the triplanar footprint to different values than the
+// forward path computed for the same pixel.
+//
+// Pass 2 therefore reconstructs the covering triangle's own quad-aligned
+// gradients and publishes them here. The forward pipeline never writes these,
+// so `terrain_explicit_gradients` stays 0 and every `select` below returns the
+// hardware derivative bit-for-bit: the forward image is unchanged.
+var<private> terrain_explicit_gradients: u32 = 0u;
+var<private> terrain_explicit_ddx_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
+var<private> terrain_explicit_ddy_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
+var<private> terrain_explicit_ddx_world: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+var<private> terrain_explicit_ddy_world: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+
+fn terrain_screen_ddx_uv(uv: vec2<f32>) -> vec2<f32> {
+    return select(
+        dpdxCoarse(uv),
+        terrain_explicit_ddx_uv,
+        terrain_explicit_gradients != 0u,
+    );
+}
+
+fn terrain_screen_ddy_uv(uv: vec2<f32>) -> vec2<f32> {
+    return select(
+        dpdyCoarse(uv),
+        terrain_explicit_ddy_uv,
+        terrain_explicit_gradients != 0u,
+    );
+}
+
+fn terrain_screen_ddx_world(world_pos: vec3<f32>) -> vec3<f32> {
+    return select(
+        dpdxCoarse(world_pos),
+        terrain_explicit_ddx_world,
+        terrain_explicit_gradients != 0u,
+    );
+}
+
+fn terrain_screen_ddy_world(world_pos: vec3<f32>) -> vec3<f32> {
+    return select(
+        dpdyCoarse(world_pos),
+        terrain_explicit_ddy_world,
+        terrain_explicit_gradients != 0u,
+    );
+}
+
 /// Compute LOD from screen-space UV footprint (for LOD-aware Sobel).
 /// Returns LOD level and texel size at that LOD.
 struct LodInfo {
@@ -1637,8 +1721,8 @@ fn compute_height_lod(uv: vec2<f32>) -> LodInfo {
     let max_lod = f32(textureNumLevels(height_tex) - 1u);
     
     // Compute screen-space derivatives of UV
-    let ddx_uv = dpdxCoarse(uv);
-    let ddy_uv = dpdyCoarse(uv);
+    let ddx_uv = terrain_screen_ddx_uv(uv);
+    let ddy_uv = terrain_screen_ddy_uv(uv);
     
     // Footprint in texels (at mip 0)
     let rho = max(length(ddx_uv * dims), length(ddy_uv * dims));
@@ -1797,8 +1881,8 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
 /// Compute geometric normal from screen-space derivatives of world position.
 /// This is the "ground truth" normal that doesn't suffer from mip mismatch.
 fn calculate_normal_ddxddy(world_pos: vec3<f32>) -> vec3<f32> {
-    let ddx_pos = dpdxCoarse(world_pos);
-    let ddy_pos = dpdyCoarse(world_pos);
+    let ddx_pos = terrain_screen_ddx_world(world_pos);
+    let ddy_pos = terrain_screen_ddy_world(world_pos);
     // Cross product gives surface normal (right-hand rule)
     // Note: order matters for winding direction
     let n = det_cross3(ddx_pos, ddy_pos);
@@ -1863,11 +1947,6 @@ fn terrain_vt_family_enabled(family_slot: u32) -> bool {
     return terrain_vt_uniforms.family_info[family_slot].x != 0u;
 }
 
-fn terrain_vt_family_virtual_size(family_slot: u32) -> vec2<f32> {
-    let family = terrain_vt_uniforms.family_info[min(family_slot, 2u)];
-    return vec2<f32>(f32(max(family.z, 1u)), f32(max(family.w, 1u)));
-}
-
 fn terrain_vt_material_index(layer: f32) -> u32 {
     let material_count = max(terrain_vt_uniforms.config2.y, 1u);
     let clamped_layer = clamp(u32(max(layer, 0.0)), 0u, material_count - 1u);
@@ -1885,8 +1964,11 @@ fn terrain_vt_fallback_color(family_slot: u32, material_index: u32) -> vec4<f32>
     return terrain_vt_fallbacks.albedo[clamped_material];
 }
 
-fn terrain_vt_desired_mip(family_slot: u32, ddx_uv: vec2<f32>, ddy_uv: vec2<f32>) -> u32 {
-    let virtual_size = terrain_vt_family_virtual_size(family_slot);
+fn terrain_vt_desired_mip(ddx_uv: vec2<f32>, ddy_uv: vec2<f32>) -> u32 {
+    let virtual_size = vec2<f32>(
+        f32(max(terrain_vt_uniforms.config1.x, 1u)),
+        f32(max(terrain_vt_uniforms.config1.y, 1u)),
+    );
     let footprint_x = max(length(ddx_uv * virtual_size), length(ddy_uv * virtual_size));
     let desired = max(log2(max(footprint_x, 1.0)), 0.0);
     return min(u32(desired), max(terrain_vt_uniforms.config2.x, 1u) - 1u);
@@ -1905,10 +1987,44 @@ fn terrain_vt_page_dims(mip_level: u32) -> vec2<u32> {
     );
 }
 
-fn terrain_vt_page_table_layer(family_slot: u32, material_index: u32, mip_level: u32) -> i32 {
-    let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
+fn terrain_vt_page_table_layer(family_slot: u32, material_index: u32) -> i32 {
     let family_base = terrain_vt_uniforms.family_info[min(family_slot, 2u)].y;
-    return i32(family_base + material_index * max_mip_levels + mip_level);
+    return i32(family_base + material_index);
+}
+
+// The page table is a single-level atlas: mip zero occupies the base region
+// and finer tail regions are packed left-to-right below it. This avoids the
+// mipmapped Rgba32Float image path that loses the protected Vulkan device.
+fn terrain_vt_page_table_origin(mip_level: u32) -> vec2<u32> {
+    if (mip_level == 0u) {
+        return vec2<u32>(0u, 0u);
+    }
+    let base_width = max(terrain_vt_uniforms.config3.y, 1u);
+    let base_height = max(terrain_vt_uniforms.config3.z, 1u);
+    var tail_x = 0u;
+    var prior_mip = 1u;
+    loop {
+        if (prior_mip >= mip_level) {
+            break;
+        }
+        tail_x = tail_x + max(base_width >> min(prior_mip, 31u), 1u);
+        prior_mip = prior_mip + 1u;
+    }
+    return vec2<u32>(tail_x, base_height);
+}
+
+fn terrain_vt_page_table_load(
+    page: vec2<i32>,
+    layer: i32,
+    mip_level: u32,
+) -> vec4<f32> {
+    let origin = terrain_vt_page_table_origin(mip_level);
+    return textureLoad(
+        terrain_vt_page_table,
+        page + vec2<i32>(origin),
+        layer,
+        0,
+    );
 }
 
 fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) -> u32 {
@@ -1928,14 +2044,82 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
     if (tile_x >= base_pages_x || tile_y >= base_pages_y) {
         return;
     }
-    let index = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y);
-    let material_count = max(terrain_vt_uniforms.config2.y, 1u);
-    let logical_material = family_slot * material_count + material_index;
-    terrain_vt_feedback[index] = TerrainVTFeedbackEntry(
-        tile_x,
-        tile_y,
-        mip_level,
-        logical_material + 1u,
+    // `+ 1` keeps 0 reserved for an empty slot in malformed/partial readback.
+    let key = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y) + 1u;
+    let capacity = max(terrain_vt_uniforms.config3.x, 1u);
+    // A bounded append uses only operations supported by every shader backend:
+    // reserve one slot with atomicAdd, then publish the key with atomicStore.
+    // Duplicates are expected and are removed by the CPU readback parser.
+    let append_slot = atomicAdd(&terrain_vt_feedback[0], 1u);
+    if (append_slot < capacity) {
+        atomicStore(&terrain_vt_feedback[append_slot + 2u], key);
+    } else {
+        // Never a silent drop. The explicit overflow counter tells the CPU the
+        // request set was incomplete, so retained requests remain eligible for
+        // a later frame.
+        atomicAdd(&terrain_vt_feedback[1], 1u);
+    }
+}
+
+fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
+    if (!terrain_vt_enabled()
+        || terrain_vt_uniforms.config2.w == 0u
+        || !terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)) {
+        return;
+    }
+    let virtual_size = vec2<f32>(
+        f32(max(terrain_vt_uniforms.config1.x, 1u)),
+        f32(max(terrain_vt_uniforms.config1.y, 1u)),
+    );
+    let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
+    let desired_mip = terrain_vt_desired_mip(
+        terrain_screen_ddx_uv(uv),
+        terrain_screen_ddy_uv(uv),
+    );
+    let page_dims = terrain_vt_page_dims(desired_mip);
+    let page_size = vec2<f32>(tile_size * exp2(f32(desired_mip)));
+    let page = min(
+        vec2<u32>(fract(uv) * virtual_size / page_size),
+        page_dims - vec2<u32>(1u),
+    );
+    // Count every covered surface sample exactly once. The bounded append is
+    // only needed when an enabled family misses the desired page; skipping it
+    // for a fully resident page avoids contending on the global feedback
+    // counters for every pixel of a settled frame.
+    atomicAdd(&terrain_frame_counters.feedback_records, 1u);
+    let desired_entry = terrain_vt_page_table_load(
+        vec2<i32>(i32(page.x), i32(page.y)),
+        terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_ALBEDO, material_index),
+        desired_mip,
+    );
+    var all_families_resident = desired_entry.z > 0.5;
+    if (all_families_resident && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_NORMAL)) {
+        let normal_entry = terrain_vt_page_table_load(
+            vec2<i32>(i32(page.x), i32(page.y)),
+            terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_NORMAL, material_index),
+            desired_mip,
+        );
+        all_families_resident = normal_entry.z > 0.5;
+    }
+    if (all_families_resident && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_MASK)) {
+        let mask_entry = terrain_vt_page_table_load(
+            vec2<i32>(i32(page.x), i32(page.y)),
+            terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_MASK, material_index),
+            desired_mip,
+        );
+        all_families_resident = mask_entry.z > 0.5;
+    }
+    if (all_families_resident) {
+        return;
+    }
+    // One physical record represents this surface sample. CPU readback fans
+    // it out to all enabled material families.
+    terrain_vt_write_feedback(
+        TERRAIN_VT_FAMILY_ALBEDO,
+        material_index,
+        desired_mip,
+        page.x,
+        page.y,
     );
 }
 
@@ -1959,29 +2143,29 @@ fn terrain_vt_resolve_family_uv(
     }
 
     let material_index = terrain_vt_material_index(layer);
-    let virtual_size = terrain_vt_family_virtual_size(family_slot);
+    let virtual_size = vec2<f32>(
+        f32(max(terrain_vt_uniforms.config1.x, 1u)),
+        f32(max(terrain_vt_uniforms.config1.y, 1u)),
+    );
     let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
     let tile_border = f32(terrain_vt_uniforms.config0.z);
     let atlas_size = f32(max(terrain_vt_uniforms.config0.w, 1u));
     let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
     let wrapped_uv = fract(uv);
     let virtual_texel = wrapped_uv * virtual_size;
-    let desired_mip = terrain_vt_desired_mip(family_slot, ddx_uv, ddy_uv);
+    let desired_mip = terrain_vt_desired_mip(ddx_uv, ddy_uv);
     let desired_page_dims = terrain_vt_page_dims(desired_mip);
     let desired_page_size = vec2<f32>(tile_size * exp2(f32(desired_mip)), tile_size * exp2(f32(desired_mip)));
     let desired_page = min(vec2<u32>(virtual_texel / desired_page_size), desired_page_dims - vec2<u32>(1u, 1u));
-    terrain_vt_write_feedback(family_slot, material_index, desired_mip, desired_page.x, desired_page.y);
-
     var mip_level = desired_mip;
     loop {
         let page_dims = terrain_vt_page_dims(mip_level);
         let page_size = vec2<f32>(tile_size * exp2(f32(mip_level)), tile_size * exp2(f32(mip_level)));
         let page = min(vec2<u32>(virtual_texel / page_size), page_dims - vec2<u32>(1u, 1u));
-        let entry = textureLoad(
-            terrain_vt_page_table,
+        let entry = terrain_vt_page_table_load(
             vec2<i32>(i32(page.x), i32(page.y)),
-            terrain_vt_page_table_layer(family_slot, material_index, mip_level),
-            0,
+            terrain_vt_page_table_layer(family_slot, material_index),
+            mip_level,
         );
         if (entry.z > 0.5) {
             let page_origin = vec2<f32>(f32(page.x), f32(page.y)) * page_size;
@@ -2023,20 +2207,22 @@ fn terrain_vt_resolve_source_id(
         return 0u;
     }
     let material_index = terrain_vt_material_index(layer);
-    let virtual_size = terrain_vt_family_virtual_size(family_slot);
+    let virtual_size = vec2<f32>(
+        f32(max(terrain_vt_uniforms.config1.x, 1u)),
+        f32(max(terrain_vt_uniforms.config1.y, 1u)),
+    );
     let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
     let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
     let virtual_texel = fract(uv) * virtual_size;
-    var mip_level = terrain_vt_desired_mip(family_slot, ddx_uv, ddy_uv);
+    var mip_level = terrain_vt_desired_mip(ddx_uv, ddy_uv);
     loop {
         let page_dims = terrain_vt_page_dims(mip_level);
         let page_size = vec2<f32>(tile_size * exp2(f32(mip_level)), tile_size * exp2(f32(mip_level)));
         let page = min(vec2<u32>(virtual_texel / page_size), page_dims - vec2<u32>(1u, 1u));
-        let entry = textureLoad(
-            terrain_vt_page_table,
+        let entry = terrain_vt_page_table_load(
             vec2<i32>(i32(page.x), i32(page.y)),
-            terrain_vt_page_table_layer(family_slot, material_index, mip_level),
-            0,
+            terrain_vt_page_table_layer(family_slot, material_index),
+            mip_level,
         );
         if (entry.z > 0.5) {
             return family_slot * TERRAIN_VT_MATERIAL_CAPACITY + material_index + 1u;
@@ -2060,8 +2246,8 @@ fn terrain_vt_source_id_triplanar(
     layer: f32,
 ) -> u32 {
     let weights = compute_triplanar_weights(normal, blend_sharpness);
-    let dpdx_world = dpdxCoarse(world_pos) * scale;
-    let dpdy_world = dpdyCoarse(world_pos) * scale;
+    let dpdx_world = terrain_screen_ddx_world(world_pos) * scale;
+    let dpdy_world = terrain_screen_ddy_world(world_pos) * scale;
     var uv = world_pos.yz * scale;
     var ddx_uv = dpdx_world.yz;
     var ddy_uv = dpdy_world.yz;
@@ -2141,8 +2327,8 @@ fn sample_triplanar(
 
     // Compute screen-space derivatives of world position for proper mip selection
     // This ensures correct LOD even when UVs are derived from world coords
-    let dpdx_world = dpdxCoarse(world_pos) * scale;
-    let dpdy_world = dpdyCoarse(world_pos) * scale;
+    let dpdx_world = terrain_screen_ddx_world(world_pos) * scale;
+    let dpdy_world = terrain_screen_ddy_world(world_pos) * scale;
 
     // Extract UV gradients for each projection axis
     let ddx_x = dpdx_world.yz;
@@ -2175,8 +2361,8 @@ fn sample_triplanar_vt_family(
     let uv_x = world_pos.yz * scale;
     let uv_y = world_pos.xz * scale;
     let uv_z = world_pos.xy * scale;
-    let dpdx_world = dpdxCoarse(world_pos) * scale;
-    let dpdy_world = dpdyCoarse(world_pos) * scale;
+    let dpdx_world = terrain_screen_ddx_world(world_pos) * scale;
+    let dpdy_world = terrain_screen_ddy_world(world_pos) * scale;
     let ddx_x = dpdx_world.yz;
     let ddy_x = dpdy_world.yz;
     let ddx_y = dpdx_world.xz;
@@ -2941,8 +3127,7 @@ fn apply_atmospheric_fog(
     return fog_result;
 }
 
-@fragment
-fn fs_main(input : VertexOutput) -> FragmentOutput {
+fn shade_main(input : VertexOutput) -> FragmentOutput {
     var out : FragmentOutput;
 
     // P4: Reflection pass clip plane
@@ -4553,6 +4738,20 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     return out;
 }
 
+@fragment
+fn fs_main(input : VertexOutput) -> FragmentOutput {
+    let out = shade_main(input);
+    atomicAdd(&terrain_frame_counters.material_invocations, 1u);
+    atomicAdd(&terrain_frame_counters.forward_material_invocations, 1u);
+    terrain_vt_write_surface_feedback(input.tex_coord, 0u);
+    return out;
+}
+
+// TESSELLA pass 1 (`fs_visibility`) lives in src/shaders/terrain_visbuffer_write.wgsl
+// and pass 2 (`fs_visibility_resolve_fullscreen`) in
+// src/shaders/terrain_visibility_fullscreen.wgsl; both are appended to this
+// module at assembly time by `shader_sources`. Neither is defined here, so the
+// forward module cannot drift from the packing those two files agree on.
 
 // ──────────────────────────────────────────────────────────────────────────
 // BOP-P2-02: Clipmap ring/skirt vertex path.
@@ -4567,12 +4766,30 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
 fn vs_clipmap_main(
     @location(0) clip_pos_xz : vec2<f32>,
     @location(1) clip_uv : vec2<f32>,
-    @location(2) clip_morph : vec2<f32>
+    @location(2) clip_morph : vec2<f32>,
+    @location(3) instance_col0 : vec4<f32>,
+    @location(4) instance_col1 : vec4<f32>,
+    @location(5) instance_col2 : vec4<f32>,
+    @location(6) instance_col3 : vec4<f32>,
+    @location(7) _tile_id_lod : vec2<u32>
 ) -> VertexOutput {
     var out : VertexOutput;
 
     let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_fine = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let height_dims = vec2<f32>(textureDimensions(height_tex));
+    let coarse_texels = exp2(min(max(clip_morph.y, 0.0) + 1.0, 16.0));
+    let coarse_step = vec2<f32>(coarse_texels)
+        / max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0));
+    let coarse_cell = uv / coarse_step;
+    let coarse_base = floor(coarse_cell) * coarse_step;
+    let coarse_t = fract(coarse_cell);
+    let h00 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h10 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h01 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h11 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h_coarse = mix(mix(h00, h10, coarse_t.x), mix(h01, h11, coarse_t.x), coarse_t.y);
+    let h_raw = mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -4582,15 +4799,31 @@ fn vs_clipmap_main(
     let skirt_offset = select(0.0, u_terrain.camera_mode_params.y * 0.001, clip_morph.x < 0.0);
     let world_z_centered = (h_disp - h_center - skirt_offset) * h_exag;
     let world_z_original = (h_disp - skirt_offset) * h_exag;
+    let instance_transform = mat4x4<f32>(
+        instance_col0,
+        instance_col1,
+        instance_col2,
+        instance_col3,
+    );
+    let instance_position = instance_transform * vec4<f32>(
+        clip_pos_xz.x,
+        clip_pos_xz.y,
+        world_z_centered,
+        1.0,
+    );
 
-    out.world_position = vec3<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_original);
+    out.world_position = vec3<f32>(instance_position.xy, world_z_original);
     out.world_normal = vec3<f32>(0.0, 0.0, 1.0);
     out.tex_coord = uv;
+    // TESSELLA: the clipmap vertex stage always emits the packed tile/LOD
+    // identity terrain_visbuffer_write.wgsl consumes. No forward shading path
+    // reads tile_id, so both pipelines share this one vertex stage.
+    out.tile_id = ((_tile_id_lod.y & 0xfu) << 12u) | (_tile_id_lod.x & 0xfffu);
     out.clip_position = det_mat4_mul_vec4(
         u_terrain.proj,
         det_mat4_mul_vec4(
             u_terrain.view,
-            vec4<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_centered, 1.0),
+            instance_position,
         ),
     );
     return out;

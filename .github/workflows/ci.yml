@@ -24,6 +24,7 @@ on:
           - m06
           - f3dz
           - anamnesis
+          - tessella
 
 permissions:
   contents: read
@@ -405,16 +406,30 @@ jobs:
               - 'tests/test_anamnesis_*.py'
               - 'tests/goldens/determinism/**'
               - '.github/workflows/determinism-matrix.yml'
-            # No TESSELLA physical job exists on main. This explicit output is
-            # a contract guard: any future lane must consume this scope (or a
-            # deliberate manual scope) and may not run on every PR.
+            # The TESSELLA physical lane consumes this scope and remains behind
+            # the same explicit physical-runner selection policy as other
+            # expensive acceptance families.
             tessella:
               - 'src/terrain/renderer/virtual_texture.rs'
+              - 'src/terrain/culling/two_phase.rs'
               - 'src/core/feedback_buffer.rs'
               - 'src/core/screen_space_effects/hzb.rs'
               - 'src/shaders/hzb_build.wgsl'
+              - 'src/shaders/hzb_cull.wgsl'
+              - 'scripts/tessella_evidence_contract.py'
+              - 'scripts/tessella_evidence_provenance.py'
+              - 'scripts/tessella_evidence_report.py'
+              - 'scripts/tessella_evidence_thresholds.py'
               - 'tests/test_terrain_vt_pbr_families.py'
               - 'tests/test_tv20_virtual_texturing.py'
+              - 'tests/test_vt_out_of_core.py'
+              - 'tests/test_hzb_culling.py'
+              - 'tests/test_visibility_buffer.py'
+              - 'tests/test_bc_encoders.py'
+              - 'tests/test_flythrough_popping.py'
+              - 'tests/test_vt_request_retention.py'
+              - 'tests/test_tessella_certificate_evidence.py'
+              - 'tests/test_tessella_evidence_report.py'
 
   # ============================================================================
   # Rust Tests (cargo test)
@@ -1614,6 +1629,121 @@ jobs:
           }
 
   # ============================================================================
+  # TESSELLA out-of-core terrain acceptance
+  #
+  # When selected, this lane is mandatory and zero-skip. It proves the six
+  # quantitative terrain gates on the exact PR head with a physical NVIDIA
+  # Vulkan adapter. Selection follows the current physical-runner policy.
+  # ============================================================================
+  test-tessella-gpu:
+    name: TESSELLA Out-of-Core Terrain (NVIDIA Vulkan)
+    needs: [build-wheel-windows, terrain-golden-paths]
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'tessella')) ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'run-physical') &&
+       needs.terrain-golden-paths.outputs.tessella == 'true')
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 90
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      FORGE3D_TESSELLA_REQUIRED_GPU: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Initialize exact-head evidence
+        shell: pwsh
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "forge3d-tessella-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "FORGE3D_TESSELLA_ARTIFACT_DIR=$artifactDir" | Add-Content $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force $artifactDir | Out-Null
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) {
+            throw "TESSELLA checkout mismatch: expected=$expected actual=$actual"
+          }
+          $actual | Set-Content "$artifactDir/checked-out-head.txt"
+          @{
+            repository = $env:GITHUB_REPOSITORY
+            head_sha = $expected
+            checked_out_head = $actual
+            runner_name = $env:RUNNER_NAME
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            required_backend = 'vulkan'
+            required_labels = @('self-hosted', 'Windows', 'X64', 'forge3d-gpu', 'gpu-nvidia')
+          } | ConvertTo-Json -Depth 4 | Set-Content "$artifactDir/run-context.json"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install exact-head wheel and test dependencies
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/wheel-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install pytest numpy pillow *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/dependency-install.log"
+          exit $LASTEXITCODE
+      - name: Require the exact NVIDIA Vulkan adapter
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/adapter-probe.log"
+          exit $LASTEXITCODE
+      - name: Require the 1,000-camera GPU CPU LOD differential
+        shell: pwsh
+        run: |
+          cargo test --release --lib `
+            terrain::clipmap::gpu_lod::tests::gpu_and_cpu_select_identical_tile_sets_for_1000_cameras `
+            -- --ignored --exact --nocapture *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/gpu-cpu-lod-differential.log"
+          exit $LASTEXITCODE
+      - name: Require the real-shader HZB conservativeness differential
+        shell: pwsh
+        run: |
+          cargo test --release --lib `
+            terrain::culling::two_phase::tests::hzb_cull_shader_matches_the_cpu_occlusion_predicate `
+            -- --ignored --exact --nocapture *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/hzb-conservativeness-differential.log"
+          exit $LASTEXITCODE
+      - name: Run all six TESSELLA acceptance gates
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:FORGE3D_TESSELLA_ARTIFACT_DIR "junit.xml"
+          python -m pytest `
+            tests/test_vt_out_of_core.py `
+            tests/test_hzb_culling.py `
+            tests/test_visibility_buffer.py `
+            tests/test_bc_encoders.py `
+            tests/test_flythrough_popping.py `
+            tests/test_vt_request_retention.py `
+            tests/test_tessella_certificate_evidence.py `
+            -v --tb=short --junitxml="$junit" *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/pytest.log"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit" *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/junit-verifier.log"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          exit $verifyCode
+      - name: Consolidate the nine TESSELLA verification results
+        shell: pwsh
+        run: |
+          python scripts/tessella_evidence_report.py "$env:FORGE3D_TESSELLA_ARTIFACT_DIR" `
+            *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/verification-report.log"
+          exit $LASTEXITCODE
+      - name: Upload TESSELLA physical-GPU evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tessella-physical-gpu-evidence
+          path: ${{ runner.temp }}/forge3d-tessella-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90
+
+  # ============================================================================
   # Hosted determinism families. These consume the exact platform wheels above
   # and run only for their own paths, nightly full acceptance, or an explicit
   # manual scope. ABSENT hosted GPU evidence never substitutes for the physical
@@ -1746,7 +1876,7 @@ jobs:
   # selected high-cost hosted and physical claims without delaying every merge.
   full-acceptance-summary:
     name: Full Acceptance Summary
-    needs: [pr-core-success, terrain-golden-paths, determinism-render, determinism-f3dz, determinism-anamnesis, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production]
+    needs: [pr-core-success, terrain-golden-paths, determinism-render, determinism-f3dz, determinism-anamnesis, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, test-tessella-gpu]
     runs-on: ubuntu-latest
     if: >-
       always() &&
@@ -1758,9 +1888,10 @@ jobs:
        (github.event_name == 'pull_request' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
         contains(github.event.pull_request.labels.*.name, 'run-physical') &&
-        (needs.terrain-golden-paths.outputs.m06 == 'true' ||
-         needs.terrain-golden-paths.outputs.f3dz == 'true' ||
-         needs.terrain-golden-paths.outputs.anamnesis == 'true')))
+         (needs.terrain-golden-paths.outputs.m06 == 'true' ||
+          needs.terrain-golden-paths.outputs.f3dz == 'true' ||
+          needs.terrain-golden-paths.outputs.anamnesis == 'true' ||
+          needs.terrain-golden-paths.outputs.tessella == 'true')))
     steps:
       - name: Enforce every selected acceptance family
         shell: bash
@@ -1782,11 +1913,11 @@ jobs:
             echo "::error::PR Core Success finished as ${{ needs.pr-core-success.result }}"
             failed=1
           fi
-
           physical_pr="${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') }}"
           m06_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'm06')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.m06 == 'true') }}"
           f3dz_physical_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'f3dz')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.f3dz == 'true') }}"
           anamnesis_physical_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'anamnesis')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.anamnesis == 'true') }}"
+          tessella_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'tessella')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-physical') && needs.terrain-golden-paths.outputs.tessella == 'true') }}"
           render_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism')) || needs.terrain-golden-paths.outputs.determinism_render == 'true' }}"
           f3dz_hosted_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism' || inputs.scope == 'f3dz')) || needs.terrain-golden-paths.outputs.determinism_f3dz == 'true' }}"
           anamnesis_hosted_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism' || inputs.scope == 'anamnesis')) || needs.terrain-golden-paths.outputs.determinism_anamnesis == 'true' }}"
@@ -1799,5 +1930,6 @@ jobs:
           check_selected "$anamnesis_physical_selected" '${{ needs.test-anamnesis-portability-seed.result }}' anamnesis-seed
           check_selected "$anamnesis_physical_selected" '${{ needs.test-anamnesis-portability.result }}' anamnesis-portability
           check_selected "$anamnesis_physical_selected" '${{ needs.test-anamnesis-production.result }}' anamnesis-production
+          check_selected "$tessella_selected" '${{ needs.test-tessella-gpu.result }}' tessella-physical
           echo "physical PR opt-in: $physical_pr"
           exit "$failed"

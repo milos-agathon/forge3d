@@ -70,7 +70,12 @@ impl TerrainScene {
         self.prepare_frame_lighting(decoded)?;
         let height_inputs =
             self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
-        self.prepare_geometry(params)?;
+        self.prepare_geometry(
+            params,
+            &height_inputs.heightmap_data,
+            (height_inputs.width, height_inputs.height),
+            height_inputs.terrain_data_hash,
+        )?;
         let probe_world_span = if is_mesh_camera_mode(&params.camera_mode)
             || is_clipmap_camera_mode(&params.camera_mode)
         {
@@ -244,6 +249,8 @@ impl TerrainScene {
         let mut shadow_setup = None;
         let mut material_vt_started = false;
         let mut timing_needs_resolve = false;
+        let mut hzb_frame_staged = false;
+        let mut visibility_frame_staged = false;
 
         scheduler
             .execute_graph_with(&scheduler_plan, &leaf_keys, |pass, action| {
@@ -454,6 +461,11 @@ impl TerrainScene {
                                 time_seconds,
                                 &mut timing,
                             )?;
+                            hzb_frame_staged = params.culling == "hzb_two_phase"
+                                && render_targets.sample_count == 1
+                                && self.two_phase_culler.is_some();
+                            visibility_frame_staged = is_clipmap_camera_mode(&params.camera_mode)
+                                && render_targets.sample_count == 1;
                             Ok::<_, anyhow::Error>(())
                         })?;
                         timing_needs_resolve = true;
@@ -594,6 +606,21 @@ impl TerrainScene {
         );
         if material_vt_started {
             self.finish_material_vt_frame()?;
+        }
+        if hzb_frame_staged {
+            let (_, view, proj) = Self::build_camera_matrices(params);
+            if let Some(culler) = self.two_phase_culler.as_mut() {
+                self.culling_stats = culler.finish_frame(self.device.as_ref(), proj * view)?;
+                crate::terrain::culling::two_phase::publish_stats(self.culling_stats);
+            }
+        } else {
+            self.culling_stats = crate::terrain::culling::two_phase::CullingStats::default();
+            crate::terrain::culling::two_phase::publish_stats(self.culling_stats);
+        }
+        if visibility_frame_staged {
+            self.finish_visibility_frame()?;
+        } else {
+            super::visibility_buffer::publish_stats(Default::default());
         }
         self.record_render_timings(&mut timing);
         self.store_render_timing(timing);

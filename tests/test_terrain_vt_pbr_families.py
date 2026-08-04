@@ -326,7 +326,6 @@ def test_shader_carries_family_info_and_residency_gate() -> None:
     ).read_text(encoding="utf-8")
     for token in (
         "family_info: array<vec4<u32>, 3>",
-        "fn terrain_vt_family_virtual_size(",
         "fn terrain_vt_resolve_family_uv(",
         "fn terrain_vt_sample_family_data(",
     ):
@@ -449,7 +448,6 @@ class TestTerrainVTPbrFamilies:
             budget_sum += stats[f"budget_bytes_{family}"]
 
         assert resident_sum == pytest.approx(stats["resident_bytes_total"])
-        assert f3d.memory_metrics()["resident_tile_bytes"] == pytest.approx(resident_sum)
         assert resident_sum <= budget_bytes
         assert budget_sum <= budget_bytes
         assert resident_sum <= MEMORY_BUDGET_LIMIT_BYTES

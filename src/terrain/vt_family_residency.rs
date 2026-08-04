@@ -1,20 +1,20 @@
 //! Device-free per-family residency accounting for the terrain material VT.
 //!
-//! The terrain virtual-texture runtime pages three material families (albedo,
-//! normal, mask) through one shared atlas + tile cache. This module owns the
-//! CPU-side policy that keeps each family inside its own residency budget:
-//! budgets are an even split of the total VT budget across enabled families,
-//! and eviction pressure from one family never drains another family's
-//! resident set while that family stays under its own budget (within-family
-//! LRU evicts first; the shared cache capacity remains the global backstop).
+//! Terrain applies this feedback-driven policy to four family slots: one
+//! material-runtime instance enables albedo, normal, and mask, while the
+//! store-backed height mosaic owns a separate instance for height. Each
+//! instance splits its budget across the families it enables, and eviction
+//! pressure from one family never drains another family's resident set while
+//! that family stays under its own budget (within-family LRU evicts first; the
+//! owning cache capacity remains the instance-level backstop).
 //!
 //! Kept free of wgpu/PyO3 so the unit tests run under the curated cargo
 //! feature set (which excludes `extension-module`).
 
 use std::collections::VecDeque;
 
-/// Number of terrain VT material families (albedo, normal, mask).
-pub(crate) const VT_FAMILY_COUNT: usize = 3;
+/// Number of terrain VT families (albedo, normal, mask, height).
+pub(crate) const VT_FAMILY_COUNT: usize = 4;
 
 /// Identity of one virtual-texture tile within a family/material/mip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -24,18 +24,6 @@ pub(crate) struct TileKey {
     pub x: u32,
     pub y: u32,
     pub mip_level: u32,
-}
-
-impl TileKey {
-    pub fn request_priority(&self) -> (u32, u32, u32, u32, u32) {
-        (
-            self.mip_level,
-            self.material_index,
-            self.y,
-            self.x,
-            self.family_slot,
-        )
-    }
 }
 
 /// Residency snapshot for one material family.
@@ -283,18 +271,5 @@ mod tests {
         assert_eq!(decode_feedback_payload(out_of_range, material_count), None);
         // material_count = 0 is clamped instead of dividing by zero.
         assert_eq!(decode_feedback_payload(1, 0), Some((0, 0)));
-    }
-
-    #[test]
-    fn request_priority_orders_families_deterministically() {
-        let mut requests = [key(2, 0, 0), key(0, 1, 0), key(1, 0, 0), key(0, 0, 0)];
-        requests.sort_by_key(TileKey::request_priority);
-        assert_eq!(
-            requests
-                .iter()
-                .map(|request| (request.family_slot, request.x))
-                .collect::<Vec<_>>(),
-            vec![(0, 0), (1, 0), (2, 0), (0, 1)],
-        );
     }
 }

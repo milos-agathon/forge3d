@@ -1915,6 +1915,17 @@ class TerrainRenderParams:
     # the polar angle from +Z (0 = top-down, 90 = horizon) and cam_phi_deg the
     # azimuth within the terrain plane; plain "mesh" keeps legacy output.
     camera_mode: str = "screen"
+    # Terrain submission policy. HZB mode is conservative and only active for clipmap/MSAA1.
+    culling: str = "frustum"
+    # Material evaluation path. "visibility" performs a depth/ID prepass and
+    # one full-screen barycentric material resolve per visible pixel.
+    shading: str = "forward"
+    # Optional disk-backed store returned by forge3d.terrain.open_vt_store().
+    vt_store: Optional[object] = None
+    # One-frame camera-velocity extrapolation horizon for lower-priority pages.
+    prefetch_horizon_ms: float = 100.0
+    # Hard per-frame page upload cap.
+    vt_upload_budget_bytes: int = 16 * 1024 * 1024
     # P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
     debug_mode: int = 0
     # M1: Accumulation AA sample count (1 = no AA, 16/64/256 typical for offline)
@@ -2110,6 +2121,22 @@ class TerrainRenderParams:
                 raise ValueError("terrain_data_revision must be >= 0")
             if self.terrain_data_revision > 0xFFFF_FFFF_FFFF_FFFF:
                 raise ValueError("terrain_data_revision must fit in u64")
+        if self.culling not in {"none", "frustum", "hzb_two_phase"}:
+            raise ValueError("culling must be one of: none, frustum, hzb_two_phase")
+        if self.shading not in {"forward", "visibility"}:
+            raise ValueError("shading must be one of: forward, visibility")
+        if not np.isfinite(self.prefetch_horizon_ms) or self.prefetch_horizon_ms < 0.0:
+            raise ValueError("prefetch_horizon_ms must be finite and >= 0")
+        if (
+            isinstance(self.vt_upload_budget_bytes, bool)
+            or not isinstance(self.vt_upload_budget_bytes, Integral)
+            or self.vt_upload_budget_bytes <= 0
+        ):
+            raise ValueError("vt_upload_budget_bytes must be a positive integer")
+        if self.vt_store is not None and not (
+            hasattr(self.vt_store, "path") or isinstance(self.vt_store, (str, Path))
+        ):
+            raise ValueError("vt_store must be a path or forge3d.terrain.VTStore")
 
 
 def load_height_curve_lut(path: str | Path) -> np.ndarray:
@@ -2156,8 +2183,14 @@ def make_terrain_params_config(
     cam_radius: float = 1200.0,
     cam_phi_deg: float = 135.0,
     cam_theta_deg: float = 45.0,
+    cam_target: Sequence[float] = (0.0, 0.0, 0.0),
     fov_y_deg: float = 55.0,
     camera_mode: str = "screen",  # "screen", "mesh", or "mesh:zup" (Z-up orbit, see TerrainParams)
+    culling: str = "frustum",  # "none", "frustum", or "hzb_two_phase"
+    shading: str = "forward",  # "forward" or "visibility"
+    vt_store: Optional[object] = None,
+    prefetch_horizon_ms: float = 100.0,
+    vt_upload_budget_bytes: int = 16 * 1024 * 1024,
     debug_mode: int = 0,  # 0=normal, 40=view-depth probe, 41=NDC depth, 42=view-pos XYZ
     clip: Optional[Tuple[float, float]] = None,
     height_curve_mode: str = "linear",
@@ -2288,7 +2321,7 @@ def make_terrain_params_config(
         terrain_span=float(terrain_span),
         msaa_samples=msaa_samples,
         z_scale=z_scale,
-        cam_target=[0.0, 0.0, 0.0],
+        cam_target=[float(value) for value in cam_target],
         cam_radius=float(cam_radius),
         cam_phi_deg=float(cam_phi_deg),
         cam_theta_deg=float(cam_theta_deg),
@@ -2335,6 +2368,11 @@ def make_terrain_params_config(
         probes=probes,
         reflection_probes=reflection_probes,
         camera_mode=str(camera_mode),
+        culling=str(culling),
+        shading=str(shading),
+        vt_store=vt_store,
+        prefetch_horizon_ms=float(prefetch_horizon_ms),
+        vt_upload_budget_bytes=int(vt_upload_budget_bytes),
         debug_mode=int(debug_mode),
         aa_samples=int(aa_samples),
         aa_seed=aa_seed,

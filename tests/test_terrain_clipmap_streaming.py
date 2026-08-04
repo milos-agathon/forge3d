@@ -26,6 +26,7 @@ from _terrain_runtime import (
     _write_test_hdr,
     terrain_rendering_available,
 )
+from forge3d.diagnostics import render_certificate
 from forge3d.terrain_params import PomSettings, make_terrain_params_config
 
 requires_terrain = pytest.mark.skipif(
@@ -59,12 +60,17 @@ def _make_params(
     phi_deg: float = 28.0,
     cam_radius: float = 1.0,
     z_scale: float = 1.2,
+    culling: str = "frustum",
+    shading: str = "forward",
+    vt=None,
+    terrain_span: float = TERRAIN_SPAN_M,
+    cam_target: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> "f3d.TerrainRenderParams":
     return f3d.TerrainRenderParams(
         make_terrain_params_config(
             size_px=size_px,
             render_scale=1.0,
-            terrain_span=TERRAIN_SPAN_M,
+            terrain_span=terrain_span,
             msaa_samples=1,
             z_scale=z_scale,
             exposure=1.0,
@@ -78,9 +84,13 @@ def _make_params(
             cam_radius=cam_radius,
             cam_phi_deg=phi_deg,
             cam_theta_deg=theta_deg,
+            cam_target=list(cam_target),
             fov_y_deg=45.0,
             camera_mode=camera_mode,
-            clip=(0.1, TERRAIN_SPAN_M * 1.5),
+            culling=culling,
+            shading=shading,
+            vt=vt,
+            clip=(0.1, terrain_span * 1.5),
             overlays=[_build_overlay()],
             pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         )
@@ -131,6 +141,15 @@ def test_terrain_renderer_exposes_height_streaming_api():
 
 @requires_terrain
 class TestClipmapGeometryProvider:
+    def test_clipmap_render_uses_gpu_lod_indirect_draws(self, terrain_ibl):
+        renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        _render_rgba(renderer, _make_params(), _steep_dem(64), terrain_ibl)
+
+        certificate = render_certificate(sign=False)
+        main_pass = next(p for p in certificate["passes"] if p["label"] == "terrain.main")
+        assert main_pass["draw_calls"] >= 1
+        assert "clipmap_lod_select" in certificate["engine"]["wgsl_module_hashes"]
+
     def test_clipmap_render_is_deterministic(self, terrain_ibl):
         session = f3d.Session(window=False)
         renderer = f3d.TerrainRenderer(session)
