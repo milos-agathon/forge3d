@@ -68,6 +68,10 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert f"          - {scope}" in trigger
 
     preflight = _job(workflow, "preflight")
+    assert "name: Checkout evaluated workflow state" in preflight
+    assert "ref: ${{ github.sha }}" in preflight
+    assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in preflight
+    assert "base-added policy tests are available" in preflight
     assert "tests/test_ci_cost_controls.py" in preflight
     assert "tests/test_ci_lfs_fanout.py" in preflight
     assert "tests/test_determinism_matrix.py" in preflight
