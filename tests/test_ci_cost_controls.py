@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 import yaml
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(
+    os.environ.get(
+        "FORGE3D_CI_CONTRACT_ROOT", Path(__file__).resolve().parents[1]
+    )
+)
 UPLOAD_STEP = re.compile(
     r"(?ms)^      - (?:name|uses):.*?"
     r"(?=^      - (?:name|uses):|^  [A-Za-z0-9_-]+:|\Z)"

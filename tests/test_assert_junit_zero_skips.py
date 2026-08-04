@@ -1,6 +1,7 @@
 """Adversarial fixtures for the required-lane JUnit verifier."""
 
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -15,6 +16,14 @@ from scripts.summarize_m06_evidence import (
     markdown_summary,
     write_summary,
 )
+
+
+def _contract_root() -> Path:
+    return Path(
+        os.environ.get(
+            "FORGE3D_CI_CONTRACT_ROOT", Path(__file__).resolve().parents[1]
+        )
+    )
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -273,7 +282,7 @@ def _checkout_refs(workflow_text: str) -> list[str | None]:
 
 
 def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
-    root = Path(__file__).resolve().parents[1]
+    root = _contract_root()
     pr_head_ref = "${{ github.event.pull_request.head.sha || github.sha }}"
     reusable_ref = "${{ inputs.ref }}"
     # Semantic discovery avoids the old brittle checkout-count assertion: adding
@@ -321,7 +330,7 @@ def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
 
 
 def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
-    root = Path(__file__).resolve().parents[1]
+    root = _contract_root()
     workflow = (root / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
