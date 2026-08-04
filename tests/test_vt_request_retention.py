@@ -255,5 +255,6 @@ def test_tessella_acceptance_is_a_required_zero_skip_hardware_lane():
         "test_vt_request_retention.py",
     ):
         assert test_file in job
-    aggregator = workflow.split("\n  ci-success:", 1)[1]
+    aggregator = workflow.split("\n  full-acceptance-summary:", 1)[1]
     assert "test-tessella-gpu" in aggregator
+    assert "tessella_selected=" in aggregator

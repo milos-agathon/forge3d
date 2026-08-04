@@ -118,8 +118,9 @@ def test_support_matrices_record_current_mapscene_diagnostics_and_ownership():
     assert "Owned by later MapScene" not in tiles3d
 
     assert "MapScene.validate" in vt
-    assert "albedo-only" in vt
-    assert "vt_unsupported_family" in vt
+    assert "`albedo`, `normal`, and `mask`" in vt
+    assert "terrain_vt_bindless_atlas" in vt
+    assert "albedo-only" not in vt
 
 
 def test_support_matrix_rows_use_prd_support_taxonomy():

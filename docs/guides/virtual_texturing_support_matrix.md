@@ -13,6 +13,9 @@ the source for diagnostics without enabling it. The supported material-family
 set is exactly `albedo`, `normal`, and `mask`.
 Height streaming is a separate store-backed height mosaic, not a fourth slot in
 the material-family atlas or its per-family residency split.
+`MapScene.validate()` owns recipe-level validation before rendering; runtime
+capability or residency loss remains explicit through the certificate
+degradations and `vt_stats()` fields listed below.
 
 ## Memory budgets
 

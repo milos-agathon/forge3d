@@ -4,6 +4,10 @@ fn mip_extent(extent: u32, mip: u32) -> u32 {
     (extent >> mip).max(1)
 }
 
+fn small_test_f32(value: u32) -> f32 {
+    f32::from(u16::try_from(value).expect("HZB test value fits u16"))
+}
+
 fn proportional_bounds(index: u32, src: u32, dst: u32) -> std::ops::Range<u32> {
     let lo = index * src / dst;
     let hi = ((index + 1) * src).div_ceil(dst).min(src);
@@ -44,24 +48,24 @@ fn max_reduce(source: &[f32], width: u32, height: u32) -> Vec<f32> {
 
 #[test]
 fn same_size_initial_pass_remains_an_exact_copy() {
-    let source: Vec<f32> = (0..35).map(|index| index as f32 / 34.0).collect();
+    let source: Vec<f32> = (0..35).map(|index| small_test_f32(index) / 34.0).collect();
     assert_eq!(max_reduce_to(&source, 7, 5, 7, 5), source);
 }
 
 #[test]
 fn fused_half_resolution_max_is_proportional_and_conservative() {
     assert_eq!(
-        max_reduce(&(0..16).map(|value| value as f32).collect::<Vec<_>>(), 4, 4),
+        max_reduce(&(0..16).map(small_test_f32).collect::<Vec<_>>(), 4, 4),
         [5.0, 7.0, 13.0, 15.0],
     );
     assert_eq!(
-        max_reduce(&(0..15).map(|value| value as f32).collect::<Vec<_>>(), 5, 3),
+        max_reduce(&(0..15).map(small_test_f32).collect::<Vec<_>>(), 5, 3),
         [12.0, 14.0],
     );
 
     for (width, height) in [(8, 6), (7, 5), (2, 9)] {
         let source: Vec<f32> = (0..width * height)
-            .map(|index| (index * 37 % 101) as f32 / 100.0)
+            .map(|index| small_test_f32(index * 37 % 101) / 100.0)
             .collect();
         let fused = max_reduce(&source, width, height);
 
