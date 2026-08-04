@@ -290,9 +290,18 @@ def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
     # checkout in any PR-reachable reusable workflow must still fail preflight.
     ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     ci_jobs = yaml.load(ci, Loader=yaml.BaseLoader)["jobs"]
-    assert _checkout_refs(yaml.dump({"jobs": {"preflight": ci_jobs["preflight"]}})) == [
-        "${{ github.sha }}"
-    ]
+    preflight_refs = _checkout_refs(
+        yaml.dump({"jobs": {"preflight": ci_jobs["preflight"]}})
+    )
+    live_base_ref = (
+        "${{ github.event_name == 'pull_request' && "
+        "format('refs/heads/{0}', github.base_ref) || github.sha }}"
+    )
+    trusted_base_ref = "${{ steps.policy-base.outputs.sha }}"
+    assert preflight_refs in (
+        ["${{ github.sha }}"],
+        [live_base_ref, trusted_base_ref],
+    )
     for job_name, job in ci_jobs.items():
         if job_name == "preflight" or not isinstance(job, dict):
             continue
@@ -336,13 +345,100 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
     )
     jobs = yaml.load(workflow, Loader=yaml.BaseLoader)["jobs"]
     preflight = jobs["preflight"]
-    assert _checkout_refs(yaml.dump({"jobs": {"preflight": preflight}})) == [
-        "${{ github.sha }}"
-    ]
-    run_blocks = "\n".join(
-        step.get("run", "") for step in preflight["steps"] if isinstance(step, dict)
-    )
-    assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in run_blocks
+    checkout_refs = _checkout_refs(yaml.dump({"jobs": {"preflight": preflight}}))
+    if checkout_refs == ["${{ github.sha }}"]:
+        run_blocks = "\n".join(
+            step.get("run", "")
+            for step in preflight["steps"]
+            if isinstance(step, dict)
+        )
+        assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in run_blocks
+    else:
+        live_base_ref = (
+            "${{ github.event_name == 'pull_request' && "
+            "format('refs/heads/{0}', github.base_ref) || github.sha }}"
+        )
+        trusted_base_ref = "${{ steps.policy-base.outputs.sha }}"
+        assert checkout_refs == [live_base_ref, trusted_base_ref]
+        steps = preflight["steps"]
+        base_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Checkout live policy base"
+        )
+        snapshot_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Snapshot live policy base"
+        )
+        trusted_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Checkout trusted CI contracts"
+        )
+        merge_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Materialize current-base candidate tree"
+        )
+        setup_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("uses") == "actions/setup-python@v5"
+        )
+        validate_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Validate workflow and cost-control contracts"
+        )
+        assert (
+            base_index
+            < snapshot_index
+            < trusted_index
+            < merge_index
+            < setup_index
+            < validate_index
+        )
+        base_checkout = steps[base_index]
+        assert base_checkout["with"] == {
+            "ref": live_base_ref,
+            "fetch-depth": "0",
+        }
+        snapshot_step = steps[snapshot_index]
+        assert snapshot_step["id"] == "policy-base"
+        assert 'sha=$(git rev-parse HEAD)' in snapshot_step["run"]
+        trusted_checkout = steps[trusted_index]
+        assert trusted_checkout["with"] == {
+            "ref": trusted_base_ref,
+            "path": ".ci-contracts",
+        }
+        merge_step = steps[merge_index]
+        assert merge_step["if"] == "github.event_name == 'pull_request'"
+        assert merge_step["env"] == {
+            "POLICY_BASE_SHA": trusted_base_ref,
+            "PR_NUMBER": "${{ github.event.pull_request.number }}",
+            "PR_HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+        }
+        merge_run = merge_step["run"]
+        assert 'test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"' in merge_run
+        assert (
+            "+refs/pull/${PR_NUMBER}/head:refs/remotes/pull/${PR_NUMBER}/head"
+            in merge_run
+        )
+        assert (
+            'test "$(git rev-parse refs/remotes/pull/${PR_NUMBER}/head)" = '
+            '"$PR_HEAD_SHA"' in merge_run
+        )
+        assert 'git merge --no-commit --no-ff "$PR_HEAD_SHA"' in merge_run
+        assert 'test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"' in merge_run
+        assert 'test "$(git rev-parse MERGE_HEAD)" = "$PR_HEAD_SHA"' in merge_run
+        validate_step = steps[validate_index]
+        assert validate_step["working-directory"] == ".ci-contracts"
+        assert validate_step["env"] == {
+            "FORGE3D_NO_BOOTSTRAP": "1",
+            "FORGE3D_CI_CONTRACT_ROOT": "${{ github.workspace }}",
+            "PYTHONPATH": "${{ github.workspace }}/.ci-contracts",
+        }
 
     pr_head_ref = "${{ github.event.pull_request.head.sha || github.sha }}"
     for job_name, job in jobs.items():
