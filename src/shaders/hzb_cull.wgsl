@@ -1,12 +1,12 @@
-// TESSELLA two-phase occlusion. Phase 1 uses the previous frame's min-depth
-// HZB to reject likely-hidden tiles aggressively. Phase 2 scans mip 0 of the
-// fresh phase-1 depth and rejects only when every covered pixel is closer.
+// TESSELLA two-phase occlusion. Phase 1 uses the previous frame's conservative
+// MAX-reduced HZB. Phase 2 uses the fresh phase-1 HZB and rejects only when
+// every covered depth sample is closer.
 
 struct CullParams {
     view_proj: mat4x4<f32>,
     height_bounds: vec4<f32>,
     viewport: vec4<f32>, // width, height, max_mip, hzb_valid
-    control: vec4<u32>,  // phase (1 previous, 2 fresh), indirect first-instance, padding
+    control: vec4<u32>,  // phase, indirect first-instance, full-resolution HZB mip bias, padding
 }
 
 struct OutputHeader {
@@ -103,10 +103,12 @@ fn tile_occluded(tile: TileInfo) -> bool {
         (uv_max.y - uv_min.y) * params.viewport.y,
     );
     let phase = params.control.x;
-    let mip = min(
-        u32(max(floor(log2(max(pixel_extent, 1.0))) - 4.0, 0.0)),
-        u32(params.viewport.z),
-    );
+    let requested_mip = u32(max(floor(log2(max(pixel_extent, 1.0))) - 4.0, 0.0));
+    // Terrain's half-sized pyramid mip 0 represents full-resolution mip 1.
+    // Saturating subtraction keeps tiny footprints on that conservative base;
+    // larger footprints select the same physical resolution as before.
+    let relative_mip = requested_mip - min(requested_mip, params.control.z);
+    let mip = min(relative_mip, u32(params.viewport.z));
     let dims = textureDimensions(hzb, i32(mip));
     let lo = min(vec2<u32>(uv_min * vec2<f32>(dims)), dims - 1u);
     let hi = min(
@@ -120,8 +122,8 @@ fn tile_occluded(tile: TileInfo) -> bool {
             farthest_occluder = max(farthest_occluder, depth);
         }
     }
-    // Phase 1 takes the farthest of min-reduced blocks. Phase 2 reads a
-    // max-reduced fresh pyramid, so the same operation remains conservative.
+    // Both phases take the farthest sample from a MAX-reduced pyramid, so the
+    // operation remains conservative.
     let occluder = farthest_occluder;
     if occluder >= 0.999999 {
         atomicAdd(&output_header.background_bypassed, 1u);

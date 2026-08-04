@@ -377,11 +377,25 @@ jobs:
             # expensive acceptance families.
             tessella:
               - 'src/terrain/renderer/virtual_texture.rs'
+              - 'src/terrain/culling/two_phase.rs'
               - 'src/core/feedback_buffer.rs'
               - 'src/core/screen_space_effects/hzb.rs'
               - 'src/shaders/hzb_build.wgsl'
+              - 'src/shaders/hzb_cull.wgsl'
+              - 'scripts/tessella_evidence_contract.py'
+              - 'scripts/tessella_evidence_provenance.py'
+              - 'scripts/tessella_evidence_report.py'
+              - 'scripts/tessella_evidence_thresholds.py'
               - 'tests/test_terrain_vt_pbr_families.py'
               - 'tests/test_tv20_virtual_texturing.py'
+              - 'tests/test_vt_out_of_core.py'
+              - 'tests/test_hzb_culling.py'
+              - 'tests/test_visibility_buffer.py'
+              - 'tests/test_bc_encoders.py'
+              - 'tests/test_flythrough_popping.py'
+              - 'tests/test_vt_request_retention.py'
+              - 'tests/test_tessella_certificate_evidence.py'
+              - 'tests/test_tessella_evidence_report.py'
 
   # ============================================================================
   # Rust Tests (cargo test)
@@ -1654,6 +1668,13 @@ jobs:
           cargo test --release --lib `
             terrain::clipmap::gpu_lod::tests::gpu_and_cpu_select_identical_tile_sets_for_1000_cameras `
             -- --ignored --exact --nocapture *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/gpu-cpu-lod-differential.log"
+          exit $LASTEXITCODE
+      - name: Require the real-shader HZB conservativeness differential
+        shell: pwsh
+        run: |
+          cargo test --release --lib `
+            terrain::culling::two_phase::tests::hzb_cull_shader_matches_the_cpu_occlusion_predicate `
+            -- --ignored --exact --nocapture *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/hzb-conservativeness-differential.log"
           exit $LASTEXITCODE
       - name: Run all six TESSELLA acceptance gates
         shell: pwsh

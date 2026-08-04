@@ -70,14 +70,15 @@
 #
 # POP-GATE FIXTURE CONTRACT
 # -------------------------
-# The measured frames hold the camera at its first-frame target while only the
-# streaming/clipmap centre moves. The mesh still rebuilds every frame, but the
-# dE2000 comparison no longer mistakes a 12.8 px camera translation for a pop.
-# The overlay likewise uses one continuous two-stop ramp: the shared four-stop
-# terrain ramp has a hard LUT colour step that amplifies a one-LSB geometry
-# change above the perceptual threshold. The negative control below retains an
-# intentional camera translation and proves that the unchanged dE < 1 gate can
-# still fail.
+# This is a real camera flythrough: the camera target advances by 0.01 ground
+# pixel per frame (about 165 m over 600 frames, or 16.5 m/s at 60 fps). The
+# independent clipmap/streaming-centre path still crosses the regeneration
+# threshold every frame, so the gate observes camera motion and new geometry
+# without misclassifying a many-pixel camera jump as tile pop. The overlay uses
+# one continuous two-stop ramp: the shared four-stop terrain ramp has a hard LUT
+# colour step that amplifies a one-LSB geometry change above the perceptual
+# threshold. The negative control adds a much larger camera translation and
+# proves that the unchanged dE < 1 gate can still fail.
 #
 # RELIEF CEILING (real, and load-bearing for the numbers below)
 # -------------------------------------------------------------
@@ -186,11 +187,12 @@ CENTER_X_AMPLITUDE_STEPS = 19
 CENTER_Y_AMPLITUDE_STEPS = 23
 MIN_DISTINCT_CENTERS = 500
 STREAM_ALTITUDE_M = 3_000.0
-FIXED_CAM_TARGET = (
+INITIAL_CAM_TARGET = (
     -CENTER_X_AMPLITUDE_STEPS * CENTER_STEP_M + CAM_TARGET_DX,
     -CENTER_Y_AMPLITUDE_STEPS * CENTER_STEP_M,
     0.0,
 )
+CAMERA_STEP_PX = 0.01
 
 STREAM_LOD = 3
 STREAM_TILE_RESOLUTION = 32
@@ -223,6 +225,7 @@ SEAM_ROUGHNESS_BUDGET_FRACTION = 0.75
 HALF_HEIGHT_M = CAM_RADIUS * math.tan(math.radians(FOV_Y_DEG) * 0.5)
 HALF_WIDTH_M = HALF_HEIGHT_M * (SIZE[0] / SIZE[1])
 GROUND_PIXEL_M = 2.0 * HALF_WIDTH_M / SIZE[0]
+CAMERA_STEP_M = CAMERA_STEP_PX * GROUND_PIXEL_M
 FRAME_MIN_X = CAM_TARGET_DX - HALF_WIDTH_M
 FRAME_MAX_X = CAM_TARGET_DX + HALF_WIDTH_M
 FRAME_MAX_ABS_Y = HALF_HEIGHT_M
@@ -239,17 +242,18 @@ def _region_outer_radii() -> list[float]:
 
 
 def _regions_on_screen() -> int:
-    """Minimum clipmap regions the fixed frame intersects over the run.
+    """Minimum clipmap regions the moving camera frame intersects over the run.
 
-    The frame is fixed in world space while the regions move with the streaming
-    centre, so evaluate the relative Chebyshev reach at every committed centre.
+    The camera and clipmap centre follow independent committed paths, so evaluate
+    their relative Chebyshev reach on every frame.
     """
     boundaries = _region_outer_radii()[:-1]
     counts = []
     for index in range(FRAMES):
         center_x, center_y = _center_at(index)
-        target_x = FIXED_CAM_TARGET[0] - center_x
-        target_y = FIXED_CAM_TARGET[1] - center_y
+        camera_target = _camera_target_at(index)
+        target_x = camera_target[0] - center_x
+        target_y = camera_target[1] - center_y
         reach = max(
             abs(target_x - HALF_WIDTH_M),
             abs(target_x + HALF_WIDTH_M),
@@ -279,13 +283,22 @@ def _center_at(index: int) -> tuple[float, float]:
     )
 
 
-def _params(*, z_scale: float, overlay, shading="forward"):
+def _camera_target_at(index: int) -> tuple[float, float, float]:
+    """World-space target for the committed 600-frame camera flythrough."""
+    return (
+        INITIAL_CAM_TARGET[0] + index * CAMERA_STEP_M,
+        INITIAL_CAM_TARGET[1],
+        INITIAL_CAM_TARGET[2],
+    )
+
+
+def _params(*, z_scale: float, overlay, shading="forward", frame_index: int = 0):
     return flythrough_params(
         size_px=SIZE,
         terrain_span=SPAN,
         camera_mode=MODE,
         cam_radius=CAM_RADIUS,
-        cam_target=FIXED_CAM_TARGET,
+        cam_target=_camera_target_at(frame_index),
         theta_deg=CAM_THETA_DEG,
         phi_deg=CAM_PHI_DEG,
         fov_y_deg=FOV_Y_DEG,
@@ -397,9 +410,7 @@ def test_fractal_dem_is_deterministic_and_inside_the_seam_budget():
     )
     assert half_spacings == pytest.approx([390.625, 781.25, 1562.5, 3125.0])
     measured = seam_roughness(first, SPAN, half_spacings, Z_SCALE)
-    budget = seam_roughness(
-        legacy_gate_dem(), SPAN, half_spacings, LEGACY_GATE_Z_SCALE
-    )
+    budget = seam_roughness(legacy_gate_dem(), SPAN, half_spacings, LEGACY_GATE_Z_SCALE)
     assert measured <= budget * SEAM_ROUGHNESS_BUDGET_FRACTION, {
         "boundary_half_spacings_m": half_spacings,
         "seam_roughness": measured,
@@ -415,6 +426,17 @@ def test_fractal_dem_is_deterministic_and_inside_the_seam_budget():
     }
 
 
+def test_committed_camera_path_is_a_real_non_vacuous_flythrough():
+    targets = [_camera_target_at(index) for index in range(FRAMES)]
+    steps = [
+        math.dist(targets[index], targets[index + 1]) for index in range(FRAMES - 1)
+    ]
+    assert min(steps) == pytest.approx(CAMERA_STEP_M)
+    assert max(steps) == pytest.approx(CAMERA_STEP_M)
+    assert len(set(targets)) == FRAMES
+    assert math.dist(targets[0], targets[-1]) > 100.0
+
+
 def test_committed_camera_frames_multiple_clipmap_regions():
     radii = _region_outer_radii()
     assert radii[:3] == pytest.approx([6250.0, 18750.0, 43750.0])
@@ -423,7 +445,7 @@ def test_committed_camera_frames_multiple_clipmap_regions():
     # that make_ring's short strips actually cover.
     covered = clipmap_covered_positive_x_limit(SPAN, CENTER_RESOLUTION)
     max_relative_x = max(
-        FIXED_CAM_TARGET[0] + HALF_WIDTH_M - _center_at(index)[0]
+        _camera_target_at(index)[0] + HALF_WIDTH_M - _center_at(index)[0]
         for index in range(FRAMES)
     )
     assert max_relative_x < covered, (max_relative_x, covered)
@@ -441,7 +463,9 @@ def test_committed_camera_frames_multiple_clipmap_regions():
         _center_at(0)[1],
         0.0,
     )
-    assert FIXED_CAM_TARGET == expected_target
+    assert _camera_target_at(0) == expected_target
+
+    camera_targets = [_camera_target_at(index) for index in range(FRAMES)]
 
     # Every frame regenerates the clipmap: the streaming centre step clears
     # ClipmapLevel::update_center's half-cell threshold with margin.
@@ -452,8 +476,8 @@ def test_committed_camera_frames_multiple_clipmap_regions():
 
     # The framed ground never leaves the DEM footprint, so no ring boundary on
     # screen is silently flattened by the UV clamp.
-    assert abs(FIXED_CAM_TARGET[0]) + HALF_WIDTH_M < SPAN * 0.5
-    assert abs(FIXED_CAM_TARGET[1]) + HALF_HEIGHT_M < SPAN * 0.5
+    assert max(abs(target[0]) for target in camera_targets) + HALF_WIDTH_M < SPAN * 0.5
+    assert max(abs(target[1]) for target in camera_targets) + HALF_HEIGHT_M < SPAN * 0.5
 
     # The relief control must be constructible. It previously was not: the
     # control asked for z_scale 1200 against an API ceiling of 50.0, so it died
@@ -529,7 +553,7 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             )
             frame = render_rgba(
                 renderer,
-                _params(z_scale=Z_SCALE, overlay=overlay),
+                _params(z_scale=Z_SCALE, overlay=overlay, frame_index=index),
                 dem,
                 ibl,
                 material_set,
@@ -543,7 +567,9 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             total_crack_count += int(seams["crack_count"])
             samples = int(seams["depth_sample_count"])
             min_depth_samples = (
-                samples if min_depth_samples is None else min(min_depth_samples, samples)
+                samples
+                if min_depth_samples is None
+                else min(min_depth_samples, samples)
             )
             signature = seam_signature(seams)
             if previous_signature is not None and signature != previous_signature:
@@ -602,6 +628,13 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             "clipmap_center_step_m": CENTER_STEP_LENGTH_M,
             "clipmap_regeneration_threshold_m": REGENERATION_THRESHOLD_M,
             "clipmap_center_path_m": CENTER_STEP_LENGTH_M * (FRAMES - 1),
+            "camera_step_px": CAMERA_STEP_PX,
+            "camera_path_distance_m": math.dist(
+                _camera_target_at(0), _camera_target_at(FRAMES - 1)
+            ),
+            "distinct_camera_positions": len(
+                {_camera_target_at(index) for index in range(FRAMES)}
+            ),
             "distinct_clipmap_centers": len(
                 {_center_at(index) for index in range(FRAMES)}
             ),
