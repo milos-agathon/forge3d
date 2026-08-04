@@ -18,22 +18,44 @@ struct VisibilityStats {
 @group(0) @binding(1) var<storage, read_write> stats: VisibilityStats;
 @group(0) @binding(2) var<storage, read> frame_counters: array<u32>;
 
+var<workgroup> workgroup_visible: atomic<u32>;
+var<workgroup> workgroup_background: atomic<u32>;
+
 @compute @workgroup_size(8, 8, 1)
-fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let dimensions = textureDimensions(visibility_ids);
-    if gid.x >= dimensions.x || gid.y >= dimensions.y {
-        return;
+fn cs_main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_index) local_index: u32,
+) {
+    if local_index == 0u {
+        atomicStore(&workgroup_visible, 0u);
+        atomicStore(&workgroup_background, 0u);
     }
+    workgroupBarrier();
+
+    let dimensions = textureDimensions(visibility_ids);
+    let in_bounds = gid.x < dimensions.x && gid.y < dimensions.y;
     if gid.x == 0u && gid.y == 0u {
-        atomicStore(&stats.feedback_records, frame_counters[1]);
-        atomicStore(&stats.material_invocations, frame_counters[0]);
+        // Visibility feedback/material counts are derived from the reduced
+        // visible-pixel total on the CPU. Forward rendering still publishes
+        // its overdraw-sensitive invocation count in slot 3.
+        atomicStore(&stats.feedback_records, 0u);
+        atomicStore(&stats.material_invocations, 0u);
         atomicStore(&stats.fallback_texels, frame_counters[2]);
         atomicStore(&stats.forward_material_invocations, frame_counters[3]);
     }
-    let packed = textureLoad(visibility_ids, vec2<i32>(gid.xy), 0).r;
-    if packed == 0u {
-        atomicAdd(&stats.background_pixels, 1u);
-        return;
+
+    if in_bounds {
+        let packed = textureLoad(visibility_ids, vec2<i32>(gid.xy), 0).r;
+        if packed == 0u {
+            atomicAdd(&workgroup_background, 1u);
+        } else {
+            atomicAdd(&workgroup_visible, 1u);
+        }
     }
-    atomicAdd(&stats.visible_pixels, 1u);
+    workgroupBarrier();
+
+    if local_index == 0u {
+        atomicAdd(&stats.visible_pixels, atomicLoad(&workgroup_visible));
+        atomicAdd(&stats.background_pixels, atomicLoad(&workgroup_background));
+    }
 }

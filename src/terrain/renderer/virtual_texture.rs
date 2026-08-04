@@ -85,8 +85,8 @@ struct TerrainVTUniformsGpu {
     /// w = registered source count. Matches `family_info` in
     /// `terrain_pbr_pom.wgsl`; refreshed every `prepare_frame`.
     family_info: [[u32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
-    /// Bounded feedback append (TESSELLA win 1). x = slot capacity (power of
-    /// two), y/z = physical page-table base width/height, w reserved. Matches
+    /// Bounded feedback set (TESSELLA win 1). x = slot capacity (power of
+    /// two), y/z = physical page-table base width/height, w = probe limit. Matches
     /// `config3` in `terrain_pbr_pom.wgsl`.
     config3: [u32; 4],
 }
@@ -103,11 +103,14 @@ pub(crate) const VT_UNIFORM_BUFFER_BYTES: u64 = std::mem::size_of::<TerrainVTUni
 #[repr(C)]
 #[derive(Clone, Copy, Default, Pod, Zeroable)]
 struct PageTableEntry {
-    atlas_u: f32,
-    atlas_v: f32,
-    is_resident: u32,
-    mip_bias: f32,
+    /// Zero is non-resident; otherwise this is the row-major physical atlas
+    /// slot index plus one. The shader reconstructs the texel origin from the
+    /// already-published atlas and slot sizes.
+    slot_plus_one: u32,
 }
+
+#[cfg(feature = "extension-module")]
+const PAGE_TABLE_ENTRY_BYTES: u32 = std::mem::size_of::<PageTableEntry>() as u32;
 
 #[derive(Clone)]
 struct PreparedVTSource {
@@ -1120,7 +1123,7 @@ impl TerrainMaterialVT {
                 runtime.feedback_capacity,
                 runtime.page_table_width,
                 runtime.page_table_height,
-                0,
+                crate::core::feedback_buffer::FEEDBACK_PROBE_LIMIT,
             ],
         };
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -1291,7 +1294,7 @@ impl TerrainMaterialVTRuntime {
             tracked_create_texture(device, &page_table_descriptor).map_err(|e| e.to_string())?;
         let page_table_view = page_table_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.material_vt.page_table.view"),
-            format: Some(wgpu::TextureFormat::Rgba32Float),
+            format: Some(wgpu::TextureFormat::R32Uint),
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             base_mip_level: 0,
             mip_level_count: Some(1),
@@ -1866,23 +1869,12 @@ impl TerrainMaterialVTRuntime {
                 page_table_region_origin(self.page_table_width, self.page_table_height, mip_level);
             // Keep each deferred queue write below one staging-ring-sized
             // chunk. The first page-table upload covers every family and mip;
-            // submitting each row chunk prevents one 64 MiB mip-0 copy from
+            // submitting each row chunk prevents one 16 MiB mip-0 copy from
             // sharing a submit with the first terrain draw on Windows Vulkan.
-            let row_bytes = pages_x as usize * 16;
+            let row_bytes = pages_x as usize * PAGE_TABLE_ENTRY_BYTES as usize;
             let rows_per_chunk = (8 * 1024 * 1024 / row_bytes.max(1))
                 .max(1)
                 .min(pages_y as usize);
-            let packed_entries = entries
-                .iter()
-                .map(|entry| {
-                    [
-                        entry.atlas_u,
-                        entry.atlas_v,
-                        if entry.is_resident > 0 { 1.0 } else { 0.0 },
-                        entry.mip_bias,
-                    ]
-                })
-                .collect::<Vec<_>>();
             for row_start in (0..pages_y as usize).step_by(rows_per_chunk) {
                 let rows = rows_per_chunk.min(pages_y as usize - row_start);
                 let entry_start = row_start * pages_x as usize;
@@ -1898,10 +1890,10 @@ impl TerrainMaterialVTRuntime {
                         },
                         aspect: wgpu::TextureAspect::All,
                     },
-                    bytemuck::cast_slice(&packed_entries[entry_start..entry_end]),
+                    bytemuck::cast_slice(&entries[entry_start..entry_end]),
                     wgpu::ImageDataLayout {
                         offset: 0,
-                        bytes_per_row: Some(pages_x * 16),
+                        bytes_per_row: Some(pages_x * PAGE_TABLE_ENTRY_BYTES),
                         rows_per_image: Some(rows as u32),
                     },
                     wgpu::Extent3d {
@@ -2129,10 +2121,12 @@ impl TerrainMaterialVTRuntime {
         let (pages_x, _pages_y) = self.pages_at_mip(key.mip_level);
         let page_index = (key.y * pages_x + key.x) as usize;
         if let Some(entry) = self.page_tables[layer_index].get_mut(page_index) {
-            entry.atlas_u = atlas_slot.atlas_u;
-            entry.atlas_v = atlas_slot.atlas_v;
-            entry.is_resident = 1;
-            entry.mip_bias = 0.0;
+            entry.slot_plus_one = page_table_slot_plus_one(
+                atlas_slot.atlas_x,
+                atlas_slot.atlas_y,
+                self.atlas_size,
+                self.slot_size,
+            );
             self.dirty_page_table_layers.insert(layer_index);
         }
     }
@@ -2177,7 +2171,7 @@ impl TerrainMaterialVTRuntime {
                 .get(layer_index)
                 .and_then(|table| table.get(page_index))
             {
-                if entry.is_resident > 0 {
+                if entry.slot_plus_one != 0 {
                     return Some(TileKey {
                         family_slot: key.family_slot,
                         material_index: key.material_index,
@@ -2431,6 +2425,15 @@ fn pages_for_mip_counts(pages_x0: u32, pages_y0: u32, mip_level: u32) -> (u32, u
 }
 
 #[cfg(feature = "extension-module")]
+fn page_table_slot_plus_one(atlas_x: u32, atlas_y: u32, atlas_size: u32, slot_size: u32) -> u32 {
+    let slot_size = slot_size.max(1);
+    let slots_per_row = (atlas_size / slot_size).max(1);
+    let slot_x = atlas_x / slot_size;
+    let slot_y = atlas_y / slot_size;
+    slot_y * slots_per_row + slot_x + 1
+}
+
+#[cfg(feature = "extension-module")]
 fn page_table_texture_descriptor(
     pages_x0: u32,
     pages_y0: u32,
@@ -2458,7 +2461,7 @@ fn page_table_texture_descriptor(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba32Float,
+        format: wgpu::TextureFormat::R32Uint,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     }
@@ -2629,8 +2632,17 @@ mod bounded_feedback_tests {
         assert_eq!(page_table_region_origin(2048, 2048, 7), (2016, 2048));
 
         let bytes = crate::core::resource_tracker::calculate_texture_descriptor_size(&descriptor);
-        assert_eq!(bytes, 301_989_888);
+        assert_eq!(PAGE_TABLE_ENTRY_BYTES, 4);
+        assert_eq!(bytes, 75_497_472);
         assert!(bytes < 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn packed_page_table_slots_round_trip_atlas_grid_edges() {
+        assert_eq!(page_table_slot_plus_one(0, 0, 8192, 128), 1);
+        assert_eq!(page_table_slot_plus_one(128, 0, 8192, 128), 2);
+        assert_eq!(page_table_slot_plus_one(0, 128, 8192, 128), 65);
+        assert_eq!(page_table_slot_plus_one(8064, 8064, 8192, 128), 4096);
     }
 
     #[test]

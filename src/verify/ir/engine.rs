@@ -8,7 +8,7 @@ const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xf664_b696_d596_de84;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x4758_e817_2f5b_182e;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xfd97_b645_fac6_6c98;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x4ce4_5518_4da1_20ee;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {
@@ -427,6 +427,39 @@ impl Evaluator<'_> {
                             .load(&state, pointer_value.clone())
                             .unwrap_or(Value::Opaque);
                         let operand = self.eval_expr(function_ref, &mut state, *value)?;
+                        if let naga::AtomicFunction::Exchange {
+                            compare: Some(compare),
+                        } = fun
+                        {
+                            // A weak compare-exchange may either retain the
+                            // observed value or publish the operand. Join both
+                            // outcomes in memory and expose the WGSL result
+                            // struct (`old_value`, `exchanged`) to subsequent
+                            // control flow. This is conservative: it admits
+                            // spurious failure and does not assume equality.
+                            let _ = self.eval_expr(function_ref, &mut state, *compare)?;
+                            let updated = current.join(&operand);
+                            if !self.store(&mut state, pointer_value, updated) {
+                                self.alarm_expr(
+                                    function_ref,
+                                    *pointer,
+                                    "unsupported_ir",
+                                    "compare-exchange target is not a supported pointer",
+                                );
+                            }
+                            state.values.insert(
+                                *result,
+                                Value::Composite(vec![
+                                    current,
+                                    Value::Bool {
+                                        can_false: true,
+                                        can_true: true,
+                                    },
+                                ]),
+                            );
+                            next.push(state);
+                            continue;
+                        }
                         let updated = match fun {
                             naga::AtomicFunction::Add => current
                                 .clone()
@@ -450,7 +483,7 @@ impl Evaluator<'_> {
                                 current.clone().binary_int(operand, i64::max)
                             }
                             naga::AtomicFunction::Exchange { compare: None } => Some(operand),
-                            naga::AtomicFunction::Exchange { compare: Some(_) } => None,
+                            naga::AtomicFunction::Exchange { compare: Some(_) } => unreachable!(),
                         };
                         if let Some(updated) = updated {
                             if !self.store(&mut state, pointer_value, updated) {

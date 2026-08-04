@@ -220,6 +220,20 @@ fn dynamic_buffer_access_uses_the_declared_length() {
 }
 
 #[test]
+fn compare_exchange_is_interpreted_conservatively() {
+    let source = r#"
+@group(0) @binding(0) var<storage, read_write> values: array<atomic<u32>>;
+fn main(candidate: u32) -> u32 {
+    let observed = atomicCompareExchangeWeak(&values[0], 0u, candidate);
+    return select(observed.old_value, candidate, observed.exchanged);
+}
+"#;
+    let parsed = parse_contract("[module]\npath = \"tests/data/shader_proofs/fixture.wgsl\"\nowner = \"test\"\nexpiry = \"2027-01-17\"\n\n[[entry]]\nname = \"main\"\nproof_status = \"proven\"\ninputs = [\"value:candidate:1:16\", \"buffer:values:0:16:1\"]\noutputs = [\"return:0:16\", \"values:0:16\"]\n").unwrap();
+    let proof = prove_wgsl(source, "main", &parsed.entries[0]).unwrap();
+    assert!(proof.alarms.is_empty(), "{:?}", proof.alarms);
+}
+
+#[test]
 fn texture_load_uses_declared_dimensions_and_sample_range() {
     let source = "@group(0) @binding(0) var image: texture_2d<f32>; fn main(coord: vec2<i32>) -> vec4<f32> { return textureLoad(image, coord, 0); }";
     let parse = |maximum: i32| {

@@ -323,8 +323,8 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
             # host-visible budget: textures never enter host_visible_bytes.
             "atlas_device_local_bytes": int(stats["atlas_device_local_bytes"]),
             # One-level page-table atlas: base 2048 rows plus the packed
-            # half-height mip tail, three family layers, RGBA32F entries.
-            "device_local_page_table_bytes": 2048 * 3072 * 3 * 16,
+            # half-height mip tail, three family layers, packed R32Uint entries.
+            "device_local_page_table_bytes": 2048 * 3072 * 3 * 4,
             "atlas_uncompressed_equivalent_bytes": int(
                 stats["atlas_uncompressed_equivalent_bytes"]
             ),

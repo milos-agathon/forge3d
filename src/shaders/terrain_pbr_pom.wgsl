@@ -492,8 +492,8 @@ struct TerrainVTUniforms {
     // w = registered source count. Must match TerrainVTUniformsGpu in
     // src/terrain/renderer/virtual_texture.rs.
     family_info: array<vec4<u32>, 3>,
-    // Bounded feedback append (TESSELLA win 1). x = slot capacity (a power of
-    // two), y/z = physical page-table base width/height, w unused.
+    // Bounded feedback set (TESSELLA win 1). x = slot capacity (a power of
+    // two), y/z = physical page-table base width/height, w = probe limit.
     config3: vec4<u32>,
 }
 
@@ -509,16 +509,14 @@ struct TerrainVTFallbackColors {
 // 16-byte slot per (family, material, mip, page_y, page_x). At the acceptance
 // camera's 2^18 x 2^18 virtual texture that is 100,663,296 slots = 1.5 GiB of
 // MAP_READ memory: three times the entire 512 MiB host-visible budget, for a
-// working set of about a thousand pages. It is now a fixed-capacity append
-// buffer of 32-bit page keys, so the host-visible footprint is a function of
-// the CAPACITY, never of the virtual texture's size. Duplicate samples are
-// intentional: the CPU deduplicates the bounded readback with its normal
-// HashSet path.
+// working set of about a thousand pages. It is now a fixed-capacity,
+// open-addressed set of 32-bit page keys, so both memory and write traffic are
+// functions of the distinct working set, never of covered pixel count.
 //
-// Layout: word 0 is an atomic append count, word 1 is an explicit overflow
-// count, and words 2 ..= capacity + 1 hold `page_index + 1`. The key alone
-// identifies the page, so the CPU inverts `terrain_vt_feedback_index` rather
-// than reading back separate coordinate words.
+// Layout: word 0 counts distinct admitted keys, word 1 is an explicit overflow
+// count, and words 2 ..= capacity + 1 are hash slots holding `page_index + 1`.
+// The key alone identifies the page, so the CPU inverts
+// `terrain_vt_feedback_index` rather than reading separate coordinates.
 
 @group(6) @binding(6)
 var<uniform> terrain_vt_uniforms: TerrainVTUniforms;
@@ -533,7 +531,7 @@ var terrain_vt_atlas: texture_2d<f32>;
 var terrain_vt_sampler: sampler;
 
 @group(6) @binding(10)
-var terrain_vt_page_table: texture_2d_array<f32>;
+var terrain_vt_page_table: texture_2d_array<u32>;
 
 @group(6) @binding(11)
 var<storage, read_write> terrain_vt_feedback: array<atomic<u32>>;
@@ -1994,7 +1992,8 @@ fn terrain_vt_page_table_layer(family_slot: u32, material_index: u32) -> i32 {
 
 // The page table is a single-level atlas: mip zero occupies the base region
 // and finer tail regions are packed left-to-right below it. This avoids the
-// mipmapped Rgba32Float image path that loses the protected Vulkan device.
+// mipmapped image path that loses the protected Vulkan device. Each R32Uint
+// entry is zero for non-resident or the physical atlas slot index plus one.
 fn terrain_vt_page_table_origin(mip_level: u32) -> vec2<u32> {
     if (mip_level == 0u) {
         return vec2<u32>(0u, 0u);
@@ -2017,13 +2016,26 @@ fn terrain_vt_page_table_load(
     page: vec2<i32>,
     layer: i32,
     mip_level: u32,
-) -> vec4<f32> {
+) -> u32 {
     let origin = terrain_vt_page_table_origin(mip_level);
     return textureLoad(
         terrain_vt_page_table,
         page + vec2<i32>(origin),
         layer,
         0,
+    ).x;
+}
+
+fn terrain_vt_atlas_origin(slot_plus_one: u32) -> vec2<f32> {
+    let atlas_size = max(terrain_vt_uniforms.config0.w, 1u);
+    let slot_size = max(terrain_vt_uniforms.config2.z, 1u);
+    let slots_per_row = max(atlas_size / slot_size, 1u);
+    let slot_index = slot_plus_one - 1u;
+    let slot_x = slot_index % slots_per_row;
+    let slot_y = slot_index / slots_per_row;
+    return vec2<f32>(
+        f32(slot_x * slot_size) / f32(atlas_size),
+        f32(slot_y * slot_size) / f32(atlas_size),
     );
 }
 
@@ -2035,6 +2047,18 @@ fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u
     return (((logical_material * max(terrain_vt_uniforms.config2.x, 1u)) + mip_level) * base_pages_y + tile_y) * base_pages_x + tile_x;
 }
 
+// Murmur3's 32-bit finalizer keeps adjacent page keys distributed across the
+// power-of-two table instead of concentrating a camera's contiguous pages.
+fn terrain_vt_feedback_hash(key: u32) -> u32 {
+    var h = key;
+    h = h ^ (h >> 16u);
+    h = h * 2246822507u;
+    h = h ^ (h >> 13u);
+    h = h * 3266489909u;
+    h = h ^ (h >> 16u);
+    return h;
+}
+
 fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) {
     if (terrain_vt_uniforms.config2.w == 0u) {
         return;
@@ -2044,20 +2068,49 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
     if (tile_x >= base_pages_x || tile_y >= base_pages_y) {
         return;
     }
-    // `+ 1` keeps 0 reserved for an empty slot in malformed/partial readback.
+    // `+ 1` keeps 0 reserved for an empty hash slot.
     let key = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y) + 1u;
     let capacity = max(terrain_vt_uniforms.config3.x, 1u);
-    // A bounded append uses only operations supported by every shader backend:
-    // reserve one slot with atomicAdd, then publish the key with atomicStore.
-    // Duplicates are expected and are removed by the CPU readback parser.
-    let append_slot = atomicAdd(&terrain_vt_feedback[0], 1u);
-    if (append_slot < capacity) {
-        atomicStore(&terrain_vt_feedback[append_slot + 2u], key);
-    } else {
-        // Never a silent drop. The explicit overflow counter tells the CPU the
-        // request set was incomplete, so retained requests remain eligible for
-        // a later frame.
-        atomicAdd(&terrain_vt_feedback[1], 1u);
+    let mask = capacity - 1u;
+    let probe_limit = max(terrain_vt_uniforms.config3.w, 1u);
+    var slot = terrain_vt_feedback_hash(key) & mask;
+    var probe = 0u;
+    loop {
+        if (probe >= probe_limit) {
+            // Never a silent drop: the CPU surfaces a non-zero overflow and
+            // keeps already-known requests retained for later frames.
+            atomicAdd(&terrain_vt_feedback[1], 1u);
+            return;
+        }
+        let table_index = slot + 2u;
+        let resident_key = atomicLoad(&terrain_vt_feedback[table_index]);
+        if (resident_key == key) {
+            // The common path after the first fragment for a page is a
+            // distributed atomic read, not a contended read-modify-write.
+            return;
+        }
+        if (resident_key == 0u) {
+            let observed = atomicCompareExchangeWeak(
+                &terrain_vt_feedback[table_index],
+                0u,
+                key,
+            );
+            if (observed.exchanged) {
+                atomicAdd(&terrain_vt_feedback[0], 1u);
+                return;
+            }
+            if (observed.old_value == key) {
+                return;
+            }
+            // A spurious weak-CAS failure reports the slot as still empty;
+            // retry it within the fixed probe budget.
+            if (observed.old_value == 0u) {
+                probe = probe + 1u;
+                continue;
+            }
+        }
+        slot = (slot + 1u) & mask;
+        probe = probe + 1u;
     }
 }
 
@@ -2082,24 +2135,22 @@ fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
         vec2<u32>(fract(uv) * virtual_size / page_size),
         page_dims - vec2<u32>(1u),
     );
-    // Count every covered surface sample exactly once. The bounded append is
-    // only needed when an enabled family misses the desired page; skipping it
-    // for a fully resident page avoids contending on the global feedback
-    // counters for every pixel of a settled frame.
-    atomicAdd(&terrain_frame_counters.feedback_records, 1u);
+    // The visibility statistics pass derives the logical feedback-record count
+    // from its exact visible-pixel reduction. Avoid a duplicate globally
+    // contended per-fragment counter here.
     let desired_entry = terrain_vt_page_table_load(
         vec2<i32>(i32(page.x), i32(page.y)),
         terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_ALBEDO, material_index),
         desired_mip,
     );
-    var all_families_resident = desired_entry.z > 0.5;
+    var all_families_resident = desired_entry != 0u;
     if (all_families_resident && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_NORMAL)) {
         let normal_entry = terrain_vt_page_table_load(
             vec2<i32>(i32(page.x), i32(page.y)),
             terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_NORMAL, material_index),
             desired_mip,
         );
-        all_families_resident = normal_entry.z > 0.5;
+        all_families_resident = normal_entry != 0u;
     }
     if (all_families_resident && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_MASK)) {
         let mask_entry = terrain_vt_page_table_load(
@@ -2107,7 +2158,7 @@ fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
             terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_MASK, material_index),
             desired_mip,
         );
-        all_families_resident = mask_entry.z > 0.5;
+        all_families_resident = mask_entry != 0u;
     }
     if (all_families_resident) {
         return;
@@ -2124,7 +2175,7 @@ fn terrain_vt_write_surface_feedback(uv: vec2<f32>, material_index: u32) {
 }
 
 // Shared residency-gated page walk. Returns vec4(linear_rgb, 1.0) when a
-// resident tile (page-table is_resident flag) was sampled, and
+// resident tile (non-zero packed page-table slot) was sampled, and
 // vec4(fallback_rgb_as_authored, 0.0) when the family is disabled or no tile
 // along the mip chain is resident. Never samples atlas memory for
 // non-resident tiles.
@@ -2167,11 +2218,11 @@ fn terrain_vt_resolve_family_uv(
             terrain_vt_page_table_layer(family_slot, material_index),
             mip_level,
         );
-        if (entry.z > 0.5) {
+        if (entry != 0u) {
             let page_origin = vec2<f32>(f32(page.x), f32(page.y)) * page_size;
             let texel_in_page = (virtual_texel - page_origin) / exp2(f32(mip_level));
             let inner_texel = clamp(texel_in_page, vec2<f32>(0.0, 0.0), vec2<f32>(tile_size - 1.0, tile_size - 1.0));
-            let atlas_uv = vec2<f32>(entry.x, entry.y)
+            let atlas_uv = terrain_vt_atlas_origin(entry)
                 + (vec2<f32>(tile_border, tile_border) + inner_texel + vec2<f32>(0.5, 0.5)) / atlas_size;
             return vec4<f32>(
                 textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0).rgb,
@@ -2224,7 +2275,7 @@ fn terrain_vt_resolve_source_id(
             terrain_vt_page_table_layer(family_slot, material_index),
             mip_level,
         );
-        if (entry.z > 0.5) {
+        if (entry != 0u) {
             return family_slot * TERRAIN_VT_MATERIAL_CAPACITY + material_index + 1u;
         }
         if (mip_level + 1u >= max_mip_levels) {
@@ -4741,7 +4792,6 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
 @fragment
 fn fs_main(input : VertexOutput) -> FragmentOutput {
     let out = shade_main(input);
-    atomicAdd(&terrain_frame_counters.material_invocations, 1u);
     atomicAdd(&terrain_frame_counters.forward_material_invocations, 1u);
     terrain_vt_write_surface_feedback(input.tex_coord, 0u);
     return out;

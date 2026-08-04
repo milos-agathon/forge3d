@@ -322,7 +322,6 @@ fn fs_visibility_resolve_fullscreen(
         // what keeps `visibility_feedback_records == visible_pixels` exact.
         discard;
     } else {
-        atomicAdd(&terrain_frame_counters.material_invocations, 1u);
         terrain_vt_write_surface_feedback(surface.tex_coord, 0u);
         if (terrain_vt_uniforms.config2.w != 0u) {
             if (terrain_vt_enabled()
@@ -353,7 +352,6 @@ fn fs_visibility_geometry(
         discard;
     }
     let out = shade_main(input);
-    atomicAdd(&terrain_frame_counters.material_invocations, 1u);
     terrain_vt_write_surface_feedback(input.tex_coord, 0u);
     if (terrain_vt_uniforms.config2.w != 0u) {
         if (terrain_vt_enabled()

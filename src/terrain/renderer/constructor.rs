@@ -187,7 +187,7 @@ impl TerrainScene {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba32Float,
+                format: wgpu::TextureFormat::R32Uint,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -196,7 +196,7 @@ impl TerrainScene {
         let vt_page_table_fallback_view =
             vt_page_table_fallback_texture.create_view(&wgpu::TextureViewDescriptor {
                 label: Some("vt_page_table_fallback_view"),
-                format: Some(wgpu::TextureFormat::Rgba32Float),
+                format: Some(wgpu::TextureFormat::R32Uint),
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 base_mip_level: 0,
                 mip_level_count: Some(1),
@@ -205,7 +205,7 @@ impl TerrainScene {
                 ..Default::default()
             });
 
-        let vt_page_table_fallback_data = vec![0u8; 16 * super::core::MATERIAL_LAYER_CAPACITY];
+        let vt_page_table_fallback_data = vec![0u8; 4 * super::core::MATERIAL_LAYER_CAPACITY];
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &vt_page_table_fallback_texture,
@@ -216,7 +216,7 @@ impl TerrainScene {
             &vt_page_table_fallback_data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(16),
+                bytes_per_row: Some(4),
                 rows_per_image: Some(1),
             },
             wgpu::Extent3d {
@@ -501,7 +501,7 @@ impl TerrainScene {
                 1,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
             ),
-            crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::Rgba32Float),
+            crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::R32Uint),
             crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::Rgba16Float),
         ];
 

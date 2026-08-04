@@ -527,12 +527,21 @@ impl TerrainVisibilityBuffer {
         drop(mapped);
         self.stats_readback.unmap();
         self.staged = false;
+        let is_forward = counters.forward_material_invocations > 0;
+        let material_invocations = if is_forward {
+            counters.forward_material_invocations
+        } else {
+            counters.visible_pixels
+        };
         Ok(VisibilityStats {
             visible_pixels: counters.visible_pixels,
-            feedback_records: counters.feedback_records,
+            // Both render paths invoke the feedback helper exactly once per
+            // material invocation. Deriving this equality removes a second
+            // globally contended per-fragment atomic from the 4K path.
+            feedback_records: material_invocations,
             visibility_feedback_records: 0,
             forward_feedback_records: 0,
-            material_invocations: counters.material_invocations,
+            material_invocations,
             background_pixels: counters.background_pixels,
             fallback_texels: counters.fallback_texels,
             forward_material_invocations: counters.forward_material_invocations,

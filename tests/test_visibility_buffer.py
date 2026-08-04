@@ -55,9 +55,13 @@ def test_feedback_counter_tracks_the_physical_surface_write():
     fullscreen = (
         root / "src/shaders/terrain_visibility_fullscreen.wgsl"
     ).read_text(encoding="utf-8")
-    assert shader.count(
-        "atomicAdd(&terrain_frame_counters.feedback_records, 1u)"
-    ) == 1
+    assert "atomicAdd(&terrain_frame_counters.feedback_records, 1u)" not in shader
+    assert "feedback_records: material_invocations" in (
+        root / "src/terrain/renderer/visibility_buffer.rs"
+    ).read_text(encoding="utf-8")
+    assert "workgroup_visible" in (
+        root / "src/shaders/terrain_visbuffer_resolve.wgsl"
+    ).read_text(encoding="utf-8")
     assert "terrain_vt_write_surface_feedback(input.tex_coord, 0u)" in shader
     assert "terrain_vt_write_surface_feedback(surface.tex_coord, 0u)" in fullscreen
 
