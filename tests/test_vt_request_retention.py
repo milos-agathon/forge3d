@@ -236,7 +236,7 @@ def test_retained_request_set_accessor_is_registered():
     assert "def read_retained_vt_requests(" in stub
 
 
-def test_tessella_acceptance_is_a_required_zero_skip_hardware_lane():
+def test_selected_tessella_acceptance_is_a_required_zero_skip_hardware_lane():
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     job = workflow.split("\n  test-tessella-gpu:", 1)[1].split(
@@ -255,5 +255,6 @@ def test_tessella_acceptance_is_a_required_zero_skip_hardware_lane():
         "test_vt_request_retention.py",
     ):
         assert test_file in job
-    aggregator = workflow.split("\n  ci-success:", 1)[1]
+    aggregator = workflow.split("\n  full-acceptance-summary:", 1)[1]
     assert "test-tessella-gpu" in aggregator
+    assert "tessella_selected=" in aggregator

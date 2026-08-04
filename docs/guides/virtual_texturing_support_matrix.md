@@ -1,5 +1,10 @@
 # Virtual Texturing Support Matrix
 
+`MapScene.validate()` reports unsupported virtual-texture configurations before
+rendering. Unknown layer families fail with `vt_unsupported_family`; the
+runtime is not an albedo-only path—albedo, normal, and mask families share the
+same store, feedback, residency, page-table, and atlas machinery.
+
 | Capability | Support level | Scope | Diagnostics |
 | --- | --- | --- | --- |
 | Albedo terrain VT family | `supported` | Runtime pages BC7 albedo through the shared store, feedback, residency, page-table, and atlas path. | `terrain_vt_bc_atlas` / `terrain_vt_bindless_atlas` certificate degradations when the compressed bindless path is unavailable. |
