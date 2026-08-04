@@ -8,9 +8,7 @@ import yaml
 
 
 ROOT = Path(
-    os.environ.get(
-        "FORGE3D_CI_CONTRACT_ROOT", Path(__file__).resolve().parents[1]
-    )
+    os.environ.get("FORGE3D_CI_CONTRACT_ROOT", Path(__file__).resolve().parents[1])
 )
 UPLOAD_STEP = re.compile(
     r"(?ms)^      - (?:name|uses):.*?"
@@ -55,6 +53,8 @@ def _upload_steps(workflow: str) -> list[str]:
 
 def test_ci_cost_controls_are_scoped_and_retained() -> None:
     workflow = _workflow("ci.yml")
+    jobs = _workflow_data("ci.yml")["jobs"]
+    tessella_enabled = "test-tessella-gpu" in jobs
 
     concurrency = re.search(r"(?ms)^concurrency:\n.*?(?=^env:)", workflow)
     assert concurrency
@@ -69,7 +69,10 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         "types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]"
         in trigger
     )
-    for scope in ("core", "full", "determinism", "m06", "f3dz", "anamnesis"):
+    scopes = ["core", "full", "determinism", "m06", "f3dz", "anamnesis"]
+    if tessella_enabled:
+        scopes.append("tessella")
+    for scope in scopes:
         assert f"          - {scope}" in trigger
 
     preflight = _job(workflow, "preflight")
@@ -89,7 +92,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert 'test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"' in preflight
         assert 'git config --local user.name "github-actions[bot]"' in preflight
         assert (
-            'git config --local user.email '
+            "git config --local user.email "
             '"41898282+github-actions[bot]@users.noreply.github.com"' in preflight
         )
         assert 'git merge --no-commit --no-ff "$PR_HEAD_SHA"' in preflight
@@ -132,7 +135,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         "test-python-compat-macos",
     ):
         assert "test_mode: compatibility" in _job(workflow, job_name)
-    assert "python_versions: '[\"3.10\", \"3.13\"]'" in _job(
+    assert 'python_versions: \'["3.10", "3.13"]\'' in _job(
         workflow, "test-python-compat-linux"
     )
     for job_name in (
@@ -143,7 +146,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         job = _job(workflow, job_name)
         assert "github.event_name == 'schedule'" in job
         assert "inputs.scope == 'full'" in job
-        assert "python_versions: '[\"3.10\", \"3.11\", \"3.12\", \"3.13\"]'" in job
+        assert 'python_versions: \'["3.10", "3.11", "3.12", "3.13"]\'' in job
 
     assert "retention-days: 1" in _artifact_step(
         _job(workflow, "prepare-lfs-fixtures"), "lfs-fixture-bundles"
@@ -159,13 +162,18 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
     ):
         assert "retention-days: 7" in _artifact_step(_job(workflow, job), artifact)
 
-    for job, artifact in (
+    physical_artifacts = [
         ("test-m06-full-geospatial-viewer", "m06-full-geospatial-viewer-evidence"),
         ("test-f3dz-gpu", "f3dz-physical-gpu-evidence"),
         ("test-anamnesis-portability-seed", "anamnesis-physical-portable-store"),
         ("test-anamnesis-portability", "anamnesis-portability-evidence"),
         ("test-anamnesis-production", "anamnesis-production-evidence"),
-    ):
+    ]
+    if tessella_enabled:
+        physical_artifacts.append(
+            ("test-tessella-gpu", "tessella-physical-gpu-evidence")
+        )
+    for job, artifact in physical_artifacts:
         assert "retention-days: 90" in _artifact_step(_job(workflow, job), artifact)
 
     assert "sphinx" not in workflow.lower()
@@ -247,7 +255,9 @@ def test_determinism_cost_controls_keep_pr_cancellation_and_evidence() -> None:
 
 def test_all_workflows_parse_and_local_reusable_calls_are_well_formed() -> None:
     workflow_dir = ROOT / ".github" / "workflows"
-    parsed = {path.name: _workflow_data(path.name) for path in workflow_dir.glob("*.yml")}
+    parsed = {
+        path.name: _workflow_data(path.name) for path in workflow_dir.glob("*.yml")
+    }
     assert parsed
 
     allowed_call_keys = {
@@ -273,11 +283,13 @@ def test_all_workflows_parse_and_local_reusable_calls_are_well_formed() -> None:
                 f"{sorted(set(job) - allowed_call_keys)}"
             )
             target_name = Path(uses).name
-            assert target_name in parsed, f"{caller_name}:{job_name} calls missing {uses}"
+            assert (
+                target_name in parsed
+            ), f"{caller_name}:{job_name} calls missing {uses}"
             target_on = parsed[target_name].get("on", {})
-            assert isinstance(target_on, dict) and "workflow_call" in target_on, (
-                f"{caller_name}:{job_name} target {target_name} is not reusable"
-            )
+            assert (
+                isinstance(target_on, dict) and "workflow_call" in target_on
+            ), f"{caller_name}:{job_name} target {target_name} is not reusable"
             call_contract = target_on["workflow_call"] or {}
             declared_inputs = call_contract.get("inputs", {})
             provided_inputs = job.get("with", {}) or {}
@@ -297,45 +309,56 @@ def test_all_workflows_parse_and_local_reusable_calls_are_well_formed() -> None:
             for input_name, value in provided_inputs.items():
                 input_type = declared_inputs[input_name].get("type")
                 if input_type == "boolean" and not str(value).startswith("${{"):
-                    assert str(value).casefold() in {"true", "false"}, (
-                        f"{caller_name}:{job_name} passes non-boolean {input_name}={value}"
-                    )
+                    assert str(value).casefold() in {
+                        "true",
+                        "false",
+                    }, f"{caller_name}:{job_name} passes non-boolean {input_name}={value}"
 
 
-def test_tessella_cannot_become_an_unscoped_pr_job() -> None:
+def test_tessella_acceptance_is_absent_or_exactly_scoped() -> None:
     workflow = _workflow("ci.yml")
     paths = _job(workflow, "terrain-golden-paths")
     assert "tessella: ${{ steps.filter.outputs.tessella }}" in paths
     assert "            tessella:" in paths
 
-    for path in (
+    baseline_paths = (
         "src/terrain/renderer/virtual_texture.rs",
         "src/core/feedback_buffer.rs",
         "src/core/screen_space_effects/hzb.rs",
         "src/shaders/hzb_build.wgsl",
         "tests/test_terrain_vt_pbr_families.py",
         "tests/test_tv20_virtual_texturing.py",
-    ):
+    )
+    for path in baseline_paths:
         assert f"              - '{path}'" in paths
 
-    # Main currently has no TESSELLA acceptance job. Lock that honest state so
-    # a future lane cannot appear under a generic name without an explicit
-    # contract/test update that wires the classifier or a manual scope.
+    # Main may reserve the classifier without running a TESSELLA lane. If a
+    # candidate introduces one, admit only the exact fail-closed physical lane
+    # and aggregate contract reviewed here.
     jobs = _workflow_data("ci.yml")["jobs"]
     tessella_jobs = []
-    tessella_tokens = (
-        "test_tv20_virtual_texturing.py",
-        "test_terrain_vt_pbr_families.py",
-        "hzb_build.wgsl",
-        "virtual_texture.rs",
-        "feedback_buffer.rs",
+    tessella_markers = baseline_paths + (
+        "src/terrain/culling/two_phase.rs",
+        "src/shaders/hzb_cull.wgsl",
+        "scripts/tessella_evidence_contract.py",
+        "scripts/tessella_evidence_provenance.py",
+        "scripts/tessella_evidence_report.py",
+        "scripts/tessella_evidence_thresholds.py",
+        "tests/test_vt_out_of_core.py",
+        "tests/test_hzb_culling.py",
+        "tests/test_visibility_buffer.py",
+        "tests/test_bc_encoders.py",
+        "tests/test_flythrough_popping.py",
+        "tests/test_vt_request_retention.py",
+        "tests/test_tessella_certificate_evidence.py",
+        "tests/test_tessella_evidence_report.py",
     )
     for name, body in jobs.items():
         if name == "terrain-golden-paths":
             continue
         serialized = yaml.safe_dump(body).casefold()
         physical_domain_job = "self-hosted" in serialized and any(
-            token in serialized for token in tessella_tokens
+            marker in serialized for marker in tessella_markers
         )
         if (
             "tessella" in name.casefold()
@@ -343,7 +366,123 @@ def test_tessella_cannot_become_an_unscoped_pr_job() -> None:
             or physical_domain_job
         ):
             tessella_jobs.append(name)
-    assert tessella_jobs == [], f"TESSELLA jobs require an explicit scoped contract: {tessella_jobs}"
+    if "test-tessella-gpu" not in jobs:
+        assert (
+            tessella_jobs == []
+        ), f"TESSELLA jobs require an explicit scoped contract: {tessella_jobs}"
+        return
+
+    assert tessella_jobs == ["test-tessella-gpu", "full-acceptance-summary"]
+
+    for path in tessella_markers[len(baseline_paths) :]:
+        assert f"              - '{path}'" in paths
+
+    lane = jobs["test-tessella-gpu"]
+    expected_condition = " ".join(
+        """
+        github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' &&
+         (inputs.scope == 'full' || inputs.scope == 'tessella')) ||
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         contains(github.event.pull_request.labels.*.name, 'run-physical') &&
+         needs.terrain-golden-paths.outputs.tessella == 'true')
+        """.split()
+    )
+    assert " ".join(lane["if"].split()) == expected_condition
+    assert lane["needs"] == ["build-wheel-windows", "terrain-golden-paths"]
+    assert lane["runs-on"] == [
+        "self-hosted",
+        "Windows",
+        "X64",
+        "forge3d-gpu",
+        "gpu-nvidia",
+    ]
+    assert lane["timeout-minutes"] == "90"
+    assert lane["env"]["WGPU_BACKEND"] == "vulkan"
+    assert lane["env"]["FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN"] == "1"
+    assert lane["env"]["FORGE3D_NO_BOOTSTRAP"] == "1"
+    assert lane["env"]["FORGE3D_TEST_INSTALLED_WHEEL"] == "1"
+    assert lane["env"]["FORGE3D_TESSELLA_REQUIRED_GPU"] == "1"
+
+    lane_text = _job(workflow, "test-tessella-gpu")
+    assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in lane_text
+    assert "--require-nvidia-vulkan" in lane_text
+    assert (
+        "terrain::clipmap::gpu_lod::tests::"
+        "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras" in lane_text
+    )
+    assert (
+        "terrain::culling::two_phase::tests::"
+        "hzb_cull_shader_matches_the_cpu_occlusion_predicate" in lane_text
+    )
+    assert lane_text.count("--ignored --exact --nocapture") == 2
+    acceptance_files = (
+        "test_vt_out_of_core.py",
+        "test_hzb_culling.py",
+        "test_visibility_buffer.py",
+        "test_bc_encoders.py",
+        "test_flythrough_popping.py",
+        "test_vt_request_retention.py",
+        "test_tessella_certificate_evidence.py",
+    )
+    for test_file in acceptance_files:
+        assert test_file in lane_text
+    assert "scripts/tessella_evidence_report.py" in lane_text
+
+    steps = lane["steps"]
+    exact_head_steps = [
+        step for step in steps if "TESSELLA checkout mismatch" in step.get("run", "")
+    ]
+    assert len(exact_head_steps) == 1
+    exact_head_run = exact_head_steps[0]["run"]
+    assert "git rev-parse HEAD" in exact_head_run
+    assert "checked-out-head.txt" in exact_head_run
+    assert "run-context.json" in exact_head_run
+
+    acceptance_steps = [
+        step for step in steps if "tests/test_vt_out_of_core.py" in step.get("run", "")
+    ]
+    assert len(acceptance_steps) == 1
+    acceptance_run = acceptance_steps[0]["run"]
+    for test_file in acceptance_files:
+        assert test_file in acceptance_run
+    assert '--junitxml="$junit"' in acceptance_run
+    assert 'python scripts/assert_junit_zero_skips.py "$junit"' in acceptance_run
+    assert "if ($pytestCode -ne 0) { exit $pytestCode }" in acceptance_run
+    assert "exit $verifyCode" in acceptance_run
+
+    evidence = _artifact_step(lane_text, "tessella-physical-gpu-evidence")
+    assert "if: always()" in evidence
+    assert "if-no-files-found: error" in evidence
+    assert "retention-days: 90" in evidence
+
+    summary = jobs["full-acceptance-summary"]
+    assert "test-tessella-gpu" in summary["needs"]
+    assert "always()" in summary["if"]
+    assert (
+        "contains(github.event.pull_request.labels.*.name, 'run-physical')"
+        in summary["if"]
+    )
+    assert "needs.terrain-golden-paths.outputs.tessella == 'true'" in summary["if"]
+
+    enforcement_steps = [
+        step for step in summary["steps"] if "check_selected()" in step.get("run", "")
+    ]
+    assert len(enforcement_steps) == 1
+    enforcement_run = enforcement_steps[0]["run"]
+    assert (
+        "tessella_selected=\"${{ github.event_name == 'schedule' || "
+        "(github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || "
+        "inputs.scope == 'tessella')) || (github.event_name == 'pull_request' && "
+        "github.event.pull_request.head.repo.full_name == github.repository && "
+        "contains(github.event.pull_request.labels.*.name, 'run-physical') && "
+        "needs.terrain-golden-paths.outputs.tessella == 'true') }}\"" in enforcement_run
+    )
+    assert (
+        'check_selected "$tessella_selected" '
+        "'${{ needs.test-tessella-gpu.result }}' tessella-physical" in enforcement_run
+    )
 
 
 def test_physical_selection_truth_table_and_job_conditions() -> None:
@@ -368,12 +507,12 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
     expected = {
         "test-m06-full-geospatial-viewer": expected_condition("m06", "m06"),
         "test-f3dz-gpu": expected_condition("f3dz", "f3dz"),
-        "test-anamnesis-portability-seed": expected_condition(
-            "anamnesis", "anamnesis"
-        ),
+        "test-anamnesis-portability-seed": expected_condition("anamnesis", "anamnesis"),
         "test-anamnesis-portability": expected_condition("anamnesis", "anamnesis"),
         "test-anamnesis-production": expected_condition("anamnesis", "anamnesis"),
     }
+    if "test-tessella-gpu" in jobs:
+        expected["test-tessella-gpu"] = expected_condition("tessella", "tessella")
     for job_name, condition in expected.items():
         assert normalize(jobs[job_name]["if"]) == condition
 
@@ -386,10 +525,10 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
         path_selected: bool = False,
         family: str = "m06",
     ) -> bool:
-        return event == "schedule" or (
-            event == "workflow_dispatch" and scope in {"full", family}
-        ) or (
-            event == "pull_request" and internal and labeled and path_selected
+        return (
+            event == "schedule"
+            or (event == "workflow_dispatch" and scope in {"full", family})
+            or (event == "pull_request" and internal and labeled and path_selected)
         )
 
     cases = (
@@ -429,3 +568,8 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
     )
     for arguments, wanted in cases:
         assert selected(**arguments) is wanted
+    if "test-tessella-gpu" in jobs:
+        assert (
+            selected("workflow_dispatch", scope="tessella", family="tessella") is True
+        )
+        assert selected("workflow_dispatch", scope="m06", family="tessella") is False
