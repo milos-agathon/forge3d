@@ -82,14 +82,18 @@ pub struct TerrainScene {
     pub(super) water_reflection_fallback_view: wgpu::TextureView,
     pub(super) water_reflection_pipeline: wgpu::RenderPipeline,
     pub(super) material_layer_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) visibility_resolve_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) material_layer_uniform_buffer: TrackedBuffer,
     pub(super) vt_uniform_buffer: TrackedBuffer,
     pub(super) vt_fallback_uniform_buffer: TrackedBuffer,
-    pub(super) _vt_atlas_fallback_texture: TrackedTexture,
-    pub(super) vt_atlas_fallback_view: wgpu::TextureView,
+    pub(super) _vt_atlas_fallback_textures: Vec<TrackedTexture>,
+    pub(super) vt_atlas_fallback_views: Vec<wgpu::TextureView>,
     pub(super) _vt_page_table_fallback_texture: TrackedTexture,
     pub(super) vt_page_table_fallback_view: wgpu::TextureView,
     pub(super) vt_feedback_fallback_buffer: TrackedBuffer,
+    /// Shader-written per-frame counters: material invocations, logical
+    /// feedback records, fallback texels, and forward invocations.
+    pub(super) vt_frame_counters_buffer: TrackedBuffer,
     pub(super) vt_atlas_sampler: wgpu::Sampler,
     pub(super) probe_grid_uniform_buffer: TrackedBuffer,
     pub(super) probe_ssbo: TrackedBuffer,
@@ -136,9 +140,15 @@ pub struct TerrainScene {
     #[cfg(feature = "enable-renderer-config")]
     pub(super) config: Arc<Mutex<crate::render::params::RendererConfig>>,
     pub(super) material_vt: Mutex<super::virtual_texture::TerrainMaterialVT>,
+    pub(super) visibility_buffer: Mutex<Option<super::visibility_buffer::TerrainVisibilityBuffer>>,
+    pub(super) cpu_visibility_oracle: Mutex<Option<super::visibility_buffer::CpuVisibilityOracle>>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
     pub(super) geometry_provider: Option<TerrainGeometryProvider>,
-    pub(super) height_streaming: Option<super::streaming::HeightStreamingState>,
+    pub(super) two_phase_culler: Option<crate::terrain::culling::two_phase::TwoPhaseTerrainCuller>,
+    pub(super) terrain_minmax_pyramid:
+        Option<crate::path_tracing::hybrid_compute::terrain_heightfield::TerrainMinMaxPyramid>,
+    pub(super) culling_stats: crate::terrain::culling::two_phase::CullingStats,
+    pub(super) height_streaming: Option<super::streaming::HeightVtFamilyRuntime>,
     /// CENSOR Task 9: owned per-render GPU timing manager, lazily constructed on
     /// the first render when the device granted `TIMESTAMP_QUERY`. Stored behind
     /// a `Mutex<Option<..>>` because the draw methods borrow `&self`; a render
@@ -239,6 +249,8 @@ pub(super) struct PipelineCache {
     pub(super) sample_count: u32,
     pub(super) pipeline: wgpu::RenderPipeline,
     pub(super) clipmap_pipeline: Option<wgpu::RenderPipeline>,
+    pub(super) visibility_write_pipeline: Option<wgpu::RenderPipeline>,
+    pub(super) visibility_resolve_pipeline: Option<wgpu::RenderPipeline>,
 }
 
 pub(super) const TERRAIN_DEFAULT_CASCADE_SPLITS: [f32; 4] = [50.0, 200.0, 800.0, 3000.0];

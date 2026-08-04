@@ -22,7 +22,7 @@ def test_native_recompute_control_is_required_on_physical_gpu_ci():
         Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
     ).read_text(encoding="utf-8")
     production_job = workflow.split("  test-anamnesis-production:", 1)[1].split(
-        "\n  build-docs:", 1
+        "\n  # ============================================================================\n  # Hosted determinism families", 1
     )[0]
     required_fragments = (
         "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]",

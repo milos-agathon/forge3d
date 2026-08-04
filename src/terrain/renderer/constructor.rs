@@ -86,6 +86,8 @@ impl TerrainScene {
 
         let material_layer_bind_group_layout =
             Self::create_material_layer_bind_group_layout(device.as_ref());
+        let visibility_resolve_bind_group_layout =
+            Self::create_visibility_resolve_bind_group_layout(device.as_ref());
         let material_layer_uniform_buffer = tracked_create_buffer_init(
             &device,
             &wgpu::util::BufferInitDescriptor {
@@ -96,51 +98,82 @@ impl TerrainScene {
         )?;
 
         // VT fallback resources
-        let vt_atlas_fallback_texture = tracked_create_texture(
-            &device,
-            &wgpu::TextureDescriptor {
-                label: Some("vt_atlas_fallback"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
+        let bindless_bc = super::virtual_texture::bindless_bc_supported(device.as_ref());
+        let fallback_specs = if bindless_bc {
+            vec![
+                (
+                    wgpu::TextureFormat::Bc7RgbaUnormSrgb,
+                    crate::core::compressed_textures::encode_bc7_rgba8(&[255; 4 * 4 * 4], 4, 4)
+                        .map_err(anyhow::Error::msg)?,
+                ),
+                (
+                    wgpu::TextureFormat::Bc5RgUnorm,
+                    crate::core::compressed_textures::encode_bc5_rg8(&[128; 4 * 4 * 2], 4, 4)
+                        .map_err(anyhow::Error::msg)?,
+                ),
+                (
+                    wgpu::TextureFormat::Bc7RgbaUnorm,
+                    crate::core::compressed_textures::encode_bc7_rgba8(&[255; 4 * 4 * 4], 4, 4)
+                        .map_err(anyhow::Error::msg)?,
+                ),
+            ]
+        } else {
+            vec![(wgpu::TextureFormat::Rgba8UnormSrgb, vec![255; 4])]
+        };
+        let mut vt_atlas_fallback_textures = Vec::with_capacity(fallback_specs.len());
+        let mut vt_atlas_fallback_views = Vec::with_capacity(fallback_specs.len());
+        for (index, (format, data)) in fallback_specs.into_iter().enumerate() {
+            let side = if format.is_compressed() { 4 } else { 1 };
+            let texture = tracked_create_texture(
+                &device,
+                &wgpu::TextureDescriptor {
+                    label: Some("vt_atlas_fallback"),
+                    size: wgpu::Extent3d {
+                        width: side,
+                        height: side,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            },
-        )?;
-
-        let vt_atlas_fallback_view =
-            vt_atlas_fallback_texture.create_view(&wgpu::TextureViewDescriptor {
+            )?;
+            let view = texture.create_view(&wgpu::TextureViewDescriptor {
                 label: Some("vt_atlas_fallback_view"),
-                format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+                format: Some(format),
                 dimension: Some(wgpu::TextureViewDimension::D2),
                 ..Default::default()
             });
-
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &vt_atlas_fallback_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &[255, 255, 255, 255],
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4),
-                rows_per_image: None,
-            },
-            wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-        );
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &data,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(if format.is_compressed() { 16 } else { 4 }),
+                    rows_per_image: Some(if format.is_compressed() {
+                        side / 4
+                    } else {
+                        side
+                    }),
+                },
+                wgpu::Extent3d {
+                    width: side,
+                    height: side,
+                    depth_or_array_layers: 1,
+                },
+            );
+            debug_assert_eq!(index, vt_atlas_fallback_textures.len());
+            vt_atlas_fallback_textures.push(texture);
+            vt_atlas_fallback_views.push(view);
+        }
 
         let vt_page_table_fallback_texture = tracked_create_texture(
             &device,
@@ -198,8 +231,10 @@ impl TerrainScene {
             &wgpu::BufferDescriptor {
                 label: Some("vt_uniforms"),
                 // Must cover TerrainVTUniformsGpu (3x vec4<u32> config + 3x
-                // vec4<u32> per-family info = 96 bytes).
-                size: 96,
+                // vec4<u32> per-family info + the bounded-feedback config3
+                // vec4<u32> = 112 bytes). `vt_uniform_buffer_covers_gpu_struct`
+                // in virtual_texture.rs fails if this drifts.
+                size: crate::terrain::renderer::virtual_texture::VT_UNIFORM_BUFFER_BYTES,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             },
@@ -221,6 +256,16 @@ impl TerrainScene {
                 label: Some("vt_feedback_fallback"),
                 contents: bytemuck::cast_slice(&[0u32; 4]),
                 usage: wgpu::BufferUsages::STORAGE,
+            },
+        )?;
+        let vt_frame_counters_buffer = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.vt.frame_counters"),
+                contents: bytemuck::cast_slice(&[0u32; 4]),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
             },
         )?;
 
@@ -464,6 +509,8 @@ impl TerrainScene {
             sample_count: 1,
             pipeline,
             clipmap_pipeline,
+            visibility_write_pipeline: None,
+            visibility_resolve_pipeline: None,
         };
 
         Ok(Self {
@@ -542,14 +589,16 @@ impl TerrainScene {
             water_reflection_fallback_view,
             water_reflection_pipeline,
             material_layer_bind_group_layout,
+            visibility_resolve_bind_group_layout,
             material_layer_uniform_buffer,
             vt_uniform_buffer,
             vt_fallback_uniform_buffer,
-            _vt_atlas_fallback_texture: vt_atlas_fallback_texture,
-            vt_atlas_fallback_view,
+            _vt_atlas_fallback_textures: vt_atlas_fallback_textures,
+            vt_atlas_fallback_views,
             _vt_page_table_fallback_texture: vt_page_table_fallback_texture,
             vt_page_table_fallback_view,
             vt_feedback_fallback_buffer,
+            vt_frame_counters_buffer,
             vt_atlas_sampler,
             probe_grid_uniform_buffer,
             probe_ssbo,
@@ -592,8 +641,13 @@ impl TerrainScene {
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
             material_vt: Mutex::new(super::virtual_texture::TerrainMaterialVT::new()),
+            visibility_buffer: Mutex::new(None),
+            cpu_visibility_oracle: Mutex::new(None),
             viewer_heightmap: None,
             geometry_provider: None,
+            two_phase_culler: None,
+            terrain_minmax_pyramid: None,
+            culling_stats: crate::terrain::culling::two_phase::CullingStats::default(),
             height_streaming: None,
             gpu_timing: Mutex::new(None),
             _tracked_scene_textures: tracked_scene_textures,
