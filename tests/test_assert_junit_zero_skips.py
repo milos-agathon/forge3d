@@ -298,10 +298,7 @@ def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
         "format('refs/heads/{0}', github.base_ref) || github.sha }}"
     )
     trusted_base_ref = "${{ steps.policy-base.outputs.sha }}"
-    assert preflight_refs in (
-        ["${{ github.sha }}"],
-        [live_base_ref, trusted_base_ref],
-    )
+    assert preflight_refs == [live_base_ref, trusted_base_ref]
     for job_name, job in ci_jobs.items():
         if job_name == "preflight" or not isinstance(job, dict):
             continue
@@ -346,6 +343,12 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
     jobs = yaml.load(workflow, Loader=yaml.BaseLoader)["jobs"]
     preflight = jobs["preflight"]
     checkout_refs = _checkout_refs(yaml.dump({"jobs": {"preflight": preflight}}))
+    live_base_ref = (
+        "${{ github.event_name == 'pull_request' && "
+        "format('refs/heads/{0}', github.base_ref) || github.sha }}"
+    )
+    trusted_base_ref = "${{ steps.policy-base.outputs.sha }}"
+    assert checkout_refs == [live_base_ref, trusted_base_ref]
     if checkout_refs == ["${{ github.sha }}"]:
         run_blocks = "\n".join(
             step.get("run", "")
@@ -354,11 +357,6 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
         )
         assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in run_blocks
     else:
-        live_base_ref = (
-            "${{ github.event_name == 'pull_request' && "
-            "format('refs/heads/{0}', github.base_ref) || github.sha }}"
-        )
-        trusted_base_ref = "${{ steps.policy-base.outputs.sha }}"
         assert checkout_refs == [live_base_ref, trusted_base_ref]
         steps = preflight["steps"]
         base_index = next(

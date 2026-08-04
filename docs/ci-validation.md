@@ -17,10 +17,13 @@ request to `main` or `develop`. It requires:
 - the representative slow lane, TERMINUS, Linux aarch64 install smoke, docs,
   and path-selected hosted visual goldens.
 
-The preflight validates the evaluated event state (the proposed merge on pull
-requests), so policy tests added on the base branch are available to older PR
-heads. Wheels, source tests, and acceptance evidence remain built from the
-exact PR head SHA.
+For pull requests, the preflight checks out the live base branch, fetches and
+verifies the immutable PR head, and materializes their merge locally before it
+runs the workflow contracts from a separate base-owned checkout. This avoids
+stale activity-event SHAs, makes policy tests added on the base branch available
+to older PR heads, and prevents a candidate from weakening its own validator. A
+merge conflict fails preflight. Wheels, source tests, and acceptance evidence
+remain built from the exact PR head SHA.
 
 The exhaustive 3 operating systems by 4 Python versions suite runs only in the
 nightly schedule or a manual `full` dispatch. It replaces, rather than

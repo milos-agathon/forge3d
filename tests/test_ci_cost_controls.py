@@ -73,6 +73,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert f"          - {scope}" in trigger
 
     preflight = _job(workflow, "preflight")
+    assert "name: Checkout trusted CI contracts" in preflight
     if "name: Checkout trusted CI contracts" in preflight:
         live_base_ref = (
             "ref: ${{ github.event_name == 'pull_request' && "
