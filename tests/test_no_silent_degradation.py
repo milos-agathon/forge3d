@@ -196,7 +196,13 @@ def test_c_every_feature_referenced_and_ci_list_curated():
     # The wheel's maturin list is the extension-module compile lane. Together,
     # portable/default closure + system lane + wheel lane must cover everything.
     maturin = _maturin_features()
-    assert "PyO3/maturin-action" in ci_yml, "CI has no wheel build exercising maturin features"
+    wheel_yml = (ROOT / ".github" / "workflows" / "build-wheel.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "uses: ./.github/workflows/build-wheel.yml" in ci_yml
+    assert "PyO3/maturin-action" in wheel_yml, (
+        "reusable CI wheel builder does not exercise maturin features"
+    )
     covered = _feature_closure(PORTABLE_CI_CARGO_FEATURES) | DEDICATED_SYSTEM_FEATURES | maturin
     assert covered == declared, f"declared features not compiled by any CI lane: {sorted(declared - covered)}"
 
@@ -377,7 +383,9 @@ def test_e_slow_lane_is_marker_selected_and_accounted():
         "\n  # ============================================================================\n  # TERMINUS", 1
     )[0]
     assert "python scripts/ci_pytest_lane.py --slow-lane" in slow_job
-    aggregate = ci_yml.split("  ci-success:", 1)[1]
+    aggregate = ci_yml.split("  pr-core-success:", 1)[1].split(
+        "\n  full-acceptance-summary:", 1
+    )[0]
     assert "test-python-slow" in aggregate.split("\n    runs-on:", 1)[0]
 
 
@@ -390,11 +398,7 @@ def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
     )[0]
     assert "anamnesis: ${{ steps.filter.outputs.anamnesis }}" in paths_job
     anamnesis_paths = paths_job.split("            anamnesis:\n", 1)[1]
-    for broad_path in (
-        "'.github/workflows/ci.yml'",
-        "'src/**'",
-        "'python/**'",
-    ):
+    for broad_path in ("'src/**'", "'python/**'"):
         assert broad_path not in anamnesis_paths
     for path in (
         "'src/core/anamnesis/**'",
@@ -445,13 +449,18 @@ def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
         "'scripts/assert_junit_zero_skips.py'",
         "'tests/anamnesis_gpu_acceptance.py'",
         "'tests/goldens/determinism/**'",
+        "'.github/workflows/ci.yml'",
+        "'.github/workflows/build-wheel.yml'",
     ):
         assert path in anamnesis_paths
 
     required = (
-        "github.event_name == 'workflow_dispatch'",
         "github.event_name == 'schedule'",
-        "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+        "inputs.scope == 'full'",
+        "inputs.scope == 'anamnesis'",
+        "github.event_name == 'pull_request'",
+        "github.event.pull_request.head.repo.full_name == github.repository",
+        "contains(github.event.pull_request.labels.*.name, 'run-physical')",
         "needs.terrain-golden-paths.outputs.anamnesis == 'true'",
     )
     for job_name in (
@@ -464,28 +473,22 @@ def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
         )[0]
         for fragment in required:
             assert fragment in job
+        assert "github.event_name == 'push'" not in job
     production = ci_yml.split("  test-anamnesis-production:", 1)[1].split(
-        "\n  # ============================================================================\n  # Documentation Build", 1
+        "\n  # ============================================================================\n  # Hosted determinism families", 1
     )[0]
     assert "test_real_gpu_600_frame_acceptance" in production
-    aggregate = ci_yml.split("  ci-success:", 1)[1]
-    assert "anamnesis_required" in aggregate
-    required_branch, skip_tail = aggregate.split(
-        'if [ "$anamnesis_required" = "true" ]; then', 1
-    )[1].split("\n          else\n", 1)
-    skip_branch = skip_tail.split("\n          fi\n          if ", 1)[0]
+    aggregate = ci_yml.split("  full-acceptance-summary:", 1)[1]
+    assert "anamnesis_physical_selected=" in aggregate
     for job_name in (
         "test-anamnesis-portability-seed",
         "test-anamnesis-portability",
         "test-anamnesis-production",
     ):
-        result_prefix = f"needs.{job_name}.result "
-        success_check = result_prefix + '}}" != "success"'
-        skipped_check = result_prefix + '}}" != "skipped"'
-        assert success_check in required_branch
-        assert success_check not in skip_branch
-        assert skipped_check in skip_branch
-        assert skipped_check not in required_branch
+        assert (
+            f"check_selected \"$anamnesis_physical_selected\" "
+            f"'${{{{ needs.{job_name}.result }}}}'"
+        ) in aggregate
 
 
 # ---------------------------------------------------------------------------
@@ -493,15 +496,16 @@ def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
 # ---------------------------------------------------------------------------
 def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent():
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    # Stop at the dispatch-only certificate refresh job.  That separate lane
-    # intentionally downloads the Windows wheel on the labeled GPU runner;
-    # the hosted Metal golden lane itself must remain macOS-wheel-only.
+    # Certificate mutation lives in a different manual-only workflow; the
+    # hosted Metal golden lane itself must remain macOS-wheel-only.
     golden_job = ci_yml.split("  test-golden-images:", 1)[1].split(
-        "\n  refresh-recipe-certificates:", 1
+        "\n  test-m06-full-geospatial-viewer:", 1
     )[0]
     pytest_step = golden_job.split("- name: Run visual golden tests", 1)[1].split("\n      - name:", 1)[0]
     probe_step = golden_job.split("- name: Probe terrain golden backend", 1)[1].split("\n      - name:", 1)[0]
-    aggregate = ci_yml.split("  ci-success:", 1)[1]
+    aggregate = ci_yml.split("  pr-core-success:", 1)[1].split(
+        "\n  full-acceptance-summary:", 1
+    )[0]
 
     assert "runs-on: macos-14" in golden_job, "golden lane must use the gated Metal runner"
     assert "WGPU_BACKEND: metal" in golden_job
@@ -527,5 +531,5 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     assert 'if [ -z "$FORGE3D_CERT_SIGNING_KEY" ]' in signing_step
     assert "exit 1" in signing_step
     assert "UNTRUSTED external PR" in golden_job
-    assert 'needs.test-golden-images.result }}" != "success"' in aggregate
-    assert 'needs.test-golden-images.result }}" != "skipped"' in aggregate
+    assert "require_success test-golden-images '${{ needs.test-golden-images.result }}'" in aggregate
+    assert "require_state test-golden-images '${{ needs.test-golden-images.result }}' skipped" in aggregate

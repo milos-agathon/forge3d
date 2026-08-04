@@ -36,106 +36,39 @@
 # present they upload a hash that the diff job enforces; if not they upload an
 # explicit ABSENT marker with the reason (loud, never a silent placeholder).
 
-name: determinism-matrix
+name: Determinism acceptance
 
 on:
-  workflow_dispatch:
-  # push trigger so direct-to-main work can never silently skip the matrix
-  # again (the original scaffolding landed on main without a single run).
-  push:
-    branches: [main]
-    paths:
-      - 'src/shaders/includes/determinism.wgsl'
-      - 'src/shaders/includes/shadow_moments.wgsl'
-      - 'src/shaders/includes/tonemap_common.wgsl'
-      - 'src/shaders/shadows.wgsl'
-      - 'src/shaders/lighting_ibl.wgsl'
-      - 'src/shaders/terrain_pbr_pom.wgsl'
-      - 'src/core/gpu.rs'
-      - 'src/core/dd.rs'
-      - 'src/core/dd/**'
-      - 'src/shaders/includes/dd.wgsl'
-      - 'src/shaders/dd_harness.wgsl'
-      - 'src/shaders/dd_jitter.wgsl'
-      - 'python/forge3d/precision.py'
-      - 'python/forge3d/precision.pyi'
-      - 'python/forge3d/__init__.py'
-      - 'python/forge3d/__init__.pyi'
-      - 'src/py_functions/precision.rs'
-      - 'src/py_functions/mod.rs'
-      - 'src/py_module/functions/precision.rs'
-      - 'src/py_module/functions.rs'
-      - 'scripts/run_dupla_proof.py'
-      - 'tests/test_dd_arithmetic.py'
-      - 'tests/test_dd_jitter.py'
-      - 'python/forge3d/determinism.py'
-      - 'scripts/check_determinism_hashes.py'
-      - 'tests/test_determinism_hash.py'
-      - 'tests/test_determinism_matrix.py'
-      - 'tests/test_f3dz_codec.py'
-      - 'tests/data/codec_corpus/**'
-      - 'tools/f3dz_determinism_report.py'
-      - 'src/codec/f3dz/**'
-      - 'src/py_functions/codec.rs'
-      - 'python/forge3d/codec.py'
-      - 'python/forge3d/anamnesis.py'
-      - 'src/core/anamnesis/**'
-      - 'scripts/check_anamnesis_portability.py'
-      - 'tests/test_anamnesis_*.py'
-      - 'tests/goldens/determinism/**'
-      - '.github/workflows/determinism-matrix.yml'
-  pull_request:
-    paths:
-      - 'src/shaders/includes/determinism.wgsl'
-      - 'src/shaders/includes/shadow_moments.wgsl'
-      - 'src/shaders/includes/tonemap_common.wgsl'
-      - 'src/shaders/shadows.wgsl'
-      - 'src/shaders/lighting_ibl.wgsl'
-      - 'src/shaders/terrain_pbr_pom.wgsl'
-      - 'src/core/gpu.rs'
-      - 'src/core/dd.rs'
-      - 'src/core/dd/**'
-      - 'src/shaders/includes/dd.wgsl'
-      - 'src/shaders/dd_harness.wgsl'
-      - 'src/shaders/dd_jitter.wgsl'
-      - 'python/forge3d/precision.py'
-      - 'python/forge3d/precision.pyi'
-      - 'python/forge3d/__init__.py'
-      - 'python/forge3d/__init__.pyi'
-      - 'src/py_functions/precision.rs'
-      - 'src/py_functions/mod.rs'
-      - 'src/py_module/functions/precision.rs'
-      - 'src/py_module/functions.rs'
-      - 'scripts/run_dupla_proof.py'
-      - 'tests/test_dd_arithmetic.py'
-      - 'tests/test_dd_jitter.py'
-      - 'python/forge3d/determinism.py'
-      - 'scripts/check_determinism_hashes.py'
-      - 'tests/test_determinism_hash.py'
-      - 'tests/test_determinism_matrix.py'
-      - 'tests/test_f3dz_codec.py'
-      - 'tests/data/codec_corpus/**'
-      - 'tools/f3dz_determinism_report.py'
-      - 'src/codec/f3dz/**'
-      - 'src/py_functions/codec.rs'
-      - 'python/forge3d/codec.py'
-      - 'python/forge3d/anamnesis.py'
-      - 'src/core/anamnesis/**'
-      - 'scripts/check_anamnesis_portability.py'
-      - 'tests/test_anamnesis_*.py'
-      - 'tests/goldens/determinism/**'
-      - '.github/workflows/determinism-matrix.yml'
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit SHA whose already-built wheels are under test.
+        required: true
+        type: string
+      run_render:
+        required: false
+        default: false
+        type: boolean
+      run_f3dz:
+        required: false
+        default: false
+        type: boolean
+      run_anamnesis:
+        required: false
+        default: false
+        type: boolean
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
 
 env:
   SCENE: terra_determinata_v1
+  FORGE3D_NO_BOOTSTRAP: '1'
 
 jobs:
   f3dz-stream:
     name: f3dz stream (${{ matrix.os }})
+    if: inputs.run_f3dz
     strategy:
       fail-fast: false
       matrix:
@@ -144,21 +77,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: dtolnay/rust-toolchain@stable
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Build extension
-        shell: bash
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ runner.os == 'Windows' && 'windows' || 'linux' }}
+          path: dist/
+      - name: Install the exact wheel built by the caller
         run: |
-          python -m venv .venv
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
-          echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> "$GITHUB_ENV"
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-          echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
-          python -m pip install -U pip maturin numpy pytest
-          maturin develop --release
+          python scripts/install_compatible_wheel.py dist
+          python -m pip install numpy pytest
       - name: Reproduce each stream twice against the committed hashes
         shell: bash
         run: |
@@ -178,6 +108,7 @@ jobs:
 
   render:
     name: render (${{ matrix.leg }})
+    if: inputs.run_render
     strategy:
       fail-fast: false
       matrix:
@@ -202,8 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: dtolnay/rust-toolchain@stable
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -212,19 +142,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
-      - name: Build extension
-        shell: bash
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ runner.os == 'Windows' && 'windows' || runner.os == 'macOS' && 'macos' || 'linux' }}
+          path: dist/
+      - name: Install the exact wheel built by the caller
         run: |
-          # maturin develop refuses to run without a virtualenv; hosted
-          # runners provide none, so create one and persist it for the
-          # render step (bin/ on unix, Scripts/ on windows).
-          python -m venv .venv
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
-          echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> "$GITHUB_ENV"
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-          echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
-          python -m pip install -U pip maturin numpy
-          maturin develop --release
+          python scripts/install_compatible_wheel.py dist
+          python -m pip install numpy
       - name: Render canonical scene
         shell: bash
         env:
@@ -299,11 +224,12 @@ jobs:
 
   wasm-policy:
     name: render (wasm) — relaxed-SIMD policy gate
+    if: inputs.run_render
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.ref }}
       - name: Forbid relaxed-SIMD in any build configuration (GATED)
         run: |
           # Relaxed SIMD is nondeterministic by design (results may vary per
@@ -329,17 +255,17 @@ jobs:
 
   anamnesis-seed:
     name: anamnesis golden-store seed (linux/vulkan)
+    if: inputs.run_anamnesis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.ref }}
       - name: Prove exact-head checkout
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_HEAD: ${{ inputs.ref }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -347,15 +273,33 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
-      - name: Build extension
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux
+          path: dist/
+      - name: Install the exact wheel built by the caller
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
-          python -m pip install -U pip maturin numpy pytest
-          maturin develop --release
+          python scripts/install_compatible_wheel.py dist
+          python -m pip install numpy pytest pillow
+      - name: Classify the hosted Vulkan adapter before runtime tests
+        id: anamnesis-probe
+        shell: bash
+        run: |
+          set +e
+          python scripts/terrain_ci_probe.py \
+            --mode terrain --json anamnesis-seed-adapter.json
+          probe_status=$?
+          set -e
+          if [ "$probe_status" -eq 0 ]; then
+            echo "status=positive" >> "$GITHUB_OUTPUT"
+          elif [ "$probe_status" -eq 2 ]; then
+            echo "status=absent" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::ANAMNESIS hosted probe crashed on a CI-safe adapter (exit $probe_status)"
+            exit "$probe_status"
+          fi
       - name: Gate ANAMNESIS incrementality, speed, hermeticity, and corruption handling
         run: |
-          source .venv/bin/activate
           python -m pytest \
             tests/test_anamnesis_incremental.py \
             tests/test_anamnesis_adversarial_keys.py \
@@ -371,18 +315,9 @@ jobs:
           WGPU_BACKEND: vulkan
           WGPU_BACKENDS: vulkan
         run: |
-          source .venv/bin/activate
-          set +e
-          python scripts/terrain_ci_probe.py \
-            --mode terrain --json anamnesis-seed-adapter.json
-          probe_status=$?
-          set -e
-          if [ "$probe_status" -eq 2 ]; then
+          if [ "${{ steps.anamnesis-probe.outputs.status }}" = "absent" ]; then
             echo "ABSENT: terrain_ci_probe proved no physical Linux/Vulkan adapter" \
               > ANAMNESIS.ABSENT
-          elif [ "$probe_status" -ne 0 ]; then
-            echo "ANAMNESIS seed probe crashed on a CI-safe adapter"
-            exit "$probe_status"
           else
             set -o pipefail
             python -m forge3d.determinism \
@@ -416,17 +351,17 @@ jobs:
   anamnesis-portability:
     name: anamnesis portability consume (windows)
     needs: anamnesis-seed
+    if: inputs.run_anamnesis
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.ref }}
       - name: Prove exact-head checkout
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_HEAD: ${{ inputs.ref }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -434,13 +369,14 @@ jobs:
         with:
           name: anamnesis-store-linux
           path: seeded
-      - name: Build extension
-        shell: bash
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install the exact wheel built by the caller
         run: |
-          python -m venv .venv
-          source .venv/Scripts/activate
-          python -m pip install -U pip maturin numpy
-          maturin develop --release
+          python scripts/install_compatible_wheel.py dist
+          python -m pip install numpy
       - name: Require portable hits and mismatch isolation
         shell: bash
         env:
@@ -448,7 +384,6 @@ jobs:
           WGPU_BACKEND: dx12
           WGPU_BACKENDS: dx12
         run: |
-          source .venv/Scripts/activate
           if [ -f seeded/ANAMNESIS.ABSENT ]; then
             echo "ABSENT: Linux/Vulkan seed host exposed no physical adapter"
           else
@@ -490,26 +425,51 @@ jobs:
           retention-days: 7
 
   diff:
-    name: diff hashes (zero-byte tolerance)
-    needs: [render, wasm-policy]
+    name: Determinism Acceptance Summary
+    needs: [f3dz-stream, render, wasm-policy, anamnesis-seed, anamnesis-portability]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.ref }}
       - uses: actions/download-artifact@v4
+        if: inputs.run_render
         with:
           pattern: determinism-hash-*
           path: hashes
       - name: Fail on any pairwise or golden mismatch
+        if: inputs.run_render
         run: >-
           python scripts/check_determinism_hashes.py
           --hashes hashes
           --golden tests/goldens/determinism/${{ env.SCENE }}.sha256
           --scene ${{ env.SCENE }}
       - name: Validate DUPLA backend proofs
+        if: inputs.run_render
         run: >-
           python scripts/run_dupla_proof.py
           --validate-artifacts hashes
           --expected-legs intel amd nvidia apple
+      - name: Enforce every requested family
+        shell: bash
+        run: |
+          failed=0
+          check_family() {
+            requested="$1"
+            result="$2"
+            label="$3"
+            if [ "$requested" = "true" ] && [ "$result" != "success" ]; then
+              echo "::error::$label was requested but finished as $result"
+              failed=1
+            elif [ "$requested" != "true" ] && [ "$result" != "skipped" ]; then
+              echo "::error::$label was not requested but finished as $result"
+              failed=1
+            fi
+          }
+          check_family '${{ inputs.run_f3dz }}' '${{ needs.f3dz-stream.result }}' f3dz
+          check_family '${{ inputs.run_render }}' '${{ needs.render.result }}' render
+          check_family '${{ inputs.run_render }}' '${{ needs.wasm-policy.result }}' wasm-policy
+          check_family '${{ inputs.run_anamnesis }}' '${{ needs.anamnesis-seed.result }}' anamnesis-seed
+          check_family '${{ inputs.run_anamnesis }}' '${{ needs.anamnesis-portability.result }}' anamnesis-portability
+          exit "$failed"
