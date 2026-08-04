@@ -927,6 +927,55 @@ impl TerrainRenderer {
         Ok(material_vt.get_stats())
     }
 
+    /// Test hook for the mandatory live feedback-retention acceptance gate.
+    /// The request is inserted into the active renderer VT runtime, held while
+    /// feedback is forced not-ready, then converges through the normal upload
+    /// path after the requested number of frames.
+    #[pyo3(text_signature = "(self, not_ready_frames)")]
+    fn force_vt_feedback_not_ready_for_test(&self, not_ready_frames: u32) -> PyResult<()> {
+        let mut material_vt = self.scene.material_vt.lock().map_err(|error| {
+            PyRuntimeError::new_err(format!("Failed to lock material_vt: {error}"))
+        })?;
+        material_vt
+            .force_live_retention_probe(not_ready_frames)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    /// TESSELLA win 6: the retained VT request set as
+    /// `(family_slot, material_index, mip_level, tile_x, tile_y)` tuples.
+    ///
+    /// The retention gate compares this SET across a forced not-ready feedback
+    /// window; `get_material_vt_stats()["retained_requests"]` only reports its
+    /// cardinality, which cannot tell a preserved set from a silently swapped
+    /// one of the same size.
+    #[pyo3(text_signature = "(self)")]
+    fn read_retained_vt_requests(&self) -> PyResult<Vec<(u32, u32, u32, u32, u32)>> {
+        let material_vt = self.scene.material_vt.lock().map_err(|error| {
+            PyRuntimeError::new_err(format!("Failed to lock material_vt: {error}"))
+        })?;
+        Ok(material_vt.retained_request_set())
+    }
+
+    /// Return `(tile_id, triangle_id)` identities for visibility-buffer
+    /// pixels. Background pixels return `None`.
+    #[pyo3(text_signature = "(self, pixels)")]
+    fn pick_visibility_pixels(&self, pixels: Vec<(u32, u32)>) -> PyResult<Vec<Option<(u32, u32)>>> {
+        self.scene
+            .pick_visibility_pixels(&pixels)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    }
+
+    /// Independent CPU-BVH oracle for TESSELLA visibility-buffer acceptance.
+    #[pyo3(text_signature = "(self, pixels)")]
+    fn pick_visibility_pixels_cpu(
+        &self,
+        pixels: Vec<(u32, u32)>,
+    ) -> PyResult<Vec<Option<(u32, u32)>>> {
+        self.scene
+            .pick_visibility_pixels_cpu(&pixels)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    }
+
     /// VERITAS: contributing-tile records for the last rendered frame.
     ///
     /// Blocking drain of the VT feedback stream, resolved on the CPU to the
@@ -980,8 +1029,8 @@ impl TerrainRenderer {
     /// Builds a fixed-LOD `HeightMosaic` (`2^lod` tiles per axis at
     /// `tile_resolution` texels per tile), an `AsyncTileLoader` worker pool,
     /// and a `ClipmapStreamer` for camera-driven tile demand. When `dem` is
-    /// given, tiles are bilinearly sliced from it on worker threads;
-    /// otherwise the synthetic procedural height reader is used. With
+    /// given, tiles are bilinearly sliced from it on worker threads. Shipped
+    /// render paths require an explicit source and never synthesize I/O. With
     /// `coarse_prefill=True` (default) every tile slot is filled from a
     /// low-resolution read so streaming frames show coarse terrain instead
     /// of holes while fine tiles are in flight.
@@ -1024,9 +1073,13 @@ impl TerrainRenderer {
                     h,
                 ))
             }
-            None => Arc::new(crate::terrain::page_table::SyntheticHeightReader),
+            None => {
+                return Err(PyRuntimeError::new_err(
+                    "dem is required; synthetic height streaming is test-only",
+                ))
+            }
         };
-        let state = super::streaming::HeightStreamingState::new(
+        let state = super::streaming::HeightVtFamilyRuntime::new(
             self.scene.device.as_ref(),
             self.scene.queue.as_ref(),
             terrain_extent_m,
@@ -1043,6 +1096,59 @@ impl TerrainRenderer {
         .map_err(|e| PyRuntimeError::new_err(format!("enable_height_streaming failed: {:#}", e)))?;
         self.scene.height_streaming = Some(state);
         // Force clipmap mesh regeneration around the (new) streaming center.
+        self.scene.geometry_provider = None;
+        Ok(())
+    }
+
+    /// Enable the same height-mosaic path from a COG-backed
+    /// `VirtualTextureStore`. The COG reader and the packed material store
+    /// therefore share the page contract instead of maintaining a third
+    /// render-time streamer.
+    #[cfg(feature = "cog_streaming")]
+    #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn enable_height_streaming_cog(
+        &mut self,
+        dataset: &crate::terrain::cog::py_bindings::PyCogDataset,
+        terrain_extent_m: f32,
+        ring_count: u32,
+        ring_resolution: u32,
+        lod: u32,
+        tile_resolution: u32,
+        max_in_flight: usize,
+        pool_size: usize,
+        coarse_prefill: bool,
+        max_resident_bytes: Option<u64>,
+    ) -> PyResult<()> {
+        if !(terrain_extent_m.is_finite() && terrain_extent_m > 0.0) {
+            return Err(PyRuntimeError::new_err(
+                "terrain_extent_m must be a positive finite value",
+            ));
+        }
+        let tile_resolution = tile_resolution.clamp(8, 1024);
+        let store = std::sync::Arc::new(crate::terrain::vt::CogPageStore::from_reader(
+            dataset.reader(),
+            tile_resolution,
+        ));
+        let reader = std::sync::Arc::new(super::streaming::StoreHeightReader::new(store));
+        let state = super::streaming::HeightVtFamilyRuntime::new(
+            self.scene.device.as_ref(),
+            self.scene.queue.as_ref(),
+            terrain_extent_m,
+            ring_count,
+            ring_resolution,
+            lod.min(6),
+            tile_resolution,
+            max_in_flight,
+            pool_size,
+            reader,
+            coarse_prefill,
+            max_resident_bytes,
+        )
+        .map_err(|error| {
+            PyRuntimeError::new_err(format!("enable_height_streaming_cog failed: {error:#}"))
+        })?;
+        self.scene.height_streaming = Some(state);
         self.scene.geometry_provider = None;
         Ok(())
     }
@@ -1065,6 +1171,12 @@ impl TerrainRenderer {
         max_uploads: usize,
     ) -> PyResult<PyObject> {
         let queue = self.scene.queue.clone();
+        let feedback_uvs = self
+            .scene
+            .material_vt
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("material VT mutex poisoned"))?
+            .latest_feedback_uvs();
         let state = self.scene.height_streaming.as_mut().ok_or_else(|| {
             PyRuntimeError::new_err(
                 "height streaming not enabled; call enable_height_streaming() first",
@@ -1073,6 +1185,7 @@ impl TerrainRenderer {
         let stats = state.stream_step(
             queue.as_ref(),
             glam::Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2),
+            &feedback_uvs,
             max_uploads,
         );
         height_streaming_stats_to_py(py, &stats)

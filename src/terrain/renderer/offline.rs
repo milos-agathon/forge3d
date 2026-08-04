@@ -459,7 +459,12 @@ impl TerrainScene {
 
         let height_inputs =
             self.upload_height_inputs(heightmap, water_mask, offline_params.terrain_data_revision)?;
-        self.prepare_geometry(&offline_params)?;
+        self.prepare_geometry(
+            &offline_params,
+            &height_inputs.heightmap_data,
+            (height_inputs.width, height_inputs.height),
+            height_inputs.terrain_data_hash,
+        )?;
         let probe_world_span = if is_mesh_camera_mode(&offline_params.camera_mode) {
             offline_params.terrain_span.max(1e-3)
         } else {
@@ -628,7 +633,12 @@ impl TerrainScene {
         // Re-prepare per sample: interleaved non-offline renders may have
         // switched the geometry provider; the clipmap mesh cache makes this
         // free when nothing changed.
-        self.prepare_geometry(&state.params)?;
+        self.prepare_geometry(
+            &state.params,
+            &state.height_inputs.heightmap_data,
+            (state.height_inputs.width, state.height_inputs.height),
+            state.height_inputs.terrain_data_hash,
+        )?;
         let (eye, view, proj) = Self::build_camera_matrices(&state.params);
         let jittered_proj = apply_jitter_to_projection(
             proj,
@@ -1123,8 +1133,14 @@ impl TerrainScene {
         pass.set_bind_group(5, water_reflection_bind_group, &[]);
         pass.set_bind_group(6, material_layer_bind_group, &[]);
 
+        if params.culling == "hzb_two_phase" {
+            crate::core::degradation::record_degradation(
+                "rendering_fallback",
+                "terrain_hzb_two_phase_offline_aov",
+                "offline AOV rendering uses the direct clipmap path; two-phase HZB applies to the beauty pass",
+            );
+        }
         self.geometry_provider()?.draw(&mut pass);
-        let _ = params;
         Ok(())
     }
 

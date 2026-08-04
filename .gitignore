@@ -398,6 +398,10 @@ scripts/*
 !scripts/summarize_m06_evidence.py
 !scripts/check_anamnesis_portability.py
 !scripts/run_dupla_proof.py
+!scripts/tessella_evidence_report.py
+!scripts/tessella_evidence_contract.py
+!scripts/tessella_evidence_provenance.py
+!scripts/tessella_evidence_thresholds.py
 
 # forge3d outputs (A13) 
 out/

@@ -16,6 +16,7 @@
       "Light Storage Buffer 2": 1280,
       "colormap1d-lut": 1024,
       "csm_evsm_maps": 134217728,
+      "csm_moment_fallback": 64,
       "csm_shadow_maps": 335544320,
       "csm_uniforms": 1728,
       "forge3d-readback-staging": 40960,
@@ -38,15 +39,15 @@
       "mesh_instanced_terrain_fallback": 4,
       "mesh_instanced_terrain_uniforms": 32,
       "mesh_instanced_uniforms": 240,
-      "src/terrain/renderer/constructor.rs:444": 4,
-      "src/terrain/renderer/constructor.rs:445": 1024,
-      "src/terrain/renderer/constructor.rs:446": 1,
-      "src/terrain/renderer/constructor.rs:447": 4,
-      "src/terrain/renderer/constructor.rs:448": 1048576,
-      "src/terrain/renderer/constructor.rs:449": 1048576,
-      "src/terrain/renderer/constructor.rs:454": 4,
-      "src/terrain/renderer/constructor.rs:459": 16,
-      "src/terrain/renderer/constructor.rs:460": 8,
+      "src/terrain/renderer/constructor.rs:489": 4,
+      "src/terrain/renderer/constructor.rs:490": 1024,
+      "src/terrain/renderer/constructor.rs:491": 1,
+      "src/terrain/renderer/constructor.rs:492": 4,
+      "src/terrain/renderer/constructor.rs:493": 1048576,
+      "src/terrain/renderer/constructor.rs:494": 1048576,
+      "src/terrain/renderer/constructor.rs:499": 4,
+      "src/terrain/renderer/constructor.rs:504": 16,
+      "src/terrain/renderer/constructor.rs:505": 8,
       "sun_vis.uniform_buffer": 64,
       "terrain.ao_debug_fallback": 4,
       "terrain.coarse_ao": 1024,
@@ -80,18 +81,19 @@
       "terrain.sky.fallback": 4,
       "terrain.sun_vis_fallback": 4,
       "terrain.uniform_buffer": 176,
+      "terrain.vt.frame_counters": 16,
       "terrain.water_mask_fallback": 1,
       "terrain.water_reflection.depth": 1058816,
       "terrain.water_reflection.fallback": 4,
       "terrain.water_reflection.texture": 1058816,
       "terrain.water_reflection.uniform_buffer": 128,
-      "vt_atlas_fallback": 4,
+      "vt_atlas_fallback": 48,
       "vt_fallback_colors": 256,
       "vt_feedback_fallback": 16,
       "vt_page_table_fallback": 64,
-      "vt_uniforms": 96
+      "vt_uniforms": 112
     },
-    "peak_device_local_bytes": 474214322,
+    "peak_device_local_bytes": 474214462,
     "peak_host_visible_bytes": 41984
   },
   "capabilities": {
@@ -100,9 +102,12 @@
       "pipeline_statistics_query",
       "texture_binding_array",
       "sampled_texture_and_storage_buffer_array_non_uniform_indexing",
+      "shader_primitive_index",
       "texture_compression_bc",
       "float32_filterable",
-      "indirect_first_instance"
+      "indirect_first_instance",
+      "multi_draw_indirect",
+      "multi_draw_indirect_count"
     ],
     "limits": {
       "max_bind_groups": 8,
@@ -117,24 +122,27 @@
       "pipeline_statistics_query",
       "texture_binding_array",
       "sampled_texture_and_storage_buffer_array_non_uniform_indexing",
+      "shader_primitive_index",
       "texture_compression_bc",
       "float32_filterable",
-      "indirect_first_instance"
+      "indirect_first_instance",
+      "multi_draw_indirect",
+      "multi_draw_indirect_count"
     ]
   },
   "degradations": [],
   "engine": {
-    "git_sha": "5e6cc4e52ea3",
+    "git_sha": "e51c6c7b3d3e",
     "version": "1.34.0",
     "wgsl_module_hashes": {
       "terrain.shadow_depth.shader": "5cb47cb163eba8496ca4c80b931f961d2d51c752cbddbf116690106bfa2a8ce0",
-      "terrain_pbr_pom.shader": "ff5778bc9f4ba1abc8b00460c2be2055c45f52cf2bb5ebdb97d4c17abedd6d82"
+      "terrain_pbr_pom.shader": "122a8073702abd4257853bb9edbebe353735c2a153b5e14d88cd8d87f368cb50"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 3.5246078968048096,
+      "gpu_ms": 4.934656143188477,
       "label": "terrain.shadow"
     },
     {
@@ -154,17 +162,17 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.1884160041809082,
+      "gpu_ms": 0.2396160066127777,
       "label": "terrain.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.resolve"
     },
     {
@@ -177,7 +185,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "25d044e955742d526c4cce0eedc98b7d89445ba6f1b99ebb953c063a6a0bdc6b22416012084ec5a1c0f05c30389d7ece493424e84db3cd2d18dc7ae0ebe31405",
+    "sig": "59f05dce5f49938257530eb5a661fd44ec5b9fa1c1a01335c5a7cc59bb06f4de215f5178bafb1a0ac30ab3888a06ac336326799b0681af8fcaca3c3dd7206206",
     "signed_fields": [
       "adapter",
       "allocations",
