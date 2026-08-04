@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import sys
@@ -9,7 +10,10 @@ import pytest
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "check_determinism_hashes.py"
 DUPLA_SCRIPT = Path(__file__).parents[1] / "scripts" / "run_dupla_proof.py"
-WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "determinism-matrix.yml"
+CONTRACT_ROOT = Path(
+    os.environ.get("FORGE3D_CI_CONTRACT_ROOT", Path(__file__).parents[1])
+)
+WORKFLOW = CONTRACT_ROOT / ".github" / "workflows" / "determinism-matrix.yml"
 SCENE = "terra_determinata_v1"
 SHA = "d" * 64
 
