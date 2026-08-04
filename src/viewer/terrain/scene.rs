@@ -312,6 +312,7 @@ pub struct ViewerTerrainScene {
     // P6.2: Shadow mapping support
     pub(super) csm_renderer: Option<crate::shadows::CsmRenderer>,
     pub(super) moment_pass: Option<crate::shadows::MomentGenerationPass>,
+    pub(super) moment_blur_pass: Option<crate::shadows::ShadowBlurPass>,
     pub(super) csm_uniform_buffer: Option<TrackedBuffer>,
 
     // Shadow rendering resources

@@ -85,6 +85,14 @@ def test_p1_rejecting_controls_cover_recompute_and_complete_disk_bound():
     assert "cache=None" not in native_acceptance
     assert '"incremental_native_invocations": 600' in native_acceptance
     assert '"graph_command_submissions"' in native_acceptance
+    assert "expected_seed_misses = list(_NATIVE_PASSES) * 600" in native_acceptance
+    assert 'seed_report["misses"] != expected_seed_misses' in native_acceptance
+    assert 'or seed_report["hits"]' in native_acceptance
+    assert 'seed_report["graph_command_submissions"] != 3600' in native_acceptance
+    assert 'result["matching_frames"] != 600' in native_acceptance
+    assert 'result["speedup"] < 20.0' in native_acceptance
+    assert "1801" not in native_acceptance
+    assert "2402" not in native_acceptance
     assert "changed_report[\"misses\"] != list(_NATIVE_PASSES)" in native_acceptance
 
 

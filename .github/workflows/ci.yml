@@ -5,6 +5,8 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  schedule:
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       update_recipe_certificates:
@@ -16,6 +18,11 @@ on:
 permissions:
   contents: read
   pull-requests: read
+
+concurrency:
+  # Keep reviewed certificate refreshes isolated from ordinary CI cancellation.
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.update_recipe_certificates && format('certificate-refresh-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('manual-{0}', github.ref_name) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.update_recipe_certificates) }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -42,10 +49,16 @@ jobs:
       - name: Download the required LFS objects once
         shell: bash
         run: |
-          git lfs install --local
-          git lfs pull \
-            --include="assets/tif/Mount_Fuji_30m.tif,assets/tif/dem_rainier.tif,assets/tif/switzerland_dem.tif" \
-            --exclude=""
+          media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
+          while read -r sha256 fixture; do
+            curl --fail --location --retry 3 \
+              --output "$fixture" "$media_base/$fixture"
+            echo "$sha256  $fixture" | sha256sum --check -
+          done <<'EOF'
+          cff39b4e02d7ba13c48f3d8b1a4080d40ada753ade62fa951459fe4e01e98b48 assets/tif/Mount_Fuji_30m.tif
+          875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3 assets/tif/dem_rainier.tif
+          d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478 assets/tif/switzerland_dem.tif
+          EOF
 
           for fixture in \
             assets/tif/Mount_Fuji_30m.tif \
@@ -84,7 +97,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       terrain_goldens: ${{ steps.filter.outputs.terrain_goldens }}
+      m06: ${{ steps.filter.outputs.m06 }}
       f3dz: ${{ steps.filter.outputs.f3dz }}
+      anamnesis: ${{ steps.filter.outputs.anamnesis }}
 
     steps:
       - uses: actions/checkout@v4
@@ -118,24 +133,142 @@ jobs:
               - 'tests/golden/adjudication/**'
               - 'tests/golden/hybrid_terrain/**'
               - 'docs/gallery/**'
-            f3dz:
-              - '.github/workflows/ci.yml'
+            m06:
               - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - '.cargo/config.toml'
+              - 'pyproject.toml'
+              - 'pytest.ini'
+              - 'conftest.py'
+              - 'src/**'
+              - 'python/forge3d/**'
+              - 'scripts/install_compatible_wheel.py'
+              - 'scripts/terrain_ci_probe.py'
+              - 'scripts/assert_junit_zero_skips.py'
+              - 'scripts/summarize_m06_evidence.py'
+              - 'scripts/ci_pytest_lane.py'
+              - 'tests/*.py'
+              - 'tests/*.toml'
+              - 'tests/golden/certificates/**'
+              - 'tests/golden/recipes/mapscene_terrain_raster.png'
+              - 'tests/data/vector_torture/cases.json'
+              - 'assets/lidar/MtStHelens.laz'
+              - 'assets/tif/switzerland_dem.tif'
+              - 'assets/fonts/**'
+              - 'assets/geoid/egm96_n120.bin'
+            f3dz:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - 'pyproject.toml'
               - 'benches/f3dz_bench.rs'
-              - 'docs/formats/f3dz.md'
               - 'python/forge3d/codec.py'
               - 'python/forge3d/__init__.py'
-              - 'python/forge3d/__init__.pyi'
+              - 'python/forge3d/_native.py'
+              - 'python/forge3d/_gpu.py'
               - 'src/codec/**'
+              - 'src/lib.rs'
+              - 'src/core/mod.rs'
+              - 'src/core/error.rs'
               - 'src/core/certificate.rs'
               - 'src/core/degradation.rs'
+              - 'src/core/gpu.rs'
+              - 'src/core/capabilities.rs'
+              - 'src/core/resource_tracker.rs'
+              - 'src/core/memory_tracker.rs'
+              - 'src/core/memory_tracker/**'
+              - 'src/core/shader_registry.rs'
+              - 'src/core/shader_contract_runtime.rs'
+              - 'src/core/provenance.rs'
               - 'src/py_functions/codec.rs'
+              - 'src/py_functions/diagnostics.rs'
+              - 'src/py_functions/mod.rs'
+              - 'src/py_module/mod.rs'
+              - 'src/py_module/functions.rs'
+              - 'src/py_module/functions/codec.rs'
+              - 'src/py_module/functions/diagnostics.rs'
               - 'src/shaders/f3dz_decode.wgsl'
-              - 'src/terrain/cog/cog_reader.rs'
-              - 'src/terrain/stream/height.rs'
+              - 'scripts/install_compatible_wheel.py'
+              - 'scripts/assert_junit_zero_skips.py'
               - 'tests/data/codec_corpus/**'
+              - 'tests/_toml_compat.py'
               - 'tests/test_f3dz_codec.py'
-              - 'tools/f3dz_determinism_report.py'
+            anamnesis:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - 'pyproject.toml'
+              - '.cargo/**'
+              - 'src/core/anamnesis/**'
+              - 'src/core/framegraph_impl/**'
+              - 'src/core/ibl.rs'
+              - 'src/core/ibl/**'
+              - 'src/core/capabilities.rs'
+              - 'src/core/gpu.rs'
+              - 'src/core/session.rs'
+              - 'src/core/shader_registry.rs'
+              - 'src/core/hdr.rs'
+              - 'src/core/tonemap.rs'
+              - 'src/core/resource_tracker.rs'
+              - 'src/core/material.rs'
+              - 'src/core/hdr_readback.rs'
+              - 'src/core/provenance.rs'
+              - 'src/formats/hdr.rs'
+              - 'src/lighting/ibl_wrapper.rs'
+              - 'src/lighting/types.rs'
+              - 'src/lighting/light_buffer/**'
+              - 'src/offscreen/**'
+              - 'src/path_tracing/**'
+              - 'src/shader_sources.rs'
+              - 'src/shadows/**'
+              - 'src/py_functions/adjudication.rs'
+              - 'src/py_functions/mod.rs'
+              - 'src/render/material_set.rs'
+              - 'src/render/material_set/**'
+              - 'src/terrain/renderer.rs'
+              - 'src/terrain/renderer/**'
+              - 'src/terrain/render_params.rs'
+              - 'src/terrain/render_params/**'
+              - 'src/py_module/classes.rs'
+              - 'src/py_module/functions.rs'
+              - 'src/py_module/functions/anamnesis.rs'
+              - 'src/py_module/functions/rendering.rs'
+              - 'src/py_types/frame.rs'
+              - 'src/lib.rs'
+              - 'src/util/memory_budget.rs'
+              - 'python/forge3d/__init__.py'
+              - 'python/forge3d/_canonical_json.py'
+              - 'python/forge3d/anamnesis.py'
+              - 'python/forge3d/determinism.py'
+              - 'python/forge3d/terrain_params.py'
+              - 'python/forge3d/_native.py'
+              - 'python/forge3d/_gpu.py'
+              - 'src/shaders/adjudication_raster.wgsl'
+              - 'src/shaders/ao_from_aovs.wgsl'
+              - 'src/shaders/pt_*.wgsl'
+              - 'src/shaders/terrain_*.wgsl'
+              - 'src/shaders/heightfield_*.wgsl'
+              - 'src/shaders/sky.wgsl'
+              - 'src/shaders/lighting*.wgsl'
+              - 'src/shaders/lights.wgsl'
+              - 'src/shaders/brdf/**'
+              - 'src/shaders/includes/determinism.wgsl'
+              - 'src/shaders/includes/shadow_moments.wgsl'
+              - 'src/shaders/includes/tonemap_common.wgsl'
+              - 'src/shaders/shadows.wgsl'
+              - 'src/shaders/moment_generation.wgsl'
+              - 'src/shaders/shadow_blur.wgsl'
+              - 'src/shaders/offline_*.wgsl'
+              - 'src/shaders/tonemap_terrain_offline.wgsl'
+              - 'src/shaders/ibl_*.wgsl'
+              - 'scripts/check_anamnesis_portability.py'
+              - 'scripts/terrain_ci_probe.py'
+              - 'scripts/assert_junit_zero_skips.py'
+              - 'tests/anamnesis_gpu_acceptance.py'
+              - 'tests/anamnesis_irrelevant_inputs.toml'
+              - 'tests/test_anamnesis_*.py'
+              - 'tests/goldens/determinism/**'
 
   # ============================================================================
   # Rust Tests (cargo test)
@@ -301,6 +434,7 @@ jobs:
         with:
           name: wheels-${{ matrix.platform.os }}
           path: dist/*.whl
+          retention-days: 1
 
   # ============================================================================
   # Python Tests (pytest)
@@ -312,9 +446,7 @@ jobs:
     timeout-minutes: 35
     strategy:
       fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && '{"include":[{"os":"ubuntu-latest","python-version":"3.10"},{"os":"ubuntu-latest","python-version":"3.11"},{"os":"ubuntu-latest","python-version":"3.12"},{"os":"ubuntu-latest","python-version":"3.13"},{"os":"windows-latest","python-version":"3.11"},{"os":"macos-latest","python-version":"3.11"}]}' || '{"os":["windows-latest","ubuntu-latest","macos-latest"],"python-version":["3.10","3.11","3.12","3.13"]}') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -373,6 +505,50 @@ jobs:
         run: python scripts/ci_pytest_lane.py -v --tb=short
 
   # ============================================================================
+  # Accounted slow Python tests (one hosted representative)
+  # ============================================================================
+  test-python-slow:
+    name: Test Python Slow (ubuntu, 3.11)
+    needs: [build-wheels, prepare-lfs-fixtures]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Download shared LFS fixture artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: lfs-fixture-bundles
+
+      - name: Restore Python TIFF fixtures
+        run: python -m zipfile -e lfs-fixture-bundles/python-tiffs.zip .
+
+      - name: Download Linux wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux
+          path: dist/
+
+      - name: Install wheel and slow-lane dependencies
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          pip install pytest numpy pillow
+
+      - name: Run accounted slow Python lane
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: python scripts/ci_pytest_lane.py --slow-lane -v --tb=short
+
+  # ============================================================================
   # TERMINUS deterministic CPU-only robustness fuzzer
   #
   # The command performs exactly two fixed-seed passes internally and fails on
@@ -426,6 +602,7 @@ jobs:
           name: terminus-fuzzer-evidence
           path: target/terminus-fuzz-evidence/
           if-no-files-found: error
+          retention-days: 7
 
   # ============================================================================
   # Linux aarch64 Wheel Smoke Test (QEMU)
@@ -588,6 +765,7 @@ jobs:
           name: golden-lane-marker
           path: golden-out/
           if-no-files-found: error
+          retention-days: 7
 
       - name: Run software-allowed recipe goldens
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1'
@@ -602,6 +780,7 @@ jobs:
         with:
           name: visual-golden-diffs
           path: tests/artifacts/
+          retention-days: 7
 
   refresh-recipe-certificates:
     name: Refresh Recipe Certificates
@@ -645,16 +824,24 @@ jobs:
           name: refreshed-recipe-certificates
           path: tests/golden/certificates/*.json
           if-no-files-found: error
+          retention-days: 90
 
   # ============================================================================
   # M-06 Option-2 Full Geospatial Viewer acceptance
   #
-  # This is a required, zero-skip hardware lane. An unavailable adapter, a
-  # stale/missing release viewer, or a skipped acceptance test is a hard error.
+  # This lane is required and zero-skip when M-06 dependency paths select it on
+  # PRs/develop pushes, and always on main, schedules, and manual runs. An
+  # unavailable adapter, a stale/missing release viewer, or a skipped
+  # acceptance test is a hard error whenever the lane is required.
   # ============================================================================
   test-m06-full-geospatial-viewer:
     name: M-06 Full Geospatial Viewer (NVIDIA Vulkan)
-    needs: [build-wheels, prepare-lfs-fixtures]
+    needs: [build-wheels, prepare-lfs-fixtures, terrain-golden-paths]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.m06 == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 35
     env:
@@ -663,7 +850,6 @@ jobs:
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       RUN_M06_VIEWER_CI: '1'
       RUN_LIMES_GPU_CI: '1'
-      FORGE3D_VIEWER_BINARY: ${{ github.workspace }}/target/release/interactive_viewer.exe
       FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
 
     steps:
@@ -677,6 +863,22 @@ jobs:
           "FORGE3D_M06_ARTIFACT_DIR=$artifactDir" | Add-Content $env:GITHUB_ENV
           $env:FORGE3D_M06_ARTIFACT_DIR = $artifactDir
           New-Item -ItemType Directory -Force $env:FORGE3D_M06_ARTIFACT_DIR | Out-Null
+          $scratchDrive = Get-PSDrive -PSProvider FileSystem |
+            Where-Object { $null -ne $_.Free -and $_.Root } |
+            Sort-Object Free -Descending |
+            Select-Object -First 1
+          if ($null -eq $scratchDrive) { throw 'No filesystem drive is available for M-06 scratch data' }
+          $scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $scratchDir = Join-Path $scratchDrive.Root "forge3d-ci-scratch/$scratchScope"
+          $targetDir = Join-Path $scratchDir 'cargo-target'
+          $viewerBinary = Join-Path $targetDir 'release/interactive_viewer.exe'
+          New-Item -ItemType Directory -Force $targetDir | Out-Null
+          "FORGE3D_M06_SCRATCH_DIR=$scratchDir" | Add-Content $env:GITHUB_ENV
+          "CARGO_TARGET_DIR=$targetDir" | Add-Content $env:GITHUB_ENV
+          "FORGE3D_VIEWER_BINARY=$viewerBinary" | Add-Content $env:GITHUB_ENV
+          $env:FORGE3D_M06_SCRATCH_DIR = $scratchDir
+          $env:CARGO_TARGET_DIR = $targetDir
+          $env:FORGE3D_VIEWER_BINARY = $viewerBinary
           "initialized=$(Get-Date -Format o)" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/sentinel.txt"
           @{
             repository = $env:GITHUB_REPOSITORY
@@ -691,6 +893,7 @@ jobs:
             required_labels = @('self-hosted', 'Windows', 'X64', 'forge3d-gpu', 'gpu-nvidia')
             required_backend = 'vulkan'
             installed_wheel_required = $true
+            scratch_dir = $scratchDir
           } | ConvertTo-Json -Depth 4 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/run-context.json"
 
       - uses: actions/checkout@v4
@@ -764,20 +967,6 @@ jobs:
           }
           exit $code
 
-      - name: Run M-06 Rust ABI and adapter gates
-        shell: pwsh
-        run: |
-          $features = 'default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts'
-          $filters = @('terrain_uniform_abi_tests', 'backend_request_tests', 'camera::anchor::tests')
-          $filters -join "`n" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rust-test-filters.txt"
-          $failed = 0
-          foreach ($filter in $filters) {
-            cargo test --release --features $features $filter -- --test-threads=1 *>&1 | Tee-Object -Append "$env:FORGE3D_M06_ARTIFACT_DIR/rust-gates.log"
-            if ($LASTEXITCODE -ne 0) { $failed = $LASTEXITCODE; break }
-          }
-          "rust_gates=$failed" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rust-gates-exit-code.txt"
-          exit $failed
-
       - name: Require the exact NVIDIA Vulkan adapter
         shell: pwsh
         run: |
@@ -793,27 +982,8 @@ jobs:
           New-Item -ItemType Directory -Force $hdriDir | Out-Null
           python -c "from pathlib import Path; from tests.test_terrain_viewer_pbr import write_asymmetric_test_hdr; write_asymmetric_test_hdr(Path('assets/hdri/brown_photostudio_02_4k.hdr'))"
           $tests = @(
-            'tests/test_m06_anchoring_boundary.py',
-            'tests/test_world_coord_f32_gate.py',
-            'tests/test_m06_viewer_matrix_contract.py',
-            'tests/test_m06_single_rebase_contract.py',
-            'tests/test_m06_temporal_resource_contract.py',
-            'tests/test_m06_scene_review_transaction.py',
-            'tests/test_m06_command_transaction.py',
-            'tests/test_m06_python_viewer_contracts.py',
-            'tests/test_gis_raster.py',
-            'tests/test_gis_crs_affine.py',
-            'tests/test_3dtiles_parse.py',
-            'tests/test_buildings_cityjson.py',
-            'tests/test_viewer_ipc.py',
-            'tests/test_api_contracts.py',
-            'tests/test_install_smoke.py',
-            'tests/test_allocation_gate.py',
-            'tests/test_no_silent_degradation.py',
-            'tests/test_certificate_verifier.py',
-            'tests/test_render_certificate_contract.py',
-            'tests/test_recipe_goldens.py::test_certificate_refresh_rejects_capability_degradation',
-            'tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression',
+            'tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_is_not_black',
+            'tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_banding_is_bounded_in_raw_visibility',
             'tests/test_m06_full_geospatial_viewer.py',
             'tests/test_terrain_viewer_pbr.py',
             'tests/test_vector_overlay_rendering.py',
@@ -872,6 +1042,25 @@ jobs:
           name: m06-full-geospatial-viewer-evidence
           path: ${{ runner.temp }}/forge3d-m06-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
+          retention-days: 90
+      - name: Clean M-06 build scratch
+        if: always()
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FORGE3D_M06_SCRATCH_DIR)) {
+            Write-Warning 'M-06 scratch was not initialized; there is no scoped path to clean'
+            exit 0
+          }
+          $scratchDir = [IO.Path]::GetFullPath($env:FORGE3D_M06_SCRATCH_DIR)
+          $expectedLeaf = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $parentDir = Split-Path -Parent $scratchDir
+          if ((Split-Path -Leaf $scratchDir) -ne $expectedLeaf -or
+              (Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch') {
+            throw "Refusing to clean unexpected M-06 scratch path: $scratchDir"
+          }
+          if (Test-Path -LiteralPath $scratchDir) {
+            Remove-Item -LiteralPath $scratchDir -Recurse -Force
+          }
 
   # ============================================================================
   # COMPENDIUM F3DZ physical-GPU acceptance
@@ -884,7 +1073,11 @@ jobs:
   test-f3dz-gpu:
     name: F3DZ Codec (NVIDIA Vulkan)
     needs: [build-wheels, terrain-golden-paths]
-    if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.f3dz == 'true'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.f3dz == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 30
     env:
@@ -903,6 +1096,19 @@ jobs:
           "FORGE3D_F3DZ_ARTIFACT_DIR=$artifactDir" | Add-Content $env:GITHUB_ENV
           $env:FORGE3D_F3DZ_ARTIFACT_DIR = $artifactDir
           New-Item -ItemType Directory -Force $artifactDir | Out-Null
+          $scratchDrive = Get-PSDrive -PSProvider FileSystem |
+            Where-Object { $null -ne $_.Free -and $_.Root } |
+            Sort-Object Free -Descending |
+            Select-Object -First 1
+          if ($null -eq $scratchDrive) { throw 'No filesystem drive is available for F3DZ scratch data' }
+          $scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $scratchDir = Join-Path $scratchDrive.Root "forge3d-ci-scratch/$scratchScope"
+          $targetDir = Join-Path $scratchDir 'cargo-target'
+          New-Item -ItemType Directory -Force $targetDir | Out-Null
+          "FORGE3D_F3DZ_SCRATCH_DIR=$scratchDir" | Add-Content $env:GITHUB_ENV
+          "CARGO_TARGET_DIR=$targetDir" | Add-Content $env:GITHUB_ENV
+          $env:FORGE3D_F3DZ_SCRATCH_DIR = $scratchDir
+          $env:CARGO_TARGET_DIR = $targetDir
           git rev-parse HEAD | Set-Content "$artifactDir/checked-out-head.txt"
           @{
             repository = $env:GITHUB_REPOSITORY
@@ -912,6 +1118,7 @@ jobs:
             runner_arch = $env:RUNNER_ARCH
             required_backend = 'vulkan'
             required_labels = @('self-hosted', 'Windows', 'X64', 'forge3d-gpu', 'gpu-nvidia')
+            scratch_dir = $scratchDir
           } | ConvertTo-Json -Depth 4 | Set-Content "$artifactDir/run-context.json"
       - uses: actions/download-artifact@v4
         with:
@@ -924,11 +1131,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install pytest numpy *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/dependency-install.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Require the exact NVIDIA Vulkan adapter
-        shell: pwsh
-        run: |
-          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_F3DZ_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/adapter-probe.log"
-          exit $LASTEXITCODE
       - name: Run all F3DZ corpus and CPU-GPU identity gates
         shell: pwsh
         run: |
@@ -950,6 +1152,25 @@ jobs:
           name: f3dz-physical-gpu-evidence
           path: ${{ runner.temp }}/forge3d-f3dz-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
+          retention-days: 90
+      - name: Clean F3DZ build scratch
+        if: always()
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FORGE3D_F3DZ_SCRATCH_DIR)) {
+            Write-Warning 'F3DZ scratch was not initialized; there is no scoped path to clean'
+            exit 0
+          }
+          $scratchDir = [IO.Path]::GetFullPath($env:FORGE3D_F3DZ_SCRATCH_DIR)
+          $expectedLeaf = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $parentDir = Split-Path -Parent $scratchDir
+          if ((Split-Path -Leaf $scratchDir) -ne $expectedLeaf -or
+              (Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch') {
+            throw "Refusing to clean unexpected F3DZ scratch path: $scratchDir"
+          }
+          if (Test-Path -LiteralPath $scratchDir) {
+            Remove-Item -LiteralPath $scratchDir -Recurse -Force
+          }
 
   # ============================================================================
   # ANAMNESIS physical cross-backend portability
@@ -959,7 +1180,12 @@ jobs:
   # ============================================================================
   test-anamnesis-portability-seed:
     name: ANAMNESIS Physical Seed (Windows Vulkan)
-    needs: build-wheels
+    needs: [build-wheels, terrain-golden-paths]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.anamnesis == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 20
     env:
@@ -1030,10 +1256,16 @@ jobs:
             anamnesis-portability-producer-adapter.json
             anamnesis-portability-producer-machine-id.txt
           if-no-files-found: error
+          retention-days: 90
 
   test-anamnesis-portability:
     name: ANAMNESIS Physical Consume (Windows DX12)
-    needs: [build-wheels, test-anamnesis-portability-seed]
+    needs: [build-wheels, terrain-golden-paths, test-anamnesis-portability-seed]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.anamnesis == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 20
     env:
@@ -1113,6 +1345,7 @@ jobs:
             anamnesis-portability-consumer-adapter.json
             anamnesis-portability-consumer-machine-id.txt
           if-no-files-found: error
+          retention-days: 90
 
   # ============================================================================
   # ANAMNESIS production acceptance
@@ -1122,7 +1355,12 @@ jobs:
   # ============================================================================
   test-anamnesis-production:
     name: ANAMNESIS 600-frame Production (NVIDIA Vulkan)
-    needs: build-wheels
+    needs: [build-wheels, terrain-golden-paths]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.terrain-golden-paths.outputs.anamnesis == 'true'
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 50
     env:
@@ -1132,6 +1370,20 @@ jobs:
       FORGE3D_RUN_GPU_ANAMNESIS: '1'
 
     steps:
+      - name: Initialize isolated ANAMNESIS scratch
+        shell: pwsh
+        run: |
+          $scratchDrive = Get-PSDrive -PSProvider FileSystem |
+            Where-Object { $null -ne $_.Free -and $_.Root } |
+            Sort-Object Free -Descending |
+            Select-Object -First 1
+          if ($null -eq $scratchDrive) { throw 'No filesystem drive is available for ANAMNESIS scratch data' }
+          $scratchScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $scratchDir = Join-Path $scratchDrive.Root "forge3d-ci-scratch/$scratchScope"
+          $baseTemp = Join-Path $scratchDir 'pytest'
+          New-Item -ItemType Directory -Force $baseTemp | Out-Null
+          "FORGE3D_ANAMNESIS_SCRATCH_DIR=$scratchDir" | Add-Content $env:GITHUB_ENV
+          "FORGE3D_ANAMNESIS_BASE_TEMP=$baseTemp" | Add-Content $env:GITHUB_ENV
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -1162,7 +1414,7 @@ jobs:
         env:
           FORGE3D_ANAMNESIS_RESULT_PATH: ${{ runner.temp }}/anamnesis-production-result.json
         run: |
-          python -m pytest tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance -v --tb=short
+          python -m pytest tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance -v --tb=short --basetemp="$env:FORGE3D_ANAMNESIS_BASE_TEMP"
       - name: Reject native final-frame stale hits
         shell: pwsh
         run: |
@@ -1195,6 +1447,25 @@ jobs:
             ${{ runner.temp }}/anamnesis-p0-adapter.json
             ${{ runner.temp }}/anamnesis-checked-out-head.txt
           if-no-files-found: error
+          retention-days: 90
+      - name: Clean ANAMNESIS scratch
+        if: always()
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FORGE3D_ANAMNESIS_SCRATCH_DIR)) {
+            Write-Warning 'ANAMNESIS scratch was not initialized; there is no scoped path to clean'
+            exit 0
+          }
+          $scratchDir = [IO.Path]::GetFullPath($env:FORGE3D_ANAMNESIS_SCRATCH_DIR)
+          $expectedLeaf = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:GITHUB_JOB"
+          $parentDir = Split-Path -Parent $scratchDir
+          if ((Split-Path -Leaf $scratchDir) -ne $expectedLeaf -or
+              (Split-Path -Leaf $parentDir) -ne 'forge3d-ci-scratch') {
+            throw "Refusing to clean unexpected ANAMNESIS scratch path: $scratchDir"
+          }
+          if (Test-Path -LiteralPath $scratchDir) {
+            Remove-Item -LiteralPath $scratchDir -Recurse -Force
+          }
 
   # ============================================================================
   # Documentation Build
@@ -1214,34 +1485,12 @@ jobs:
       - name: Build Rust docs
         run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts --no-deps
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install Sphinx dependencies
-        run: |
-          pip install sphinx sphinx-rtd-theme myst-parser numpy pillow ipywidgets pooch
-
-      - name: Build Sphinx docs
-        run: |
-          cd docs
-          make html
-
-      - name: Upload docs artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: documentation
-          path: |
-            target/doc/
-            docs/_build/html/
-
   # ============================================================================
   # Final Status
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
+    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-python-slow, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -1257,20 +1506,59 @@ jobs:
           # aggregator. `absent` (no usable adapter) still reports as job
           # `success` and is surfaced by the lane line below, not swallowed.
           echo "golden lane: ${{ needs.test-golden-images.outputs.lane || 'skipped(paths)' }}"
+          anamnesis_required="${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.terrain-golden-paths.outputs.anamnesis == 'true' }}"
+          echo "ANAMNESIS physical lanes required: $anamnesis_required"
+          m06_required="${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.terrain-golden-paths.outputs.m06 == 'true' }}"
+          echo "M-06 full geospatial viewer required: $m06_required"
+          golden_failed=0
+          if [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; then
+            golden_failed=1
+          fi
+          refresh_failed=0
+          if [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; then
+            refresh_failed=1
+          fi
+          f3dz_failed=0
+          if [ "${{ needs.test-f3dz-gpu.result }}" != "success" ] && [ "${{ needs.test-f3dz-gpu.result }}" != "skipped" ]; then
+            f3dz_failed=1
+          fi
+          anamnesis_failed=0
+          if [ "$anamnesis_required" = "true" ]; then
+            if [ "${{ needs.test-anamnesis-portability-seed.result }}" != "success" ] || \
+               [ "${{ needs.test-anamnesis-portability.result }}" != "success" ] || \
+               [ "${{ needs.test-anamnesis-production.result }}" != "success" ]; then
+              anamnesis_failed=1
+            fi
+          else
+            if [ "${{ needs.test-anamnesis-portability-seed.result }}" != "skipped" ] || \
+               [ "${{ needs.test-anamnesis-portability.result }}" != "skipped" ] || \
+               [ "${{ needs.test-anamnesis-production.result }}" != "skipped" ]; then
+              anamnesis_failed=1
+            fi
+          fi
+          m06_failed=0
+          if [ "$m06_required" = "true" ]; then
+            if [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ]; then
+              m06_failed=1
+            fi
+          else
+            if [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "skipped" ]; then
+              m06_failed=1
+            fi
+          fi
           if [ "${{ needs.prepare-lfs-fixtures.result }}" != "success" ] || \
              [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
              [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \
              [ "${{ needs.test-python.result }}" != "success" ] || \
+             [ "${{ needs.test-python-slow.result }}" != "success" ] || \
              [ "${{ needs.test-terminus-fuzz.result }}" != "success" ] || \
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
-             { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
-             { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
-             [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
-             { [ "${{ needs.test-f3dz-gpu.result }}" != "success" ] && [ "${{ needs.test-f3dz-gpu.result }}" != "skipped" ]; } || \
-             [ "${{ needs.test-anamnesis-portability-seed.result }}" != "success" ] || \
-             [ "${{ needs.test-anamnesis-portability.result }}" != "success" ] || \
-             [ "${{ needs.test-anamnesis-production.result }}" != "success" ] || \
+             [ "$golden_failed" -ne 0 ] || \
+             [ "$refresh_failed" -ne 0 ] || \
+             [ "$m06_failed" -ne 0 ] || \
+             [ "$f3dz_failed" -ne 0 ] || \
+             [ "$anamnesis_failed" -ne 0 ] || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1

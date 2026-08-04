@@ -301,7 +301,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             sky,
             debug_mode,
         } => {
-            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+            let update_result = if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 terrain_viewer.set_terrain_pbr(
                     *enabled,
                     hdr_path.clone(),
@@ -323,7 +323,17 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     volumetrics.as_ref().clone(),
                     denoise.clone(),
                     *debug_mode,
-                );
+                )
+            } else {
+                Err(anyhow::anyhow!(
+                    "terrain PBR configuration requires a loaded terrain"
+                ))
+            };
+            if let Err(error) = update_result {
+                viewer.reject_command(format!(
+                    "terrain_pbr_configuration_rejected: error={error} unchanged_state=true"
+                ));
+                return true;
             }
 
             if let Some(ref cfg) = sky {
