@@ -10,7 +10,11 @@ import pytest
 
 import forge3d as f3d
 from _tessella_evidence import record_tessella_result
-from _terrain_runtime import _write_test_hdr, terrain_rendering_available
+from _terrain_runtime import (
+    _write_test_hdr,
+    terrain_rendering_available,
+    tessella_inert_shadows,
+)
 from forge3d.diagnostics import render_certificate, visibility_stats, vt_stats
 from forge3d.mem import memory_metrics
 from forge3d.terrain_params import (
@@ -239,6 +243,11 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
             max_mip_levels=8,
             use_feedback=True,
         ),
+        # TESSELLA's 4K keyhole gate measures VT streaming, visibility, and the
+        # CENSOR host-visible budget. Pin the unrelated shadow system inert so
+        # changes to its default cascade atlas or PCSS workload cannot poison
+        # this acceptance process before those measurements are recorded.
+        shadows=tessella_inert_shadows(),
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
     )
     params = f3d.TerrainRenderParams(config)

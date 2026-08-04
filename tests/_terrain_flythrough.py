@@ -26,6 +26,7 @@ import math
 import numpy as np
 
 import forge3d as f3d
+from _terrain_runtime import tessella_inert_shadows
 from forge3d.terrain_params import PomSettings, make_terrain_params_config
 
 # Background clear colour of the terrain render pass (linear 0.1/0.1/0.15).
@@ -342,6 +343,9 @@ def flythrough_params(
             camera_mode=camera_mode,
             culling=culling,
             shading=shading,
+            # The flythrough gate measures clipmap popping and cracks, not
+            # shadow filtering. Keep the unrelated cascade workload inert.
+            shadows=tessella_inert_shadows(),
             clip=clip,
             overlays=[overlay],
             pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),

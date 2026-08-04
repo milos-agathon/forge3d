@@ -11,7 +11,11 @@ from pathlib import Path
 import numpy as np
 
 import forge3d as f3d
-from forge3d.terrain_params import PomSettings, make_terrain_params_config
+from forge3d.terrain_params import (
+    PomSettings,
+    ShadowSettings,
+    make_terrain_params_config,
+)
 
 
 SOFTWARE_ADAPTER_TOKENS = (
@@ -23,6 +27,26 @@ SOFTWARE_ADAPTER_TOKENS = (
 )
 HARDWARE_DEVICE_TYPES = {"discretegpu", "integratedgpu", "virtualgpu"}
 REQUIRED_SYMBOLS = ("TerrainRenderer", "TerrainRenderParams", "OverlayLayer", "MaterialSet", "IBL")
+
+
+def tessella_inert_shadows() -> ShadowSettings:
+    """Keep shadows outside TESSELLA's VT/visibility acceptance workload."""
+    return ShadowSettings(
+        enabled=False,
+        technique="NONE",
+        resolution=512,
+        cascades=1,
+        max_distance=4000.0,
+        softness=0.0,
+        intensity=0.0,
+        slope_scale_bias=0.001,
+        depth_bias=0.0005,
+        normal_bias=0.0002,
+        min_variance=1e-4,
+        light_bleed_reduction=0.5,
+        evsm_exponent=40.0,
+        fade_start=1.0,
+    )
 
 
 def _adapter_is_terrain_safe(probe: dict) -> bool:

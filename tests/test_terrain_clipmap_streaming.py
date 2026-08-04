@@ -24,6 +24,7 @@ import forge3d as f3d
 from _terrain_runtime import (
     _build_overlay,
     _write_test_hdr,
+    tessella_inert_shadows,
     terrain_rendering_available,
 )
 from forge3d.diagnostics import render_certificate
@@ -90,6 +91,10 @@ def _make_params(
             culling=culling,
             shading=shading,
             vt=vt,
+            # Shadows are outside the TESSELLA clipmap/visibility contracts.
+            # Keep their independently evolving atlas and PCSS cost out of
+            # these fixtures so the gates measure only their stated workload.
+            shadows=tessella_inert_shadows(),
             clip=(0.1, terrain_span * 1.5),
             overlays=[_build_overlay()],
             pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
