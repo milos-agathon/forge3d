@@ -41,23 +41,19 @@ def test_terrain_shader_declares_vt_sampling_and_feedback_bindings() -> None:
     )
     for token in required_tokens:
         assert token in source, f"Missing terrain VT shader token: {token}"
-    assert "fn terrain_vt_feedback_hash(" in source
-    assert "atomicLoad(&terrain_vt_feedback[table_index])" in source
-    assert "atomicCompareExchangeWeak" in source
+    assert "atomicCompareExchangeWeak" not in source
     assert "atomicAdd(&terrain_vt_feedback[0], 1u)" in source
+    assert "atomicStore(&terrain_vt_feedback[append_slot + 2u], key)" in source
     assert "atomicAdd(&terrain_vt_feedback[1], 1u)" in source
-    assert "let probe_limit = max(terrain_vt_uniforms.config3.w, 1u);" in source
-    assert "let append_slot = atomicAdd" not in source
+    assert "let append_slot = atomicAdd" in source
     assert "fn terrain_vt_page_table_origin(" in source
-    assert "var terrain_vt_page_table: texture_2d_array<u32>;" in source
+    assert "var terrain_vt_page_table: texture_2d_array<f32>;" in source
     assert "page + vec2<i32>(origin)" in source
     assert "terrain_vt_page_table,\n        page + vec2<i32>(origin),\n        layer,\n        0," in source
     assert "terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_NORMAL, material_index)," in source
     assert "terrain_vt_page_table_layer(TERRAIN_VT_FAMILY_MASK, material_index)," in source
-    assert ").x;" in source
-    assert "var all_families_resident = desired_entry != 0u;" in source
-    assert "let slot_index = slot_plus_one - 1u;" in source
-    assert "let atlas_uv = terrain_vt_atlas_origin(entry)" in source
+    assert "var all_families_resident = desired_entry.z > 0.5;" in source
+    assert "let atlas_uv = vec2<f32>(entry.x, entry.y)" in source
     assert "if (all_families_resident)" in source
     assert "terrain_vt_page_table_layer(family_slot, material_index)," in source
     assert "mip_level," in source
@@ -106,11 +102,12 @@ def test_terrain_vt_page_table_uploads_are_dirty_layer_scoped() -> None:
     assert "dirty_page_table_layers: HashSet<usize>" in source
     assert "self.dirty_page_table_layers.drain()" in source
     assert "self.dirty_page_table_layers.insert(layer_index)" in source
-    assert "slot_plus_one: u32" in source
-    assert "format: wgpu::TextureFormat::R32Uint" in source
-    assert "bytes_per_row: Some(pages_x * PAGE_TABLE_ENTRY_BYTES)" in source
-    assert "assert_eq!(PAGE_TABLE_ENTRY_BYTES, 4);" in source
-    assert "assert_eq!(bytes, 75_497_472);" in source
+    assert "atlas_u: f32" in source
+    assert "atlas_v: f32" in source
+    assert "is_resident: u32" in source
+    assert "format: wgpu::TextureFormat::Rgba32Float" in source
+    assert "bytes_per_row: Some(pages_x * 16)" in source
+    assert "assert_eq!(bytes, 301_989_888);" in source
 
 
 def test_vt_settings_reject_duplicate_families() -> None:

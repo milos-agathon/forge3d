@@ -22,12 +22,11 @@ use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue
 /// `pixels / tile_area` summed over the mip chain).
 pub const FEEDBACK_MAX_SLOTS: u32 = 1 << 16;
 
-/// Linear probes before a distinct page is declared overflow. Mirrored by
-/// `terrain_vt_write_feedback` through `TerrainVTUniforms.config3.w`.
+/// Legacy linear-probe limit retained for Rust source compatibility.
 ///
-/// The table is deliberately very lightly loaded (65,536 slots versus a
-/// working set measured in hundreds of pages), so eight probes bound shader
-/// work without sacrificing the acceptance working set.
+/// The bounded feedback path now appends with an atomic counter; this value is
+/// not read. `TerrainVTUniforms.config3.y/z` carry page-table atlas dimensions.
+#[deprecated(note = "bounded VT feedback no longer probes; this value is unused")]
 pub const FEEDBACK_PROBE_LIMIT: u32 = 8;
 
 /// Page-index layout the GPU keys were built from, used to invert
@@ -82,10 +81,10 @@ pub struct FeedbackBuffer {
     readback_buffer: TrackedBuffer,
     pending_readback: Mutex<Option<Receiver<Result<(), wgpu::BufferAsyncError>>>>,
     forced_not_ready_polls: AtomicU32,
-    /// Hash-set capacity in slots, excluding the two header words.
+    /// Append capacity in slots, excluding the two header words.
     capacity: u32,
     layout: FeedbackLayout,
-    /// Distinct pages the most recent readback could not admit. Non-zero means the
+    /// Samples the most recent readback could not admit. Non-zero means the
     /// frame's request set was incomplete -- surfaced through `vt_stats`, never
     /// swallowed.
     last_overflow: AtomicU32,
@@ -110,15 +109,15 @@ impl FeedbackBuffer {
     ///
     /// `requested_slots` is rounded up to a power of two and clamped to
     /// [`FEEDBACK_MAX_SLOTS`], so the allocation cannot grow with the virtual
-    /// texture. Two words precede the table: the admitted-distinct count and
-    /// the explicit overflow count.
+    /// texture. Two words precede the table: the append count and the explicit
+    /// overflow count.
     pub fn new(
         device: &Device,
         requested_slots: u32,
         layout: FeedbackLayout,
     ) -> Result<Self, String> {
         let capacity = Self::capacity_for(requested_slots);
-        // Admitted-count + overflow headers + `capacity` key slots, 4 bytes each.
+        // Append-count + overflow headers + `capacity` key slots, 4 bytes each.
         let buffer_size = (capacity as u64 + 2) * 4;
 
         // Create GPU feedback buffer
@@ -165,7 +164,7 @@ impl FeedbackBuffer {
             .min(FEEDBACK_MAX_SLOTS)
     }
 
-    /// Hash-set capacity in slots, excluding the two header words.
+    /// Append capacity in slots, excluding the two header words.
     pub fn capacity(&self) -> u32 {
         self.capacity
     }
@@ -380,15 +379,15 @@ impl FeedbackBuffer {
 
     /// Decode the bounded feedback set into deduplicated feedback entries.
     ///
-    /// Word 0 is the number of distinct keys admitted, word 1 is the explicit
-    /// overflow header, and every later non-zero word is a page key in the
-    /// bounded open-addressed set. The CPU `HashSet` remains a defensive guard
-    /// against malformed or repeated readback.
+    /// Word 0 is the append count, word 1 is the explicit overflow header, and
+    /// every later non-zero word is a page key. The GPU uses a bounded append,
+    /// so duplicate samples are expected; the `HashSet` is the authoritative
+    /// CPU-side deduplication step.
     fn parse_feedback_entries(&self, data: &[u8]) -> Vec<FeedbackEntry> {
         let mut unique_entries = HashSet::new();
 
         let mut words = data.chunks_exact(4);
-        let admitted_count = words
+        let append_count = words
             .next()
             .and_then(|word| word.try_into().ok())
             .map(u32::from_le_bytes)
@@ -401,20 +400,20 @@ impl FeedbackBuffer {
         self.last_overflow.store(overflow, Ordering::Release);
         if overflow > 0 {
             log::warn!(
-                "feedback_buffer: {} distinct page requests exceeded the {}-slot feedback set; \
+                "feedback_buffer: {} surface samples exceeded the {}-slot feedback set; \
                  their pages stay in the retained-request set until a later frame admits them",
                 overflow,
                 self.capacity,
             );
         }
 
-        // Open addressing distributes keys throughout the whole table, so all
-        // slots are inspected. The admitted header bounds the number of
-        // decoded keys accepted from a malformed/stale stream.
-        let entry_limit = admitted_count.min(self.capacity) as usize;
-        for word in &mut words {
-            if unique_entries.len() >= entry_limit {
-                break;
+        // Only the slots reserved by the append counter are valid. The clear
+        // command normally leaves the rest zero, but clamping here prevents a
+        // stale or malformed tail from becoming a request on readback.
+        let entry_limit = append_count.min(self.capacity) as usize;
+        for (slot, word) in (&mut words).enumerate() {
+            if slot >= entry_limit {
+                continue;
             }
             let Ok(bytes) = <[u8; 4]>::try_from(word) else {
                 continue;
@@ -537,17 +536,17 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_feedback_reads_sparse_hash_slots_and_clamps_count() {
+    fn test_parse_feedback_deduplicates_and_clamps_tail() {
         let Some(device) = crate::core::gpu::create_device_for_test() else {
             return;
         };
 
         let layout = test_layout();
         let buffer = FeedbackBuffer::new(&device, 4, layout).unwrap();
-        let mut bytes = 1u32.to_le_bytes().to_vec();
+        let mut bytes = 2u32.to_le_bytes().to_vec();
         bytes.extend_from_slice(&0u32.to_le_bytes());
         let key = gpu_key(layout, 0, 0, 1, 3, 9).to_le_bytes();
-        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&key);
         bytes.extend_from_slice(&key);
         bytes.extend_from_slice(&gpu_key(layout, 0, 0, 1, 4, 9).to_le_bytes());
         bytes.extend_from_slice(&[0xAA, 0xBB]);
