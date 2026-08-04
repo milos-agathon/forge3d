@@ -427,6 +427,11 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
             'test "$(git rev-parse refs/remotes/pull/${PR_NUMBER}/head)" = '
             '"$PR_HEAD_SHA"' in merge_run
         )
+        assert 'git config --local user.name "github-actions[bot]"' in merge_run
+        assert (
+            'git config --local user.email '
+            '"41898282+github-actions[bot]@users.noreply.github.com"' in merge_run
+        )
         assert 'git merge --no-commit --no-ff "$PR_HEAD_SHA"' in merge_run
         assert 'test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"' in merge_run
         assert 'test "$(git rev-parse MERGE_HEAD)" = "$PR_HEAD_SHA"' in merge_run
