@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+import yaml
 
 from scripts.ci_pytest_lane import default_lane_files
 
@@ -15,9 +18,26 @@ def _workflow() -> str:
 
 def test_ci_downloads_verified_lfs_media_once_and_shares_one_artifact() -> None:
     workflow = _workflow()
+    python_workflow = (
+        ROOT / ".github" / "workflows" / "test-python-wheel.yml"
+    ).read_text(encoding="utf-8")
 
-    assert "git lfs pull" not in workflow
-    assert "lfs: true" not in workflow
+    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(r"\bgit\s+lfs\s+(?:pull|fetch|checkout)\b", text), (
+            f"{path.name} reintroduced per-job LFS transfer"
+        )
+        data = yaml.load(text, Loader=yaml.BaseLoader)
+        for job_name, job in data.get("jobs", {}).items():
+            if not isinstance(job, dict):
+                continue
+            for step in job.get("steps", []):
+                if step.get("uses") != "actions/checkout@v4":
+                    continue
+                lfs = step.get("with", {}).get("lfs", "false").casefold()
+                assert lfs not in {"true", "1", "yes", "on"}, (
+                    f"{path.name}:{job_name} checkout reintroduced LFS fanout"
+                )
     assert (
         "https://media.githubusercontent.com/media/milos-agathon/forge3d/"
         "92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
@@ -27,7 +47,12 @@ def test_ci_downloads_verified_lfs_media_once_and_shares_one_artifact() -> None:
     assert "875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3" in workflow
     assert "d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478" in workflow
     assert "is still an LFS pointer" in workflow
-    assert workflow.count("name: lfs-fixture-bundles") == 4
+    prepare = workflow.split("  prepare-lfs-fixtures:", 1)[1].split(
+        "  terrain-golden-paths:", 1
+    )[0]
+    assert prepare.count("name: lfs-fixture-bundles") == 1
+    assert python_workflow.count("name: lfs-fixture-bundles") == 1
+    assert "if: inputs.restore_lfs" in python_workflow
     assert workflow.count("uses: actions/upload-artifact@v4") >= 1
     assert "retention-days: 1" in workflow
 
@@ -51,27 +76,45 @@ def test_ci_lfs_manifest_contains_only_lane_fixtures() -> None:
 
 def test_python_and_m06_restore_only_their_fixture_bundles() -> None:
     workflow = _workflow()
-    python_job = workflow.split("  test-python:", 1)[1].split(
-        "\n  # ============================================================================\n  # Accounted slow Python tests (one hosted representative)", 1
-    )[0]
+    python_workflow = (
+        ROOT / ".github" / "workflows" / "test-python-wheel.yml"
+    ).read_text(encoding="utf-8")
     slow_job = workflow.split("  test-python-slow:", 1)[1].split(
         "\n  # ============================================================================\n  # TERMINUS", 1
     )[0]
     golden_job = workflow.split("  test-golden-images:", 1)[1].split(
-        "  refresh-recipe-certificates:", 1
+        "  test-m06-full-geospatial-viewer:", 1
     )[0]
     m06_job = workflow.split("  test-m06-full-geospatial-viewer:", 1)[1].split(
-        "  build-docs:", 1
+        "\n  # ============================================================================\n  # COMPENDIUM F3DZ", 1
     )[0]
 
-    for job in (python_job, slow_job):
-        assert "needs: [build-wheels, prepare-lfs-fixtures]" in job
-        assert job.count(".zip") == 1
-        assert "python-tiffs.zip" in job
-        assert "m06-dem.zip" not in job
-        assert "forge3d.pdb" not in job
+    assert python_workflow.count("python-tiffs.zip") == 1
+    assert "m06-dem.zip" not in python_workflow
+    assert "forge3d.pdb" not in python_workflow
+    assert "needs: [build-wheel-linux, prepare-lfs-fixtures]" in slow_job
+    assert slow_job.count(".zip") == 1
+    assert "python-tiffs.zip" in slow_job
+    assert "m06-dem.zip" not in slow_job
+    for full_job in (
+        "test-python-core",
+        "test-python-full-linux",
+        "test-python-full-windows",
+        "test-python-full-macos",
+    ):
+        assert "restore_lfs: true" in workflow.split(f"  {full_job}:", 1)[1].split(
+            "\n\n", 1
+        )[0]
+    for smoke_job in (
+        "test-python-compat-linux",
+        "test-python-compat-windows",
+        "test-python-compat-macos",
+    ):
+        assert "restore_lfs:" not in workflow.split(f"  {smoke_job}:", 1)[1].split(
+            "\n\n", 1
+        )[0]
     assert "lfs-fixture-bundles" not in golden_job
-    assert "needs: [build-wheels, prepare-lfs-fixtures, terrain-golden-paths]" in m06_job
+    assert "needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths]" in m06_job
     assert "m06-dem.zip" in m06_job
     assert "python-tiffs.zip" not in m06_job
     assert "Get-PSDrive -PSProvider FileSystem" in m06_job
@@ -126,7 +169,6 @@ def test_m06_path_filter_and_aggregator_contract() -> None:
     ):
         assert f"              - '{pattern}'" in m06_paths
     for broad_pattern in (
-        ".github/workflows/ci.yml",
         "docs/**",
         "examples/**",
         "python/**",
@@ -134,41 +176,34 @@ def test_m06_path_filter_and_aggregator_contract() -> None:
         "assets/**",
     ):
         assert f"              - '{broad_pattern}'" not in m06_paths
+    for workflow_path in (
+        ".github/workflows/ci.yml",
+        ".github/workflows/build-wheel.yml",
+    ):
+        assert f"              - '{workflow_path}'" in m06_paths
 
     m06_job = workflow.split("  test-m06-full-geospatial-viewer:", 1)[1].split(
         "\n  # ============================================================================\n  # COMPENDIUM F3DZ", 1
     )[0]
-    assert "needs: [build-wheels, prepare-lfs-fixtures, terrain-golden-paths]" in m06_job
+    assert "needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths]" in m06_job
     assert "if: >-" in m06_job
     for clause in (
-        "github.event_name == 'workflow_dispatch'",
         "github.event_name == 'schedule'",
-        "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+        "inputs.scope == 'full'",
+        "inputs.scope == 'm06'",
+        "github.event_name == 'pull_request'",
+        "contains(github.event.pull_request.labels.*.name, 'run-physical')",
         "needs.terrain-golden-paths.outputs.m06 == 'true'",
     ):
         assert clause in m06_job
+    assert "github.event_name == 'push'" not in m06_job
 
-    aggregate = workflow.split("  ci-success:", 1)[1]
-    assert "m06_required=" in aggregate
-    required_branch, skip_tail = aggregate.split(
-        'if [ "$m06_required" = "true" ]; then', 1
-    )[1].split("\n          else\n", 1)
-    skip_branch = skip_tail.split("\n          fi\n          if ", 1)[0]
-    success_check = (
-        '${{ needs.test-m06-full-geospatial-viewer.result }}" != "success"'
+    aggregate = workflow.split("  full-acceptance-summary:", 1)[1]
+    assert "m06_selected=" in aggregate
+    assert (
+        "check_selected \"$m06_selected\" '${{ needs.test-m06-full-geospatial-viewer.result }}' m06-physical"
+        in aggregate
     )
-    skipped_check = (
-        '${{ needs.test-m06-full-geospatial-viewer.result }}" != "skipped"'
-    )
-    assert success_check in required_branch
-    assert success_check not in skip_branch
-    assert skipped_check in skip_branch
-    assert skipped_check not in required_branch
-    final_gate = aggregate.split(
-        'if [ "${{ needs.prepare-lfs-fixtures.result }}" != "success" ] ||', 1
-    )[1]
-    assert '[ "$m06_failed" -ne 0 ] || \\' in final_gate
-    assert "needs.test-m06-full-geospatial-viewer.result" not in final_gate
 
 
 def test_m06_acceptance_keeps_only_unique_physical_coverage() -> None:

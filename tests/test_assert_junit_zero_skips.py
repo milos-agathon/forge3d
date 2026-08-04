@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 import pytest
+import yaml
 
 from scripts.assert_junit_zero_skips import JUnitValidationError, verify_junit
 from scripts.summarize_m06_evidence import (
@@ -259,22 +260,74 @@ def test_m06_evidence_summary_fails_closed_on_synthetic_merge_checkout(
     assert summarize_m06_main() == 1
 
 
+def _checkout_refs(workflow_text: str) -> list[str | None]:
+    workflow = yaml.load(workflow_text, Loader=yaml.BaseLoader)
+    refs: list[str | None] = []
+    for job in workflow.get("jobs", {}).values():
+        if not isinstance(job, dict):
+            continue
+        for step in job.get("steps", []):
+            if step.get("uses") == "actions/checkout@v4":
+                refs.append(step.get("with", {}).get("ref"))
+    return refs
+
+
 def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
     root = Path(__file__).resolve().parents[1]
-    exact_ref = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
-    expected_counts = {
-        "ci.yml": 17,
-        "determinism-matrix.yml": 6,
-    }
-
-    for name, expected_count in expected_counts.items():
+    exact_refs = (
+        "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+        "ref: ${{ inputs.ref }}",
+    )
+    # Semantic discovery avoids the old brittle checkout-count assertion: adding
+    # a properly pinned job must not break every Python lane, while an unpinned
+    # checkout in any PR-reachable reusable workflow must still fail preflight.
+    for name in (
+        "ci.yml",
+        "build-wheel.yml",
+        "test-python-wheel.yml",
+        "determinism-matrix.yml",
+    ):
         workflow = (root / ".github" / "workflows" / name).read_text(encoding="utf-8")
-        checkout_steps = workflow.split("- uses: actions/checkout@v4")[1:]
-        # Exact counts keep a newly added job from bypassing this provenance
-        # review accidentally.
-        assert len(checkout_steps) == expected_count
-        for index, tail in enumerate(checkout_steps, start=1):
-            step = tail.split("\n\n", 1)[0]
-            assert exact_ref in step, (
+        checkout_refs = _checkout_refs(workflow)
+        assert checkout_refs, f"{name} has no checkout provenance to verify"
+        for index, checkout_ref in enumerate(checkout_refs, start=1):
+            assert checkout_ref in {ref.removeprefix("ref: ") for ref in exact_refs}, (
                 f"{name} checkout step {index} is not exact-head pinned"
             )
+
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    ci_jobs = yaml.load(ci, Loader=yaml.BaseLoader)["jobs"]
+    for reusable in ("build-wheel.yml", "test-python-wheel.yml", "determinism-matrix.yml"):
+        callers = [
+            job
+            for job in ci_jobs.values()
+            if isinstance(job, dict)
+            and job.get("uses") == f"./.github/workflows/{reusable}"
+        ]
+        assert callers, f"CI does not call {reusable}"
+        for caller in callers:
+            assert caller.get("with", {}).get("ref") == (
+                "${{ github.event.pull_request.head.sha || github.sha }}"
+            )
+
+    certificate = (
+        root / ".github" / "workflows" / "certificate-refresh.yml"
+    ).read_text(encoding="utf-8")
+    assert _checkout_refs(certificate) == ["${{ github.sha }}"]
+
+
+def test_checkout_contract_cannot_be_satisfied_by_a_comment_or_sibling_key():
+    deceptive = """
+name: deceptive
+on:
+  pull_request:
+jobs:
+  bad:
+    runs-on: ubuntu-latest
+    steps:
+      # ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v4
+      - name: "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
+        run: echo not-a-checkout-ref
+"""
+    assert _checkout_refs(deceptive) == [None]
