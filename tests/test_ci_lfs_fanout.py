@@ -45,6 +45,10 @@ def test_ci_downloads_verified_lfs_media_once_and_shares_one_artifact() -> None:
                 )
     assert (
         "https://media.githubusercontent.com/media/milos-agathon/forge3d/"
+        "92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
+    ) in workflow
+    assert (
+        "https://media.githubusercontent.com/media/milos-agathon/forge3d/"
         "19028116dfbe9b954eac63e0a211be0d544226aa"
     ) in workflow
     assert workflow.count("sha256sum --check -") == 1

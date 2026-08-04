@@ -128,10 +128,15 @@ jobs:
       - name: Download the required LFS objects once
         shell: bash
         run: |
-          media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/19028116dfbe9b954eac63e0a211be0d544226aa"
+          media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
+          selene_media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/19028116dfbe9b954eac63e0a211be0d544226aa"
           while read -r sha256 fixture; do
+            fixture_base="$media_base"
+            if [ "$fixture" = "assets/tif/moon_south_pole_lola.tif" ]; then
+              fixture_base="$selene_media_base"
+            fi
             curl --fail --location --retry 3 \
-              --output "$fixture" "$media_base/$fixture"
+              --output "$fixture" "$fixture_base/$fixture"
             echo "$sha256  $fixture" | sha256sum --check -
           done <<'EOF'
           cff39b4e02d7ba13c48f3d8b1a4080d40ada753ade62fa951459fe4e01e98b48 assets/tif/Mount_Fuji_30m.tif
