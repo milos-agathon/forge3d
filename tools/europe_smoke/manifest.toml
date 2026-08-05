@@ -63,7 +63,7 @@ attribution_required = true
 [natural_earth]
 class = "acquired"
 path = "{build}/cache/ne/ne_10m_admin_0_countries.zip"
-sha256 = ""
+sha256 = "ce1ac7036499a0edd641fbc093cd209a98f96a49d2eca8480aaacad35138a7f6"
 # Task 8 DEFINES load_countries but never runs it against config.CACHE_DIR --
 # its own tests all use tmp_path, and fetch.run() calls only build_land_union.
 # The first thing that writes this file is Task 10's slow tests, via
