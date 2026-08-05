@@ -115,9 +115,14 @@ def ground_tiers(dem, valid, bounds_mercator, display_window):
 
     Lowlands (below ``LOWLAND_MAX_M``) keep ``LOWLAND_RELIEF`` of the full
     relief; the highland threshold ``h1`` is the elevation quantile that puts
-    ``TARGET_HIGHLAND_SHARE`` of the DISPLAY-window pixels at full relief, and
-    the ramp between them is a smootherstep. Returns
+    ``TARGET_HIGHLAND_SHARE`` of the DISPLAY-window LAND pixels at full relief,
+    and the ramp between them is a smootherstep. Returns
     ``(multiplier, h1_m, highland_share)``.
+
+    Land, not all display pixels: Europe's display window is ~half sea, and a
+    share target counted over the sea too drags h1 to the ~48th land
+    percentile -- 206.6 m on the delivered z7 DEM [measured], below the 300 m
+    lowland ceiling by construction, so the tiers could never exist.
     """
     dem = np.asarray(dem, dtype="float32")
     valid = np.asarray(valid, dtype=bool)
@@ -134,7 +139,7 @@ def ground_tiers(dem, valid, bounds_mercator, display_window):
     display_pixels = int(np.count_nonzero(display))
     land = display & valid & np.isfinite(dem)
     land_values = dem[land]
-    target_pixels = int(round(TARGET_HIGHLAND_SHARE * display_pixels))
+    target_pixels = int(round(TARGET_HIGHLAND_SHARE * land_values.size))
     if display_pixels == 0 or target_pixels <= 0 or target_pixels >= land_values.size:
         raise ValueError("display/land coverage cannot support the 21% highland target")
 
@@ -146,7 +151,7 @@ def ground_tiers(dem, valid, bounds_mercator, display_window):
     ramp = _smootherstep01((dem - LOWLAND_MAX_M) / (h1 - LOWLAND_MAX_M))
     multiplier = LOWLAND_RELIEF + (1.0 - LOWLAND_RELIEF) * ramp
     multiplier = np.where(valid, multiplier, 0.0).astype("float32")
-    share = float(np.count_nonzero(display & valid & (dem >= h1)) / display_pixels)
+    share = float(np.count_nonzero(land & (dem >= h1)) / land_values.size)
     if not HIGHLAND_SHARE_RANGE[0] <= share <= HIGHLAND_SHARE_RANGE[1]:
         raise AssertionError(f"measured highland share {share:.4f} is outside 0.18..0.24")
     return multiplier, h1, share

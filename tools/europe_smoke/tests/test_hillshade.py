@@ -202,6 +202,27 @@ def test_ground_tiers_measure_h1_and_hit_the_display_share():
     assert np.allclose(multiplier[dem >= h1], 1.0)
 
 
+def test_ground_tiers_share_is_of_display_land_not_of_the_sea_too():
+    """Europe's display window is ~half sea. A share target counted over ALL
+    display pixels drags h1 down to the ~48th land percentile (206.6 m on the
+    delivered z7 DEM [measured]), below the 300 m lowland ceiling by
+    construction. The highland share is a share of display LAND.
+    """
+    dem = np.arange(100, dtype="float32").reshape(10, 10) * 10.0
+    valid = np.ones_like(dem, dtype=bool)
+    valid[:, 5:] = False                      # the right half is sea
+    bounds = (-1_000_000.0, -1_000_000.0, 1_000_000.0, 1_000_000.0)
+    multiplier, h1, share = hillshade.ground_tiers(
+        dem, valid, bounds, (-180.0, -85.0, 180.0, 85.0)
+    )
+    land_values = dem[valid]
+    assert h1 == pytest.approx(
+        float(np.quantile(land_values, 1.0 - round(0.21 * land_values.size)
+                          / land_values.size)), rel=1e-6)
+    assert 0.18 <= share <= 0.24
+    assert np.allclose(multiplier[~valid], 0.0)
+
+
 def test_ground_tiers_reject_an_h1_below_the_lowland_ceiling():
     dem = np.linspace(0.0, 250.0, 100, dtype="float32").reshape(10, 10)
     with pytest.raises(ValueError, match="h1"):
