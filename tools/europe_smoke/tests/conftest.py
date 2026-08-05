@@ -109,7 +109,7 @@ def ghsl_artifact() -> provenance.Finding:
 
 @pytest.fixture
 def osm_land_artifact() -> provenance.Finding:
-    """The OSM land-polygon shapefile. Skips when it is not on this machine."""
+    """The verified OSM land-polygon ZIP. Skips when it is not on this machine."""
     return require_artifacts("osm_land")["osm_land"]
 
 

@@ -53,13 +53,12 @@ attribution_required = true
 
 [osm_land]
 class = "required"
-path = "{repo}/examples/.cache/iberia_france_smoke/osm/simplified-land-polygons-complete-3857/simplified_land_polygons.shp"
-sha256 = "82826f464b271ca5095a84dff13d045e929fb80992982bbbd09fc230ef70d19d"
-bytes = 31844968
+path = "{repo}/examples/.cache/iberia_france_smoke/osm/simplified-land-polygons-complete-3857.zip"
+sha256 = "4ac8f10a30bcb8ee11da574b704bf37a1e37c9de85d5d2b2f9d2c34869d5272a"
+bytes = 24451300
 licence = "ODbL 1.0 (c) OpenStreetMap contributors"
 upstream = "https://osmdata.openstreetmap.de/download/simplified-land-polygons-complete-3857.zip"
 attribution_required = true
-note = "only the .shp member is pinned; the .dbf/.shx/.prj sidecars are not"
 
 [natural_earth]
 class = "acquired"

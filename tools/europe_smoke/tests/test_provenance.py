@@ -64,7 +64,7 @@ def test_manifest_rejects_a_remote_entry_that_carries_a_path(tmp_path):
 def test_manifest_paths_resolve_through_the_config_placeholders():
     m = provenance.load_manifest()
     assert provenance._resolve(m["engine"]["path"]) == config.ENGINE_PYC
-    assert provenance._resolve(m["osm_land"]["path"]) == config.OSM_LAND_SHP
+    assert provenance._resolve(m["osm_land"]["path"]) == config.OSM_LAND_ZIP
     ne = provenance._resolve(m["natural_earth"]["path"])
     assert ne == config.CACHE_DIR / "ne" / "ne_10m_admin_0_countries.zip"
     # the manifest must not hardcode the build drive a second time
@@ -317,7 +317,7 @@ def test_no_automated_entry_point_mutates_the_manifest(tmp_path, monkeypatch,
 
     _, findings = provenance.check_all()
     assert provenance.propose_pins(findings), "sandbox failed to arm the pin path"
-    assert probe.main(["--check"]) == 0
+    assert probe.main(["--check"]) == 1
     assert p.read_bytes() == before
     # the observed hash went to the proposal file, never into the manifest
     assert (tmp_path / "proposed_pins.toml").exists()
@@ -380,13 +380,13 @@ def test_a_pinned_entry_is_never_offered_for_pinning_again(tmp_path, monkeypatch
 
 
 # ------------------------------------------------------------------ CLI
-def test_probe_check_exits_zero_with_a_pending_acquired_artifact(tmp_path, monkeypatch,
-                                                                capsys,
-                                                                required_artifacts):
-    monkeypatch.setattr(config, "BUILD_DIR", tmp_path)
+def test_probe_check_exits_one_with_a_pending_acquired_artifact(
+        tmp_path, monkeypatch, capsys, required_artifacts):
     from tools.europe_smoke import probe
-    assert probe.main(["--check"]) == 0
-    assert "provenance: PASS" in capsys.readouterr().out
+
+    monkeypatch.setattr(config, "BUILD_DIR", tmp_path)
+    assert probe.main(["--check"]) == 1
+    assert "provenance: FAIL" in capsys.readouterr().out
 
 
 def test_probe_check_strict_exits_one_while_anything_is_unpinned(tmp_path, monkeypatch,
@@ -584,3 +584,17 @@ def test_only_absence_is_a_skippable_status():
     for status in (provenance.SIZE, provenance.MISMATCH):
         assert status not in gate.ABSENT_STATUSES
         assert provenance.level_of(status) == provenance.FAIL
+
+
+def test_probe_check_is_strict_by_default(monkeypatch):
+    from tools.europe_smoke import probe
+
+    seen = []
+
+    def fake_check_all(**kwargs):
+        seen.append(kwargs)
+        return True, []
+
+    monkeypatch.setattr(probe.provenance, "check_all", fake_check_all)
+    assert probe.main(["--check"]) == 0
+    assert seen == [{"strict": True}]

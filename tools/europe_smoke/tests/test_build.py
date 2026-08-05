@@ -134,9 +134,9 @@ def harness(monkeypatch, tmp_path):
 
     _fake_population(monkeypatch)
     monkeypatch.setattr(provenance, "check_all",
-                        lambda: (True, [_ok("engine", "verified")]))
+                        lambda **kwargs: (True, [_ok("engine", "verified")]))
     monkeypatch.setattr(build.provenance, "check_all",
-                        lambda: (True, [_ok("engine", "verified")]))
+                        lambda **kwargs: (True, [_ok("engine", "verified")]))
 
     state = {"fetch": 0, "basemap": 0, "cube": _cube(), "aspect": (1920, 1080)}
 
@@ -464,7 +464,7 @@ def test_gate10_fails_when_the_basemap_misses_the_display_window(harness, monkey
 def test_gate16_fails_the_build_before_any_queue_time_is_spent(harness, monkeypatch):
     tmp, state = harness
     monkeypatch.setattr(build.provenance, "check_all",
-                        lambda: (False, [_bad("ghsl", "missing: x")]))
+                        lambda **kwargs: (False, [_bad("ghsl", "missing: x")]))
     d = _build(tmp)
     assert d["verdict"] == "FAIL"
     assert d["gates"]["16"]["verdict"] == "FAIL"
@@ -476,7 +476,7 @@ def test_a_missing_natural_earth_does_not_block_the_bootstrap(harness, monkeypat
     tmp, state = harness
     calls = {"n": 0}
 
-    def staged_check():
+    def staged_check(**kwargs):
         calls["n"] += 1
         if calls["n"] == 1:                      # stage 0, before derive
             return False, [_bad("natural_earth", "missing: ne.zip"),
@@ -497,10 +497,34 @@ def test_a_derivable_artifact_still_missing_at_the_end_fails_gate16(harness,
     tmp, _ = harness
     monkeypatch.setattr(
         build.provenance, "check_all",
-        lambda: (False, [_bad("natural_earth", "missing")]))
+        lambda **kwargs: (False, [_bad("natural_earth", "missing")]))
     d = _build(tmp)
     assert d["gates"]["16"]["verdict"] == "FAIL"
     assert d["verdict"] == "FAIL"
+
+
+def test_gate16_rejects_an_unpinned_artifact():
+    finding = provenance.Finding(
+        "natural_earth", provenance.UNPINNED, provenance.WARN,
+        "on disk but manifest carries no hash", "a" * 64,
+    )
+    gate5 = {"checks": {"variables_resolved": {"ok": True, "missing": []}}}
+    fit = {"k": 1.0, "k_unclamped": 1.0, "clamped": False}
+    out = build.gate16([finding], fit, gate5, AXIS, {"window": "10 days"}, {})
+    assert out["verdict"] == "FAIL"
+
+
+def test_a_mismatched_derivable_artifact_blocks_before_fetch(harness, monkeypatch):
+    tmp, state = harness
+    bad = provenance._finding(
+        "natural_earth", provenance.MISMATCH, "sha256 mismatch"
+    )
+    monkeypatch.setattr(
+        build.provenance, "check_all", lambda **kwargs: (False, [bad])
+    )
+    out = _build(tmp)
+    assert out["verdict"] == "FAIL"
+    assert state["fetch"] == 0
 
 
 def test_gate16_records_the_clamp_when_the_gain_fit_saturates(harness, monkeypatch):

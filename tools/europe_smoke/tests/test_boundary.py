@@ -44,6 +44,37 @@ def test_land_union_is_valid_and_multipart(tmp_path, osm_land_artifact):
     assert geom.geom_type in {"Polygon", "MultiPolygon"}
 
 
+def test_prepare_osm_land_uses_the_verified_zip_and_all_sidecars(tmp_path, monkeypatch):
+    import hashlib
+    import zipfile
+
+    archive = tmp_path / "land.zip"
+    members = {
+        "land/simplified_land_polygons.shp": b"shp",
+        "land/simplified_land_polygons.shx": b"shx",
+        "land/simplified_land_polygons.dbf": b"dbf",
+        "land/simplified_land_polygons.prj": b"prj",
+    }
+    with zipfile.ZipFile(archive, "w") as zf:
+        for name, payload in members.items():
+            zf.writestr(name, payload)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    entry = {"class": "required", "path": str(archive), "sha256": digest,
+             "bytes": archive.stat().st_size}
+    monkeypatch.setattr(boundary.config, "OSM_LAND_ZIP", archive, raising=False)
+    monkeypatch.setattr(boundary.provenance, "load_manifest", lambda: {"osm_land": entry})
+
+    shp = boundary.prepare_osm_land(tmp_path / "cache")
+
+    assert shp.name == "simplified_land_polygons.shp"
+    assert {shp.with_suffix(s).name for s in (".shp", ".shx", ".dbf", ".prj")} <= {
+        p.name for p in shp.parent.iterdir()
+    }
+    shp.with_suffix(".dbf").unlink()
+    with pytest.raises(RuntimeError, match="partial OSM extraction"):
+        boundary.prepare_osm_land(tmp_path / "cache")
+
+
 def test_load_countries_rejects_a_malicious_natural_earth_zip(tmp_path):
     """The NE zip arrives over plain HTTPS from an S3 bucket; treat it as input."""
     zip_path = tmp_path / "ne" / "ne_10m_admin_0_countries.zip"

@@ -377,7 +377,10 @@ def _gate9(bounds, shape) -> dict:
 
 def gate16(findings, fit: dict, gate5_result: dict, axis, firms_data: dict,
            versions: dict) -> dict:
-    prov_ok = all(f.ok for f in findings)
+    prov_ok = all(
+        f.status in {provenance.VERIFIED, provenance.PRESENT, provenance.REMOTE}
+        for f in findings
+    )
     k_ok = fit["k"] <= config.MAX_ADVECTION_GAIN
     vars_ok = gate5_result["checks"]["variables_resolved"]["ok"]
     return {
@@ -430,13 +433,24 @@ def build(days: int = 10, today: dt.date | None = None, axis=None,
     )
 
     # ---- stage 0: provenance. Fail fast, before any ADS queue time is spent.
+    # Non-strict only for bootstrap: a derivable artifact may legitimately be
+    # absent or unpinned before the stage that creates it, but a non-derivable
+    # warning and a wrong-on-disk derivable (size/mismatch) block immediately.
     _, findings = provenance.check_all()
     for line in provenance.format_findings(findings):
         print(line)
-    blocking = [f for f in findings
-                if not f.ok and f.name not in DERIVABLE_ARTIFACTS]
-    deferred = [f for f in findings
-                if not f.ok and f.name in DERIVABLE_ARTIFACTS]
+    healthy = {provenance.VERIFIED, provenance.PRESENT, provenance.REMOTE}
+    derivable_before_build = {
+        provenance.PENDING, provenance.MISSING, provenance.UNPINNED,
+    }
+    deferred = [
+        f for f in findings
+        if f.name in DERIVABLE_ARTIFACTS and f.status in derivable_before_build
+    ]
+    blocking = [
+        f for f in findings
+        if f.status not in healthy and f not in deferred
+    ]
     for f in deferred:
         print(f"[note] {f.name} is absent but the build creates it; "
               "gate 16 re-checks at the end")
@@ -596,21 +610,10 @@ def build(days: int = 10, today: dt.date | None = None, axis=None,
                  f"{config.FIRMS_MAP_CAP}-record map cap (§4.3)"),
     }
 
-    # Gate 16 re-runs the check now that the derivable artifacts exist.
-    #
-    # OPEN DEFECT (review 2026-08-04, Spec finding 4): this is the NON-strict
-    # check, so an `unpinned` entry (level `warn`) passes gate 16 even though
-    # spec §9.16 requires every external-artifact hash to be verified. Three of
-    # six manifest entries ship unpinned, so a first build can report gate 16
-    # PASS with half its artifacts hash-unverified.
-    #
-    # Naively passing strict=True here fails 24 test_build.py tests, because the
-    # fixtures' artifacts are legitimately unpinned in a sandbox. The real fix
-    # is for gate16() to separate `unpinned` (record it, fail a RELEASE build,
-    # not a development one) from `mismatch`/`missing` (always fatal), and for
-    # the fixtures to pin what they stage. That is a gate16() change, not a
-    # one-line strictness flip. NOT DONE.
-    _, final_findings = provenance.check_all()
+    # Gate 16 re-runs the check now that the derivable artifacts exist. It is
+    # STRICT: only verified/present/remote findings pass, so an unpinned hash
+    # cannot ride along to release.
+    _, final_findings = provenance.check_all(strict=True)
     g16 = gate16(final_findings, fit, g5, axis, firms_block, versions)
 
     gates = {"5": g5, "6": g6, "7": g7, "8": g8, "11": g11, "16": g16}

@@ -24,6 +24,45 @@ def osm_boundary_path(cache_dir: Path) -> Path:
             / f"california_boundary_osm_r{config.SENTINEL_RELATION_ID}.geojson")
 
 
+_OSM_SIDECARS = (".shp", ".shx", ".dbf", ".prj")
+
+
+def prepare_osm_land(cache_dir: Path) -> Path:
+    """Extract the VERIFIED OSM land ZIP into a digest-keyed cache directory.
+
+    The manifest pins the whole archive, so every shapefile sidecar comes from
+    the same verified bytes; a cache directory that lost a sidecar is a partial
+    extraction and fails loudly rather than being silently reused.
+    """
+    entry = provenance.load_manifest()["osm_land"]
+    finding = provenance.check_artifact("osm_land", entry)
+    if finding.status != provenance.VERIFIED:
+        raise RuntimeError(f"OSM land archive is not verified: {finding.detail}")
+
+    dest = Path(cache_dir) / "osm" / f"land-{finding.sha256[:16]}"
+    if dest.exists():
+        existing = list(dest.rglob("simplified_land_polygons.shp"))
+        if len(existing) != 1:
+            raise RuntimeError(
+                f"partial OSM extraction at {dest}; found {len(existing)} shapefiles"
+            )
+        shp = existing[0]
+        missing = [suffix for suffix in _OSM_SIDECARS if not shp.with_suffix(suffix).exists()]
+        if missing:
+            raise RuntimeError(f"partial OSM extraction at {dest}; missing {missing}")
+        return shp
+
+    written = provenance.safe_extract(config.OSM_LAND_ZIP, dest)
+    matches = [p for p in written if p.name == "simplified_land_polygons.shp"]
+    if len(matches) != 1:
+        raise RuntimeError(f"OSM archive carried {len(matches)} matching shapefiles")
+    shp = matches[0]
+    missing = [suffix for suffix in _OSM_SIDECARS if not shp.with_suffix(suffix).exists()]
+    if missing:
+        raise RuntimeError(f"OSM archive is missing required sidecars {missing}")
+    return shp
+
+
 def build_land_union(cache_dir: Path, force: bool = False) -> Path:
     """Union the cached OSM simplified land polygons over the request area."""
     out = osm_boundary_path(cache_dir)
@@ -34,16 +73,12 @@ def build_land_union(cache_dir: Path, force: bool = False) -> Path:
     from pyproj import Transformer
     from shapely.geometry import box, mapping
 
-    if not config.OSM_LAND_SHP.exists():
-        raise RuntimeError(
-            f"OSM land polygons missing at {config.OSM_LAND_SHP}; see manifest.toml"
-        )
-
     north, west, south, east = config.AREA
     project = Transformer.from_crs(4326, 3857, always_xy=True).transform
     x0, y0 = project(west, south)
     x1, y1 = project(east, north)
-    land = gpd.read_file(config.OSM_LAND_SHP, bbox=(x0, y0, x1, y1))
+    source = prepare_osm_land(cache_dir)
+    land = gpd.read_file(source, bbox=(x0, y0, x1, y1))
     if land.empty:
         raise RuntimeError("OSM land dataset did not cover the Europe request area")
 

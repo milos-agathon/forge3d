@@ -74,9 +74,9 @@ REPORT_PATH = BUILD_DIR / "build_report.json"
 
 ENGINE_PYC = REPO_ROOT / "examples" / "wildfire_smoke_engine.cpython-313.pyc"
 GHSL_TIF = Path("D:/ghsl-population/GHS_POP_E2025_GLOBE_R2023A_4326_30ss_V1_0.tif")
-OSM_LAND_SHP = (
+OSM_LAND_ZIP = (
     REPO_ROOT / "examples" / ".cache" / "iberia_france_smoke" / "osm"
-    / "simplified-land-polygons-complete-3857" / "simplified_land_polygons.shp"
+    / "simplified-land-polygons-complete-3857.zip"
 )
 
 CDSAPIRC = Path.home() / ".cdsapirc"

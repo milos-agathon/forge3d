@@ -130,9 +130,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true",
                     help="verify artifacts and credentials, then exit (gate 16)")
-    ap.add_argument("--strict", action="store_true",
-                    help="with --check: also fail on warnings (unpinned, pending). "
-                         "The release gate.")
+    ap.add_argument(
+        "--strict", action="store_true",
+        help="compatibility flag; --check is strict by default",
+    )
     ap.add_argument("--write-pins", action="store_true",
                     help="install observed hashes for unpinned artifacts into "
                          "manifest.toml. Operator-invoked; never runs automatically; "
@@ -141,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--days", type=int, default=10, help="analysis window length")
     args = ap.parse_args(argv)
 
-    ok, findings = provenance.check_all(strict=args.strict)
+    ok, findings = provenance.check_all(strict=bool(args.check or args.strict))
     for line in provenance.format_findings(findings):
         print(line)
 
