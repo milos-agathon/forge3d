@@ -55,6 +55,29 @@ def test_a_frozen_seam_fails_even_though_the_rate_is_zero():
     assert "identical" in out["reason"]
 
 
+def test_reference_uses_only_intervals_at_the_seam_cadence():
+    hours = [0, 6, 12] + list(range(15, 45, 3))
+    arms = ["an"] * 3 + ["fc"] * 10
+    values = np.linspace(1.0, 1.4, len(hours))
+    out = seam.evaluate(_ds(values, hours, arms), np.datetime64("2026-08-01T12"))
+    assert out["seam_dt_h"] == 3.0
+    assert out["cadence_matched"] is True
+    assert out["reference_source"] == "empirical"
+    assert out["n_reference"] == 9
+
+
+def test_small_matched_reference_uses_priors_without_mixing_cadences():
+    hours = [0, 6, 12, 15, 18, 21]
+    arms = ["an", "an", "an", "fc", "fc", "fc"]
+    values = np.linspace(1.0, 1.2, len(hours))
+    out = seam.evaluate(_ds(values, hours, arms), np.datetime64("2026-08-01T12"))
+    assert out["cadence_matched"] is True
+    assert out["reference_source"] == "pooled_priors"
+    assert out["n_reference"] == 2
+    assert out["p95"] == seam.POOLED_P95_PRIOR
+    assert out["p99"] == seam.POOLED_P99_PRIOR
+
+
 def test_reference_n_is_reported_because_p99_is_an_order_statistic():
     vals = [1.0, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14]
     ds = _ds(vals, [0, 3, 6, 9, 12, 15, 18, 21], ["an"] * 4 + ["fc"] * 4)

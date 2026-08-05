@@ -55,25 +55,30 @@ def evaluate(ds: xr.Dataset, t_now, var: str = "omaod550") -> dict:
     matched = same_arm & np.isfinite(r) & np.isclose(step_h, seam_dt, rtol=1e-6)
     reference = r[matched]
 
-    # Fall back only if the matched reference is too small to carry a p95, and
-    # say so -- silently widening the cadence is the bug this block exists to
-    # prevent.
-    cadence_note = None
     if reference.size < 8:
+        p95, p99 = POOLED_P95_PRIOR, POOLED_P99_PRIOR
+        reference_source = "pooled_priors"
         cadence_note = (
             f"only {int(reference.size)} same-arm intervals at the seam's "
-            f"{seam_dt:g} h cadence; widened to all same-arm intervals, which "
-            "biases the threshold low (towards false alarms)")
-        reference = r[same_arm & np.isfinite(r)]
+            f"{seam_dt:g} h cadence; using pooled priors without mixing cadences"
+        )
+    else:
+        p95 = float(np.percentile(reference, 95))
+        p99 = float(np.percentile(reference, 99))
+        reference_source = "empirical"
+        cadence_note = None
 
     out = {
         "r_seam": r_seam,
         "seam_dt_h": float(seam_dt),
         "n_reference": int(reference.size),
-        "cadence_matched": cadence_note is None,
+        "cadence_matched": True,
+        "reference_source": reference_source,
         "cadence_note": cadence_note,
         "caveat": CAVEAT,
         "priors": {"p95": POOLED_P95_PRIOR, "p99": POOLED_P99_PRIOR},
+        "p95": p95,
+        "p99": p99,
     }
 
     a = ds[var].values[seam_idx]
@@ -82,19 +87,11 @@ def evaluate(ds: xr.Dataset, t_now, var: str = "omaod550") -> dict:
         out.update(verdict="FAIL", reason="seam fields are bit-identical (frozen frame)")
         return out
 
-    if reference.size == 0:
-        p95, p99 = POOLED_P95_PRIOR, POOLED_P99_PRIOR
-        out["reason"] = "no same-arm reference; using pooled priors"
-    else:
-        p95 = float(np.percentile(reference, 95))
-        p99 = float(np.percentile(reference, 99))
-    out.update(p95=p95, p99=p99)
-
     if r_seam <= p95:
         out["verdict"] = "PASS"
     elif r_seam <= p99:
         out["verdict"] = "WARN"
     else:
         out["verdict"] = "FAIL"
-        out.setdefault("reason", f"r_seam {r_seam:.4f} exceeds p99 {p99:.4f}")
+        out["reason"] = f"r_seam {r_seam:.4f} exceeds p99 {p99:.4f}"
     return out
