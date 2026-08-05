@@ -245,6 +245,8 @@ def test_write_proposed_pins_lands_outside_the_tracked_tree(tmp_path):
 def test_apply_pins_writes_only_empty_slots(tmp_path):
     p = tmp_path / "manifest.toml"
     shutil.copyfile(provenance.MANIFEST_PATH, p)
+    p.write_text(_unpin_natural_earth(p.read_text(encoding="utf-8")),
+                 encoding="utf-8")
     digest = "cd" * 32
     assert provenance.apply_pins({"natural_earth": digest}, p) == ["natural_earth"]
     assert provenance.load_manifest(p)["natural_earth"]["sha256"] == digest
@@ -268,6 +270,25 @@ def test_apply_pins_refuses_a_remote_entry(tmp_path):
 
 
 # ----------------------------------------------------- the pinning controls
+def _unpin_natural_earth(text: str) -> str:
+    """Blank the natural_earth pin in a manifest COPY.
+
+    The pinning-machinery tests need an unpinned slot to exercise, and the
+    TRACKED manifest carries an operator-reviewed pin once the first machine
+    build has been verified. Blanking the copy keeps these tests meaningful on
+    both a fresh checkout and a provisioned one; a no-op when the slot is
+    already empty.
+    """
+    import re
+
+    pattern = re.compile(r'(\[natural_earth\][^\[]*?sha256 = ")[0-9a-f]*(")',
+                         re.DOTALL)
+    out, n = pattern.subn(r"\1\2", text)
+    if n != 1:
+        raise AssertionError("natural_earth sha256 line not found to blank")
+    return out
+
+
 def _sandbox(tmp_path, ne_bytes=b"pretend-natural-earth", ghsl_bytes=None):
     """A manifest copy whose natural_earth entry is PRESENT and UNPINNED.
 
@@ -290,7 +311,8 @@ def _sandbox(tmp_path, ne_bytes=b"pretend-natural-earth", ghsl_bytes=None):
     original = p.read_text(encoding="utf-8")
     needle = 'path = "{build}/cache/ne/ne_10m_admin_0_countries.zip"'
     assert needle in original, "sandbox anchor no longer matches manifest.toml"
-    text = original.replace(needle, f'path = "{art.as_posix()}"')
+    text = _unpin_natural_earth(original).replace(
+        needle, f'path = "{art.as_posix()}"')
     if ghsl_bytes is not None:
         bad = tmp_path / "substituted.tif"
         bad.write_bytes(ghsl_bytes)
@@ -444,6 +466,9 @@ def test_the_manifest_uses_the_token_for_artifacts_the_build_creates(tmp_path,
     assert "{build}" in m["natural_earth"]["path"], (
         "natural_earth is downloaded into BUILD_DIR; hardcoding it makes gate 16 "
         "fail on any machine whose BUILD_DIR differs")
+    # the test is about TOKEN RESOLUTION, not hash agreement: the staged file
+    # is a stand-in, so the pin the real build wrote must not judge it
+    m["natural_earth"]["sha256"] = ""
     monkeypatch.setattr(config, "BUILD_DIR", tmp_path)
     p = tmp_path / "cache" / "ne" / "ne_10m_admin_0_countries.zip"
     p.parent.mkdir(parents=True)
