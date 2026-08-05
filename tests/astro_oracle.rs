@@ -1,6 +1,6 @@
 use forge3d::astro::frames;
 use forge3d::astro::moon;
-use forge3d::astro::time::{julian_day_tt, julian_day_ut1, UtcDateTime};
+use forge3d::astro::time::{delta_t_seconds, julian_day_tt, julian_day_ut1, UtcDateTime};
 use forge3d::astro::{body_position, moon_phase, Body, Observer};
 use forge3d::geo::units::{Angle, Degree};
 use forge3d::lighting::ephemeris::sun_position;
@@ -95,6 +95,61 @@ fn positions_meet_committed_horizons_thresholds() {
     assert!(
         geocentric_semidiameter_max <= 1.0,
         "Moon geocentric semidiameter: {geocentric_semidiameter_max} arcsec"
+    );
+
+    let mut lunar_window_max = 0.0_f64;
+    let mut lunar_window_rows = 0usize;
+    let mut regression_present = false;
+    for line in include_str!("data/horizons_vectors.dat")
+        .lines()
+        .filter(|line| line.starts_with("@moon_window "))
+    {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        lunar_window_rows += 1;
+        regression_present |= fields[1] == "tromso" && fields[2] == "2008-11-14T00:00:00Z";
+        let utc = parse_utc(fields[2]);
+        let observer = Observer::new(
+            Angle::<Degree>::new(fields[3].parse().unwrap()),
+            Angle::new(fields[4].parse().unwrap()),
+            fields[5].parse().unwrap(),
+        )
+        .unwrap();
+        let actual = body_position(Body::Moon, utc, observer, false).unwrap();
+        lunar_window_max = lunar_window_max.max(separation_arcsec(
+            actual.azimuth.value(),
+            actual.altitude.value(),
+            fields[6].parse().unwrap(),
+            fields[7].parse().unwrap(),
+        ));
+    }
+    assert_eq!(lunar_window_rows, 621);
+    assert!(regression_present);
+    assert!(
+        lunar_window_max <= 14.10,
+        "Moon window: {lunar_window_max} arcsec"
+    );
+    println!("Moon 30-day window sweep max: {lunar_window_max} arcsec");
+}
+
+#[test]
+fn delta_t_meets_declared_midmonth_residual() {
+    let mut maximum = 0.0_f64;
+    let mut rows = 0usize;
+    for line in include_str!("data/horizons_vectors.dat")
+        .lines()
+        .filter(|line| line.starts_with("@delta_t_midmonth "))
+    {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        rows += 1;
+        maximum = maximum.max(
+            (delta_t_seconds(parse_utc(fields[1])).unwrap() - fields[2].parse::<f64>().unwrap())
+                .abs(),
+        );
+    }
+    assert_eq!(rows, 612);
+    assert!(
+        maximum <= 0.0066,
+        "delta-T midpoint residual {maximum} seconds"
     );
 }
 

@@ -111,8 +111,9 @@ fn fs_night(input: VertexOutput) -> @location(0) vec4<f32> {
             profile * input.phase,
         );
     }
-    let alpha = profile
-        * clamp(0.18 + 0.65 * sqrt(max(input.color_intensity.w, 0.0)), 0.0, 1.0)
-        * input.phase;
+    // Stars have one constant angular footprint. `color_intensity.w` is the
+    // linearly exposed catalogue irradiance, so the integrated sprite energy
+    // preserves the astronomical magnitude ratio while twilight is visible.
+    let alpha = profile * clamp(input.color_intensity.w, 0.0, 1.0) * input.phase;
     return vec4<f32>(input.color_intensity.rgb, alpha);
 }

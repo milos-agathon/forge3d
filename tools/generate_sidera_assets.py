@@ -7,10 +7,13 @@ import ast
 import calendar
 import csv
 import datetime as dt
+import hashlib
 import io
 import json
+import os
 import re
 import struct
+import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -20,6 +23,13 @@ ASTRO = ROOT / "assets" / "astro"
 VSOP_URL = "https://ftp.imcce.fr/pub/ephem/planets/vsop87/"
 VSOP_FILES = ("mer", "ven", "ear", "mar", "jup", "sat")
 VSOP_HEADER = re.compile(r"VARIABLE\s+(\d).*T\*\*(\d)\s+(\d+)\s+TERMS")
+# A conservative contribution budget over |t| <= 0.051 VSOP millennia
+# (2000-01-01 through 2050-12-31).  Terms are removed smallest-bound first,
+# across each body's complete coordinate series.  The sum of every omitted
+# |A*t^power| is therefore bounded by these values before the Horizons gate is
+# applied.  L/B are radians; R is AU.
+VSOP_MAX_ABS_T = 0.051
+VSOP_OMITTED_CONTRIBUTION_BUDGET = (5.0e-8, 5.0e-8, 2.0e-8)
 MOON_URL = "https://raw.githubusercontent.com/commenthol/astronomia/master/src/moonposition.js"
 HORIZONS_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
 BSC_URL = (
@@ -46,6 +56,10 @@ EPOCHS = (
     "2044-02-29 12:00",
     "2050-12-31 23:00",
 )
+LUNAR_SWEEP_SITE = ("tromso", 69.6492, 18.9553, 0.010)
+LUNAR_SWEEP_START = "2000-01-01"
+LUNAR_SWEEP_STOP = "2050-12-31"
+LUNAR_SWEEP_STEP = "30 d"
 BODIES = (
     ("sun", "10"),
     ("moon", "301"),
@@ -122,6 +136,38 @@ def generate_vsop() -> None:
             sections.append((variable - 1, power, terms))
         bodies.append((body, body_sections))
 
+    kept_indices: dict[int, set[int]] = {
+        index: set(range(len(terms)))
+        for index, (_, _, terms) in enumerate(sections)
+    }
+    omitted_bounds: dict[str, list[float]] = {}
+    for body, body_sections in bodies:
+        body_bounds = []
+        for coordinate, budget in enumerate(VSOP_OMITTED_CONTRIBUTION_BUDGET):
+            candidates = []
+            for section_index in body_sections:
+                variable, power, terms = sections[section_index]
+                if variable != coordinate:
+                    continue
+                for term_index, (amplitude, _, _) in enumerate(terms):
+                    contribution = abs(amplitude) * VSOP_MAX_ABS_T**power
+                    candidates.append((contribution, section_index, term_index))
+            omitted = 0.0
+            for contribution, section_index, term_index in sorted(candidates):
+                # Every published power remains represented, even when all of
+                # its terms fall below the aggregate contribution budget.
+                if len(kept_indices[section_index]) <= 1 or omitted + contribution > budget:
+                    continue
+                kept_indices[section_index].remove(term_index)
+                omitted += contribution
+            body_bounds.append(omitted)
+        omitted_bounds[body] = body_bounds
+
+    sections = [
+        (variable, power, [term for i, term in enumerate(terms) if i in kept_indices[index]])
+        for index, (variable, power, terms) in enumerate(sections)
+    ]
+
     with output.open("wb") as stream:
         stream.write(b"F3DVSOP1")
         stream.write(struct.pack("<II", len(bodies), len(sections)))
@@ -133,7 +179,14 @@ def generate_vsop() -> None:
             stream.write(struct.pack("<BBHI", variable, power, 0, len(terms)))
             for term in terms:
                 stream.write(struct.pack("<ddd", *term))
-    print(f"{output}: {output.stat().st_size} bytes")
+    total_terms = sum(len(terms) for _, _, terms in sections)
+    print(f"{output}: {output.stat().st_size} bytes, {total_terms} retained terms")
+    for body, body_sections in bodies:
+        counts = {coordinate: [] for coordinate in range(3)}
+        for section_index in body_sections:
+            variable, power, terms = sections[section_index]
+            counts[variable].append((power, len(terms)))
+        print(f"  {body}: L/B/R={counts}; omitted bounds={omitted_bounds[body]}")
 
 
 def generate_moon() -> None:
@@ -155,10 +208,51 @@ def generate_moon() -> None:
     print(f"{output}: {output.stat().st_size} bytes")
 
 
+def _horizons_result(parameters: dict[str, str]) -> tuple[str, str, str]:
+    url = HORIZONS_URL + "?" + urllib.parse.urlencode(parameters)
+    result = json.load(urllib.request.urlopen(url, timeout=60))["result"]
+    preamble, remainder = result.split("$$SOE", 1)
+    block = remainder.split("$$EOE", 1)[0]
+    ephemerides = set(re.findall(r"source:\s*(DE\d+)", preamble))
+    if ephemerides != {"DE441"}:
+        raise RuntimeError(f"expected Horizons DE441, received {sorted(ephemerides)}")
+    eop_match = re.search(r"^EOP file\s*:\s*(\S+)", preamble, re.MULTILINE)
+    return block, "DE441", eop_match.group(1) if eop_match else "unreported"
+
+
+def _atomic_write_oracle(data: str, manifest: str) -> None:
+    directory = ROOT / "tests" / "data"
+    data_path = directory / "horizons_vectors.dat"
+    manifest_path = directory / "horizons_vectors.MANIFEST.toml"
+    temporary_paths = []
+    try:
+        for target, content in ((data_path, data), (manifest_path, manifest)):
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="ascii", newline="\n", dir=directory, delete=False
+            ) as stream:
+                stream.write(content)
+                temporary_paths.append((Path(stream.name), target))
+        for temporary, target in temporary_paths:
+            os.replace(temporary, target)
+    finally:
+        for temporary, _ in temporary_paths:
+            temporary.unlink(missing_ok=True)
+
+
+def _parse_horizons_calendar(value: str) -> dt.datetime:
+    value = value.strip()
+    for format_string in ("%Y-%b-%d %H:%M:%S.%f", "%Y-%b-%d %H:%M:%S"):
+        try:
+            return dt.datetime.strptime(value, format_string)
+        except ValueError:
+            pass
+    raise ValueError(f"unexpected Horizons calendar value: {value!r}")
+
+
 def generate_horizons() -> None:
-    output = ROOT / "tests" / "data" / "horizons_vectors.dat"
     rows = []
     served_ephemerides: set[str] = set()
+    served_eop_files: set[str] = set()
     for site, latitude, longitude, height_km in SITES:
         for body, command in BODIES:
             parameters = {
@@ -180,17 +274,9 @@ def generate_horizons() -> None:
                 "CAL_FORMAT": "CAL",
                 "TIME_DIGITS": "SECONDS",
             }
-            url = HORIZONS_URL + "?" + urllib.parse.urlencode(parameters)
-            result = json.load(urllib.request.urlopen(url, timeout=60))["result"]
-            # Keep the response preamble: it is the only place the ephemeris
-            # version Horizons actually served appears. Writing a hardcoded
-            # "DE441" into the file header would let the provenance drift the
-            # first time JPL rolls its default.
-            preamble = result.split("$$SOE", 1)[0]
-            for token in preamble.replace("/", " ").split():
-                if token.startswith("DE") and token[2:].split("-")[0].isdigit():
-                    served_ephemerides.add(token.strip("*,;"))
-            block = result.split("$$SOE", 1)[1].split("$$EOE", 1)[0]
+            block, ephemeris, eop_file = _horizons_result(parameters)
+            served_ephemerides.add(ephemeris)
+            served_eop_files.add(eop_file)
             body_rows = list(csv.reader(io.StringIO(block.strip())))
             if len(body_rows) != len(EPOCHS):
                 raise RuntimeError(f"Horizons returned {len(body_rows)} rows for {site}/{body}")
@@ -222,19 +308,68 @@ def generate_horizons() -> None:
         "CAL_FORMAT": "CAL",
         "TIME_DIGITS": "SECONDS",
     }
-    phase_url = HORIZONS_URL + "?" + urllib.parse.urlencode(phase_parameters)
-    phase_result = json.load(urllib.request.urlopen(phase_url, timeout=60))["result"]
-    phase_block = phase_result.split("$$SOE", 1)[1].split("$$EOE", 1)[0]
+    phase_block, ephemeris, eop_file = _horizons_result(phase_parameters)
+    served_ephemerides.add(ephemeris)
+    served_eop_files.add(eop_file)
     phase_rows = list(csv.reader(io.StringIO(phase_block.strip())))
+
+    sweep_site, sweep_latitude, sweep_longitude, sweep_height_km = LUNAR_SWEEP_SITE
+    sweep_parameters = {
+        "format": "json",
+        "COMMAND": "'301'",
+        "OBJ_DATA": "NO",
+        "MAKE_EPHEM": "YES",
+        "EPHEM_TYPE": "OBSERVER",
+        "CENTER": "'coord@399'",
+        "COORD_TYPE": "GEODETIC",
+        "SITE_COORD": f"'{sweep_longitude},{sweep_latitude},{sweep_height_km}'",
+        "START_TIME": f"'{LUNAR_SWEEP_START}'",
+        "STOP_TIME": f"'{LUNAR_SWEEP_STOP}'",
+        "STEP_SIZE": f"'{LUNAR_SWEEP_STEP}'",
+        "QUANTITIES": "'4'",
+        "ANG_FORMAT": "DEG",
+        "APPARENT": "AIRLESS",
+        "CSV_FORMAT": "YES",
+        "REF_SYSTEM": "ICRF",
+        "CAL_FORMAT": "CAL",
+        "TIME_DIGITS": "SECONDS",
+    }
+    sweep_block, ephemeris, eop_file = _horizons_result(sweep_parameters)
+    served_ephemerides.add(ephemeris)
+    served_eop_files.add(eop_file)
+    sweep_rows = list(csv.reader(io.StringIO(sweep_block.strip())))
+
+    midmonth_parameters = {
+        "format": "json",
+        "COMMAND": "'10'",
+        "OBJ_DATA": "NO",
+        "MAKE_EPHEM": "YES",
+        "EPHEM_TYPE": "OBSERVER",
+        "CENTER": "'500@399'",
+        "START_TIME": "'2000-01-15'",
+        "STOP_TIME": "'2050-12-15'",
+        "STEP_SIZE": "'1 month'",
+        "QUANTITIES": "'30,49'",
+        "CSV_FORMAT": "YES",
+        "CAL_FORMAT": "CAL",
+        "TIME_DIGITS": "SECONDS",
+    }
+    midmonth_block, ephemeris, eop_file = _horizons_result(midmonth_parameters)
+    served_ephemerides.add(ephemeris)
+    served_eop_files.add(eop_file)
+    midmonth_rows = list(csv.reader(io.StringIO(midmonth_block.strip())))
 
     # Every quantitative claim in the header is derived from what was actually
     # requested and actually served, so re-running with a different ephemeris,
     # site list or epoch list cannot leave a stale provenance record behind.
     generated = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
-    ephemeris = ", ".join(sorted(served_ephemerides)) or "unreported by Horizons"
+    if served_ephemerides != {"DE441"}:
+        raise RuntimeError(f"mixed Horizons ephemerides: {sorted(served_ephemerides)}")
+    ephemeris = next(iter(served_ephemerides))
+    eop_files = ",".join(sorted(served_eop_files))
     header = (
         f"# JPL Horizons topocentric observer vectors, generated {generated}.\n"
-        f"# Ephemeris: {ephemeris}; center: coord@399; frame: ICRF; apparent: AIRLESS.\n"
+        f"# Ephemeris: {ephemeris}; EOP: {eop_files}; center: coord@399; frame: ICRF; apparent: AIRLESS.\n"
         "# Quantities: 4,10,13,20,24,30,49; angular format: decimal degrees; CSV.\n"
         "# Generator: tools/generate_sidera_assets.py --horizons\n"
         f"# {len(SITES)} WGS84 sites x {len(EPOCHS)} UTC epochs = "
@@ -244,21 +379,60 @@ def generate_horizons() -> None:
         "#          angular_diameter_arcsec distance_au range_rate_km_s phase_angle_deg\n"
         "#          tdb_minus_ut_seconds ut1_minus_utc_seconds\n"
         "# @moon_phase rows are geocentric: utc illum_percent diameter_arcsec distance_au phase_deg.\n"
+        "# @moon_window rows are a 30-day Tromso sweep: utc lat lon height_m az_deg alt_deg.\n"
+        "# @delta_t_midmonth rows are independent monthly: utc TT_minus_UT1_seconds.\n"
     )
-    with output.open("w", encoding="ascii", newline="\n") as stream:
-        stream.write(header)
-        for row in rows:
-            stream.write(" ".join(map(str, row)) + "\n")
-        for epoch, values in zip(EPOCHS, phase_rows):
-            numeric = [value.strip() for value in values[3:]]
-            stream.write(
-                "@moon_phase "
-                + epoch.replace(" ", "T")
-                + ":00Z "
-                + " ".join(numeric[0:1] + numeric[1:2] + numeric[2:3] + numeric[4:5])
-                + "\n"
-            )
-    print(f"{output}: {len(rows)} vectors, {output.stat().st_size} bytes")
+    stream = io.StringIO()
+    stream.write(header)
+    for row in rows:
+        stream.write(" ".join(map(str, row)).rstrip() + "\n")
+    for epoch, values in zip(EPOCHS, phase_rows):
+        numeric = [value.strip() for value in values[3:]]
+        stream.write(
+            "@moon_phase "
+            + epoch.replace(" ", "T")
+            + ":00Z "
+            + " ".join(numeric[0:1] + numeric[1:2] + numeric[2:3] + numeric[4:5])
+            + "\n"
+        )
+    for values in sweep_rows:
+        epoch = _parse_horizons_calendar(values[0])
+        stream.write(
+            f"@moon_window {sweep_site} {epoch:%Y-%m-%dT%H:%M:%SZ} "
+            f"{sweep_latitude} {sweep_longitude} {sweep_height_km * 1_000.0} "
+            f"{values[3].strip()} {values[4].strip()}\n"
+        )
+    for values in midmonth_rows:
+        epoch = _parse_horizons_calendar(values[0])
+        delta_t = float(values[3]) - float(values[4])
+        stream.write(f"@delta_t_midmonth {epoch:%Y-%m-%dT%H:%M:%SZ} {delta_t:.6f}\n")
+    data = stream.getvalue()
+    digest = hashlib.sha256(data.encode("ascii")).hexdigest()
+    manifest = (
+        "format_version = 2\n"
+        "path = \"horizons_vectors.dat\"\n"
+        "source = \"NASA/JPL Horizons API\"\n"
+        "source_url = \"https://ssd-api.jpl.nasa.gov/doc/horizons.html\"\n"
+        "license = \"NASA/JPL public ephemeris data\"\n"
+        "generation_command = \"python tools/generate_sidera_assets.py --horizons\"\n"
+        "settings = \"coord@399, GEODETIC, ICRF, AIRLESS, DE441, quantities 4/10/13/20/24/30/49\"\n"
+        f"generated_utc = \"{generated}\"\n"
+        f"ephemeris = \"{ephemeris}\"\n"
+        f"eop_files = \"{eop_files}\"\n"
+        f"combinations = {len(SITES) * len(EPOCHS)}\n"
+        f"unique_epochs = {len(EPOCHS)}\n"
+        f"vectors = {len(rows)}\n"
+        f"moon_phase_vectors = {len(phase_rows)}\n"
+        f"moon_window_vectors = {len(sweep_rows)}\n"
+        f"delta_t_midmonth_vectors = {len(midmonth_rows)}\n"
+        f"sha256 = \"{digest}\"\n"
+    )
+    _atomic_write_oracle(data, manifest)
+    output = ROOT / "tests" / "data" / "horizons_vectors.dat"
+    print(
+        f"{output}: {len(rows)} body, {len(sweep_rows)} lunar-window, "
+        f"{len(midmonth_rows)} delta-T vectors, {output.stat().st_size} bytes"
+    )
 
 
 def generate_delta_t() -> None:
@@ -276,9 +450,7 @@ def generate_delta_t() -> None:
         "CSV_FORMAT": "YES",
         "CAL_FORMAT": "JD",
     }
-    url = HORIZONS_URL + "?" + urllib.parse.urlencode(parameters)
-    result = json.load(urllib.request.urlopen(url, timeout=60))["result"]
-    block = result.split("$$SOE", 1)[1].split("$$EOE", 1)[0]
+    block, ephemeris, eop_file = _horizons_result(parameters)
     dut1 = [float(row[4]) for row in csv.reader(io.StringIO(block.strip()))]
     dates = []
     year, month = 2000, 1
@@ -309,13 +481,21 @@ def generate_delta_t() -> None:
 
     values = [tai_minus_utc(date) + 32.184 - delta for date, delta in zip(dates, dut1)]
     output = ASTRO / "delta_t_fit.dat"
-    with output.open("w", encoding="ascii", newline="\n") as stream:
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="ascii", newline="\n", dir=output.parent, delete=False
+    ) as stream:
+        temporary = Path(stream.name)
         stream.write("# Piecewise-linear TT-UT1 fit to monthly JPL Horizons/IERS EOP nodes.\n")
+        stream.write(
+            f"# Generated {dt.datetime.now(dt.timezone.utc):%Y-%m-%d}; "
+            f"ephemeris {ephemeris}; EOP {eop_file}.\n"
+        )
         stream.write("# columns: start_year end_year origin_year c0_seconds c1_seconds_per_year\n")
         for date_a, date_b, value_a, value_b in zip(dates, dates[1:], values, values[1:]):
             start, end = decimal_year(date_a), decimal_year(date_b)
             slope = (value_b - value_a) / (end - start)
             stream.write(f"{start:.12f} {end:.12f} {start:.12f} {value_a:.9f} {slope:.9f}\n")
+    os.replace(temporary, output)
     print(f"{output}: {len(values) - 1} monthly segments")
 
 

@@ -1,8 +1,9 @@
-//! Full VSOP87D term evaluation, bounded by SIDERA's 2000–2050 oracle.
+//! Bounded VSOP87D term evaluation over SIDERA's 2000–2050 window.
 //!
-//! The compact asset preserves every IMCCE VSOP87D term for Earth and
-//! Mercury through Saturn; the declared truncation is by body coverage, not
-//! by dropping terms.
+//! The compact asset retains 14,793 of 25,659 IMCCE terms.  The generator
+//! removes the smallest `|A*t^power|` contributions per body and coordinate,
+//! subject to the aggregate bounds declared in `assets/astro/MANIFEST.toml`;
+//! exact L/B/R counts by power are published there and locked by tests.
 
 use super::AstroError;
 use glam::DVec3;
@@ -192,8 +193,8 @@ mod tests {
 
     const J2000_TT: f64 = 2_451_545.0;
 
-    /// The committed asset must parse to the six declared bodies with the full
-    /// L/B/R power series each, and consume every byte (the parser already
+    /// The committed asset must parse to the six declared bodies with every
+    /// retained L/B/R power series, and consume every byte (the parser already
     /// rejects a trailing-byte mismatch, so reaching `Ok` proves exactness).
     #[test]
     fn committed_theory_round_trips_with_every_body_and_series() {
@@ -221,8 +222,31 @@ mod tests {
                 "{} has thin series {coordinates:?}",
                 String::from_utf8_lossy(&body.name)
             );
+            let retained = body
+                .sections
+                .iter()
+                .map(|index| theory.sections[*index].terms.len())
+                .sum::<usize>();
+            let expected = match &body.name {
+                b"mer" => 2_620,
+                b"ven" => 912,
+                b"ear" => 1_348,
+                b"mar" => 3_357,
+                b"jup" => 2_421,
+                b"sat" => 4_135,
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                retained, expected,
+                "unexpected truncation for {:?}",
+                body.name
+            );
         }
-        assert!(total_terms > 20_000, "only {total_terms} terms committed");
+        assert_eq!(total_terms, 14_793);
+        assert!(
+            total_terms < 25_659,
+            "the full source theory was not truncated"
+        );
     }
 
     /// Earth's heliocentric distance oscillates between the published

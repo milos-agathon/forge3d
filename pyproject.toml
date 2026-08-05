@@ -12,7 +12,11 @@ dependencies = [
 ]
 readme = "README.md"
 license = { text = "Apache-2.0 OR MIT" }
-license-files = ["LICENSE", "LICENSE-APACHE"]
+license-files = [
+    "LICENSE",
+    "LICENSE-APACHE",
+    "assets/astro/THIRD_PARTY_NOTICES.md",
+]
 authors = [{ name = "forge3d authors" }]
 keywords = ["graphics", "rendering", "webgpu", "rust", "3d", "terrain", "visualization"]
 classifiers = [

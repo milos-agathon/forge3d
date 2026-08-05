@@ -39,11 +39,31 @@ def _set_active_viewer(viewer) -> None:
 
 
 def _remove_active_viewer(viewer) -> None:
+    # A viewer may have exited before close() reaches this cleanup hook, so use
+    # stack ownership rather than ``is_running`` to decide whether its removal
+    # exposes an older viewer.  That older viewer must receive the current
+    # process-level observation before it becomes the active target again.
+    live = []
+    for reference in _active_viewers:
+        candidate = reference()
+        if candidate is not None:
+            live.append((reference, candidate))
+    was_top = bool(live and live[-1][1] is viewer)
     _active_viewers[:] = [
-        reference
-        for reference in _active_viewers
-        if reference() is not None and reference() is not viewer
+        reference for reference, candidate in live if candidate is not viewer
     ]
+    if not was_top or _last_observation_command is None:
+        return
+    promoted = _get_active_viewer()
+    if promoted is None:
+        return
+    try:
+        promoted.send_ipc(_last_observation_command)
+    except Exception:
+        # Closing one viewer must remain best-effort even if the older viewer's
+        # IPC channel disappeared concurrently.  The replay stays retained, so
+        # re-registering that viewer (or opening another) can retry it.
+        pass
 
 
 def _clear_observation_replay() -> None:

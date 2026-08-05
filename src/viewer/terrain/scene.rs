@@ -236,6 +236,12 @@ impl ViewerTerrainScene {
     pub(crate) fn screen_depth_view(&self) -> Option<&wgpu::TextureView> {
         self.depth_view.as_ref()
     }
+
+    pub(crate) fn snapshot_depth_view(&self) -> Option<wgpu::TextureView> {
+        self.snapshot_depth_texture
+            .as_ref()
+            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+    }
 }
 
 /// Simple terrain scene for interactive viewer
@@ -247,6 +253,9 @@ pub struct ViewerTerrainScene {
     pub(super) depth_texture: Option<TrackedTexture>,
     pub(super) depth_view: Option<wgpu::TextureView>,
     pub(super) depth_size: (u32, u32),
+    /// Depth from the latest single-sample offscreen render, retained so the
+    /// viewer can fill only uncovered pixels with the computed sky.
+    pub(super) snapshot_depth_texture: Option<TrackedTexture>,
     pub terrain: Option<ViewerTerrainData>,
     /// PBR+POM rendering configuration (opt-in, default off)
     pub pbr_config: super::pbr_renderer::ViewerTerrainPbrConfig,

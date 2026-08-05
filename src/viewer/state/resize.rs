@@ -189,6 +189,7 @@ impl Viewer {
         self.sky_output_view = self
             .sky_output
             .create_view(&wgpu::TextureViewDescriptor::default());
+        self.sky_present_bg_cache.borrow_mut().take();
         // Recreate depth buffer for geometry pass
         if self.geom_pipeline.is_some() {
             let z_texture = tracked_create_texture(

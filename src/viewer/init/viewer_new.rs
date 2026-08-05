@@ -99,7 +99,7 @@ impl Viewer {
         let gi_base = create_gi_baseline_resources(&device, width, height)?;
 
         // Sky resources
-        let sky = create_sky_resources(&device, &queue, width, height)?;
+        let sky = create_sky_resources(&device, &queue, width, height, surface_config.format)?;
 
         // Fog resources
         let fog = create_fog_resources(&device, width, height)?;
@@ -268,6 +268,10 @@ impl Viewer {
             sky_camera: sky.sky_camera,
             sky_output: sky.sky_output,
             sky_output_view: sky.sky_output_view,
+            sky_present_bind_group_layout: sky.sky_present_bind_group_layout,
+            sky_present_depth_pipeline: sky.sky_present_depth_pipeline,
+            sky_present_flat_pipeline: sky.sky_present_flat_pipeline,
+            sky_present_sampler: sky.sky_present_sampler,
             night_pipeline: sky.night_pipeline,
             night_instances: sky.night_instances,
             night_bind_group: sky.night_bind_group,
@@ -276,6 +280,7 @@ impl Viewer {
             astro_night_revision: 0,
             sky_bg0_cache: std::cell::RefCell::new(None),
             sky_bg1_cache: std::cell::RefCell::new(None),
+            sky_present_bg_cache: std::cell::RefCell::new(None),
             sky_enabled: true,
             // Fog resources
             fog_enabled: false,

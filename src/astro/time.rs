@@ -8,11 +8,10 @@
 //! Horizons' EOP series by `tools/generate_sidera_assets.py --delta-t`. Two
 //! declarations, both load-bearing:
 //!
-//! * **Stated residual.** Between nodes the interpolant is exact at the ends
-//!   and the residual is bounded by the monthly curvature of ΔT, which is far
-//!   below one second; `tests/test_astro_ephemeris.py` gates the fit directly
-//!   against the `tdb_minus_ut_seconds` and `ut1_minus_utc_seconds` columns of
-//!   the committed Horizons oracle at every epoch in the file.
+//! * **Stated residual.** Between nodes the interpolant is exact at the ends;
+//!   612 independent Horizons midmonth samples gate the committed manifest's
+//!   measured interpolation residual directly across every month in the
+//!   validity window.
 //! * **What this is not.** Beyond the published EOP series Horizons holds
 //!   UT1−UTC fixed, and SIDERA inherits that convention verbatim. Future ΔT is
 //!   therefore a *convention shared with the oracle*, not a prediction of Earth

@@ -335,6 +335,7 @@ pub(crate) fn _astro_night_golden_frame(
     let texture = astro::night_gpu::render_test_frame(
         ctx.device.clone(),
         ctx.queue.clone(),
+        ctx.adapter.get_info().backend,
         &observation,
         width,
         height,

@@ -35,11 +35,6 @@ THRESHOLDS = {
     "jupiter": 60.0,
     "saturn": 60.0,
 }
-#: Max |ΔT_SIDERA − ΔT_Horizons| tolerated, in seconds. The module doc of
-#: ``src/astro/time.rs`` states a sub-second residual; this is that claim's gate.
-DELTA_T_RESIDUAL_SECONDS = 1.0
-
-
 def _separation_arcsec(a, b):
     azimuth_delta = math.radians(a[0] - b[0])
     altitude_a = math.radians(a[1])
@@ -61,9 +56,15 @@ def _oracle_rows():
         if not line or line.startswith("#"):
             continue
         fields = line.split()
-        if fields[0] == "@moon_phase":
+        if fields[0].startswith("@"):
             continue
         yield fields
+
+
+def _tagged_rows(tag):
+    for line in DATA.read_text(encoding="ascii").splitlines():
+        if line.startswith(tag + " "):
+            yield line.split()
 
 
 def test_public_ephemeris_meets_committed_horizons_gates(capsys):
@@ -92,6 +93,8 @@ def test_public_ephemeris_meets_committed_horizons_gates(capsys):
             phase = astro.moon_phase(_utc(fields[1]))
             phase_max = max(phase_max, abs(phase[0] - float(fields[2]) / 100.0))
             semidiameter_max = max(semidiameter_max, abs(phase[2] - float(fields[3]) * 0.5))
+            continue
+        if fields[0].startswith("@"):
             continue
         rows += 1
         site, iso, body = fields[0], fields[1], fields[2]
@@ -131,6 +134,28 @@ def test_public_ephemeris_meets_committed_horizons_gates(capsys):
     assert rows == len(combinations) * len(THRESHOLDS), rows
     assert phase_rows >= len(combinations) // len({c[0] for c in combinations})
     assert set(maxima) == set(THRESHOLDS)
+
+    lunar_window_rows = 0
+    regression_present = False
+    for fields in _tagged_rows("@moon_window"):
+        lunar_window_rows += 1
+        _, site, iso, latitude, longitude, height, azimuth, altitude = fields
+        regression_present |= site == "tromso" and iso == "2008-11-14T00:00:00Z"
+        deviation = _separation_arcsec(
+            astro.body_position(
+                "moon",
+                _utc(iso),
+                float(latitude),
+                float(longitude),
+                height_m=float(height),
+            ),
+            (float(azimuth), float(altitude)),
+        )
+        if deviation > maxima["moon"]:
+            maxima["moon"] = deviation
+            worst["moon"] = f"{site} {iso} [30-day window sweep]"
+    assert lunar_window_rows == 621
+    assert regression_present, "the independently observed Tromso regression is missing"
 
     with capsys.disabled():
         print(
@@ -178,26 +203,30 @@ def test_delta_t_matches_the_horizons_time_scale_columns(capsys):
     native = get_native_module()
     worst = 0.0
     worst_epoch = None
+    manifest = load_toml(ROOT / "assets" / "astro" / "MANIFEST.toml")
+    delta_asset = next(entry for entry in manifest["asset"] if entry["path"] == "delta_t_fit.dat")
+    declared_residual = float(delta_asset["max_validated_midmonth_residual_seconds"])
+    oracle_manifest = load_toml(DATA.with_name("horizons_vectors.MANIFEST.toml"))
     epochs = 0
-    for fields in _oracle_rows():
-        if fields[2] != "sun":
-            continue
+    for fields in _tagged_rows("@delta_t_midmonth"):
         epochs += 1
         when = _utc(fields[1])
-        expected = float(fields[13]) - float(fields[14])
+        expected = float(fields[2])
         actual = native.astro_delta_t_seconds(
             when.year, when.month, when.day, when.hour, when.minute, float(when.second)
         )
         if abs(actual - expected) > worst:
             worst = abs(actual - expected)
-            worst_epoch = f"{fields[0]} {fields[1]}"
-    assert epochs >= 40, epochs
+            worst_epoch = fields[1]
+    assert epochs == oracle_manifest["delta_t_midmonth_vectors"] == 612
     with capsys.disabled():
         print(
             f"\ndelta-T (TT-UT1) vs Horizons over {epochs} epochs: "
-            f"max |residual| {worst:.6f} s (gate {DELTA_T_RESIDUAL_SECONDS} s) at {worst_epoch}"
+            f"max |residual| {worst:.6f} s (declared gate {declared_residual} s) "
+            f"at {worst_epoch}"
         )
-    assert worst <= DELTA_T_RESIDUAL_SECONDS, f"ΔT residual {worst} s at {worst_epoch}"
+    assert worst <= declared_residual, f"ΔT residual {worst} s at {worst_epoch}"
+    assert declared_residual < 1.0
 
 
 def test_observation_sets_every_rendered_body_and_star_catalog():
@@ -277,25 +306,74 @@ def test_observation_replay_survives_viewer_restart():
         sky._set_active_viewer(None)
 
 
-def test_temporary_viewer_restores_previous_observation_target():
+def test_temporary_viewer_restores_previous_observation_target(monkeypatch):
     class FakeViewer:
         is_running = True
 
         def __init__(self):
-            self.command = None
+            self.commands = []
 
         def send_ipc(self, command):
-            self.command = command
+            self.commands.append(dict(command))
 
+    monkeypatch.setattr(sky, "get_native_module", lambda: None)
+    sky._set_active_viewer(None)
+    sky._clear_observation_replay()
+    previous = FakeViewer()
+    temporary = FakeViewer()
+    sky._set_active_viewer(previous)
+    try:
+        sky.set_observation(
+            datetime(2026, 7, 26, 22, tzinfo=timezone.utc), 52.3676, 4.9041
+        )
+        sky._set_active_viewer(temporary)
+        sky.set_observation(
+            datetime(2027, 7, 26, 22, tzinfo=timezone.utc), 19.8207, -155.4681
+        )
+        sky._remove_active_viewer(temporary)
+        assert sky._get_active_viewer() is previous
+        assert [command["year"] for command in previous.commands] == [2026, 2027]
+        assert [command["year"] for command in temporary.commands] == [2026, 2027]
+    finally:
+        sky._set_active_viewer(None)
+        sky._clear_observation_replay()
+
+
+def test_promoted_viewer_replay_failure_is_cleanup_safe_and_retryable(monkeypatch):
+    class FakeViewer:
+        is_running = True
+
+        def __init__(self):
+            self.commands = []
+            self.fail = False
+
+        def send_ipc(self, command):
+            self.commands.append(dict(command))
+            if self.fail:
+                raise RuntimeError("viewer IPC disappeared")
+
+    monkeypatch.setattr(sky, "get_native_module", lambda: None)
+    sky._set_active_viewer(None)
+    sky._clear_observation_replay()
     previous = FakeViewer()
     temporary = FakeViewer()
     sky._set_active_viewer(previous)
     try:
         sky._set_active_viewer(temporary)
+        sky.set_observation(
+            datetime(2027, 7, 26, 22, tzinfo=timezone.utc), 19.8207, -155.4681
+        )
+        previous.fail = True
         sky._remove_active_viewer(temporary)
         assert sky._get_active_viewer() is previous
+        assert previous.commands[-1]["year"] == 2027
+
+        previous.fail = False
+        sky._set_active_viewer(previous)
+        assert previous.commands[-1]["year"] == 2027
     finally:
         sky._set_active_viewer(None)
+        sky._clear_observation_replay()
 
 
 def test_viewer_close_keeps_replay_cleanup_best_effort(monkeypatch):
@@ -363,7 +441,22 @@ def test_observation_aware_blocking_snapshot_closes_after_capture(monkeypatch):
     sky._clear_observation_replay()
 
 
-def test_manual_sun_success_clears_stale_observation_replay():
+@pytest.mark.parametrize(
+    "command",
+    [
+        {"cmd": "lit_sun", "azimuth_deg": 180.0, "elevation_deg": 30.0},
+        {
+            "cmd": "set_terrain_sun",
+            "azimuth_deg": 180.0,
+            "elevation_deg": 30.0,
+            "intensity": 1.0,
+        },
+        {"cmd": "set_terrain", "sun_azimuth": 180.0},
+        {"cmd": "set_terrain", "sun_elevation": 30.0},
+        {"cmd": "set_terrain", "sun_intensity": 1.0},
+    ],
+)
+def test_manual_sun_success_clears_stale_observation_replay(command):
     from forge3d import viewer as viewer_module
 
     class Socket:
@@ -385,15 +478,67 @@ def test_manual_sun_success_clears_stale_observation_replay():
     )
     handle = object.__new__(viewer_module.ViewerHandle)
     handle._socket = Socket()
-    handle._send_command(
-        {"cmd": "lit_sun", "azimuth_deg": 180.0, "elevation_deg": 30.0}
-    )
+    handle._send_command(command)
     viewer = FakeViewer()
     try:
         sky._set_active_viewer(viewer)
         assert viewer.command is None
     finally:
         sky._set_active_viewer(None)
+
+
+def test_non_sun_terrain_success_preserves_observation_replay():
+    from forge3d import viewer as viewer_module
+
+    class Socket:
+        def sendall(self, _request):
+            pass
+
+        def recv(self, _size):
+            return b'{"ok": true}\n'
+
+    sky.set_observation(
+        datetime(2026, 7, 26, 22, tzinfo=timezone.utc), 52.3676, 4.9041
+    )
+    handle = object.__new__(viewer_module.ViewerHandle)
+    handle._socket = Socket()
+    try:
+        handle._send_command(
+            {"cmd": "set_terrain", "zscale": 2.0, "sun_azimuth": None}
+        )
+        assert sky._has_observation_replay()
+    finally:
+        sky._clear_observation_replay()
+
+
+def test_rejected_manual_terrain_sun_preserves_observation_replay():
+    from forge3d import viewer as viewer_module
+
+    class Socket:
+        def sendall(self, _request):
+            pass
+
+        def recv(self, _size):
+            return b'{"ok": false, "error": "terrain rejected"}\n'
+
+    sky.set_observation(
+        datetime(2026, 7, 26, 22, tzinfo=timezone.utc), 52.3676, 4.9041
+    )
+    handle = object.__new__(viewer_module.ViewerHandle)
+    handle._socket = Socket()
+    try:
+        with pytest.raises(viewer_module.ViewerError, match="terrain rejected"):
+            handle._send_command(
+                {
+                    "cmd": "set_terrain_sun",
+                    "azimuth_deg": 180.0,
+                    "elevation_deg": 30.0,
+                    "intensity": 1.0,
+                }
+            )
+        assert sky._has_observation_replay()
+    finally:
+        sky._clear_observation_replay()
 
 
 def test_observation_can_preseed_viewer_without_native(monkeypatch):
@@ -612,9 +757,7 @@ def test_set_sun_handler_is_live_not_print_only():
         Path(__file__).parents[1] / "src" / "viewer" / "cmd" / "ipc_command.rs"
     ).read_text(encoding="utf-8")
     arm = ipc.split("ViewerCmd::SetSunDirection", 1)[1].split("ViewerCmd::SetObservation", 1)[0]
-    assert "apply_manual_sun_control(" in arm
-    assert "viewer.update_lit_uniform();" in arm
-    assert "viewer.sync_terrain_sun_to_lit();" in arm
+    assert "viewer.apply_manual_sun(" in arm
     # The exact shape of the old stub must be gone from this arm. (Other arms
     # in this file legitimately print, so the check is arm-scoped.)
     assert "let _dir" not in arm
@@ -701,6 +844,39 @@ def test_sidera_assets_stay_under_two_mebibytes_and_match_their_manifest():
         )
         for field in ("source", "source_url", "license"):
             assert entry.get(field), f"{name} has no declared {field}"
+    vsop = declared["vsop87d.bin"]
+    retained = sum(
+        sum(counts)
+        for body in vsop["term_counts"].values()
+        for counts in body.values()
+    )
+    assert retained == 14_793 < 25_659
+    assert vsop["max_omitted_longitude_radians_per_body"] <= 5.0e-8
+    assert vsop["max_omitted_latitude_radians_per_body"] <= 5.0e-8
+    assert vsop["max_omitted_radius_au_per_body"] <= 2.0e-8
+
+
+def test_horizons_oracle_manifest_locks_payload_and_generation_settings():
+    manifest = load_toml(DATA.with_name("horizons_vectors.MANIFEST.toml"))
+    payload = DATA.read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == manifest["sha256"]
+    assert manifest["ephemeris"] == "DE441"
+    assert manifest["eop_files"].startswith("eop.")
+    for setting in ("GEODETIC", "ICRF", "AIRLESS", "DE441", "4/10/13/20/24/30/49"):
+        assert setting in manifest["settings"]
+
+    lines = DATA.read_text(encoding="ascii").splitlines()
+    ordinary = [line for line in lines if line and not line.startswith(("#", "@"))]
+    assert len(ordinary) == manifest["vectors"] == 280
+    assert sum(line.startswith("@moon_phase ") for line in lines) == manifest["moon_phase_vectors"]
+    assert sum(line.startswith("@moon_window ") for line in lines) == manifest["moon_window_vectors"]
+    assert (
+        sum(line.startswith("@delta_t_midmonth ") for line in lines)
+        == manifest["delta_t_midmonth_vectors"]
+    )
+    header = "\n".join(lines[:12])
+    assert f"Ephemeris: {manifest['ephemeris']}" in header
+    assert f"EOP: {manifest['eop_files']}" in header
 
 
 def test_manifest_truncation_budgets_are_gates_not_prose(capsys):
@@ -729,14 +905,19 @@ def test_manifest_truncation_budgets_are_gates_not_prose(capsys):
         if not line or line.startswith("#"):
             continue
         fields = line.split()
-        if fields[0] == "@moon_phase":
+        if fields[0] in {"@moon_phase", "@delta_t_midmonth"}:
             continue
-        when = datetime.fromisoformat(fields[1].replace("Z", "+00:00"))
+        if fields[0] == "@moon_window":
+            _, _, iso, latitude, longitude, height, azimuth, altitude = fields
+            body = "moon"
+        else:
+            _, iso, body, latitude, longitude, height, azimuth, altitude, *_ = fields
+        when = datetime.fromisoformat(iso.replace("Z", "+00:00"))
         actual = astro.body_position(
-            fields[2], when, float(fields[3]), float(fields[4]), height_m=float(fields[5])
+            body, when, float(latitude), float(longitude), height_m=float(height)
         )
-        deviation = _separation_arcsec(actual, (float(fields[6]), float(fields[7])))
-        measured[fields[2]] = max(measured.get(fields[2], 0.0), deviation)
+        deviation = _separation_arcsec(actual, (float(azimuth), float(altitude)))
+        measured[body] = max(measured.get(body, 0.0), deviation)
 
     with capsys.disabled():
         print("\nmanifest declared budgets vs measured maxima:")

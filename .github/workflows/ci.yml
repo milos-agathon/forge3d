@@ -985,6 +985,17 @@ jobs:
           FORGE3D_RECIPE_GOLDEN_VARIANT: metal
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression 'tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]' -v --tb=short
 
+      - name: Run SIDERA Metal night golden
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          mkdir -p tests/artifacts/sidera_night
+          junit=tests/artifacts/sidera_night/junit.xml
+          python -m pytest tests/test_astro_night_golden.py \
+            -v --tb=short --junitxml="$junit"
+          python scripts/assert_junit_zero_skips.py "$junit"
+
       - name: Record golden lane RAN
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
         id: golden-ran

@@ -137,6 +137,7 @@ impl ViewerTerrainScene {
             depth_texture: None,
             depth_view: None,
             depth_size: (0, 0),
+            snapshot_depth_texture: None,
             terrain: None,
             pbr_config: crate::viewer::terrain::pbr_renderer::ViewerTerrainPbrConfig::default(),
             pbr_pipeline: None,

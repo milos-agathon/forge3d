@@ -10,6 +10,11 @@ use glam::DVec3;
 
 pub const MAX_NIGHT_INSTANCES: usize = 9_096 + 6;
 const FULL_MOON_LUX: f64 = 0.25;
+/// Constant sprite footprint keeps integrated energy proportional to the
+/// catalogue irradiance instead of making bright stars larger as well as
+/// brighter. The display exposure keeps Sirius below alpha saturation.
+const STAR_ANGULAR_RADIUS_DEG: f32 = 0.05;
+const STAR_EXPOSURE: f32 = 0.20;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -32,19 +37,21 @@ pub fn instances(observation: &ObservationSnapshot) -> Vec<NightInstance> {
         // exactly one definition in the tree.
         let relative_irradiance =
             (star.irradiance_w_m2 / catalog::magnitude_to_irradiance(0.0)) as f32;
-        let radius_deg = 0.04 + relative_irradiance.sqrt().min(1.5) * 0.02;
         result.push(instance(
             direction,
             right,
             up,
-            radius_deg.to_radians(),
+            STAR_ANGULAR_RADIUS_DEG.to_radians(),
             0.0,
             night_visibility,
             star.linear_rgb,
-            relative_irradiance,
+            star_display_energy(relative_irradiance),
         ));
     }
 
+    // Deliberately artistic display constants: SIDERA makes no physical
+    // planetary-photometry claim. This assumption is declared in the signed
+    // render-certificate model ledger by the night rendering path.
     const PLANETS: [(Body, [f32; 3], f32); 5] = [
         (Body::Mercury, [0.75, 0.72, 0.68], 0.55),
         (Body::Venus, [1.0, 0.92, 0.72], 1.0),
@@ -95,6 +102,10 @@ pub fn instances(observation: &ObservationSnapshot) -> Vec<NightInstance> {
         night_visibility,
     ));
     result
+}
+
+fn star_display_energy(relative_irradiance: f32) -> f32 {
+    relative_irradiance.max(0.0) * STAR_EXPOSURE
 }
 
 /// K&S phase attenuation plus standard-atmosphere extinction, in lux.
@@ -198,6 +209,27 @@ mod tests {
     fn night_instance_layout_matches_wgsl() {
         assert_eq!(std::mem::size_of::<NightInstance>(), 64);
         assert_eq!(MAX_NIGHT_INSTANCES, 9_102);
+    }
+
+    #[test]
+    fn star_display_energy_preserves_the_magnitude_ratio() {
+        let magnitude_zero = catalog::magnitude_to_irradiance(0.0);
+        let magnitude_five = catalog::magnitude_to_irradiance(5.0);
+        let zero_energy = star_display_energy((magnitude_zero / magnitude_zero) as f32);
+        let five_energy = star_display_energy((magnitude_five / magnitude_zero) as f32);
+        assert!((zero_energy / five_energy - 100.0).abs() < 1.0e-3);
+
+        // V=-1.46 (Sirius) remains below saturation under the declared display
+        // exposure, so every shipped catalogue star preserves that ratio.
+        let sirius_relative = 10.0_f32.powf(0.4 * 1.46);
+        assert!(star_display_energy(sirius_relative) < 1.0);
+    }
+
+    #[test]
+    fn star_shader_uses_direct_energy_without_a_visibility_floor() {
+        let shader = include_str!("../shaders/stars.wgsl");
+        assert!(shader.contains("clamp(input.color_intensity.w, 0.0, 1.0)"));
+        assert!(!shader.contains("0.18 + 0.65 * sqrt"));
     }
 
     #[test]

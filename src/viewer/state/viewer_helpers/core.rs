@@ -5,6 +5,28 @@ use crate::viewer::Viewer;
 use anyhow::Context;
 
 impl Viewer {
+    /// Apply one manual sun edit to every renderer-owned representation.
+    /// Manual edits always leave observation replay and remove stale night
+    /// instances so a later terrain command cannot silently diverge from the
+    /// sky or lit-object state.
+    pub(crate) fn apply_manual_sun(
+        &mut self,
+        azimuth_deg: f32,
+        elevation_deg: f32,
+        intensity: Option<f32>,
+    ) {
+        self.lit_sun_direction_ws = manual_sun_direction(azimuth_deg, elevation_deg);
+        self.sky_sun_direction_ws = self.lit_sun_direction_ws;
+        if let Some(intensity) = intensity {
+            self.lit_sun_intensity = intensity.max(0.0);
+        }
+        self.lit_directional_scale = 1.0;
+        self.astro_observation_active = false;
+        self.night_instance_count = 0;
+        self.update_lit_uniform();
+        self.sync_terrain_sun_to_lit();
+    }
+
     pub(crate) fn write_p5_meta<
         F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>),
     >(
@@ -130,5 +152,30 @@ impl Viewer {
                 self.astro_terrain_revision = observation.revision;
             }
         }
+    }
+}
+
+fn manual_sun_direction(azimuth_deg: f32, elevation_deg: f32) -> [f32; 3] {
+    let azimuth = azimuth_deg.to_radians();
+    let elevation = elevation_deg.to_radians();
+    glam::Vec3::new(
+        elevation.cos() * azimuth.sin(),
+        elevation.sin(),
+        elevation.cos() * azimuth.cos(),
+    )
+    .normalize()
+    .to_array()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manual_sun_direction;
+
+    #[test]
+    fn manual_sun_direction_matches_the_viewer_azimuth_convention() {
+        let direction = manual_sun_direction(90.0, 30.0);
+        assert!((direction[0] - 30_f32.to_radians().cos()).abs() < 1e-6);
+        assert!((direction[1] - 0.5).abs() < 1e-6);
+        assert!(direction[2].abs() < 1e-6);
     }
 }

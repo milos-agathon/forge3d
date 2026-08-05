@@ -4,7 +4,7 @@
 //! committed in compact form (`assets/astro/moon_terms.bin`). The declared
 //! truncation is that of the published tables themselves — nothing further is
 //! dropped — and the *measured* maximum topocentric error over the committed
-//! 2000–2050 Horizons oracle is the figure carried in
+//! 621-epoch, 30-day 2000–2050 Horizons sweep is the figure carried in
 //! `assets/astro/MANIFEST.toml`, gated by
 //! `tests/test_astro_ephemeris.py::test_manifest_truncation_budgets_are_gates_not_prose`.
 //! SIDERA's DoD threshold for the Moon is the looser 30 arcseconds.

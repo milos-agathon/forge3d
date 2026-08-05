@@ -240,7 +240,14 @@ class ViewerHandle:
         if not response.get("ok", False):
             error_msg = response.get("error", "Unknown error")
             raise ViewerError(f"Viewer command failed: {error_msg}")
-        if cmd.get("cmd") == "lit_sun":
+        command_name = cmd.get("cmd")
+        overrides_observation_sun = command_name in {"lit_sun", "set_terrain_sun"}
+        if command_name == "set_terrain":
+            overrides_observation_sun = any(
+                cmd.get(key) is not None
+                for key in ("sun_azimuth", "sun_elevation", "sun_intensity")
+            )
+        if overrides_observation_sun:
             from . import sky
 
             sky._clear_observation_replay()

@@ -5,41 +5,13 @@ use crate::viewer::event_loop::{
 use crate::viewer::viewer_enums::ViewerCmd;
 use crate::viewer::Viewer;
 
-fn apply_manual_sun_control(
-    direction_ws: &mut [f32; 3],
-    observation_active: &mut bool,
-    azimuth_deg: f32,
-    elevation_deg: f32,
-) {
-    let az_rad = azimuth_deg.to_radians();
-    let el_rad = elevation_deg.to_radians();
-    *direction_ws = glam::Vec3::new(
-        el_rad.cos() * az_rad.sin(),
-        el_rad.sin(),
-        el_rad.cos() * az_rad.cos(),
-    )
-    .normalize()
-    .to_array();
-    *observation_active = false;
-}
-
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
         ViewerCmd::SetSunDirection {
             azimuth_deg,
             elevation_deg,
         } => {
-            apply_manual_sun_control(
-                &mut viewer.lit_sun_direction_ws,
-                &mut viewer.astro_observation_active,
-                *azimuth_deg,
-                *elevation_deg,
-            );
-            viewer.sky_sun_direction_ws = viewer.lit_sun_direction_ws;
-            viewer.lit_directional_scale = 1.0;
-            viewer.night_instance_count = 0;
-            viewer.update_lit_uniform();
-            viewer.sync_terrain_sun_to_lit();
+            viewer.apply_manual_sun(*azimuth_deg, *elevation_deg, None);
             true
         }
         ViewerCmd::SetObservation {
@@ -197,21 +169,5 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         _ => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::apply_manual_sun_control;
-
-    #[test]
-    fn manual_sun_control_mutates_direction_and_disables_observation() {
-        let mut direction = [0.0; 3];
-        let mut observation_active = true;
-        apply_manual_sun_control(&mut direction, &mut observation_active, 90.0, 30.0);
-        assert!(!observation_active);
-        assert!((direction[0] - 30_f32.to_radians().cos()).abs() < 1e-6);
-        assert!((direction[1] - 0.5).abs() < 1e-6);
-        assert!(direction[2].abs() < 1e-6);
     }
 }

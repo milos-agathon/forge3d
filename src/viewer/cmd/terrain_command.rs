@@ -2,6 +2,30 @@ use crate::viewer::terrain;
 use crate::viewer::viewer_enums::ViewerCmd;
 use crate::viewer::Viewer;
 
+fn requested_manual_sun(
+    current_direction: [f32; 3],
+    current_intensity: f32,
+    azimuth: Option<f32>,
+    elevation: Option<f32>,
+    intensity: Option<f32>,
+) -> Option<(f32, f32, f32)> {
+    if azimuth.is_none() && elevation.is_none() && intensity.is_none() {
+        return None;
+    }
+    let direction = glam::Vec3::from_array(current_direction).normalize_or_zero();
+    let current_azimuth = direction
+        .x
+        .atan2(direction.z)
+        .to_degrees()
+        .rem_euclid(360.0);
+    let current_elevation = direction.y.clamp(-1.0, 1.0).asin().to_degrees();
+    Some((
+        azimuth.unwrap_or(current_azimuth),
+        elevation.unwrap_or(current_elevation).clamp(-90.0, 90.0),
+        intensity.unwrap_or(current_intensity).max(0.0),
+    ))
+}
+
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
         ViewerCmd::LoadTerrain(path) => {
@@ -90,13 +114,11 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             elevation_deg,
             intensity,
         } => {
-            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
-                terrain_viewer.set_sun(*azimuth_deg, *elevation_deg, *intensity);
-                println!(
-                    "[terrain] Sun: az={:.1}° el={:.1}° int={:.2}",
-                    azimuth_deg, elevation_deg, intensity
-                );
-            }
+            viewer.apply_manual_sun(*azimuth_deg, *elevation_deg, Some(*intensity));
+            println!(
+                "[terrain] Sun: az={:.1}° el={:.1}° int={:.2}",
+                azimuth_deg, elevation_deg, intensity
+            );
             true
         }
         ViewerCmd::SetTerrain {
@@ -116,6 +138,20 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             target,
         } => {
             let anchor = viewer.camera_anchor;
+            let mut manual_sun = requested_manual_sun(
+                viewer.lit_sun_direction_ws,
+                viewer.lit_sun_intensity,
+                *sun_azimuth,
+                *sun_elevation,
+                *sun_intensity,
+            );
+            if manual_sun.is_some_and(|sun| ![sun.0, sun.1, sun.2].into_iter().all(f32::is_finite))
+            {
+                viewer.reject_command(
+                    "terrain_sun_rejected: non-finite manual sun unchanged_state=true",
+                );
+                return true;
+            }
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 if let Some(terrain) = terrain_viewer.terrain.as_mut() {
                     let old_default_target = terrain.default_camera_target();
@@ -214,6 +250,13 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     terrain.sun_azimuth_deg = candidate_sun_azimuth;
                     terrain.sun_elevation_deg = candidate_sun_elevation;
                     terrain.sun_intensity = candidate_sun_intensity;
+                    if sun_azimuth.is_some() || sun_elevation.is_some() || sun_intensity.is_some() {
+                        manual_sun = Some((
+                            candidate_sun_azimuth,
+                            candidate_sun_elevation,
+                            candidate_sun_intensity,
+                        ));
+                    }
                     terrain.ambient = candidate_ambient;
                     terrain.z_scale = candidate_zscale;
                     terrain.shadow_intensity = candidate_shadow;
@@ -228,6 +271,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 if let Some(params) = terrain_viewer.get_params() {
                     println!("[terrain] {}", params);
                 }
+            }
+            if let Some((azimuth, elevation, intensity)) = manual_sun {
+                viewer.apply_manual_sun(azimuth, elevation, Some(intensity));
             }
             true
         }
@@ -450,5 +496,20 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::requested_manual_sun;
+
+    #[test]
+    fn sun_bearing_set_terrain_has_a_manual_transition_without_loaded_terrain() {
+        let transition = requested_manual_sun([1.0, 0.0, 0.0], 2.0, None, Some(30.0), None)
+            .expect("sun-bearing command must transition out of observation replay");
+        assert!((transition.0 - 90.0).abs() < 1.0e-5);
+        assert_eq!(transition.1, 30.0);
+        assert_eq!(transition.2, 2.0);
+        assert!(requested_manual_sun([0.0, 1.0, 0.0], 1.0, None, None, None).is_none());
     }
 }

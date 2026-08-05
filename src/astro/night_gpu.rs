@@ -179,6 +179,7 @@ pub fn create_resources(
 pub fn render_test_frame(
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
+    backend: wgpu::Backend,
     observation: &super::observation::ObservationSnapshot,
     width: u32,
     height: u32,
@@ -246,13 +247,15 @@ pub fn render_test_frame(
         },
     )?;
     let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
-    let mut timing =
-        crate::core::gpu_timing::OneShotTiming::for_device(device.clone(), queue.clone());
+    let mut timing = night_golden_uses_timestamp_queries(backend)
+        .then(|| crate::core::gpu_timing::OneShotTiming::for_device(device.clone(), queue.clone()));
     crate::core::shader_registry::record_shader_use("astro.night.shader");
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("astro.night.test.encoder"),
     });
-    let scope = timing.begin(&mut encoder, "astro.night.overlay");
+    let scope = timing
+        .as_mut()
+        .map(|timing| timing.begin(&mut encoder, "astro.night.overlay"));
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("astro.night.test.pass"),
@@ -278,20 +281,46 @@ pub fn render_test_frame(
         pass.set_bind_group(1, &camera_bind_group, &[]);
         pass.draw(0..6, 0..instances.len() as u32);
     }
-    timing.end(&mut encoder, scope, 1);
-    timing.resolve(&mut encoder);
+    if let (Some(timing), Some(scope)) = (timing.as_mut(), scope) {
+        timing.end(&mut encoder, scope, 1);
+        timing.resolve(&mut encoder);
+    }
     queue.submit(Some(encoder.finish()));
     device.poll(wgpu::Maintain::Wait);
-    crate::core::certificate::record_pass(
-        "astro.twilight.sidera_civil_to_astronomical_smoothstep",
-        0.0,
-        0,
+    crate::core::certificate::record_model(
+        "astro.twilight",
+        "SIDERA civil-to-astronomical smoothstep; solar altitude -4 to -18 degrees; rendering visibility model",
     );
-    crate::core::certificate::record_pass("astro.moonlight.krisciunas_schaefer_1991", 0.0, 0);
-    if !timing.record_into_certificate() {
+    crate::core::certificate::record_model(
+        "astro.moonlight",
+        "Krisciunas and Schaefer 1991 phase and extinction; 0.172 mag per airmass; normalized to 0.25 lux zenith full Moon",
+    );
+    crate::core::certificate::record_model(
+        "astro.star_photometry",
+        "catalogue magnitude-to-irradiance ratio; constant 0.05 degree sprite radius; linear exposure 0.20; no visibility floor",
+    );
+    crate::core::certificate::record_model(
+        "astro.planet_display",
+        "artistic fixed display intensities; no physical planetary photometry claim",
+    );
+    let timing_recorded = timing
+        .take()
+        .is_some_and(crate::core::gpu_timing::OneShotTiming::record_into_certificate);
+    if !timing_recorded {
+        if backend == wgpu::Backend::Metal {
+            crate::core::degradation::record_degradation(
+                "timing_unavailable",
+                "astro.night.overlay",
+                "one-shot timestamp queries are disabled for the SIDERA golden path on Metal because synchronous query readback is unreliable; gpu_ms is reported as 0",
+            );
+        }
         crate::core::certificate::record_pass("astro.night.overlay", 0.0, 1);
     }
     Ok(target)
+}
+
+fn night_golden_uses_timestamp_queries(backend: wgpu::Backend) -> bool {
+    backend != wgpu::Backend::Metal
 }
 
 #[repr(C)]
@@ -353,5 +382,12 @@ mod tests {
         assert_eq!((width, height, pixels.len()), (128, 64, 8_192));
         assert!(pixels.iter().copied().min().unwrap() < 130);
         assert!(pixels.iter().copied().max().unwrap() > 200);
+    }
+
+    #[test]
+    fn metal_only_disables_one_shot_timing_for_the_night_golden() {
+        assert!(!night_golden_uses_timestamp_queries(wgpu::Backend::Metal));
+        assert!(night_golden_uses_timestamp_queries(wgpu::Backend::Vulkan));
+        assert!(night_golden_uses_timestamp_queries(wgpu::Backend::Dx12));
     }
 }

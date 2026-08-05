@@ -144,11 +144,24 @@ def test_night_sky_render_is_repeatable_and_certified(tmp_path):
 
     certificate = render_certificate(sign=False)
     labels = [entry["label"] for entry in certificate["passes"]]
-    assert labels == [
-        "astro.twilight.sidera_civil_to_astronomical_smoothstep",
-        "astro.moonlight.krisciunas_schaefer_1991",
-        "astro.night.overlay",
-    ]
+    assert labels == ["astro.night.overlay"]
+    assert certificate["models"] == {
+        "astro.moonlight": (
+            "Krisciunas and Schaefer 1991 phase and extinction; 0.172 mag per "
+            "airmass; normalized to 0.25 lux zenith full Moon"
+        ),
+        "astro.planet_display": (
+            "artistic fixed display intensities; no physical planetary photometry claim"
+        ),
+        "astro.star_photometry": (
+            "catalogue magnitude-to-irradiance ratio; constant 0.05 degree sprite "
+            "radius; linear exposure 0.20; no visibility floor"
+        ),
+        "astro.twilight": (
+            "SIDERA civil-to-astronomical smoothstep; solar altitude -4 to -18 "
+            "degrees; rendering visibility model"
+        ),
+    }
     assert set(certificate["engine"]["wgsl_module_hashes"]) == {"astro.night.shader"}
     # `finish_render_capture` re-derives a `capability_absent` degradation for
     # every negotiated feature the device did not grant, and records
