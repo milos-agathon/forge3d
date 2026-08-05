@@ -53,3 +53,11 @@ def test_lattice_tolerance_admits_float_representation_error():
 def test_max_advection_gain_is_the_validated_cap():
     # §5.5: gate 11(b) was measured at exactly 1.5x wind gain
     assert config.MAX_ADVECTION_GAIN == 1.5
+
+
+def test_basemap_window_is_16_9_in_web_mercator():
+    west, south, east, north = config.BASEMAP_WINDOW
+    merc_w = config.mercator_x(east) - config.mercator_x(west)
+    merc_h = config.mercator_y(north) - config.mercator_y(south)
+    assert merc_w / merc_h == pytest.approx(16 / 9, rel=1e-12)
+    assert config.BASEMAP_SIZE == (4000, 2250)

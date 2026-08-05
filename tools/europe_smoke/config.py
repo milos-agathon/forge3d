@@ -30,6 +30,25 @@ DISPLAY_BLOCK_SHAPE = (106, 175)
 MAX_ADVECTION_GAIN = 1.5
 
 # ---------------------------------------------------------------- basemap §2
+# §6.6: the delivered basemap is a true 16:9 canvas in Web Mercator. The window
+# keeps the display latitudes exactly and widens the longitudes symmetrically
+# until merc_w / merc_h == 16/9, so the display window sits centred with
+# out-of-data rail headroom on both sides.
+EARTH_R = 6_378_137.0
+BASEMAP_WINDOW = (-55.87353781282144, 30.0, 75.87353781282144, 72.0)
+BASEMAP_SIZE = (4000, 2250)
+
+
+def mercator_x(lon_deg: float) -> float:
+    return EARTH_R * np.radians(float(lon_deg))
+
+
+def mercator_y(lat_deg: float) -> float:
+    lat = np.radians(float(lat_deg))
+    return EARTH_R * np.log(np.tan(np.pi / 4.0 + lat / 2.0))
+
+
+
 # install_hillshade_patch() divides the engine's index-unit gradient by the
 # per-row GROUND metres, so `exaggeration` stops being "rise per pixel" and
 # becomes a dimensionless z-factor. The engine's literal 5.5 is kept as the

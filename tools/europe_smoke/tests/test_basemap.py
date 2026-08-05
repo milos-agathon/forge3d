@@ -26,6 +26,12 @@ def test_configure_installs_the_sentinel_and_stubs_the_downloader(engine_artifac
     assert str(config.SENTINEL_RELATION_ID) in str(p)
 
 
+def test_configure_uses_the_widened_basemap_window(engine_artifact):
+    m = basemap.load_engine()
+    basemap.configure(m, *config.BASEMAP_SIZE)
+    assert (m.LON_MIN, m.LAT_MIN, m.LON_MAX, m.LAT_MAX) == config.BASEMAP_WINDOW
+
+
 def test_configure_defeats_the_portrait_branch_defaults(engine_artifact):
     m = basemap.load_engine()
     basemap.configure(m, 4000, 4241)

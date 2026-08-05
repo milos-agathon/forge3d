@@ -63,39 +63,53 @@ def prepare_osm_land(cache_dir: Path) -> Path:
     return shp
 
 
-def build_land_union(cache_dir: Path, force: bool = False) -> Path:
-    """Union the cached OSM simplified land polygons over the request area."""
-    out = osm_boundary_path(cache_dir)
-    if out.exists() and not force:
-        return out
+def build_land_union(cache_dir: Path, force: bool = False, window=None) -> Path:
+    """Union the verified OSM land polygons over the widened basemap window.
 
+    The sentinel GeoJSON is keyed by (window, source hash) through its feature
+    properties, so a boundary built for an older window or from different
+    source bytes is rebuilt rather than silently reused.
+    """
+    window = tuple(window or config.BASEMAP_WINDOW)
+    out = osm_boundary_path(cache_dir)
+    source = prepare_osm_land(cache_dir)
+    source_hash = provenance.check_artifact(
+        "osm_land", provenance.load_manifest()["osm_land"]
+    ).sha256
+
+    wanted = {"window": list(window), "source_sha256": source_hash}
+    if out.exists() and not force:
+        try:
+            current = json.loads(out.read_text(encoding="utf-8"))
+            properties = current["features"][0].get("properties")
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+            properties = None
+        if properties == wanted:
+            return out
+
+    west, south, east, north = window
     import geopandas as gpd
     from pyproj import Transformer
     from shapely.geometry import box, mapping
 
-    north, west, south, east = config.AREA
     project = Transformer.from_crs(4326, 3857, always_xy=True).transform
     x0, y0 = project(west, south)
     x1, y1 = project(east, north)
-    source = prepare_osm_land(cache_dir)
     land = gpd.read_file(source, bbox=(x0, y0, x1, y1))
     if land.empty:
-        raise RuntimeError("OSM land dataset did not cover the Europe request area")
-
+        raise RuntimeError("OSM land dataset did not cover BASEMAP_WINDOW")
     merged = land.geometry.union_all()
     geom = (gpd.GeoSeries([merged], crs=land.crs).to_crs(4326).iloc[0]
             .intersection(box(west, south, east, north)))
     if geom.is_empty:
-        raise RuntimeError("land union emptied after clipping to the request area")
+        raise RuntimeError("land union emptied after clipping to BASEMAP_WINDOW")
     if not geom.is_valid:
         geom = geom.buffer(0)
-
-    doc = {"type": "FeatureCollection", "features": [
-        {"type": "Feature", "properties": {"name": "Europe smoke domain"},
-         "geometry": mapping(geom)}]}
+    doc = {"type": "FeatureCollection", "features": [{
+        "type": "Feature", "properties": wanted, "geometry": mapping(geom)
+    }]}
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(doc), encoding="utf-8")
-    print(f"boundary: wrote {out} ({geom.area:.1f} deg^2)")
     return out
 
 

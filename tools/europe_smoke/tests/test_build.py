@@ -439,15 +439,22 @@ def test_gate10_fails_when_the_basemap_is_flush_with_the_display_window(harness,
                         lambda *a, **k: (Image.new("RGB", (1920, 1080)), flush))
     d = _build(tmp, force=("basemap",))
     assert d["gates"]["10"]["verdict"] == "FAIL"
-    assert "flush" in d["gates"]["10"]["reason"]
+    assert "cover BASEMAP_WINDOW" in d["gates"]["10"]["reason"]
 
 
-def test_gate10_is_na_not_pass_at_the_data_aspect(harness):
-    """4000x4241 is the domain aspect; §6.6's rails only exist when widened."""
-    tmp, _ = harness
-    g = _build(tmp, width=4000, height=4241)["gates"]["10"]
-    assert g["verdict"] == "N/A"
-    assert "data aspect" in g["reason"]
+def test_non_widened_basemap_fails_gate10(harness):
+    projector = _Projector(lon_span=(-25.0, 45.0), lat_span=(30.0, 72.0))
+    out = build.gate10(projector, 4000, 4241)
+    assert out["verdict"] == "FAIL"
+    assert "16:9" in out["reason"]
+
+
+def test_build_defaults_use_the_widened_basemap_size():
+    import inspect
+
+    params = inspect.signature(build.build).parameters
+    assert params["width"].default == config.BASEMAP_SIZE[0]
+    assert params["height"].default == config.BASEMAP_SIZE[1]
 
 
 def test_gate10_fails_when_the_basemap_misses_the_display_window(harness, monkeypatch):

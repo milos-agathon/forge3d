@@ -26,7 +26,7 @@ def test_land_union_covers_the_full_request_area(tmp_path, osm_land_artifact):
     from shapely.geometry import shape
     p = boundary.build_land_union(tmp_path)
     geom = shape(json.loads(p.read_text())["features"][0]["geometry"])
-    north, west, south, east = config.AREA
+    west, south, east, north = config.BASEMAP_WINDOW
     minx, miny, maxx, maxy = geom.bounds
     # the union must reach every edge of the request, or the DEM crop will be
     # smaller than the CAMS grid and the shader will sample outside the basemap

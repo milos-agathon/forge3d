@@ -111,6 +111,7 @@ def basemap_fingerprint(width: int, height: int, dem_zoom: int,
         "dem_zoom": dem_zoom, "max_dem_size": max_dem_size,
         "webp_qualities": list(webp_qualities),
         "sentinel_relation_id": config.SENTINEL_RELATION_ID,
+        "basemap_window": list(config.BASEMAP_WINDOW),
     })
 
 
@@ -275,7 +276,7 @@ def gate10(projector, width: int, height: int) -> dict:
     headroom_px = min(left_px, right_px)
 
     aspect = width / float(height)
-    widened = aspect >= 16.0 / 9.0 - 0.05
+    aspect_ok = math.isclose(aspect, 16.0 / 9.0, rel_tol=0.0, abs_tol=1e-12)
 
     out = {
         "name": "frame_rect containment and the §6.6 rail invariant",
@@ -293,24 +294,21 @@ def gate10(projector, width: int, height: int) -> dict:
             "The ceiling is measured here, not taken from §6.6's rounded 450."
         ),
     }
-    if not contained or not out["covers_display_window"]:
-        out["verdict"] = "FAIL"
-        out["reason"] = ("frame_rect leaves [0,1]" if not contained
-                         else "basemap does not cover the display window")
-    elif not widened:
-        out["verdict"] = "N/A"
-        out["reason"] = (
-            f"rendered at the data aspect {aspect:.4f}, not the 16:9 viewport "
-            "aspect of §6.6, so there is no rail region to bound. frame_rect "
-            "and display-window coverage PASS; the rail half of gate 10 must "
-            "be re-run on the widened basemap Plan 2 lays out."
-        )
+    bw, bs, be, bn = config.BASEMAP_WINDOW
+    covers_basemap_window = bool(
+        x0 <= _merc_x(bw) and x1 >= _merc_x(be)
+        and y0 <= _merc_y(bs) and y1 >= _merc_y(bn)
+    )
+    out["covers_basemap_window"] = covers_basemap_window
+
+    if not aspect_ok:
+        out.update(verdict="FAIL", reason=f"basemap aspect {aspect:.6f} is not 16:9")
+    elif not contained:
+        out.update(verdict="FAIL", reason="frame_rect leaves [0,1]")
+    elif not covers_basemap_window:
+        out.update(verdict="FAIL", reason="render does not cover BASEMAP_WINDOW")
     elif headroom_px <= 0.0:
-        out["verdict"] = "FAIL"
-        out["reason"] = (
-            "the basemap is flush with the display window on at least one side, "
-            "so any rail would cover live data; widen the basemap or letterbox"
-        )
+        out.update(verdict="FAIL", reason="no out-of-data rail headroom")
     else:
         out["verdict"] = "PASS"
         if headroom_px < SPEC_RAIL_REFERENCE_PX:
@@ -406,7 +404,8 @@ def gate16(findings, fit: dict, gate5_result: dict, axis, firms_data: dict,
 
 
 def build(days: int = 10, today: dt.date | None = None, axis=None,
-          width: int = 4000, height: int = 4241, dem_zoom: int = 7,
+          width: int = config.BASEMAP_SIZE[0],
+          height: int = config.BASEMAP_SIZE[1], dem_zoom: int = 7,
           max_dem_size: int = 4000, webp_qualities=(86, 90),
           force: tuple[str, ...] = (), skip_basemap: bool = False,
           build_dir: Path | None = None, report_path: Path | None = None) -> dict:
@@ -756,8 +755,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="comma-separated stages to rerun: fetch,derive,advection,basemap,all")
     ap.add_argument("--skip-basemap", action="store_true",
                     help="run everything except the ~700-tile DEM render")
-    ap.add_argument("--width", type=int, default=4000)
-    ap.add_argument("--height", type=int, default=4241)
+    ap.add_argument("--width", type=int, default=config.BASEMAP_SIZE[0])
+    ap.add_argument("--height", type=int, default=config.BASEMAP_SIZE[1])
     ap.add_argument("--dem-zoom", type=int, default=7)
     ap.add_argument("--max-dem-size", type=int, default=4000)
     ap.add_argument("--webp-quality", default="86,90")

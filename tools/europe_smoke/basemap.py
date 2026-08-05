@@ -558,7 +558,7 @@ def assert_frame_fit_ran(state, fits_before: int) -> None:
 # --------------------------------------------------------------- engine config
 def configure(m, width: int, height: int) -> None:
     """Point the engine at our domain and defeat its country-scale defaults."""
-    lon_min, lat_min, lon_max, lat_max = config.DISPLAY_WINDOW
+    lon_min, lat_min, lon_max, lat_max = config.BASEMAP_WINDOW
     m.LON_MIN, m.LAT_MIN, m.LON_MAX, m.LAT_MAX = lon_min, lat_min, lon_max, lat_max
     m.OSM_RELATION_ID = config.SENTINEL_RELATION_ID
     m.USER_AGENT = config.USER_AGENT
