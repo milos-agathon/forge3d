@@ -277,11 +277,21 @@ def _run_with_forecast(monkeypatch, tmp_path, axis, forecast_times):
                         lambda request, cache_dir, label, **kw: tmp_path / f"{label}.zip")
     monkeypatch.setattr(fetch, "record_delivery", lambda target, ds: {"stub": True})
     monkeypatch.setattr(fetch, "read_sidecar", lambda target: {"retrieved_utc": "stub"})
-    analysis = _grid_ds(axis.requested_analysis_times())
-    forecast = _grid_ds(forecast_times)
-    monkeypatch.setattr(
-        fetch, "_open",
-        lambda target: forecast if target.name.startswith("forecast") else analysis)
+    # Serve the SEGMENTED delivery the real ADS produces (§0.4 R1a-d): one
+    # payload per (variable group, day window). A single full dataset for every
+    # label is exactly the unrealistic shape that masked the assembly defect
+    # test_run_assembles_segmented_analysis_arms_without_holes pins.
+    times = axis.requested_analysis_times()
+    win = [t for t in times if t.date() <= axis.d_prev]
+    new = [t for t in times if t.date() == axis.d_an]
+    segments = {
+        "analysis_0.zip": _segment_ds(win, ("omaod550",)),
+        "analysis_1.zip": _segment_ds(win, ("u10", "v10")),
+        "analysis_2.zip": _segment_ds(new, ("omaod550",)),
+        "analysis_3.zip": _segment_ds(new, ("u10", "v10")),
+        "forecast.zip": _grid_ds(forecast_times),
+    }
+    monkeypatch.setattr(fetch, "_open", lambda target: segments[target.name])
 
     def _stop(*a, **k):
         raise _ReachedMerge
@@ -307,6 +317,82 @@ def test_run_accepts_a_forecast_arm_matching_this_runs_axis(monkeypatch, tmp_pat
         today, fetch.cams.forecast_request(today))
     with pytest.raises(_ReachedMerge):
         _run_with_forecast(monkeypatch, tmp_path, today, good)
+
+
+def _segment_ds(times, names):
+    """One canonicalisable analysis segment carrying only ``names``."""
+    import numpy as np
+    import xarray as xr
+
+    lon, lat = config.grid_axes()
+    t = np.array(times, dtype="datetime64[ns]")
+    data = np.zeros((t.size, lat.size, lon.size), dtype="float32")
+    dims = ("time", "latitude", "longitude")
+    meta = {
+        "omaod550": ({"units": "~",
+                      "long_name": "Organic Matter AOD at 550nm"}, 0.0),
+        "u10": ({"units": "m s**-1",
+                 "long_name": "10 metre U wind component"}, 1.0),
+        "v10": ({"units": "m s**-1",
+                 "long_name": "10 metre V wind component"}, -1.0),
+    }
+    return xr.Dataset(
+        {n: (dims, data + meta[n][1], meta[n][0]) for n in names},
+        coords={"time": t, "latitude": lat, "longitude": lon})
+
+
+def test_run_assembles_segmented_analysis_arms_without_holes(monkeypatch, tmp_path):
+    """The real ADS delivery is segmented by VARIABLE and by DAY WINDOW (§0.4
+    R1a-d): four analysis payloads that partition (variable, time). The
+    assembled analysis must carry every variable at every requested time.
+
+    [measured on the 2026-08-05 delivery] ``xr.merge(compat="override",
+    join="outer")`` takes each variable from the FIRST segment that carries it
+    and reindexes it over the union time axis, so the newest-day segments are
+    silently dropped to NaN and the lead-0 identity gate then fails with an
+    all-non-finite comparison.
+    """
+    import numpy as np
+
+    axis = _axis(4)
+    monkeypatch.setattr(fetch.provenance, "check_all",
+                        lambda **k: (True, [fetch.provenance._finding(
+                            "stub", fetch.provenance.VERIFIED, "test")]))
+    monkeypatch.setattr(fetch, "retrieve",
+                        lambda request, cache_dir, label, **kw: tmp_path / f"{label}.zip")
+    monkeypatch.setattr(fetch, "record_delivery", lambda target, ds: {"stub": True})
+    monkeypatch.setattr(fetch, "read_sidecar", lambda target: {"retrieved_utc": "stub"})
+
+    times = axis.requested_analysis_times()
+    win = [t for t in times if t.date() <= axis.d_prev]
+    new = [t for t in times if t.date() == axis.d_an]
+    assert win and new, "the fixture must exercise both day windows"
+    fc_times = fetch.cams.requested_forecast_times(
+        axis, fetch.cams.forecast_request(axis))
+    segments = {
+        "analysis_0.zip": _segment_ds(win, ("omaod550",)),
+        "analysis_1.zip": _segment_ds(win, ("u10", "v10")),
+        "analysis_2.zip": _segment_ds(new, ("omaod550",)),
+        "analysis_3.zip": _segment_ds(new, ("u10", "v10")),
+        "forecast.zip": _segment_ds(fc_times, ("omaod550", "u10", "v10")),
+    }
+    monkeypatch.setattr(fetch, "_open", lambda target: segments[target.name])
+
+    seen = {}
+
+    def _capture(analysis, forecast, t_now, t_init):
+        seen["analysis"] = analysis
+        raise _ReachedMerge
+
+    monkeypatch.setattr(fetch.cams, "merge_arms", _capture)
+    with pytest.raises(_ReachedMerge):
+        fetch.run(days=10, dry_run=False, today=dt.date(2026, 8, 4), axis=axis)
+
+    analysis = seen["analysis"]
+    assert int(analysis.sizes["time"]) == len(times)
+    for var in ("omaod550", "u10", "v10"):
+        assert np.isfinite(analysis[var].values).all(), (
+            f"{var} has holes after assembling the segmented analysis arms")
 
 
 def _axis(day=4, h_new=("00:00",)):

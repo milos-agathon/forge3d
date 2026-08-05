@@ -274,7 +274,13 @@ def run(days: int = 10, dry_run: bool = False, today: dt.date | None = None,
     arms = []
     for i, request in enumerate(requests[:-1]):
         arms.append(_canonical_arm(f"analysis_{i}", request, labels[i]))
-    analysis = xr.merge(arms, compat="override", join="outer")
+    # The analysis segments partition (variable, time): aerosol/wind by request
+    # (§0.4 R1a-d) and window/newest-day by date. combine_by_coords CONCATS each
+    # variable's segments over time and merges across variables. xr.merge with
+    # compat="override" instead reindexed the FIRST segment carrying a variable
+    # over the union time axis, silently dropping the newest-day values to NaN
+    # [measured on the 2026-08-05 delivery; the lead-0 identity gate caught it].
+    analysis = xr.combine_by_coords(arms, combine_attrs="override")
     forecast = _canonical_arm("forecast", requests[-1], labels[-1])
 
     report.set("cams_cache", cache_records)
