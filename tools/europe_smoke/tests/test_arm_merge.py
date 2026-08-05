@@ -300,6 +300,18 @@ def test_lead0_shape_mismatch_is_named_not_broadcast():
     assert "shape" in str(e.value).lower() or "align" in str(e.value).lower()
 
 
+def test_merged_dims_are_time_first_even_when_the_arms_are_not():
+    """The engine's flatten_time delivers (latitude, longitude, time)
+    [measured; config.ACCEPTED_DIM_SETS is a SET for exactly that reason], but
+    every consumer of the merged cube -- seam.burden, advection, derive --
+    indexes time-first. merge_arms owns the canonical order.
+    """
+    an = _arm(AN_TIMES, AN_VALUES).transpose("latitude", "longitude", "time")
+    fc = _arm(FC_TIMES, FC_VALUES).transpose("latitude", "longitude", "time")
+    merged, _ = cams.merge_arms(an, fc, np.datetime64(T_NOW), np.datetime64(T_INIT))
+    assert merged["omaod550"].dims == ("time", "latitude", "longitude")
+
+
 # ------------------------------------------------------------- determinism
 
 

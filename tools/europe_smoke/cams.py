@@ -668,5 +668,9 @@ def merge_arms(analysis: xr.Dataset, forecast: xr.Dataset, t_now, t_init,
     merged = merged.isel(time=order)
     _, keep = np.unique(_time_keys(merged["time"].values), return_index=True)
     merged = merged.isel(time=np.sort(keep))
+    # The engine's flatten_time delivers (latitude, longitude, time) [measured];
+    # every consumer of the merged cube indexes time-first, so the canonical
+    # order is fixed HERE, once, rather than assumed in each of them.
+    merged = merged.transpose("time", "latitude", "longitude")
     report["n_merged"] = int(merged.sizes["time"])
     return merged, report
