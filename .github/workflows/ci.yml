@@ -900,6 +900,7 @@ jobs:
     # an honest `ran|absent` distinction instead of treating both as opaque success.
     outputs:
       lane: ${{ steps.golden-absent.outputs.golden_lane || steps.golden-ran.outputs.golden_lane || 'unknown' }}
+      sidera_lane: ${{ steps.sidera-absent.outputs.sidera_lane || steps.sidera-ran.outputs.sidera_lane || steps.sidera-software-absent.outputs.sidera_lane || 'unknown' }}
     env:
       # Pin the hardware backend before the native module initializes.
       WGPU_BACKEND: metal
@@ -984,6 +985,66 @@ jobs:
           # recipe catalog remains exercised by the normal GPU suite.
           FORGE3D_RECIPE_GOLDEN_VARIANT: metal
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression 'tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]' -v --tb=short
+
+      - name: Probe SIDERA physical Metal reference backend
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1'
+        id: sidera-metal-probe
+        shell: bash
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          set +e
+          python scripts/terrain_ci_probe.py --mode sidera-metal --json tests/artifacts/sidera_night/adapter-probe.json
+          code=$?
+          set -e
+          if [ "$code" = "0" ]; then
+            echo "probe=positive" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = "2" ]; then
+            echo "probe=absent" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::SIDERA physical Metal probe crashed (exit $code)"
+            exit "$code"
+          fi
+
+      - name: Run SIDERA Metal night golden
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.sidera-metal-probe.outputs.probe == 'positive'
+        id: sidera-ran
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          mkdir -p tests/artifacts/sidera_night
+          junit=tests/artifacts/sidera_night/junit.xml
+          python -m pytest tests/test_astro_night_golden.py \
+            -v --tb=short --junitxml="$junit"
+          python scripts/assert_junit_zero_skips.py "$junit"
+          echo "sidera_lane=ran" >> "$GITHUB_OUTPUT"
+
+      - name: Record SIDERA Metal lane ABSENT
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.sidera-metal-probe.outputs.probe == 'absent'
+        id: sidera-absent
+        shell: bash
+        run: |
+          mkdir -p sidera-out
+          echo "SIDERA reference lane ABSENT: no proven physical Metal adapter" > sidera-out/sidera-night.ABSENT
+          echo "sidera_lane=absent" >> "$GITHUB_OUTPUT"
+
+      - name: Record SIDERA Metal lane ABSENT under software override
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1'
+        id: sidera-software-absent
+        shell: bash
+        run: |
+          mkdir -p sidera-out
+          echo "SIDERA reference lane ABSENT: software goldens do not prove physical Metal" > sidera-out/sidera-night.ABSENT
+          echo "sidera_lane=absent" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SIDERA Metal lane marker
+        if: steps.sidera-absent.outcome == 'success' || steps.sidera-software-absent.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidera-metal-lane-marker
+          path: sidera-out/
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Record golden lane RAN
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
@@ -1896,6 +1957,14 @@ jobs:
           check_selected "$full_selected" '${{ needs.test-python-linux-arm.result }}' python-linux-arm
           check_selected "$full_selected" '${{ needs.test-golden-images.result }}' visual-goldens
           check_selected "$full_selected" '${{ needs.build-docs.result }}' docs
+          if [ "$full_selected" = "true" ]; then
+            sidera_lane='${{ needs.test-golden-images.outputs.sidera_lane }}'
+            echo "SIDERA physical Metal lane: $sidera_lane"
+            if [ "$sidera_lane" != "ran" ]; then
+              echo "::error::SIDERA physical Metal lane was selected but reported $sidera_lane"
+              failed=1
+            fi
+          fi
 
           check_selected "$render_selected" '${{ needs.determinism-render.result }}' determinism-render
           check_selected "$f3dz_hosted_selected" '${{ needs.determinism-f3dz.result }}' determinism-f3dz

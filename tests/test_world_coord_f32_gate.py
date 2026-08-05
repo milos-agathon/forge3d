@@ -31,7 +31,7 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1411
+EXPECTED_CONVERSION_COUNT = 1433
 # Re-frozen when ANAMNESIS merged with main. The site COUNT is unchanged, and a
 # site-by-site diff against main shows exactly five added and five removed --
 # the same five `as_f32` statements in src/offscreen/adjudication_raster.rs,
@@ -42,15 +42,20 @@ EXPECTED_CONVERSION_COUNT = 1411
 # narrowing conversion was introduced by that merge. TESSELLA subsequently
 # added four reviewed u32-to-f32 telemetry conversions in
 # TerrainMaterialVT::get_stats for byte counts and percentages; they do not
-# participate in world-coordinate production.
-EXPECTED_CONVERSION_SHA256 = "8c46297d901489fad89ba324db91107837d3cb919a913117fb6115f379b73385"
+# participate in world-coordinate production. SIDERA adds 21 reviewed
+# render-boundary conversions plus the scanner record for its f64-to-f32
+# moonlight helper: catalog color, photometry, angular radius/phase, unit
+# direction/tangent vectors, a fixed-camera aspect ratio, and the existing
+# viewer sun/terrain-light seam. None stores absolute world coordinates or
+# bypasses the camera Anchor.
+EXPECTED_CONVERSION_SHA256 = "e18f59c918ec15624c1aaa12c4f3ec1a2c07e9f3ed7328424cdfeb7b036720b7"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1411,
+    "current_count": 1433,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -74,7 +79,7 @@ REVIEWED_INVENTORY_TRANSITION = {
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
     # Re-based on main at the merge: the pre-transition tree is now main rather
     # than this branch's original base, so the count and digest are main's.
-    "base_count": 1411,
+    "base_count": 1433,
     "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",

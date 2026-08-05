@@ -404,6 +404,7 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
         "tests/test_certificate_verifier.py",
         "tests/test_render_certificate.py",
         "tests/test_render_certificate_contract.py",
+        "tests/test_astro_ephemeris.py",
         "tests/test_no_silent_degradation.py",
     }
     assert fast_lane == expected_fast, (
@@ -554,7 +555,13 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     # hosted Metal golden lane itself must remain macOS-wheel-only.
     golden_job = _workflow_job(ci_yml, "test-golden-images")
     pytest_step = golden_job.split("- name: Run visual golden tests", 1)[1].split("\n      - name:", 1)[0]
+    sidera_step = golden_job.split("- name: Run SIDERA Metal night golden", 1)[1].split(
+        "\n      - name:", 1
+    )[0]
     probe_step = golden_job.split("- name: Probe terrain golden backend", 1)[1].split("\n      - name:", 1)[0]
+    sidera_probe_step = golden_job.split(
+        "- name: Probe SIDERA physical Metal reference backend", 1
+    )[1].split("\n      - name:", 1)[0]
     aggregate = _workflow_job(ci_yml, "full-acceptance-summary")
 
     assert "github.event_name == 'pull_request'" not in golden_job
@@ -573,6 +580,19 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     assert 'exit "$code"' in probe_step, "probe crash must propagate a nonzero exit"
     assert "continue-on-error" not in pytest_step, "golden pytest mismatch is incorrectly non-fatal"
     assert "terrain-goldens-probe.outputs.probe == 'positive'" in pytest_step
+    assert "tests/test_astro_night_golden.py" in sidera_step
+    assert "assert_junit_zero_skips.py" in sidera_step
+    assert "continue-on-error" not in sidera_step
+    assert "sidera-metal-probe.outputs.probe == 'positive'" in sidera_step
+    assert "continue-on-error" not in sidera_probe_step
+    assert "--mode sidera-metal" in sidera_probe_step
+    assert 'probe=absent' in sidera_probe_step and 'exit "$code"' in sidera_probe_step
+    assert "sidera-metal-probe.outputs.probe == 'absent'" in golden_job
+    assert "sidera-night.ABSENT" in golden_job and "sidera-metal-lane-marker" in golden_job
+    assert "sidera_lane:" in golden_job
+    assert 'echo "sidera_lane=ran" >> "$GITHUB_OUTPUT"' in sidera_step
+    assert "sidera_lane=absent" in golden_job
+    assert "software goldens do not prove physical Metal" in golden_job
     assert "goldens.ABSENT" in golden_job and "golden-lane-marker" in golden_job
     assert "terrain-goldens-probe.outputs.probe == 'absent'" in golden_job
     signing_step = golden_job.split(
@@ -591,6 +611,9 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
         "'${{ needs.test-golden-images.result }}' visual-goldens"
         in aggregate
     )
+    assert "needs.test-golden-images.outputs.sidera_lane" in aggregate
+    assert 'if [ "$sidera_lane" != "ran" ]' in aggregate
+    assert "SIDERA physical Metal lane was selected" in aggregate
 
 
 def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
