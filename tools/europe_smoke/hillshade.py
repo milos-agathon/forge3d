@@ -95,6 +95,63 @@ def col_ground_metres(bounds_mercator, shape) -> np.ndarray:
     return merc_per_col * np.cos(np.radians(row_latitudes(bounds_mercator, shape)))
 
 
+LOWLAND_MAX_M = 300.0
+LOWLAND_RELIEF = 0.15
+TARGET_HIGHLAND_SHARE = 0.21
+HIGHLAND_SHARE_RANGE = (0.18, 0.24)
+
+
+def _lon_from_merc_x(x_m) -> np.ndarray:
+    return np.degrees(np.asarray(x_m, dtype="float64") / EARTH_R)
+
+
+def _smootherstep01(x) -> np.ndarray:
+    x = np.clip(np.asarray(x, dtype="float32"), 0.0, 1.0)
+    return x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
+
+
+def ground_tiers(dem, valid, bounds_mercator, display_window):
+    """Measure the three-tier relief field from the delivered DEM.
+
+    Lowlands (below ``LOWLAND_MAX_M``) keep ``LOWLAND_RELIEF`` of the full
+    relief; the highland threshold ``h1`` is the elevation quantile that puts
+    ``TARGET_HIGHLAND_SHARE`` of the DISPLAY-window pixels at full relief, and
+    the ramp between them is a smootherstep. Returns
+    ``(multiplier, h1_m, highland_share)``.
+    """
+    dem = np.asarray(dem, dtype="float32")
+    valid = np.asarray(valid, dtype=bool)
+    if dem.shape != valid.shape or dem.ndim != 2:
+        raise ValueError(f"DEM/valid shape mismatch: {dem.shape} vs {valid.shape}")
+
+    rows = row_latitudes(bounds_mercator, dem.shape)
+    x0, _, x1, _ = (float(v) for v in bounds_mercator)
+    xs = x0 + (np.arange(dem.shape[1]) + 0.5) * (x1 - x0) / dem.shape[1]
+    cols = _lon_from_merc_x(xs)
+    west, south, east, north = display_window
+    display = ((rows[:, None] >= south) & (rows[:, None] <= north)
+               & (cols[None, :] >= west) & (cols[None, :] <= east))
+    display_pixels = int(np.count_nonzero(display))
+    land = display & valid & np.isfinite(dem)
+    land_values = dem[land]
+    target_pixels = int(round(TARGET_HIGHLAND_SHARE * display_pixels))
+    if display_pixels == 0 or target_pixels <= 0 or target_pixels >= land_values.size:
+        raise ValueError("display/land coverage cannot support the 21% highland target")
+
+    q = 1.0 - target_pixels / float(land_values.size)
+    h1 = float(np.quantile(land_values, q, method="linear"))
+    if h1 <= LOWLAND_MAX_M:
+        raise ValueError(f"measured h1 {h1:.1f} m is not above 300 m")
+
+    ramp = _smootherstep01((dem - LOWLAND_MAX_M) / (h1 - LOWLAND_MAX_M))
+    multiplier = LOWLAND_RELIEF + (1.0 - LOWLAND_RELIEF) * ramp
+    multiplier = np.where(valid, multiplier, 0.0).astype("float32")
+    share = float(np.count_nonzero(display & valid & (dem >= h1)) / display_pixels)
+    if not HIGHLAND_SHARE_RANGE[0] <= share <= HIGHLAND_SHARE_RANGE[1]:
+        raise AssertionError(f"measured highland share {share:.4f} is outside 0.18..0.24")
+    return multiplier, h1, share
+
+
 class CosLatHillshade:
     """Drop-in replacement for the engine's ``_dem_hillshade``.
 
@@ -110,13 +167,24 @@ class CosLatHillshade:
 
     is_coslat = True
 
-    def __init__(self, bounds_mercator, shape):
+    def __init__(self, bounds_mercator, shape, relief_multiplier=None,
+                 h1_m=None, highland_share=None):
         self.bounds = tuple(float(v) for v in bounds_mercator)
         self.shape = (int(shape[0]), int(shape[1]))
         self.row_metres = row_ground_metres(self.bounds, self.shape)
         self.col_metres = col_ground_metres(self.bounds, self.shape)
         self.latitudes = row_latitudes(self.bounds, self.shape)
         self.calls = 0
+        self.relief_multiplier = (
+            None if relief_multiplier is None
+            else np.asarray(relief_multiplier, dtype="float32")
+        )
+        if self.relief_multiplier is not None and self.relief_multiplier.shape != self.shape:
+            raise ValueError(
+                f"relief multiplier shape {self.relief_multiplier.shape} != DEM {self.shape}"
+            )
+        self.h1_m = None if h1_m is None else float(h1_m)
+        self.highland_share = None if highland_share is None else float(highland_share)
         self._validate()
 
     @classmethod
@@ -140,6 +208,9 @@ class CosLatHillshade:
         obj.bounds = None
         obj.latitudes = None
         obj.calls = 0
+        obj.relief_multiplier = None
+        obj.h1_m = None
+        obj.highland_share = None
         obj._validate()
         return obj
 
@@ -180,12 +251,35 @@ class CosLatHillshade:
         az = math.radians(360.0 - float(azimuth_deg) + 90.0)
         shaded = (np.sin(alt) * np.cos(slope)
                   + np.cos(alt) * np.sin(slope) * np.cos(az - aspect))
+        # measured three-tier relief: scale the shading contrast around the
+        # flat-plane illumination sin(alt), so lowlands flatten toward the base
+        # tone instead of darkening
+        flat = np.float32(np.sin(alt))
+        shaded = np.clip(shaded, 0.0, 1.0).astype("float32")
+        if self.relief_multiplier is not None:
+            shaded = flat + self.relief_multiplier * (shaded - flat)
         return np.clip(shaded, 0.0, 1.0).astype("float32")
 
 
-def make_coslat_hillshade(bounds_mercator, shape) -> CosLatHillshade:
-    """Build a drop-in replacement for the engine's ``_dem_hillshade``."""
-    return CosLatHillshade(bounds_mercator, shape)
+def make_coslat_hillshade(bounds_mercator, shape, *, dem=None, valid=None,
+                          display_window=None) -> CosLatHillshade:
+    """Build a drop-in replacement for the engine's ``_dem_hillshade``.
+
+    With ``dem``/``valid`` (always together) the replacement carries the
+    measured three-tier relief field; without them it is the plain cos-latitude
+    correction the synthetic gates use.
+    """
+    if (dem is None) != (valid is None):
+        raise ValueError("dem and valid must be provided together")
+    if dem is None:
+        return CosLatHillshade(bounds_mercator, shape)
+    if display_window is None:
+        raise ValueError("display_window is required when measuring ground tiers")
+    relief, h1, share = ground_tiers(dem, valid, bounds_mercator, display_window)
+    return CosLatHillshade(
+        bounds_mercator, shape,
+        relief_multiplier=relief, h1_m=h1, highland_share=share,
+    )
 
 
 def ridge_patch(row_spacing_m: float, col_spacing_m: float, *, side_m: float,

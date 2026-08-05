@@ -189,6 +189,36 @@ def test_the_two_azimuth_spellings_agree_to_float32():
     assert np.allclose(ours, alt_form, atol=2e-7)
 
 
+def test_ground_tiers_measure_h1_and_hit_the_display_share():
+    dem = np.arange(100, dtype="float32").reshape(10, 10) * 10.0
+    valid = np.ones_like(dem, dtype=bool)
+    bounds = (-1_000_000.0, -1_000_000.0, 1_000_000.0, 1_000_000.0)
+    multiplier, h1, share = hillshade.ground_tiers(
+        dem, valid, bounds, (-180.0, -85.0, 180.0, 85.0)
+    )
+    assert h1 > 300.0
+    assert 0.18 <= share <= 0.24
+    assert np.allclose(multiplier[dem < 300.0], 0.15)
+    assert np.allclose(multiplier[dem >= h1], 1.0)
+
+
+def test_ground_tiers_reject_an_h1_below_the_lowland_ceiling():
+    dem = np.linspace(0.0, 250.0, 100, dtype="float32").reshape(10, 10)
+    with pytest.raises(ValueError, match="h1"):
+        hillshade.ground_tiers(
+            dem, np.ones_like(dem, dtype=bool),
+            (-1e6, -1e6, 1e6, 1e6), (-180.0, -85.0, 180.0, 85.0)
+        )
+
+
+def test_factory_requires_dem_and_valid_together():
+    with pytest.raises(ValueError, match="together"):
+        hillshade.make_coslat_hillshade(
+            (-1e6, -1e6, 1e6, 1e6), (10, 10),
+            dem=np.zeros((10, 10), dtype="float32"),
+        )
+
+
 def test_latitude_uniformity_separates_corrected_from_uncorrected():
     bounds, shape = _bounds(nrows=4241, ncols=4000)
     out = hillshade.latitude_uniformity(bounds, shape)

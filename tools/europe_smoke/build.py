@@ -560,14 +560,19 @@ def build(days: int = 10, today: dt.date | None = None, axis=None,
             files.append(png)
 
             bounds = [float(v) for v in projector.map_bounds_mercator]
+            m = basemap.load_engine()
+            terrain = basemap.hillshade_report(basemap.patch_state(m), m)
             data = {
-                "width": width, "height": height, "dem_zoom": dem_zoom,
+                "width": width,
+                "height": height,
+                "dem_zoom": dem_zoom,
                 "max_dem_size": max_dem_size,
                 "image_size": list(rgb.size),
                 "frame_rect": [float(v) for v in projector.frame_rect],
                 "map_bounds_mercator": bounds,
                 "webp": encodings,
                 "png_bytes": png.stat().st_size,
+                "terrain": terrain,
                 "gate10": gate10(projector, width, height),
                 "gate9": _gate9(bounds, rgb.size[::-1]),
             }

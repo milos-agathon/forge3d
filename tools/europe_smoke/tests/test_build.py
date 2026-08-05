@@ -172,6 +172,18 @@ def harness(monkeypatch, tmp_path):
     monkeypatch.setattr(fetch_mod, "run", fake_fetch_run)
     monkeypatch.setattr(basemap, "render", fake_render)
     monkeypatch.setattr(build.basemap, "render", fake_render)
+    fake_engine = object()
+    monkeypatch.setattr(build.basemap, "load_engine", lambda: fake_engine)
+    monkeypatch.setattr(build.basemap, "patch_state", lambda m: {})
+    monkeypatch.setattr(
+        build.basemap, "hillshade_report",
+        lambda state, m: {
+            "h1_m": 650.0,
+            "highland_share": 0.21,
+            "lowland_relief": 0.15,
+            "gate9_rel_diff": 0.05,
+        },
+    )
     return tmp_path, state
 
 
@@ -210,6 +222,8 @@ def test_the_report_carries_everything_the_finding_names(harness):
     assert d["population"]["domain_people"] > d["population"]["display_block_people"]
     assert d["basemap"]["webp"]["86"]["bytes"] > 0
     assert d["basemap"]["webp"]["90"]["bytes"] > 0
+    assert d["basemap"]["terrain"]["h1_m"] == 650.0
+    assert d["basemap"]["terrain"]["highland_share"] == pytest.approx(0.21)
     assert d["verdict"] == "PASS"
 
 

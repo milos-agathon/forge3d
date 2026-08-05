@@ -186,7 +186,10 @@ def install_hillshade_patch(m) -> dict:
     def _patched(dem, valid, bounds, width, height):
         # built BEFORE anything is mutated: a degenerate-geometry ValueError
         # here leaves the engine untouched rather than half-patched
-        replacement = hillshade.make_coslat_hillshade(bounds, dem.shape)
+        replacement = hillshade.make_coslat_hillshade(
+            bounds, dem.shape, dem=dem, valid=valid,
+            display_window=config.DISPLAY_WINDOW,
+        )
         state["shading_calls"] += 1
         state["bounds"] = tuple(float(v) for v in bounds)
         state["shape"] = (int(dem.shape[0]), int(dem.shape[1]))
@@ -244,6 +247,10 @@ def assert_hillshade_patch_ran(state, shading_calls_before: int) -> None:
         raise AssertionError(
             f"the installed replacement was built for {shade.shape} but the "
             f"shading pass carried a {state['shape']} DEM")
+    if shade.h1_m is None or shade.highland_share is None:
+        raise AssertionError("the production hillshade ran without measured ground tiers")
+    if not 0.18 <= shade.highland_share <= 0.24:
+        raise AssertionError(f"highland share {shade.highland_share:.4f} is outside 0.18..0.24")
 
 
 def hillshade_report(state, m) -> dict:
@@ -272,6 +279,9 @@ def hillshade_report(state, m) -> dict:
         "ground_metres_per_px": [float(shade.row_metres[0]), float(shade.row_metres[-1])],
         "uncorrected_ruggedness_bias": shade.latitude_span_ratio,
         "z_factor": float(m.HILLSHADE_EXAGGERATION),
+        "h1_m": float(shade.h1_m),
+        "highland_share": float(shade.highland_share),
+        "lowland_relief": hillshade.LOWLAND_RELIEF,
         "shading_calls": state["shading_calls"],
         "hillshade_invocations": shade.calls,
         "gate9_rel_diff": metric["rel_diff"],

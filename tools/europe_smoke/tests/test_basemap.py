@@ -108,9 +108,10 @@ def test_the_wrapper_installs_a_replacement_built_from_the_ENGINES_geometry():
     state = basemap.install_hillshade_patch(fake)
     before = state["shading_calls"]
 
-    dem = np.zeros((64, 96), np.float32)
+    dem = np.linspace(0.0, 2_000.0, 64 * 96, dtype="float32").reshape(64, 96)
+    valid = np.ones_like(dem, dtype=bool)
     bounds = (-1.0e6, 3.5e6, 1.0e6, 1.2e7)
-    fake._render_nadir_hillshade_terrain(dem, dem > -1, bounds, 400, 500)
+    fake._render_nadir_hillshade_terrain(dem, valid, bounds, 400, 500)
 
     shade = seen["hillshade"]
     assert shade.is_coslat
@@ -135,9 +136,11 @@ def test_the_wrapper_restores_the_engine_hillshade_even_on_failure():
     fake = types.SimpleNamespace(_render_nadir_hillshade_terrain=boom,
                                  _dem_hillshade=engine_hillshade)
     basemap.install_hillshade_patch(fake)
-    with pytest.raises(RuntimeError, match="blew up"):
-        fake._render_nadir_hillshade_terrain(np.zeros((8, 8), np.float32), None,
-                                             (-1e6, 3.5e6, 1e6, 1.2e7), 4, 5)
+    bounds = (-1e6, 3.5e6, 1e6, 1.2e7)
+    dem = np.linspace(0.0, 2_000.0, 8 * 8, dtype="float32").reshape(8, 8)
+    valid = np.ones_like(dem, dtype=bool)
+    with pytest.raises(RuntimeError, match="shading blew up"):
+        fake._render_nadir_hillshade_terrain(dem, valid, bounds, 4, 5)
     assert fake._dem_hillshade is engine_hillshade
 
 
@@ -513,3 +516,5 @@ def test_gate_9_on_the_real_rendered_dem(rendered):
     assert report["hillshade_invocations"] >= 2
     assert report["uncorrected_ruggedness_bias"] > 1.0
     assert report["gate9_rel_diff"] < config.HILLSHADE_UNIFORMITY_MAX, report
+    assert report["h1_m"] > 300.0
+    assert 0.18 <= report["highland_share"] <= 0.24
