@@ -47,10 +47,15 @@ def test_ci_downloads_verified_lfs_media_once_and_shares_one_artifact() -> None:
         "https://media.githubusercontent.com/media/milos-agathon/forge3d/"
         "92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
     ) in workflow
+    assert (
+        "https://media.githubusercontent.com/media/milos-agathon/forge3d/"
+        "19028116dfbe9b954eac63e0a211be0d544226aa"
+    ) in workflow
     assert workflow.count("sha256sum --check -") == 1
     assert "cff39b4e02d7ba13c48f3d8b1a4080d40ada753ade62fa951459fe4e01e98b48" in workflow
     assert "875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3" in workflow
     assert "d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478" in workflow
+    assert "575e4b57d69d5db1bc16d5cd7edc8c83c570e280717e9e7ca225c060fd0aeb3d" in workflow
     assert "is still an LFS pointer" in workflow
     prepare = workflow.split("  prepare-lfs-fixtures:", 1)[1].split(
         "  terrain-golden-paths:", 1
@@ -71,6 +76,7 @@ def test_ci_lfs_manifest_contains_only_lane_fixtures() -> None:
     assert "assets/tif/Mount_Fuji_30m.tif" in prepare
     assert "assets/tif/dem_rainier.tif" in prepare
     assert "assets/tif/switzerland_dem.tif" in prepare
+    assert "assets/tif/moon_south_pole_lola.tif" in prepare
     assert "python/forge3d/forge3d.pdb" not in prepare
     assert "assets/highres.png" not in prepare
     assert "assets/swiss-legend.png" not in prepare

@@ -2,6 +2,7 @@
 // Geographic utilities including CRS reprojection
 // RELEVANT FILES: src/geo/reproject.rs, python/forge3d/crs.py
 
+pub mod body;
 pub mod geodesic;
 pub mod geoid;
 pub mod projections;
