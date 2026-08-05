@@ -118,11 +118,11 @@ impl SphericalHarmonicSurface {
     }
 
     #[inline(always)]
-    fn degree_sum(&self, basis: &HarmonicBasis, n: usize) -> f64 {
+    fn degree_sum(&self, pnm: &[f64], cosml: &[f64], sinml: &[f64], n: usize) -> f64 {
         let mut sum = 0.0;
         for m in 0..=n {
             let (c, s) = self.coefficient(n, m);
-            sum += basis.pnm[harmonic_index(n, m)] * (c * basis.cosml[m] + s * basis.sinml[m]);
+            sum += pnm[harmonic_index(n, m)] * (c * cosml[m] + s * sinml[m]);
         }
         sum
     }
@@ -167,66 +167,60 @@ fn harmonic_index(n: usize, m: usize) -> usize {
 /// inside the recursion is what keeps every intermediate O(1). At degree 120
 /// the Holmes–Featherstone global (10⁻²⁸⁰-scaled) variant is not yet needed;
 /// it only becomes necessary beyond degree ~1900 where sinᵐθ underflows.
-fn legendre_all<const N: usize>(cos_theta: f64, sin_theta: f64) -> Vec<f64> {
-    let size = ((N + 1) * (N + 2)) / 2;
-    let mut p = vec![0.0f64; size];
-    let idx = |n: usize, m: usize| (n * (n + 1)) / 2 + m;
+macro_rules! define_legendre_all {
+    ($name:ident, $nmax:expr) => {
+        fn $name(cos_theta: f64, sin_theta: f64) -> Vec<f64> {
+            let size = (($nmax + 1) * ($nmax + 2)) / 2;
+            let mut p = vec![0.0f64; size];
+            let idx = |n: usize, m: usize| (n * (n + 1)) / 2 + m;
 
-    p[idx(0, 0)] = 1.0;
-    if N == 0 {
-        return p;
-    }
-    p[idx(1, 0)] = 3.0f64.sqrt() * cos_theta;
-    p[idx(1, 1)] = 3.0f64.sqrt() * sin_theta;
+            p[idx(0, 0)] = 1.0;
+            if $nmax == 0 {
+                return p;
+            }
+            p[idx(1, 0)] = 3.0f64.sqrt() * cos_theta;
+            p[idx(1, 1)] = 3.0f64.sqrt() * sin_theta;
 
-    // Sectorals: P̄mm = √((2m+1)/(2m)) · sinθ · P̄(m−1)(m−1).
-    for m in 2..=N {
-        let f = ((2 * m + 1) as f64 / (2 * m) as f64).sqrt();
-        p[idx(m, m)] = f * sin_theta * p[idx(m - 1, m - 1)];
-    }
-    // First off-sectoral: P̄(m+1)m = √(2m+3) · cosθ · P̄mm.
-    for m in 0..N {
-        p[idx(m + 1, m)] = ((2 * m + 3) as f64).sqrt() * cos_theta * p[idx(m, m)];
-    }
-    // General forward-column recursion.
-    for m in 0..=N {
-        for n in (m + 2)..=N {
-            let nf = n as f64;
-            let mf = m as f64;
-            let a = ((2.0 * nf + 1.0) / ((nf + mf) * (nf - mf))).sqrt();
-            let b = (2.0 * nf - 1.0).sqrt();
-            let c = ((nf + mf - 1.0) * (nf - mf - 1.0) / (2.0 * nf - 3.0)).sqrt();
-            p[idx(n, m)] = a * (b * cos_theta * p[idx(n - 1, m)] - c * p[idx(n - 2, m)]);
+            for m in 2..=$nmax {
+                let f = ((2 * m + 1) as f64 / (2 * m) as f64).sqrt();
+                p[idx(m, m)] = f * sin_theta * p[idx(m - 1, m - 1)];
+            }
+            for m in 0..$nmax {
+                p[idx(m + 1, m)] = ((2 * m + 3) as f64).sqrt() * cos_theta * p[idx(m, m)];
+            }
+            for m in 0..=$nmax {
+                for n in (m + 2)..=$nmax {
+                    let nf = n as f64;
+                    let mf = m as f64;
+                    let a = ((2.0 * nf + 1.0) / ((nf + mf) * (nf - mf))).sqrt();
+                    let b = (2.0 * nf - 1.0).sqrt();
+                    let c = ((nf + mf - 1.0) * (nf - mf - 1.0) / (2.0 * nf - 3.0)).sqrt();
+                    p[idx(n, m)] = a * (b * cos_theta * p[idx(n - 1, m)] - c * p[idx(n - 2, m)]);
+                }
+            }
+            p
         }
-    }
-    p
+    };
 }
 
-struct HarmonicBasis {
-    pnm: Vec<f64>,
-    cosml: [f64; MARS_AREOID_NMAX + 1],
-    sinml: [f64; MARS_AREOID_NMAX + 1],
-}
+define_legendre_all!(legendre_all, NMAX);
+define_legendre_all!(legendre_all_mars, MARS_AREOID_NMAX);
 
-fn harmonic_basis<const N: usize>(
-    cos_theta: f64,
-    sin_theta: f64,
-    longitude_rad: f64,
-) -> HarmonicBasis {
-    assert!(N <= MARS_AREOID_NMAX);
-    let pnm = legendre_all::<N>(cos_theta, sin_theta);
-    let mut cosml = [0.0; MARS_AREOID_NMAX + 1];
-    let mut sinml = [0.0; MARS_AREOID_NMAX + 1];
-    cosml[0] = 1.0;
-    if N >= 1 {
-        cosml[1] = longitude_rad.cos();
-        sinml[1] = longitude_rad.sin();
-        for m in 2..=N {
-            cosml[m] = 2.0 * cosml[1] * cosml[m - 1] - cosml[m - 2];
-            sinml[m] = 2.0 * cosml[1] * sinml[m - 1] - sinml[m - 2];
+macro_rules! harmonic_basis {
+    ($pnm:ident, $cosml:ident, $sinml:ident, $legendre:ident, $nmax:expr, $cos_theta:expr, $sin_theta:expr, $longitude:expr) => {
+        let $pnm = $legendre($cos_theta, $sin_theta);
+        let mut $cosml = [0.0f64; $nmax + 1];
+        let mut $sinml = [0.0f64; $nmax + 1];
+        $cosml[0] = 1.0;
+        if $nmax >= 1 {
+            $cosml[1] = $longitude.cos();
+            $sinml[1] = $longitude.sin();
+            for m in 2..=$nmax {
+                $cosml[m] = 2.0 * $cosml[1] * $cosml[m - 1] - $cosml[m - 2];
+                $sinml[m] = 2.0 * $cosml[1] * $sinml[m - 1] - $sinml[m - 2];
+            }
         }
-    }
-    HarmonicBasis { pnm, cosml, sinml }
+    };
 }
 
 /// EGM96 geoid undulation N(φ, λ) in metres. `lat_deg` is geodetic latitude,
@@ -249,7 +243,16 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
     let gamma = GEQT * (1.0 + SOMIGLIANA_K * t1) / (1.0 - E2 * t1).sqrt();
 
     let theta = core::f64::consts::FRAC_PI_2 - lat_gc;
-    let basis = harmonic_basis::<NMAX>(theta.cos(), theta.sin(), lon);
+    harmonic_basis!(
+        pnm,
+        cosml,
+        sinml,
+        legendre_all,
+        NMAX,
+        theta.cos(),
+        theta.sin(),
+        lon
+    );
 
     // Height anomaly on the ellipsoid from the disturbing potential.
     let ar = AE / r;
@@ -263,7 +266,7 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
         let mut sum = 0.0;
         for m in 0..=n {
             let (c, s) = model.coefficients[pot_index(n, m)];
-            sum += basis.pnm[harmonic_index(n, m)] * (c * basis.cosml[m] + s * basis.sinml[m]);
+            sum += pnm[harmonic_index(n, m)] * (c * cosml[m] + s * sinml[m]);
         }
         a_sum += sum * arn;
     }
@@ -274,7 +277,7 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
     for n in 0..=NMAX {
         for m in 0..=n {
             let (c, s) = model.corrections[corr_index(n, m)];
-            corr_sum += basis.pnm[harmonic_index(n, m)] * (c * basis.cosml[m] + s * basis.sinml[m]);
+            corr_sum += pnm[harmonic_index(n, m)] * (c * cosml[m] + s * sinml[m]);
         }
     }
     zeta + corr_sum / 100.0 + ZERO_DEGREE_M
@@ -284,10 +287,19 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
 pub fn areoid_undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
     let model = &*MARS_AREOID_MODEL;
     let lat = lat_deg.to_radians();
-    let basis = harmonic_basis::<MARS_AREOID_NMAX>(lat.sin(), lat.cos(), lon_deg.to_radians());
+    harmonic_basis!(
+        pnm,
+        cosml,
+        sinml,
+        legendre_all_mars,
+        MARS_AREOID_NMAX,
+        lat.sin(),
+        lat.cos(),
+        lon_deg.to_radians()
+    );
     let mut dimensionless_potential = 0.0;
     for n in 0..=model.nmax {
-        dimensionless_potential += model.degree_sum(&basis, n);
+        dimensionless_potential += model.degree_sum(&pnm, &cosml, &sinml, n);
     }
     let disturbing_potential = MARS_GM / MARS_REFERENCE_RADIUS_M * dimensionless_potential;
     let normal_gravity = MARS_GM / MARS_REFERENCE_RADIUS_M.powi(2);
