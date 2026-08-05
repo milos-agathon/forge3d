@@ -1,0 +1,116 @@
+# tools/europe_smoke/manifest.toml
+# §10.2 external-artifact contract. Every input a clean checkout cannot carry.
+#
+# Each entry declares a CLASS, which decides what a problem with it means:
+#
+#   class = "required"  the build cannot start without it. Absent -> BLOCKING.
+#   class = "acquired"  the build itself creates it. Absent before the acquiring
+#                       step -> "pending" (a warning, never blocking). Present
+#                       -> verified exactly like a required artifact.
+#   class = "remote"    a live API with no local file. Never hashed; gated by
+#                       its credential entry instead (see check_credentials).
+#
+# A hash MISMATCH or a size MISMATCH is BLOCKING for every class that has a
+# path. §10.2: "fails loudly on mismatch rather than proceeding with a
+# substituted artifact."
+#
+# An entry with an EMPTY sha256 is "unpinned": a distinct, visible third state.
+# It is reported with its observed hash, counted as a warning, recorded in the
+# build report, and it fails `probe --check --strict`. It never silently passes.
+# Nothing in the automated build writes a hash back into this file; see
+# `probe --write-pins` and the note at the bottom.
+#
+# Paths may use {repo}, {build} and {cache} placeholders, resolved against
+# config.REPO_ROOT / config.BUILD_DIR / config.CACHE_DIR. A bare relative path
+# is repo-relative; an absolute path is used as written.
+#
+# MERGE NOTE: the natural_earth path uses {build}/cache/... not {cache}/...
+# (do not write the table header inside a comment: apply_pins locates an entry
+# with a plain str.partition and would find the comment first).
+# The two are the same directory (config.CACHE_DIR == config.BUILD_DIR/"cache"),
+# but only {build} is resolved from a live module attribute that a test can
+# monkeypatch -- CACHE_DIR is bound at import time, so redirecting BUILD_DIR
+# alone would leave a {cache} path pointing at the real drive. Both fixes'
+# tests are satisfied by this spelling.
+
+[engine]
+class = "required"
+path = "{repo}/examples/wildfire_smoke_engine.cpython-313.pyc"
+sha256 = "20f302223ed9282965921b80a076ccff208640e8105ae8a9214bf2be816c48bc"
+bytes = 293372
+licence = "project-internal, not redistributable"
+upstream = "NONE - source was deleted; this bytecode is the only copy"
+requires = "CPython 3.13 exactly"
+
+[ghsl]
+class = "required"
+path = "D:/ghsl-population/GHS_POP_E2025_GLOBE_R2023A_4326_30ss_V1_0.tif"
+bytes = 384285897
+sha256 = "6a3dac929afc5f5f77893c81b6e2a0c4771d76e267d2a2a19ade526f0e25ddc2"
+licence = "CC BY 4.0 (European Commission JRC)"
+upstream = "https://human-settlement.emergency.copernicus.eu/download.php"
+attribution_required = true
+
+[osm_land]
+class = "required"
+path = "{repo}/examples/.cache/iberia_france_smoke/osm/simplified-land-polygons-complete-3857/simplified_land_polygons.shp"
+sha256 = "82826f464b271ca5095a84dff13d045e929fb80992982bbbd09fc230ef70d19d"
+bytes = 31844968
+licence = "ODbL 1.0 (c) OpenStreetMap contributors"
+upstream = "https://osmdata.openstreetmap.de/download/simplified-land-polygons-complete-3857.zip"
+attribution_required = true
+note = "only the .shp member is pinned; the .dbf/.shx/.prj sidecars are not"
+
+[natural_earth]
+class = "acquired"
+path = "{build}/cache/ne/ne_10m_admin_0_countries.zip"
+sha256 = ""
+# Task 8 DEFINES load_countries but never runs it against config.CACHE_DIR --
+# its own tests all use tmp_path, and fetch.run() calls only build_land_union.
+# The first thing that writes this file is Task 10's slow tests, via
+# population.rasterise_countries(config.CACHE_DIR); build.derive does it too.
+acquired_by = "boundary.load_countries(CACHE_DIR) via population.rasterise_countries() - Task 10 slow tests"
+licence = "public domain"
+upstream = "https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_0_countries.zip"
+
+[cams]
+class = "remote"
+credential = "cdsapirc"
+licence = "Copernicus / ECMWF - free, ATTRIBUTION REQUIRED"
+upstream = "ADS API, credentials at ~/.cdsapirc"
+note = "no hash; the delivered axis is recorded in the build report instead"
+attribution_required = true
+
+[firms]
+class = "remote"
+credential = "firms_key"
+licence = "NASA FIRMS - free, ATTRIBUTION REQUIRED"
+upstream = "https://firms.modaps.eosdis.nasa.gov/api/area/csv/, key at ~/.firms_key"
+note = "no hash; the fetched window and source list are recorded in the build report"
+attribution_required = true
+
+# ---------------------------------------------------------------------------
+# Pinning policy.
+#
+# A hash that writes itself is not a control: a corrupted or substituted
+# artifact would pin its own corruption and every later run would agree with
+# it. So no automated step -- not `probe --check`, not `fetch.run()` -- ever
+# mutates this file.
+#
+# The operator flow, once, per artifact:
+#   1. `probe --check` prints  [warn] natural_earth: unpinned; sha256=<hex>
+#      and writes the same value to {build}/proposed_pins.toml (outside the
+#      tracked tree, so it can never be mistaken for the manifest).
+#   2. The operator confirms the artifact's PROVENANCE by hand -- the upstream
+#      URL above, the publisher's own checksum where one exists, the download
+#      log -- not merely that the file is on disk.
+#   3. `probe --write-pins` copies the observed hashes in. It refuses to run at
+#      all while anything is blocking, and it refuses to touch an entry whose
+#      sha256 is already non-empty, so a pin can never be silently rotated and
+#      a substituted artifact can never be pinned around; changing a pin is a
+#      deliberate hand edit.
+#   4. The change lands as a diff in a TRACKED file and is reviewed in git
+#      like any other. That review, not the code, is the control.
+#
+# `probe --check --strict` fails while anything is still unpinned, so an
+# unpinned artifact cannot ride along unnoticed to release.
