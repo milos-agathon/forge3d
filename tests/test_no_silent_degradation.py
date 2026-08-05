@@ -5,7 +5,8 @@
 #   (c) every Cargo feature is referenced, and the CI --features list is curated
 #   (d) the wheel ships the features its public APIs need; the built-in CRS
 #       engine is authoritative, while optional PROJ and GEOS remain honest
-#   (e) every tracked tests/test_*.py is either run by a CI lane or UNRUN-listed
+#   (e) the full profile accounts for every tracked test, while the routine fast
+#       profile retains every mandatory CENSOR truth contract
 # RELEVANT FILES: scripts/ci_pytest_lane.py, tests/UNRUN.toml,
 #   tests/degradation_allowlist.toml, tests/allocation_allowlist.toml,
 #   tests/_toml_compat.py, Cargo.toml, pyproject.toml, .github/workflows/ci.yml
@@ -38,7 +39,7 @@ for _p in (str(TESTS), str(ROOT / "scripts")):
         sys.path.insert(0, _p)
 
 from test_allocation_gate import _raw_sites  # noqa: E402  (reuse the source gate)
-import ci_pytest_lane  # noqa: E402  (the default-lane selection is the source of truth)
+import ci_pytest_lane  # noqa: E402  (validation profiles are the source of truth)
 
 
 # ---------------------------------------------------------------------------
@@ -206,12 +207,21 @@ def test_c_every_feature_referenced_and_ci_list_curated():
     covered = _feature_closure(PORTABLE_CI_CARGO_FEATURES) | DEDICATED_SYSTEM_FEATURES | maturin
     assert covered == declared, f"declared features not compiled by any CI lane: {sorted(declared - covered)}"
 
-    # Clippy covers the portable surface plus extension-module without PROJ's
-    # system dependency.
-    alias = load_toml(ROOT / ".cargo" / "config.toml")["alias"]["forge3d-clippy"]
-    alias_features = _cargo_alias_features(alias)
-    assert alias_features == PORTABLE_CI_CARGO_FEATURES | {"extension-module"}, (
-        f"forge3d-clippy feature drift: {sorted(alias_features)}"
+    # Routine linting stays deliberately small. Explicit acceptance linting
+    # covers the portable surface plus extension-module without system PROJ.
+    aliases = load_toml(ROOT / ".cargo" / "config.toml")["alias"]
+    routine = _cargo_alias_features(aliases["forge3d-clippy"])
+    acceptance = _cargo_alias_features(aliases["forge3d-clippy-acceptance"])
+    assert routine == {
+        "default",
+        "extension-module",
+        "cog_streaming",
+        "shader-contract-asserts",
+    }, (
+        f"routine clippy expanded beyond the small contract: {sorted(routine)}"
+    )
+    assert acceptance == PORTABLE_CI_CARGO_FEATURES | {"extension-module"}, (
+        f"acceptance clippy feature drift: {sorted(acceptance)}"
     )
 
 
@@ -326,51 +336,86 @@ def _explicit_lane_files() -> set[str]:
     return golden | viewer
 
 
-def test_e_unrun_accounting_is_exhaustive_and_honest():
+def _workflow_job(workflow: str, name: str) -> str:
+    match = re.search(
+        rf"^  {re.escape(name)}:\n.*?(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        workflow,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match, f"workflow job not found: {name}"
+    return match.group(0)
+
+
+def test_e_validation_profiles_are_exhaustive_and_honest():
     universe = _tracked_test_files()
     unrun = set(ci_pytest_lane.unrun_files())
-    explicit = _explicit_lane_files() & universe
+    explicit = _explicit_lane_files()
 
     # No UNRUN entry may name a nonexistent / untracked file.
     missing = sorted(f for f in unrun if f not in universe)
     assert missing == [], f"UNRUN names files absent from the tracked suite: {missing}"
 
-    # No UNRUN entry may be expired.
+    # Quarantine entries are unique, owner-attributed, and non-expired.
     data = load_toml(TESTS / "UNRUN.toml")
-    for entry in data.get("entries", []):
+    entries = data.get("entries", [])
+    files = [entry.get("file") for entry in entries]
+    assert len(files) == len(set(files)), f"duplicate UNRUN entries: {files}"
+    for entry in entries:
         assert "reason" in entry and entry["reason"], f"UNRUN entry lacks a reason: {entry}"
+        assert "owner" in entry and entry["owner"], f"UNRUN entry lacks an owner: {entry}"
         assert date.fromisoformat(entry["expires"]) >= date.today(), f"expired UNRUN entry: {entry}"
 
     # A file may not be BOTH quarantined and claimed by an explicit lane.
     both = sorted(unrun & explicit)
     assert both == [], f"files are both UNRUN and run by an explicit lane: {both}"
 
-    # The default lane collects everything not UNRUN; the accounting must be
-    # total. Exercise the lane SCRIPT's own selection (not a re-derivation of
-    # the same set) so a filtering regression in ci_pytest_lane.py fails here.
-    script_lane = {Path(f).name for f in ci_pytest_lane.default_lane_files()}
-    default_lane = universe - unrun
+    # The full profile collects everything not UNRUN; the accounting remains
+    # total even though routine pull requests use the focused profile.
+    script_lane = set(ci_pytest_lane.full_lane_files())
+    full_lane = universe - unrun
     unrun_names = {Path(f).name for f in unrun}
-    default_lane_names = {Path(f).name for f in default_lane}
-    assert script_lane & unrun_names == set(), (
-        f"lane script selects quarantined files: {sorted(script_lane & unrun_names)}"
+    assert {Path(f).name for f in script_lane} & unrun_names == set(), (
+        "full profile selects quarantined files"
     )
-    assert script_lane == default_lane_names, (
-        "lane script and tracked default-lane accounting differ: "
-        f"missing={sorted(default_lane_names - script_lane)}, extra={sorted(script_lane - default_lane_names)}"
+    assert script_lane == full_lane, (
+        "lane script and tracked full-profile accounting differ: "
+        f"missing={sorted(full_lane - script_lane)}, extra={sorted(script_lane - full_lane)}"
+    )
+
+    fast_lane = set(ci_pytest_lane.fast_lane_files())
+    expected_fast = {
+        "tests/test_install_smoke.py",
+        "tests/test_license.py",
+        "tests/test_api_contracts.py",
+        "tests/test_capability_negotiation.py",
+        "tests/test_budget_enforce.py",
+        "tests/test_memory_budget_policy.py",
+        "tests/test_device_init_failure.py",
+        "tests/test_allocation_gate.py",
+        "tests/test_dead_render_structure_gate.py",
+        "tests/test_pipeline_validation_gate.py",
+        "tests/test_degradation_behavior.py",
+        "tests/test_certificate_verifier.py",
+        "tests/test_render_certificate.py",
+        "tests/test_render_certificate_contract.py",
+        "tests/test_no_silent_degradation.py",
+    }
+    assert fast_lane == expected_fast, (
+        "fast profile changed without updating the architectural-contract lock: "
+        f"missing={sorted(expected_fast - fast_lane)}, extra={sorted(fast_lane - expected_fast)}"
+    )
+    assert fast_lane <= full_lane, (
+        f"fast profile selects quarantined or unknown tests: {sorted(fast_lane - full_lane)}"
     )
     conftest = (ROOT / "conftest.py").read_text(encoding="utf-8")
     assert "pytest_ignore_collect" not in conftest, "root conftest silently bypasses test collection"
-    assert (default_lane | explicit | unrun) == universe, (
-        "accounting is not exhaustive: "
-        f"{sorted(universe - (default_lane | explicit | unrun))}"
-    )
+    assert explicit <= universe
 
 
 def test_e_slow_lane_is_marker_selected_and_accounted():
-    default_args = ci_pytest_lane.build_pytest_args([])
+    default_args = ci_pytest_lane.build_pytest_args("full", [])
     slow_args = ci_pytest_lane.build_pytest_args(
-        [ci_pytest_lane.SLOW_LANE_SELECTOR]
+        "full", [ci_pytest_lane.SLOW_LANE_SELECTOR]
     )
     assert default_args[default_args.index("-m") + 1] == "not slow"
     assert slow_args[slow_args.index("-m") + 1] == "slow"
@@ -382,14 +427,14 @@ def test_e_slow_lane_is_marker_selected_and_accounted():
     slow_job = ci_yml.split("  test-python-slow:", 1)[1].split(
         "\n  # ============================================================================\n  # TERMINUS", 1
     )[0]
-    assert "python scripts/ci_pytest_lane.py --slow-lane" in slow_job
-    aggregate = ci_yml.split("  pr-core-success:", 1)[1].split(
-        "\n  full-acceptance-summary:", 1
-    )[0]
-    assert "test-python-slow" in aggregate.split("\n    runs-on:", 1)[0]
+    assert "python scripts/ci_pytest_lane.py --profile full --slow-lane" in slow_job
+    pr_core = _workflow_job(ci_yml, "pr-core-success")
+    acceptance = _workflow_job(ci_yml, "full-acceptance-summary")
+    assert "test-python-slow" not in pr_core.split("\n    runs-on:", 1)[0]
+    assert "test-python-slow" in acceptance.split("\n    runs-on:", 1)[0]
 
 
-def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
+def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
@@ -458,10 +503,6 @@ def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
         "github.event_name == 'schedule'",
         "inputs.scope == 'full'",
         "inputs.scope == 'anamnesis'",
-        "github.event_name == 'pull_request'",
-        "github.event.pull_request.head.repo.full_name == github.repository",
-        "contains(github.event.pull_request.labels.*.name, 'run-physical')",
-        "needs.terrain-golden-paths.outputs.anamnesis == 'true'",
     )
     for job_name in (
         "test-anamnesis-portability-seed",
@@ -473,7 +514,13 @@ def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
         )[0]
         for fragment in required:
             assert fragment in job
-        assert "github.event_name == 'push'" not in job
+        for forbidden in (
+            "github.event_name == 'push'",
+            "github.event_name == 'pull_request'",
+            "run-physical",
+            "needs.terrain-golden-paths.outputs.anamnesis",
+        ):
+            assert forbidden not in job
     production = ci_yml.split("  test-anamnesis-production:", 1)[1].split(
         "\n  # ============================================================================\n  # Hosted determinism families", 1
     )[0]
@@ -496,17 +543,16 @@ def test_e_anamnesis_physical_jobs_are_path_gated_honestly():
 # ---------------------------------------------------------------------------
 def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent():
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    fast_job = _workflow_job(ci_yml, "test-fast-contract")
     # Certificate mutation lives in a different manual-only workflow; the
     # hosted Metal golden lane itself must remain macOS-wheel-only.
-    golden_job = ci_yml.split("  test-golden-images:", 1)[1].split(
-        "\n  test-m06-full-geospatial-viewer:", 1
-    )[0]
+    golden_job = _workflow_job(ci_yml, "test-golden-images")
     pytest_step = golden_job.split("- name: Run visual golden tests", 1)[1].split("\n      - name:", 1)[0]
     probe_step = golden_job.split("- name: Probe terrain golden backend", 1)[1].split("\n      - name:", 1)[0]
-    aggregate = ci_yml.split("  pr-core-success:", 1)[1].split(
-        "\n  full-acceptance-summary:", 1
-    )[0]
+    aggregate = _workflow_job(ci_yml, "full-acceptance-summary")
 
+    assert "github.event_name == 'pull_request'" not in golden_job
+    assert "inputs.scope == 'full'" in golden_job
     assert "runs-on: macos-14" in golden_job, "golden lane must use the gated Metal runner"
     assert "WGPU_BACKEND: metal" in golden_job
     assert "name: wheels-macos" in golden_job, "golden lane must install its runner-compatible wheel"
@@ -530,6 +576,50 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" in golden_job
     assert 'if [ -z "$FORGE3D_CERT_SIGNING_KEY" ]' in signing_step
     assert "exit 1" in signing_step
-    assert "UNTRUSTED external PR" in golden_job
-    assert "require_success test-golden-images '${{ needs.test-golden-images.result }}'" in aggregate
-    assert "require_state test-golden-images '${{ needs.test-golden-images.result }}' skipped" in aggregate
+    assert "FORGE3D_CERT_SIGNING_KEY" not in fast_job
+    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" not in fast_job
+    assert "FORGE3D_RUN_TERRAIN_GOLDENS" not in fast_job
+    assert "test_recipe_goldens.py" not in fast_job
+    assert (
+        "check_selected \"$full_selected\" "
+        "'${{ needs.test-golden-images.result }}' visual-goldens"
+        in aggregate
+    )
+
+
+def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
+    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    fast_job = _workflow_job(ci_yml, "test-fast-contract")
+    pr_core = _workflow_job(ci_yml, "pr-core-success")
+    acceptance = _workflow_job(ci_yml, "full-acceptance-summary")
+
+    assert "--profile fast" in fast_job
+    pr_needs = pr_core.split("\n    runs-on:", 1)[0]
+    assert "test-fast-contract" in pr_needs
+    for heavy in (
+        "test-golden-images",
+        "test-m06-full-geospatial-viewer",
+        "test-anamnesis-production",
+        "test-python-full-linux",
+        "test-python-full-windows",
+        "test-python-full-macos",
+    ):
+        assert heavy not in pr_needs, f"PR Core Success depends on heavyweight lane {heavy}"
+    assert "FORGE3D_CERT_SIGNING_KEY" not in pr_core
+    assert "full acceptance" in acceptance.lower()
+
+    for name in (
+        "test-python-full-linux",
+        "test-python-full-windows",
+        "test-python-full-macos",
+    ):
+        job = _workflow_job(ci_yml, name)
+        assert "test_mode: full" in job, f"{name} does not select the exhaustive profile"
+        assert "github.event_name == 'pull_request'" not in job
+    reusable_python = (
+        ROOT / ".github" / "workflows" / "test-python-wheel.yml"
+    ).read_text(encoding="utf-8")
+    assert "python scripts/ci_pytest_lane.py --profile full" in reusable_python
+    slow_job = _workflow_job(ci_yml, "test-python-slow")
+    assert "python scripts/ci_pytest_lane.py --profile full --slow-lane" in slow_job
+    assert "github.event_name == 'pull_request'" not in slow_job

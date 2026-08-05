@@ -315,7 +315,7 @@ There is no cherry-pick step: `11a141c7` was merged to main via PR #106 and is a
 
 **Files and symbols to change:**
 
-- `.github/workflows/ci.yml` — add selected `test-m06-full-geospatial-viewer` acceptance on `[self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]`, set `WGPU_BACKEND=vulkan`, check out LFS fixtures, build the release `interactive_viewer`, install `pytest numpy pillow rasterio`, run only the M-06 live file with `-vv -rs --junitxml=m06.xml`, assert the JUnit skipped total is zero with Python stdlib XML parsing, upload image/diff artifacts on failure, and add the job to `Full Acceptance Summary.needs`. Adapter or binary absence must fail inside the fixture, never call `pytest.skip`.
+- `.github/workflows/ci.yml` — add selected `test-m06-full-geospatial-viewer` acceptance on `[self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]`, triggered only by the nightly schedule or an explicit manual `m06`/`full` scope. It never runs on pull-request or push events. Set `WGPU_BACKEND=vulkan`, check out LFS fixtures, build the release `interactive_viewer`, install `pytest numpy pillow rasterio`, run only the M-06 live file with `-vv -rs --junitxml=m06.xml`, assert the JUnit skipped total is zero with Python stdlib XML parsing, upload image/diff artifacts on failure, and add the job to `Full Acceptance Summary.needs`. Adapter or binary absence must fail inside the fixture, never call `pytest.skip`.
 - New `tests/test_m06_full_geospatial_viewer.py` — reuse the existing process/socket/snapshot launcher; create deterministic local and UTM-translated north-up fixtures, south-up/X-mirrored rejection fixtures, normalized-RGB comparison, rebase/orbit checks, and the 1 mm feature check.
 - New `tests/test_m06_viewer_matrix_contract.py` — strip comments, normalize UFCS/whitespace/multiline statements, inventory look-at, perspective, projection/view composition, inverse-VP, and previous-VP operations under `src/viewer`; compare the normalized `(path, operation)` set with an explicit allowlist and require an Anchor/frame-helper assertion at every allowed producer. Any unclassified producer or stale allowlist entry fails.
 - `tests/test_world_coord_f32_gate.py` — refresh against the integrated tree and add component/field/index cast fixtures (`origin.x as f32`, `point[i] as f32`, array/map conversion helpers) plus positive Anchor-chokepoint assertions.
@@ -334,7 +334,7 @@ There is no cherry-pick step: `11a141c7` was merged to main via PR #106 and is a
 
 - The implementation branch is based on the recorded allocation-gated integration SHA; `tests/test_allocation_gate.py` exists and passes.
 - Matrix and f32 inventories are mechanically refreshed, checked in, and demonstrably fail on injected forbidden operations.
-- `test-m06-full-geospatial-viewer` is required on the nightly schedule, an explicit manual `m06`/`full` dispatch, or an internal PR selected by both the M-06 dependency paths and the `run-physical` label. Ordinary pushes and unlabeled PRs do not allocate the physical runner. When selected, it uses the real NVIDIA Vulkan runner and cannot skip green; `PR Core Success` remains the stable hosted merge gate.
+- `test-m06-full-geospatial-viewer` is required only on the nightly schedule or an explicit manual `m06`/`full` dispatch. Pull-request and push events never allocate the physical runner. When selected, it uses the real NVIDIA Vulkan runner and cannot skip green; `PR Core Success` remains the stable hosted pull-request gate.
 - Local fallback/control tests pass; the metric, cast-before-subtract, and unsupported-transform negative controls pass; the live translated-scene test is red for the expected pre-implementation reason.
 
 **Verification/tests:**
@@ -802,7 +802,7 @@ python -m pytest tests/test_terrain_viewer_pbr.py tests/test_vector_overlay_rend
 python -m pytest tests/test_recipe_goldens.py tests/test_determinism_hash.py -q
 ```
 
-The P0 live command runs in `test-m06-full-geospatial-viewer` CI on the self-hosted NVIDIA runner with `WGPU_BACKEND=vulkan` when selected by the nightly schedule, an explicit manual `m06`/`full` scope, or an internal PR with both matching M-06 paths and the `run-physical` label. Build the release viewer first, install Pillow and rasterio explicitly, and reject adapter absence, binary absence, or any skipped M-06 test whenever the lane is selected. The existing informational macOS lane is supplementary only and `PR Core Success` does not claim physical evidence.
+The P0 live command runs in `test-m06-full-geospatial-viewer` CI on the self-hosted NVIDIA runner with `WGPU_BACKEND=vulkan` only when selected by the nightly schedule or an explicit manual `m06`/`full` scope. It never runs on pull-request or push events; `PR Core Success` remains the hosted pull-request gate and does not claim physical evidence. Build the release viewer first, install Pillow and rasterio explicitly, and reject adapter absence, binary absence, or any skipped M-06 test whenever the lane is selected. The existing informational macOS lane is supplementary only.
 
 ### Allocation and budget gates
 
