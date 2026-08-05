@@ -41,36 +41,35 @@ const MARS_AREOID_BIN: &[u8] = include_bytes!(concat!(
     "/assets/geoid/mars_areoid_n179.bin"
 ));
 
-/// The original Earth model is intentionally retained as its own instance.
-/// SELENE's contract requires the existing EGM96 path to remain bit-identical.
-struct Egm96Model {
-    surface: SphericalHarmonicSurface,
-}
-
 /// Compact body-independent spherical-harmonic surface shared by Earth and Mars.
 pub struct SphericalHarmonicSurface {
     nmax: usize,
     coefficient_nmin: usize,
     /// (C̄, S̄) potential pairs, n = 2..=120, m = 0..=n, minus the WGS84
     /// normal-field even zonals (applied at load).
-    coefficients: Vec<(f64, f64)>,
+    pot: Vec<(f64, f64)>,
     /// NGA correction-model pairs in centimetres, n = 0..=120, m = 0..=n.
-    corrections: Vec<(f64, f64)>,
+    corr: Vec<(f64, f64)>,
 }
+
+/// The original Earth model remains a named instance of the generalized
+/// surface so its established release-build synthesis path retains its exact
+/// arithmetic shape.
+type Egm96Model = SphericalHarmonicSurface;
 
 fn read_u32(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(b[at..at + 4].try_into().expect("bounds checked"))
 }
 
 static MODEL: Lazy<Egm96Model> = Lazy::new(|| {
-    let mut surface = SphericalHarmonicSurface::parse(EGM96_BIN, b"F3DEGM96", 2);
-    assert_eq!(surface.nmax, NMAX, "geoid asset degree mismatch");
+    let mut model = SphericalHarmonicSurface::parse(EGM96_BIN, b"F3DEGM96", 2);
+    assert_eq!(model.nmax, NMAX, "geoid asset degree mismatch");
     // Subtract the normal field's even zonals (stored positively as +Jn/√(2n+1),
     // matching F477's DHCSIN which ADDS them to the negative C̄n0).
     for (n, j) in [(2usize, J2), (4, J4), (6, J6), (8, J8), (10, J10)] {
-        surface.coefficients[pot_index(n, 0)].0 += j / ((2 * n + 1) as f64).sqrt();
+        model.pot[pot_index(n, 0)].0 += j / ((2 * n + 1) as f64).sqrt();
     }
-    Egm96Model { surface }
+    model
 });
 
 impl SphericalHarmonicSurface {
@@ -100,21 +99,21 @@ impl SphericalHarmonicSurface {
             }
             values
         };
-        let coefficients = read_pairs(coefficient_count);
-        let corrections = read_pairs(correction_count);
+        let pot = read_pairs(coefficient_count);
+        let corr = read_pairs(correction_count);
         assert_eq!(off, b.len(), "harmonic surface asset trailing bytes");
         Self {
             nmax,
             coefficient_nmin,
-            coefficients,
-            corrections,
+            pot,
+            corr,
         }
     }
 
     #[inline(always)]
     fn coefficient(&self, n: usize, m: usize) -> (f64, f64) {
         let offset = self.coefficient_nmin * (self.coefficient_nmin + 1) / 2;
-        self.coefficients[harmonic_index(n, m) - offset]
+        self.pot[harmonic_index(n, m) - offset]
     }
 
     #[inline(always)]
@@ -226,7 +225,7 @@ macro_rules! harmonic_basis {
 /// EGM96 geoid undulation N(φ, λ) in metres. `lat_deg` is geodetic latitude,
 /// `lon_deg` longitude (either ±180 or 0..360 convention).
 pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
-    let model = &MODEL.surface;
+    let model = &*MODEL;
     let lat = lat_deg.to_radians();
     let lon = lon_deg.to_radians();
 
@@ -253,6 +252,7 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
         theta.sin(),
         lon
     );
+    let idx = |n: usize, m: usize| (n * (n + 1)) / 2 + m;
 
     // Height anomaly on the ellipsoid from the disturbing potential.
     let ar = AE / r;
@@ -265,8 +265,8 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
         // surface; this Earth-only radial weighting remains byte-identical.
         let mut sum = 0.0;
         for m in 0..=n {
-            let (c, s) = model.coefficients[pot_index(n, m)];
-            sum += pnm[harmonic_index(n, m)] * (c * cosml[m] + s * sinml[m]);
+            let (c, s) = model.pot[pot_index(n, m)];
+            sum += pnm[idx(n, m)] * (c * cosml[m] + s * sinml[m]);
         }
         a_sum += sum * arn;
     }
@@ -276,8 +276,8 @@ pub fn undulation_deg(lat_deg: f64, lon_deg: f64) -> f64 {
     let mut corr_sum = 0.0;
     for n in 0..=NMAX {
         for m in 0..=n {
-            let (c, s) = model.corrections[corr_index(n, m)];
-            corr_sum += pnm[harmonic_index(n, m)] * (c * cosml[m] + s * sinml[m]);
+            let (c, s) = model.corr[corr_index(n, m)];
+            corr_sum += pnm[idx(n, m)] * (c * cosml[m] + s * sinml[m]);
         }
     }
     zeta + corr_sum / 100.0 + ZERO_DEGREE_M
