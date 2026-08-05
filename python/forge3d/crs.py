@@ -50,12 +50,9 @@ except ImportError:
     pyproj = None  # type: ignore
 
 # The built-in pure-Rust MENSURA projection engine ships in the wheel and is
-# always available; the legacy optional `proj` feature is only a dev oracle.
-try:
-    from forge3d._forge3d import proj_available as _native_proj_available
-    HAS_NATIVE_PROJ = _native_proj_available()
-except (ImportError, AttributeError):
-    HAS_NATIVE_PROJ = False
+# always available for coordinate transforms; the optional `proj` Cargo feature
+# is only a dev-time differential oracle and is never a runtime fallback. pyproj
+# (imported above) is used only for WKT/EPSG metadata lookups.
 
 
 def _crs_transform(from_crs, to_crs, *, always_xy: bool = True):
@@ -70,16 +67,13 @@ def _crs_transform(from_crs, to_crs, *, always_xy: bool = True):
 
 
 def proj_available() -> bool:
-    """Report whether a general CRS transformation backend is available.
+    """Report availability of the shipped pure-Rust CRS transform engine.
 
-    `transform_coords` needs a general backend (native PROJ or pyproj) for
-    arbitrary EPSG pairs; the built-in pure-Rust engine only covers the
-    curated MENSURA projection whitelist (used directly by `reproject_geom`
-    and the `forge3d.gis` reprojection paths). Returning honestly here keeps
-    the `skipif(not proj_available())`-guarded CRS tests correct on wheels
-    that ship without pyproj.
+    MENSURA always provides the curated native transform surface. Unsupported
+    CRS pairs raise explicitly; availability does not imply that every EPSG or
+    free-form pipeline is supported.
     """
-    return HAS_NATIVE_PROJ or HAS_PYPROJ or HAS_PYPROJ_LEGACY
+    return True
 
 
 def transform_coords(
@@ -110,10 +104,11 @@ def transform_coords(
 
     Raises
     ------
-    RuntimeError
-        If no CRS transformation backend is available.
     ValueError
-        If the CRS is invalid or transformation fails.
+        If ``coords`` does not have shape (N, 2).
+    RuntimeError
+        If the source or destination CRS is unsupported by the built-in
+        MENSURA engine. The transform never silently falls back to pyproj.
 
     Example
     -------
@@ -132,56 +127,16 @@ def transform_coords(
     if _crs_equal(from_crs, to_crs):
         return coords.copy()
 
-    # Try native Rust implementation first
-    if HAS_NATIVE_PROJ:
-        try:
-            coords_list = coords.tolist()
-            result = _native_reproject(coords_list, from_crs, to_crs)
-            return np.array(result, dtype=np.float64)
-        except Exception:
-            # Fall through to pyproj
-            pass
-    else:
-        # CENSOR gate (d): native PROJ reprojection was compiled out of this
-        # wheel. Reaching a non-native backend is a capability degradation --
-        # record it on the certificate sink instead of substituting silently.
-        try:
-            from . import _degradation
-
-            _degradation.record(
-                "feature_not_compiled",
-                "proj",
-                "native PROJ reprojection unavailable; using pyproj fallback",
-            )
-        except Exception:
-            pass
-
-    # Fallback to pyproj (modern API: pyproj >= 2.0)
-    if HAS_PYPROJ:
-        try:
-            transformer = pyproj.Transformer.from_crs(
-                from_crs, to_crs, always_xy=always_xy
-            )
-            x, y = transformer.transform(coords[:, 0], coords[:, 1])
-            return np.column_stack([x, y])
-        except Exception as e:
-            raise ValueError(f"Reprojection failed: {e}") from e
-
-    # Fallback to legacy pyproj API (pyproj < 2.0)
-    if HAS_PYPROJ_LEGACY:
-        try:
-            # Legacy API uses pyproj.Proj and pyproj.transform
-            src_proj = pyproj.Proj(init=from_crs) if from_crs.upper().startswith("EPSG:") else pyproj.Proj(from_crs)
-            dst_proj = pyproj.Proj(init=to_crs) if to_crs.upper().startswith("EPSG:") else pyproj.Proj(to_crs)
-            x, y = pyproj.transform(src_proj, dst_proj, coords[:, 0], coords[:, 1])
-            return np.column_stack([x, y])
-        except Exception as e:
-            raise ValueError(f"Reprojection failed (legacy API): {e}") from e
-
-    raise RuntimeError(
-        "No CRS transformation backend available. "
-        "Install pyproj (pip install pyproj) or build forge3d with proj feature."
-    )
+    # MENSURA: transform through the built-in pure-Rust engine only. An
+    # unsupported/unregistered CRS raises rather than silently falling back to
+    # pyproj. This is the same native-only path as ``reproject_geom``.
+    transformer = _crs_transform(from_crs, to_crs, always_xy=always_xy)
+    result = np.empty_like(coords)
+    for i in range(coords.shape[0]):
+        tx, ty = transformer.transform_point(float(coords[i, 0]), float(coords[i, 1]))
+        result[i, 0] = tx
+        result[i, 1] = ty
+    return result
 
 
 def reproject_geom(

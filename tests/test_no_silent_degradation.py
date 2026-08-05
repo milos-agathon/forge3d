@@ -294,6 +294,12 @@ def test_d_wheel_features_and_native_gis_backends_are_honest():
     crs_source = (ROOT / "python" / "forge3d" / "crs.py").read_text(encoding="utf-8")
     assert "_native.CrsTransform.from_crs" in crs_source
     assert "never as a transform backend" in crs_source
+    transform_source = crs_source.split("def transform_coords(", 1)[1].split(
+        "\ndef reproject_geom", 1
+    )[0]
+    assert "transformer = _crs_transform" in transform_source
+    assert "pyproj.Transformer" not in transform_source
+    assert "pyproj.transform(" not in transform_source
 
     # geos-topology: even though the wheel now ships it, the Rust boundary keeps
     # an explicit require_topology_backend / BackendUnavailable gate so a minimal
