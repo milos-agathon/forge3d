@@ -172,6 +172,31 @@ def test_a_sparse_plume_mismatch_raises_even_though_the_median_is_zero():
                         np.datetime64("2026-08-04T00"))
 
 
+def test_a_small_smooth_assimilation_increment_is_consistent_not_fatal():
+    """The identity premise fails on real ADS data: the analysis at t_init
+    carries assimilation increments the same-hour forecast init does not.
+
+    [measured on the 2026-08-05 delivery] max|d| = 0.0066 on a field of
+    p99.9 = 0.156 (4.3% of scale), 93% of cells differing at the 1e-6 level,
+    u10 up to 0.12 m/s -- smooth, field-wide, and far beyond the packing-noise
+    identity threshold, yet unmistakably the same weather. A WRONG run is not
+    this gate's last line of defence: fetch.run pins the forecast arm's axis to
+    this run's request (test_run_stops_on_a_forecast_arm_from_an_older_run).
+    """
+    rng = np.random.default_rng(5)
+    good = (0.05 + 0.25 * rng.random((NLAT, NLON))).astype("float32")
+    drifted = (good * 1.03).astype("float32")     # a smooth 3% increment
+    an = _arm_from_fields(["2026-08-04T00"], [good])
+    fc = _arm_from_fields(["2026-08-04T00", "2026-08-04T03"], [drifted, drifted])
+    merged, report = cams.merge_arms(an, fc, np.datetime64("2026-08-04T00"),
+                                     np.datetime64("2026-08-04T00"))
+    stats = report["lead0_identity"]
+    assert stats["max"] > stats["threshold"], "fixture must exceed identity"
+    assert stats["verdict"] == "assimilation_increment"
+    assert stats["max"] <= stats["increment_max_allowed"]
+    assert int(merged.sizes["time"]) == 2
+
+
 def test_a_clean_air_domain_does_not_false_alarm_on_rounding_noise():
     """The other end: an all-but-zero field must not make the gate hair-trigger.
 

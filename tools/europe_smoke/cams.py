@@ -521,6 +521,19 @@ def requested_forecast_times(axis: Axis, request: dict) -> list[dt.datetime]:
 LEAD0_ATOL = 1e-3
 LEAD0_RTOL = 1e-3
 
+# The identity premise above holds only when ADS serves both arms from the
+# same physical cycle. [measured on the 2026-08-05 delivery] the analysis at
+# t_init carries ASSIMILATION INCREMENTS the same-hour forecast init does not:
+# max|d| = 0.0066 on a field of p99.9 = 0.156 (4.3% of scale), 93% of cells
+# differing at the 1e-6 level, u10 up to 0.12 m/s -- smooth, field-wide, and
+# unmistakably the same weather. So the gate has two bands: exact identity
+# (packing noise) passes as before, a bounded smooth increment is recorded as
+# `assimilation_increment`, and anything beyond it still fails hard. A WRONG
+# run does not depend on this gate alone: fetch.run pins the forecast arm's
+# delivered axis to this run's request before merge_arms ever sees it.
+LEAD0_INCREMENT_MAX_FRAC = 0.10    # max|d| ceiling, as a fraction of p99.9|a|
+LEAD0_INCREMENT_P999_FRAC = 0.05   # p99.9|d| ceiling, same scale
+
 
 def _time_keys(values) -> np.ndarray:
     """Integer-nanosecond keys for a time axis.
@@ -621,12 +634,23 @@ def merge_arms(analysis: xr.Dataset, forecast: xr.Dataset, t_now, t_init,
                 f"lead 0 has no finite cells to compare (all {stats['n_total']} are "
                 "non-finite) - the delivery is empty, not identical"
             )
-        if not stats["max"] <= stats["threshold"]:
-            raise AssertionError(
-                f"forecast lead 0 is not the analysis: max|d|={stats['max']:.6g} > "
-                f"{stats['threshold']:.6g} ({stats['n_differing']} of "
-                f"{stats['n_cells']} cells differ) - revisit the arm definitions"
-            )
+        if stats["max"] <= stats["threshold"]:
+            stats["verdict"] = "identical"
+        else:
+            inc_max = LEAD0_ATOL + LEAD0_INCREMENT_MAX_FRAC * stats["scale_p99_9"]
+            inc_p999 = LEAD0_ATOL + LEAD0_INCREMENT_P999_FRAC * stats["scale_p99_9"]
+            stats["increment_max_allowed"] = inc_max
+            stats["increment_p99_9_allowed"] = inc_p999
+            if stats["max"] <= inc_max and stats["p99_9"] <= inc_p999:
+                stats["verdict"] = "assimilation_increment"
+            else:
+                raise AssertionError(
+                    f"forecast lead 0 is not the analysis: max|d|={stats['max']:.6g} "
+                    f"(allowed {inc_max:.6g}) or p99.9|d|={stats['p99_9']:.6g} "
+                    f"(allowed {inc_p999:.6g}); {stats['n_differing']} of "
+                    f"{stats['n_cells']} cells differ beyond even an assimilation "
+                    "increment - revisit the arm definitions"
+                )
 
     forecast = forecast.sel(time=forecast["time"] > t_now)
     if set(_time_keys(forecast["time"].values).tolist()) & an_set:
