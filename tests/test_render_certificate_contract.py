@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-import sys
 
 import numpy as np
 
@@ -18,6 +17,7 @@ from forge3d.north_arrow import NorthArrow
 from forge3d.offline import render_offline
 from forge3d.scale_bar import ScaleBar
 from forge3d.sdf import HybridRenderer, SdfPrimitive, SdfScene
+import forge3d.smoke as smoke_module
 from forge3d.smoke import SmokeDomain
 from forge3d.vector import VectorScene
 import forge3d._forge3d as _native
@@ -396,12 +396,12 @@ def test_native_smoke_certificate_uses_cpu_identity():
     assert [entry["label"] for entry in cert["passes"]] == ["smoke.cpu_projection"]
     assert cert["adapter"]["backend"] == "cpu"
     assert cert["engine"]["wgsl_module_hashes"] == {}
-    if sys.version_info >= (3, 14):
+    if smoke_module._HAS_NATIVE_SMOKE:
+        assert cert["degradations"] == []
+    else:
         assert {(item["kind"], item["name"]) for item in cert["degradations"]} == {
             ("cpu_fallback", "smoke.render")
         }
-    else:
-        assert cert["degradations"] == []
 
 
 def test_fallback_renderer_discloses_cpu_degradation():

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.ci_pytest_lane import default_lane_files
+from scripts.ci_pytest_lane import full_lane_files
 
 
 ROOT = Path(
@@ -202,15 +202,22 @@ def test_m06_path_filter_and_aggregator_contract() -> None:
         "github.event_name == 'schedule'",
         "inputs.scope == 'full'",
         "inputs.scope == 'm06'",
-        "github.event_name == 'pull_request'",
-        "contains(github.event.pull_request.labels.*.name, 'run-physical')",
-        "needs.terrain-golden-paths.outputs.m06 == 'true'",
     ):
         assert clause in m06_job
-    assert "github.event_name == 'push'" not in m06_job
+    for forbidden in (
+        "github.event_name == 'pull_request'",
+        "github.event_name == 'push'",
+        "run-physical",
+        "needs.terrain-golden-paths.outputs.m06",
+    ):
+        assert forbidden not in m06_job
 
     aggregate = workflow.split("  full-acceptance-summary:", 1)[1]
-    assert "m06_selected=" in aggregate
+    assert (
+        "m06_selected=\"${{ github.event_name == 'schedule' || "
+        "(github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || "
+        "inputs.scope == 'm06')) }}\"" in aggregate
+    )
     assert (
         "check_selected \"$m06_selected\" '${{ needs.test-m06-full-geospatial-viewer.result }}' m06-physical"
         in aggregate
@@ -227,7 +234,7 @@ def test_m06_acceptance_keeps_only_unique_physical_coverage() -> None:
     )[1].split("      - name: Summarize public M-06 evidence", 1)[0]
 
     assert "      - name: Run M-06 Rust ABI and adapter gates" not in m06_job
-    canonical_lane = set(default_lane_files())
+    canonical_lane = set(full_lane_files())
     for redundant in (
         "tests/test_m06_anchoring_boundary.py",
         "tests/test_world_coord_f32_gate.py",

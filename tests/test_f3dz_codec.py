@@ -225,11 +225,13 @@ def test_physical_gpu_ci_contract_is_zero_skip_and_records_benchmark() -> None:
     assert "github.event_name == 'schedule'" in job
     assert "inputs.scope == 'full'" in job
     assert "inputs.scope == 'f3dz'" in job
-    assert "github.event_name == 'pull_request'" in job
-    assert "github.event.pull_request.head.repo.full_name == github.repository" in job
-    assert "contains(github.event.pull_request.labels.*.name, 'run-physical')" in job
-    assert "github.event_name == 'push'" not in job
-    assert "needs.terrain-golden-paths.outputs.f3dz == 'true'" in job
+    for forbidden in (
+        "github.event_name == 'pull_request'",
+        "github.event_name == 'push'",
+        "run-physical",
+        "needs.terrain-golden-paths.outputs.f3dz",
+    ):
+        assert forbidden not in job
 
     f3dz_paths = workflow.split("            f3dz:\n", 1)[1].split(
         "\n            anamnesis:\n", 1

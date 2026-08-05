@@ -154,7 +154,7 @@ def test_f3dz_stream_hashes_run_on_two_hosted_platforms():
     assert "f3dz-determinism-${{ matrix.os }}" in workflow
 
 
-def test_shadow_shader_changes_select_only_the_render_family_in_ci():
+def test_shadow_shader_classifier_is_retained_without_pr_path_gating():
     ci = (WORKFLOW.parent / "ci.yml").read_text()
     classifier = ci.split("            determinism_render:\n", 1)[1].split(
         "\n            determinism_f3dz:\n", 1
@@ -166,7 +166,11 @@ def test_shadow_shader_changes_select_only_the_render_family_in_ci():
     caller = ci.split("  determinism-render:", 1)[1].split(
         "\n  determinism-f3dz:", 1
     )[0]
-    assert "needs.terrain-golden-paths.outputs.determinism_render == 'true'" in caller
+    assert "needs.terrain-golden-paths.outputs.determinism_render" not in caller
+    assert "github.event_name == 'schedule'" in caller
+    assert "inputs.scope == 'full'" in caller
+    assert "inputs.scope == 'determinism'" in caller
+    assert "github.event_name == 'pull_request'" not in caller
     assert "uses: ./.github/workflows/determinism-matrix.yml" in caller
     assert "run_render: true" in caller
 

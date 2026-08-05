@@ -65,10 +65,9 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request'" in body
 
     trigger = workflow.split("\npermissions:", 1)[0]
-    assert (
-        "types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]"
-        in trigger
-    )
+    assert "types: [opened, synchronize, reopened, ready_for_review]" in trigger
+    assert "labeled" not in trigger
+    assert "unlabeled" not in trigger
     scopes = ["core", "full", "determinism", "m06", "f3dz", "anamnesis"]
     if tessella_enabled:
         scopes.append("tessella")
@@ -198,6 +197,30 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
     assert "retention-days: 90" in _artifact_step(
         _job(certificate, "refresh"), "refreshed-recipe-certificates"
     )
+
+
+def test_only_the_small_core_jobs_can_run_on_pr_or_push_events() -> None:
+    """Any new CI job is acceptance-only until this allowlist is reviewed."""
+    jobs = _workflow_data("ci.yml")["jobs"]
+    routine = {"preflight", "test-fast-contract", "pr-core-success"}
+    assert routine <= set(jobs)
+
+    assert jobs["preflight"].get("if") is None
+    assert jobs["test-fast-contract"].get("if") is None
+    assert jobs["pr-core-success"].get("if") == "always()"
+
+    for name, job in jobs.items():
+        if name in routine:
+            continue
+        condition = str(job.get("if", ""))
+        assert condition, f"{name} lacks an explicit acceptance-only condition"
+        assert "github.event_name == 'pull_request'" not in condition, name
+        assert "github.event_name == 'push'" not in condition, name
+        assert "run-physical" not in condition, name
+        assert (
+            "github.event_name == 'schedule'" in condition
+            or "github.event_name == 'workflow_dispatch'" in condition
+        ), f"{name} is not routed through schedule or explicit dispatch"
 
 
 def test_publish_cost_controls_are_tag_only_and_retention_aware() -> None:
@@ -382,11 +405,7 @@ def test_tessella_acceptance_is_absent_or_exactly_scoped() -> None:
         """
         github.event_name == 'schedule' ||
         (github.event_name == 'workflow_dispatch' &&
-         (inputs.scope == 'full' || inputs.scope == 'tessella')) ||
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name == github.repository &&
-         contains(github.event.pull_request.labels.*.name, 'run-physical') &&
-         needs.terrain-golden-paths.outputs.tessella == 'true')
+         (inputs.scope == 'full' || inputs.scope == 'tessella'))
         """.split()
     )
     assert " ".join(lane["if"].split()) == expected_condition
@@ -460,11 +479,11 @@ def test_tessella_acceptance_is_absent_or_exactly_scoped() -> None:
     summary = jobs["full-acceptance-summary"]
     assert "test-tessella-gpu" in summary["needs"]
     assert "always()" in summary["if"]
-    assert (
-        "contains(github.event.pull_request.labels.*.name, 'run-physical')"
-        in summary["if"]
-    )
-    assert "needs.terrain-golden-paths.outputs.tessella == 'true'" in summary["if"]
+    assert "github.event_name == 'schedule'" in summary["if"]
+    assert "github.event_name == 'workflow_dispatch'" in summary["if"]
+    assert "github.event_name == 'pull_request'" not in summary["if"]
+    assert "github.event_name == 'push'" not in summary["if"]
+    assert "run-physical" not in summary["if"]
 
     enforcement_steps = [
         step for step in summary["steps"] if "check_selected()" in step.get("run", "")
@@ -474,10 +493,7 @@ def test_tessella_acceptance_is_absent_or_exactly_scoped() -> None:
     assert (
         "tessella_selected=\"${{ github.event_name == 'schedule' || "
         "(github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || "
-        "inputs.scope == 'tessella')) || (github.event_name == 'pull_request' && "
-        "github.event.pull_request.head.repo.full_name == github.repository && "
-        "contains(github.event.pull_request.labels.*.name, 'run-physical') && "
-        "needs.terrain-golden-paths.outputs.tessella == 'true') }}\"" in enforcement_run
+        "inputs.scope == 'tessella')) }}\"" in enforcement_run
     )
     assert (
         'check_selected "$tessella_selected" '
@@ -491,28 +507,24 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
     def normalize(value: str) -> str:
         return " ".join(value.split())
 
-    def expected_condition(scope: str, output: str) -> str:
+    def expected_condition(scope: str) -> str:
         return normalize(
             f"""
             github.event_name == 'schedule' ||
             (github.event_name == 'workflow_dispatch' &&
-             (inputs.scope == 'full' || inputs.scope == '{scope}')) ||
-            (github.event_name == 'pull_request' &&
-             github.event.pull_request.head.repo.full_name == github.repository &&
-             contains(github.event.pull_request.labels.*.name, 'run-physical') &&
-             needs.terrain-golden-paths.outputs.{output} == 'true')
+             (inputs.scope == 'full' || inputs.scope == '{scope}'))
             """
         )
 
     expected = {
-        "test-m06-full-geospatial-viewer": expected_condition("m06", "m06"),
-        "test-f3dz-gpu": expected_condition("f3dz", "f3dz"),
-        "test-anamnesis-portability-seed": expected_condition("anamnesis", "anamnesis"),
-        "test-anamnesis-portability": expected_condition("anamnesis", "anamnesis"),
-        "test-anamnesis-production": expected_condition("anamnesis", "anamnesis"),
+        "test-m06-full-geospatial-viewer": expected_condition("m06"),
+        "test-f3dz-gpu": expected_condition("f3dz"),
+        "test-anamnesis-portability-seed": expected_condition("anamnesis"),
+        "test-anamnesis-portability": expected_condition("anamnesis"),
+        "test-anamnesis-production": expected_condition("anamnesis"),
     }
     if "test-tessella-gpu" in jobs:
-        expected["test-tessella-gpu"] = expected_condition("tessella", "tessella")
+        expected["test-tessella-gpu"] = expected_condition("tessella")
     for job_name, condition in expected.items():
         assert normalize(jobs[job_name]["if"]) == condition
 
@@ -528,7 +540,6 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
         return (
             event == "schedule"
             or (event == "workflow_dispatch" and scope in {"full", family})
-            or (event == "pull_request" and internal and labeled and path_selected)
         )
 
     cases = (
@@ -558,7 +569,7 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
                 "labeled": True,
                 "path_selected": True,
             },
-            True,
+            False,
         ),
         ({"event": "schedule"}, True),
         ({"event": "workflow_dispatch", "scope": "core"}, False),
