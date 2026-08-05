@@ -132,6 +132,10 @@ impl Viewer {
         };
 
         let frame = self.current_frame_camera();
+        let snapshot_sky_ready = self.sky_enabled
+            && terrain_snap_size.is_some_and(|(width, height)| {
+                self.encode_snapshot_sky(&mut encoder, width, height, frame)
+            });
         if let Some(mut tv) = self.terrain_viewer.take() {
             if tv.has_terrain() {
                 eprintln!("[DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request={:?}, terrain_snap_size={:?}",
@@ -160,17 +164,28 @@ impl Viewer {
                     if tv.pbr_config.motion_blur.enabled && tv.pbr_config.motion_blur.samples > 1 {
                         // Motion blur handles its own encoder internally
                         self.queue.submit(std::iter::once(encoder.finish()));
-                        if let Some(tex) =
-                            tv.render_with_motion_blur(self.config.format, snap_w, snap_h, frame)
-                        {
-                            self.pending_snapshot_tex = Some(tex);
-                        }
+                        let motion_blur_tex =
+                            tv.render_with_motion_blur(self.config.format, snap_w, snap_h, frame);
                         // Create a new encoder for any remaining work
                         encoder =
                             self.device
                                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                                     label: Some("viewer.render.post_motion_blur"),
                                 });
+                        if let Some(tex) = motion_blur_tex {
+                            if snapshot_sky_ready {
+                                if let Some(depth_view) = tv.snapshot_depth_view() {
+                                    let color_view =
+                                        tex.create_view(&wgpu::TextureViewDescriptor::default());
+                                    self.present_snapshot_sky(
+                                        &mut encoder,
+                                        &color_view,
+                                        Some(&depth_view),
+                                    );
+                                }
+                            }
+                            self.pending_snapshot_tex = Some(tex);
+                        }
                     } else {
                         if let Some(tex) = tv.render_to_texture(
                             &mut encoder,
@@ -180,11 +195,11 @@ impl Viewer {
                             self.selected_feature_id,
                             frame,
                         ) {
-                            if self.sky_enabled {
+                            if snapshot_sky_ready {
                                 if let Some(depth_view) = tv.snapshot_depth_view() {
                                     let color_view =
                                         tex.create_view(&wgpu::TextureViewDescriptor::default());
-                                    self.present_sky_output(
+                                    self.present_snapshot_sky(
                                         &mut encoder,
                                         &color_view,
                                         Some(&depth_view),
@@ -279,8 +294,9 @@ impl Viewer {
                                 let snap_view =
                                     snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
-                                if sky_prefilled {
-                                    self.present_sky_output(&mut encoder, &snap_view, None);
+                                let snapshot_sky_prefilled = sky_prefilled && snapshot_sky_ready;
+                                if snapshot_sky_prefilled {
+                                    self.present_snapshot_sky(&mut encoder, &snap_view, None);
                                 }
 
                                 scene.render_viewer_terrain(
@@ -289,7 +305,7 @@ impl Viewer {
                                     self.config.format,
                                     snap_w,
                                     snap_h,
-                                    sky_prefilled,
+                                    snapshot_sky_prefilled,
                                 );
 
                                 self.pending_snapshot_tex = Some(snap_tex);

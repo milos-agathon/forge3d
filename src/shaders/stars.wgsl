@@ -14,6 +14,7 @@ struct CameraUniforms {
     inv_proj: mat4x4<f32>,
     eye_position: vec3<f32>,
     _pad0: f32,
+    viewport: vec4<f32>,
 }
 
 @group(0) @binding(0) var<storage, read> instances: array<NightInstance>;
@@ -27,6 +28,7 @@ struct VertexOutput {
     @location(1) @interpolate(flat) kind: u32,
     @location(2) @interpolate(flat) phase: f32,
     @location(3) @interpolate(flat) color_intensity: vec4<f32>,
+    @location(4) @interpolate(flat) center_px: vec2<f32>,
 }
 
 fn quad_corner(index: u32) -> vec2<f32> {
@@ -47,12 +49,7 @@ fn vs_night(
     let item = instances[instance_index];
     let corner = quad_corner(vertex_index);
     let direction = item.direction_radius.xyz;
-    let world_direction = normalize(
-        direction
-        + item.direction_radius.w
-            * (item.right_kind.xyz * corner.x + item.up_phase.xyz * corner.y)
-    );
-    let view_direction = (camera.view * vec4<f32>(world_direction, 0.0)).xyz;
+    let center_view_direction = (camera.view * vec4<f32>(direction, 0.0)).xyz;
 
     var output: VertexOutput;
     // Celestial objects are at infinity, so only the clip-space XY/W of the
@@ -61,8 +58,32 @@ fn vs_night(
     // 1.0 world unit (frame_anchor.rs), which would clip a unit-distance quad
     // away everywhere except exactly on the optical axis. This pass has no
     // depth attachment, so the pinned Z affects clipping only.
-    let clip = camera.proj * vec4<f32>(view_direction, 1.0);
-    output.position = vec4<f32>(clip.xy, 0.0, clip.w);
+    let center_clip = camera.proj * vec4<f32>(center_view_direction, 1.0);
+    let center_ndc = center_clip.xy / center_clip.w;
+    output.center_px = vec2<f32>(
+        (center_ndc.x * 0.5 + 0.5) * camera.viewport.x,
+        (0.5 - center_ndc.y * 0.5) * camera.viewport.y,
+    );
+    if (u32(item.right_kind.w) == 0u) {
+        let pixel_offset = vec2<f32>(
+            2.0 * corner.x * item.direction_radius.w / camera.viewport.x,
+            2.0 * corner.y * item.direction_radius.w / camera.viewport.y,
+        );
+        output.position = vec4<f32>(
+            center_clip.xy + pixel_offset * center_clip.w,
+            0.0,
+            center_clip.w,
+        );
+    } else {
+        let world_direction = normalize(
+            direction
+            + item.direction_radius.w
+                * (item.right_kind.xyz * corner.x + item.up_phase.xyz * corner.y)
+        );
+        let view_direction = (camera.view * vec4<f32>(world_direction, 0.0)).xyz;
+        let clip = camera.proj * vec4<f32>(view_direction, 1.0);
+        output.position = vec4<f32>(clip.xy, 0.0, clip.w);
+    }
     if (direction.y <= 0.0) {
         output.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
     }
@@ -75,6 +96,16 @@ fn vs_night(
 
 @fragment
 fn fs_night(input: VertexOutput) -> @location(0) vec4<f32> {
+    if (input.kind == 0u) {
+        // Pixel-integrated separable tent. For any fractional point position,
+        // the weights of its at-most-four recipient pixels sum to exactly one.
+        let delta = abs(input.position.xy - input.center_px);
+        let weight = max(1.0 - delta.x, 0.0) * max(1.0 - delta.y, 0.0);
+        return vec4<f32>(
+            input.color_intensity.rgb,
+            weight * clamp(input.color_intensity.w, 0.0, 1.0) * input.phase,
+        );
+    }
     let local = input.uv * 2.0 - 1.0;
     let radius_squared = dot(local, local);
     if (radius_squared > 1.0) {
@@ -93,10 +124,8 @@ fn fs_night(input: VertexOutput) -> @location(0) vec4<f32> {
         let to_sun = vec3<f32>(sin(input.phase), 0.0, cos(input.phase));
         let illumination = max(dot(normal, to_sun), 0.0);
         let edge = smoothstep(1.0, 0.94, radius_squared);
-        // `up_phase.w` carries the phase ANGLE for the Moon, so the declared
-        // twilight ramp rides in `color_intensity.w` instead (unused for this
-        // kind). Without it the Moon would composite at alpha 1 over the
-        // daylight sky and read as a dark disc punched into midday blue.
+        // `up_phase.w` carries the phase angle; the disc alpha is independent
+        // of the star-only twilight visibility ramp.
         return vec4<f32>(
             input.color_intensity.rgb * albedo * (0.015 + 1.35 * illumination),
             edge * input.color_intensity.w,
@@ -111,9 +140,5 @@ fn fs_night(input: VertexOutput) -> @location(0) vec4<f32> {
             profile * input.phase,
         );
     }
-    // Stars have one constant angular footprint. `color_intensity.w` is the
-    // linearly exposed catalogue irradiance, so the integrated sprite energy
-    // preserves the astronomical magnitude ratio while twilight is visible.
-    let alpha = profile * clamp(input.color_intensity.w, 0.0, 1.0) * input.phase;
-    return vec4<f32>(input.color_intensity.rgb, alpha);
+    return vec4<f32>(0.0);
 }

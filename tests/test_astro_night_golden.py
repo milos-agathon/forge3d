@@ -1,10 +1,10 @@
 """SIDERA night-sky golden — DoD 6.
 
-The committed frame must be byte-identical across two in-process renders, across
-two *separate processes* on a pinned backend, and equal to the committed PNG and
-its SHA-256 sidecar in ``tests/goldens/determinism/`` — the same inventory and
-the same zero-byte tolerance the TERRA-DETERMINATA harness
-(``tests/test_determinism_hash.py``) applies to the canonical terrain render.
+The frame must be byte-identical across two in-process renders and across two
+*separate processes* on a pinned backend.  The committed Metal reference must
+also equal its PNG and SHA-256 sidecar in ``tests/goldens/determinism/`` — the
+same inventory and zero-byte tolerance the TERRA-DETERMINATA harness
+(``tests/test_determinism_hash.py``) applies to its reference renders.
 """
 
 from __future__ import annotations
@@ -49,17 +49,19 @@ def _adapter_is_hardware() -> bool:
         return False
     device_type = str(probe.get("device_type", "")).lower()
     name = str(probe.get("name", "")).lower()
-    software_markers = ("cpu", "software", "warp", "lavapipe", "llvmpipe", "swiftshader")
+    software_markers = (
+        "cpu",
+        "software",
+        "warp",
+        "lavapipe",
+        "llvmpipe",
+        "swiftshader",
+        "paravirtual",
+    )
     if any(marker in name for marker in software_markers):
         return False
     return device_type in {"discretegpu", "integratedgpu", "discrete_gpu", "integrated_gpu"}
 
-
-HARDWARE_ADAPTER = _adapter_is_hardware()
-requires_hardware = pytest.mark.skipif(
-    not HARDWARE_ADAPTER,
-    reason="byte-exact golden equality is only claimed on a proven non-software adapter",
-)
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "tests" / "golden" / "sidera_night.png"
@@ -86,6 +88,15 @@ def _determinism_backend() -> str:
     if sys.platform == "darwin":
         return "metal"
     return "vulkan"
+
+
+REFERENCE_BACKEND = "metal"
+HARDWARE_ADAPTER = _adapter_is_hardware()
+requires_reference_hardware = pytest.mark.skipif(
+    not HARDWARE_ADAPTER
+    or _determinism_backend().strip().lower() != REFERENCE_BACKEND,
+    reason="committed SIDERA bytes require a proven physical Metal reference adapter",
+)
 
 
 def _render_in_subprocess(destination: Path) -> str:
@@ -120,6 +131,26 @@ def _components(mask: np.ndarray) -> list[int]:
     return sizes
 
 
+def _largest_component_bounds(mask: np.ndarray) -> tuple[int, int]:
+    pending = set(map(tuple, np.argwhere(mask)))
+    largest: list[tuple[int, int]] = []
+    while pending:
+        stack = [pending.pop()]
+        component = []
+        while stack:
+            y, x = stack.pop()
+            component.append((y, x))
+            for neighbor in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if neighbor in pending:
+                    pending.remove(neighbor)
+                    stack.append(neighbor)
+        if len(component) > len(largest):
+            largest = component
+    assert largest
+    ys, xs = zip(*largest)
+    return max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+
+
 def test_night_sky_render_is_repeatable_and_certified(tmp_path):
     """Two in-process renders, zero byte tolerance, plus the certificate shape.
 
@@ -140,29 +171,37 @@ def test_night_sky_render_is_repeatable_and_certified(tmp_path):
     rgba = np.asarray(first.to_numpy())
     assert rgba.shape == (512, 768, 4)
     # Moon + planets + stars: at least three lit, multi-pixel components.
-    assert len([size for size in _components(rgba[..., :3].max(axis=2) > 24) if size >= 2]) >= 3
+    background = np.median(rgba[..., :3].reshape(-1, 3), axis=0).astype(np.int16)
+    foreground = np.abs(rgba[..., :3].astype(np.int16) - background).max(axis=2) > 8
+    assert len([size for size in _components(foreground) if size >= 2]) >= 3
 
     certificate = render_certificate(sign=False)
     labels = [entry["label"] for entry in certificate["passes"]]
-    assert labels == ["astro.night.overlay"]
+    assert labels == ["astro.night.overlay", "astro.night.resolve"]
     assert certificate["models"] == {
         "astro.moonlight": (
             "Krisciunas and Schaefer 1991 phase and extinction; 0.172 mag per "
-            "airmass; normalized to 0.25 lux zenith full Moon"
+            "airmass; 0.25 lux pre-extinction reference; live terrain term "
+            "normalized by the modeled zenith full Moon after extinction (not "
+            "applied to this sky-only golden)"
         ),
         "astro.planet_display": (
             "artistic fixed display intensities; no physical planetary photometry claim"
         ),
         "astro.star_photometry": (
-            "catalogue magnitude-to-irradiance ratio; constant 0.05 degree sprite "
-            "radius; linear exposure 0.20; no visibility floor"
+            "catalogue magnitude-to-irradiance ratio; resolution-invariant "
+            "pixel-integrated tent splat in linear HDR; exposure 0.20; one "
+            "Reinhard plus sRGB display resolve; no visibility floor"
         ),
         "astro.twilight": (
             "SIDERA civil-to-astronomical smoothstep; solar altitude -4 to -18 "
             "degrees; rendering visibility model"
         ),
     }
-    assert set(certificate["engine"]["wgsl_module_hashes"]) == {"astro.night.shader"}
+    assert set(certificate["engine"]["wgsl_module_hashes"]) == {
+        "astro.night.resolve.shader",
+        "astro.night.shader",
+    }
     # `finish_render_capture` re-derives a `capability_absent` degradation for
     # every negotiated feature the device did not grant, and records
     # `timing_unavailable` when a timestamp query resolves invalid. Neither is
@@ -174,26 +213,49 @@ def test_night_sky_render_is_repeatable_and_certified(tmp_path):
         if degradation["kind"] == "capability_absent":
             assert degradation["name"] not in granted, degradation
         else:
-            assert degradation["name"] == "astro.night.overlay", degradation
+            assert degradation["name"] in {
+                "astro.night.overlay",
+                "astro.night.resolve",
+            }, degradation
 
 
-@requires_hardware
-def test_night_golden_matches_committed_bytes_on_a_pinned_backend(tmp_path):
-    """DoD 6: two *processes* on a pinned backend, byte-identical to the golden.
+def test_night_frame_custom_aspects_preserve_the_moon_disc():
+    """The dimension-specific projection does not stretch celestial discs."""
+    for width, height in ((512, 256), (256, 512)):
+        rgba = np.asarray(
+            native._astro_night_golden_frame(width=width, height=height).to_numpy()
+        )
+        assert rgba.shape == (height, width, 4)
+        background = np.median(rgba[..., :3].reshape(-1, 3), axis=0).astype(np.int16)
+        foreground = np.abs(rgba[..., :3].astype(np.int16) - background).max(axis=2) > 20
+        disc_width, disc_height = _largest_component_bounds(foreground)
+        assert abs(disc_width - disc_height) <= 2, (width, height, disc_width, disc_height)
 
-    This is the SIDERA member of the ``tests/test_determinism_hash.py`` family:
-    same zero-byte tolerance, same backend pin, same committed SHA-256 sidecar.
-    """
-    first_png = tmp_path / "process_a.png"
-    first = _render_in_subprocess(first_png)
+
+def test_night_golden_is_cross_process_repeatable_on_pinned_backend(tmp_path):
+    """DoD 6: two processes on the selected backend produce identical bytes."""
+    first = _render_in_subprocess(tmp_path / "process_a.png")
     second = _render_in_subprocess(tmp_path / "process_b.png")
     assert first == second, (
         "cross-process nondeterminism in the SIDERA night render on "
         f"{_determinism_backend()}\n  first:  {first}\n  second: {second}"
     )
 
+
+@requires_reference_hardware
+def test_night_golden_matches_committed_metal_bytes(tmp_path):
+    """DoD 6: the pinned physical Metal render equals the committed golden.
+
+    This is the SIDERA member of the ``tests/test_determinism_hash.py`` family:
+    same zero-byte tolerance and same committed SHA-256 sidecar. Other physical
+    backends prove their own repeatability above; they are not claimed to
+    reproduce a reference generated on Metal.
+    """
+    first_png = tmp_path / "process_a.png"
+    first = _render_in_subprocess(first_png)
+
     if _update_goldens_enabled():
-        # Refreshing happens here, from the pinned-backend render, so the
+        # Refreshing happens here, from the pinned Metal render, so the
         # committed bytes can never come from whatever backend the ambient
         # test process happened to pick.
         GOLDEN.parent.mkdir(parents=True, exist_ok=True)
@@ -213,7 +275,7 @@ def test_night_golden_matches_committed_bytes_on_a_pinned_backend(tmp_path):
     assert np.array_equal(f3d.png_to_numpy(first_png), f3d.png_to_numpy(GOLDEN))
 
 
-@requires_hardware
+@requires_reference_hardware
 def test_golden_refresh_does_not_rewrite_the_committed_file_when_disabled(
     tmp_path, monkeypatch
 ):
@@ -224,14 +286,12 @@ def test_golden_refresh_does_not_rewrite_the_committed_file_when_disabled(
     import, this ``delenv`` would be dead code and a corrupted frame could be
     copied over the golden during a refresh sweep.
     """
-    if not HARDWARE_ADAPTER:
-        pytest.skip("byte-exact golden equality requires a proven hardware adapter")
     before_png = GOLDEN.read_bytes()
     before_sha = GOLDEN_SHA.read_bytes()
     monkeypatch.setenv(UPDATE_ENV, "1")
     assert _update_goldens_enabled() is True
     monkeypatch.delenv(UPDATE_ENV)
     assert _update_goldens_enabled() is False
-    test_night_golden_matches_committed_bytes_on_a_pinned_backend(tmp_path)
+    test_night_golden_matches_committed_metal_bytes(tmp_path)
     assert GOLDEN.read_bytes() == before_png
     assert GOLDEN_SHA.read_bytes() == before_sha

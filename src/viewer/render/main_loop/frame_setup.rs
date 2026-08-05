@@ -130,6 +130,17 @@ impl Viewer {
             let base = (std::mem::size_of::<[[f32; 4]; 4]>() * 4) as u64;
             self.queue
                 .write_buffer(&self.sky_camera, base, bytemuck::cast_slice(&eye4));
+            let viewport: [f32; 4] = [
+                self.config.width as f32,
+                self.config.height as f32,
+                1.0 / self.config.width as f32,
+                1.0 / self.config.height as f32,
+            ];
+            self.queue.write_buffer(
+                &self.sky_camera,
+                base + std::mem::size_of::<[f32; 4]>() as u64,
+                bytemuck::cast_slice(&viewport),
+            );
 
             // Update sky params each frame based on viewer-set fields
             let sun_dir_ws = glam::Vec3::from_array(self.sky_sun_direction_ws).normalize();

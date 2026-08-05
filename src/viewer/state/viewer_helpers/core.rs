@@ -80,12 +80,7 @@ impl Viewer {
 
     pub(crate) fn sync_terrain_sun_to_lit(&mut self) {
         let direction = glam::Vec3::from_array(self.lit_sun_direction_ws).normalize();
-        let azimuth = direction
-            .x
-            .atan2(direction.z)
-            .to_degrees()
-            .rem_euclid(360.0);
-        let elevation = direction.y.clamp(-1.0, 1.0).asin().to_degrees();
+        let (azimuth, elevation) = terrain_sun_angles(direction);
         if let Some(terrain_viewer) = self.terrain_viewer.as_mut() {
             terrain_viewer.set_sun(
                 azimuth,
@@ -120,14 +115,14 @@ impl Viewer {
             self.astro_night_revision = observation.revision;
         }
         if observation.revision != self.astro_observation_revision {
-            let azimuth_rad = azimuth.to_radians();
-            let elevation_rad = elevation.to_radians();
-            self.sky_sun_direction_ws = [
-                elevation_rad.cos() * azimuth_rad.sin(),
-                elevation_rad.sin(),
-                elevation_rad.cos() * azimuth_rad.cos(),
-            ];
+            self.sky_sun_direction_ws =
+                crate::astro::night::horizontal_direction(f64::from(azimuth), f64::from(elevation))
+                    .as_vec3()
+                    .to_array();
             let moon = observation.bodies[1].1;
+            // Observation is authoritative for celestial lighting. A prior
+            // manual `lit_sun 0` must not leave the next observation dark.
+            self.lit_sun_intensity = 1.0;
             if elevation > 0.0 {
                 self.lit_sun_direction_ws = self.sky_sun_direction_ws;
                 self.lit_directional_scale = 1.0;
@@ -167,9 +162,20 @@ fn manual_sun_direction(azimuth_deg: f32, elevation_deg: f32) -> [f32; 3] {
     .to_array()
 }
 
+fn terrain_sun_angles(direction: glam::Vec3) -> (f32, f32) {
+    (
+        direction
+            .x
+            .atan2(direction.z)
+            .to_degrees()
+            .rem_euclid(360.0),
+        direction.y.clamp(-1.0, 1.0).asin().to_degrees(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::manual_sun_direction;
+    use super::{manual_sun_direction, terrain_sun_angles};
 
     #[test]
     fn manual_sun_direction_matches_the_viewer_azimuth_convention() {
@@ -177,5 +183,15 @@ mod tests {
         assert!((direction[0] - 30_f32.to_radians().cos()).abs() < 1e-6);
         assert!((direction[1] - 0.5).abs() < 1e-6);
         assert!(direction[2].abs() < 1e-6);
+    }
+
+    #[test]
+    fn geographic_observation_basis_maps_to_terrain_renderer_azimuth() {
+        for (geographic, expected_renderer) in [(0.0, 180.0), (90.0, 90.0), (180.0, 0.0)] {
+            let direction = crate::astro::night::horizontal_direction(geographic, 0.0).as_vec3();
+            let (azimuth, elevation) = terrain_sun_angles(direction);
+            assert!((azimuth - expected_renderer).abs() < 1.0e-5);
+            assert!(elevation.abs() < 1.0e-5);
+        }
     }
 }

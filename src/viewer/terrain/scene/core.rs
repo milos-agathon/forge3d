@@ -171,6 +171,7 @@ impl ViewerTerrainScene {
             post_process: None,
             dof_pass: None,
             motion_blur_pass: None,
+            motion_blur_depth_pass: None,
             volumetrics_pass: None,
             denoise_pass: None,
             surface_format: target_format,

@@ -296,6 +296,7 @@ pub struct ViewerTerrainScene {
     pub(super) dof_pass: Option<super::dof::DofPass>,
     // Motion blur accumulator
     pub(super) motion_blur_pass: Option<super::motion_blur::MotionBlurAccumulator>,
+    pub(super) motion_blur_depth_pass: Option<super::motion_blur_depth::MotionBlurDepthAccumulator>,
     // P5: Volumetrics pass
     pub(super) volumetrics_pass: Option<super::volumetrics::VolumetricsPass>,
     // M5: Denoise pass

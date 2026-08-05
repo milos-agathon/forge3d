@@ -40,6 +40,7 @@ FAST_LANE_FILES = [
     "tests/test_certificate_verifier.py",
     "tests/test_render_certificate.py",
     "tests/test_render_certificate_contract.py",
+    "tests/test_astro_ephemeris.py",
     "tests/test_no_silent_degradation.py",
 ]
 
@@ -84,7 +85,7 @@ def full_lane_files() -> list[str]:
 
 
 def fast_lane_files() -> list[str]:
-    """Focused routine checks for CENSOR's permanent architectural invariants."""
+    """Focused routine checks for permanent contracts and CPU acceptance gates."""
     missing = [path for path in FAST_LANE_FILES if not (ROOT / path).is_file()]
     if missing:
         raise RuntimeError(f"fast CENSOR lane names missing tests: {missing}")

@@ -197,7 +197,7 @@ pub fn render_test_frame(
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
-                min_binding_size: NonZeroU64::new(272),
+                min_binding_size: NonZeroU64::new(288),
             },
             count: None,
         }],
@@ -223,14 +223,32 @@ pub fn render_test_frame(
         &device,
         &queue,
         &camera_layout,
-        wgpu::TextureFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Rgba16Float,
     )?;
     let instances = super::night::instances(observation);
     queue.write_buffer(&night.instances, 0, bytemuck::cast_slice(&instances));
+    let hdr_target = tracked_create_texture(
+        &device,
+        &wgpu::TextureDescriptor {
+            label: Some("astro.night.test.hdr_target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+    )?;
+    let target_view = hdr_target.create_view(&wgpu::TextureViewDescriptor::default());
     let target = tracked_create_texture(
         &device,
         &wgpu::TextureDescriptor {
-            label: Some("astro.night.test.target"),
+            label: Some("astro.night.test.sdr_target"),
             size: wgpu::Extent3d {
                 width,
                 height,
@@ -240,20 +258,18 @@ pub fn render_test_frame(
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         },
     )?;
-    let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let resolved_view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let mut timing = night_golden_uses_timestamp_queries(backend)
         .then(|| crate::core::gpu_timing::OneShotTiming::for_device(device.clone(), queue.clone()));
     crate::core::shader_registry::record_shader_use("astro.night.shader");
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("astro.night.test.encoder"),
     });
-    let scope = timing
+    let overlay_scope = timing
         .as_mut()
         .map(|timing| timing.begin(&mut encoder, "astro.night.overlay"));
     {
@@ -281,8 +297,15 @@ pub fn render_test_frame(
         pass.set_bind_group(1, &camera_bind_group, &[]);
         pass.draw(0..6, 0..instances.len() as u32);
     }
-    if let (Some(timing), Some(scope)) = (timing.as_mut(), scope) {
-        timing.end(&mut encoder, scope, 1);
+    if let Some(timing) = timing.as_mut() {
+        timing.end(&mut encoder, overlay_scope.flatten(), 1);
+    }
+    let resolve_scope = timing
+        .as_mut()
+        .map(|timing| timing.begin(&mut encoder, "astro.night.resolve"));
+    encode_sdr_resolve(&device, &mut encoder, &target_view, &resolved_view);
+    if let Some(timing) = timing.as_mut() {
+        timing.end(&mut encoder, resolve_scope.flatten(), 1);
         timing.resolve(&mut encoder);
     }
     queue.submit(Some(encoder.finish()));
@@ -293,11 +316,11 @@ pub fn render_test_frame(
     );
     crate::core::certificate::record_model(
         "astro.moonlight",
-        "Krisciunas and Schaefer 1991 phase and extinction; 0.172 mag per airmass; normalized to 0.25 lux zenith full Moon",
+        "Krisciunas and Schaefer 1991 phase and extinction; 0.172 mag per airmass; 0.25 lux pre-extinction reference; live terrain term normalized by the modeled zenith full Moon after extinction (not applied to this sky-only golden)",
     );
     crate::core::certificate::record_model(
         "astro.star_photometry",
-        "catalogue magnitude-to-irradiance ratio; constant 0.05 degree sprite radius; linear exposure 0.20; no visibility floor",
+        "catalogue magnitude-to-irradiance ratio; resolution-invariant pixel-integrated tent splat in linear HDR; exposure 0.20; one Reinhard plus sRGB display resolve; no visibility floor",
     );
     crate::core::certificate::record_model(
         "astro.planet_display",
@@ -308,13 +331,16 @@ pub fn render_test_frame(
         .is_some_and(crate::core::gpu_timing::OneShotTiming::record_into_certificate);
     if !timing_recorded {
         if backend == wgpu::Backend::Metal {
-            crate::core::degradation::record_degradation(
-                "timing_unavailable",
-                "astro.night.overlay",
-                "one-shot timestamp queries are disabled for the SIDERA golden path on Metal because synchronous query readback is unreliable; gpu_ms is reported as 0",
-            );
+            for label in ["astro.night.overlay", "astro.night.resolve"] {
+                crate::core::degradation::record_degradation(
+                    "timing_unavailable",
+                    label,
+                    "one-shot timestamp queries are disabled for the SIDERA golden path on Metal because synchronous query readback is unreliable; gpu_ms is reported as 0",
+                );
+            }
         }
         crate::core::certificate::record_pass("astro.night.overlay", 0.0, 1);
+        crate::core::certificate::record_pass("astro.night.resolve", 0.0, 1);
     }
     Ok(target)
 }
@@ -331,6 +357,7 @@ struct CameraUniform {
     inverse_view: [[f32; 4]; 4],
     inverse_projection: [[f32; 4]; 4],
     eye: [f32; 4],
+    viewport: [f32; 4],
 }
 
 fn fixed_camera(width: u32, height: u32) -> CameraUniform {
@@ -348,8 +375,122 @@ fn fixed_camera(width: u32, height: u32) -> CameraUniform {
         inverse_view: view.inverse().to_cols_array_2d(),
         inverse_projection: projection.inverse().to_cols_array_2d(),
         eye: [0.0; 4],
+        viewport: [
+            width as f32,
+            height as f32,
+            1.0 / width as f32,
+            1.0 / height as f32,
+        ],
     }
 }
+
+fn encode_sdr_resolve(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    hdr_view: &wgpu::TextureView,
+    output_view: &wgpu::TextureView,
+) {
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("astro.night.resolve.bgl"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        }],
+    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "astro.night.resolve.shader",
+        NIGHT_RESOLVE_SHADER,
+    );
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("astro.night.resolve.pl"),
+        bind_group_layouts: &[&layout],
+        push_constant_ranges: &[],
+    });
+    let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("astro.night.resolve.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_resolve",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_resolve",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        },
+    );
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("astro.night.resolve.bg"),
+        layout: &layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(hdr_view),
+        }],
+    });
+    crate::core::shader_registry::record_shader_use("astro.night.resolve.shader");
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("astro.night.resolve.pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: output_view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+    });
+    pass.set_pipeline(&pipeline);
+    pass.set_bind_group(0, &bind_group, &[]);
+    pass.draw(0..3, 0..1);
+}
+
+const NIGHT_RESOLVE_SHADER: &str = r#"
+@group(0) @binding(0) var hdr: texture_2d<f32>;
+
+@vertex
+fn vs_resolve(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+    let x = f32((vertex_index << 1u) & 2u);
+    let y = f32(vertex_index & 2u);
+    return vec4<f32>(x * 2.0 - 1.0, y * 2.0 - 1.0, 0.0, 1.0);
+}
+
+fn linear_to_srgb(linear: vec3<f32>) -> vec3<f32> {
+    let low = linear * 12.92;
+    let high = 1.055 * pow(linear, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(high, low, linear <= vec3<f32>(0.0031308));
+}
+
+@fragment
+fn fs_resolve(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let dimensions = textureDimensions(hdr);
+    let coordinate = clamp(vec2<i32>(position.xy), vec2<i32>(0), vec2<i32>(dimensions) - 1);
+    let linear = max(textureLoad(hdr, coordinate, 0).rgb, vec3<f32>(0.0));
+    let mapped = linear / (vec3<f32>(1.0) + linear);
+    return vec4<f32>(linear_to_srgb(mapped), 1.0);
+}
+"#;
 
 fn moon_texture_data() -> RenderResult<(&'static [u8], u32, u32)> {
     if MOON_DATA.len() < 16 || &MOON_DATA[..8] != b"F3DMAP01" {

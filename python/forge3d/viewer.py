@@ -250,7 +250,9 @@ class ViewerHandle:
         if overrides_observation_sun:
             from . import sky
 
-            sky._clear_observation_replay()
+            active_viewer = sky._get_active_viewer()
+            if active_viewer is None or active_viewer is self:
+                sky._clear_observation_replay()
         return response
 
     def send_ipc(self, cmd: Dict[str, Any]) -> Dict[str, Any]:

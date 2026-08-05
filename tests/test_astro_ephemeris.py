@@ -511,6 +511,44 @@ def test_non_sun_terrain_success_preserves_observation_replay():
         sky._clear_observation_replay()
 
 
+def test_inactive_viewer_manual_sun_preserves_active_viewer_replay():
+    from forge3d import viewer as viewer_module
+
+    class Socket:
+        def sendall(self, _request):
+            pass
+
+        def recv(self, _size):
+            return b'{"ok": true}\n'
+
+    class ActiveViewer:
+        is_running = True
+
+        def __init__(self):
+            self.command = None
+
+        def send_ipc(self, command):
+            self.command = command
+
+    inactive = object.__new__(viewer_module.ViewerHandle)
+    inactive._socket = Socket()
+    active = ActiveViewer()
+    sky._set_active_viewer(active)
+    try:
+        sky.set_observation(
+            datetime(2026, 7, 26, 22, tzinfo=timezone.utc), 52.3676, 4.9041
+        )
+        assert active.command["cmd"] == "set_observation"
+        inactive._send_command(
+            {"cmd": "lit_sun", "azimuth_deg": 180.0, "elevation_deg": 30.0}
+        )
+        assert sky._get_active_viewer() is active
+        assert sky._has_observation_replay()
+    finally:
+        sky._set_active_viewer(None)
+        sky._clear_observation_replay()
+
+
 def test_rejected_manual_terrain_sun_preserves_observation_replay():
     from forge3d import viewer as viewer_module
 
@@ -787,6 +825,8 @@ def test_set_sun_handler_is_live_not_print_only():
         / "core.rs"
     ).read_text(encoding="utf-8")
     assert "lit_sun_direction_ws[1] > 0.0" in helpers
+    assert "crate::astro::night::horizontal_direction" in helpers
+    assert "self.lit_sun_intensity = 1.0" in helpers
     scene_command = (
         Path(__file__).parents[1]
         / "src"
@@ -817,6 +857,57 @@ def test_set_sun_handler_is_live_not_print_only():
     assert "handle.close()" in replay[1]
     blocking = viewer.split("def open_viewer(", 1)[1]
     assert "handle = open_viewer_async(" in blocking
+
+
+def test_sidera_reference_probe_rejects_virtual_or_non_metal_adapters():
+    from scripts import terrain_ci_probe
+
+    physical_metal = {
+        "status": "ok",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4",
+        "software_fallback": False,
+    }
+    assert terrain_ci_probe._adapter_is_physical_metal(physical_metal)
+    assert not terrain_ci_probe._adapter_is_physical_metal(
+        {**physical_metal, "name": "Apple Paravirtual device"}
+    )
+    assert not terrain_ci_probe._adapter_is_physical_metal(
+        {**physical_metal, "device_type": "VirtualGpu"}
+    )
+    assert not terrain_ci_probe._adapter_is_physical_metal(
+        {**physical_metal, "backend": "Vulkan", "device_type": "DiscreteGpu"}
+    )
+
+
+def test_snapshot_sky_uses_dedicated_camera_and_motion_coverage_union():
+    snapshot = (
+        ROOT / "src" / "viewer" / "render" / "main_loop" / "snapshot_sky.rs"
+    ).read_text(encoding="utf-8")
+    allocator = (
+        ROOT
+        / "src"
+        / "viewer"
+        / "state"
+        / "viewer_helpers"
+        / "snapshot_sky.rs"
+    ).read_text(encoding="utf-8")
+    secondary = (
+        ROOT / "src" / "viewer" / "render" / "main_loop" / "secondary.rs"
+    ).read_text(encoding="utf-8")
+    motion = (
+        ROOT / "src" / "viewer" / "terrain" / "render" / "motion_blur.rs"
+    ).read_text(encoding="utf-8")
+    union = (
+        ROOT / "src" / "viewer" / "terrain" / "motion_blur_depth.rs"
+    ).read_text(encoding="utf-8")
+    assert "frame.projection(width, height)" in snapshot
+    assert "viewer.sky.snapshot.camera" in allocator
+    assert "cache.camera" in snapshot and "self.sky_camera" not in snapshot
+    assert "present_snapshot_sky" in secondary
+    assert "self.snapshot_depth_texture = Some(coverage_depth)" in motion
+    assert "CompareFunction::Less" in union and "texture_depth_2d" in union
 
 
 def test_sidera_assets_stay_under_two_mebibytes_and_match_their_manifest():

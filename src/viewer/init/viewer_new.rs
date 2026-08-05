@@ -281,6 +281,7 @@ impl Viewer {
             sky_bg0_cache: std::cell::RefCell::new(None),
             sky_bg1_cache: std::cell::RefCell::new(None),
             sky_present_bg_cache: std::cell::RefCell::new(None),
+            sky_snapshot_cache: None,
             sky_enabled: true,
             // Fog resources
             fog_enabled: false,

@@ -120,14 +120,14 @@ def test_matches_committed_golden(tmp_path):
     )
 
 
-def test_sidera_night_golden_is_in_the_determinism_inventory(tmp_path):
-    """SIDERA's night sky joins this harness: same inventory, same tolerance.
+def test_sidera_night_golden_is_in_the_determinism_inventory():
+    """SIDERA's Metal reference joins this inventory at zero-byte tolerance.
 
     The full cross-process gate lives in ``tests/test_astro_night_golden.py``
     (it needs a GPU but not terrain, so it must not inherit this module's
-    terrain skip). What is asserted here is membership: the golden has a
-    SHA-256 sidecar alongside ``terra_determinata_v1``, that sidecar matches the
-    committed PNG, and a fresh backend-pinned process still reproduces it.
+    terrain skip). This test asserts inventory membership independently of the
+    local backend: the golden has a SHA-256 sidecar alongside
+    ``terra_determinata_v1`` and that sidecar matches the committed PNG.
     """
     sidecar = GOLDEN_PATH.parent / "sidera_night.sha256"
     png = Path(__file__).parent / "golden" / "sidera_night.png"
@@ -135,8 +135,18 @@ def test_sidera_night_golden_is_in_the_determinism_inventory(tmp_path):
     committed = sidecar.read_text().split()[0].strip()
     assert hashlib.sha256(png.read_bytes()).hexdigest() == committed
 
+
+@pytest.mark.skipif(
+    _local_backend().strip().lower() != "metal",
+    reason="the committed SIDERA reference was generated on Metal",
+)
+def test_sidera_night_metal_reference_replays(tmp_path):
+    """A fresh pinned Metal process reproduces the committed Metal reference."""
+    sidecar = GOLDEN_PATH.parent / "sidera_night.sha256"
+    committed = sidecar.read_text().split()[0].strip()
+
     env = dict(os.environ)
-    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=_local_backend())
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS="metal")
     env.pop("FORGE3D_UPDATE_SIDERA_GOLDEN", None)
     destination = tmp_path / "sidera_night_replay.png"
     subprocess.run(
@@ -153,7 +163,7 @@ def test_sidera_night_golden_is_in_the_determinism_inventory(tmp_path):
     )
     actual = hashlib.sha256(destination.read_bytes()).hexdigest()
     assert actual == committed, (
-        f"SIDERA night golden diverged on {_local_backend()}\n"
+        "SIDERA night golden diverged on metal\n"
         f"  golden: {committed}\n  actual: {actual}"
     )
 

@@ -47,7 +47,7 @@ pub fn sky_output_descriptor(width: u32, height: u32) -> wgpu::TextureDescriptor
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        format: wgpu::TextureFormat::Rgba16Float,
         usage: wgpu::TextureUsages::STORAGE_BINDING
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -82,7 +82,7 @@ pub fn create_sky_resources(
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::StorageTexture {
                     access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    format: wgpu::TextureFormat::Rgba16Float,
                     view_dimension: wgpu::TextureViewDimension::D2,
                 },
                 count: None,
@@ -140,9 +140,9 @@ pub fn create_sky_resources(
         },
     )?;
 
-    // Sky camera buffer - matches CameraUniforms struct in sky.wgsl (272 bytes)
-    // Layout: view(64) + proj(64) + inv_view(64) + inv_proj(64) + eye_position(12) + _pad0(4)
-    let sky_camera_data: [f32; 68] = [0.0; 68]; // 272 bytes
+    // The first 272 bytes match CameraUniforms in sky.wgsl; stars.wgsl reads
+    // the trailing viewport vec4 to build a resolution-invariant point splat.
+    let sky_camera_data: [f32; 72] = [0.0; 72]; // 288 bytes
     let sky_camera = tracked_create_buffer_init(
         device,
         &wgpu::util::BufferInitDescriptor {
@@ -230,7 +230,7 @@ pub fn create_sky_resources(
         device,
         queue,
         &sky_bgl1,
-        wgpu::TextureFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Rgba16Float,
     )?;
 
     Ok(SkyResources {

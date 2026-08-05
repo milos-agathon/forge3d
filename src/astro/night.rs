@@ -2,18 +2,19 @@
 //!
 //! Lunar attenuation follows Krisciunas & Schaefer (1991), PASP 103, 1033:
 //! the phase polynomial from their equation 9 and a standard 0.172 mag/airmass
-//! extinction. The renderer normalizes the resulting illuminance to a 0.25 lux
-//! zenith full Moon because forge3d's directional-light intensity is relative.
+//! extinction. The renderer divides by the modeled post-extinction zenith full
+//! Moon so forge3d's relative directional-light intensity reaches one there.
 
 use super::{catalog, observation::ObservationSnapshot, Body};
 use glam::DVec3;
 
 pub const MAX_NIGHT_INSTANCES: usize = 9_096 + 6;
 const FULL_MOON_LUX: f64 = 0.25;
-/// Constant sprite footprint keeps integrated energy proportional to the
-/// catalogue irradiance instead of making bright stars larger as well as
-/// brighter. The display exposure keeps Sirius below alpha saturation.
-const STAR_ANGULAR_RADIUS_DEG: f32 = 0.05;
+/// Pixel-integrated tent support for a sub-pixel point source. The shader uses
+/// this radius only to rasterize the four pixels that can receive energy; its
+/// separable tent weights sum to one for every sub-pixel star position, so
+/// changing output resolution cannot change integrated display energy.
+const STAR_SPLAT_RADIUS_PX: f32 = 1.0;
 const STAR_EXPOSURE: f32 = 0.20;
 
 #[repr(C)]
@@ -41,7 +42,7 @@ pub fn instances(observation: &ObservationSnapshot) -> Vec<NightInstance> {
             direction,
             right,
             up,
-            STAR_ANGULAR_RADIUS_DEG.to_radians(),
+            STAR_SPLAT_RADIUS_PX,
             0.0,
             night_visibility,
             star.linear_rgb,
@@ -94,12 +95,9 @@ pub fn instances(observation: &ObservationSnapshot) -> Vec<NightInstance> {
         2.0,
         observation.moon_phase.phase_angle.radians() as f32,
         [0.92, 0.92, 0.9],
-        // The Moon's `phase` slot is taken by the phase angle, so the declared
-        // twilight ramp travels in `intensity` and `stars.wgsl` multiplies the
-        // disc alpha by it. Declared consequence: SIDERA does not render the
-        // daytime Moon — it fades out with the stars rather than compositing
-        // as an opaque disc over the daylight sky fit.
-        night_visibility,
+        // The Moon is independent of the star-only twilight visibility ramp.
+        // Its direction is still horizon-clipped in the vertex shader.
+        1.0,
     ));
     result
 }
@@ -121,7 +119,8 @@ pub fn moon_illuminance_lux(phase_angle_deg: f64, altitude_deg: f64) -> f64 {
 }
 
 pub fn normalized_moonlight(phase_angle_deg: f64, altitude_deg: f64) -> f32 {
-    (moon_illuminance_lux(phase_angle_deg, altitude_deg) / FULL_MOON_LUX) as f32
+    let modeled_zenith_full_moon = moon_illuminance_lux(0.0, 90.0);
+    (moon_illuminance_lux(phase_angle_deg, altitude_deg) / modeled_zenith_full_moon) as f32
 }
 
 pub fn horizontal_direction(azimuth_deg: f64, altitude_deg: f64) -> DVec3 {
@@ -130,7 +129,7 @@ pub fn horizontal_direction(azimuth_deg: f64, altitude_deg: f64) -> DVec3 {
     DVec3::new(
         altitude.cos() * azimuth.sin(),
         altitude.sin(),
-        altitude.cos() * azimuth.cos(),
+        -altitude.cos() * azimuth.cos(),
     )
 }
 
@@ -182,6 +181,17 @@ mod tests {
         assert!(full > quarter * 8.0);
         assert!(quarter > crescent * 4.0);
         assert_eq!(moon_illuminance_lux(0.0, -0.1), 0.0);
+        assert!((normalized_moonlight(0.0, 90.0) - 1.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn geographic_azimuth_uses_the_viewer_east_up_negative_north_basis() {
+        let north = horizontal_direction(0.0, 0.0);
+        let east = horizontal_direction(90.0, 0.0);
+        let south = horizontal_direction(180.0, 0.0);
+        assert!(north.abs_diff_eq(DVec3::NEG_Z, 1.0e-12));
+        assert!(east.abs_diff_eq(DVec3::X, 1.0e-12));
+        assert!(south.abs_diff_eq(DVec3::Z, 1.0e-12));
     }
 
     #[test]
@@ -197,12 +207,10 @@ mod tests {
         assert!(upload[..MAX_NIGHT_INSTANCES - 1]
             .iter()
             .all(|item| item.up_phase[3] == 0.0));
-        // The Moon carries it in `color_intensity[3]` because its `up_phase[3]`
-        // is the phase angle. Covering the LAST element too is the point: an
-        // earlier revision sliced it off and let a daylight Moon draw opaque.
+        // The Moon is explicitly not governed by the star-only twilight ramp.
         let moon = upload.last().unwrap();
         assert_eq!(moon.right_kind[3], 2.0);
-        assert_eq!(moon.color_intensity[3], 0.0);
+        assert_eq!(moon.color_intensity[3], 1.0);
     }
 
     #[test]
@@ -215,14 +223,30 @@ mod tests {
     fn star_display_energy_preserves_the_magnitude_ratio() {
         let magnitude_zero = catalog::magnitude_to_irradiance(0.0);
         let magnitude_five = catalog::magnitude_to_irradiance(5.0);
-        let zero_energy = star_display_energy((magnitude_zero / magnitude_zero) as f32);
+        assert!((magnitude_zero / magnitude_five - 100.0).abs() < 1.0e-12);
+
+        let zero_energy = star_display_energy(1.0);
         let five_energy = star_display_energy((magnitude_five / magnitude_zero) as f32);
         assert!((zero_energy / five_energy - 100.0).abs() < 1.0e-3);
 
-        // V=-1.46 (Sirius) remains below saturation under the declared display
-        // exposure, so every shipped catalogue star preserves that ratio.
+        // V=-1.46 (Sirius) remains below saturation in the linear HDR target.
         let sirius_relative = 10.0_f32.powf(0.4 * 1.46);
         assert!(star_display_energy(sirius_relative) < 1.0);
+
+        // A V=6.5 star survives the HDR blend and changes a byte after the one
+        // authoritative Reinhard + sRGB display resolve; no visibility floor
+        // or gamma-encoded alpha is needed.
+        let limit_alpha = star_display_energy(10.0_f32.powf(-0.4 * 6.5));
+        let background = [0.004, 0.006, 0.018, 1.0];
+        let blended = [
+            1.0 * limit_alpha + background[0] * (1.0 - limit_alpha),
+            1.0 * limit_alpha + background[1] * (1.0 - limit_alpha),
+            1.0 * limit_alpha + background[2] * (1.0 - limit_alpha),
+            1.0,
+        ];
+        let before = crate::core::tonemap::resolve_reference_hdr_to_rgba8(&background, 1.0);
+        let after = crate::core::tonemap::resolve_reference_hdr_to_rgba8(&blended, 1.0);
+        assert_ne!(before[..3], after[..3]);
     }
 
     #[test]

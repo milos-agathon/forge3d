@@ -35,6 +35,17 @@ use super::viewer_config::{FpsCounter, ViewerConfig};
 use super::viewer_enums::{CaptureKind, FogMode, VizMode};
 use super::viewer_types::FrameCamera;
 
+pub(crate) struct SkySnapshotResources {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) camera: TrackedBuffer,
+    pub(crate) _output: TrackedTexture,
+    pub(crate) output_view: TextureView,
+    pub(crate) compute_bind_group: BindGroup,
+    pub(crate) camera_bind_group: BindGroup,
+    pub(crate) present_bind_group: BindGroup,
+}
+
 pub struct Viewer {
     pub(crate) window: Arc<Window>,
     pub(crate) surface: Surface<'static>,
@@ -201,6 +212,7 @@ pub struct Viewer {
     pub(crate) sky_bg0_cache: RefCell<Option<BindGroup>>,
     pub(crate) sky_bg1_cache: RefCell<Option<BindGroup>>,
     pub(crate) sky_present_bg_cache: RefCell<Option<BindGroup>>,
+    pub(crate) sky_snapshot_cache: Option<SkySnapshotResources>,
     pub(crate) sky_enabled: bool,
 
     // P6: Fog rendering resources and parameters
