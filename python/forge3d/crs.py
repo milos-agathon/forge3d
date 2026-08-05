@@ -383,6 +383,11 @@ def _require_geodesy_native() -> Any:
     return _native
 
 
+def body_info(name: str) -> dict[str, Any]:
+    """Return registered planetary datum constants with explicit units."""
+    return _require_geodesy_native().body_info(name)
+
+
 def geoid_undulation(lat: float, lon: float) -> float:
     """EGM96 geoid undulation N(lat, lon) in metres.
 
@@ -391,6 +396,11 @@ def geoid_undulation(lat: float, lon: float) -> float:
     zero-degree term).
     """
     return _require_geodesy_native().geoid_undulation(lat, lon)
+
+
+def areoid_undulation(lat: float, lon: float) -> float:
+    """GMM3 Mars areoid undulation above its reference ellipsoid, metres."""
+    return _require_geodesy_native().areoid_undulation(lat, lon)
 
 
 def orthometric_to_ellipsoidal(h_orthometric: float, lat: float, lon: float) -> float:
@@ -403,20 +413,38 @@ def ellipsoidal_to_orthometric(h_ellipsoidal: float, lat: float, lon: float) -> 
     return _require_geodesy_native().ellipsoidal_to_orthometric(h_ellipsoidal, lat, lon)
 
 
-def geodesic_inverse(lat1: float, lon1: float, lat2: float, lon2: float) -> dict[str, float]:
-    """Karney inverse geodesic on WGS84.
+def geodesic_inverse(
+    lat1: float,
+    lon1: float,
+    lat2: float,
+    lon2: float,
+    *,
+    body: str = "earth",
+) -> dict[str, float]:
+    """Karney inverse geodesic on Earth, Moon, or Mars.
 
     Returns {"s12": metres, "azi1": deg, "azi2": deg, "a12": deg}.
     """
-    return _require_geodesy_native().geodesic_inverse(lat1, lon1, lat2, lon2)
+    return _require_geodesy_native().geodesic_inverse(
+        lat1, lon1, lat2, lon2, body=body
+    )
 
 
-def geodesic_direct(lat1: float, lon1: float, azi1: float, s12: float) -> dict[str, float]:
-    """Karney direct geodesic on WGS84.
+def geodesic_direct(
+    lat1: float,
+    lon1: float,
+    azi1: float,
+    s12: float,
+    *,
+    body: str = "earth",
+) -> dict[str, float]:
+    """Karney direct geodesic on Earth, Moon, or Mars.
 
     Returns {"lat2": deg, "lon2": deg, "azi2": deg, "a12": deg}.
     """
-    return _require_geodesy_native().geodesic_direct(lat1, lon1, azi1, s12)
+    return _require_geodesy_native().geodesic_direct(
+        lat1, lon1, azi1, s12, body=body
+    )
 
 
 def wgs84_to_ecef(lon: float, lat: float, h: float = 0.0) -> tuple[float, float, float]:
@@ -449,6 +477,8 @@ __all__ = [
     "crs_to_epsg",
     "get_crs_from_rasterio",
     "get_crs_from_geopandas",
+    "body_info",
+    "areoid_undulation",
     "geoid_undulation",
     "orthometric_to_ellipsoidal",
     "ellipsoidal_to_orthometric",
