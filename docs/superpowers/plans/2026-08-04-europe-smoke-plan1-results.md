@@ -1,11 +1,11 @@
-# Europe Wildfire Smoke - Plan 1 Results
+# Europe Wildfire Smoke — Plan 1 Results
 
 - Build verdict: **PASS**
 - Delivered axis: `2026-07-26` through `2026-08-04`; NOW `2026-08-04T12:00:00`; run `2026-08-04 12:00`
 - CAMS steps: **63**
 - Population: domain **1257393922**; display **1037658908**
 - Advection gain: **0.0**
-- Basemap: **4000x2250**, frame `[0.004542151162790609, 0.0, 0.9954578488372094, 1.0]`
+- Basemap: **4000×2250**, frame `[0.004542151162790609, 0.0, 0.9954578488372094, 1.0]`
 - Measured h1: **530.0 m**; highland share **21.000%**
 - Hillshade latitude-uniformity rel_diff: **0.0005**
 - WebP sizes: q86 **229738 B**, q90 **301794 B**
