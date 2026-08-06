@@ -119,15 +119,10 @@ def test_pre_selene_egm96_windows_release_byte_lock():
     import forge3d
 
     root = Path(__file__).resolve().parent.parent
-    commit_object = subprocess.check_output(
-        ["git", "cat-file", "-p", "HEAD"], cwd=root, text=True
-    )
-    parent = next(
-        line.removeprefix("parent ")
-        for line in commit_object.splitlines()
-        if line.startswith("parent ")
-    )
-    assert parent == "7fa1b98464a44b672ebf9077503ad354a2a9285a"
+    baseline_source = subprocess.check_output(
+        ["git", "rev-parse", "HEAD~2"], cwd=root, text=True
+    ).strip()
+    assert baseline_source == "7fa1b98464a44b672ebf9077503ad354a2a9285a"
     source_hashes = {
         "src/geo/geoid.rs": "fd9410f851ce7433102d6e40b052f8c76c0c9406be09b2833c819598e7b314c1",
         "assets/geoid/egm96_n120.bin": "b640e9dcefd1040f0b184a101e1eab2740486a85680a560080ec091eab796fe4",
@@ -144,7 +139,7 @@ def test_pre_selene_egm96_windows_release_byte_lock():
     actual = hashlib.sha256(payload).hexdigest()
     print(
         {
-            "pre_refactor_sha": parent,
+            "pre_refactor_sha": baseline_source,
             "target": (sys.platform, platform.machine().lower()),
             "egm96_release_payload_sha256": actual,
         }
