@@ -18,8 +18,8 @@ use crate::core::tile_cache::{TileCache, TileData, TileId};
 use crate::terrain::vt::VirtualTextureStore;
 #[cfg(feature = "extension-module")]
 use crate::terrain::vt_family_residency::{
-    decode_family_mip_feedback, decode_feedback_payload, fair_family_budget_admit,
-    logical_resident_slot_bytes, validate_material_atlas_capacity, validate_material_family_names,
+    decode_family_mip_feedback, fair_family_budget_admit, logical_resident_slot_bytes,
+    validate_material_atlas_capacity, validate_material_family_names,
     validate_material_residency_budget, FamilyResidency, FamilyResidencyTracker, TileKey,
     VT_FAMILY_COUNT,
 };
@@ -1046,8 +1046,8 @@ impl TerrainMaterialVT {
             .collect())
     }
 
-    /// VERITAS: drain the feedback buffer (blocking) and resolve each sampled
-    /// tile to the resident mip the shader actually landed on this frame.
+    /// VERITAS: resolve each unresolved shader-demand record from the latest
+    /// frame to the resident mip the shader actually landed on.
     ///
     /// The GPU walk starts at the desired mip and climbs coarser until a
     /// page-table entry is resident; this replays the identical walk against
@@ -1064,34 +1064,26 @@ impl TerrainMaterialVT {
         let Some(runtime) = self.runtime.as_mut() else {
             return Ok(Vec::new());
         };
-        let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() else {
+        if runtime.feedback_buffer.is_none() {
             return Ok(Vec::new());
-        };
-
-        let entries = feedback_buffer.read_feedback_entries_blocking(device)?;
-        runtime.feedback_staged = false;
+        }
+        // `finish_frame` normally consumes the async readback first. Reuse
+        // the exact decoded snapshot it retained; otherwise a second read of
+        // the already-consumed staging buffer makes an active feedback frame
+        // appear empty. If the async map is still pending, finish it here and
+        // populate that same snapshot.
+        if runtime.feedback_staged {
+            let entries = runtime
+                .feedback_buffer
+                .as_ref()
+                .expect("checked above")
+                .read_feedback_entries_blocking(device)?;
+            runtime.ingest_shader_feedback(entries);
+            runtime.feedback_staged = false;
+        }
 
         let mut resolved = HashSet::new();
-        for entry in entries {
-            let Some((family_slot, material_index)) =
-                decode_feedback_payload(entry.frame_number, runtime.material_count)
-            else {
-                continue;
-            };
-            if entry.mip_level >= runtime.max_mip_levels {
-                continue;
-            }
-            let (pages_x, pages_y) = runtime.pages_at_mip(entry.mip_level);
-            if entry.tile_x >= pages_x || entry.tile_y >= pages_y {
-                continue;
-            }
-            let key = TileKey {
-                family_slot,
-                material_index,
-                x: entry.tile_x,
-                y: entry.tile_y,
-                mip_level: entry.mip_level,
-            };
+        for &key in &runtime.latest_shader_feedback {
             if let Some(resident) = runtime.resolve_resident_mip(key) {
                 resolved.insert(resident);
             }

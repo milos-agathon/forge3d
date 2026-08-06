@@ -866,6 +866,7 @@ impl TerrainScene {
             lod_tiles,
             draw_templates,
             variant_count,
+            index_count,
             ..
         }) = self.geometry_provider.as_ref()
         else {
@@ -880,6 +881,7 @@ impl TerrainScene {
             lod_tiles,
             draw_templates,
             *variant_count,
+            *index_count,
             lod_config,
         )?);
         Ok(())

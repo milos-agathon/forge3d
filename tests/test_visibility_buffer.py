@@ -162,14 +162,32 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
         dem = _steep_dem(96)
         forward_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         register_sources(forward_renderer)
-        forward_params = _make_params(size_px=size, vt=vt)
+        # A 1 m camera radius against a 100 km terrain puts the eye inside the
+        # near-origin relief and makes the visibility differential vacuous on
+        # some adapters. Span several rings at a real view distance and keep
+        # the indirect frustum path active so the 10,000-pixel differential
+        # covers tile/LOD packing as well as primitive identity.
+        forward_params = _make_params(
+            size_px=size,
+            theta_deg=10.0,
+            cam_radius=50_000.0,
+            culling="frustum",
+            vt=vt,
+        )
         forward = _render_rgba(forward_renderer, forward_params, dem, ibl)
 
         renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         register_sources(renderer)
         visibility = _render_rgba(
             renderer,
-            _make_params(size_px=size, shading="visibility", vt=vt),
+            _make_params(
+                size_px=size,
+                theta_deg=10.0,
+                cam_radius=50_000.0,
+                culling="frustum",
+                shading="visibility",
+                vt=vt,
+            ),
             dem,
             ibl,
         )
@@ -177,8 +195,10 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
     np.testing.assert_array_equal(visibility, forward)
     stats = visibility_stats()
     assert stats["visible_pixels"] + stats["background_pixels"] == size[0] * size[1]
+    assert stats["visible_pixels"] > 0
     assert stats["visibility_feedback_records"] == stats["visible_pixels"]
     assert stats["material_invocations"] == stats["visible_pixels"]
+    assert stats["material_invocations"] > 0
     assert stats["forward_material_invocations"] >= stats["visible_pixels"]
     assert (
         stats["forward_feedback_records"] == stats["forward_material_invocations"]
@@ -228,7 +248,14 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
             })
         )
     assert len(first) == 10_000
-    assert sum(value is not None for value in first) > 0
+    visible_identities = [value for value in first if value is not None]
+    assert len(visible_identities) >= 1_000, len(visible_identities)
+    tile_lod_ids = {value[0] for value in visible_identities}
+    assert len(tile_lod_ids) > 1, tile_lod_ids
+    assert any(tile_lod_id != 0 for tile_lod_id in tile_lod_ids), tile_lod_ids
+    selected_lods = {(tile_lod_id >> 12) & 0xF for tile_lod_id in tile_lod_ids}
+    assert len(selected_lods) > 1, selected_lods
+    assert any(lod > 0 for lod in selected_lods), selected_lods
     record_tessella_result(
         "visibility_buffer",
         {

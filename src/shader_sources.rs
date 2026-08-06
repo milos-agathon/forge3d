@@ -189,6 +189,41 @@ mod tests {
     }
 
     #[test]
+    fn terrain_height_sampling_is_portable_manual_bilinear() {
+        let source = terrain();
+        assert!(source.contains("fn sample_height_bilinear_level("));
+        assert_eq!(source.matches("textureLoad(height_tex").count(), 4);
+        assert!(!source.contains("textureSample(height_tex"));
+        assert!(!source.contains("textureSampleLevel(height_tex"));
+
+        // Both the ordinary geometry path and every clipmap morph lookup must
+        // share the same reconstruction instead of drifting by callsite.
+        assert!(source.contains("let h_raw = sample_height_bilinear(uv);"));
+        assert!(source.contains("let h_fine = sample_height_bilinear(uv);"));
+        assert_eq!(
+            source.matches("sample_height_bilinear(coarse_base").count(),
+            4
+        );
+
+        // Resolve reconstructs the exact vertices emitted by the visibility
+        // write pass. It must therefore reuse the same helper rather than
+        // silently reintroducing filterable R32Float sampling.
+        let resolve = terrain_visbuffer_resolve(false);
+        assert!(!resolve.contains("textureSample(height_tex"));
+        assert!(!resolve.contains("textureSampleLevel(height_tex"));
+        assert_eq!(resolve.matches("textureLoad(height_tex").count(), 4);
+        assert!(resolve.contains("let h_fine = sample_height_bilinear(uv);"));
+
+        // The CSM caster and visible surface must agree between texel centres.
+        let shadow = terrain_shadow_depth();
+        assert!(shadow.contains("fn sample_height_bilinear("));
+        assert_eq!(shadow.matches("textureLoad(height_tex").count(), 4);
+        assert!(!shadow.contains("textureSample(height_tex"));
+        assert!(!shadow.contains("textureSampleLevel(height_tex"));
+        assert!(shadow.contains("let h_raw = sample_height_bilinear(uv);"));
+    }
+
+    #[test]
     fn actual_pbr_terrain_and_csm_assemblies_are_valid_wgsl() {
         for source in [
             pbr(),

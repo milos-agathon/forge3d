@@ -208,6 +208,40 @@ var height_tex : texture_2d<f32>;
 @group(0) @binding(2)
 var height_samp : sampler;
 
+// R32Float height textures are intentionally bound as unfilterable on the
+// portable terrain path. Reconstruct bilinear filtering explicitly so height
+// sampling is identical on adapters that cannot filter this format.
+fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
+    let last_level = i32(textureNumLevels(height_tex)) - 1;
+    let level = clamp(i32(floor(lod + 0.5)), 0, last_level);
+    let dimensions = textureDimensions(height_tex, level);
+    let max_x = max(i32(dimensions.x) - 1, 0);
+    let max_y = max(i32(dimensions.y) - 1, 0);
+    let texel_x = clamp(uv.x, 0.0, 1.0) * f32(max_x);
+    let texel_y = clamp(uv.y, 0.0, 1.0) * f32(max_y);
+    let x0 = i32(floor(texel_x));
+    let y0 = i32(floor(texel_y));
+    // Keep each upper-bound relation explicit for the CENSOR IR proof as well
+    // as for runtime safety; all four coordinates are clamped to this texture.
+    let x1 = clamp(x0 + 1, 0, max_x);
+    let y1 = clamp(y0 + 1, 0, max_y);
+    let blend = clamp(
+        vec2<f32>(texel_x - f32(x0), texel_y - f32(y0)),
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
+
+    let h00 = textureLoad(height_tex, vec2<i32>(x0, y0), level).r;
+    let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), level).r;
+    let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), level).r;
+    let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), level).r;
+    return det_mix(det_mix(h00, h10, blend.x), det_mix(h01, h11, blend.x), blend.y);
+}
+
+fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
+    return sample_height_bilinear_level(uv, 0.0);
+}
+
 @group(0) @binding(3)
 var material_albedo_tex : texture_2d_array<f32>;
 
@@ -1331,7 +1365,7 @@ fn normalize_for_shadow(tex_coord: vec2<f32>) -> vec3<f32> {
     
     // Sample height directly from heightmap at this fragment's UV
     // This matches what the shadow depth shader does
-    let h_raw = textureSample(height_tex, height_samp, tex_coord).r;
+    let h_raw = sample_height_bilinear(tex_coord);
     let h_norm = clamp((h_raw - h_min) / h_range, 0.0, 1.0);
     
     // Apply height curve (must match shadow depth shader)
@@ -1473,13 +1507,11 @@ struct FragmentOutput {
 var<private> terrain_vt_albedo_source_id: u32 = 0u;
 
 fn sample_height(uv : vec2<f32>) -> f32 {
-    let uv_clamped = clamp(uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-    return textureSample(height_tex, height_samp, uv_clamped).r;
+    return sample_height_bilinear(uv);
 }
 
 fn sample_height_level(uv: vec2<f32>, lod: f32) -> f32 {
-    let uv_clamped = clamp(uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-    return textureSampleLevel(height_tex, height_samp, uv_clamped, lod).r;
+    return sample_height_bilinear_level(uv, lod);
 }
 
 fn get_height_geom_t(h_raw: f32) -> f32 {
@@ -1510,8 +1542,7 @@ fn apply_height_curve01(t: f32) -> f32 {
 }
 
 fn sample_height_geom(uv : vec2<f32>) -> f32 {
-    let uv_clamped = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_raw = textureSample(height_tex, height_samp, uv_clamped).r;
+    let h_raw = sample_height_bilinear(uv);
     let t = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -1605,8 +1636,8 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     // Map UV [0,1] to world XY centered at origin
     let world_xy = (uv - vec2<f32>(0.5, 0.5)) * spacing;
 
-    // Sample height from heightmap (use textureSampleLevel for vertex shader)
-    let h_raw = textureSampleLevel(height_tex, height_samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    // Sample height from the portable explicit-bilinear path.
+    let h_raw = sample_height_bilinear(uv);
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -1646,8 +1677,7 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
 
 /// Sample height at a specific LOD level for LOD-aware normal computation.
 fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
-    let uv_clamped = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_raw = textureSampleLevel(height_tex, height_samp, uv_clamped, lod).r;
+    let h_raw = sample_height_bilinear_level(uv, lod);
     let t = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -4840,7 +4870,7 @@ fn vs_clipmap_main(
     var out : VertexOutput;
 
     let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_fine = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_fine = sample_height_bilinear(uv);
     let height_dims = vec2<f32>(textureDimensions(height_tex));
     let coarse_texels = exp2(min(max(clip_morph.y, 0.0) + 1.0, 16.0));
     let coarse_step = vec2<f32>(coarse_texels)
@@ -4848,10 +4878,10 @@ fn vs_clipmap_main(
     let coarse_cell = uv / coarse_step;
     let coarse_base = floor(coarse_cell) * coarse_step;
     let coarse_t = fract(coarse_cell);
-    let h00 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h10 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h01 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h11 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h00 = sample_height_bilinear(coarse_base);
+    let h10 = sample_height_bilinear(coarse_base + vec2<f32>(coarse_step.x, 0.0));
+    let h01 = sample_height_bilinear(coarse_base + vec2<f32>(0.0, coarse_step.y));
+    let h11 = sample_height_bilinear(coarse_base + coarse_step);
     let h_coarse = mix(mix(h00, h10, coarse_t.x), mix(h01, h11, coarse_t.x), coarse_t.y);
     let h_raw = mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);

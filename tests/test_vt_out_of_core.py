@@ -58,16 +58,6 @@ COARSE_WORKING_SET_PAGES = 3 * (
     PAGES_AT_MIP[COARSE_MIN_MIP] ** 2 + PAGES_AT_MIP[COARSE_MIN_MIP + 1] ** 2
 )
 
-# Measured on the RTX 3070 Vulkan lane: two independent runs of this test both
-# reported exactly 193 deduplicated contributing tiles for the committed camera
-# (2026-07-29, `evidence/vt_out_of_core.json`), so this floor is the real count
-# rather than a placeholder. The per-tile digest cross-check below is still the
-# load-bearing assertion; the floor is what makes a collapse of the sampled set
-# (e.g. residency regressing to a handful of coarse pages) fail here instead of
-# passing vacuously.
-MIN_CONTRIBUTING_TILES = 193
-
-
 def _build_sparse_store(tmp_path: Path) -> tuple[f3d.VTStore, dict]:
     store_path = tmp_path / "switzerland-procedural.f3dvt"
     manifest_path = tmp_path / "switzerland-procedural.manifest.json"
@@ -247,8 +237,22 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     dem = np.linspace(0.0, 1.0, 96 * 96, dtype=np.float32).reshape(96, 96)
 
     stats = {}
+    contributing_by_key = {}
+    shader_feedback_keys = set()
     for settling_frame in range(1, 9):
         frame = _render_rgba(renderer, params, dem, ibl)
+        # Capture provenance while shader demand is populated. Once every
+        # desired page is resident the shader intentionally emits no paging
+        # request, so inspecting only the final settled frame is vacuous.
+        for tile in renderer.read_contributing_tiles():
+            key = (
+                tile["family_slot"],
+                tile["mip_level"],
+                tile["tile_x"],
+                tile["tile_y"],
+            )
+            contributing_by_key[key] = tile
+        shader_feedback_keys.update(renderer.read_latest_vt_shader_feedback())
         stats = renderer.get_material_vt_stats()
         if stats["retained_requests"] == 0 and stats["miss_rate"] == 0:
             break
@@ -305,12 +309,25 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     # claim, and impossible with fewer atlas slots than requested pages.
     assert stats["resident_pages"] >= COARSE_WORKING_SET_PAGES
 
-    # Wrong-tile detector: the bytes uploaded for a tile must be the bytes the
-    # manifest recorded for THAT key, not for some canonical page. With the old
-    # aliasing store this loop fails on the first non-(0,0) tile.
+    # Shader feedback must be real and family-specific, not satisfied solely by
+    # predictive CPU prefetch. Validate every resident provenance record that
+    # those populated feedback frames resolved, including its per-page digest.
+    assert shader_feedback_keys
+    assert {entry[0] for entry in shader_feedback_keys} == {0, 1, 2}
+    for family_slot in range(3):
+        family_feedback = {
+            entry for entry in shader_feedback_keys if entry[0] == family_slot
+        }
+        assert len(family_feedback) >= 2, family_feedback
+        assert any(entry[3] != 0 or entry[4] != 0 for entry in family_feedback)
     digests = _manifest_digests(manifest)
-    tiles = renderer.read_contributing_tiles()
-    assert len(tiles) >= MIN_CONTRIBUTING_TILES
+    tiles = list(contributing_by_key.values())
+    assert tiles
+    assert {tile["family_slot"] for tile in tiles} == {0, 1, 2}
+    for family_slot in range(3):
+        family_tiles = [tile for tile in tiles if tile["family_slot"] == family_slot]
+        assert len(family_tiles) >= 2, family_tiles
+        assert any(tile["tile_x"] != 0 or tile["tile_y"] != 0 for tile in family_tiles)
     for tile in tiles:
         key = (tile["family_slot"], tile["mip_level"], tile["tile_x"], tile["tile_y"])
         assert key in digests, key

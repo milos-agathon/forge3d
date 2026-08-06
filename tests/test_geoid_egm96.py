@@ -45,12 +45,13 @@ _BYTE_LOCK_POINTS = [
 # Rust's f64 trigonometric operations use the target platform's libm, so an
 # optimized payload is byte-stable per target rather than portable across
 # targets. These release-build hashes lock the exact pre-SELENE EGM96 payload
-# on the two targets that run this gate. The macOS arm64 value was reproduced
+# on the three targets that run this gate. The macOS arm64 value was reproduced
 # directly from pre-refactor commit 7fa1b984 with the same release toolchain;
-# the Linux x86_64 value is the stable hosted-wheel payload.
+# the Linux x86_64 and Windows AMD64 values are stable hosted-wheel payloads.
 _BYTE_LOCK_SHA256 = {
     ("darwin", "arm64"): "86291cb905156dabb987bf57c53b42f124e2cf1047dc5b9145e4e46c0a856a17",
     ("linux", "x86_64"): "5deafb3b0a40962cd947c714bead4c5e86a038793723d9fd252dfb90e751ee61",
+    ("win32", "amd64"): "ab9469d5e078dbfaa5df9b02219733c482ee21ed1f872fa251ed7056da27a639",
 }
 
 

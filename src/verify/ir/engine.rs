@@ -8,7 +8,7 @@ const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xf664_b696_d596_de84;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x4758_e817_2f5b_182e;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x5b14_d489_cce9_5071;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x6f35_be00_7d2a_d1d3;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {
@@ -1185,6 +1185,11 @@ impl Evaluator<'_> {
             let component_image = match relation {
                 Some(Relation::ImageUpperIndex(image)) => Some(image),
                 Some(Relation::ImageUpperIndexAxis(image, bound_axis)) if bound_axis == axis => {
+                    Some(image)
+                }
+                Some(Relation::InImageAxes(image, component_mask))
+                    if component_mask & (1u8.checked_shl(axis as u32).unwrap_or(0)) != 0 =>
+                {
                     Some(image)
                 }
                 Some(Relation::LessThan(bound)) => {

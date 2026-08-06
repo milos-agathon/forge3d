@@ -56,7 +56,7 @@ struct VisibilityReconstructedVertex {
 fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     let source = terrain_visibility_vertices[index];
     let uv = clamp(source.uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_fine = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_fine = sample_height_bilinear(uv);
     // Geomorphing, mirrored from `vs_clipmap_main`. Reconstructing from the
     // FINE height alone put every morphing vertex at a different clip position
     // than pass 1 rasterised it from, which tilts the triangle and biases the
@@ -69,10 +69,10 @@ fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     let coarse_cell = uv / coarse_step;
     let coarse_base = floor(coarse_cell) * coarse_step;
     let coarse_t = fract(coarse_cell);
-    let h00 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h10 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h01 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h11 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h00 = sample_height_bilinear(clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h10 = sample_height_bilinear(clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h01 = sample_height_bilinear(clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h11 = sample_height_bilinear(clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)));
     let h_coarse = mix(mix(h00, h10, coarse_t.x), mix(h01, h11, coarse_t.x), coarse_t.y);
     let h_raw = mix(h_fine, h_coarse, clamp(source.morph_data.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
