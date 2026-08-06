@@ -19,7 +19,11 @@ SOFTWARE_ADAPTER_TOKENS = (
     "basic render driver",
     "lavapipe",
     "llvmpipe",
+    "paravirtual",
+    "software",
     "swiftshader",
+    "virtual",
+    "virtio",
     "warp",
 )
 HARDWARE_DEVICE_TYPES = {"discretegpu", "integratedgpu", "virtualgpu"}

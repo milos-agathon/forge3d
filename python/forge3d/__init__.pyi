@@ -796,6 +796,9 @@ class TerrainRenderer:
     def read_retained_vt_requests(
         self,
     ) -> List[Tuple[int, int, int, int, int]]: ...
+    def read_latest_vt_shader_feedback(
+        self,
+    ) -> List[Tuple[int, int, int, int, int]]: ...
     def pick_visibility_pixels(
         self, pixels: Sequence[Tuple[int, int]]
     ) -> List[Optional[Tuple[int, int]]]: ...

@@ -323,7 +323,8 @@ fn fs_visibility_resolve_fullscreen(
         discard;
     } else {
         atomicAdd(&terrain_frame_counters.material_invocations, 1u);
-        terrain_vt_write_surface_feedback(surface.tex_coord, 0u);
+        terrain_vt_write_surface_feedback(
+            surface.tex_coord, surface.world_position, 0u, input.clip_position.xy);
         if (terrain_vt_uniforms.config2.w != 0u) {
             if (terrain_vt_enabled()
                 && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
@@ -345,6 +346,16 @@ fn fs_visibility_geometry(
     input: VertexOutput,
     @builtin(primitive_index) primitive_index: u32,
 ) -> FragmentOutput {
+    // Capture the rasteriser's real quad gradients before the visibility-ID
+    // ownership test discards neighbouring helper/non-owning lanes. The
+    // Grid-UV normal and mask families now consume UV derivatives, while
+    // albedo consumes world-space triplanar derivatives; evaluating either
+    // after the divergent discard makes boundary derivatives undefined and
+    // produced a one-pixel forward/visibility mismatch on Metal.
+    let resolve_ddx_uv = dpdx(input.tex_coord);
+    let resolve_ddy_uv = dpdy(input.tex_coord);
+    let resolve_ddx_world = dpdx(input.world_position);
+    let resolve_ddy_world = dpdy(input.world_position);
     let pixel = vec2<i32>(input.clip_position.xy);
     let encoded = textureLoad(terrain_visibility_ids, pixel, 0).x;
     let expected = (((input.tile_id & 0xffffu) << 16u)
@@ -352,9 +363,15 @@ fn fs_visibility_geometry(
     if (encoded != expected) {
         discard;
     }
+    terrain_explicit_ddx_uv = resolve_ddx_uv;
+    terrain_explicit_ddy_uv = resolve_ddy_uv;
+    terrain_explicit_ddx_world = resolve_ddx_world;
+    terrain_explicit_ddy_world = resolve_ddy_world;
+    terrain_explicit_gradients = 1u;
     let out = shade_main(input);
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
-    terrain_vt_write_surface_feedback(input.tex_coord, 0u);
+    terrain_vt_write_surface_feedback(
+        input.tex_coord, input.world_position, 0u, input.clip_position.xy);
     if (terrain_vt_uniforms.config2.w != 0u) {
         if (terrain_vt_enabled()
             && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)

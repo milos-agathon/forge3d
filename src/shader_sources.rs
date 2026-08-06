@@ -124,7 +124,7 @@ pub(crate) fn terrain_bindless() -> String {
         )
         .replace(
             "textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0)",
-            "textureSampleLevel(terrain_vt_atlas[family_slot], terrain_vt_sampler, atlas_uv, 0.0)",
+            "textureSampleLevel(terrain_vt_atlas[terrain_vt_atlas_layer(family_slot)], terrain_vt_sampler, atlas_uv, 0.0)",
         )
 }
 
@@ -241,7 +241,7 @@ mod tests {
         let bindless = terrain_bindless();
         assert!(fixed.contains("var terrain_vt_atlas: texture_2d<f32>;"));
         assert!(!fixed.contains("binding_array"));
-        assert!(!fixed.contains("terrain_vt_atlas[family_slot]"));
+        assert!(!fixed.contains("terrain_vt_atlas[terrain_vt_atlas_layer(family_slot)]"));
         // The array must be SIZED and must agree with the bind-group layout's
         // `count`; an unsized array against a counted layout entry is what
         // faulted the Vulkan device.
@@ -249,7 +249,9 @@ mod tests {
             "var terrain_vt_atlas: binding_array<texture_2d<f32>, {VT_ATLAS_BINDING_COUNT}>;"
         )));
         assert!(!bindless.contains("binding_array<texture_2d<f32>>"));
-        assert!(bindless.contains("terrain_vt_atlas[family_slot], terrain_vt_sampler"));
+        assert!(bindless
+            .contains("terrain_vt_atlas[terrain_vt_atlas_layer(family_slot)], terrain_vt_sampler"));
+        assert!(bindless.contains("fn terrain_vt_atlas_layer(family_slot: u32) -> u32"));
         assert_ne!(fixed, bindless);
     }
 }

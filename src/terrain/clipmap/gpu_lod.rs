@@ -211,13 +211,6 @@ pub struct GpuLodDrawResources {
     bind_group: wgpu::BindGroup,
 }
 
-#[cfg(feature = "extension-module")]
-impl GpuLodDrawResources {
-    pub(crate) fn template_buffer(&self) -> &wgpu::Buffer {
-        &self._draw_templates
-    }
-}
-
 /// Frustum planes for culling (Ax + By + Cz + D = 0 format).
 #[derive(Debug, Clone)]
 pub struct FrustumPlanes {

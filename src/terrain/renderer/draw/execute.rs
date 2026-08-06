@@ -599,7 +599,7 @@ impl TerrainScene {
         multi_draw_count: bool,
         first_instance: bool,
     ) -> Result<()> {
-        let resolve_bind_group = self.visibility_resolve_bind_group(&render_targets.depth_view)?;
+        let resolve_bind_group = self.visibility_resolve_bind_group()?;
         let pipeline_cache = self
             .pipeline
             .lock()

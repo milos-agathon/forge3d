@@ -275,6 +275,10 @@ impl TerrainRenderer {
             ));
         }
 
+        self.scene
+            .validate_material_vt_request(params, material_set.materials().len() as u32)
+            .map_err(|error| PyRuntimeError::new_err(format!("Rendering failed: {error:#}")))?;
+
         let certificate_enabled = certificate
             .as_ref()
             .is_some_and(|value| !value.is_none() && !matches!(value.extract::<bool>(), Ok(false)));
@@ -342,6 +346,12 @@ impl TerrainRenderer {
                 "An offline accumulation session is active; call end_offline_accumulation() before one-shot rendering.",
             ));
         }
+
+        self.scene
+            .validate_material_vt_request(params, material_set.materials().len() as u32)
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("Rendering with AOV failed: {error:#}"))
+            })?;
 
         let (frame, aov_frame) = self
             .scene
@@ -954,6 +964,20 @@ impl TerrainRenderer {
             PyRuntimeError::new_err(format!("Failed to lock material_vt: {error}"))
         })?;
         Ok(material_vt.retained_request_set())
+    }
+
+    /// Exact family-specific records emitted by the most recently staged GPU
+    /// material-VT feedback pass. CPU prefetch and test-seeded requests are
+    /// intentionally excluded.
+    #[pyo3(text_signature = "(self)")]
+    fn read_latest_vt_shader_feedback(&self) -> PyResult<Vec<(u32, u32, u32, u32, u32)>> {
+        self.scene
+            .drain_latest_material_vt_shader_feedback()
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!(
+                    "Failed to read material VT shader feedback: {error:#}"
+                ))
+            })
     }
 
     /// Return `(tile_id, triangle_id)` identities for visibility-buffer

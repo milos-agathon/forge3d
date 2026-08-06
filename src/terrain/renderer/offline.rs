@@ -1538,6 +1538,17 @@ impl TerrainRenderer {
             ));
         }
 
+        // Keep missing or malformed VT family requests fail-before-mutation:
+        // build_offline_state allocates the complete offline graph and the
+        // returned state is installed as an active session below.
+        self.scene
+            .validate_material_vt_request(params, material_set.materials().len() as u32)
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!(
+                    "Failed to begin offline accumulation during material VT preflight: {error:#}"
+                ))
+            })?;
+
         let jitter_sequence_samples =
             resolve_offline_jitter_sequence_samples(params.aa_samples, jitter_sequence_samples)
                 .map_err(PyValueError::new_err)?;

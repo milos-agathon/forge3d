@@ -1031,21 +1031,34 @@ def _mapscene_vt_settings(recipe: "SceneRecipe") -> Any | None:
     from .terrain_params import TerrainVTSettings, VTLayerFamily
 
     families = config.get("families") or config.get("layers") or ("albedo",)
+    default_virtual_size = config.get("virtual_size_px")
+    if default_virtual_size is None:
+        default_virtual_size = (
+            config.get("source_size", 512)
+            if bool(config.get("procedural_sources", False))
+            else (4096, 4096)
+        )
     layers = []
     for item in families:
         layer_data = item if isinstance(item, Mapping) else {"family": item}
-        virtual_size = layer_data.get("virtual_size_px", config.get("virtual_size_px", (4096, 4096)))
+        virtual_size = layer_data.get("virtual_size_px", default_virtual_size)
         if isinstance(virtual_size, Sequence) and not isinstance(virtual_size, (str, bytes)):
             size_pair = tuple(int(value) for value in list(virtual_size)[:2])
         else:
             size_pair = (int(virtual_size), int(virtual_size))
+        family = str(layer_data.get("family", "albedo"))
+        fallback = layer_data.get("fallback")
         layers.append(
             VTLayerFamily(
-                family=str(layer_data.get("family", "albedo")),
+                family=family,
                 virtual_size_px=size_pair,  # type: ignore[arg-type]
                 tile_size=int(layer_data.get("tile_size", config.get("tile_size", 248))),
                 tile_border=int(layer_data.get("tile_border", config.get("tile_border", 4))),
-                fallback=tuple(float(value) for value in layer_data.get("fallback", (0.5, 0.5, 0.5, 1.0))),
+                fallback=(
+                    tuple(float(value) for value in fallback)
+                    if fallback is not None
+                    else None
+                ),
             )
         )
     if not layers:
@@ -1061,12 +1074,36 @@ def _mapscene_vt_settings(recipe: "SceneRecipe") -> Any | None:
     )
 
 
-def _procedural_vt_source(size: int, material_index: int, pattern: str) -> Any:
+def _procedural_vt_source(
+    size: int | tuple[int, int],
+    material_index: int,
+    family: str,
+    pattern: str,
+) -> Any:
     import numpy as np
 
-    size = max(16, int(size))
-    coords = np.linspace(0.0, 1.0, size, dtype=np.float32)
-    xx, yy = np.meshgrid(coords, coords)
+    if isinstance(size, Sequence) and not isinstance(size, (str, bytes)):
+        dimensions = list(size)[:2]
+        if len(dimensions) != 2:
+            raise ValueError("procedural VT size must contain width and height")
+        width, height = (max(16, int(value)) for value in dimensions)
+    else:
+        width = height = max(16, int(size))
+    if family == "normal":
+        return np.ascontiguousarray(
+            np.broadcast_to(
+                np.array([128, 128, 255, 255], dtype=np.uint8),
+                (height, width, 4),
+            ).copy()
+        )
+    if family == "mask":
+        return np.ascontiguousarray(
+            np.full((height, width, 4), 255, dtype=np.uint8)
+        )
+
+    coords_x = np.linspace(0.0, 1.0, width, dtype=np.float32)
+    coords_y = np.linspace(0.0, 1.0, height, dtype=np.float32)
+    xx, yy = np.meshgrid(coords_x, coords_y)
     pattern = str(pattern or "checker").lower()
     if pattern == "stripes":
         modulation = 0.45 + 0.55 * (0.5 + 0.5 * np.sin((xx * 18.0 + material_index) * np.pi))
@@ -1085,7 +1122,7 @@ def _procedural_vt_source(size: int, material_index: int, pattern: str) -> Any:
     )
     base = palette[int(material_index) % len(palette)]
     rgb = np.clip(base * modulation[..., None] + 0.08 * (1.0 - modulation[..., None]), 0.0, 1.0)
-    alpha = np.ones((size, size, 1), dtype=np.float32)
+    alpha = np.ones((height, width, 1), dtype=np.float32)
     return np.ascontiguousarray(np.round(np.concatenate([rgb, alpha], axis=-1) * 255.0).astype(np.uint8))
 
 
@@ -1103,13 +1140,47 @@ def _mapscene_register_vt_sources(renderer: Any, recipe: "SceneRecipe") -> None:
     sources = config.get("sources")
     if not isinstance(sources, Sequence) or isinstance(sources, (str, bytes)):
         if bool(config.get("procedural_sources", False)):
+            settings = _mapscene_vt_settings(recipe)
+            layers = () if settings is None else settings.layers
+            configured_families = config.get("families") or config.get("layers") or ()
+            explicit_fallbacks = {
+                str(item.get("family", "albedo")): item["fallback"]
+                for item in configured_families
+                if isinstance(item, Mapping) and "fallback" in item
+            }
+            configured_source_size = config.get("source_size")
+            if configured_source_size is not None:
+                if isinstance(configured_source_size, Sequence) and not isinstance(
+                    configured_source_size, (str, bytes)
+                ):
+                    source_dimensions = tuple(
+                        int(value) for value in list(configured_source_size)[:2]
+                    )
+                else:
+                    source_dimensions = (
+                        int(configured_source_size),
+                        int(configured_source_size),
+                    )
+                if len(source_dimensions) != 2 or any(
+                    layer.virtual_size_px != source_dimensions for layer in layers
+                ):
+                    raise ValueError(
+                        "procedural VT source_size must match every family's virtual_size_px"
+                    )
             sources = [
                 {
                     "material_index": int(material_index),
-                    "family": "albedo",
+                    "family": layer.family,
                     "pattern": config.get("pattern", "checker"),
-                    "size": int(config.get("source_size", 512)),
+                    "size": layer.virtual_size_px,
+                    "virtual_size_px": layer.virtual_size_px,
+                    **(
+                        {"fallback": explicit_fallbacks[layer.family]}
+                        if layer.family in explicit_fallbacks
+                        else {}
+                    ),
                 }
+                for layer in layers
                 for material_index in range(int(config.get("source_count", 4)))
             ]
         else:
@@ -1138,16 +1209,27 @@ def _mapscene_register_vt_sources(renderer: Any, recipe: "SceneRecipe") -> None:
 
                 image = np.asarray(load_png_rgba(path_obj), dtype=np.uint8)
         else:
-            image = _procedural_vt_source(int(source.get("size", max(size_pair))), material_index, str(source.get("pattern", "checker")))
+            image = _procedural_vt_source(
+                source.get("size", size_pair),
+                material_index,
+                family,
+                str(source.get("pattern", "checker")),
+            )
 
         fallback = source.get("fallback")
         if fallback is None:
-            rgba = np.asarray(image, dtype=np.float32)
-            if rgba.ndim == 3 and rgba.shape[-1] >= 3:
-                rgb = rgba[..., :3].mean(axis=(0, 1)) / 255.0
-                fallback = [float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0]
+            if family == "albedo":
+                rgba = np.asarray(image, dtype=np.float32)
+                if rgba.ndim == 3 and rgba.shape[-1] >= 3:
+                    rgb = rgba[..., :3].mean(axis=(0, 1)) / 255.0
+                    fallback = [float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0]
+                else:
+                    fallback = [0.5, 0.5, 0.5, 1.0]
             else:
-                fallback = [0.5, 0.5, 0.5, 1.0]
+                fallback = {
+                    "normal": [0.5, 0.5, 1.0, 1.0],
+                    "mask": [1.0, 1.0, 1.0, 1.0],
+                }.get(family, [0.5, 0.5, 0.5, 1.0])
         renderer.register_material_vt_source(
             material_index,
             family,

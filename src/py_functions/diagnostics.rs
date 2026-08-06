@@ -188,6 +188,16 @@ pub(crate) fn global_memory_metrics(py: Python<'_>) -> PyResult<PyObject> {
     d.set_item("utilization_ratio", metrics.utilization_ratio)?;
     d.set_item("resident_tiles", metrics.resident_tiles)?;
     d.set_item("resident_tile_bytes", metrics.resident_tile_bytes)?;
+    for (slot, family) in ["albedo", "normal", "mask", "height"].iter().enumerate() {
+        d.set_item(
+            format!("resident_tiles_{family}"),
+            metrics.resident_tiles_by_family[slot],
+        )?;
+        d.set_item(
+            format!("resident_bytes_{family}"),
+            metrics.resident_tile_bytes_by_family[slot],
+        )?;
+    }
     d.set_item("staging_bytes_in_flight", metrics.staging_bytes_in_flight)?;
     d.set_item("staging_ring_count", metrics.staging_ring_count)?;
     d.set_item("staging_buffer_size", metrics.staging_buffer_size)?;

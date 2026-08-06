@@ -162,6 +162,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert "retention-days: 7" in _artifact_step(_job(workflow, job), artifact)
 
     physical_artifacts = [
+        ("test-substratia-gpu", "substratia-physical-gpu-evidence"),
         ("test-m06-full-geospatial-viewer", "m06-full-geospatial-viewer-evidence"),
         ("test-f3dz-gpu", "f3dz-physical-gpu-evidence"),
         ("test-anamnesis-portability-seed", "anamnesis-physical-portable-store"),
@@ -174,6 +175,12 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         )
     for job, artifact in physical_artifacts:
         assert "retention-days: 90" in _artifact_step(_job(workflow, job), artifact)
+
+    substratia = _job(workflow, "test-substratia-gpu")
+    assert "runs-on: macos-14" in substratia
+    assert "inputs.scope == 'full'" in substratia
+    assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in substratia
+    assert "substratia_evidence_report.py" in substratia
 
     assert "sphinx" not in workflow.lower()
     assert "name: documentation" not in workflow

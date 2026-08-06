@@ -406,6 +406,7 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
         "tests/test_render_certificate_contract.py",
         "tests/test_astro_ephemeris.py",
         "tests/test_no_silent_degradation.py",
+        "tests/test_substratia_evidence_report.py",
     }
     assert fast_lane == expected_fast, (
         "fast profile changed without updating the architectural-contract lock: "
@@ -652,3 +653,56 @@ def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
     slow_job = _workflow_job(ci_yml, "test-python-slow")
     assert "python scripts/ci_pytest_lane.py --profile full --slow-lane" in slow_job
     assert "github.event_name == 'pull_request'" not in slow_job
+
+
+def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
+    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = _workflow_job(ci_yml, "test-substratia-gpu")
+    core = _workflow_job(ci_yml, "pr-core-success")
+    acceptance = _workflow_job(ci_yml, "full-acceptance-summary")
+    probe = (ROOT / "scripts" / "terrain_ci_probe.py").read_text(encoding="utf-8")
+    lane = (ROOT / "scripts" / "ci_pytest_lane.py").read_text(encoding="utf-8")
+
+    # Physical acceptance remains outside the stable hosted PR context.
+    assert "test-substratia-gpu" not in core.split("\n    runs-on:", 1)[0]
+    assert "github.event_name == 'pull_request'" not in job
+    assert "inputs.scope == 'full'" in job
+    assert "runs-on: macos-14" in job
+    assert "WGPU_BACKEND: metal" in job
+    assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in job
+    assert "continue-on-error" not in job
+
+    # The lane is bound to an explicit clean candidate and produces exact test,
+    # image, adapter, and verifier evidence rather than trusting artifact presence.
+    assert "FORGE3D_SUBSTRATIA_CANDIDATE_SHA" in job
+    assert 'git status --porcelain --untracked-files=no' in job
+    assert "--junitxml=" in job
+    for test_name in (
+        "test_normal_family_changes_lighting_ssim",
+        "test_all_families_page_within_budget",
+        "test_missing_family_is_fatal",
+        "test_partial_normal_residency_degrades_gracefully",
+    ):
+        assert test_name in job
+    assert "scripts/substratia_evidence_report.py" in job
+    assert "--candidate-sha \"$FORGE3D_SUBSTRATIA_CANDIDATE_SHA\"" in job
+    assert "adapter-probe.json" in job
+    assert "lane-ran.json" in job and "verification.json" in job
+    assert "if-no-files-found: error" in job
+    assert "retention-days: 90" in job
+
+    # Full Acceptance consumes explicit RAN and PASS outputs; a successful upload
+    # alone is not sufficient.
+    assert "test-substratia-gpu" in acceptance.split("\n    runs-on:", 1)[0]
+    assert "needs.test-substratia-gpu.outputs.lane" in acceptance
+    assert "needs.test-substratia-gpu.outputs.verifier" in acceptance
+    assert "SUBSTRATIA physical lane did not record RAN" in acceptance
+    assert "SUBSTRATIA evidence verifier did not record PASS" in acceptance
+
+    # The SUBSTRATIA physical proof excludes virtual devices even though the
+    # general CI-safe probe retains main's virtual-GPU support.
+    assert 'PHYSICAL_DEVICE_TYPES = {"discretegpu", "integratedgpu"}' in probe
+    for token in ("software", "virtual", "paravirtual", "virtio", "llvmpipe"):
+        assert f'"{token}"' in probe
+    assert "return 2" in probe and "return 3" in probe
+    assert "tests/test_substratia_evidence_report.py" in lane
