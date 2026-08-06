@@ -2,12 +2,42 @@
 
 from importlib.metadata import distribution, metadata
 from pathlib import Path
+import hashlib
+import platform
 import re
+import struct
+import subprocess
 import sys
 
 import pytest
 
 from tests.conftest import _validate_installed_wheel_paths
+
+
+# One-off provenance lock evaluated by the installed release wheel from exact
+# pre-SELENE source commit 7fa1b98464a44b672ebf9077503ad354a2a9285a.
+_EGM96_BYTE_LOCK_POINTS = [
+    (-89.5, 0.5),
+    (-75.25, 42.75),
+    (-60.0, -120.0),
+    (-45.5, 179.5),
+    (-30.25, -179.75),
+    (-15.0, 90.0),
+    (0.0, 0.0),
+    (0.5, 179.5),
+    (12.345, 67.89),
+    (23.5, -45.5),
+    (35.0, 120.0),
+    (46.87, 102.45),
+    (51.5074, -0.1278),
+    (60.0, 10.0),
+    (70.25, -135.0),
+    (80.0, 179.0),
+    (89.5, 359.5),
+    (-33.8688, 151.2093),
+    (27.9881, 86.925),
+    (-22.9068, -43.1729),
+]
 
 try:
     import tomllib  # type: ignore[attr-defined]
@@ -78,6 +108,48 @@ def test_import_forge3d():
     import forge3d
 
     assert forge3d.__version__
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32" or platform.machine().lower() != "amd64",
+    reason="one-off exact pre-SELENE Windows AMD64 release provenance",
+)
+def test_pre_selene_egm96_windows_release_byte_lock():
+    """Establish the Windows baseline from unchanged pre-refactor sources."""
+    import forge3d
+
+    root = Path(__file__).resolve().parent.parent
+    commit_object = subprocess.check_output(
+        ["git", "cat-file", "-p", "HEAD"], cwd=root, text=True
+    )
+    parent = next(
+        line.removeprefix("parent ")
+        for line in commit_object.splitlines()
+        if line.startswith("parent ")
+    )
+    assert parent == "7fa1b98464a44b672ebf9077503ad354a2a9285a"
+    source_hashes = {
+        "src/geo/geoid.rs": "fd9410f851ce7433102d6e40b052f8c76c0c9406be09b2833c819598e7b314c1",
+        "assets/geoid/egm96_n120.bin": "b640e9dcefd1040f0b184a101e1eab2740486a85680a560080ec091eab796fe4",
+        "Cargo.lock": "152339c2ddae5195920068029940c163119bcd19e5cc9f3bc82107f7f43b2313",
+        "pyproject.toml": "b9013b02c47808c345f12320c7c7ec77e3f14d89a4b90ddb66c5cef3bb0888a4",
+    }
+    for relative, expected in source_hashes.items():
+        assert hashlib.sha256((root / relative).read_bytes()).hexdigest() == expected
+
+    payload = b"".join(
+        struct.pack("<d", forge3d.geoid_undulation(lat, lon))
+        for lat, lon in _EGM96_BYTE_LOCK_POINTS
+    )
+    actual = hashlib.sha256(payload).hexdigest()
+    print(
+        {
+            "pre_refactor_sha": parent,
+            "target": (sys.platform, platform.machine().lower()),
+            "egm96_release_payload_sha256": actual,
+        }
+    )
+    assert actual == "ab9469d5e078dbfaa5df9b02219733c482ee21ed1f872fa251ed7056da27a639"
 
 
 def test_public_api_surface():
