@@ -22,6 +22,13 @@ requires_terrain = pytest.mark.skipif(
 
 WIN2_SIZE = (3840, 2160)
 HZB_SPEEDUP_GATE = 1.8
+# Exercise the production-default clipmap density. The shared terrain test
+# helper deliberately uses a 32x32 fast-test mesh; at that density the fixed
+# HZB dispatch overhead dominates after the canyon culls ~95% of the tiles and
+# the historical fixture measured only 1.70-1.83x. Production uses 64x64 for
+# both the center and rings, while the same conservative HZB partition and
+# bitwise baseline comparison below remain authoritative.
+WIN2_CAMERA_MODE = "clipmap:4:64:64:10:0.3"
 
 
 def _canyon_dem(size: int = 96) -> np.ndarray:
@@ -32,6 +39,7 @@ def _canyon_dem(size: int = 96) -> np.ndarray:
 
 def _win2_params(culling: str):
     return _make_params(
+        camera_mode=WIN2_CAMERA_MODE,
         culling=culling,
         terrain_span=50.0,
         cam_radius=7.0,

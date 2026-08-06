@@ -674,6 +674,7 @@ class TestEvsmExposureParity:
             "cmd": "set_terrain_pbr", "enabled": True, "shadow_technique": technique,
             "shadow_map_res": 2048, "exposure": 1.0, "msaa": 1,
             "ibl_intensity": 0.0, "debug_mode": debug_mode,
+            "sky": {"enabled": False},
         })
         viewer.snapshot(str(out), width=640, height=400)
         from PIL import Image
@@ -702,7 +703,11 @@ class TestEvsmExposureParity:
         means = {}
         for tech, l in lum.items():
             terrain = l < 0.97  # exclude the white background
-            assert terrain.any(), f"{tech}: no terrain pixels found"
+            terrain_pixels = int(terrain.sum())
+            assert 0 < terrain_pixels < terrain.size, (
+                f"{tech}: terrain mask must exclude the white background; "
+                f"selected {terrain_pixels}/{terrain.size} pixels"
+            )
             means[tech] = float(l[terrain].mean())
 
         # EVSM must not be globally darker than PCF by more than 20%.

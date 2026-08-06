@@ -120,6 +120,7 @@ SPECS = {
     "flythrough_popping": GateSpec(
         numeric=(
             "frames",
+            "rendered_frames_total",
             "width",
             "height",
             "worst_frame_crack_count",
@@ -130,6 +131,11 @@ SPECS = {
             "camera_step_px",
             "camera_path_distance_m",
             "distinct_camera_positions",
+            "clipmap_center_step_m",
+            "clipmap_center_path_m",
+            "actual_clipmap_center_transitions",
+            "distinct_clipmap_centers",
+            "regions_on_screen",
         )
     ),
     "vt_request_retention": GateSpec(

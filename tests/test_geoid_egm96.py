@@ -92,9 +92,13 @@ def test_egm96_refactor_is_byte_identical():
         for lat, lon in _BYTE_LOCK_POINTS
     )
     target = (sys.platform, platform.machine().lower())
+    actual = hashlib.sha256(payload).hexdigest()
     expected = _BYTE_LOCK_SHA256.get(target)
-    assert expected is not None, f"no reviewed EGM96 release baseline for {target}"
-    assert hashlib.sha256(payload).hexdigest() == expected
+    assert expected is not None, (
+        f"no reviewed EGM96 release baseline for {target}; "
+        f"measured release payload sha256={actual}"
+    )
+    assert actual == expected
 
 
 def test_known_undulation_signs_and_magnitudes():

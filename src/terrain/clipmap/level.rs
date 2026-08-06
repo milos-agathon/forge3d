@@ -6,6 +6,13 @@ use super::ClipmapConfig;
 use crate::terrain::tiling::TileId;
 use glam::Vec2;
 
+fn snap_center_to_finest_grid(center: Vec2, base_cell_size: f32) -> Vec2 {
+    if !base_cell_size.is_finite() || base_cell_size <= 0.0 {
+        return center;
+    }
+    (center / base_cell_size).round() * base_cell_size
+}
+
 /// Bounds for a mesh region (start index, index count).
 #[derive(Debug, Clone, Copy)]
 pub struct MeshBounds {
@@ -163,6 +170,7 @@ impl ClipmapLevel {
     /// Update the clipmap center position.
     /// Returns list of TileIds that should be requested for streaming.
     pub fn update_center(&mut self, new_center: Vec2) -> Vec<TileId> {
+        let new_center = snap_center_to_finest_grid(new_center, self.base_cell_size);
         let delta = new_center - self.center;
 
         // Only regenerate if moved significantly (half a cell)
@@ -313,6 +321,31 @@ mod tests {
         // Small movement should not regenerate
         let tiles = level.update_center(Vec2::new(0.1, 0.1));
         assert!(tiles.is_empty());
+    }
+
+    #[test]
+    fn test_center_updates_snap_to_the_finest_grid() {
+        let config = ClipmapConfig::new(4, 64);
+        let mut level = ClipmapLevel::new(config, Vec2::ZERO, 1000.0);
+        let base_cell = level.base_cell_size;
+
+        let requested = Vec2::new(base_cell * 0.6, -base_cell * 1.6);
+        assert!(!level.update_center(requested).is_empty());
+        assert_eq!(level.center, Vec2::new(base_cell, -base_cell * 2.0));
+
+        // Another raw camera position inside the same snapped cell neither
+        // changes the mesh lattice nor spuriously requests tiles.
+        let same_cell = Vec2::new(base_cell * 0.7, -base_cell * 1.7);
+        assert!(level.update_center(same_cell).is_empty());
+        assert_eq!(level.center, Vec2::new(base_cell, -base_cell * 2.0));
+    }
+
+    #[test]
+    fn test_initial_center_preserves_static_clipmap_semantics() {
+        let config = ClipmapConfig::new(4, 64);
+        let center = Vec2::new(12.25, -31.75);
+        let level = ClipmapLevel::new(config, center, 1000.0);
+        assert_eq!(level.center, center);
     }
 
     #[test]

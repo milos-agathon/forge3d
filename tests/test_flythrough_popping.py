@@ -26,9 +26,9 @@
 #   * frames three clipmap regions (centre block, ring 0, ring 1) with two ring
 #     boundaries permanently on screen, and *computes* that from the Rust ring
 #     formulas rather than asserting it in prose;
-#   * moves the clipmap/streaming centre 353.6 m every frame -- 1.81x the
-#     ``base_cell_size * 0.5`` regeneration threshold -- so the mesh, the seam
-#     analysis and the LOD tiling are rebuilt on every one of the 600 frames;
+#   * requests a 424.3 m diagonal clipmap/streaming-centre move every frame --
+#     2.17x the regeneration threshold -- while production snaps geometry to
+#     its stable finest-grid lattice; at least 90% of transitions still rebuild;
 #   * asserts the crack metric, the seam-gap headroom and a threshold-free hole
 #     count on EVERY frame, not once at the end;
 #   * warms the height mosaic to asserted full fine-tile residency before the
@@ -73,9 +73,9 @@
 # This is a real camera flythrough: the camera target advances by 0.01 ground
 # pixel per frame (about 165 m over 600 frames, or 16.5 m/s at 60 fps). The
 # independent clipmap/streaming-centre path still crosses the regeneration
-# threshold every frame, so the gate observes camera motion and new geometry
-# without misclassifying a many-pixel camera jump as tile pop. The overlay uses
-# one continuous two-stop ramp: the shared four-stop terrain ramp has a hard LUT
+# threshold every frame. The literal consecutive-frame maximum remains the
+# acceptance result. The overlay uses one continuous two-stop ramp: the shared
+# four-stop terrain ramp has a hard LUT
 # colour step that amplifies a one-LSB geometry change above the perceptual
 # threshold. The negative control adds a much larger camera translation and
 # proves that the unchanged dE < 1 gate can still fail.
@@ -182,10 +182,13 @@ CAM_RADIUS = 24_000.0
 CAM_TARGET_DX = -12_000.0
 CLIP = (18_000.0, 40_000.0)
 
-CENTER_STEP_M = 250.0
+# The public API receives an ordinary fractional-grid camera step. Production
+# snaps it to the finest clipmap lattice before regenerating geometry.
+CENTER_STEP_M = 300.0
 CENTER_X_AMPLITUDE_STEPS = 19
 CENTER_Y_AMPLITUDE_STEPS = 23
-MIN_DISTINCT_CENTERS = 500
+MIN_DISTINCT_REQUESTED_CENTERS = 500
+MIN_DISTINCT_ACTUAL_CENTERS = 480
 STREAM_ALTITUDE_M = 3_000.0
 INITIAL_CAM_TARGET = (
     -CENTER_X_AMPLITUDE_STEPS * CENTER_STEP_M + CAM_TARGET_DX,
@@ -241,16 +244,31 @@ def _region_outer_radii() -> list[float]:
     )
 
 
-def _regions_on_screen() -> int:
+def _snap_center_to_finest_grid(center: tuple[float, float]) -> tuple[float, float]:
+    """Mirror Rust ``f32::round`` for the committed non-tie fixture values."""
+
+    def snap(value: float) -> float:
+        scaled = value / BASE_CELL_M
+        rounded = math.floor(scaled + 0.5) if scaled >= 0.0 else math.ceil(scaled - 0.5)
+        return rounded * BASE_CELL_M
+
+    return snap(center[0]), snap(center[1])
+
+
+def _actual_center_at(index: int) -> tuple[float, float]:
+    return _snap_center_to_finest_grid(_center_at(index))
+
+
+def _regions_on_screen_for_centers(centers: list[tuple[float, float]]) -> int:
     """Minimum clipmap regions the moving camera frame intersects over the run.
 
     The camera and clipmap centre follow independent committed paths, so evaluate
     their relative Chebyshev reach on every frame.
     """
+    assert len(centers) == FRAMES
     boundaries = _region_outer_radii()[:-1]
     counts = []
-    for index in range(FRAMES):
-        center_x, center_y = _center_at(index)
+    for index, (center_x, center_y) in enumerate(centers):
         camera_target = _camera_target_at(index)
         target_x = camera_target[0] - center_x
         target_y = camera_target[1] - center_y
@@ -264,18 +282,24 @@ def _regions_on_screen() -> int:
     return min(counts)
 
 
+def _regions_on_screen() -> int:
+    return _regions_on_screen_for_centers(
+        [_actual_center_at(index) for index in range(FRAMES)]
+    )
+
+
 def _center_at(index: int) -> tuple[float, float]:
     """Clipmap/streaming centre for frame ``index``.
 
-    Two integer triangle waves of period 76 and 92 frames, which visit 511
+    Two integer triangle waves of period 76 and 92 frames, which request 511
     distinct centres over the run while keeping the path inside a
-    +/-4750 x +/-5750 m box -- small enough that the framed ground never leaves
+    +/-5700 x +/-6900 m box -- small enough that the framed ground never leaves
     the DEM footprint, large enough that every single step is exactly
-    ``CENTER_STEP_LENGTH_M = 353.6 m``, i.e. 1.81x the clipmap's
+    ``CENTER_STEP_LENGTH_M = 424.3 m``, i.e. 2.17x the clipmap's
     ``base_cell_size * 0.5 = 195.3 m`` regeneration threshold
-    (``src/terrain/clipmap/level.rs:168-171``). No two consecutive frames ever
-    share a centre, so the clipmap geometry cache key
-    (``geometry.rs:603-615``) misses on every frame of the run.
+    (``src/terrain/clipmap/level.rs``). Production snaps those requests to its
+    finest-grid lattice, retaining 481 distinct actual centres and 569 actual
+    transitions for the committed constants.
     """
     return (
         triangle_wave(index, CENTER_X_AMPLITUDE_STEPS) * CENTER_STEP_M,
@@ -444,8 +468,9 @@ def test_committed_camera_frames_multiple_clipmap_regions():
     # Every pixel is terrain: the frame's right edge stays inside the +x limit
     # that make_ring's short strips actually cover.
     covered = clipmap_covered_positive_x_limit(SPAN, CENTER_RESOLUTION)
+    actual_centers = [_actual_center_at(index) for index in range(FRAMES)]
     max_relative_x = max(
-        _camera_target_at(index)[0] + HALF_WIDTH_M - _center_at(index)[0]
+        _camera_target_at(index)[0] + HALF_WIDTH_M - actual_centers[index][0]
         for index in range(FRAMES)
     )
     assert max_relative_x < covered, (max_relative_x, covered)
@@ -467,8 +492,10 @@ def test_committed_camera_frames_multiple_clipmap_regions():
 
     camera_targets = [_camera_target_at(index) for index in range(FRAMES)]
 
-    # Every frame regenerates the clipmap: the streaming centre step clears
-    # ClipmapLevel::update_center's half-cell threshold with margin.
+    # Every requested move clears ClipmapLevel's half-cell threshold with
+    # margin; finest-grid snapping can intentionally coalesce a small fraction
+    # of successive requests, while the run-level signature assertion below
+    # still requires at least 90% real mesh rebuilds.
     assert CENTER_STEP_LENGTH_M > REGENERATION_THRESHOLD_M, (
         CENTER_STEP_LENGTH_M,
         REGENERATION_THRESHOLD_M,
@@ -498,8 +525,18 @@ def test_committed_camera_frames_multiple_clipmap_regions():
     ]
     assert min(steps) == pytest.approx(CENTER_STEP_LENGTH_M)
     assert max(steps) == pytest.approx(CENTER_STEP_LENGTH_M)
-    centers = {_center_at(index) for index in range(FRAMES)}
-    assert len(centers) >= MIN_DISTINCT_CENTERS, len(centers)
+    requested_centers = {_center_at(index) for index in range(FRAMES)}
+    assert len(requested_centers) >= MIN_DISTINCT_REQUESTED_CENTERS, len(
+        requested_centers
+    )
+    assert len(set(actual_centers)) >= MIN_DISTINCT_ACTUAL_CENTERS, len(
+        set(actual_centers)
+    )
+    actual_transitions = sum(
+        actual_centers[index] != actual_centers[index - 1]
+        for index in range(1, FRAMES)
+    )
+    assert actual_transitions >= MIN_REBUILD_SIGNATURE_CHANGES, actual_transitions
 
     # Overlay construction below creates the native GPU-backed LUT. Skip
     # before that first allocation on hosted runners without a terrain-safe
@@ -535,6 +572,7 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
     signature_changes = 0
     previous_signature = None
     previous_lab = None
+    actual_centers: list[tuple[float, float]] = []
 
     with tempfile.TemporaryDirectory() as td:
         hdr = Path(td) / "probe.hdr"
@@ -548,12 +586,18 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
 
         for index in range(FRAMES):
             center = _center_at(index)
-            renderer.stream_height_tiles(
+            params = _params(z_scale=Z_SCALE, overlay=overlay, frame_index=index)
+            stream = renderer.stream_height_tiles(
                 (center[0], STREAM_ALTITUDE_M, center[1]), max_uploads=8
             )
+            actual_center = tuple(float(value) for value in stream["center"])
+            assert actual_center == pytest.approx(
+                _actual_center_at(index), abs=1e-3
+            ), {"frame": index, "requested": center, "stream": stream}
+            actual_centers.append(actual_center)
             frame = render_rgba(
                 renderer,
-                _params(z_scale=Z_SCALE, overlay=overlay, frame_index=index),
+                params,
                 dem,
                 ibl,
                 material_set,
@@ -581,8 +625,10 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             assert holes == 0, {"frame": index, "background_pixels": holes}
             hole_pixels_total += holes
 
-            # Per-transition pop gate.
             lab = srgb_to_lab(frame[..., :3])
+
+            # Literal prompt gate: all 599 consecutive committed flythrough
+            # frames, including camera motion and any clipmap-centre update.
             if previous_lab is not None:
                 delta = float(delta_e_2000(previous_lab, lab).max())
                 assert delta < 1.0, {"transition": index, "max_delta_e_2000": delta}
@@ -599,6 +645,17 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
         "seam_signature_changes": signature_changes,
         "transitions": FRAMES - 1,
     }
+    assert len(actual_centers) == FRAMES
+    actual_steps = [
+        math.dist(actual_centers[index - 1], actual_centers[index])
+        for index in range(1, FRAMES)
+    ]
+    actual_transition_count = sum(step > 0.0 for step in actual_steps)
+    assert actual_transition_count >= MIN_REBUILD_SIGNATURE_CHANGES, {
+        "actual_clipmap_center_transitions": actual_transition_count,
+        "transitions": FRAMES - 1,
+    }
+    assert len(set(actual_centers)) >= MIN_DISTINCT_ACTUAL_CENTERS
     assert height_vt["resident_tiles_height"] > 0, height_vt
     assert height_vt["height_pending_requests"] == 0, height_vt
 
@@ -615,6 +672,7 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             # Field names the win-5 row of scripts/tessella_evidence_report.py
             # renders; everything after them is extra context.
             "frames": FRAMES,
+            "rendered_frames_total": FRAMES,
             "width": SIZE[0],
             "height": SIZE[1],
             "worst_frame_crack_count": max_crack_count,
@@ -625,9 +683,14 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             "dem_octaves": DEM_OCTAVES,
             "terrain_span_m": SPAN,
             "z_scale": Z_SCALE,
-            "clipmap_center_step_m": CENTER_STEP_LENGTH_M,
+            "clipmap_center_step_m": sum(actual_steps) / len(actual_steps),
+            "clipmap_center_step_min_m": min(actual_steps),
+            "clipmap_center_step_max_m": max(actual_steps),
+            "requested_clipmap_center_step_m": CENTER_STEP_LENGTH_M,
             "clipmap_regeneration_threshold_m": REGENERATION_THRESHOLD_M,
-            "clipmap_center_path_m": CENTER_STEP_LENGTH_M * (FRAMES - 1),
+            "clipmap_center_path_m": sum(actual_steps),
+            "requested_clipmap_center_path_m": CENTER_STEP_LENGTH_M * (FRAMES - 1),
+            "actual_clipmap_center_transitions": actual_transition_count,
             "camera_step_px": CAMERA_STEP_PX,
             "camera_path_distance_m": math.dist(
                 _camera_target_at(0), _camera_target_at(FRAMES - 1)
@@ -635,10 +698,11 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             "distinct_camera_positions": len(
                 {_camera_target_at(index) for index in range(FRAMES)}
             ),
-            "distinct_clipmap_centers": len(
+            "distinct_requested_clipmap_centers": len(
                 {_center_at(index) for index in range(FRAMES)}
             ),
-            "regions_on_screen": _regions_on_screen(),
+            "distinct_clipmap_centers": len(set(actual_centers)),
+            "regions_on_screen": _regions_on_screen_for_centers(actual_centers),
             "region_outer_radii_m": _region_outer_radii(),
             "ground_pixel_m": GROUND_PIXEL_M,
             "max_delta_e_2000": max_delta_e,

@@ -35,6 +35,17 @@ THRESHOLDS = {
     "jupiter": 60.0,
     "saturn": 60.0,
 }
+
+
+def test_hashed_text_oracles_are_checked_out_with_canonical_lf_bytes():
+    attributes = {
+        line.strip()
+        for line in (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    }
+    assert "assets/astro/*.dat text eol=lf" in attributes
+    assert "tests/data/horizons_vectors.dat text eol=lf" in attributes
+
+
 def _separation_arcsec(a, b):
     azimuth_delta = math.radians(a[0] - b[0])
     altitude_a = math.radians(a[1])

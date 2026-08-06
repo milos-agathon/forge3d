@@ -230,12 +230,14 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
         vt=TerrainVTSettings(
             enabled=True,
             layers=layers,
-            # 8192/128 -> 64x64 = 4096 atlas slots, so the 3840-page coarse
-            # working set is simultaneously resident and paging never thrashes.
-            # (4096 slots at 4096 would be 1024 -- a guaranteed 3.75x overcommit
-            # that only looked harmless while every page aliased onto one.)
+            # 8192/128 -> 64x64 = 4096 atlas slots. The 256 MiB logical budget
+            # represents 4096 128x128 RGBA pages (4095 after equal family
+            # splitting), enough for the 3840 coarse pages plus 72 fine pages.
+            # A 192 MiB budget holds only 3072 logical pages and only looked
+            # sufficient while compressed physical bytes stood in for logical
+            # residency cost.
             atlas_size=8192,
-            residency_budget_mb=192.0,
+            residency_budget_mb=256.0,
             max_mip_levels=8,
             use_feedback=True,
         ),
@@ -256,6 +258,9 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     assert stats["retained_requests"] == 0
     assert stats["evictions"] == 0
     assert stats["cache_misses"] == 0
+    assert stats["cache_budget_mb"] == 256.0
+    assert stats["resident_megabytes"] <= 256.0
+    assert stats["resident_bytes_total"] <= 256 * 1024**2
     public_stats = vt_stats()
     assert all(public_stats[key] == value for key, value in stats.items())
     assert stats["atlas_device_local_bytes"] > 0

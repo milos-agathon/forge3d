@@ -58,8 +58,23 @@ def test_feedback_counter_tracks_the_physical_surface_write():
     assert shader.count(
         "atomicAdd(&terrain_frame_counters.feedback_records, 1u)"
     ) == 1
-    assert "terrain_vt_write_surface_feedback(input.tex_coord, 0u)" in shader
-    assert "terrain_vt_write_surface_feedback(surface.tex_coord, 0u)" in fullscreen
+    shader_compact = "".join(shader.split())
+    fullscreen_compact = "".join(fullscreen.split())
+    assert (
+        "terrain_vt_write_surface_feedback("
+        "input.tex_coord,input.world_position,0u,input.clip_position.xy)"
+        in shader_compact
+    )
+    assert (
+        "terrain_vt_write_surface_feedback("
+        "input.tex_coord,input.world_position,0u,input.clip_position.xy)"
+        in fullscreen_compact
+    )
+    assert (
+        "terrain_vt_write_surface_feedback("
+        "surface.tex_coord,surface.world_position,0u,input.clip_position.xy)"
+        in fullscreen_compact
+    )
 
 
 def test_visibility_write_and_resolve_are_separate_shader_sources():
@@ -195,7 +210,23 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
     )
     first = renderer.pick_visibility_pixels(pixels)
     cpu = renderer.pick_visibility_pixels_cpu(pixels)
-    assert first == cpu
+    if first != cpu:
+        mismatch = next(
+            index for index, (gpu_value, cpu_value) in enumerate(zip(first, cpu))
+            if gpu_value != cpu_value
+        )
+        mismatch_count = sum(
+            gpu_value != cpu_value for gpu_value, cpu_value in zip(first, cpu)
+        )
+        pytest.fail(
+            repr({
+                "mismatch_count": mismatch_count,
+                "first_index": mismatch,
+                "pixel": pixels[mismatch],
+                "gpu": first[mismatch],
+                "cpu": cpu[mismatch],
+            })
+        )
     assert len(first) == 10_000
     assert sum(value is not None for value in first) > 0
     record_tessella_result(

@@ -36,8 +36,9 @@ def _adapter_is_hardware() -> bool:
     sub-pixel star quads differently from real hardware. Following the
     ANAMNESIS rule in ``AGENTS.md``, a byte-exact comparison against a golden
     produced on one physical device is only claimed where the adapter proves it
-    is not a software rasteriser; elsewhere the two-run and cross-process
-    reproducibility claims still apply, but the committed-bytes claim is ABSENT.
+    is not a software rasteriser. Hosted software/virtual adapters retain the
+    in-process determinism coverage, while cross-process and committed-byte
+    claims are ABSENT because deterministic mode intentionally refuses them.
     """
     try:
         probe = f3d.device_probe(os.environ.get("WGPU_BACKEND"))
@@ -92,6 +93,10 @@ def _determinism_backend() -> str:
 
 REFERENCE_BACKEND = "metal"
 HARDWARE_ADAPTER = _adapter_is_hardware()
+requires_hardware = pytest.mark.skipif(
+    not HARDWARE_ADAPTER,
+    reason="cross-process deterministic render requires a proven physical adapter",
+)
 requires_reference_hardware = pytest.mark.skipif(
     not HARDWARE_ADAPTER
     or _determinism_backend().strip().lower() != REFERENCE_BACKEND,
@@ -232,6 +237,7 @@ def test_night_frame_custom_aspects_preserve_the_moon_disc():
         assert abs(disc_width - disc_height) <= 2, (width, height, disc_width, disc_height)
 
 
+@requires_hardware
 def test_night_golden_is_cross_process_repeatable_on_pinned_backend(tmp_path):
     """DoD 6: two processes on the selected backend produce identical bytes."""
     first = _render_in_subprocess(tmp_path / "process_a.png")

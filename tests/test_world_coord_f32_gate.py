@@ -31,31 +31,28 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1433
-# Re-frozen when ANAMNESIS merged with main. The site COUNT is unchanged, and a
-# site-by-site diff against main shows exactly five added and five removed --
-# the same five `as_f32` statements in src/offscreen/adjudication_raster.rs,
-# moved from `render_raster_reference` to `render_raster_reference_incremental`
-# by the incremental-render rename. A site record is
-# (file, function, operation, nth, statement) with no line numbers, so the
-# digest moved only because the enclosing function was renamed. No new
-# narrowing conversion was introduced by that merge. TESSELLA subsequently
-# added four reviewed u32-to-f32 telemetry conversions in
-# TerrainMaterialVT::get_stats for byte counts and percentages; they do not
-# participate in world-coordinate production. SIDERA adds 21 reviewed
-# render-boundary conversions plus the scanner record for its f64-to-f32
-# moonlight helper: catalog color, photometry, angular radius/phase, unit
-# direction/tangent vectors, a fixed-camera aspect ratio, and the existing
-# viewer sun/terrain-light seam. None stores absolute world coordinates or
-# bypasses the camera Anchor.
-EXPECTED_CONVERSION_SHA256 = "e18f59c918ec15624c1aaa12c4f3ec1a2c07e9f3ed7328424cdfeb7b036720b7"
+EXPECTED_CONVERSION_COUNT = 1447
+# The previous 1433-site freeze already covered the reviewed ANAMNESIS,
+# TESSELLA, and first SIDERA transitions described below. The d8313007 base
+# source actually contained 1446 sites because SIDERA's later adversarial
+# closure added twelve u32 viewport-dimension/reciprocal casts and one
+# normalized celestial unit-direction conversion without refreshing this
+# constant. SUBSTRATIA adds one u32 feedback-origin telemetry counter converted
+# for Python float stats. It also moves four existing tile-index-to-normalized-
+# UV casts from finish_frame to ingest_shader_feedback; that changes their
+# occurrence ownership, but not the count. The physical TESSELLA picking audit
+# also moved two existing screen-coordinate conversions from pixel corners to
+# raster pixel centres; their count is unchanged. All reviewed primitives are
+# render dimensions, normalized directions/UVs, or telemetry. None stores
+# absolute world coordinates or bypasses the camera Anchor.
+EXPECTED_CONVERSION_SHA256 = "d2b79d0d6cc512d357142d17cc923f8d7996507272a04d6cdaf8d0e71a9754bc"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1433,
+    "current_count": 1447,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -79,7 +76,7 @@ REVIEWED_INVENTORY_TRANSITION = {
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
     # Re-based on main at the merge: the pre-transition tree is now main rather
     # than this branch's original base, so the count and digest are main's.
-    "base_count": 1433,
+    "base_count": 1447,
     "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",

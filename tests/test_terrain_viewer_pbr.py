@@ -948,6 +948,7 @@ class TestTerrainViewerPbr:
                     "msaa": 4,
                     "ibl_intensity": 0.15,
                     "normal_strength": 3.8,
+                    "sky": {"enabled": False},
                     "height_ao": {"enabled": False},
                     "sun_visibility": {
                         "enabled": True,

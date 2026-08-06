@@ -1299,6 +1299,9 @@ def test_m06_live_millimetre_vectors_and_scene_review_transaction(tmp_path: Path
             (span_x / values.shape[1], 0.0, origin_x)
         )
         _load_terrain(viewer, terrain)
+        # This is a vector-precision oracle, not a sky-composition test. Keep
+        # SIDERA's opt-in sky from covering color-only overlays over clear depth.
+        viewer.ok({"cmd": "set_terrain_pbr", "sky": {"enabled": False}})
         center = [origin_x + span_x / 2.0, 0.002, -origin_y + span_y / 2.0]
         _camera(viewer, target=center, phi=90.0, radius=0.03)
         separated = {
