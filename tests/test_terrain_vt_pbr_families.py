@@ -240,6 +240,7 @@ def _build_render_params(
     shading: str = "forward",
     camera_mode: str = "mesh",
     culling: str = "frustum",
+    prefetch_horizon_ms: float = 100.0,
     vt_upload_budget_bytes: int = 16 * 1024 * 1024,
 ) -> "f3d.TerrainRenderParams":
     config = make_terrain_params_config(
@@ -264,6 +265,7 @@ def _build_render_params(
         camera_mode=camera_mode,
         culling=culling,
         shading=shading,
+        prefetch_horizon_ms=prefetch_horizon_ms,
         vt_upload_budget_bytes=vt_upload_budget_bytes,
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         aov=AovSettings(enabled=True, albedo=False, normal=normal_aov, depth=False),
@@ -719,7 +721,11 @@ class TestTerrainVTPbrFamilies:
             ],
         )
 
-        # Camera sweep to drive feedback/paging across the virtual extent.
+        # Capture two camera-dependent GPU demand sets without allowing CPU
+        # prefetch or uploads to turn the proof into a prefilled/count-only
+        # check. The blocking accessor contains only shader-emitted records.
+        demand_sets = []
+        demand_frame_stats = []
         for cam_target in ((-2.0, -2.0, 0.0), (2.0, 2.0, 0.0)):
             _render_beauty(
                 vt_render_env,
@@ -727,9 +733,95 @@ class TestTerrainVTPbrFamilies:
                     vt_settings=vt_settings,
                     cam_target=cam_target,
                     cam_radius=1.5,
+                    prefetch_horizon_ms=0.0,
+                    vt_upload_budget_bytes=1,
                 ),
             )
+            demand = {
+                tuple(int(value) for value in record)
+                for record in renderer.read_latest_vt_shader_feedback()
+            }
+            assert demand, f"camera target {cam_target} emitted no VT shader feedback"
+            assert {record[0] for record in demand} == {0, 1, 2}
+            assert all(len(record) == 5 for record in demand)
+            demand_sets.append(demand)
+            frame_stats = renderer.get_material_vt_stats()
+            assert frame_stats["tiles_streamed"] == 0.0
+            assert frame_stats["uploaded_bytes"] == 0.0
+            for family in ("albedo", "normal", "mask"):
+                assert frame_stats[f"resident_tiles_{family}"] == 0.0
+                assert frame_stats[f"resident_bytes_{family}"] == 0.0
+                assert frame_stats[f"feedback_tiles_streamed_{family}"] == 0.0
+            demand_frame_stats.append(frame_stats)
+
+        assert demand_sets[0] != demand_sets[1], (
+            "camera sweep must change shader-feedback page identity"
+        )
+        assert any(
+            {
+                record[2:]
+                for record in demand_sets[0]
+                if record[0] == family_slot
+            }
+            != {
+                record[2:]
+                for record in demand_sets[1]
+                if record[0] == family_slot
+            }
+            for family_slot in range(3)
+        ), "at least one family must demand different pages after camera movement"
+
+        retained_after_sweep = {
+            tuple(int(value) for value in record)
+            for record in renderer.read_retained_vt_requests()
+        }
+        assert demand_sets[1] <= retained_after_sweep, (
+            "second-camera shader demand must enter the retained request set"
+        )
+        stats_before_upload = renderer.get_material_vt_stats()
+        assert stats_before_upload["feedback_overflow"] == 0.0
+
+        # Feedback emitted by a frame is consumed on the next frame. The native
+        # counters below tag only exact keys admitted from retained feedback,
+        # so overlapping CPU visible-rect requests cannot impersonate this
+        # path. A 64 MiB frame permits at least 256 page attempts even on the
+        # raw-atlas compatibility path.
+        _render_beauty(
+            vt_render_env,
+            _build_render_params(
+                vt_settings=vt_settings,
+                cam_target=(2.0, 2.0, 0.0),
+                cam_radius=1.5,
+                prefetch_horizon_ms=0.0,
+                vt_upload_budget_bytes=64 * MIB,
+            ),
+        )
+        retained_after_upload = {
+            tuple(int(value) for value in record)
+            for record in renderer.read_retained_vt_requests()
+        }
         stats = renderer.get_material_vt_stats()
+        assert stats["feedback_overflow"] == 0.0
+        assert stats["tiles_streamed"] > 0.0
+        assert stats["uploaded_bytes"] > 0.0
+        removed_demand_by_family = {}
+        for family_slot, family in enumerate(("albedo", "normal", "mask")):
+            family_demand = {
+                record for record in demand_sets[1] if record[0] == family_slot
+            }
+            removed_demand = family_demand - retained_after_upload
+            assert removed_demand, (
+                f"family '{family}' processed no exact retained page; "
+                f"removed={sorted(removed_demand)}"
+            )
+            assert stats[f"feedback_tiles_streamed_{family}"] > 0.0, (
+                f"family '{family}' streamed no feedback-admitted page"
+            )
+            assert (
+                stats[f"resident_tiles_{family}"]
+                > stats_before_upload[f"resident_tiles_{family}"]
+            ), f"family '{family}' shader demand did not advance residency"
+            removed_demand_by_family[family] = len(removed_demand)
 
         budget_bytes = budget_mb * MIB
         resident_sum = 0.0
@@ -767,6 +859,22 @@ class TestTerrainVTPbrFamilies:
                 "total_resident_bytes": int(resident_sum),
                 "configured_budget_bytes": int(budget_bytes),
                 "memory_limit_bytes": MEMORY_BUDGET_LIMIT_BYTES,
+                "camera_feedback_record_counts": [
+                    len(demand) for demand in demand_sets
+                ],
+                "camera_feedback_sets_distinct": True,
+                "retained_second_camera_requests": len(demand_sets[1]),
+                "retained_after_upload": len(retained_after_upload),
+                "removed_shader_demand_by_family": removed_demand_by_family,
+                "feedback_tiles_streamed_by_family": {
+                    family: int(stats[f"feedback_tiles_streamed_{family}"])
+                    for family in ("albedo", "normal", "mask")
+                },
+                "tiles_streamed_demand_frames": [
+                    int(frame_stats["tiles_streamed"])
+                    for frame_stats in demand_frame_stats
+                ],
+                "tiles_streamed_upload_frame": int(stats["tiles_streamed"]),
             },
         )
 

@@ -153,6 +153,9 @@ struct TerrainMaterialVTStats {
     source_count: u32,
     feedback_requests: u32,
     retained_requests: u32,
+    /// Per-frame uploads whose exact page key entered admission through the
+    /// retained shader-feedback path, split by material family.
+    feedback_tiles_streamed_by_family: [u32; VT_FAMILY_COUNT],
     prefetch_requests: u32,
     uploaded_bytes: u64,
     upload_budget_bytes: u64,
@@ -610,6 +613,10 @@ impl TerrainMaterialVT {
                 family.resident_tiles as f32,
             );
             out.insert(
+                format!("feedback_tiles_streamed_{name}"),
+                stats.feedback_tiles_streamed_by_family[slot] as f32,
+            );
+            out.insert(
                 format!("resident_bytes_{name}"),
                 family.resident_bytes as f32,
             );
@@ -908,7 +915,7 @@ impl TerrainMaterialVT {
             bytemuck::cast_slice(&fallback_colors),
         );
 
-        let requests =
+        let (requests, feedback_admissions) =
             runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback);
         // Keep VT uploads separate from the 4K terrain draw. `queue.write_*`
         // copies are deferred until submit, so a single encoder can both trip
@@ -931,12 +938,17 @@ impl TerrainMaterialVT {
                     label: Some("terrain.material_vt.uploads"),
                 });
             for &key in request_batch {
-                runtime.ensure_tile_resident(
+                let streamed = runtime.ensure_tile_resident(
                     &mut vt_upload_encoder,
                     device.as_ref(),
                     queue.as_ref(),
                     key,
                 )?;
+                if streamed && feedback_admissions.contains(&key) {
+                    let family = key.family_slot as usize;
+                    runtime.stats.feedback_tiles_streamed_by_family[family] =
+                        runtime.stats.feedback_tiles_streamed_by_family[family].saturating_add(1);
+                }
             }
             queue.submit(Some(vt_upload_encoder.finish()));
             device.poll(wgpu::Maintain::Wait);
@@ -1634,6 +1646,7 @@ impl TerrainMaterialVTRuntime {
             .iter()
             .map(|bucket| bucket.len() as u32)
             .sum();
+        self.stats.feedback_tiles_streamed_by_family = [0; VT_FAMILY_COUNT];
         self.stats.prefetch_requests = 0;
         self.stats.store_page_misses = 0;
         self.stats.uploaded_bytes = 0;
@@ -1710,7 +1723,7 @@ impl TerrainMaterialVTRuntime {
         render_width: u32,
         render_height: u32,
         use_feedback: bool,
-    ) -> Vec<TileKey> {
+    ) -> (Vec<TileKey>, HashSet<TileKey>) {
         let desired_mip = self.target_mip_level(params, render_width, render_height);
         let (uv_min, uv_max) = self.visible_uv_rect(params);
         let current_target = [params.cam_target[0], params.cam_target[1]];
@@ -1736,6 +1749,7 @@ impl TerrainMaterialVTRuntime {
         let end_y = ((uv_max[1] * pages_y as f32).ceil() as i32 - 1).clamp(0, pages_y as i32 - 1);
 
         let mut priorities = HashMap::<TileKey, u64>::new();
+        let mut feedback_admissions = HashSet::<TileKey>::new();
         let source_slots = self.sources.keys().copied().collect::<Vec<_>>();
         for (family_slot, material_index) in source_slots.iter().copied() {
             for y in start_y..=end_y {
@@ -1754,7 +1768,7 @@ impl TerrainMaterialVTRuntime {
                         false,
                         self.page_screen_space_error(key, params),
                     );
-                    self.admit_request(&mut priorities, key, score);
+                    let _ = self.admit_request(&mut priorities, key, score);
                 }
             }
         }
@@ -1779,7 +1793,7 @@ impl TerrainMaterialVTRuntime {
                         true,
                         self.page_screen_space_error(key, params),
                     );
-                    self.admit_request(&mut priorities, key, score);
+                    let _ = self.admit_request(&mut priorities, key, score);
                 }
             }
             self.stats.prefetch_requests =
@@ -1813,7 +1827,9 @@ impl TerrainMaterialVTRuntime {
                         false,
                         self.page_screen_space_error(feedback, params),
                     );
-                    self.admit_request(&mut priorities, feedback, score);
+                    if let Some(resolved) = self.admit_request(&mut priorities, feedback, score) {
+                        feedback_admissions.insert(resolved);
+                    }
                 }
             }
         }
@@ -1861,7 +1877,7 @@ impl TerrainMaterialVTRuntime {
         );
         self.admission_cursor = (self.admission_cursor + 1) % VT_FAMILY_COUNT;
         self.stats.upload_budget_bytes = params.vt_upload_budget_bytes;
-        ordered
+        (ordered, feedback_admissions)
     }
 
     fn page_screen_space_error(
@@ -1949,14 +1965,14 @@ impl TerrainMaterialVTRuntime {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         key: TileKey,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let cache_tile = self.encode_cache_tile(key);
         if self.tile_cache.is_resident(&cache_tile) {
             self.tile_cache.access_tile(&cache_tile);
             self.family_residency.note_access(key);
             self.stats.cache_hits += 1;
             self.pending_feedback[key.family_slot as usize].remove(&key);
-            return Ok(());
+            return Ok(false);
         }
 
         let Some(source) = self
@@ -1964,7 +1980,7 @@ impl TerrainMaterialVTRuntime {
             .get(&(key.family_slot, key.material_index))
             .cloned()
         else {
-            return Ok(());
+            return Ok(false);
         };
 
         self.stats.cache_misses += 1;
@@ -1982,7 +1998,7 @@ impl TerrainMaterialVTRuntime {
         }
         let Some((atlas_slot, evicted)) = self.tile_cache.allocate_tile_with_evicted(cache_tile)
         else {
-            return Ok(());
+            return Ok(false);
         };
         for evicted_tile in evicted {
             let victim = self.decode_cache_tile(evicted_tile);
@@ -2008,7 +2024,7 @@ impl TerrainMaterialVTRuntime {
         self.family_residency.on_insert(key);
         self.pending_feedback[key.family_slot as usize].remove(&key);
         let _ = device;
-        Ok(())
+        Ok(true)
     }
 
     fn refresh_stats(&mut self) {
@@ -2448,11 +2464,17 @@ impl TerrainMaterialVTRuntime {
     /// Admit one candidate request, resolving it against the store first so a
     /// key outside the materialization plan can never reach the fatal
     /// `store.page(...)?` in `build_tile_data`.
-    fn admit_request(&mut self, requests: &mut HashMap<TileKey, u64>, key: TileKey, score: u64) {
+    fn admit_request(
+        &mut self,
+        requests: &mut HashMap<TileKey, u64>,
+        key: TileKey,
+        score: u64,
+    ) -> Option<TileKey> {
         let Some(resolved) = self.resolve_store_key(key) else {
-            return;
+            return None;
         };
         self.insert_prioritized_with_ancestors(requests, resolved, score);
+        Some(resolved)
     }
 
     fn insert_prioritized_with_ancestors(
