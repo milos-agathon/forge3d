@@ -1,0 +1,18 @@
+{
+  "capsule": "swiss-landcover",
+  "version": "0.1.0",
+  "datasets": [
+    {
+      "name": "swiss",
+      "file": "switzerland_dem.tif",
+      "sha256": "d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478",
+      "fetch": "forge3d.datasets.fetch_dem('swiss')"
+    },
+    {
+      "name": "swiss-land-cover",
+      "file": "switzerland_land_cover.tif",
+      "sha256": "6b254585be4982ed9e8da63b8536ecc2f5fa4c64c6545db06c73eb1fe39a8f7f",
+      "fetch": "forge3d.datasets.fetch('swiss-land-cover')"
+    }
+  ]
+}

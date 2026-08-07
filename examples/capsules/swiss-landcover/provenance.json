@@ -1,0 +1,30 @@
+{
+  "records": [
+    {
+      "dataset": "swiss",
+      "distributed_file": "switzerland_dem.tif",
+      "distributed_sha256": "d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478",
+      "upstream_provider": "AWS Terrain Tiles (Mapzen Terrarium)",
+      "upstream_product": "Terrarium-encoded elevation tiles, ~30 m (composite: EU-DEM, SRTM et al. for the Swiss extent)",
+      "upstream_url": "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png",
+      "license_basis": "Mapzen/AWS Terrain Tiles open composite; underlying sources' notices apply",
+      "required_attribution": "Elevation: Terrain Tiles (Mapzen/AWS Open Data), sources incl. EU-DEM (Copernicus) and SRTM (NASA)",
+      "acquired_date": "2025-12-27 (first commit of assets/tif/switzerland_dem.tif in the forge3d repo, via git log --follow; the upstream download date was not recorded)",
+      "transformations": ["tile mosaic", "clip to Switzerland boundary", "reproject", "GeoTIFF export"],
+      "notes": "Produced by Milos Popovic; pinned by sha256 in forge3d.datasets registry and distributed via Git LFS media. examples/swiss_terrain_landcover_viewer.py consumes the finished asset and holds no fetch URLs; the Terrarium endpoint above is the constant used by the sibling pipeline that builds these rasters (examples/bosnia_terrain_landcover_viewer.py TERRARIUM). {z}/{x}/{y} is the XYZ tile template; the zoom and tile range used for Switzerland were not recorded."
+    },
+    {
+      "dataset": "swiss-land-cover",
+      "distributed_file": "switzerland_land_cover.tif",
+      "distributed_sha256": "6b254585be4982ed9e8da63b8536ecc2f5fa4c64c6545db06c73eb1fe39a8f7f",
+      "upstream_provider": "Esri / Impact Observatory / Microsoft",
+      "upstream_product": "Sentinel-2 10m Land Use/Land Cover",
+      "upstream_url": "https://lulctimeseries.blob.core.windows.net/lulctimeseriesv003/lc2024/{tile}_20240101-20241231.tif",
+      "license_basis": "CC BY 4.0",
+      "required_attribution": "Data: Sentinel-2 10m Land Use/Land Cover – Esri, Impact Observatory, and Microsoft",
+      "acquired_date": "2025-12-27 (first commit of assets/tif/switzerland_land_cover.tif in the forge3d repo, via git log --follow; the upstream download date was not recorded)",
+      "transformations": ["tile mosaic", "clip to Switzerland boundary", "RGB class raster export"],
+      "notes": "Credit line matches examples/swiss_terrain_landcover_viewer.py:22 verbatim. {tile} is the MGRS grid-zone id, matching the LANDCOVER_BASE_URL constant in examples/germany_terrain_landcover_viewer.py and the concrete per-tile URLs in examples/bosnia_terrain_landcover_viewer.py; the specific tile ids downloaded for the Swiss extent were not recorded in the repo. Distributed as an RGB raster whose colours are the Esri class palette, which examples/swiss_terrain_landcover_viewer.py maps back to classes."
+    }
+  ]
+}
