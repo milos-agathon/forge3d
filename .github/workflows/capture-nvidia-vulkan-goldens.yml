@@ -1,0 +1,553 @@
+name: Capture NVIDIA Vulkan golden variants
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type CAPTURE to run the reviewed exact-head physical capture.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nvidia-vulkan-golden-capture
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Capture Preflight
+    if: inputs.confirm == 'CAPTURE' && github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    outputs:
+      candidate_sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - name: Prove candidate merges into the protected default branch
+        id: candidate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "${#EXPECTED_SHA}" = 40
+          policy_sha="$(git rev-parse HEAD)"
+          git fetch --no-tags origin "$EXPECTED_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-commit --no-ff "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$policy_sha"
+          test "$(git rev-parse MERGE_HEAD)" = "$EXPECTED_SHA"
+          echo "sha=$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
+
+  build-wheel-windows:
+    name: Build exact capture wheel
+    needs: preflight
+    uses: ./.github/workflows/build-wheel.yml
+    with:
+      ref: ${{ needs.preflight.outputs.candidate_sha }}
+      runner: windows-latest
+      target: x86_64-pc-windows-msvc
+      maturin_args: --release --out dist
+      manylinux: 'auto'
+      artifact: nvidia-golden-capture-wheel
+
+  capture:
+    name: Capture candidates (NVIDIA Vulkan)
+    needs: [preflight, build-wheel-windows]
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 35
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      FORGE3D_TERRAIN_GOLDEN_VARIANT: nvidia-vulkan
+      FORGE3D_RECIPE_GOLDEN_VARIANT: nvidia-vulkan
+      FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan
+      CANDIDATE_SHA: ${{ needs.preflight.outputs.candidate_sha }}
+      SCENE: terra_determinata_v1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: nvidia-golden-capture-wheel
+          path: dist/
+      - name: Install exact wheel and capture dependencies
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install pytest numpy pyproj pillow
+          exit $LASTEXITCODE
+      - name: Initialize exact-head capture evidence
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:CANDIDATE_SHA) { throw "candidate SHA mismatch" }
+          $dirty = (git status --porcelain --untracked-files=no | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw "candidate tracked worktree is dirty: $dirty" }
+          $evidence = Join-Path $env:RUNNER_TEMP "nvidia-golden-candidates-${{ github.run_id }}-${{ github.run_attempt }}"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          "FORGE3D_CAPTURE_EVIDENCE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR=$(Join-Path $evidence 'terrain-diagnostics')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR=$(Join-Path $evidence 'recipe-diagnostics')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_EXPECTED_ADAPTER_PROBE=$(Join-Path $evidence 'adapter-probe.json')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $head | Out-File -FilePath (Join-Path $evidence 'head.txt') -Encoding ascii
+      - name: Require physical NVIDIA Vulkan adapter
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_EXPECTED_ADAPTER_PROBE"
+          exit $LASTEXITCODE
+      - name: Capture exactly ten NVIDIA variant fixtures
+        shell: pwsh
+        env:
+          FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+          FORGE3D_UPDATE_TERRAIN_GOLDENS: '1'
+          FORGE3D_UPDATE_RECIPE_GOLDENS: '1'
+          FORGE3D_UPDATE_RECIPE_CERTIFICATES: '0'
+        run: |
+          python -m pytest `
+            tests/test_terrain_visual_goldens.py `
+            tests/test_terrain_tv10_goldens.py `
+            "tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]" `
+            -v --tb=short --junitxml="$env:FORGE3D_CAPTURE_EVIDENCE/capture.junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_CAPTURE_EVIDENCE/capture.junit.xml"
+          exit $LASTEXITCODE
+      - name: Stage exact fixture set and initial manifest
+        shell: pwsh
+        run: |
+          @'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          paths = (
+              "tests/golden/terrain/terrain_pbr.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_water.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_atmosphere.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_low_sun_sky.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_pom.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_water_reflection.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_zero_sss.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_scene_a_sss.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_scene_b_sss.nvidia-vulkan.png",
+              "tests/golden/recipes/mapscene_terrain_raster.nvidia-vulkan.png",
+          )
+          if len(paths) != 10 or len(set(paths)) != 10:
+              raise SystemExit("capture fixture inventory must have ten unique paths")
+          evidence = Path(os.environ["FORGE3D_CAPTURE_EVIDENCE"])
+          fixtures = evidence / "fixtures"
+          records = []
+          for relative in paths:
+              source = Path(relative)
+              if not source.is_file():
+                  raise SystemExit(f"missing captured fixture: {relative}")
+              destination = fixtures / relative
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, destination)
+              data = source.read_bytes()
+              records.append(
+                  {
+                      "path": relative,
+                      "bytes": len(data),
+                      "sha256": hashlib.sha256(data).hexdigest(),
+                  }
+              )
+          actual_files = {
+              path.relative_to(fixtures).as_posix()
+              for path in fixtures.rglob("*")
+              if path.is_file()
+          }
+          if actual_files != set(paths):
+              raise SystemExit("captured fixture directory has missing or extra files")
+          manifest = {
+              "schema": "forge3d.nvidia-vulkan-golden-capture.v1",
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "files": records,
+          }
+          (evidence / "manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          '@ | python -
+          exit $LASTEXITCODE
+      - name: Render two exact NVIDIA determinism frames
+        shell: pwsh
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKENDS: vulkan
+        run: |
+          $out = Join-Path $env:FORGE3D_CAPTURE_EVIDENCE "determinism"
+          python scripts/run_nvidia_determinism_acceptance.py `
+            --artifact-dir "$out" `
+            --adapter-probe "$env:FORGE3D_EXPECTED_ADAPTER_PROBE" `
+            --scene "$env:SCENE" --width 512 --height 512
+          exit $LASTEXITCODE
+      - name: Finalize capture manifest and adapter binding
+        shell: pwsh
+        run: |
+          @'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["FORGE3D_CAPTURE_EVIDENCE"])
+          manifest_path = evidence / "manifest.json"
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          if manifest.get("candidate_sha") != os.environ["CANDIDATE_SHA"]:
+              raise SystemExit("manifest candidate SHA mismatch")
+          files = manifest.get("files")
+          paths = [record.get("path") for record in files] if isinstance(files, list) else []
+          if len(paths) != 10 or len(set(paths)) != 10:
+              raise SystemExit("manifest must contain ten unique fixtures")
+          fixture_root = evidence / "fixtures"
+          actual_paths = {
+              path.relative_to(fixture_root).as_posix()
+              for path in fixture_root.rglob("*")
+              if path.is_file()
+          }
+          if actual_paths != set(paths):
+              raise SystemExit("fixture inventory differs from manifest")
+          for record in files:
+              data = (fixture_root / record["path"]).read_bytes()
+              if len(data) != record["bytes"]:
+                  raise SystemExit(f"size mismatch: {record['path']}")
+              if hashlib.sha256(data).hexdigest() != record["sha256"]:
+                  raise SystemExit(f"hash mismatch: {record['path']}")
+
+          probe = json.loads((evidence / "adapter-probe.json").read_text(encoding="utf-8"))["probe"]
+          identity_fields = (
+              "name", "vendor", "device", "backend", "device_type", "software_fallback"
+          )
+          render_records = (
+              evidence / "terrain-diagnostics" / "terrain-render-adapter.json",
+              evidence / "terrain-diagnostics" / "tv10-render-adapter.json",
+              evidence / "recipe-diagnostics" / "recipe-render-adapter.json",
+          )
+          for record_path in render_records:
+              record = json.loads(record_path.read_text(encoding="utf-8"))
+              for field in identity_fields:
+                  if str(record.get(field, "")).lower() != str(probe.get(field, "")).lower():
+                      raise SystemExit(f"{record_path.name} differs from strict probe at {field}")
+
+          determinism = (
+              evidence / "determinism" / f"{os.environ['SCENE']}.sha256"
+          ).read_text(encoding="utf-8").strip()
+          repeat = (
+              evidence / "determinism" / f"{os.environ['SCENE']}.repeat.sha256"
+          ).read_text(encoding="utf-8").strip()
+          if determinism != repeat or len(determinism) != 64:
+              raise SystemExit("NVIDIA determinism hashes differ")
+          manifest["determinism_sha256"] = determinism
+          manifest["capture"] = {
+              "junit": "clean-zero-skip",
+              "adapter": "physical-nvidia-vulkan-process-bound",
+              "repeat_hash": "equal",
+          }
+          manifest_path.write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          '@ | python -
+          exit $LASTEXITCODE
+      - name: Upload exact NVIDIA candidate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvidia-vulkan-golden-candidates
+          path: ${{ runner.temp }}/nvidia-golden-candidates-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Clean capture-owned runner state
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          paths = (
+              "tests/golden/terrain/terrain_pbr.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_water.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_atmosphere.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_low_sun_sky.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_pom.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_water_reflection.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_zero_sss.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_scene_a_sss.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_scene_b_sss.nvidia-vulkan.png",
+              "tests/golden/recipes/mapscene_terrain_raster.nvidia-vulkan.png",
+          )
+          candidate_sha = os.environ["CANDIDATE_SHA"]
+          for relative in paths:
+              tracked = subprocess.run(
+                  ["git", "cat-file", "-e", f"{candidate_sha}:{relative}"],
+                  check=False,
+              ).returncode == 0
+              if tracked:
+                  subprocess.run(
+                      ["git", "restore", "--source", candidate_sha, "--worktree", "--", relative],
+                      check=True,
+                  )
+              else:
+                  Path(relative).unlink(missing_ok=True)
+          evidence = os.environ.get("FORGE3D_CAPTURE_EVIDENCE")
+          if evidence:
+              shutil.rmtree(Path(evidence), ignore_errors=True)
+          '@ | python -
+
+  verify:
+    name: Independent reverify (NVIDIA Vulkan)
+    needs: [preflight, build-wheel-windows, capture]
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 35
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      FORGE3D_TERRAIN_GOLDEN_VARIANT: nvidia-vulkan
+      FORGE3D_RECIPE_GOLDEN_VARIANT: nvidia-vulkan
+      FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan
+      CANDIDATE_SHA: ${{ needs.preflight.outputs.candidate_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: nvidia-golden-capture-wheel
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: nvidia-vulkan-golden-candidates
+          path: ${{ runner.temp }}/downloaded-nvidia-golden-candidates-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Install exact wheel and verification dependencies
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install pytest numpy pyproj pillow
+          exit $LASTEXITCODE
+      - name: Initialize fresh exact-head verification
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:CANDIDATE_SHA) { throw "candidate SHA mismatch" }
+          $dirty = (git status --porcelain --untracked-files=no | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw "candidate tracked worktree is dirty: $dirty" }
+          $candidate = Join-Path $env:RUNNER_TEMP "downloaded-nvidia-golden-candidates-${{ github.run_id }}-${{ github.run_attempt }}"
+          $evidence = Join-Path $env:RUNNER_TEMP "nvidia-golden-reverify-${{ github.run_id }}-${{ github.run_attempt }}"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          "FORGE3D_CANDIDATE_EVIDENCE=$candidate" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_VERIFY_EVIDENCE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR=$(Join-Path $evidence 'terrain-diagnostics')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR=$(Join-Path $evidence 'recipe-diagnostics')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_EXPECTED_ADAPTER_PROBE=$(Join-Path $evidence 'adapter-probe.json')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $head | Out-File -FilePath (Join-Path $evidence 'head.txt') -Encoding ascii
+      - name: Require physical NVIDIA Vulkan adapter again
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_EXPECTED_ADAPTER_PROBE"
+          exit $LASTEXITCODE
+      - name: Verify candidate manifest and install exact fixtures
+        shell: pwsh
+        run: |
+          @'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          expected = {
+              "tests/golden/terrain/terrain_pbr.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_water.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_atmosphere.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_low_sun_sky.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_pom.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_water_reflection.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_zero_sss.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_scene_a_sss.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_scene_b_sss.nvidia-vulkan.png",
+              "tests/golden/recipes/mapscene_terrain_raster.nvidia-vulkan.png",
+          }
+          candidate = Path(os.environ["FORGE3D_CANDIDATE_EVIDENCE"])
+          manifest = json.loads((candidate / "manifest.json").read_text(encoding="utf-8"))
+          if manifest.get("schema") != "forge3d.nvidia-vulkan-golden-capture.v1":
+              raise SystemExit("wrong capture manifest schema")
+          if manifest.get("candidate_sha") != os.environ["CANDIDATE_SHA"]:
+              raise SystemExit("capture manifest candidate SHA mismatch")
+          if (candidate / "head.txt").read_text(encoding="utf-8-sig").strip() != os.environ["CANDIDATE_SHA"]:
+              raise SystemExit("capture head file mismatch")
+          files = manifest.get("files")
+          paths = [record.get("path") for record in files] if isinstance(files, list) else []
+          if len(paths) != 10 or len(set(paths)) != 10 or set(paths) != expected:
+              raise SystemExit("capture manifest does not contain the exact fixture set")
+          fixture_root = candidate / "fixtures"
+          actual = {
+              path.relative_to(fixture_root).as_posix()
+              for path in fixture_root.rglob("*")
+              if path.is_file()
+          }
+          if actual != expected:
+              raise SystemExit("downloaded fixture directory has missing or extra files")
+          for record in files:
+              source = fixture_root / record["path"]
+              data = source.read_bytes()
+              if len(data) != record["bytes"]:
+                  raise SystemExit(f"size mismatch: {record['path']}")
+              if hashlib.sha256(data).hexdigest() != record["sha256"]:
+                  raise SystemExit(f"hash mismatch: {record['path']}")
+              destination = Path(record["path"])
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, destination)
+          '@ | python -
+          exit $LASTEXITCODE
+      - name: Reverify fixtures with update mode absent
+        shell: pwsh
+        env:
+          FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+          FORGE3D_UPDATE_RECIPE_CERTIFICATES: '0'
+        run: |
+          if ($env:FORGE3D_UPDATE_TERRAIN_GOLDENS -or $env:FORGE3D_UPDATE_RECIPE_GOLDENS) { throw "update mode leaked into verification" }
+          python -m pytest `
+            tests/test_terrain_visual_goldens.py `
+            tests/test_terrain_tv10_goldens.py `
+            "tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]" `
+            -v --tb=short --junitxml="$env:FORGE3D_VERIFY_EVIDENCE/verify.junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_VERIFY_EVIDENCE/verify.junit.xml"
+          exit $LASTEXITCODE
+      - name: Exercise corrected VT mask and mip proof
+        shell: pwsh
+        run: |
+          python -m pytest `
+            tests/test_terrain_vt_pbr_families.py::TestTerrainVTPbrFamilies::test_partial_mask_residency_uses_neutral_fallback `
+            tests/test_terrain_vt_pbr_families.py::TestTerrainVTPbrFamilies::test_gpu_shader_feedback_preserves_family_coordinates `
+            -v --tb=short --junitxml="$env:FORGE3D_VERIFY_EVIDENCE/vt-proof.junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_VERIFY_EVIDENCE/vt-proof.junit.xml"
+          exit $LASTEXITCODE
+      - name: Cross-validate independent adapter identities
+        shell: pwsh
+        run: |
+          @'
+          import json
+          import os
+          from pathlib import Path
+
+          candidate = Path(os.environ["FORGE3D_CANDIDATE_EVIDENCE"])
+          verify = Path(os.environ["FORGE3D_VERIFY_EVIDENCE"])
+          capture_probe = json.loads((candidate / "adapter-probe.json").read_text(encoding="utf-8"))["probe"]
+          verify_probe = json.loads((verify / "adapter-probe.json").read_text(encoding="utf-8"))["probe"]
+          identity_fields = (
+              "name", "vendor", "device", "backend", "device_type", "software_fallback"
+          )
+          for field in identity_fields:
+              if str(capture_probe.get(field, "")).lower() != str(verify_probe.get(field, "")).lower():
+                  raise SystemExit(f"capture/verify adapters differ at {field}")
+          render_records = (
+              verify / "terrain-diagnostics" / "terrain-render-adapter.json",
+              verify / "terrain-diagnostics" / "tv10-render-adapter.json",
+              verify / "recipe-diagnostics" / "recipe-render-adapter.json",
+          )
+          for record_path in render_records:
+              record = json.loads(record_path.read_text(encoding="utf-8"))
+              for field in identity_fields:
+                  if str(record.get(field, "")).lower() != str(verify_probe.get(field, "")).lower():
+                      raise SystemExit(f"{record_path.name} differs from verify probe at {field}")
+          result = {
+              "schema": "forge3d.nvidia-vulkan-golden-reverify.v1",
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "adapter": {field: verify_probe[field] for field in identity_fields},
+              "capture_manifest_sha256": __import__("hashlib").sha256(
+                  (candidate / "manifest.json").read_bytes()
+              ).hexdigest(),
+              "verification": {
+                  "fixture_junit": "clean-zero-skip",
+                  "vt_proof_junit": "clean-zero-skip",
+                  "update_mode": "absent",
+                  "process_adapters": "match-strict-probe",
+              },
+          }
+          (verify / "verification.json").write_text(
+              json.dumps(result, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          '@ | python -
+          exit $LASTEXITCODE
+      - name: Upload independent NVIDIA verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvidia-vulkan-golden-reverify
+          path: |
+            ${{ runner.temp }}/downloaded-nvidia-golden-candidates-${{ github.run_id }}-${{ github.run_attempt }}/
+            ${{ runner.temp }}/nvidia-golden-reverify-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Clean verification-owned runner state
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          paths = (
+              "tests/golden/terrain/terrain_pbr.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_water.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_atmosphere.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_low_sun_sky.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_pom.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_water_reflection.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_zero_sss.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_scene_a_sss.nvidia-vulkan.png",
+              "tests/golden/terrain/terrain_tv10_scene_b_sss.nvidia-vulkan.png",
+              "tests/golden/recipes/mapscene_terrain_raster.nvidia-vulkan.png",
+          )
+          candidate_sha = os.environ["CANDIDATE_SHA"]
+          for relative in paths:
+              tracked = subprocess.run(
+                  ["git", "cat-file", "-e", f"{candidate_sha}:{relative}"],
+                  check=False,
+              ).returncode == 0
+              if tracked:
+                  subprocess.run(
+                      ["git", "restore", "--source", candidate_sha, "--worktree", "--", relative],
+                      check=True,
+                  )
+              else:
+                  Path(relative).unlink(missing_ok=True)
+          for env_name in ("FORGE3D_CANDIDATE_EVIDENCE", "FORGE3D_VERIFY_EVIDENCE"):
+              value = os.environ.get(env_name)
+              if value:
+                  shutil.rmtree(Path(value), ignore_errors=True)
+          '@ | python -
