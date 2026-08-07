@@ -1684,7 +1684,9 @@ impl TerrainMaterialVTRuntime {
                 self.latest_feedback_uvs.push(feedback_uv);
             }
             if let Some(retained) = self.resolve_feedback_key(key) {
-                self.pending_feedback[family_slot as usize].insert(retained);
+                let cache_tile = self.encode_cache_tile(retained);
+                self.pending_feedback
+                    .retain_if_nonresident(retained, self.tile_cache.is_resident(&cache_tile));
             }
         }
         self.latest_shader_feedback = exact.into_iter().collect();

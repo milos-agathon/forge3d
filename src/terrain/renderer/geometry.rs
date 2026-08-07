@@ -597,7 +597,7 @@ impl TerrainScene {
         }) = self.geometry_provider.as_ref()
         {
             if *existing == cache_key {
-                self.refresh_cpu_visibility_oracle(params, heightmap, height_dims)?;
+                self.refresh_cpu_visibility_oracle(params, heightmap, height_dims, None)?;
                 return Ok(());
             }
         }
@@ -842,7 +842,7 @@ impl TerrainScene {
             variant_count,
             cache_key,
         });
-        self.refresh_cpu_visibility_oracle(params, heightmap, height_dims)?;
+        self.refresh_cpu_visibility_oracle(params, heightmap, height_dims, None)?;
         Ok(())
     }
 
@@ -851,12 +851,20 @@ impl TerrainScene {
         params: &crate::terrain::render_params::TerrainRenderParams,
         heightmap: &[f32],
         height_dims: (u32, u32),
+        submitted_tiles: Option<&[TileInfo]>,
     ) -> Result<()> {
         let mut oracle = self
             .cpu_visibility_oracle
             .lock()
             .map_err(|_| anyhow!("terrain CPU visibility oracle mutex poisoned"))?;
         if params.shading != "visibility" {
+            *oracle = None;
+            return Ok(());
+        }
+        // Frustum draws consume the compute shader's compact indirect list.
+        // The exact list is only available after submission, so do not publish
+        // a CPU-recomputed oracle in the interim.
+        if params.culling == "frustum" && submitted_tiles.is_none() {
             *oracle = None;
             return Ok(());
         }
@@ -883,8 +891,32 @@ impl TerrainScene {
             *variant_count,
             *index_count,
             lod_config,
+            submitted_tiles,
         )?);
         Ok(())
+    }
+
+    pub(in crate::terrain::renderer) fn refresh_cpu_visibility_oracle_from_gpu_selection(
+        &self,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        heightmap: &[f32],
+        height_dims: (u32, u32),
+    ) -> Result<()> {
+        if params.shading != "visibility" || params.culling != "frustum" {
+            return Ok(());
+        }
+        let selection = match self.geometry_provider.as_ref() {
+            Some(TerrainGeometryProvider::Clipmap { lod_resources, .. }) => lod_resources
+                .read_selection_blocking(self.device.as_ref(), self.queue.as_ref())
+                .map_err(anyhow::Error::msg)?,
+            _ => return Ok(()),
+        };
+        self.refresh_cpu_visibility_oracle(
+            params,
+            heightmap,
+            height_dims,
+            Some(&selection.visible_tiles),
+        )
     }
 
     pub(in crate::terrain::renderer) fn geometry_provider(

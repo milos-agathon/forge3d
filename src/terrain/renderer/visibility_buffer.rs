@@ -38,6 +38,7 @@ impl CpuVisibilityOracle {
         variant_count: u32,
         fallback_index_count: u32,
         lod_config: &crate::terrain::clipmap::gpu_lod::GpuLodConfig,
+        submitted_tiles: Option<&[crate::terrain::clipmap::gpu_lod::TileInfo]>,
     ) -> anyhow::Result<Self> {
         use crate::terrain::clipmap::gpu_lod::cpu_lod_select;
 
@@ -67,16 +68,6 @@ impl CpuVisibilityOracle {
             })
             .collect::<Vec<_>>();
         let (eye, view, proj) = super::TerrainScene::build_camera_matrices(params);
-        let selected = cpu_lod_select(
-            tiles,
-            proj * view,
-            eye,
-            lod_config,
-            (
-                (h_min - h_center - skirt) * params.z_scale,
-                (h_max - h_center) * params.z_scale,
-            ),
-        );
         let tile_indices = tiles
             .iter()
             .enumerate()
@@ -98,7 +89,21 @@ impl CpuVisibilityOracle {
                 identities.push((0, primitive as u32 & 0xffff));
             }
         } else {
-            for visible in selected.visible_tiles {
+            let selected_tiles =
+                crate::terrain::clipmap::gpu_lod::prefer_submitted_tiles(submitted_tiles, || {
+                    cpu_lod_select(
+                        tiles,
+                        proj * view,
+                        eye,
+                        lod_config,
+                        (
+                            (h_min - h_center - skirt) * params.z_scale,
+                            (h_max - h_center) * params.z_scale,
+                        ),
+                    )
+                    .visible_tiles
+                });
+            for visible in selected_tiles {
                 let Some(&tile_index) = tile_indices.get(&visible.tile_id) else {
                     continue;
                 };

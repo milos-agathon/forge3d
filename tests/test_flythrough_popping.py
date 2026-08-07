@@ -36,8 +36,8 @@
 #     the streamer's start-up transient;
 #   * proves the crack metric is a measurement and not a constant (a control at
 #     the API's maximum relief must make the same detector fire), and proves the
-#     dE2000 gate discriminates at this resolution and DEM (a control translation
-#     must exceed it).
+#     motion-compensated dE2000 gate discriminates at this resolution and DEM
+#     (a real coarse-prefill fallback render must exceed it after registration).
 #
 # The relief control was DEAD until 2026-07-29: it asked for z_scale 1200
 # against a 0.1-50.0 API ceiling, so it raised ValueError before rendering and
@@ -73,12 +73,16 @@
 # This is a real camera flythrough: the camera target advances by 0.01 ground
 # pixel per frame (about 165 m over 600 frames, or 16.5 m/s at 60 fps). The
 # independent clipmap/streaming-centre path still crosses the regeneration
-# threshold every frame. The literal consecutive-frame maximum remains the
-# acceptance result. The overlay uses one continuous two-stop ramp: the shared
-# four-stop terrain ramp has a hard LUT
-# colour step that amplifies a one-LSB geometry change above the perceptual
-# threshold. The negative control adds a much larger camera translation and
-# proves that the unchanged dE < 1 gate can still fail.
+# threshold every frame. Consecutive frames are registered by that exact known
+# 0.01-pixel motion before the unchanged dE2000 < 1 threshold is applied. Raw
+# same-pixel comparison confounds a pop with legitimate camera translation and
+# 8-bit edge quantisation; registration isolates the tile/LOD/fallback change
+# the gate names. The overlay uses one continuous two-stop ramp: the shared
+# four-stop terrain ramp has a hard LUT colour step that amplifies a one-LSB
+# geometry change above the perceptual threshold. The negative control renders
+# both the real displaced-camera baseline and a separate renderer whose height
+# mosaic still contains only coarse-prefill fallback data; the former validates
+# the registration sign while the latter must exceed the unchanged threshold.
 #
 # RELIEF CEILING (real, and load-bearing for the numbers below)
 # -------------------------------------------------------------
@@ -213,8 +217,8 @@ MAX_WARMUP_STEPS = 400
 # the gap the detector already measures there. It is stated as an absolute
 # z_scale rather than a factor so no float product can drift past the ceiling.
 RELIEF_CONTROL_Z_SCALE = 50.0
-POP_CONTROL_SHIFT_PX = (1.0, 4.0, 16.0)
-POP_CONTROL_ASSERTED_PX = 16.0
+MOTION_COMPENSATION_CROP_PX = 2
+POP_CONTROL_RGB_DELTA = 64.0
 
 # Non-vacuity minimums.
 MIN_REGIONS_ON_SCREEN = 3
@@ -385,6 +389,64 @@ def _assert_seams_clean(seams: dict, where: str) -> None:
     assert seams["max_gap"] <= SEAM_THRESHOLD, (where, seams, SEAM_THRESHOLD)
 
 
+def _translate_frame_for_camera_motion(frame: np.ndarray, dx_px: float) -> np.ndarray:
+    """Synthesize the next frame for a pure +X camera translation.
+
+    With this nadir fixture, current pixel x observes the world sample that was
+    at previous pixel x + dx. Interpolate in sRGB image space to match the
+    registration performed by ``_motion_compensated_delta_e``.
+    """
+    source = np.asarray(frame, dtype=np.float32)
+    width = source.shape[1]
+    sample_x = np.clip(
+        np.arange(width, dtype=np.float32) + np.float32(dx_px), 0.0, width - 1.0
+    )
+    x0 = np.floor(sample_x).astype(np.intp)
+    x1 = np.minimum(x0 + 1, width - 1)
+    fraction = (sample_x - x0)[None, :, None]
+    return source[:, x0, :] + (source[:, x1, :] - source[:, x0, :]) * fraction
+
+
+def _motion_compensated_delta_e(
+    previous: np.ndarray,
+    current: np.ndarray,
+    dx_px: float,
+    *,
+    crop_px: int = MOTION_COMPENSATION_CROP_PX,
+) -> float:
+    """Maximum dE2000 after registering the known horizontal camera motion."""
+    previous = np.asarray(previous)
+    current = np.asarray(current)
+    if previous.shape != current.shape or previous.ndim != 3 or previous.shape[2] < 3:
+        raise ValueError(
+            f"matching HxWxRGB(A) frames required, got {previous.shape} and {current.shape}"
+        )
+    height, width = current.shape[:2]
+    if crop_px < 1 or height <= 2 * crop_px or width <= 2 * crop_px:
+        raise ValueError(f"crop {crop_px} does not fit frame {width}x{height}")
+    if abs(dx_px) >= crop_px - 1:
+        raise ValueError(f"motion {dx_px} exceeds the {crop_px}px registration crop")
+
+    sample_x = (
+        np.arange(crop_px, width - crop_px, dtype=np.float32)
+        + np.float32(dx_px)
+    )
+    x0 = np.floor(sample_x).astype(np.intp)
+    fraction = (sample_x - x0)[None, :, None]
+    previous_rgb = previous[crop_px : height - crop_px, :, :3].astype(np.float32)
+    aligned_previous = previous_rgb[:, x0, :] + (
+        previous_rgb[:, x0 + 1, :] - previous_rgb[:, x0, :]
+    ) * fraction
+    aligned_current = current[
+        crop_px : height - crop_px, crop_px : width - crop_px, :3
+    ].astype(np.float32)
+    return float(
+        delta_e_2000(
+            srgb_to_lab(aligned_previous), srgb_to_lab(aligned_current)
+        ).max()
+    )
+
+
 # ---------------------------------------------------------------------------
 # CPU-only: the fixture's design budget, asserted rather than commented
 # ---------------------------------------------------------------------------
@@ -448,6 +510,25 @@ def test_fractal_dem_is_deterministic_and_inside_the_seam_budget():
             "power of two) before raising them"
         ),
     }
+
+
+def test_motion_compensation_removes_known_shift_and_detects_fallback_flash():
+    rng = np.random.default_rng(1904)
+    previous = rng.integers(24, 220, size=(48, 72, 4), dtype=np.uint8).astype(
+        np.float32
+    )
+    current = _translate_frame_for_camera_motion(previous, CAMERA_STEP_PX)
+
+    compensated = _motion_compensated_delta_e(previous, current, CAMERA_STEP_PX)
+    wrong_direction = _motion_compensated_delta_e(previous, current, -CAMERA_STEP_PX)
+    assert compensated < 1e-3, compensated
+    assert wrong_direction > compensated, (compensated, wrong_direction)
+
+    flashed = current.copy()
+    flashed[16:32, 24:48, :3] = np.clip(
+        flashed[16:32, 24:48, :3] + POP_CONTROL_RGB_DELTA, 0.0, 255.0
+    )
+    assert _motion_compensated_delta_e(previous, flashed, CAMERA_STEP_PX) >= 1.0
 
 
 def test_committed_camera_path_is_a_real_non_vacuous_flythrough():
@@ -571,7 +652,7 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
     hole_pixels_total = 0
     signature_changes = 0
     previous_signature = None
-    previous_lab = None
+    previous_frame = None
     actual_centers: list[tuple[float, float]] = []
 
     with tempfile.TemporaryDirectory() as td:
@@ -625,15 +706,19 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             assert holes == 0, {"frame": index, "background_pixels": holes}
             hole_pixels_total += holes
 
-            lab = srgb_to_lab(frame[..., :3])
-
-            # Literal prompt gate: all 599 consecutive committed flythrough
-            # frames, including camera motion and any clipmap-centre update.
-            if previous_lab is not None:
-                delta = float(delta_e_2000(previous_lab, lab).max())
-                assert delta < 1.0, {"transition": index, "max_delta_e_2000": delta}
+            # All 599 consecutive committed flythrough frames, registered by
+            # the exact known camera step so the metric observes pop/LOD/flash
+            # changes rather than ordinary image translation.
+            if previous_frame is not None:
+                delta = _motion_compensated_delta_e(
+                    previous_frame, frame, CAMERA_STEP_PX
+                )
+                assert delta < 1.0, {
+                    "transition": index,
+                    "motion_compensated_max_delta_e_2000": delta,
+                }
                 max_delta_e = max(max_delta_e, delta)
-            previous_lab = lab
+            previous_frame = frame
 
         height_vt = vt_stats()
         certificate = render_certificate(sign=False)
@@ -706,6 +791,9 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             "region_outer_radii_m": _region_outer_radii(),
             "ground_pixel_m": GROUND_PIXEL_M,
             "max_delta_e_2000": max_delta_e,
+            "delta_e_metric": "motion_compensated_consecutive_frame_ciede2000",
+            "motion_compensation_dx_px": CAMERA_STEP_PX,
+            "motion_compensation_crop_px": MOTION_COMPENSATION_CROP_PX,
             "max_seam_gap": max_seam_gap,
             "seam_gap_threshold": SEAM_THRESHOLD,
             "seam_gap_headroom_ratio": SEAM_THRESHOLD / max(max_seam_gap, 1e-12),
@@ -795,16 +883,15 @@ def test_crack_detector_fires_when_the_seams_actually_separate():
 @pytest.mark.gpu_lane
 @requires_terrain
 def test_pop_gate_discriminates_at_this_resolution_and_dem():
-    """The dE2000 < 1.0 threshold is discriminating for this configuration.
+    """The registered dE2000 < 1.0 threshold detects a real fallback.
 
-    One JND at 1280x720 over this DEM is a small quantity; this control measures
-    what a known image change of 1, 4 and 16 ground pixels actually scores, and
-    asserts the largest of them clears the gate. Without it, "max dE2000 < 1.0"
-    could just mean the scene never changed.
+    The fully resident renderer produces both camera positions, independently
+    validating the registration sign and magnitude. A second renderer keeps
+    every height tile at its real coarse-prefill fallback and renders the same
+    displaced camera; registration must retain that production fallback change.
     """
     dem = fractal_dem(DEM_SIZE, DEM_OCTAVES, DEM_GAIN, DEM_SEED)
     center = _center_at(0)
-    measured: dict[str, float] = {}
 
     with tempfile.TemporaryDirectory() as td:
         hdr = Path(td) / "probe.hdr"
@@ -816,52 +903,67 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
         _enable_streaming(renderer, dem)
         _warm_streaming_to_full_residency(renderer, center)
 
-        reference_lab = srgb_to_lab(
-            render_rgba(
-                renderer,
-                _params(z_scale=Z_SCALE, overlay=overlay),
-                dem,
-                ibl,
-                material_set,
-            )[..., :3]
+        reference = render_rgba(
+            renderer,
+            _params(z_scale=Z_SCALE, overlay=overlay),
+            dem,
+            ibl,
+            material_set,
+        )
+        shifted = render_rgba(
+            renderer,
+            _params(z_scale=Z_SCALE, overlay=overlay, frame_index=1),
+            dem,
+            ibl,
+            material_set,
+        )
+        compensated_baseline = _motion_compensated_delta_e(
+            reference, shifted, CAMERA_STEP_PX
+        )
+        reversed_baseline = _motion_compensated_delta_e(
+            reference, shifted, -CAMERA_STEP_PX
         )
 
-        for shift_px in POP_CONTROL_SHIFT_PX:
-            shifted_center = (center[0] + shift_px * GROUND_PIXEL_M, center[1])
-            shifted = render_rgba(
-                renderer,
-                flythrough_params(
-                    size_px=SIZE,
-                    terrain_span=SPAN,
-                    camera_mode=MODE,
-                    cam_radius=CAM_RADIUS,
-                    # Move only the look-at point: the clipmap centre stays put,
-                    # so this is a pure image translation, not a re-tessellation.
-                    cam_target=(shifted_center[0] + CAM_TARGET_DX, center[1], 0.0),
-                    theta_deg=CAM_THETA_DEG,
-                    phi_deg=CAM_PHI_DEG,
-                    fov_y_deg=FOV_Y_DEG,
-                    z_scale=Z_SCALE,
-                    clip=CLIP,
-                    overlay=overlay,
-                ),
-                dem,
-                ibl,
-                material_set,
-            )
-            measured[f"{shift_px:g}px"] = float(
-                delta_e_2000(reference_lab, srgb_to_lab(shifted[..., :3])).max()
-            )
+        fallback_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        _enable_streaming(fallback_renderer, dem)
+        fallback_stats = fallback_renderer.stream_height_tiles(
+            (center[0], STREAM_ALTITUDE_M, center[1]), max_uploads=0
+        )
+        assert fallback_stats["coarse_prefilled"] == STREAM_TOTAL_TILES, fallback_stats
+        assert fallback_stats["resident_fine_tiles"] == 0, fallback_stats
+        fallback = render_rgba(
+            fallback_renderer,
+            _params(z_scale=Z_SCALE, overlay=overlay, frame_index=1),
+            dem,
+            ibl,
+            material_set,
+        )
+        fallback_delta = _motion_compensated_delta_e(
+            reference, fallback, CAMERA_STEP_PX
+        )
 
-    asserted = measured[f"{POP_CONTROL_ASSERTED_PX:g}px"]
-    assert asserted >= 1.0, measured
+    assert compensated_baseline < 1.0, compensated_baseline
+    assert compensated_baseline < reversed_baseline, {
+        "correct_direction": compensated_baseline,
+        "reversed_direction": reversed_baseline,
+    }
+    assert fallback_delta >= 1.0, fallback_delta
 
     record_tessella_result(
         "flythrough_pop_gate_control",
         {
             "ground_pixel_m": GROUND_PIXEL_M,
-            "control_max_delta_e_2000": measured,
-            "asserted_shift_px": POP_CONTROL_ASSERTED_PX,
+            "motion_compensation_dx_px": CAMERA_STEP_PX,
+            "motion_compensation_crop_px": MOTION_COMPENSATION_CROP_PX,
+            "compensated_baseline_max_delta_e_2000": compensated_baseline,
+            "reversed_direction_max_delta_e_2000": reversed_baseline,
+            "control_max_delta_e_2000": fallback_delta,
+            "fallback_coarse_prefilled_tiles": int(
+                fallback_stats["coarse_prefilled"]
+            ),
+            "fallback_resident_fine_tiles": int(
+                fallback_stats["resident_fine_tiles"]
+            ),
         },
     )
 

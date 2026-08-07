@@ -3,7 +3,7 @@
 //! Performs per-tile frustum culling and LOD selection on the GPU using
 //! a compute shader, outputting a compact list of visible tiles.
 
-use crate::core::error::RenderResult;
+use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
@@ -209,6 +209,64 @@ pub struct GpuLodDrawResources {
     _input_tiles: crate::core::resource_tracker::TrackedBuffer,
     _draw_templates: crate::core::resource_tracker::TrackedBuffer,
     bind_group: wgpu::BindGroup,
+}
+
+impl GpuLodDrawResources {
+    /// Read back the compact tile list produced by the most recently submitted
+    /// LOD compute pass. Queue ordering guarantees this copy observes the exact
+    /// list consumed by the indirect terrain draw.
+    pub(crate) fn read_selection_blocking(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> RenderResult<LodSelectionResult> {
+        let header_bytes = std::mem::size_of::<OutputHeader>() as u64;
+        let tile_bytes = u64::from(self.max_draw_count) * std::mem::size_of::<TileInfo>() as u64;
+        let readback = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("lod_selection_readback"),
+                size: header_bytes + tile_bytes,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )?;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("lod_selection_readback_encoder"),
+        });
+        encoder.copy_buffer_to_buffer(&self.output_header, 0, &readback, 0, header_bytes);
+        encoder.copy_buffer_to_buffer(&self.output_tiles, 0, &readback, header_bytes, tile_bytes);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = readback.slice(..);
+        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).ok();
+        });
+        device.poll(wgpu::Maintain::Wait);
+        pollster::block_on(receiver.receive())
+            .ok_or_else(|| RenderError::readback("LOD selection callback dropped"))?
+            .map_err(|error| RenderError::readback(format!("LOD selection map failed: {error}")))?;
+        let mapped = slice.get_mapped_range();
+        let header = bytemuck::pod_read_unaligned::<OutputHeader>(
+            &mapped[..std::mem::size_of::<OutputHeader>()],
+        );
+        let visible_count = header.visible_count.min(self.max_draw_count) as usize;
+        let tile_size = std::mem::size_of::<TileInfo>();
+        let visible_tiles = (0..visible_count)
+            .map(|index| {
+                let start = header_bytes as usize + index * tile_size;
+                bytemuck::pod_read_unaligned::<TileInfo>(&mapped[start..start + tile_size])
+            })
+            .collect();
+        drop(mapped);
+        readback.unmap();
+        Ok(LodSelectionResult {
+            visible_tiles,
+            total_triangles: header.total_triangles,
+            culled_count: self.max_draw_count - header.visible_count.min(self.max_draw_count),
+        })
+    }
 }
 
 /// Frustum planes for culling (Ax + By + Cz + D = 0 format).
@@ -705,6 +763,18 @@ impl LodSelectionResult {
     }
 }
 
+/// Use the exact GPU-submitted tile/LOD list when it is available, falling
+/// back to an independent CPU selection only for paths without that provenance.
+pub(crate) fn prefer_submitted_tiles<F>(
+    submitted_tiles: Option<&[TileInfo]>,
+    cpu_fallback: F,
+) -> Vec<TileInfo>
+where
+    F: FnOnce() -> Vec<TileInfo>,
+{
+    submitted_tiles.map_or_else(cpu_fallback, <[_]>::to_vec)
+}
+
 /// CPU fallback for LOD selection (used when GPU compute is unavailable).
 pub fn cpu_lod_select(
     tiles: &[TileInfo],
@@ -820,6 +890,27 @@ fn select_lod_cpu(distance: f32, config: &GpuLodConfig) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oracle_selection_prefers_exact_submitted_tiles_without_recomputing() {
+        let submitted = [TileInfo {
+            tile_id: 97,
+            height_min: -1.0,
+            bounds_min: [-2.0, -3.0],
+            bounds_max: [4.0, 5.0],
+            distance: 12.0,
+            selected_lod: 2,
+            visible: 1,
+            height_max: 6.0,
+        }];
+        let selected = prefer_submitted_tiles(Some(&submitted), || {
+            panic!("CPU LOD selection must not replace submitted GPU provenance")
+        });
+
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].tile_id, 97);
+        assert_eq!(selected[0].selected_lod, 2);
+    }
 
     #[test]
     fn test_tile_id_packing() {
