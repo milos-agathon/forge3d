@@ -651,9 +651,9 @@ def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     )
     assert (
         "test_recipe_goldens_render_and_match[mapscene_terrain_raster]"
-        in visual_runner
+        not in visual_runner
     )
-    assert "test_nvidia_vulkan_recipe_pixel_golden_render_and_match" not in visual_runner
+    assert "test_nvidia_vulkan_recipe_pixel_golden_render_and_match" in visual_runner
     recipe_source = (ROOT / "tests/test_recipe_goldens.py").read_text(encoding="utf-8")
     certificate_test = recipe_source.split(
         "def test_recipe_goldens_render_and_match", 1
@@ -665,6 +665,8 @@ def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     assert "_emit_or_verify_certificate(spec)" in certificate_test
     assert "_render_recipe_golden_pixels" in nvidia_pixel_test
     assert "_emit_or_verify_certificate" not in nvidia_pixel_test
+    assert "FORGE3D_CERT_SIGNING_KEY" not in golden_job
+    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" not in golden_job
     assert "assert_junit_zero_skips.py" in pytest_step
     assert "tests/test_astro_night_golden.py" in sidera_step
     assert "assert_junit_zero_skips.py" in sidera_step
@@ -682,13 +684,14 @@ def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
         if path != "test_recipe_goldens.py":
             assert "selected_golden_path(" in source
     assert "visual-gpu-evidence" in golden_job and "retention-days: 90" in golden_job
-    signing_step = golden_job.split(
-        "- name: Require production certificate signing key", 1
-    )[1].split("\n      - name:", 1)[0]
-    assert "FORGE3D_CERT_SIGNING_KEY" in golden_job
-    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" in golden_job
-    assert "if (-not $env:FORGE3D_CERT_SIGNING_KEY)" in signing_step
-    assert "throw" in signing_step
+    assert "Require production certificate signing key" not in golden_job
+    certificate_refresh = (
+        ROOT / ".github/workflows/certificate-refresh.yml"
+    ).read_text(encoding="utf-8")
+    assert "FORGE3D_CERT_SIGNING_KEY" in certificate_refresh
+    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" in certificate_refresh
+    assert "github.ref == 'refs/heads/main'" in certificate_refresh
+    assert "github.ref_protected" in certificate_refresh
     assert "FORGE3D_CERT_SIGNING_KEY" not in fast_job
     assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" not in fast_job
     assert "FORGE3D_RUN_TERRAIN_GOLDENS" not in fast_job
