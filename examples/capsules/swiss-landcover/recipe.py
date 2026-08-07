@@ -291,7 +291,22 @@ def _crop_aspect_report(hit: np.ndarray, overlay_size: tuple[int, int]) -> tuple
     return report, mismatch
 
 
+# Text artifacts hashed newline-normalized so LF/CRLF checkouts agree;
+# rasters/PNGs hashed raw. Kept byte-identical to verify.py::sha256_file.
+TEXT_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".cfg", ".ini", ".toml", ".yaml", ".yml"})
+
+
 def _sha256(path: Path) -> str:
+    """sha256 of a capsule artifact.
+
+    Text artifacts hashed newline-normalized so LF/CRLF checkouts agree;
+    rasters/PNGs hashed raw. A fresh Windows clone (git core.autocrlf true)
+    checks this file out with CRLF, so hashing raw bytes would make every such
+    reproduction report a recipe mismatch it did not cause.
+    """
+    path = Path(path)
+    if path.suffix.lower() in TEXT_SUFFIXES:
+        return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
