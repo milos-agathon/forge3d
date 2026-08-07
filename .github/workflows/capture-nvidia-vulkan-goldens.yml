@@ -126,10 +126,31 @@ jobs:
           python -m pytest `
             tests/test_terrain_visual_goldens.py `
             tests/test_terrain_tv10_goldens.py `
-            "tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]" `
+            "tests/test_recipe_goldens.py::test_nvidia_vulkan_recipe_pixel_golden_render_and_match" `
             -v --tb=short --junitxml="$env:FORGE3D_CAPTURE_EVIDENCE/capture.junit.xml"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$env:FORGE3D_CAPTURE_EVIDENCE/capture.junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @'
+          import sys
+          from xml.etree import ElementTree as ET
+
+          expected = {
+              "test_terrain_visual_goldens[terrain_pbr-scene_kwargs0]",
+              "test_terrain_visual_goldens[terrain_water-scene_kwargs1]",
+              "test_terrain_visual_goldens[terrain_atmosphere-scene_kwargs2]",
+              "test_terrain_visual_goldens[terrain_low_sun_sky-scene_kwargs3]",
+              "test_terrain_visual_goldens[terrain_pom-scene_kwargs4]",
+              "test_terrain_visual_goldens[terrain_water_reflection-scene_kwargs5]",
+              "test_tv10_goldens[terrain_tv10_zero_sss-scene0-zero]",
+              "test_tv10_goldens[terrain_tv10_scene_a_sss-scene1-sss]",
+              "test_tv10_goldens[terrain_tv10_scene_b_sss-scene2-sss]",
+              "test_nvidia_vulkan_recipe_pixel_golden_render_and_match",
+          }
+          cases = [case.get("name") for case in ET.parse(sys.argv[1]).iter("testcase")]
+          if len(cases) != 10 or set(cases) != expected:
+              raise SystemExit(f"wrong capture JUnit inventory: {cases!r}")
+          '@ | python - "$env:FORGE3D_CAPTURE_EVIDENCE/capture.junit.xml"
           exit $LASTEXITCODE
       - name: Stage exact fixture set and initial manifest
         shell: pwsh
@@ -443,10 +464,31 @@ jobs:
           python -m pytest `
             tests/test_terrain_visual_goldens.py `
             tests/test_terrain_tv10_goldens.py `
-            "tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]" `
+            "tests/test_recipe_goldens.py::test_nvidia_vulkan_recipe_pixel_golden_render_and_match" `
             -v --tb=short --junitxml="$env:FORGE3D_VERIFY_EVIDENCE/verify.junit.xml"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$env:FORGE3D_VERIFY_EVIDENCE/verify.junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @'
+          import sys
+          from xml.etree import ElementTree as ET
+
+          expected = {
+              "test_terrain_visual_goldens[terrain_pbr-scene_kwargs0]",
+              "test_terrain_visual_goldens[terrain_water-scene_kwargs1]",
+              "test_terrain_visual_goldens[terrain_atmosphere-scene_kwargs2]",
+              "test_terrain_visual_goldens[terrain_low_sun_sky-scene_kwargs3]",
+              "test_terrain_visual_goldens[terrain_pom-scene_kwargs4]",
+              "test_terrain_visual_goldens[terrain_water_reflection-scene_kwargs5]",
+              "test_tv10_goldens[terrain_tv10_zero_sss-scene0-zero]",
+              "test_tv10_goldens[terrain_tv10_scene_a_sss-scene1-sss]",
+              "test_tv10_goldens[terrain_tv10_scene_b_sss-scene2-sss]",
+              "test_nvidia_vulkan_recipe_pixel_golden_render_and_match",
+          }
+          cases = [case.get("name") for case in ET.parse(sys.argv[1]).iter("testcase")]
+          if len(cases) != 10 or set(cases) != expected:
+              raise SystemExit(f"wrong verify JUnit inventory: {cases!r}")
+          '@ | python - "$env:FORGE3D_VERIFY_EVIDENCE/verify.junit.xml"
           exit $LASTEXITCODE
       - name: Exercise corrected VT mask and mip proof
         shell: pwsh
