@@ -14,6 +14,11 @@ import pytest
 import forge3d as f3d
 
 from _terrain_runtime import terrain_rendering_available
+from tests._golden_variants import (
+    assert_nvidia_vulkan_golden_adapter,
+    nvidia_vulkan_golden_selected,
+    selected_golden_variant,
+)
 from tests._ssim import ssim
 
 
@@ -51,12 +56,9 @@ MEAN_ABS_MAX = 2.0
 
 def _recipe_golden_variant() -> str | None:
     """Return the explicitly selected backend baseline variant, if any."""
-    variant = os.environ.get("FORGE3D_RECIPE_GOLDEN_VARIANT")
-    if variant is None:
-        return None
-    if variant != "metal":
-        raise ValueError(f"Unknown recipe golden variant: {variant!r}")
-    return variant
+    return selected_golden_variant(
+        "FORGE3D_RECIPE_GOLDEN_VARIANT", implicit_metal=False
+    )
 
 
 @dataclass(frozen=True)
@@ -1132,6 +1134,7 @@ def test_certificate_refresh_requires_a_real_render_but_not_an_absent_backend_pn
 ) -> None:
     """An optional Metal diagnostic must never fabricate or write baselines."""
     monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_CERTIFICATES", "1")
+    monkeypatch.setenv("WGPU_BACKEND", "metal")
     monkeypatch.setenv("FORGE3D_RECIPE_GOLDEN_VARIANT", "metal")
     assert _certificate_refresh_without_backend_baseline(RECIPE_GOLDENS[0]) is False
     assert _certificate_refresh_without_backend_baseline(RECIPE_GOLDENS[1]) is True
@@ -1152,8 +1155,12 @@ def test_recipe_golden_variant_uses_an_explicit_backend_baseline(
     spec = RECIPE_GOLDENS[0]
     monkeypatch.delenv("FORGE3D_RECIPE_GOLDEN_VARIANT", raising=False)
     assert spec.golden_path == spec.canonical_golden_path
+    monkeypatch.setenv("WGPU_BACKEND", "metal")
     monkeypatch.setenv("FORGE3D_RECIPE_GOLDEN_VARIANT", "metal")
     assert spec.golden_path == GOLDEN_DIR / "mapscene_terrain_raster.metal.png"
+    monkeypatch.setenv("WGPU_BACKEND", "vulkan")
+    monkeypatch.setenv("FORGE3D_RECIPE_GOLDEN_VARIANT", "nvidia-vulkan")
+    assert spec.golden_path == GOLDEN_DIR / "mapscene_terrain_raster.nvidia-vulkan.png"
 
 
 def test_recipe_golden_gate_rejects_pixel_regression(
@@ -1213,6 +1220,17 @@ def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
 
     _clear_degradation_sinks()
     report = scene.render()
+    if nvidia_vulkan_golden_selected("FORGE3D_RECIPE_GOLDEN_VARIANT"):
+        adapter_probe = f3d.device_probe("vulkan")
+        assert_nvidia_vulkan_golden_adapter(
+            "FORGE3D_RECIPE_GOLDEN_VARIANT", adapter_probe
+        )
+        if ARTIFACT_DIR is not None:
+            ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+            (ARTIFACT_DIR / "recipe-render-adapter.json").write_text(
+                json.dumps(adapter_probe, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
     assert scene.last_render_backend == "gpu_terrain"
     for feature in spec.expected_features:
         assert report.supported_features[feature] == "supported"

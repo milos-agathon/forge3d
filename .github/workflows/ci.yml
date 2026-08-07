@@ -1004,6 +1004,8 @@ jobs:
       FORGE3D_NO_BOOTSTRAP: '1'
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       FORGE3D_DETERMINISM_TEST_BACKEND: vulkan
+      FORGE3D_TERRAIN_GOLDEN_VARIANT: nvidia-vulkan
+      FORGE3D_RECIPE_GOLDEN_VARIANT: nvidia-vulkan
       FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan
       FORGE3D_SUBSTRATIA_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       FORGE3D_CERT_SIGNING_KEY: ${{ secrets.FORGE3D_CERT_SIGNING_KEY }}

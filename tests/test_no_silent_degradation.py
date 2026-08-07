@@ -21,7 +21,14 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from _toml_compat import load_toml
+from tests._golden_variants import (
+    assert_nvidia_vulkan_golden_adapter,
+    selected_golden_path,
+    selected_golden_variant,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
@@ -549,6 +556,64 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
 # ---------------------------------------------------------------------------
 # (f) visual-golden lane honesty
 # ---------------------------------------------------------------------------
+def test_f_backend_golden_variants_are_explicit_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_name = "FORGE3D_TERRAIN_GOLDEN_VARIANT"
+    monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.delenv("WGPU_BACKEND", raising=False)
+    assert selected_golden_variant(env_name, implicit_metal=True) is None
+
+    monkeypatch.setenv("WGPU_BACKEND", "metal")
+    assert selected_golden_variant(env_name, implicit_metal=True) == "metal"
+    assert selected_golden_path(
+        Path("goldens"), "scene", env_name, implicit_metal=True
+    ) == Path("goldens/scene.metal.png")
+
+    monkeypatch.setenv("WGPU_BACKEND", "vulkan")
+    assert selected_golden_variant(env_name, implicit_metal=True) is None
+    assert selected_golden_path(
+        Path("goldens"), "scene", env_name, implicit_metal=True
+    ) == Path("goldens/scene.png")
+    monkeypatch.setenv(env_name, "nvidia-vulkan")
+    assert selected_golden_variant(env_name, implicit_metal=True) == "nvidia-vulkan"
+    assert selected_golden_path(
+        Path("goldens"), "scene", env_name, implicit_metal=True
+    ) == Path("goldens/scene.nvidia-vulkan.png")
+    assert_nvidia_vulkan_golden_adapter(
+        env_name,
+        {
+            "status": "ok",
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "vendor": 0x10DE,
+            "name": "NVIDIA test adapter",
+            "software_fallback": False,
+        },
+    )
+    with pytest.raises(AssertionError):
+        assert_nvidia_vulkan_golden_adapter(
+            env_name,
+            {
+                "status": "ok",
+                "backend": "Vulkan",
+                "device_type": "DiscreteGpu",
+                "vendor": 0x1002,
+                "name": "wrong adapter",
+                "software_fallback": False,
+            },
+        )
+
+    monkeypatch.setenv("WGPU_BACKEND", "metal")
+    with pytest.raises(ValueError, match="requires WGPU_BACKEND"):
+        selected_golden_variant(env_name, implicit_metal=True)
+
+    monkeypatch.setenv("WGPU_BACKEND", "vulkan")
+    monkeypatch.setenv(env_name, "generic-vulkan")
+    with pytest.raises(ValueError, match="Unknown golden variant"):
+        selected_golden_variant(env_name, implicit_metal=True)
+
+
 def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     fast_job = _workflow_job(ci_yml, "test-fast-contract")
@@ -572,6 +637,13 @@ def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     assert "--require-nvidia-vulkan" in probe_step
     assert "continue-on-error" not in probe_step
     assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in golden_job
+    assert "FORGE3D_UPDATE_TERRAIN_GOLDENS" not in golden_job
+    assert "FORGE3D_UPDATE_RECIPE_GOLDENS" not in golden_job
+    assert "FORGE3D_UPDATE_TERRAIN_GOLDENS" not in pytest_step
+    assert "FORGE3D_UPDATE_RECIPE_GOLDENS" not in pytest_step
+    assert "FORGE3D_TERRAIN_GOLDEN_VARIANT: nvidia-vulkan" in golden_job
+    assert "FORGE3D_RECIPE_GOLDEN_VARIANT: nvidia-vulkan" in golden_job
+    assert "FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan" in golden_job
     assert "continue-on-error" not in pytest_step, "golden pytest mismatch is incorrectly non-fatal"
     assert "run_nvidia_visual_acceptance.py --suite visual" in pytest_step
     assert "assert_junit_zero_skips.py" in pytest_step
@@ -580,6 +652,16 @@ def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     assert "continue-on-error" not in sidera_step
     assert "sidera_lane:" in golden_job
     assert "FORGE3D_EXPECTED_ADAPTER_PROBE" in golden_job
+    for path, evidence_name in (
+        ("test_terrain_visual_goldens.py", "terrain-render-adapter.json"),
+        ("test_terrain_tv10_goldens.py", "tv10-render-adapter.json"),
+        ("test_recipe_goldens.py", "recipe-render-adapter.json"),
+    ):
+        source = (TESTS / path).read_text(encoding="utf-8")
+        assert "assert_nvidia_vulkan_golden_adapter" in source
+        assert evidence_name in source
+        if path != "test_recipe_goldens.py":
+            assert "selected_golden_path(" in source
     assert "visual-gpu-evidence" in golden_job and "retention-days: 90" in golden_job
     signing_step = golden_job.split(
         "- name: Require production certificate signing key", 1

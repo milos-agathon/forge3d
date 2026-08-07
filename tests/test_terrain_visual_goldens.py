@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -15,6 +16,11 @@ from forge3d.terrain_params import (
     make_terrain_params_config,
 )
 
+from tests._golden_variants import (
+    assert_nvidia_vulkan_golden_adapter,
+    nvidia_vulkan_golden_selected,
+    selected_golden_path,
+)
 from tests._ssim import ssim
 
 
@@ -152,14 +158,18 @@ def _save_png(path: Path, image: np.ndarray) -> None:
 
 
 def _golden_path(scene_name: str) -> Path:
-    """Keep the required NVIDIA Vulkan/DX12 and optional Metal baselines.
+    """Select an explicitly bound physical backend baseline.
 
-    An explicitly selected Metal support diagnostic uses its own committed
-    reference because backend output differs measurably. It has no path into
-    required acceptance, and there is no cross-backend reference fallback.
+    The required NVIDIA lane and optional Metal diagnostic use separate
+    references because backend output differs measurably. There is no
+    cross-backend reference fallback.
     """
-    suffix = ".metal" if os.environ.get("WGPU_BACKEND", "").lower() == "metal" else ""
-    return GOLDEN_DIR / f"{scene_name}{suffix}.png"
+    return selected_golden_path(
+        GOLDEN_DIR,
+        scene_name,
+        "FORGE3D_TERRAIN_GOLDEN_VARIANT",
+        implicit_metal=True,
+    )
 
 
 def _write_failure_artifacts(scene_name: str, actual: np.ndarray, expected: np.ndarray) -> None:
@@ -207,6 +217,17 @@ def _assert_matches_golden(scene_name: str, actual: np.ndarray) -> None:
 def terrain_golden_env():
     session = f3d.Session(window=False)
     renderer = f3d.TerrainRenderer(session)
+    if nvidia_vulkan_golden_selected("FORGE3D_TERRAIN_GOLDEN_VARIANT"):
+        adapter_probe = f3d.device_probe("vulkan")
+        assert_nvidia_vulkan_golden_adapter(
+            "FORGE3D_TERRAIN_GOLDEN_VARIANT", adapter_probe
+        )
+        if ARTIFACT_DIR is not None:
+            ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+            (ARTIFACT_DIR / "terrain-render-adapter.json").write_text(
+                json.dumps(adapter_probe, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
     material_set = f3d.MaterialSet.terrain_default()
     overlay = _build_overlay()
     heightmap = _build_heightmap()
