@@ -48,3 +48,28 @@ def test_landcover_attribution_line_exact():
     assert lc["required_attribution"] == (
         "Data: Sentinel-2 10m Land Use/Land Cover – Esri, Impact Observatory, and Microsoft"
     )
+
+
+def _load_recipe_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("swiss_capsule_recipe", CAPSULE / "recipe.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_recipe_imports_without_gpu_and_declares_contract():
+    mod = _load_recipe_module()
+    # Proven Swiss PT register, verbatim (spec: do not re-derive).
+    assert (mod.GRID_MAX, mod.FRAME, mod.TILES, mod.MAX_FRAMES, mod.SEED) == (1536, 1120, 2, 2048, 7)
+    assert mod.SNAPSHOT.name == "swiss_landcover.png"
+    assert mod.CERT_PATH.name == "local.certificate.json"
+    assert mod.EXIT_NO_GPU == 2 and mod.EXIT_NO_HITS == 3 and mod.EXIT_NO_CERT == 4
+
+
+def test_recipe_has_no_pro_imports_and_no_telemetry():
+    text = (CAPSULE / "recipe.py").read_text(encoding="utf-8")
+    for banned in ("map_plate", "export_svg", "export_pdf", "add_buildings", "set_license_key",
+                   "requests.", "urllib.request", "httpx"):
+        assert banned not in text, f"banned reference in recipe.py: {banned}"
