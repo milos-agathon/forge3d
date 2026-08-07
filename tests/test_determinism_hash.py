@@ -208,6 +208,8 @@ def test_cli_attributes_hash_to_requested_backend(monkeypatch, tmp_path, capsys)
             "name": "test adapter",
             "backend": "Dx12",
             "device_type": "DiscreteGpu",
+            "vendor": 0x10DE,
+            "device": 0x2484,
             "software_fallback": False,
         }
 
@@ -215,7 +217,10 @@ def test_cli_attributes_hash_to_requested_backend(monkeypatch, tmp_path, capsys)
 
     assert determinism._main(["--out-png", str(tmp_path / "unused.png")]) == 0
     assert requested == ["dx12"]
-    assert '"backend": "Dx12"' in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert '"backend": "Dx12"' in output
+    assert '"vendor": 4318' in output
+    assert '"device": 9348' in output
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="requires local DX12 and Vulkan")

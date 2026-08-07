@@ -923,6 +923,7 @@ jobs:
   # default and is never consumed by Full Acceptance Summary.
   test-golden-images:
     name: Visual Goldens (optional Metal diagnostic)
+    continue-on-error: true
     needs: [build-wheel-macos, terrain-golden-paths]
     runs-on: macos-14
     if: >-
@@ -1118,6 +1119,7 @@ jobs:
   # backend investigation but is not an acceptance dependency.
   test-substratia-gpu:
     name: SUBSTRATIA Physical GPU (optional Metal diagnostic)
+    continue-on-error: true
     needs: [build-wheel-macos, terrain-golden-paths]
     if: >-
       (github.event_name == 'schedule' ||

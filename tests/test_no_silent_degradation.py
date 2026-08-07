@@ -602,6 +602,7 @@ def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     assert 'if [ "$sidera_lane" != "ran" ]' in aggregate
     assert "SIDERA physical NVIDIA Vulkan lane was selected" in aggregate
     assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
+    assert "continue-on-error: true" in metal_diagnostic
     assert "test-golden-images," not in aggregate.split("\n    runs-on:", 1)[0]
 
 
@@ -701,4 +702,5 @@ def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
     assert "return 2" in probe and "return 3" in probe
     assert "tests/test_substratia_evidence_report.py" in lane
     assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
+    assert "continue-on-error: true" in metal_diagnostic
     assert "test-substratia-gpu," not in acceptance.split("\n    runs-on:", 1)[0]

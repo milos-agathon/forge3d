@@ -1,9 +1,10 @@
 # TERRA-DETERMINATA: cross-vendor bit-exact rendering gate.
 #
 # Renders the canonical terrain+CSM+IBL reference scene (forge3d.determinism)
-# on an {intel, amd, nvidia, wasm} matrix and fails the build if any two
-# produced SHA-256 hashes differ, or if any differs from the committed golden
-# tests/goldens/determinism/terra_determinata_v1.sha256. Zero-byte tolerance.
+# on an {intel, amd, nvidia, wasm} matrix. Physical NVIDIA/Vulkan is the
+# required hardware anchor; every additional produced SHA-256 must equal it and
+# the committed tests/goldens/determinism/terra_determinata_v1.sha256. Zero-byte
+# tolerance.
 #
 # Gated vs informational legs (follows the repo convention of skipping visual
 # goldens on unsupported hosted GPUs, see ci.yml test-golden-images):
@@ -12,8 +13,8 @@
 #              gpu-intel runner.
 #   - amd    : informational on hosted windows (no AMD GPU; WARP is software).
 #              Becomes gated on a self-hosted gpu-amd runner.
-#   - nvidia : informational on hosted ubuntu (no NVIDIA GPU). Becomes gated
-#              on a self-hosted gpu-nvidia runner.
+#   - nvidia : GATED on the self-hosted Windows gpu-nvidia runner. Absence,
+#              software fallback, render failure, or hash drift is fatal.
 #   - wasm   : the relaxed-SIMD build-policy check is GATED (RUSTFLAGS /
 #              .cargo config must never enable +relaxed-simd — it is
 #              nondeterministic by design). The render itself is informational
@@ -108,10 +109,6 @@ jobs:
             os: windows-latest
             backend: dx12
             gated: false
-          - leg: nvidia
-            os: ubuntu-latest
-            backend: vulkan
-            gated: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -201,11 +198,68 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  render-nvidia:
+    name: render (nvidia)
+    if: inputs.run_render
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install the exact Windows wheel built by the caller
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install numpy
+          exit $LASTEXITCODE
+      - name: Initialize NVIDIA determinism evidence
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path hash-out | Out-Null
+      - name: Require physical NVIDIA Vulkan adapter
+        shell: pwsh
+        env:
+          WGPU_BACKEND: vulkan
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json hash-out/nvidia-adapter-probe.json
+          exit $LASTEXITCODE
+      - name: Render and bind two canonical NVIDIA frames
+        shell: pwsh
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKENDS: vulkan
+        run: |
+          python scripts/run_nvidia_determinism_acceptance.py --artifact-dir hash-out --adapter-probe hash-out/nvidia-adapter-probe.json --scene "$env:SCENE" --width 512 --height 512
+          exit $LASTEXITCODE
+      - name: Prove NVIDIA DUPLA precision
+        shell: pwsh
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKENDS: vulkan
+        run: |
+          python scripts/run_dupla_proof.py --output hash-out/dupla-proof-nvidia.json --absence-output hash-out/dupla-proof-nvidia.ABSENT --failure-output hash-out/dupla-proof-nvidia.FAILED
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: determinism-hash-nvidia
+          path: hash-out/
+          if-no-files-found: error
+          retention-days: 7
+
   # Optional Apple/Metal diagnostic retained for backend support. It is
   # disabled by default, publishes a separately named artifact, and is not a
   # dependency of the determinism acceptance summary.
   metal-diagnostic:
     name: optional render diagnostic (apple/metal)
+    continue-on-error: true
     if: inputs.run_render && vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
     strategy:
       matrix:
@@ -465,7 +519,7 @@ jobs:
 
   diff:
     name: Determinism Acceptance Summary
-    needs: [f3dz-stream, render, wasm-policy, anamnesis-seed, anamnesis-portability]
+    needs: [f3dz-stream, render, render-nvidia, wasm-policy, anamnesis-seed, anamnesis-portability]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -508,6 +562,7 @@ jobs:
           }
           check_family '${{ inputs.run_f3dz }}' '${{ needs.f3dz-stream.result }}' f3dz
           check_family '${{ inputs.run_render }}' '${{ needs.render.result }}' render
+          check_family '${{ inputs.run_render }}' '${{ needs.render-nvidia.result }}' render-nvidia
           check_family '${{ inputs.run_render }}' '${{ needs.wasm-policy.result }}' wasm-policy
           check_family '${{ inputs.run_anamnesis }}' '${{ needs.anamnesis-seed.result }}' anamnesis-seed
           check_family '${{ inputs.run_anamnesis }}' '${{ needs.anamnesis-portability.result }}' anamnesis-portability
