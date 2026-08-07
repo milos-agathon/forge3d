@@ -1,6 +1,9 @@
 name: Capture NVIDIA Vulkan golden variants
 
 on:
+  push:
+    branches:
+      - codex/substratia-nvidia-variant-capture
   workflow_dispatch:
     inputs:
       confirm:
@@ -18,7 +21,9 @@ concurrency:
 jobs:
   preflight:
     name: Capture Preflight
-    if: inputs.confirm == 'CAPTURE' && github.actor == github.repository_owner
+    if: >-
+      github.actor == github.repository_owner &&
+      (github.event_name == 'push' || inputs.confirm == 'CAPTURE')
     runs-on: ubuntu-latest
     outputs:
       candidate_sha: ${{ steps.candidate.outputs.sha }}
