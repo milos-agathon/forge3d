@@ -223,6 +223,53 @@ def test_only_the_small_core_jobs_can_run_on_pr_or_push_events() -> None:
         ), f"{name} is not routed through schedule or explicit dispatch"
 
 
+def test_aether_closure_lane_requires_live_physical_metal_and_zero_skips() -> None:
+    workflow = _workflow("ci.yml")
+    golden = _job(workflow, "test-golden-images")
+    probe = (ROOT / "scripts" / "terrain_ci_probe.py").read_text(encoding="utf-8")
+
+    # VirtualGpu and software adapters may be useful development paths, but they
+    # are not physical-Metal closure evidence.
+    assert 'PHYSICAL_DEVICE_TYPES = {"discretegpu", "integratedgpu"}' in probe
+    assert 'args.mode in {"sidera-metal", "aether-metal"}' in probe
+    aether_branch = probe.split('if args.mode == "aether-metal":', 1)[1].split(
+        "# Exit-code contract", 1
+    )[0]
+    assert "_adapter_is_physical_metal(probe)" in aether_branch
+    assert "_smoke_render(args.mode)" in aether_branch
+    assert 'write_evidence("failed")' in aether_branch
+    assert "return 3" in aether_branch
+
+    assert "python scripts/terrain_ci_probe.py --mode aether-metal" in golden
+    assert "tests/test_atmosphere_spectral.py" in golden
+    assert "tests/test_atmosphere_reference.py" in golden
+    assert "tests/test_atmosphere_pt_reference.py" in golden
+    assert "tests/test_atmosphere_golden.py" in golden
+    assert 'python scripts/assert_junit_zero_skips.py "$junit"' in golden
+    assert "FORGE3D_AETHER_PHYSICAL_METAL: '1'" in golden
+    assert "FORGE3D_TEST_INSTALLED_WHEEL: '1'" in golden
+    assert "aether_lane=absent" in golden
+    assert "software execution does not prove physical Metal" in golden
+
+    summary = _job(workflow, "full-acceptance-summary")
+    assert "needs.test-golden-images.outputs.aether_lane" in summary
+    assert 'if [ "$aether_lane" != "ran" ]' in summary
+
+
+def test_aether_offline_bake_feature_is_explicit_in_acceptance_and_wheel() -> None:
+    workflow = _workflow("ci.yml")
+    rust_job = _job(workflow, "test-rust")
+    golden_job = _job(workflow, "test-golden-images")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    maturin = pyproject.split("[tool.maturin]", 1)[1].split("\n[", 1)[0]
+
+    assert "--features atmosphere-bake core::atmosphere" in rust_job
+    assert "atmosphere-bake" in maturin
+    assert "atmosphere_bake_luts(" in golden_job
+    assert "assert h.precomputed is False" in golden_job
+    assert "tests/test_atmosphere_lut_handoff.py" in golden_job
+
+
 def test_publish_cost_controls_are_tag_only_and_retention_aware() -> None:
     workflow = _workflow("publish.yml")
     trigger = workflow.split("\npermissions:", 1)[0]

@@ -33,21 +33,34 @@ impl TerrainScene {
             .shadow_bind_group
             .as_ref()
             .unwrap_or(&self.noop_shadow.bind_group);
+        // Sky, atmosphere, and water must reconstruct the same rays as the
+        // main terrain uniforms. ShadowSetup retains its own legacy camera for
+        // cascade work and is not an authoritative view-camera source.
+        let (camera_eye, camera_view, camera_proj) = Self::build_camera_matrices(params);
+        let camera_height = if is_zup_camera_mode(&params.camera_mode) {
+            camera_eye.z
+        } else {
+            camera_eye.y
+        };
         let sky_scope = ts_begin(timing, encoder, "terrain.sky");
         let sky_texture = self.render_sky_texture(
             encoder,
             decoded,
-            shadow_setup.view_matrix,
-            shadow_setup.proj_matrix,
-            shadow_setup.eye,
+            camera_view,
+            camera_proj,
+            camera_eye,
             render_targets.internal_width,
             render_targets.internal_height,
         )?;
         ts_end(timing, encoder, sky_scope, 0);
         let sky_view = sky_texture
             .as_ref()
-            .map(|(_, view)| view)
+            .map(|sky| &sky.view)
             .unwrap_or(&self.sky_fallback_view);
+        let atmosphere_scattering_view = sky_texture
+            .as_ref()
+            .and_then(|sky| sky.scattering_view.as_ref())
+            .unwrap_or(&self.atmosphere_scattering_fallback_view);
         let main_height_view = self.main_pass_height_view(&height_inputs.heightmap_view);
         let pass_bind_groups = self.create_terrain_pass_bind_groups(
             uniform_buffer,
@@ -65,12 +78,13 @@ impl TerrainScene {
             height_curve_view,
             height_inputs.water_mask_view_uploaded.as_ref(),
             sky_view,
+            atmosphere_scattering_view,
             height_ao_computed,
             sun_vis_computed,
             decoded,
             shadow_setup.height_min,
             shadow_setup.height_exag,
-            shadow_setup.eye.y,
+            camera_height,
             material_vt_ready,
         )?;
         let water_reflection_bind_group = self.prepare_water_reflection_bind_group(
@@ -79,9 +93,9 @@ impl TerrainScene {
             decoded,
             render_targets.internal_width,
             render_targets.internal_height,
-            shadow_setup.eye,
-            shadow_setup.view_matrix,
-            shadow_setup.proj_matrix,
+            camera_eye,
+            camera_view,
+            camera_proj,
             main_height_view,
             materials.material_view(),
             materials.material_sampler(),
@@ -98,9 +112,9 @@ impl TerrainScene {
             &pass_bind_groups.fog,
             &pass_bind_groups.material_layer,
         )?;
-        if let Some((_, background_view)) = sky_texture.as_ref() {
+        if let Some(sky) = sky_texture.as_ref() {
             let scope = ts_begin(timing, encoder, "terrain.background");
-            self.blit_background_texture(encoder, render_targets, background_view)?;
+            self.blit_background_texture(encoder, render_targets, &sky.view, sky.linear_hdr)?;
             ts_end(timing, encoder, scope, 1);
         }
         let main_scope = ts_begin(timing, encoder, "terrain.main");
@@ -149,6 +163,7 @@ impl TerrainScene {
         encoder: &mut wgpu::CommandEncoder,
         render_targets: &RenderTargets,
         source_view: &wgpu::TextureView,
+        linear_hdr: bool,
     ) -> Result<()> {
         let blit_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.background.blit.bind_group"),
@@ -176,18 +191,29 @@ impl TerrainScene {
         };
 
         let msaa_pipeline = if render_targets.sample_count > 1 {
-            Some(Self::create_depth_blit_pipeline(
-                self.device.as_ref(),
-                &self.blit_bind_group_layout,
-                self.color_format,
-                render_targets.sample_count,
-            ))
+            Some(if linear_hdr {
+                Self::create_aether_depth_blit_pipeline(
+                    self.device.as_ref(),
+                    &self.blit_bind_group_layout,
+                    self.color_format,
+                    render_targets.sample_count,
+                )
+            } else {
+                Self::create_depth_blit_pipeline(
+                    self.device.as_ref(),
+                    &self.blit_bind_group_layout,
+                    self.color_format,
+                    render_targets.sample_count,
+                )
+            })
         } else {
             None
         };
-        let blit_pipeline = msaa_pipeline
-            .as_ref()
-            .unwrap_or(&self.background_blit_pipeline);
+        let blit_pipeline = msaa_pipeline.as_ref().unwrap_or(if linear_hdr {
+            &self.aether_background_blit_pipeline
+        } else {
+            &self.background_blit_pipeline
+        });
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -217,7 +243,9 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
-            crate::core::shader_registry::record_shader_use(if render_targets.sample_count > 1 {
+            crate::core::shader_registry::record_shader_use(if linear_hdr {
+                "terrain.aether.blit.shader"
+            } else if render_targets.sample_count > 1 {
                 "terrain.blit.depth.shader"
             } else {
                 "terrain.blit.shader"

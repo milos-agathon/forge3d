@@ -110,6 +110,12 @@ _NATIVE_ONLY_EXPORTS = (
         "copc_read_node_points",  # P2.3: native COPC node decode
         "render_adjudication_pair",  # AEQUITAS: PT-vs-raster adjudication pair
         "hybrid_render_terrain_reference",  # PROMETHEUS: terrain PT reference
+        "hybrid_render_aether_spectral_reference",  # AETHER: stochastic PT acceptance reference
+        "AtmosphereLutHandle",  # AETHER: exact typed LUT payload handoff
+        "atmosphere_bake_luts",  # AETHER: shipped LUT resolver / offline bake
+        "atmosphere_spectral_to_linear_rgb",  # AETHER: spectral conversion
+        "atmosphere_generate_environment",  # AETHER: validation environment
+        "atmosphere_reference_aerial",  # AETHER: CPU transport diagnostic
         "render_brdf_tile",  # CENSOR: certified BRDF pixel render
         "render_brdf_tile_overrides",  # CENSOR: certified BRDF pixel render
         "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
@@ -262,6 +268,7 @@ from .terrain_params import (
     VTLayerFamily,
     TerrainVTSettings,
     validate_terrain_vt_support,
+    SkySettings,
 )
 from .offline import OfflineProgress, OfflineResult, render_offline
 from .denoise_oidn import oidn_available, oidn_denoise
@@ -289,7 +296,19 @@ from .viewer import (
     open_viewer,
     open_viewer_async,
 )
-from . import astro, viewer_ipc, colors, interactive, datasets, widgets, sky, smoke, verify
+from . import (
+    astro,
+    atmosphere,
+    viewer_ipc,
+    colors,
+    interactive,
+    datasets,
+    widgets,
+    sky,
+    smoke,
+    verify,
+)
+from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .datasets import (
     available as available_datasets,
     bundled as bundled_datasets,
@@ -673,6 +692,9 @@ __all__ = [
     "verify",
     "codec",
     "precision",
+    "atmosphere",
+    "AtmosphereSettings",
+    "SUN_ELEVATION_SWEEP_DEG",
     "dd_selftest",
     "dd_harness",
     "dd_jitter_demo",
@@ -704,6 +726,13 @@ __all__ = [
     "render_adjudication_pair",
     # PROMETHEUS: GPU terrain path-traced reference
     "hybrid_render_terrain_reference",
+    "hybrid_render_aether_spectral_reference",
+    # AETHER: spectral atmosphere bake/validation surface
+    "AtmosphereLutHandle",
+    "atmosphere_bake_luts",
+    "atmosphere_spectral_to_linear_rgb",
+    "atmosphere_generate_environment",
+    "atmosphere_reference_aerial",
     # CENSOR: certified BRDF pixel renders
     "render_brdf_tile",
     "render_brdf_tile_overrides",
@@ -771,6 +800,7 @@ __all__ = [
     "VTLayerFamily",
     "TerrainVTSettings",
     "validate_terrain_vt_support",
+    "SkySettings",
     "OfflineProgress",
     "OfflineResult",
     "render_offline",

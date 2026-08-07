@@ -27,8 +27,14 @@ impl TerrainScene {
         let sky_bind_group_layout0 = atmosphere_resources.sky_bind_group_layout0;
         let sky_bind_group_layout1 = atmosphere_resources.sky_bind_group_layout1;
         let sky_pipeline = atmosphere_resources.sky_pipeline;
+        let aether_sky_bind_group_layout2 = atmosphere_resources.aether_sky_bind_group_layout2;
+        let aether_sky_pipeline = atmosphere_resources.aether_sky_pipeline;
+        let atmosphere_lut_cache = atmosphere_resources.atmosphere_lut_cache;
         let sky_fallback_texture = atmosphere_resources.sky_fallback_texture;
         let sky_fallback_view = atmosphere_resources.sky_fallback_view;
+        let atmosphere_scattering_fallback_texture =
+            atmosphere_resources.scattering_fallback_texture;
+        let atmosphere_scattering_fallback_view = atmosphere_resources.scattering_fallback_view;
         let height_curve_identity_texture = base_resources.height_curve_identity_texture;
         let height_curve_identity_view = base_resources.height_curve_identity_view;
         let water_mask_fallback_texture = base_resources.water_mask_fallback_texture;
@@ -427,6 +433,12 @@ impl TerrainScene {
             color_format,
             1,
         );
+        let aether_background_blit_pipeline = Self::create_aether_depth_blit_pipeline(
+            device.as_ref(),
+            &blit_bind_group_layout,
+            color_format,
+            1,
+        );
         let normal_blit_pipeline = Self::create_normal_blit_pipeline(
             device.as_ref(),
             &blit_bind_group_layout,
@@ -525,14 +537,20 @@ impl TerrainScene {
             blit_pipeline,
             aov_blit_pipeline,
             background_blit_pipeline,
+            aether_background_blit_pipeline,
             normal_blit_pipeline,
             offline_compute,
             sampler_linear,
             sky_bind_group_layout0,
             sky_bind_group_layout1,
             sky_pipeline,
+            aether_sky_bind_group_layout2,
+            aether_sky_pipeline,
+            atmosphere_lut_cache,
             _sky_fallback_texture: sky_fallback_texture,
             sky_fallback_view,
+            _atmosphere_scattering_fallback_texture: atmosphere_scattering_fallback_texture,
+            atmosphere_scattering_fallback_view,
             _height_curve_identity_texture: height_curve_identity_texture,
             height_curve_identity_view,
             _water_mask_fallback_texture: water_mask_fallback_texture,
