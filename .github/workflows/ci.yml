@@ -989,6 +989,9 @@ jobs:
 
   test-golden-images-nvidia:
     name: Visual Goldens (NVIDIA Vulkan)
+    # Candidate acceptance proves physical pixels without exposing production
+    # signing material to branch code. Signed certificate rotation remains the
+    # protected main-only responsibility of certificate-refresh.yml.
     needs: [build-wheel-windows, terrain-golden-paths]
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     if: >-
@@ -1008,8 +1011,6 @@ jobs:
       FORGE3D_RECIPE_GOLDEN_VARIANT: nvidia-vulkan
       FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan
       FORGE3D_SUBSTRATIA_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      FORGE3D_CERT_SIGNING_KEY: ${{ secrets.FORGE3D_CERT_SIGNING_KEY }}
-      FORGE3D_REQUIRE_PRODUCTION_SIGNING: '1'
 
     steps:
       - uses: actions/checkout@v4
@@ -1056,12 +1057,6 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $dirty) { throw "candidate tracked worktree is dirty: $dirty" }
           if ($env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA.Length -ne 40) { throw "candidate SHA is not full length" }
           New-Item -ItemType Directory -Force -Path $env:FORGE3D_VISUAL_ARTIFACT_DIR | Out-Null
-
-      - name: Require production certificate signing key
-        if: env.FORGE3D_REQUIRE_PRODUCTION_SIGNING == '1'
-        shell: pwsh
-        run: |
-          if (-not $env:FORGE3D_CERT_SIGNING_KEY) { throw "protected golden lane requires FORGE3D_CERT_SIGNING_KEY" }
 
       - name: Require physical NVIDIA Vulkan terrain adapter
         shell: pwsh

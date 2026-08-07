@@ -20,7 +20,7 @@ VISUAL_TESTS = (
     "tests/test_terrain_tv10_goldens.py",
     "tests/test_terrain_vt_pbr_families.py",
     "tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression",
-    "tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]",
+    "tests/test_recipe_goldens.py::test_nvidia_vulkan_recipe_pixel_golden_render_and_match",
 )
 
 
