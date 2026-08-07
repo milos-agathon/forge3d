@@ -70,14 +70,15 @@
 #
 # POP-GATE FIXTURE CONTRACT
 # -------------------------
-# This is a real camera flythrough: the camera target advances by 0.01 ground
-# pixel per frame (about 165 m over 600 frames, or 16.5 m/s at 60 fps). The
-# independent clipmap/streaming-centre path still crosses the regeneration
-# threshold every frame. Consecutive frames are registered by that exact known
-# 0.01-pixel motion before the unchanged dE2000 < 1 threshold is applied. Raw
-# same-pixel comparison confounds a pop with legitimate camera translation and
-# 8-bit edge quantisation; registration isolates the tile/LOD/fallback change
-# the gate names. The overlay uses one continuous two-stop ramp: the shared
+# This is a real camera flythrough: the camera target advances by one projected
+# ground-plane pixel per frame along world +Y. Nonzero relief makes perspective
+# motion depth-dependent, so each beauty frame co-emits linear depth and every
+# current pixel is reprojected to its exact previous-camera coordinate. This
+# needs no whole-pixel tolerance or extra reference render. The independent
+# clipmap/streaming-centre path still crosses the regeneration threshold every
+# frame. The unchanged dE2000 < 1 threshold therefore observes tile/LOD/fallback
+# changes while ordinary camera motion is removed geometrically. The overlay
+# uses one continuous two-stop ramp: the shared
 # four-stop terrain ramp has a hard LUT colour step that amplifies a one-LSB
 # geometry change above the perceptual threshold. The negative control renders
 # both the real displaced-camera baseline and a separate renderer whose height
@@ -138,6 +139,7 @@ from _terrain_flythrough import (
     fractal_dem_octave_amplitudes,
     legacy_gate_dem,
     render_rgba,
+    render_rgba_depth,
     seam_gap_threshold,
     seam_roughness,
     seam_signature,
@@ -199,7 +201,7 @@ INITIAL_CAM_TARGET = (
     -CENTER_Y_AMPLITUDE_STEPS * CENTER_STEP_M,
     0.0,
 )
-CAMERA_STEP_PX = 0.01
+CAMERA_STEP_PX = 1.0
 
 STREAM_LOD = 3
 STREAM_TILE_RESOLUTION = 32
@@ -217,7 +219,7 @@ MAX_WARMUP_STEPS = 400
 # the gap the detector already measures there. It is stated as an absolute
 # z_scale rather than a factor so no float product can drift past the ceiling.
 RELIEF_CONTROL_Z_SCALE = 50.0
-MOTION_COMPENSATION_CROP_PX = 2
+MOTION_COMPENSATION_CROP_PX = 3
 POP_CONTROL_RGB_DELTA = 64.0
 
 # Non-vacuity minimums.
@@ -235,7 +237,10 @@ GROUND_PIXEL_M = 2.0 * HALF_WIDTH_M / SIZE[0]
 CAMERA_STEP_M = CAMERA_STEP_PX * GROUND_PIXEL_M
 FRAME_MIN_X = CAM_TARGET_DX - HALF_WIDTH_M
 FRAME_MAX_X = CAM_TARGET_DX + HALF_WIDTH_M
-FRAME_MAX_ABS_Y = HALF_HEIGHT_M
+FRAME_MAX_ABS_Y = max(
+    abs(INITIAL_CAM_TARGET[1]),
+    abs(INITIAL_CAM_TARGET[1] + (FRAMES - 1) * CAMERA_STEP_M),
+) + HALF_HEIGHT_M
 BASE_CELL_M = clipmap_base_cell_size(SPAN, CENTER_RESOLUTION)
 REGENERATION_THRESHOLD_M = BASE_CELL_M * 0.5
 CENTER_STEP_LENGTH_M = CENTER_STEP_M * math.sqrt(2.0)
@@ -314,13 +319,20 @@ def _center_at(index: int) -> tuple[float, float]:
 def _camera_target_at(index: int) -> tuple[float, float, float]:
     """World-space target for the committed 600-frame camera flythrough."""
     return (
-        INITIAL_CAM_TARGET[0] + index * CAMERA_STEP_M,
-        INITIAL_CAM_TARGET[1],
+        INITIAL_CAM_TARGET[0],
+        INITIAL_CAM_TARGET[1] + index * CAMERA_STEP_M,
         INITIAL_CAM_TARGET[2],
     )
 
 
-def _params(*, z_scale: float, overlay, shading="forward", frame_index: int = 0):
+def _params(
+    *,
+    z_scale: float,
+    overlay,
+    shading="forward",
+    frame_index: int = 0,
+    depth_aov: bool = False,
+):
     return flythrough_params(
         size_px=SIZE,
         terrain_span=SPAN,
@@ -334,6 +346,7 @@ def _params(*, z_scale: float, overlay, shading="forward", frame_index: int = 0)
         clip=CLIP,
         overlay=overlay,
         shading=shading,
+        depth_aov=depth_aov,
     )
 
 
@@ -389,32 +402,54 @@ def _assert_seams_clean(seams: dict, where: str) -> None:
     assert seams["max_gap"] <= SEAM_THRESHOLD, (where, seams, SEAM_THRESHOLD)
 
 
-def _translate_frame_for_camera_motion(frame: np.ndarray, dx_px: float) -> np.ndarray:
-    """Synthesize the next frame for a pure +X camera translation.
+def _translate_frame_for_camera_motion(
+    frame: np.ndarray, sample_dx_px: float, sample_dy_px: float = 0.0
+) -> np.ndarray:
+    """Synthesize a translated next frame from previous-image coordinates.
 
-    With this nadir fixture, current pixel x observes the world sample that was
-    at previous pixel x + dx. Interpolate in sRGB image space to match the
-    registration performed by ``_motion_compensated_delta_e``.
+    ``sample_dx_px``/``sample_dy_px`` name where the current pixel's world
+    sample appeared in the previous image. With the Y-up nadir camera, moving
+    the target one world pixel along +Y means sampling the previous image one
+    row upward (``sample_dy_px=-1``).
     """
     source = np.asarray(frame, dtype=np.float32)
-    width = source.shape[1]
+    height, width = source.shape[:2]
     sample_x = np.clip(
-        np.arange(width, dtype=np.float32) + np.float32(dx_px), 0.0, width - 1.0
+        np.arange(width, dtype=np.float32) + np.float32(sample_dx_px),
+        0.0,
+        width - 1.0,
+    )
+    sample_y = np.clip(
+        np.arange(height, dtype=np.float32) + np.float32(sample_dy_px),
+        0.0,
+        height - 1.0,
     )
     x0 = np.floor(sample_x).astype(np.intp)
     x1 = np.minimum(x0 + 1, width - 1)
-    fraction = (sample_x - x0)[None, :, None]
-    return source[:, x0, :] + (source[:, x1, :] - source[:, x0, :]) * fraction
+    y0 = np.floor(sample_y).astype(np.intp)
+    y1 = np.minimum(y0 + 1, height - 1)
+    fx = (sample_x - x0)[None, :, None]
+    fy = (sample_y - y0)[:, None, None]
+    top = source[y0[:, None], x0[None, :], :] + (
+        source[y0[:, None], x1[None, :], :]
+        - source[y0[:, None], x0[None, :], :]
+    ) * fx
+    bottom = source[y1[:, None], x0[None, :], :] + (
+        source[y1[:, None], x1[None, :], :]
+        - source[y1[:, None], x0[None, :], :]
+    ) * fx
+    return top + (bottom - top) * fy
 
 
 def _motion_compensated_delta_e(
     previous: np.ndarray,
     current: np.ndarray,
-    dx_px: float,
+    sample_dx_px: float,
+    sample_dy_px: float | np.ndarray = 0.0,
     *,
     crop_px: int = MOTION_COMPENSATION_CROP_PX,
 ) -> float:
-    """Maximum dE2000 after registering the known horizontal camera motion."""
+    """Maximum dE2000 after depth-aware previous-frame reprojection."""
     previous = np.asarray(previous)
     current = np.asarray(current)
     if previous.shape != current.shape or previous.ndim != 3 or previous.shape[2] < 3:
@@ -424,19 +459,43 @@ def _motion_compensated_delta_e(
     height, width = current.shape[:2]
     if crop_px < 1 or height <= 2 * crop_px or width <= 2 * crop_px:
         raise ValueError(f"crop {crop_px} does not fit frame {width}x{height}")
-    if abs(dx_px) >= crop_px - 1:
-        raise ValueError(f"motion {dx_px} exceeds the {crop_px}px registration crop")
+    dy = np.asarray(sample_dy_px, dtype=np.float32)
+    if dy.ndim not in (0, 2):
+        raise ValueError(f"sample_dy_px must be scalar or HxW, got {dy.shape}")
+    if dy.ndim == 2 and dy.shape != (height, width):
+        raise ValueError(
+            f"sample_dy_px must match frame shape {(height, width)}, got {dy.shape}"
+        )
+    max_motion = max(abs(sample_dx_px), float(np.abs(dy).max(initial=0.0)))
+    if max_motion >= crop_px - 1:
+        raise ValueError(
+            f"motion max {max_motion} exceeds the "
+            f"{crop_px}px registration crop"
+        )
 
-    sample_x = (
-        np.arange(crop_px, width - crop_px, dtype=np.float32)
-        + np.float32(dx_px)
+    out_height = height - 2 * crop_px
+    out_width = width - 2 * crop_px
+    grid_y, grid_x = np.indices((out_height, out_width), dtype=np.float32)
+    grid_x += np.float32(crop_px)
+    grid_y += np.float32(crop_px)
+    sample_x = grid_x + np.float32(sample_dx_px)
+    sample_y = grid_y + (
+        dy
+        if dy.ndim == 0
+        else dy[crop_px : height - crop_px, crop_px : width - crop_px]
     )
     x0 = np.floor(sample_x).astype(np.intp)
-    fraction = (sample_x - x0)[None, :, None]
-    previous_rgb = previous[crop_px : height - crop_px, :, :3].astype(np.float32)
-    aligned_previous = previous_rgb[:, x0, :] + (
-        previous_rgb[:, x0 + 1, :] - previous_rgb[:, x0, :]
-    ) * fraction
+    y0 = np.floor(sample_y).astype(np.intp)
+    fx = (sample_x - x0)[..., None]
+    fy = (sample_y - y0)[..., None]
+    previous_rgb = previous[..., :3].astype(np.float32)
+    top = previous_rgb[y0, x0, :] + (
+        previous_rgb[y0, x0 + 1, :] - previous_rgb[y0, x0, :]
+    ) * fx
+    bottom = previous_rgb[y0 + 1, x0, :] + (
+        previous_rgb[y0 + 1, x0 + 1, :] - previous_rgb[y0 + 1, x0, :]
+    ) * fx
+    aligned_previous = top + (bottom - top) * fy
     aligned_current = current[
         crop_px : height - crop_px, crop_px : width - crop_px, :3
     ].astype(np.float32)
@@ -445,6 +504,28 @@ def _motion_compensated_delta_e(
             srgb_to_lab(aligned_previous), srgb_to_lab(aligned_current)
         ).max()
     )
+
+
+def _previous_frame_sample_dy(current_depth: np.ndarray) -> np.ndarray:
+    """Map current pixels to previous rows using co-emitted linear depth.
+
+    The cameras differ only by world +Y translation and retain the same nadir
+    orientation. For view-space depth ``d``, projected motion is
+    ``delta_world * focal_pixels / d``. The AOV stores
+    ``(d - near) / (far - near)``, making this a direct geometric reprojection.
+    """
+    depth = np.asarray(current_depth, dtype=np.float32)
+    if depth.shape != (SIZE[1], SIZE[0]):
+        raise ValueError(f"depth must be {(SIZE[1], SIZE[0])}, got {depth.shape}")
+    if (
+        not np.isfinite(depth).all()
+        or float(depth.min()) < 0.0
+        or float(depth.max()) > 1.0
+    ):
+        raise ValueError("depth AOV must be finite and normalized to [0,1]")
+    linear_depth = CLIP[0] + depth * np.float32(CLIP[1] - CLIP[0])
+    focal_pixels = SIZE[1] / (2.0 * math.tan(math.radians(FOV_Y_DEG) * 0.5))
+    return -np.float32(CAMERA_STEP_M * focal_pixels) / linear_depth
 
 
 # ---------------------------------------------------------------------------
@@ -517,18 +598,121 @@ def test_motion_compensation_removes_known_shift_and_detects_fallback_flash():
     previous = rng.integers(24, 220, size=(48, 72, 4), dtype=np.uint8).astype(
         np.float32
     )
-    current = _translate_frame_for_camera_motion(previous, CAMERA_STEP_PX)
+    current = _translate_frame_for_camera_motion(
+        previous, 0.0, -CAMERA_STEP_PX
+    )
 
-    compensated = _motion_compensated_delta_e(previous, current, CAMERA_STEP_PX)
-    wrong_direction = _motion_compensated_delta_e(previous, current, -CAMERA_STEP_PX)
+    compensated = _motion_compensated_delta_e(
+        previous, current, 0.0, -CAMERA_STEP_PX
+    )
+    wrong_direction = _motion_compensated_delta_e(
+        previous, current, 0.0, CAMERA_STEP_PX
+    )
     assert compensated < 1e-3, compensated
     assert wrong_direction > compensated, (compensated, wrong_direction)
+
+    # A coherent one-pixel displacement is a visible geometry/LOD snap. The
+    # comparator must reject it rather than classifying it as raster phase.
+    extra_pixel_shifted = _translate_frame_for_camera_motion(
+        previous, 0.0, -CAMERA_STEP_PX - 1.0
+    )
+    assert _motion_compensated_delta_e(
+        previous, extra_pixel_shifted, 0.0, -CAMERA_STEP_PX
+    ) >= 1.0
 
     flashed = current.copy()
     flashed[16:32, 24:48, :3] = np.clip(
         flashed[16:32, 24:48, :3] + POP_CONTROL_RGB_DELTA, 0.0, 255.0
     )
-    assert _motion_compensated_delta_e(previous, flashed, CAMERA_STEP_PX) >= 1.0
+    assert _motion_compensated_delta_e(
+        previous, flashed, 0.0, -CAMERA_STEP_PX
+    ) >= 1.0
+
+
+def test_depth_reprojection_corrects_nonplanar_perspective_motion():
+    ground_depth = (CAM_RADIUS - CLIP[0]) / (CLIP[1] - CLIP[0])
+    ground = np.full((SIZE[1], SIZE[0]), ground_depth, dtype=np.float32)
+    ground_dy = _previous_frame_sample_dy(ground)
+    np.testing.assert_allclose(ground_dy, -CAMERA_STEP_PX, atol=1e-6, rtol=0.0)
+
+    # A point above the target plane is closer to the camera and therefore
+    # moves farther than one row under the same perspective-camera translation.
+    raised_linear_depth = CAM_RADIUS - Z_SCALE * 0.5
+    raised = np.full(
+        (SIZE[1], SIZE[0]),
+        (raised_linear_depth - CLIP[0]) / (CLIP[1] - CLIP[0]),
+        dtype=np.float32,
+    )
+    raised_dy = _previous_frame_sample_dy(raised)
+    assert float(raised_dy.max()) < -CAMERA_STEP_PX
+
+
+def test_depth_aov_linearizes_the_actual_raster_depth():
+    shader = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "shaders"
+        / "terrain_pbr_pom.wgsl"
+    ).read_text(encoding="utf-8")
+    depth_block = shader.split("// AOV Depth:", 1)[1].split(
+        "out.aov_depth =", 1
+    )[0]
+    assert "let ndc_depth = clamp(input.clip_position.z" in depth_block
+    assert "if (u_terrain.camera_mode_params.x >= 0.5)" in depth_block
+    assert "clip_far - ndc_depth * (clip_far - clip_near)" in depth_block
+    assert "view_pos_for_depth" not in depth_block
+
+
+@pytest.mark.gpu_lane
+@requires_terrain
+def test_depth_aov_matches_known_flat_plane_distance():
+    """Read back a physical AOV pixel whose view-space depth is known.
+
+    A constant 0.5 heightmap lies exactly on the height-centred target plane.
+    With the committed nadir camera, every non-skirt fragment therefore has
+    view-space depth ``CAM_RADIUS``. This checks the actual attachment routing,
+    raster-depth inverse, normalization, and readback rather than only matching
+    shader source text.
+    """
+    flat = np.full((64, 64), 0.5, dtype=np.float32)
+    size = (128, 72)
+
+    with tempfile.TemporaryDirectory() as td:
+        hdr = Path(td) / "probe.hdr"
+        _write_test_hdr(hdr)
+        ibl = f3d.IBL.from_hdr(str(hdr), intensity=1.0)
+        renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        material_set = f3d.MaterialSet.terrain_default()
+        overlay = build_overlay()
+        params = flythrough_params(
+            size_px=size,
+            terrain_span=SPAN,
+            camera_mode=MODE,
+            cam_radius=CAM_RADIUS,
+            cam_target=(0.0, 0.0, 0.0),
+            theta_deg=CAM_THETA_DEG,
+            phi_deg=CAM_PHI_DEG,
+            fov_y_deg=FOV_Y_DEG,
+            z_scale=Z_SCALE,
+            clip=CLIP,
+            overlay=overlay,
+            depth_aov=True,
+        )
+        _beauty, depth = render_rgba_depth(
+            renderer, params, flat, ibl, material_set
+        )
+
+    assert depth.shape == (size[1], size[0])
+    expected = (CAM_RADIUS - CLIP[0]) / (CLIP[1] - CLIP[0])
+    # The physical attachment is Rgba16Float, so compare with the value the
+    # format can actually retain rather than demanding fictitious f32 precision.
+    expected_f16 = float(np.float16(expected))
+    center_y, center_x = size[1] // 2, size[0] // 2
+    center_patch = depth[
+        center_y - 2 : center_y + 3,
+        center_x - 2 : center_x + 3,
+    ]
+    np.testing.assert_allclose(center_patch, expected_f16, atol=5e-4, rtol=0.0)
 
 
 def test_committed_camera_path_is_a_real_non_vacuous_flythrough():
@@ -653,6 +837,8 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
     signature_changes = 0
     previous_signature = None
     previous_frame = None
+    min_reprojection_dy = math.inf
+    max_reprojection_dy = -math.inf
     actual_centers: list[tuple[float, float]] = []
 
     with tempfile.TemporaryDirectory() as td:
@@ -667,7 +853,12 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
 
         for index in range(FRAMES):
             center = _center_at(index)
-            params = _params(z_scale=Z_SCALE, overlay=overlay, frame_index=index)
+            params = _params(
+                z_scale=Z_SCALE,
+                overlay=overlay,
+                frame_index=index,
+                depth_aov=True,
+            )
             stream = renderer.stream_height_tiles(
                 (center[0], STREAM_ALTITUDE_M, center[1]), max_uploads=8
             )
@@ -676,12 +867,19 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
                 _actual_center_at(index), abs=1e-3
             ), {"frame": index, "requested": center, "stream": stream}
             actual_centers.append(actual_center)
-            frame = render_rgba(
+            frame, depth = render_rgba_depth(
                 renderer,
                 params,
                 dem,
                 ibl,
                 material_set,
+            )
+            sample_dy = _previous_frame_sample_dy(depth)
+            min_reprojection_dy = min(
+                min_reprojection_dy, float(sample_dy.min())
+            )
+            max_reprojection_dy = max(
+                max_reprojection_dy, float(sample_dy.max())
             )
 
             # Per-frame crack gate on the geometry build this frame drew.
@@ -706,12 +904,13 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             assert holes == 0, {"frame": index, "background_pixels": holes}
             hole_pixels_total += holes
 
-            # All 599 consecutive committed flythrough frames, registered by
-            # the exact known camera step so the metric observes pop/LOD/flash
-            # changes rather than ordinary image translation.
+            # All 599 consecutive committed flythrough frames. The current
+            # frame's co-emitted linear depth maps each current pixel back to
+            # its exact previous-camera coordinate, without tolerance for an
+            # additional one-pixel tile/LOD shift.
             if previous_frame is not None:
                 delta = _motion_compensated_delta_e(
-                    previous_frame, frame, CAMERA_STEP_PX
+                    previous_frame, frame, 0.0, sample_dy
                 )
                 assert delta < 1.0, {
                     "transition": index,
@@ -791,8 +990,10 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             "region_outer_radii_m": _region_outer_radii(),
             "ground_pixel_m": GROUND_PIXEL_M,
             "max_delta_e_2000": max_delta_e,
-            "delta_e_metric": "motion_compensated_consecutive_frame_ciede2000",
-            "motion_compensation_dx_px": CAMERA_STEP_PX,
+            "delta_e_metric": "depth_reprojected_consecutive_frame_ciede2000",
+            "motion_compensation_dx_px": 0.0,
+            "motion_compensation_dy_px_min": min_reprojection_dy,
+            "motion_compensation_dy_px_max": max_reprojection_dy,
             "motion_compensation_crop_px": MOTION_COMPENSATION_CROP_PX,
             "max_seam_gap": max_seam_gap,
             "seam_gap_threshold": SEAM_THRESHOLD,
@@ -883,12 +1084,12 @@ def test_crack_detector_fires_when_the_seams_actually_separate():
 @pytest.mark.gpu_lane
 @requires_terrain
 def test_pop_gate_discriminates_at_this_resolution_and_dem():
-    """The registered dE2000 < 1.0 threshold detects a real fallback.
+    """The depth-reprojected dE2000 < 1.0 threshold detects a real fallback.
 
     The fully resident renderer produces both camera positions, independently
-    validating the registration sign and magnitude. A second renderer keeps
-    every height tile at its real coarse-prefill fallback and renders the same
-    displaced camera; registration must retain that production fallback change.
+    validating the exact registration direction. A second renderer keeps
+    nearly every height tile at its real coarse-prefill fallback and renders
+    the displaced camera; registration must retain that production change.
     """
     dem = fractal_dem(DEM_SIZE, DEM_OCTAVES, DEM_GAIN, DEM_SEED)
     center = _center_at(0)
@@ -903,25 +1104,31 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
         _enable_streaming(renderer, dem)
         _warm_streaming_to_full_residency(renderer, center)
 
-        reference = render_rgba(
+        reference, _reference_depth = render_rgba_depth(
             renderer,
-            _params(z_scale=Z_SCALE, overlay=overlay),
+            _params(z_scale=Z_SCALE, overlay=overlay, depth_aov=True),
             dem,
             ibl,
             material_set,
         )
-        shifted = render_rgba(
+        shifted, shifted_depth = render_rgba_depth(
             renderer,
-            _params(z_scale=Z_SCALE, overlay=overlay, frame_index=1),
+            _params(
+                z_scale=Z_SCALE,
+                overlay=overlay,
+                frame_index=1,
+                depth_aov=True,
+            ),
             dem,
             ibl,
             material_set,
         )
+        shifted_sample_dy = _previous_frame_sample_dy(shifted_depth)
         compensated_baseline = _motion_compensated_delta_e(
-            reference, shifted, CAMERA_STEP_PX
+            reference, shifted, 0.0, shifted_sample_dy
         )
         reversed_baseline = _motion_compensated_delta_e(
-            reference, shifted, -CAMERA_STEP_PX
+            reference, shifted, 0.0, -shifted_sample_dy
         )
 
         fallback_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
@@ -930,16 +1137,27 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
             (center[0], STREAM_ALTITUDE_M, center[1]), max_uploads=0
         )
         assert fallback_stats["coarse_prefilled"] == STREAM_TOTAL_TILES, fallback_stats
-        assert fallback_stats["resident_fine_tiles"] == 0, fallback_stats
-        fallback = render_rgba(
+        # `drain_completed(max_uploads)` deliberately clamps its budget to one,
+        # so a fast local reader may upload a single tile even when callers pass
+        # zero.  The control is still a real coarse-prefill fallback whenever it
+        # has not converged: most of the 64 physical mosaic slots remain coarse.
+        assert fallback_stats["resident_fine_tiles"] < STREAM_TOTAL_TILES, fallback_stats
+        assert fallback_stats["converged"] is False, fallback_stats
+        fallback, fallback_depth = render_rgba_depth(
             fallback_renderer,
-            _params(z_scale=Z_SCALE, overlay=overlay, frame_index=1),
+            _params(
+                z_scale=Z_SCALE,
+                overlay=overlay,
+                frame_index=1,
+                depth_aov=True,
+            ),
             dem,
             ibl,
             material_set,
         )
+        fallback_sample_dy = _previous_frame_sample_dy(fallback_depth)
         fallback_delta = _motion_compensated_delta_e(
-            reference, fallback, CAMERA_STEP_PX
+            reference, fallback, 0.0, fallback_sample_dy
         )
 
     assert compensated_baseline < 1.0, compensated_baseline
@@ -953,7 +1171,9 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
         "flythrough_pop_gate_control",
         {
             "ground_pixel_m": GROUND_PIXEL_M,
-            "motion_compensation_dx_px": CAMERA_STEP_PX,
+            "motion_compensation_dx_px": 0.0,
+            "motion_compensation_dy_px_min": float(shifted_sample_dy.min()),
+            "motion_compensation_dy_px_max": float(shifted_sample_dy.max()),
             "motion_compensation_crop_px": MOTION_COMPENSATION_CROP_PX,
             "compensated_baseline_max_delta_e_2000": compensated_baseline,
             "reversed_direction_max_delta_e_2000": reversed_baseline,

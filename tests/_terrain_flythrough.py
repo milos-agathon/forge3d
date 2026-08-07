@@ -26,7 +26,7 @@ import math
 import numpy as np
 
 import forge3d as f3d
-from forge3d.terrain_params import PomSettings, make_terrain_params_config
+from forge3d.terrain_params import AovSettings, PomSettings, make_terrain_params_config
 
 # Background clear colour of the terrain render pass (linear 0.1/0.1/0.15).
 BACKGROUND_RGB_LINEAR = np.array([0.1, 0.1, 0.15], dtype=np.float64)
@@ -317,6 +317,7 @@ def flythrough_params(
     overlay,
     culling: str = "frustum",
     shading: str = "forward",
+    depth_aov: bool = False,
 ) -> "f3d.TerrainRenderParams":
     """``TerrainRenderParams`` for the win-5 gate, with an explicit frustum."""
     return f3d.TerrainRenderParams(
@@ -345,6 +346,12 @@ def flythrough_params(
             clip=clip,
             overlays=[overlay],
             pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
+            aov=AovSettings(
+                enabled=depth_aov,
+                albedo=False,
+                normal=False,
+                depth=depth_aov,
+            ),
         )
     )
 
@@ -367,6 +374,20 @@ def render_rgba(renderer, params, heightmap, ibl, material_set) -> np.ndarray:
         water_mask=None,
     )
     return np.asarray(frame.to_numpy())
+
+
+def render_rgba_depth(
+    renderer, params, heightmap, ibl, material_set
+) -> tuple[np.ndarray, np.ndarray]:
+    """Render beauty and its co-emitted normalized linear-depth AOV once."""
+    frame, aov_frame = renderer.render_with_aov(
+        material_set=material_set,
+        env_maps=ibl,
+        params=params,
+        heightmap=heightmap,
+        water_mask=None,
+    )
+    return np.asarray(frame.to_numpy()), np.asarray(aov_frame.depth())
 
 
 def background_pixel_count(rgba: np.ndarray, tolerance: int = 6) -> int:

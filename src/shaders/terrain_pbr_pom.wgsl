@@ -4849,12 +4849,25 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         select(1.0, clamp(vt_normal_residency, 0.0, 1.0), vt_normal_enabled),
     );
 
-    // AOV Depth: Linear view-space depth normalized to [0,1] based on clip planes
-    // Compute view-space position to get linear depth
-    let view_pos_for_depth = det_mat4_mul_vec4(u_terrain.view, vec4<f32>(input.world_position, 1.0));
-    let linear_depth = -view_pos_for_depth.z;  // Negate because view space is -Z forward
+    // AOV Depth: projected mesh/clipmap modes use actual raster depth because
+    // their clip position is built from a height-centered instance position
+    // while public `world_position` intentionally retains original elevation.
+    // Legacy fullscreen mode has fixed clip Z and retains its established
+    // height-varying view-space depth contract.
     let clip_near = max(u_terrain.camera_mode_params.z, 1e-5);
     let clip_far = max(u_terrain.camera_mode_params.w, clip_near + 1e-5);
+    let ndc_depth = clamp(input.clip_position.z, 0.0, 1.0);
+    let screen_view_position = det_mat4_mul_vec4(
+        u_terrain.view,
+        vec4<f32>(input.world_position, 1.0)
+    );
+    var linear_depth = -screen_view_position.z;
+    if (u_terrain.camera_mode_params.x >= 0.5) {
+        linear_depth = (clip_near * clip_far) / max(
+            1e-5,
+            clip_far - ndc_depth * (clip_far - clip_near)
+        );
+    }
     let depth_normalized = clamp(
         (linear_depth - clip_near) / max(clip_far - clip_near, 1e-5),
         0.0,

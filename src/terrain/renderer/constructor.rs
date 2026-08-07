@@ -628,6 +628,7 @@ impl TerrainScene {
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
             aov_pipeline: Mutex::new(None),
             aov_pipeline_sample_count: Mutex::new(1),
+            aov_pipeline_output_mask: Mutex::new(0),
             aov_pipeline_source_id: Mutex::new(false),
             aov_pipeline_clipmap: Mutex::new(false),
             _dof_renderer: Mutex::new(None),

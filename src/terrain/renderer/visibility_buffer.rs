@@ -174,16 +174,16 @@ impl CpuVisibilityOracle {
                 for offset in 0..node.right {
                     let reordered = *self.bvh.tri_indices.get((node.left + offset) as usize)?;
                     let (v0, v1, v2) = self.mesh.get_triangle(reordered as usize)?;
-                    let Some(distance) = ray_triangle(ray, v0, v1, v2) else {
+                    // The visibility attachment is owned by fixed-point
+                    // rasterisation, not by the floating-point ray/triangle
+                    // predicate used to traverse the BVH.  At a shared edge
+                    // the latter can reject a point that WebGPU's top-left
+                    // rule accepted, producing a false CPU background pick.
+                    // Derive depth from the same snapped screen triangle that
+                    // decides coverage.
+                    let Some(distance) = raster_distance_at_pixel(v0, v1, v2, pixel) else {
                         continue;
                     };
-                    // WebGPU's clip depth is [0, 1], represented by ray
-                    // distances [1, 2] from the synthetic z=-1 origin.
-                    if !(1.0..=2.0).contains(&distance)
-                        || !raster_top_left_covers(v0, v1, v2, pixel)
-                    {
-                        continue;
-                    }
                     if distance < closest {
                         closest = distance;
                         identity = self.identities.get(reordered as usize).copied();
@@ -445,6 +445,7 @@ fn ray_aabb(ray: &crate::picking::Ray, min: [f32; 3], max: [f32; 3], limit: f32)
     true
 }
 
+#[cfg(test)]
 fn ray_triangle(
     ray: &crate::picking::Ray,
     v0: [f32; 3],
@@ -506,6 +507,32 @@ fn raster_top_left_covers(
         edge > 0 || (edge == 0 && (dy < 0 || (dy == 0 && dx > 0)))
     };
     covered_edge(a, b) && covered_edge(b, c) && covered_edge(c, a)
+}
+
+/// Return WebGPU raster depth as the synthetic ray distance used by the CPU
+/// BVH. Coverage and interpolation both use the already subpixel-snapped
+/// screen vertices emitted by `build_clipped_raster_mesh`.
+fn raster_distance_at_pixel(
+    v0: [f32; 3],
+    v1: [f32; 3],
+    v2: [f32; 3],
+    pixel: (u32, u32),
+) -> Option<f32> {
+    if !raster_top_left_covers(v0, v1, v2, pixel) {
+        return None;
+    }
+    let point = glam::vec2(pixel.0 as f32 + 0.5, pixel.1 as f32 + 0.5);
+    let a = glam::Vec2::from_array([v0[0], v0[1]]);
+    let b = glam::Vec2::from_array([v1[0], v1[1]]);
+    let c = glam::Vec2::from_array([v2[0], v2[1]]);
+    let area = (b - a).perp_dot(c - a);
+    if area == 0.0 {
+        return None;
+    }
+    let w0 = (b - point).perp_dot(c - point) / area;
+    let w1 = (c - point).perp_dot(a - point) / area;
+    let depth = w0 * v0[2] + w1 * v1[2] + (1.0 - w0 - w1) * v2[2];
+    (0.0..=1.0).contains(&depth).then_some(1.0 + depth)
 }
 
 #[cfg(test)]
@@ -584,6 +611,11 @@ mod tests {
             second[2],
             (0, 0),
         ));
+        assert_eq!(
+            raster_distance_at_pixel(second[0], second[1], second[2], (0, 0)),
+            Some(1.5),
+            "a GPU-owned edge pixel must retain a depth for CPU picking"
+        );
     }
 
     #[test]

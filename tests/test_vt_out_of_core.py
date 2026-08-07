@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -234,13 +235,23 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
     )
     params = f3d.TerrainRenderParams(config)
+    # Frame one is a shader-demand probe. A one-byte budget is smaller than a
+    # single BC page, so predictive visible-rect requests cannot prefill any
+    # family before the shader runs. The following seven frames restore the
+    # production 64 MiB upload budget and must still settle within the literal
+    # eight-frame gate.
+    feedback_probe_params = f3d.TerrainRenderParams(
+        replace(config, vt_upload_budget_bytes=1)
+    )
     dem = np.linspace(0.0, 1.0, 96 * 96, dtype=np.float32).reshape(96, 96)
 
     stats = {}
     contributing_by_key = {}
     shader_feedback_keys = set()
+    feedback_probe_keys = set()
     for settling_frame in range(1, 9):
-        frame = _render_rgba(renderer, params, dem, ibl)
+        frame_params = feedback_probe_params if settling_frame == 1 else params
+        frame = _render_rgba(renderer, frame_params, dem, ibl)
         # Capture provenance while shader demand is populated. Once every
         # desired page is resident the shader intentionally emits no paging
         # request, so inspecting only the final settled frame is vacuous.
@@ -252,8 +263,17 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
                 tile["tile_y"],
             )
             contributing_by_key[key] = tile
-        shader_feedback_keys.update(renderer.read_latest_vt_shader_feedback())
+        latest_feedback = {
+            tuple(int(value) for value in entry)
+            for entry in renderer.read_latest_vt_shader_feedback()
+        }
+        shader_feedback_keys.update(latest_feedback)
         stats = renderer.get_material_vt_stats()
+        if settling_frame == 1:
+            feedback_probe_keys = latest_feedback
+            assert stats["tiles_streamed"] == 0.0, stats
+            assert stats["uploaded_bytes"] == 0.0, stats
+            assert stats["resident_pages"] == 0.0, stats
         if stats["retained_requests"] == 0 and stats["miss_rate"] == 0:
             break
 
@@ -309,9 +329,12 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
     # claim, and impossible with fewer atlas slots than requested pages.
     assert stats["resident_pages"] >= COARSE_WORKING_SET_PAGES
 
-    # Shader feedback must be real and family-specific, not satisfied solely by
-    # predictive CPU prefetch. Validate every resident provenance record that
-    # those populated feedback frames resolved, including its per-page digest.
+    # The upload-blocked first frame proves all families produced raw shader
+    # demand in this exact 256-GiB fixture. Subsequent production-budget frames
+    # may legitimately omit already-resident keys, so preserve the union while
+    # validating the first snapshot independently.
+    assert feedback_probe_keys
+    assert {entry[0] for entry in feedback_probe_keys} == {0, 1, 2}
     assert shader_feedback_keys
     assert {entry[0] for entry in shader_feedback_keys} == {0, 1, 2}
     for family_slot in range(3):

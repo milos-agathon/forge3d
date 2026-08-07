@@ -462,6 +462,7 @@ impl TerrainScene {
         material_layer_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
+        output_mask: u8,
         include_source_id: bool,
         clipmap_geometry: bool,
     ) -> wgpu::RenderPipeline {
@@ -486,7 +487,9 @@ impl TerrainScene {
             push_constant_ranges: &[],
         });
 
-        // M1: AOV pipeline with 4 color targets
+        // M1: AOV pipeline with beauty plus only the requested auxiliary
+        // targets. `None` preserves WGSL location numbering without allocating,
+        // clearing, writing, or resolving an unused RGBA16F texture.
         // Target 0: Beauty (tonemapped color)
         // Target 1: Albedo (base color before lighting)
         // Target 2: Normal (normalized world-space normal, signed float)
@@ -500,19 +503,19 @@ impl TerrainScene {
                 write_mask: wgpu::ColorWrites::ALL,
             }),
             // Target 1: Albedo
-            Some(wgpu::ColorTargetState {
+            (output_mask & super::aov::AOV_ALBEDO_BIT != 0).then_some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             }),
             // Target 2: Normal
-            Some(wgpu::ColorTargetState {
+            (output_mask & super::aov::AOV_NORMAL_BIT != 0).then_some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             }),
             // Target 3: Depth
-            Some(wgpu::ColorTargetState {
+            (output_mask & super::aov::AOV_DEPTH_BIT != 0).then_some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
