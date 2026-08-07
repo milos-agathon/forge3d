@@ -4,7 +4,7 @@
 # RELEVANT FILES: python/forge3d/__init__.py, python/forge3d/config.py, src/render/params.rs, examples/terrain_demo.py
 # ruff: noqa: F401
 from __future__ import annotations
-from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping, Callable
+from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping, Callable, NoReturn
 import os
 import numpy as np
 from . import gis
@@ -13,6 +13,8 @@ from . import text as text
 from . import precision as precision
 from . import astro as astro
 from . import sky as sky
+from . import atmosphere as atmosphere
+from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
@@ -62,6 +64,7 @@ from .terrain_params import (
     VTLayerFamily,
     TerrainVTSettings,
     validate_terrain_vt_support,
+    SkySettings,
 )
 from . import terrain as terrain
 from .terrain import VTStore as VTStore, open_vt_store as open_vt_store
@@ -242,6 +245,16 @@ class Scene:
     def debug_uniforms_f32(self) -> np.ndarray: ...
     def debug_lut_format(self) -> str: ...
     def get_stats(self) -> Dict[str, Any]: ...
+
+    # --- AETHER spectral atmosphere ---
+    def set_atmosphere(
+        self,
+        turbidity: float = ...,
+        ozone_du: float = ...,
+        mie_g: float = ...,
+    ) -> None: ...
+    def clear_atmosphere(self) -> None: ...
+    def get_atmosphere_settings(self) -> Dict[str, Any]: ...
 
     # --- SSAO ---
     def ssao_enabled(self) -> bool: ...
@@ -1286,29 +1299,6 @@ class SSRSettings:
         temporal_alpha: float = ...
     ) -> None: ...
 
-# P6: Atmospherics & sky classes
-class SkySettings:
-    sun_direction: Tuple[float, float, float]
-    turbidity: float
-    ground_albedo: float
-    model: str  # "off", "preetham", "hosek-wilkie", or "approximate"
-    sun_intensity: float
-    exposure: float
-    def __init__(
-        self,
-        sun_direction: Tuple[float, float, float] = ...,
-        turbidity: float = ...,
-        ground_albedo: float = ...,
-        model: str = ...,
-        sun_intensity: float = ...,
-        exposure: float = ...
-    ) -> None: ...
-    @staticmethod
-    def preetham(turbidity: float, ground_albedo: float) -> SkySettings: ...
-    @staticmethod
-    def hosek_wilkie(turbidity: float, ground_albedo: float) -> SkySettings: ...
-    def with_sun_angles(self, azimuth_deg: float, elevation_deg: float) -> None: ...
-
 class VolumetricSettings:
     density: float
     height_falloff: float
@@ -1484,7 +1474,90 @@ def hybrid_render_terrain_reference(
     certificate: bool | str | PathLikeStr | None = ...,
     sun_color: Optional[Sequence[float] | np.ndarray] = ...,
     cache: str | PathLikeStr | None = ...,
+    atmosphere: AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None = ...,
 ) -> Dict[str, Any]: ...
+
+# AETHER: independent stochastic spectral atmosphere acceptance reference.
+def hybrid_render_aether_spectral_reference(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    cam: Dict[str, Any],
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    turbidity: float = ...,
+    ozone_du: float = ...,
+    mie_g: float = ...,
+    ground_albedo: float = ...,
+    spp: int = ...,
+    seed: int = ...,
+    enabled: bool = ...,
+    variance_threshold: float = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
+) -> Dict[str, Any]: ...
+
+# AETHER: spectral atmosphere public/native surface
+class AtmosphereLutHandle:
+    def __new__(cls) -> NoReturn: ...
+    @property
+    def turbidity(self) -> float: ...
+    @property
+    def ozone_du(self) -> float: ...
+    @property
+    def mie_g(self) -> float: ...
+    @property
+    def ground_albedo(self) -> float: ...
+    @property
+    def scattering_orders(self) -> int: ...
+    @property
+    def precomputed(self) -> bool: ...
+    @property
+    def byte_size(self) -> int: ...
+    @property
+    def deterministic_sha256(self) -> str: ...
+    @property
+    def aerial_lut_semantics(self) -> str: ...
+    def __getitem__(self, key: str) -> Any: ...
+    def __contains__(self, key: object) -> bool: ...
+    def __len__(self) -> int: ...
+    def keys(self) -> List[str]: ...
+    def as_dict(self) -> Dict[str, Any]: ...
+
+def atmosphere_bake_luts(
+    turbidity: float = ...,
+    ozone_du: float = ...,
+    mie_g: float = ...,
+    ground_albedo: float = ...,
+    scattering_orders: int = ...,
+) -> AtmosphereLutHandle: ...
+def atmosphere_spectral_to_linear_rgb(
+    samples: Sequence[float],
+) -> Tuple[float, float, float]: ...
+def atmosphere_generate_environment(
+    width: int,
+    height: int,
+    sun_elevation_deg: float,
+    turbidity: float = ...,
+    ozone_du: float = ...,
+    mie_g: float = ...,
+    ground_albedo: float = ...,
+    mode: Literal["lut", "reference"] = ...,
+) -> Dict[str, Any]: ...
+def atmosphere_reference_aerial(
+    surface_rgb: Tuple[float, float, float],
+    observer_altitude_m: float,
+    distance_m: float,
+    view_dir: Tuple[float, float, float],
+    sun_dir: Tuple[float, float, float],
+    turbidity: float = ...,
+    ozone_du: float = ...,
+    mie_g: float = ...,
+    ground_albedo: float = ...,
+) -> Tuple[float, float, float]: ...
 
 def render_offscreen_rgba(
     width: int,

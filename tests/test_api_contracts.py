@@ -78,6 +78,7 @@ class TestNativeModuleSymbols:
         "ClipmapMesh",
         "CogDataset",
         "SunPosition",
+        "AtmosphereLutHandle",
         # P0.3: Previously-orphaned classes now registered
         "Frame",
         "SdfPrimitive",
@@ -154,6 +155,12 @@ class TestNativeModuleSymbols:
         "render_adjudication_pair",
         # PROMETHEUS: GPU terrain path-traced reference
         "hybrid_render_terrain_reference",
+        "hybrid_render_aether_spectral_reference",
+        # AETHER: spectral atmosphere public surface
+        "atmosphere_bake_luts",
+        "atmosphere_spectral_to_linear_rgb",
+        "atmosphere_generate_environment",
+        "atmosphere_reference_aerial",
         # VERITAS: per-pixel cryptographic provenance
         "seal_provenance",
         "verify_provenance",
@@ -364,6 +371,16 @@ class TestSceneMethodContracts:
         assert hasattr(f3d.Scene, "set_height_from_r32f"), (
             "Scene.set_height_from_r32f not found"
         )
+
+    # ---- AETHER spectral atmosphere ----
+
+    @pytest.mark.parametrize(
+        "method_name",
+        ("set_atmosphere", "clear_atmosphere", "get_atmosphere_settings"),
+    )
+    def test_aether_scene_method_exists(self, method_name: str):
+        assert hasattr(f3d.Scene, method_name), f"Scene.{method_name} not found"
+        assert callable(getattr(f3d.Scene, method_name))
 
     # ---- OIT methods ----
 

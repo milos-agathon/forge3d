@@ -13,6 +13,30 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
+path = "src/shaders/atmosphere/evaluation_core.wgsl"
+reason = "atmosphere/evaluation_core.wgsl: the shared quadrilinear 3D texture dimension and packed height-by-nu coordinate relations are not yet modeled standalone; its loop-free 16-sample segment integral is proven transitively through the terrain AETHER lemmas, and all three assembled consumers are Naga-validated"
+owner = "atmosphere"
+expiry = "2027-08-06"
+
+[[unproven]]
+path = "src/shaders/atmosphere/prometheus_aerial.wgsl"
+reason = "atmosphere/prometheus_aerial.wgsl: fixed spectral-array loops together with 3D LUT coordinate and dimension relations are not yet modeled; dedicated physical Metal closure and AOV-preservation acceptance tests exercise the shipped path"
+owner = "atmosphere"
+expiry = "2027-08-06"
+
+[[unproven]]
+path = "src/shaders/atmosphere/prometheus_spectral_reference.wgsl"
+reason = "atmosphere/prometheus_spectral_reference.wgsl: stochastic delta tracking, RNG, spectral-loop, pointer, and hybrid traversal relations are not yet modeled; deterministic estimator contracts plus seed, variance, terrain-hit, and physical Metal colorimetric tests exercise the shipped path"
+owner = "atmosphere"
+expiry = "2027-08-06"
+
+[[unproven]]
+path = "src/shaders/atmosphere/scattering.wgsl"
+reason = "atmosphere/scattering.wgsl: 3D LUT sampling plus Cornette-Shanks and nonlinear horizon-coordinate envelopes are not yet modeled; Rust bake convergence and physical colorimetric acceptance tests provide executable coverage"
+owner = "atmosphere"
+expiry = "2027-08-06"
+
+[[unproven]]
 path = "src/shaders/bloom_blur_h.wgsl"
 reason = "bloom_blur_h.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
@@ -617,6 +641,12 @@ path = "src/shaders/temporal/resolve_ao.wgsl"
 reason = "temporal/resolve_ao.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/terrain_aether_blit.wgsl"
+reason = "terrain_aether_blit.wgsl: the display-only pass has no PROVEN_TARGETS contract yet and its sampled-texture coordinate relation is not yet modeled; source contracts and physical render acceptance tests lock linear-HDR ordering"
+owner = "atmosphere"
+expiry = "2027-08-06"
 
 [[unproven]]
 path = "src/shaders/terrain_blit.wgsl"

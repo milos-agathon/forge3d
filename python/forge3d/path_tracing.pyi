@@ -6,6 +6,8 @@
 from __future__ import annotations
 from typing import Tuple, Iterable, Dict, Mapping, Callable, Any, Optional, Sequence
 import numpy as np
+from . import AtmosphereLutHandle
+from .atmosphere import AtmosphereSettings
 
 class ExperimentalSyntheticOutput(RuntimeError): ...
 
@@ -85,4 +87,5 @@ def hybrid_render_terrain_reference(
     seed: int = ...,
     certificate: bool | str | None = ...,
     cache: str | None = ...,
+    atmosphere: AtmosphereSettings | Mapping[str, object] | AtmosphereLutHandle | None = ...,
 ) -> Dict[str, object]: ...

@@ -707,21 +707,33 @@ impl TerrainScene {
             .shadow_bind_group
             .as_ref()
             .unwrap_or(&self.noop_shadow.bind_group);
+        // Keep sky/atmosphere/water aligned with the camera matrices already
+        // uploaded to the main terrain pass; ShadowSetup owns cascade state.
+        let (camera_eye, camera_view, camera_proj) = Self::build_camera_matrices(params);
+        let camera_height = if is_zup_camera_mode(&params.camera_mode) {
+            camera_eye.z
+        } else {
+            camera_eye.y
+        };
         let sky_scope = ts_begin(&mut timing, &mut encoder, "terrain.sky");
         let sky_texture = self.render_sky_texture(
             &mut encoder,
             decoded,
-            shadow_setup.view_matrix,
-            shadow_setup.proj_matrix,
-            shadow_setup.eye,
+            camera_view,
+            camera_proj,
+            camera_eye,
             render_targets.internal_width,
             render_targets.internal_height,
         )?;
         ts_end(&mut timing, &mut encoder, sky_scope, 0);
         let sky_view = sky_texture
             .as_ref()
-            .map(|(_, view)| view)
+            .map(|sky| &sky.view)
             .unwrap_or(&self.sky_fallback_view);
+        let atmosphere_scattering_view = sky_texture
+            .as_ref()
+            .and_then(|sky| sky.scattering_view.as_ref())
+            .unwrap_or(&self.atmosphere_scattering_fallback_view);
 
         let main_height_view = self.main_pass_height_view(&height_inputs.heightmap_view);
         let pass_bind_groups = self.create_terrain_pass_bind_groups(
@@ -740,24 +752,24 @@ impl TerrainScene {
             &height_curve_view,
             height_inputs.water_mask_view_uploaded.as_ref(),
             sky_view,
+            atmosphere_scattering_view,
             height_ao_computed,
             sun_vis_computed,
             decoded,
             shadow_setup.height_min,
             shadow_setup.height_exag,
-            shadow_setup.eye.y,
+            camera_height,
             material_vt_ready,
         )?;
-
         let water_reflection_bind_group = self.prepare_water_reflection_bind_group(
             &mut encoder,
             params,
             decoded,
             render_targets.internal_width,
             render_targets.internal_height,
-            shadow_setup.eye,
-            shadow_setup.view_matrix,
-            shadow_setup.proj_matrix,
+            camera_eye,
+            camera_view,
+            camera_proj,
             main_height_view,
             materials.material_view(),
             materials.material_sampler(),
@@ -775,9 +787,9 @@ impl TerrainScene {
             &pass_bind_groups.material_layer,
         )?;
 
-        if let Some((_, background_view)) = sky_texture.as_ref() {
+        if let Some(sky) = sky_texture.as_ref() {
             let bg_scope = ts_begin(&mut timing, &mut encoder, "terrain.background");
-            self.blit_background_texture(&mut encoder, &render_targets, background_view)?;
+            self.blit_background_texture(&mut encoder, &render_targets, &sky.view, sky.linear_hdr)?;
             ts_end(&mut timing, &mut encoder, bg_scope, 1);
         }
 

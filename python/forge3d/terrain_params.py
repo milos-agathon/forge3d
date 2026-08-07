@@ -7,10 +7,23 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import math
 from numbers import Integral
-from typing import List, Optional, Tuple, Sequence
+from typing import TYPE_CHECKING, List, Optional, Tuple, Sequence
 
 import numpy as np
 from pathlib import Path
+
+if TYPE_CHECKING:
+    from . import AtmosphereLutHandle
+
+
+_UNSET = object()
+
+
+def _as_f32(value: object) -> float:
+    """Normalize public scalar settings exactly as their native f32 seam."""
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        return float(np.asarray(value, dtype=np.float32).item())
 
 
 @dataclass
@@ -1281,12 +1294,13 @@ class VolumetricsSettings:
 
 @dataclass
 class SkySettings:
-    """M6: Analytic procedural sky and aerial perspective configuration.
+    """Procedural or AETHER spectral sky and aerial-perspective configuration.
     
     Renders procedural sky with:
     - Sun disc rendering
     - Hosek-Wilkie RGB coefficient-table sky model
     - Optional Preetham or legacy approximate gradients for migration
+    - AETHER shipped spectral LUTs with explicit ozone and Mie anisotropy
     - Aerial perspective for distant terrain using the same sky tint path
     
     Applied as a rendered sky background in mesh-mode terrain views and sampled
@@ -1294,11 +1308,16 @@ class SkySettings:
     """
     
     enabled: bool = False  # Disabled by default
-    model: str = "hosek-wilkie"  # "hosek-wilkie", "preetham", or "approximate"
+    model: str = "hosek-wilkie"  # includes the spectral "aether" model
     
     # Sky model parameters
-    turbidity: float = 2.0        # Atmospheric haziness [1.0-10.0]
-    ground_albedo: float = 0.3    # Ground reflectance for bounce light
+    # Private sentinel defaults let the handle distinguish omitted values from
+    # explicit conflicting values while leaving normalized instances as floats.
+    turbidity: float = field(default=_UNSET)       # type: ignore[assignment]
+    ground_albedo: float = field(default=_UNSET)   # type: ignore[assignment]
+    ozone_du: float = field(default=_UNSET)        # type: ignore[assignment]
+    mie_g: float = field(default=_UNSET)           # type: ignore[assignment]
+    lut_handle: AtmosphereLutHandle | None = None
     
     # Sun parameters (uses global sun direction if not overridden)
     sun_intensity: float = 1.0    # Sun disc brightness multiplier
@@ -1306,27 +1325,66 @@ class SkySettings:
     
     # Aerial perspective
     aerial_perspective: bool = True  # Apply atmospheric scattering to terrain
-    aerial_density: float = 1.0      # Aerial perspective strength
+    aerial_density: float = 1.0      # Aerial perspective strength [0.0-10.0]
     
     # Exposure
     sky_exposure: float = 1.0     # Sky brightness adjustment
     
     def __post_init__(self) -> None:
-        valid_models = ("hosek-wilkie", "preetham", "approximate")
+        valid_models = ("hosek-wilkie", "preetham", "approximate", "aether")
         if self.model not in valid_models:
             raise ValueError(f"model must be one of {valid_models}")
-        if self.turbidity < 1.0 or self.turbidity > 10.0:
-            raise ValueError("turbidity must be in [1.0, 10.0]")
-        if self.ground_albedo < 0.0 or self.ground_albedo > 1.0:
-            raise ValueError("ground_albedo must be in [0.0, 1.0]")
-        if self.sun_intensity < 0.0:
-            raise ValueError("sun_intensity must be >= 0")
-        if self.sun_size < 0.0:
-            raise ValueError("sun_size must be >= 0")
-        if self.aerial_density < 0.0:
-            raise ValueError("aerial_density must be >= 0")
-        if self.sky_exposure < 0.0:
-            raise ValueError("sky_exposure must be >= 0")
+
+        physical_defaults = {
+            "turbidity": 2.0,
+            "ground_albedo": 0.3,
+            "ozone_du": 300.0,
+            "mie_g": 0.8,
+        }
+        if self.lut_handle is None:
+            for name, default in physical_defaults.items():
+                value = getattr(self, name)
+                setattr(self, name, float(default if value is _UNSET else value))
+        else:
+            if self.model != "aether":
+                raise ValueError("lut_handle requires model='aether'")
+            try:
+                handle_values = {
+                    name: _as_f32(getattr(self.lut_handle, name))
+                    for name in physical_defaults
+                }
+            except (AttributeError, OverflowError, TypeError, ValueError) as error:
+                raise TypeError(
+                    "lut_handle must be an AtmosphereLutHandle returned by "
+                    "forge3d.atmosphere_bake_luts()"
+                ) from error
+            for name, expected in handle_values.items():
+                supplied = getattr(self, name)
+                if supplied is not _UNSET and _as_f32(supplied) != expected:
+                    raise ValueError(
+                        f"{name}={supplied} does not match lut_handle.{name}={expected}"
+                    )
+                setattr(self, name, expected)
+
+        if not math.isfinite(self.turbidity) or not 1.0 <= self.turbidity <= 10.0:
+            raise ValueError("turbidity must be in [1.0, 10.0] and finite")
+        if not math.isfinite(self.ground_albedo) or not 0.0 <= self.ground_albedo <= 1.0:
+            raise ValueError("ground_albedo must be in [0.0, 1.0] and finite")
+        if not math.isfinite(self.ozone_du) or self.ozone_du < 0.0 or self.ozone_du > 600.0:
+            raise ValueError("ozone_du must be finite and in [0.0, 600.0]")
+        if not math.isfinite(self.mie_g) or not 0.0 <= self.mie_g <= 0.99:
+            raise ValueError("mie_g must be finite and in [0.0, 0.99]")
+        if not math.isfinite(self.sun_intensity) or self.sun_intensity < 0.0:
+            raise ValueError("sun_intensity must be finite and >= 0")
+        if not math.isfinite(self.sun_size) or self.sun_size < 0.0:
+            raise ValueError("sun_size must be finite and >= 0")
+        if (
+            not math.isfinite(self.aerial_density)
+            or not 0.0 <= self.aerial_density <= 10.0
+        ):
+            raise ValueError("aerial_density must be finite and in [0.0, 10.0]")
+        if not math.isfinite(self.sky_exposure) or self.sky_exposure < 0.0:
+            raise ValueError("sky_exposure must be finite and >= 0")
     
     @property
     def has_aerial_perspective(self) -> bool:
