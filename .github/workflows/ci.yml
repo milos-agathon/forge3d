@@ -1607,6 +1607,14 @@ jobs:
           $verifyCode = $LASTEXITCODE
           if ($pytestCode -ne 0) { exit $pytestCode }
           exit $verifyCode
+      - name: Select stable Rust toolchain for source benchmark
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')
+        shell: pwsh
+        run: |
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup show active-toolchain *>&1 | Tee-Object "$env:FORGE3D_F3DZ_ARTIFACT_DIR/rust-toolchain.txt"
+          exit $LASTEXITCODE
       - name: Record separate source benchmark (nightly/full only)
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')
         shell: pwsh
@@ -1998,6 +2006,13 @@ jobs:
         shell: pwsh
         run: |
           python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/adapter-probe.log"
+          exit $LASTEXITCODE
+      - name: Select stable Rust toolchain for source differentials
+        shell: pwsh
+        run: |
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup show active-toolchain *>&1 | Tee-Object "$env:FORGE3D_TESSELLA_ARTIFACT_DIR/rust-toolchain.txt"
           exit $LASTEXITCODE
       - name: Require the 1,000-camera GPU CPU LOD differential
         shell: pwsh

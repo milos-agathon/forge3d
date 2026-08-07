@@ -455,6 +455,11 @@ def test_tessella_acceptance_is_absent_or_exactly_scoped() -> None:
     lane_text = _job(workflow, "test-tessella-gpu")
     assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in lane_text
     assert "--require-nvidia-vulkan" in lane_text
+    assert "rustup default stable" in lane_text
+    assert "rust-toolchain.txt" in lane_text
+    assert lane_text.index("rustup default stable") < lane_text.index(
+        "cargo test --release --lib"
+    )
     assert (
         "terrain::clipmap::gpu_lod::tests::"
         "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras" in lane_text
