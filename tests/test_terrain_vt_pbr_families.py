@@ -41,6 +41,7 @@ from _substratia_evidence import (
     record_substratia_result,
 )
 from _terrain_runtime import _build_heightmap, _build_overlay, terrain_rendering_available
+from forge3d.diagnostics import visibility_stats
 from forge3d.helpers.offscreen import save_png_deterministic
 from forge3d.terrain_params import (
     AovSettings,
@@ -1330,10 +1331,28 @@ class TestTerrainVTPbrFamilies:
             # is a genuine miss rather than a CPU-prefetch record.
             from test_terrain_clipmap_streaming import _steep_dem
 
+            visibility_size = (160, 90)
+            visibility_span = 100_000.0
+            visibility_radius = 50_000.0
+            visibility_fov_y_deg = 45.0
+            # At the target plane this view covers more than two virtual texels
+            # per pixel in both axes. That makes a nonzero Grid-UV mip an
+            # intentional fixture precondition rather than an assumption about
+            # backend derivative behaviour.
+            grid_texels_per_pixel = (
+                2.0
+                * visibility_radius
+                * math.tan(math.radians(visibility_fov_y_deg) * 0.5)
+                / visibility_size[1]
+                * virtual_size
+                / visibility_span
+            )
+            assert grid_texels_per_pixel > 2.0
+
             render_config = make_terrain_params_config(
-                size_px=(160, 90),
+                size_px=visibility_size,
                 render_scale=1.0,
-                terrain_span=100_000.0,
+                terrain_span=visibility_span,
                 msaa_samples=1,
                 z_scale=1.2,
                 exposure=1.0,
@@ -1344,11 +1363,11 @@ class TestTerrainVTPbrFamilies:
                 light_azimuth_deg=138.0,
                 light_elevation_deg=24.0,
                 sun_intensity=2.4,
-                cam_radius=1.0,
+                cam_radius=visibility_radius,
                 cam_phi_deg=28.0,
-                cam_theta_deg=49.0,
+                cam_theta_deg=10.0,
                 cam_target=(0.0, 0.0, 0.0),
-                fov_y_deg=45.0,
+                fov_y_deg=visibility_fov_y_deg,
                 camera_mode="clipmap:4:32:32:10:0.3",
                 culling="frustum",
                 shading="visibility",
@@ -1369,6 +1388,22 @@ class TestTerrainVTPbrFamilies:
             )
             render_env = vt_render_env
         _render_beauty(render_env, render_params)
+        if shading == "visibility":
+            resolve_stats = visibility_stats()
+            assert resolve_stats["visible_pixels"] > 0
+            assert (
+                resolve_stats["visible_pixels"]
+                + resolve_stats["background_pixels"]
+                == visibility_size[0] * visibility_size[1]
+            )
+            assert (
+                resolve_stats["visibility_feedback_records"]
+                == resolve_stats["visible_pixels"]
+            )
+            assert (
+                resolve_stats["material_invocations"]
+                == resolve_stats["visible_pixels"]
+            )
         records = [tuple(int(value) for value in record) for record in renderer.read_latest_vt_shader_feedback()]
         assert records, f"{shading} produced no raw VT shader feedback"
         assert all(len(record) == 5 for record in records)
