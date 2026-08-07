@@ -169,7 +169,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert "retention-days: 7" in _artifact_step(_job(workflow, job), artifact)
 
     physical_artifacts = [
-        ("test-substratia-gpu", "substratia-physical-gpu-evidence"),
+        ("test-substratia-gpu", "substratia-metal-diagnostic-evidence"),
         ("test-golden-images-nvidia", "visual-gpu-evidence"),
         ("test-substratia-gpu-nvidia", "substratia-nvidia-physical-gpu-evidence"),
         ("test-m06-full-geospatial-viewer", "m06-full-geospatial-viewer-evidence"),
