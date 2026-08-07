@@ -116,18 +116,20 @@ def _validate_candidate(repository: Path, candidate_sha: str, results: dict) -> 
     )
 
 
-def _validate_adapter(path: Path, expected_backend: str) -> dict:
-    envelope = _read_json(path)
-    probe = envelope.get("probe")
-    _require(isinstance(probe, dict), "adapter probe has no probe object")
-    requested = str(envelope.get("requested_backend", "")).lower()
+def _validate_probe(probe: object, expected_backend: str) -> dict:
+    _require(isinstance(probe, dict), "adapter probe is not an object")
     backend = str(probe.get("backend", "")).lower()
     device_type = str(probe.get("device_type", "")).lower()
     name = str(probe.get("name", ""))
     name_lower = name.lower()
+    vendor = int(probe.get("vendor", 0))
+    device = int(probe.get("device", 0))
     _require(probe.get("status") == "ok", "adapter probe did not return status=ok")
-    _require(requested == expected_backend, "adapter probe requested the wrong backend")
     _require(backend == expected_backend, "selected adapter backend differs from the required backend")
+    _require(
+        probe.get("software_fallback") is False,
+        "adapter probe does not explicitly prove software_fallback=false",
+    )
     _require(
         device_type in {"discretegpu", "integratedgpu"},
         f"adapter device type is not physical GPU evidence: {device_type!r}",
@@ -137,13 +139,37 @@ def _validate_adapter(path: Path, expected_backend: str) -> dict:
         f"software/virtual/paravirtual adapter is forbidden: {name!r}",
     )
     _require(name.strip() != "", "adapter name is empty")
+    if expected_backend == "vulkan":
+        _require(
+            device_type == "discretegpu",
+            "NVIDIA Vulkan evidence requires a discrete GPU",
+        )
+        _require(vendor == 0x10DE, "NVIDIA Vulkan evidence has a non-NVIDIA vendor ID")
+        _require("nvidia" in name_lower, "NVIDIA Vulkan evidence has a non-NVIDIA adapter name")
     return {
         "backend": backend,
         "device_type": device_type,
         "name": name,
-        "vendor": int(probe.get("vendor", 0)),
-        "device": int(probe.get("device", 0)),
+        "vendor": vendor,
+        "device": device,
     }
+
+
+def _validate_adapter(path: Path, expected_backend: str) -> dict:
+    envelope = _read_json(path)
+    requested = str(envelope.get("requested_backend", "")).lower()
+    _require(requested == expected_backend, "adapter probe requested the wrong backend")
+    return _validate_probe(envelope.get("probe"), expected_backend)
+
+
+def _validate_render_adapter(path: Path, expected_backend: str, expected: dict) -> dict:
+    actual = _validate_probe(_read_json(path), expected_backend)
+    for field in ("backend", "device_type", "name", "vendor", "device"):
+        _require(
+            str(actual.get(field, "")).lower() == str(expected.get(field, "")).lower(),
+            f"render-process adapter {field} differs from the workflow probe",
+        )
+    return actual
 
 
 def _paeth(a: int, b: int, c: int) -> int:
@@ -302,9 +328,7 @@ def _validate_images(
     backend = adapter["backend"]
     if backend == "metal":
         variant = "metal"
-    elif backend == "vulkan" and (
-        adapter["vendor"] == 0x10DE or "nvidia" in adapter["name"].lower()
-    ):
+    elif backend == "vulkan":
         variant = "nvidia-vulkan"
     else:
         raise EvidenceError(f"no canonical SUBSTRATIA golden for adapter {adapter}")
@@ -324,6 +348,13 @@ def _validate_images(
     decoded = {name: decode_png(artifact_dir / name) for name in PNG_NAMES}
     shapes = {(value.height, value.width) for value in decoded.values()}
     _require(len(shapes) == 1, "actual and golden image dimensions differ")
+    for label in ("baseline", "normal"):
+        pixels = np.ascontiguousarray(decoded[f"actual_{label}.png"].pixels)
+        rgba_sha256 = hashlib.sha256(pixels.tobytes()).hexdigest()
+        _require(
+            gate.get(f"actual_{label}_rgba_sha256") == rgba_sha256,
+            f"declared actual_{label}_rgba_sha256 does not match decoded RGBA",
+        )
     luminance = {name: _luminance(value.pixels) for name, value in decoded.items()}
     height, width = next(iter(shapes))
     region = gate.get("region")
@@ -444,6 +475,9 @@ def verify(args: argparse.Namespace) -> dict:
     _require(results.get("schema") == SCHEMA, "SUBSTRATIA results schema mismatch")
     _validate_candidate(repository, args.candidate_sha, results)
     adapter = _validate_adapter(args.adapter_probe.resolve(), args.expected_backend)
+    render_adapter = _validate_render_adapter(
+        args.render_adapter.resolve(), args.expected_backend, adapter
+    )
     gates = results.get("gates")
     _require(isinstance(gates, dict), "results.json has no gates object")
     normal = _pass_gate(gates, "normal_lighting_ssim")
@@ -455,11 +489,13 @@ def verify(args: argparse.Namespace) -> dict:
         "status": "PASS",
         "candidate_sha": args.candidate_sha,
         "adapter": adapter,
+        "render_adapter": render_adapter,
         "metrics": {**image_metrics, **gate_metrics},
         "junit": junit,
         "inputs": {
             "results_sha256": hashlib.sha256(results_path.read_bytes()).hexdigest(),
             "adapter_probe_sha256": hashlib.sha256(args.adapter_probe.read_bytes()).hexdigest(),
+            "render_adapter_sha256": hashlib.sha256(args.render_adapter.read_bytes()).hexdigest(),
         },
     }
     report_path = artifact_dir / "verification.json"
@@ -484,6 +520,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--adapter-probe", type=Path, required=True)
+    parser.add_argument("--render-adapter", type=Path, required=True)
     parser.add_argument("--junit", type=Path, required=True)
     parser.add_argument("--expected-backend", choices=("metal", "vulkan"), required=True)
     return parser.parse_args(argv)

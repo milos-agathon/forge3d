@@ -85,6 +85,9 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert "name: Snapshot live policy base" in preflight
         assert "id: policy-base" in preflight
         assert 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"' in preflight
+        assert "name: Resolve protected policy base for manual acceptance" in preflight
+        assert "POLICY_BRANCH: ${{ github.event.repository.default_branch }}" in preflight
+        assert 'refs/remotes/origin/${POLICY_BRANCH}' in preflight
         assert "ref: ${{ steps.policy-base.outputs.sha }}" in preflight
         assert "path: .ci-contracts" in preflight
         assert "POLICY_BASE_SHA: ${{ steps.policy-base.outputs.sha }}" in preflight
@@ -96,6 +99,10 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         )
         assert 'git merge --no-commit --no-ff "$PR_HEAD_SHA"' in preflight
         assert 'test "$(git rev-parse MERGE_HEAD)" = "$PR_HEAD_SHA"' in preflight
+        assert "name: Materialize manual-dispatch candidate tree" in preflight
+        assert "CANDIDATE_HEAD_SHA: ${{ github.sha }}" in preflight
+        assert 'git merge --no-commit --no-ff "$CANDIDATE_HEAD_SHA"' in preflight
+        assert 'test "$(git rev-parse MERGE_HEAD)" = "$CANDIDATE_HEAD_SHA"' in preflight
         assert "working-directory: .ci-contracts" in preflight
         assert "FORGE3D_CI_CONTRACT_ROOT: ${{ github.workspace }}" in preflight
         assert "PYTHONPATH: ${{ github.workspace }}/.ci-contracts" in preflight
@@ -163,6 +170,8 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
 
     physical_artifacts = [
         ("test-substratia-gpu", "substratia-physical-gpu-evidence"),
+        ("test-golden-images-nvidia", "visual-gpu-evidence"),
+        ("test-substratia-gpu-nvidia", "substratia-nvidia-physical-gpu-evidence"),
         ("test-m06-full-geospatial-viewer", "m06-full-geospatial-viewer-evidence"),
         ("test-f3dz-gpu", "f3dz-physical-gpu-evidence"),
         ("test-anamnesis-portability-seed", "anamnesis-physical-portable-store"),
@@ -181,6 +190,18 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
     assert "inputs.scope == 'full'" in substratia
     assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in substratia
     assert "substratia_evidence_report.py" in substratia
+
+    visual_nvidia = _job(workflow, "test-golden-images-nvidia")
+    substratia_nvidia = _job(workflow, "test-substratia-gpu-nvidia")
+    for job in (visual_nvidia, substratia_nvidia):
+        assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
+        assert "inputs.scope == 'full'" in job
+        assert "WGPU_BACKEND: vulkan" in job
+        assert "--require-nvidia-vulkan" in job
+        assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in job
+    assert "name: wheels-windows" in visual_nvidia
+    assert "name: wheels-windows" in substratia_nvidia
+    assert "substratia_evidence_report.py" in substratia_nvidia
 
     assert "sphinx" not in workflow.lower()
     assert "name: documentation" not in workflow

@@ -870,26 +870,48 @@ def test_set_sun_handler_is_live_not_print_only():
     assert "handle = open_viewer_async(" in blocking
 
 
-def test_sidera_reference_probe_rejects_virtual_or_non_metal_adapters():
+def test_sidera_reference_probe_requires_physical_nvidia_vulkan():
     from scripts import terrain_ci_probe
 
-    physical_metal = {
+    physical_nvidia = {
         "status": "ok",
-        "backend": "Metal",
-        "device_type": "IntegratedGpu",
-        "name": "Apple M4",
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "name": "NVIDIA GeForce RTX 3070",
+        "vendor": 0x10DE,
         "software_fallback": False,
     }
-    assert terrain_ci_probe._adapter_is_physical_metal(physical_metal)
-    assert not terrain_ci_probe._adapter_is_physical_metal(
-        {**physical_metal, "name": "Apple Paravirtual device"}
+    assert terrain_ci_probe._adapter_is_ci_safe(
+        physical_nvidia, required_backend="vulkan", require_nvidia=True
     )
-    assert not terrain_ci_probe._adapter_is_physical_metal(
-        {**physical_metal, "device_type": "VirtualGpu"}
+    assert not terrain_ci_probe._adapter_is_ci_safe(
+        {**physical_nvidia, "name": "NVIDIA Paravirtual device"},
+        required_backend="vulkan",
+        require_nvidia=True,
     )
-    assert not terrain_ci_probe._adapter_is_physical_metal(
-        {**physical_metal, "backend": "Vulkan", "device_type": "DiscreteGpu"}
+    assert not terrain_ci_probe._adapter_is_ci_safe(
+        {**physical_nvidia, "device_type": "IntegratedGpu"},
+        required_backend="vulkan",
+        require_nvidia=True,
     )
+    assert not terrain_ci_probe._adapter_is_ci_safe(
+        {**physical_nvidia, "backend": "Metal"},
+        required_backend="vulkan",
+        require_nvidia=True,
+    )
+    for unsafe in (
+        {**physical_nvidia, "software_fallback": True},
+        {
+            key: value
+            for key, value in physical_nvidia.items()
+            if key != "software_fallback"
+        },
+        {**physical_nvidia, "vendor": 0x1002},
+        {**physical_nvidia, "name": "AMD Radeon RX 7900 XT"},
+    ):
+        assert not terrain_ci_probe._adapter_is_ci_safe(
+            unsafe, required_backend="vulkan", require_nvidia=True
+        )
 
 
 def test_snapshot_sky_uses_dedicated_camera_and_motion_coverage_union():

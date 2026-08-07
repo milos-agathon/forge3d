@@ -197,7 +197,7 @@ def _save_png(path: Path, image: np.ndarray) -> None:
 
 
 def _golden_path(scene_name: str) -> Path:
-    """Use an explicit deterministic Metal baseline when the Metal lane runs."""
+    """Use a separate Metal baseline only for the opt-in support diagnostic."""
     suffix = ".metal" if os.environ.get("WGPU_BACKEND", "").lower() == "metal" else ""
     return GOLDEN_DIR / f"{scene_name}{suffix}.png"
 

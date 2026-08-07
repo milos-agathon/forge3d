@@ -404,6 +404,7 @@ scripts/*
 !scripts/tessella_evidence_provenance.py
 !scripts/tessella_evidence_thresholds.py
 !scripts/substratia_evidence_report.py
+!scripts/run_nvidia_visual_acceptance.py
 
 # forge3d outputs (A13) 
 out/

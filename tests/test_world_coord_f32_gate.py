@@ -31,7 +31,7 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1447
+EXPECTED_CONVERSION_COUNT = 1454
 # The previous 1433-site freeze already covered the reviewed ANAMNESIS,
 # TESSELLA, and first SIDERA transitions described below. The d8313007 base
 # source actually contained 1446 sites because SIDERA's later adversarial
@@ -42,17 +42,20 @@ EXPECTED_CONVERSION_COUNT = 1447
 # UV casts from finish_frame to ingest_shader_feedback; that changes their
 # occurrence ownership, but not the count. The physical TESSELLA picking audit
 # also moved two existing screen-coordinate conversions from pixel corners to
-# raster pixel centres; their count is unchanged. All reviewed primitives are
-# render dimensions, normalized directions/UVs, or telemetry. None stores
-# absolute world coordinates or bypasses the camera Anchor.
-EXPECTED_CONVERSION_SHA256 = "d2b79d0d6cc512d357142d17cc923f8d7996507272a04d6cdaf8d0e71a9754bc"
+# raster pixel centres; their count is unchanged. Its visibility CPU oracle
+# adds seven raster-only conversions: pixel centres (2), normalized coarse
+# texel steps (2), a bounded LUT index (1), and viewport projection (2). All
+# reviewed primitives are render dimensions, normalized directions/UVs,
+# bounded raster indices, or telemetry. None stores absolute world coordinates
+# or bypasses the camera Anchor.
+EXPECTED_CONVERSION_SHA256 = "7e1273b8a9fe1400556d807e2b9c560b515b6e34e0d340ad1475bebbd6263b77"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1447,
+    "current_count": 1454,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -76,7 +79,7 @@ REVIEWED_INVENTORY_TRANSITION = {
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
     # Re-based on main at the merge: the pre-transition tree is now main rather
     # than this branch's original base, so the count and digest are main's.
-    "base_count": 1447,
+    "base_count": 1454,
     "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",

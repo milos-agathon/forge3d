@@ -1130,7 +1130,7 @@ def test_certificate_update_mode_never_enables_pixel_updates(
 def test_certificate_refresh_requires_a_real_render_but_not_an_absent_backend_png(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Metal certificate rotation must never fabricate or write pixel baselines."""
+    """An optional Metal diagnostic must never fabricate or write baselines."""
     monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_CERTIFICATES", "1")
     monkeypatch.setenv("FORGE3D_RECIPE_GOLDEN_VARIANT", "metal")
     assert _certificate_refresh_without_backend_baseline(RECIPE_GOLDENS[0]) is False

@@ -27,7 +27,6 @@ SOFTWARE_ADAPTER_TOKENS = (
     "warp",
 )
 HARDWARE_DEVICE_TYPES = {"discretegpu", "integratedgpu", "virtualgpu"}
-PHYSICAL_DEVICE_TYPES = {"discretegpu", "integratedgpu"}
 
 
 def _write_test_hdr(path: Path, width: int = 8, height: int = 4) -> None:
@@ -82,28 +81,22 @@ def _adapter_is_ci_safe(
     name = str(probe.get("name", "")).lower()
     if any(token in name for token in SOFTWARE_ADAPTER_TOKENS):
         return False
-    if required_backend is not None and str(probe.get("backend", "")).lower() != required_backend.lower():
+    if (
+        required_backend is not None
+        and str(probe.get("backend", "")).lower() != required_backend.lower()
+    ):
         return False
     if require_nvidia:
         vendor = int(probe.get("vendor", 0))
+        if probe.get("software_fallback") is not False:
+            return False
         if device_type != "discretegpu":
             return False
-        if vendor != 0x10DE and "nvidia" not in name:
+        if vendor != 0x10DE:
+            return False
+        if "nvidia" not in name:
             return False
     return True
-
-
-def _adapter_is_physical_metal(probe: dict) -> bool:
-    if probe.get("status") != "ok":
-        return False
-    if str(probe.get("backend", "")).lower() != "metal":
-        return False
-    if bool(probe.get("software_fallback", False)):
-        return False
-    if str(probe.get("device_type", "")).lower() not in PHYSICAL_DEVICE_TYPES:
-        return False
-    name = str(probe.get("name", "")).lower()
-    return not any(token in name for token in (*SOFTWARE_ADAPTER_TOKENS, "paravirtual"))
 
 
 def _build_params(*, with_aov: bool) -> object:
@@ -175,9 +168,7 @@ def _smoke_render(mode: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--mode", choices=("terrain", "terrain-aov", "sidera-metal"), required=True
-    )
+    parser.add_argument("--mode", choices=("terrain", "terrain-aov"), required=True)
     parser.add_argument("--json", type=Path, help="write exact adapter/probe evidence")
     parser.add_argument(
         "--require-nvidia-vulkan",
@@ -186,7 +177,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    backend = "metal" if args.mode == "sidera-metal" else os.environ.get("WGPU_BACKEND")
+    backend = os.environ.get("WGPU_BACKEND")
     probe = f3d.device_probe(backend)
     print(f"terrain-ci-probe backend={backend!r} probe={probe}")
     if args.json is not None:
@@ -196,13 +187,6 @@ def main() -> int:
             + "\n",
             encoding="utf-8",
         )
-
-    if args.mode == "sidera-metal":
-        if not _adapter_is_physical_metal(probe):
-            print("SIDERA reference lane ABSENT — no proven physical Metal adapter.")
-            return 2
-        print("SIDERA reference lane has a physical Metal adapter.")
-        return 0
 
     # Exit-code contract (CENSOR audit F-10). CI must not conflate "this
     # runner has no usable GPU" with "the renderer is broken":

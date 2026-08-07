@@ -152,12 +152,11 @@ def _save_png(path: Path, image: np.ndarray) -> None:
 
 
 def _golden_path(scene_name: str) -> Path:
-    """Keep the canonical Vulkan/DX12 baseline and an explicit Metal baseline.
+    """Keep the required NVIDIA Vulkan/DX12 and optional Metal baselines.
 
-    The dedicated macOS lane is probe-positive real Metal hardware. Its
-    deterministic backend output differs measurably from the canonical
-    baseline, so it has its own committed reference at the same thresholds.
-    There is no fallback between backends: a missing Metal reference fails.
+    An explicitly selected Metal support diagnostic uses its own committed
+    reference because backend output differs measurably. It has no path into
+    required acceptance, and there is no cross-backend reference fallback.
     """
     suffix = ".metal" if os.environ.get("WGPU_BACKEND", "").lower() == "metal" else ""
     return GOLDEN_DIR / f"{scene_name}{suffix}.png"

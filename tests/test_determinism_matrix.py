@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -105,16 +104,21 @@ def test_matrix_rejects_zero_hardware_hashes(tmp_path):
     assert "no hardware-backed leg produced a hash" in result.stderr
 
 
-def test_hosted_apple_virtual_adapter_is_a_nonblocking_gated_failure():
+def test_render_acceptance_has_no_required_metal_leg():
     workflow = WORKFLOW.read_text()
-    apple = re.search(r"- leg: apple.*?gated: (true|false)", workflow, re.DOTALL)
-    assert apple, "apple render leg missing"
-    assert apple.group(1) == "true"
-    assert 'if [ "${{ matrix.leg }}" = "apple" ] && grep -q "hypervisor-virtualized GPU" render.err; then' in workflow
+    acceptance = workflow.split("  render:\n", 1)[1].split("\n  metal-diagnostic:\n", 1)[0]
+    diagnostic = workflow.split("  metal-diagnostic:\n", 1)[1].split(
+        "\n  wasm-policy:\n", 1
+    )[0]
+    assert "leg: apple" not in acceptance
+    assert "backend: metal" not in acceptance
+    assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in diagnostic
+    assert "determinism-metal-diagnostic-apple" in diagnostic
+    assert "--expected-legs intel amd nvidia" in workflow
 
 
 def test_matrix_accepts_documented_gated_infrastructure_failure(tmp_path):
-    _artifact(tmp_path / "hashes", "apple", marker="FAILED")
+    _artifact(tmp_path / "hashes", "intel", marker="FAILED")
     result = _run(tmp_path)
     assert result.returncode == 0, result.stderr
     assert "GATED-FAILURE" in result.stdout
@@ -129,7 +133,7 @@ def test_matrix_rejects_unattributed_hash(tmp_path):
 
 def test_matrix_accepts_matching_hardware_hash_with_documented_gated_failure(tmp_path):
     _artifact(tmp_path / "hashes", "nvidia", sha=SHA)
-    _artifact(tmp_path / "hashes", "apple", marker="FAILED")
+    _artifact(tmp_path / "hashes", "intel", marker="FAILED")
     result = _run(tmp_path)
     assert result.returncode == 0, result.stderr
     assert "GATED-FAILURE" in result.stdout
@@ -182,7 +186,12 @@ def test_matrix_reuses_caller_wheels_instead_of_rebuilding_extensions():
     assert "PyO3/maturin-action" not in workflow
     for artifact in ("wheels-linux", "wheels-windows"):
         assert artifact in workflow
-    assert "'macos'" in workflow
+    acceptance = workflow.split("  render:\n", 1)[1].split("\n  metal-diagnostic:\n", 1)[0]
+    diagnostic = workflow.split("  metal-diagnostic:\n", 1)[1].split(
+        "\n  wasm-policy:\n", 1
+    )[0]
+    assert "wheels-macos" not in acceptance
+    assert "wheels-macos" in diagnostic
     assert "ref: ${{ inputs.ref }}" in workflow
     assert "FORGE3D_NO_BOOTSTRAP: '1'" in workflow
     anamnesis = workflow.split("  anamnesis-seed:", 1)[1].split(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import importlib.util
 import json
 import struct
@@ -89,8 +90,8 @@ def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
     ).astype(np.uint8)
     baseline_bytes = _png(baseline)
     normal_bytes = _png(normal)
-    baseline_path = golden_dir / "substratia_grazing_baseline.metal.png"
-    normal_path = golden_dir / "substratia_grazing_normal.metal.png"
+    baseline_path = golden_dir / "substratia_grazing_baseline.nvidia-vulkan.png"
+    normal_path = golden_dir / "substratia_grazing_normal.nvidia-vulkan.png"
     baseline_path.write_bytes(baseline_bytes)
     normal_path.write_bytes(normal_bytes)
     (repo / "README.md").write_text("fixture\n", encoding="utf-8")
@@ -133,6 +134,12 @@ def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
                 "golden_ssim_normal": 1.0,
                 "golden_mean_error_baseline": 0.0,
                 "golden_mean_error_normal": 0.0,
+                "actual_baseline_rgba_sha256": hashlib.sha256(
+                    baseline.tobytes()
+                ).hexdigest(),
+                "actual_normal_rgba_sha256": hashlib.sha256(
+                    normal.tobytes()
+                ).hexdigest(),
             },
             "family_residency_budget": {
                 "status": "PASS",
@@ -160,25 +167,28 @@ def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
     }
     _write_json(artifacts / "results.json", results)
     probe = {
-        "requested_backend": "metal",
+        "requested_backend": "vulkan",
         "probe": {
             "status": "ok",
-            "backend": "metal",
-            "device_type": "integratedgpu",
-            "name": "Apple M2",
-            "vendor": 0,
-            "device": 0,
+            "backend": "vulkan",
+            "device_type": "discretegpu",
+            "name": "NVIDIA GeForce RTX 3070",
+            "vendor": 0x10DE,
+            "device": 9352,
+            "software_fallback": False,
         },
     }
     _write_json(artifacts / "adapter-probe.json", probe)
+    _write_json(artifacts / "render-process-adapter.json", probe["probe"])
     (artifacts / "pytest-junit.xml").write_text(_junit(), encoding="utf-8")
     args = argparse.Namespace(
         artifact_dir=artifacts,
         repository=repo,
         candidate_sha=candidate_sha,
         adapter_probe=artifacts / "adapter-probe.json",
+        render_adapter=artifacts / "render-process-adapter.json",
         junit=artifacts / "pytest-junit.xml",
-        expected_backend="metal",
+        expected_backend="vulkan",
     )
     return args, results
 
@@ -192,7 +202,7 @@ def test_valid_physical_evidence_writes_bound_pass_and_lane_marker(tmp_path: Pat
     report = reporter.verify(args)
     assert report["status"] == "PASS"
     assert report["candidate_sha"] == args.candidate_sha
-    assert report["adapter"]["device_type"] == "integratedgpu"
+    assert report["adapter"]["device_type"] == "discretegpu"
     marker = json.loads((args.artifact_dir / "lane-ran.json").read_text(encoding="utf-8"))
     assert marker["status"] == "RAN"
     assert marker["verifier_status"] == "PASS"
@@ -242,10 +252,61 @@ def _read(path: Path) -> dict:
 def test_wrong_backend_is_rejected(tmp_path: Path) -> None:
     args, _ = _make_fixture(tmp_path)
     probe = _read(args.adapter_probe)
-    probe["requested_backend"] = "vulkan"
-    probe["probe"]["backend"] = "vulkan"
+    probe["requested_backend"] = "metal"
+    probe["probe"]["backend"] = "metal"
     _write_json(args.adapter_probe, probe)
     with pytest.raises(reporter.EvidenceError, match="wrong backend"):
+        reporter.verify(args)
+
+
+@pytest.mark.parametrize("fallback", [True, None])
+def test_nvidia_probe_must_explicitly_reject_software_fallback(
+    tmp_path: Path, fallback: bool | None
+) -> None:
+    args, _ = _make_fixture(tmp_path)
+    probe = _read(args.adapter_probe)
+    if fallback is None:
+        probe["probe"].pop("software_fallback")
+    else:
+        probe["probe"]["software_fallback"] = fallback
+    _write_json(args.adapter_probe, probe)
+    with pytest.raises(reporter.EvidenceError, match="software_fallback=false"):
+        reporter.verify(args)
+
+
+def test_nvidia_probe_requires_discrete_gpu(tmp_path: Path) -> None:
+    args, _ = _make_fixture(tmp_path)
+    probe = _read(args.adapter_probe)
+    probe["probe"]["device_type"] = "integratedgpu"
+    _write_json(args.adapter_probe, probe)
+    with pytest.raises(reporter.EvidenceError, match="discrete GPU"):
+        reporter.verify(args)
+
+
+def test_nvidia_name_cannot_spoof_non_nvidia_vendor(tmp_path: Path) -> None:
+    args, _ = _make_fixture(tmp_path)
+    probe = _read(args.adapter_probe)
+    probe["probe"]["vendor"] = 0x1002
+    _write_json(args.adapter_probe, probe)
+    with pytest.raises(reporter.EvidenceError, match="vendor ID"):
+        reporter.verify(args)
+
+
+def test_nvidia_vendor_cannot_spoof_non_nvidia_name(tmp_path: Path) -> None:
+    args, _ = _make_fixture(tmp_path)
+    probe = _read(args.adapter_probe)
+    probe["probe"]["name"] = "AMD Radeon RX 7900 XT"
+    _write_json(args.adapter_probe, probe)
+    with pytest.raises(reporter.EvidenceError, match="adapter name"):
+        reporter.verify(args)
+
+
+def test_render_process_adapter_must_match_workflow_probe(tmp_path: Path) -> None:
+    args, _ = _make_fixture(tmp_path)
+    render_probe = _read(args.render_adapter)
+    render_probe["device"] += 1
+    _write_json(args.render_adapter, render_probe)
+    with pytest.raises(reporter.EvidenceError, match="render-process adapter device"):
         reporter.verify(args)
 
 
@@ -284,12 +345,22 @@ def test_declared_image_metrics_are_recomputed(tmp_path: Path) -> None:
         reporter.verify(args)
 
 
-def test_actual_image_cannot_be_replaced_while_keeping_claimed_metric(tmp_path: Path) -> None:
+def test_declared_rgba_hash_is_recomputed_from_decoded_pixels(tmp_path: Path) -> None:
+    args, results = _make_fixture(tmp_path)
+    results["gates"]["normal_lighting_ssim"][
+        "actual_normal_rgba_sha256"
+    ] = "0" * 64
+    _rewrite_results(args, results)
+    with pytest.raises(reporter.EvidenceError, match="decoded RGBA"):
+        reporter.verify(args)
+
+
+def test_actual_image_cannot_be_replaced_while_keeping_claimed_hash(tmp_path: Path) -> None:
     args, _ = _make_fixture(tmp_path)
     (args.artifact_dir / "actual_normal.png").write_bytes(
         (args.artifact_dir / "actual_baseline.png").read_bytes()
     )
-    with pytest.raises(reporter.EvidenceError, match="SSIM delta"):
+    with pytest.raises(reporter.EvidenceError, match="decoded RGBA"):
         reporter.verify(args)
 
 

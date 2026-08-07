@@ -1064,20 +1064,16 @@ impl TerrainMaterialVT {
         let Some(runtime) = self.runtime.as_mut() else {
             return Ok(Vec::new());
         };
-        if runtime.feedback_buffer.is_none() {
+        let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() else {
             return Ok(Vec::new());
-        }
+        };
         // `finish_frame` normally consumes the async readback first. Reuse
         // the exact decoded snapshot it retained; otherwise a second read of
         // the already-consumed staging buffer makes an active feedback frame
         // appear empty. If the async map is still pending, finish it here and
         // populate that same snapshot.
         if runtime.feedback_staged {
-            let entries = runtime
-                .feedback_buffer
-                .as_ref()
-                .expect("checked above")
-                .read_feedback_entries_blocking(device)?;
+            let entries = feedback_buffer.read_feedback_entries_blocking(device)?;
             runtime.ingest_shader_feedback(entries);
             runtime.feedback_staged = false;
         }

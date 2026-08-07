@@ -23,8 +23,10 @@ Covers the moonshot definition-of-done:
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -53,8 +55,16 @@ VT_MATERIAL_COUNT = 4
 MIB = 1024.0 * 1024.0
 MEMORY_BUDGET_LIMIT_BYTES = 512 * 1024 * 1024
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden" / "terrain"
-BASELINE_GOLDEN = GOLDEN_DIR / "substratia_grazing_baseline.metal.png"
-NORMAL_GOLDEN = GOLDEN_DIR / "substratia_grazing_normal.metal.png"
+GOLDEN_VARIANT = os.environ.get(
+    "FORGE3D_SUBSTRATIA_GOLDEN_VARIANT",
+    "metal" if sys.platform == "darwin" else "nvidia-vulkan",
+)
+if GOLDEN_VARIANT not in {"metal", "nvidia-vulkan"}:
+    raise RuntimeError(
+        "FORGE3D_SUBSTRATIA_GOLDEN_VARIANT must be 'metal' or 'nvidia-vulkan'"
+    )
+BASELINE_GOLDEN = GOLDEN_DIR / f"substratia_grazing_baseline.{GOLDEN_VARIANT}.png"
+NORMAL_GOLDEN = GOLDEN_DIR / f"substratia_grazing_normal.{GOLDEN_VARIANT}.png"
 
 # Labeled grazing-light detail region (fractions of image height/width) used
 # by the SSIM gate: central band where the low-sun normal shading dominates.
@@ -111,6 +121,37 @@ def _region_slices(shape: tuple[int, ...]) -> tuple[slice, slice]:
         slice(int(h * top), int(h * bottom)),
         slice(int(w * left), int(w * right)),
     )
+
+
+def _bind_render_process_to_expected_adapter() -> None:
+    expected_path = os.environ.get("FORGE3D_EXPECTED_ADAPTER_PROBE")
+    if not expected_path:
+        return
+    envelope = json.loads(Path(expected_path).read_text(encoding="utf-8"))
+    expected = envelope.get("probe")
+    requested_backend = str(envelope.get("requested_backend", "")).strip() or None
+    actual = f3d.device_probe(requested_backend)
+    assert isinstance(expected, dict) and isinstance(actual, dict)
+    name = str(actual.get("name", ""))
+    assert actual.get("status") == "ok"
+    assert str(actual.get("device_type", "")).lower() in {"discretegpu", "integratedgpu"}
+    assert actual.get("software_fallback") is False
+    for token in ("software", "virtual", "paravirtual", "warp", "llvmpipe"):
+        assert token not in name.lower()
+    for field in (
+        "backend",
+        "device_type",
+        "name",
+        "vendor",
+        "device",
+        "software_fallback",
+    ):
+        assert str(actual.get(field, "")).lower() == str(expected.get(field, "")).lower()
+    artifact_dir = os.environ.get("FORGE3D_SUBSTRATIA_ARTIFACT_DIR")
+    if artifact_dir:
+        output = Path(artifact_dir) / "render-process-adapter.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(actual, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +391,7 @@ def vt_render_env():
         pytest.skip("terrain VT PBR tests require a terrain-capable GPU runtime")
 
     session = f3d.Session(window=False)
+    _bind_render_process_to_expected_adapter()
     renderer = f3d.TerrainRenderer(session)
     material_set = f3d.MaterialSet.terrain_default()
     heightmap = _build_heightmap(160)
@@ -689,8 +731,8 @@ class TestTerrainVTPbrFamilies:
                 "golden_ssim_normal": golden_ssim_normal,
                 "golden_mean_error_baseline": golden_error_baseline,
                 "golden_mean_error_normal": golden_error_normal,
-                "actual_baseline_sha256": image_sha256(actual_baseline),
-                "actual_normal_sha256": image_sha256(actual_normal),
+                "actual_baseline_rgba_sha256": image_sha256(actual_baseline),
+                "actual_normal_rgba_sha256": image_sha256(actual_normal),
             },
         )
 

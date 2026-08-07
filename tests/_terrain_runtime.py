@@ -74,8 +74,8 @@ def _build_overlay():
 
 
 def _running_on_unsupported_hosted_macos_ci() -> bool:
-    # The dedicated Metal golden lane enables this explicitly after its terrain
-    # probe succeeds. Other hosted macOS jobs retain the conservative skip.
+    # An explicitly selected Metal support diagnostic may opt in after its
+    # terrain probe succeeds. Hosted macOS is never an acceptance prerequisite.
     return (
         os.environ.get("GITHUB_ACTIONS") == "true"
         and platform.system() == "Darwin"

@@ -549,72 +549,60 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
 # ---------------------------------------------------------------------------
 # (f) visual-golden lane honesty
 # ---------------------------------------------------------------------------
-def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent():
+def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     fast_job = _workflow_job(ci_yml, "test-fast-contract")
-    # Certificate mutation lives in a different manual-only workflow; the
-    # hosted Metal golden lane itself must remain macOS-wheel-only.
-    golden_job = _workflow_job(ci_yml, "test-golden-images")
+    golden_job = _workflow_job(ci_yml, "test-golden-images-nvidia")
+    metal_diagnostic = _workflow_job(ci_yml, "test-golden-images")
     pytest_step = golden_job.split("- name: Run visual golden tests", 1)[1].split("\n      - name:", 1)[0]
-    sidera_step = golden_job.split("- name: Run SIDERA Metal night golden", 1)[1].split(
+    sidera_step = golden_job.split("- name: Run SIDERA NVIDIA Vulkan night golden", 1)[1].split(
         "\n      - name:", 1
     )[0]
-    probe_step = golden_job.split("- name: Probe terrain golden backend", 1)[1].split("\n      - name:", 1)[0]
-    sidera_probe_step = golden_job.split(
-        "- name: Probe SIDERA physical Metal reference backend", 1
-    )[1].split("\n      - name:", 1)[0]
+    probe_step = golden_job.split("- name: Require physical NVIDIA Vulkan terrain adapter", 1)[
+        1
+    ].split("\n      - name:", 1)[0]
     aggregate = _workflow_job(ci_yml, "full-acceptance-summary")
 
     assert "github.event_name == 'pull_request'" not in golden_job
     assert "inputs.scope == 'full'" in golden_job
-    assert "runs-on: macos-14" in golden_job, "golden lane must use the gated Metal runner"
-    assert "WGPU_BACKEND: metal" in golden_job
-    assert "name: wheels-macos" in golden_job, "golden lane must install its runner-compatible wheel"
-    assert "name: wheels-windows" not in golden_job
-    # F-10: the probe must distinguish "no adapter" (ABSENT, exit 2) from
-    # "renderer crashed on a real adapter" (exit 3, fails the job). That means
-    # NO continue-on-error on the probe — only the ABSENT branch exits zero.
-    assert "continue-on-error" not in probe_step, (
-        "probe must fail the job on a crash; only ABSENT (exit 2) may pass"
-    )
-    assert 'probe=absent' in probe_step and 'probe=crash' in probe_step
-    assert 'exit "$code"' in probe_step, "probe crash must propagate a nonzero exit"
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in golden_job
+    assert "WGPU_BACKEND: vulkan" in golden_job
+    assert "name: wheels-windows" in golden_job
+    assert "name: wheels-macos" not in golden_job
+    assert "--require-nvidia-vulkan" in probe_step
+    assert "continue-on-error" not in probe_step
+    assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in golden_job
     assert "continue-on-error" not in pytest_step, "golden pytest mismatch is incorrectly non-fatal"
-    assert "terrain-goldens-probe.outputs.probe == 'positive'" in pytest_step
+    assert "run_nvidia_visual_acceptance.py --suite visual" in pytest_step
+    assert "assert_junit_zero_skips.py" in pytest_step
     assert "tests/test_astro_night_golden.py" in sidera_step
     assert "assert_junit_zero_skips.py" in sidera_step
     assert "continue-on-error" not in sidera_step
-    assert "sidera-metal-probe.outputs.probe == 'positive'" in sidera_step
-    assert "continue-on-error" not in sidera_probe_step
-    assert "--mode sidera-metal" in sidera_probe_step
-    assert 'probe=absent' in sidera_probe_step and 'exit "$code"' in sidera_probe_step
-    assert "sidera-metal-probe.outputs.probe == 'absent'" in golden_job
-    assert "sidera-night.ABSENT" in golden_job and "sidera-metal-lane-marker" in golden_job
     assert "sidera_lane:" in golden_job
-    assert 'echo "sidera_lane=ran" >> "$GITHUB_OUTPUT"' in sidera_step
-    assert "sidera_lane=absent" in golden_job
-    assert "software goldens do not prove physical Metal" in golden_job
-    assert "goldens.ABSENT" in golden_job and "golden-lane-marker" in golden_job
-    assert "terrain-goldens-probe.outputs.probe == 'absent'" in golden_job
+    assert "FORGE3D_EXPECTED_ADAPTER_PROBE" in golden_job
+    assert "visual-gpu-evidence" in golden_job and "retention-days: 90" in golden_job
     signing_step = golden_job.split(
         "- name: Require production certificate signing key", 1
     )[1].split("\n      - name:", 1)[0]
     assert "FORGE3D_CERT_SIGNING_KEY" in golden_job
     assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" in golden_job
-    assert 'if [ -z "$FORGE3D_CERT_SIGNING_KEY" ]' in signing_step
-    assert "exit 1" in signing_step
+    assert "if (-not $env:FORGE3D_CERT_SIGNING_KEY)" in signing_step
+    assert "throw" in signing_step
     assert "FORGE3D_CERT_SIGNING_KEY" not in fast_job
     assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" not in fast_job
     assert "FORGE3D_RUN_TERRAIN_GOLDENS" not in fast_job
     assert "test_recipe_goldens.py" not in fast_job
     assert (
         "check_selected \"$full_selected\" "
-        "'${{ needs.test-golden-images.result }}' visual-goldens"
+        "'${{ needs.test-golden-images-nvidia.result }}' visual-goldens-nvidia"
         in aggregate
     )
-    assert "needs.test-golden-images.outputs.sidera_lane" in aggregate
+    assert "needs.test-golden-images-nvidia.outputs.lane" in aggregate
+    assert "needs.test-golden-images-nvidia.outputs.sidera_lane" in aggregate
     assert 'if [ "$sidera_lane" != "ran" ]' in aggregate
-    assert "SIDERA physical Metal lane was selected" in aggregate
+    assert "SIDERA physical NVIDIA Vulkan lane was selected" in aggregate
+    assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
+    assert "test-golden-images," not in aggregate.split("\n    runs-on:", 1)[0]
 
 
 def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
@@ -657,18 +645,23 @@ def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
 
 def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    job = _workflow_job(ci_yml, "test-substratia-gpu")
+    job = _workflow_job(ci_yml, "test-substratia-gpu-nvidia")
+    metal_diagnostic = _workflow_job(ci_yml, "test-substratia-gpu")
     core = _workflow_job(ci_yml, "pr-core-success")
     acceptance = _workflow_job(ci_yml, "full-acceptance-summary")
     probe = (ROOT / "scripts" / "terrain_ci_probe.py").read_text(encoding="utf-8")
     lane = (ROOT / "scripts" / "ci_pytest_lane.py").read_text(encoding="utf-8")
+    launcher = (ROOT / "scripts" / "run_nvidia_visual_acceptance.py").read_text(
+        encoding="utf-8"
+    )
 
     # Physical acceptance remains outside the stable hosted PR context.
-    assert "test-substratia-gpu" not in core.split("\n    runs-on:", 1)[0]
+    assert "test-substratia-gpu-nvidia" not in core.split("\n    runs-on:", 1)[0]
     assert "github.event_name == 'pull_request'" not in job
     assert "inputs.scope == 'full'" in job
-    assert "runs-on: macos-14" in job
-    assert "WGPU_BACKEND: metal" in job
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
+    assert "WGPU_BACKEND: vulkan" in job
+    assert "--require-nvidia-vulkan" in job
     assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in job
     assert "continue-on-error" not in job
 
@@ -676,16 +669,18 @@ def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
     # image, adapter, and verifier evidence rather than trusting artifact presence.
     assert "FORGE3D_SUBSTRATIA_CANDIDATE_SHA" in job
     assert 'git status --porcelain --untracked-files=no' in job
-    assert "--junitxml=" in job
+    assert "run_nvidia_visual_acceptance.py --suite substratia" in job
+    assert "assert_junit_zero_skips.py" in job
     for test_name in (
         "test_normal_family_changes_lighting_ssim",
         "test_all_families_page_within_budget",
         "test_missing_family_is_fatal",
         "test_partial_normal_residency_degrades_gracefully",
     ):
-        assert test_name in job
+        assert test_name in launcher
     assert "scripts/substratia_evidence_report.py" in job
-    assert "--candidate-sha \"$FORGE3D_SUBSTRATIA_CANDIDATE_SHA\"" in job
+    assert '--candidate-sha "$env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA"' in job
+    assert "--render-adapter" in job
     assert "adapter-probe.json" in job
     assert "lane-ran.json" in job and "verification.json" in job
     assert "if-no-files-found: error" in job
@@ -693,16 +688,17 @@ def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
 
     # Full Acceptance consumes explicit RAN and PASS outputs; a successful upload
     # alone is not sufficient.
-    assert "test-substratia-gpu" in acceptance.split("\n    runs-on:", 1)[0]
-    assert "needs.test-substratia-gpu.outputs.lane" in acceptance
-    assert "needs.test-substratia-gpu.outputs.verifier" in acceptance
+    assert "test-substratia-gpu-nvidia" in acceptance.split("\n    runs-on:", 1)[0]
+    assert "needs.test-substratia-gpu-nvidia.outputs.lane" in acceptance
+    assert "needs.test-substratia-gpu-nvidia.outputs.verifier" in acceptance
     assert "SUBSTRATIA physical lane did not record RAN" in acceptance
     assert "SUBSTRATIA evidence verifier did not record PASS" in acceptance
 
     # The SUBSTRATIA physical proof excludes virtual devices even though the
     # general CI-safe probe retains main's virtual-GPU support.
-    assert 'PHYSICAL_DEVICE_TYPES = {"discretegpu", "integratedgpu"}' in probe
     for token in ("software", "virtual", "paravirtual", "virtio", "llvmpipe"):
         assert f'"{token}"' in probe
     assert "return 2" in probe and "return 3" in probe
     assert "tests/test_substratia_evidence_report.py" in lane
+    assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
+    assert "test-substratia-gpu," not in acceptance.split("\n    runs-on:", 1)[0]
