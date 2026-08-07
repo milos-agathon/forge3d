@@ -1085,10 +1085,6 @@ jobs:
           path: tests/artifacts/
           retention-days: 7
 
-  # SUBSTRATIA's claims require physical pixels. This is deliberately separate
-  # from PR Core Success and has no software/ABSENT success path: a selected
-  # full-acceptance run must execute the four core tests on a physical Metal GPU,
-  # then pass the independent exact-SHA evidence verifier.
   test-substratia-gpu:
     name: SUBSTRATIA Physical GPU (Metal)
     needs: [build-wheel-macos, terrain-golden-paths]
@@ -1185,6 +1181,102 @@ jobs:
         with:
           name: substratia-physical-gpu-evidence
           path: tests/artifacts/substratia/
+          if-no-files-found: error
+          retention-days: 90
+
+  # Temporary exact-head calibration lane: capture candidate NVIDIA Vulkan
+  # goldens from the protected physical runner. The resulting images are only
+  # candidates until committed and rerun through the independent verifier.
+  test-substratia-nvidia-golden-capture:
+    name: SUBSTRATIA NVIDIA Golden Capture
+    needs: [build-wheel-windows, terrain-golden-paths]
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.scope == 'core'
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 30
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan
+      FORGE3D_DETERMINISM_TEST_BACKEND: vulkan
+      FORGE3D_SUBSTRATIA_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Initialize isolated capture evidence directory
+        shell: pwsh
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "forge3d-substratia-${{ github.run_id }}-${{ github.run_attempt }}"
+          "FORGE3D_SUBSTRATIA_ARTIFACT_DIR=$artifactDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_SIDERA_ARTIFACT_DIR=$artifactDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download exact-candidate Windows wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+
+      - name: Install wheel and evidence dependencies
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install pytest numpy pillow
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Bind lane to exact clean candidate
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA) { throw "candidate SHA mismatch" }
+          $dirty = (git status --porcelain --untracked-files=no | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw "candidate tracked worktree is dirty: $dirty" }
+          if ($env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA.Length -ne 40) { throw "candidate SHA is not full length" }
+          New-Item -ItemType Directory -Force -Path $env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR | Out-Null
+
+      - name: Require physical NVIDIA Vulkan terrain adapter
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR/adapter-probe.json"
+          exit $LASTEXITCODE
+
+      - name: Capture exact SUBSTRATIA NVIDIA Vulkan goldens
+        shell: pwsh
+        env:
+          FORGE3D_UPDATE_SUBSTRATIA_GOLDENS: '1'
+          FORGE3D_UPDATE_SIDERA_GOLDEN: '1'
+        run: |
+          python scripts/substratia_nvidia_golden_capture.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR/pytest-junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $required = @("adapter-probe.json", "capture-process-adapter.json", "sidera-process-adapter.json", "capture-manifest.json", "pytest-junit.xml", "results.json", "actual_baseline.png", "actual_normal.png", "golden_baseline.png", "golden_normal.png", "sidera_night.png", "sidera_night.sha256")
+          foreach ($name in $required) {
+            $path = Join-Path $env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing capture evidence: $name" }
+          }
+          if ((Get-FileHash (Join-Path $env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR "actual_baseline.png") -Algorithm SHA256).Hash -ne (Get-FileHash (Join-Path $env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR "golden_baseline.png") -Algorithm SHA256).Hash) { throw "baseline capture differs from generated golden" }
+          if ((Get-FileHash (Join-Path $env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR "actual_normal.png") -Algorithm SHA256).Hash -ne (Get-FileHash (Join-Path $env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR "golden_normal.png") -Algorithm SHA256).Hash) { throw "normal capture differs from generated golden" }
+          $sideraHash = (Get-FileHash (Join-Path $env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR "sidera_night.png") -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sideraExpected = ((Get-Content (Join-Path $env:FORGE3D_SUBSTRATIA_ARTIFACT_DIR "sidera_night.sha256") -Raw).Trim().Split()[0]).ToLowerInvariant()
+          if ($sideraHash -ne $sideraExpected) { throw "SIDERA capture does not match its SHA-256 sidecar" }
+
+      - name: Upload SHA- and adapter-bound SUBSTRATIA golden candidates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: substratia-nvidia-golden-candidates
+          path: ${{ runner.temp }}/forge3d-substratia-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
           retention-days: 90
 

@@ -1,7 +1,7 @@
 """SIDERA night-sky golden — DoD 6.
 
 The frame must be byte-identical across two in-process renders and across two
-*separate processes* on a pinned backend.  The committed Metal reference must
+*separate processes* on a pinned backend.  The committed Vulkan reference must
 also equal its PNG and SHA-256 sidecar in ``tests/goldens/determinism/`` — the
 same inventory and zero-byte tolerance the TERRA-DETERMINATA harness
 (``tests/test_determinism_hash.py``) applies to its reference renders.
@@ -10,6 +10,7 @@ same inventory and zero-byte tolerance the TERRA-DETERMINATA harness
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -64,6 +65,29 @@ def _adapter_is_hardware() -> bool:
     return device_type in {"discretegpu", "integratedgpu", "discrete_gpu", "integrated_gpu"}
 
 
+def _adapter_is_nvidia_vulkan(probe: object) -> bool:
+    if not isinstance(probe, dict) or probe.get("status") != "ok":
+        return False
+    name = str(probe.get("name", "")).lower()
+    return (
+        str(probe.get("backend", "")).lower() == "vulkan"
+        and str(probe.get("device_type", "")).lower() == "discretegpu"
+        and not bool(probe.get("software_fallback", False))
+        and (int(probe.get("vendor", 0)) == 0x10DE or "nvidia" in name)
+        and not any(
+            marker in name
+            for marker in ("software", "virtual", "paravirtual", "warp", "llvmpipe")
+        )
+    )
+
+
+def _reference_adapter_available() -> bool:
+    try:
+        return _adapter_is_nvidia_vulkan(f3d.device_probe("vulkan"))
+    except Exception:
+        return False
+
+
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "tests" / "golden" / "sidera_night.png"
 #: Membership in the determinism harness' golden inventory.
@@ -91,16 +115,17 @@ def _determinism_backend() -> str:
     return "vulkan"
 
 
-REFERENCE_BACKEND = "metal"
+REFERENCE_BACKEND = "vulkan"
 HARDWARE_ADAPTER = _adapter_is_hardware()
+REFERENCE_ADAPTER = _reference_adapter_available()
 requires_hardware = pytest.mark.skipif(
     not HARDWARE_ADAPTER,
     reason="cross-process deterministic render requires a proven physical adapter",
 )
 requires_reference_hardware = pytest.mark.skipif(
-    not HARDWARE_ADAPTER
+    not REFERENCE_ADAPTER
     or _determinism_backend().strip().lower() != REFERENCE_BACKEND,
-    reason="committed SIDERA bytes require a proven physical Metal reference adapter",
+    reason="committed SIDERA bytes require a proven physical Vulkan reference adapter",
 )
 
 
@@ -109,13 +134,27 @@ def _render_in_subprocess(destination: Path) -> str:
     env = dict(os.environ)
     env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=_determinism_backend())
     env.pop(UPDATE_ENV, None)
+    adapter_path = destination.with_suffix(".adapter.json")
     script = (
+        "import json;"
+        "from pathlib import Path;"
+        "import forge3d as f3d;"
         "from forge3d import _forge3d as native;"
+        "session=f3d.Session(window=False);"
+        "probe=f3d.device_probe('vulkan');"
+        f"Path({str(adapter_path)!r}).write_text(json.dumps(probe, sort_keys=True));"
         f"native._astro_night_golden_frame().save({str(destination)!r})"
     )
     subprocess.run(
         [sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True
     )
+    subprocess_probe = json.loads(adapter_path.read_text(encoding="utf-8"))
+    assert _adapter_is_nvidia_vulkan(subprocess_probe), subprocess_probe
+    artifact_dir = os.environ.get("FORGE3D_SIDERA_ARTIFACT_DIR")
+    if artifact_dir:
+        output = Path(artifact_dir) / "sidera-process-adapter.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(subprocess_probe, indent=2, sort_keys=True) + "\n")
     return hashlib.sha256(destination.read_bytes()).hexdigest()
 
 
@@ -249,19 +288,19 @@ def test_night_golden_is_cross_process_repeatable_on_pinned_backend(tmp_path):
 
 
 @requires_reference_hardware
-def test_night_golden_matches_committed_metal_bytes(tmp_path):
-    """DoD 6: the pinned physical Metal render equals the committed golden.
+def test_night_golden_matches_committed_vulkan_bytes(tmp_path):
+    """DoD 6: the pinned physical Vulkan render equals the committed golden.
 
     This is the SIDERA member of the ``tests/test_determinism_hash.py`` family:
     same zero-byte tolerance and same committed SHA-256 sidecar. Other physical
     backends prove their own repeatability above; they are not claimed to
-    reproduce a reference generated on Metal.
+    reproduce the protected NVIDIA/Vulkan reference.
     """
     first_png = tmp_path / "process_a.png"
     first = _render_in_subprocess(first_png)
 
     if _update_goldens_enabled():
-        # Refreshing happens here, from the pinned Metal render, so the
+        # Refreshing happens here, from the pinned Vulkan render, so the
         # committed bytes can never come from whatever backend the ambient
         # test process happened to pick.
         GOLDEN.parent.mkdir(parents=True, exist_ok=True)
@@ -298,6 +337,6 @@ def test_golden_refresh_does_not_rewrite_the_committed_file_when_disabled(
     assert _update_goldens_enabled() is True
     monkeypatch.delenv(UPDATE_ENV)
     assert _update_goldens_enabled() is False
-    test_night_golden_matches_committed_metal_bytes(tmp_path)
+    test_night_golden_matches_committed_vulkan_bytes(tmp_path)
     assert GOLDEN.read_bytes() == before_png
     assert GOLDEN_SHA.read_bytes() == before_sha

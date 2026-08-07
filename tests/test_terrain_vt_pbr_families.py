@@ -53,8 +53,13 @@ VT_MATERIAL_COUNT = 4
 MIB = 1024.0 * 1024.0
 MEMORY_BUDGET_LIMIT_BYTES = 512 * 1024 * 1024
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden" / "terrain"
-BASELINE_GOLDEN = GOLDEN_DIR / "substratia_grazing_baseline.metal.png"
-NORMAL_GOLDEN = GOLDEN_DIR / "substratia_grazing_normal.metal.png"
+GOLDEN_VARIANT = os.environ.get("FORGE3D_SUBSTRATIA_GOLDEN_VARIANT", "metal")
+if GOLDEN_VARIANT not in {"metal", "nvidia-vulkan"}:
+    raise RuntimeError(
+        "FORGE3D_SUBSTRATIA_GOLDEN_VARIANT must be 'metal' or 'nvidia-vulkan'"
+    )
+BASELINE_GOLDEN = GOLDEN_DIR / f"substratia_grazing_baseline.{GOLDEN_VARIANT}.png"
+NORMAL_GOLDEN = GOLDEN_DIR / f"substratia_grazing_normal.{GOLDEN_VARIANT}.png"
 
 # Labeled grazing-light detail region (fractions of image height/width) used
 # by the SSIM gate: central band where the low-sun normal shading dominates.
