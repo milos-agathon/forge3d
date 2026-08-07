@@ -81,6 +81,11 @@ def test_terrain_sky_storage_format_matches_rust_texture_contract() -> None:
     assert "texture_storage_2d<rgba8unorm, write>" in shader
     assert "texture_storage_2d<rgba16float, write>" not in shader
 
+    visual_gate = (repo / "tests/test_terrain_visual_goldens.py").read_text(
+        encoding="utf-8"
+    )
+    assert "_assert_sky_scene_is_meaningful(scene_name, actual)" in visual_gate
+
 
 def test_material_texture_modules_state_gpu_boundary() -> None:
     import forge3d.materials as materials
