@@ -133,7 +133,8 @@ impl CpuVisibilityOracle {
             &vertices,
             &indices,
             &identities,
-            proj * view,
+            view,
+            proj,
             params.size_px,
         )?;
         let bvh = crate::accel::cpu_bvh::build_bvh_cpu(
@@ -319,7 +320,8 @@ fn build_clipped_raster_mesh(
     world_vertices: &[[f32; 3]],
     source_indices: &[[u32; 3]],
     source_identities: &[(u32, u32)],
-    view_proj: glam::Mat4,
+    view: glam::Mat4,
+    proj: glam::Mat4,
     viewport: (u32, u32),
 ) -> anyhow::Result<(crate::accel::cpu_bvh::MeshCPU, Vec<(u32, u32)>)> {
     const SUBPIXEL_SCALE: f32 = 256.0;
@@ -333,7 +335,13 @@ fn build_clipped_raster_mesh(
             let position = world_vertices.get(index as usize).ok_or_else(|| {
                 anyhow::anyhow!("visibility oracle index {index} is out of bounds")
             })?;
-            clip.push(view_proj * glam::Vec3::from_array(*position).extend(1.0));
+            // Mirror vs_clipmap_main exactly: it deliberately performs the
+            // view and projection products as two ordered mat4*vec4 stages.
+            // Collapsing them into `(proj * view) * position` moves rare
+            // grazing-edge vertices across the rasterizer's subpixel grid.
+            let view_position =
+                deterministic_mat4_mul_vec4(view, glam::Vec3::from_array(*position).extend(1.0));
+            clip.push(deterministic_mat4_mul_vec4(proj, view_position));
         }
         let polygon = clip_webgpu_polygon(clip);
         for fan in 1..polygon.len().saturating_sub(1) {
@@ -373,6 +381,18 @@ fn build_clipped_raster_mesh(
         crate::accel::cpu_bvh::MeshCPU::new(vertices, indices),
         identities,
     ))
+}
+
+/// CPU mirror of WGSL `det_mat4_mul_vec4`: column products followed by a
+/// fixed left-to-right sum, with view and projection kept as separate calls.
+fn deterministic_mat4_mul_vec4(matrix: glam::Mat4, vector: glam::Vec4) -> glam::Vec4 {
+    let c0 = matrix.x_axis * vector.x;
+    let c1 = matrix.y_axis * vector.y;
+    let c2 = matrix.z_axis * vector.z;
+    let c3 = matrix.w_axis * vector.w;
+    let s01 = c0 + c1;
+    let s012 = s01 + c2;
+    s012 + c3
 }
 
 fn clip_webgpu_polygon(mut polygon: Vec<glam::Vec4>) -> Vec<glam::Vec4> {
@@ -641,6 +661,7 @@ mod tests {
             &[[0, 1, 2]],
             &[(7, 11)],
             glam::Mat4::IDENTITY,
+            glam::Mat4::IDENTITY,
             (64, 64),
         )
         .expect("clip one near-plane crossing triangle");
@@ -651,6 +672,27 @@ mod tests {
             .vertices
             .iter()
             .all(|vertex| (0.0..=1.0).contains(&vertex[2])));
+    }
+
+    #[test]
+    fn raster_projection_keeps_shader_view_then_projection_order() {
+        let view = glam::Mat4::from_cols(
+            glam::vec4(1.0, 0.0, 0.0, 0.0),
+            glam::vec4(0.0, 1.0, 0.0, 0.0),
+            glam::vec4(0.0, 0.0, 1.0, 0.0),
+            glam::vec4(0.25, -0.5, 0.75, 1.0),
+        );
+        let proj = glam::Mat4::from_cols(
+            glam::vec4(1.5, 0.0, 0.0, 0.0),
+            glam::vec4(0.0, 2.0, 0.0, 0.0),
+            glam::vec4(0.0, 0.0, 0.5, 1.0),
+            glam::vec4(0.0, 0.0, 0.25, 0.0),
+        );
+        let position = glam::vec4(0.125, -0.25, 0.5, 1.0);
+
+        let staged = deterministic_mat4_mul_vec4(proj, deterministic_mat4_mul_vec4(view, position));
+        let expected = glam::vec4(0.5625, -1.5, 0.875, 1.25);
+        assert_eq!(staged, expected);
     }
 }
 

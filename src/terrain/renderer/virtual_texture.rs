@@ -41,6 +41,13 @@ const TERRAIN_VT_FALLBACK_COUNT: usize =
     super::core::MATERIAL_LAYER_CAPACITY * TERRAIN_VT_FAMILY_COUNT as usize;
 
 #[cfg(feature = "extension-module")]
+fn feedback_key_in_bounds(key: TileKey, material_count: u32, max_mip_levels: u32) -> bool {
+    key.family_slot < TERRAIN_VT_FAMILY_COUNT
+        && key.material_index < material_count
+        && key.mip_level < max_mip_levels
+}
+
+#[cfg(feature = "extension-module")]
 pub(super) fn bindless_bc_supported(device: &wgpu::Device) -> bool {
     let features = device.features();
     features.contains(wgpu::Features::TEXTURE_COMPRESSION_BC)
@@ -1059,8 +1066,6 @@ impl TerrainMaterialVT {
         &mut self,
         device: &wgpu::Device,
     ) -> Result<Vec<crate::core::provenance::ContributingTile>, String> {
-        use crate::core::provenance::ContributingTile;
-
         let Some(runtime) = self.runtime.as_mut() else {
             return Ok(Vec::new());
         };
@@ -1078,47 +1083,30 @@ impl TerrainMaterialVT {
             runtime.feedback_staged = false;
         }
 
-        let mut resolved = HashSet::new();
-        for &key in &runtime.latest_shader_feedback {
-            if let Some(resident) = runtime.resolve_resident_mip(key) {
-                resolved.insert(resident);
-            }
-        }
+        Ok(runtime.resolve_feedback_keys_to_tiles(&runtime.latest_shader_feedback))
+    }
 
-        let mut tiles = Vec::with_capacity(resolved.len());
-        for key in resolved {
-            let Some(source) = runtime.sources.get(&(key.family_slot, key.material_index)) else {
-                continue;
-            };
-            tiles.push(ContributingTile {
-                family_slot: key.family_slot,
-                source_id: source.source_id,
-                tile_x: key.x,
-                tile_y: key.y,
-                mip_level: key.mip_level,
-                // Per-PAGE digest, recorded by `build_tile_data` for every
-                // tile it uploads. `source.content_hash` is a per-source
-                // constant (the packed store's directory hash, or the ingested
-                // image's hash), so reporting it would make every tile record
-                // identical and a wrong-tile upload undetectable. The fallback
-                // only applies to a tile that has never been built.
-                content_hash: runtime
-                    .resident_page_digests
-                    .get(&key)
-                    .copied()
-                    .unwrap_or(source.content_hash),
-            });
-        }
-        tiles.sort_by_key(|tile| {
-            (
-                tile.family_slot,
-                tile.source_id,
-                tile.mip_level,
-                tile.tile_y,
-                tile.tile_x,
-            )
-        });
-        Ok(tiles)
+    /// Resolve a caller-retained shader-feedback snapshot after streaming has
+    /// settled. Unlike `read_contributing_tiles`, this deliberately does not
+    /// drain or replace the latest-frame feedback state.
+    pub fn resolve_captured_feedback_tiles(
+        &mut self,
+        feedback: &[(u32, u32, u32, u32, u32)],
+    ) -> Vec<crate::core::provenance::ContributingTile> {
+        let Some(runtime) = self.runtime.as_mut() else {
+            return Vec::new();
+        };
+        let keys: Vec<TileKey> = feedback
+            .iter()
+            .map(|&(family_slot, material_index, mip_level, x, y)| TileKey {
+                family_slot,
+                material_index,
+                mip_level,
+                x,
+                y,
+            })
+            .collect();
+        runtime.resolve_feedback_keys_to_tiles(&keys)
     }
 
     fn write_disabled_uniforms(
@@ -2329,10 +2317,7 @@ impl TerrainMaterialVTRuntime {
 
     fn clear_page_entry(&mut self, key: TileKey) {
         self.resident_page_digests.remove(&key);
-        if key.family_slot >= TERRAIN_VT_FAMILY_COUNT
-            || key.material_index >= self.material_count
-            || key.mip_level >= self.max_mip_levels
-        {
+        if !feedback_key_in_bounds(key, self.material_count, self.max_mip_levels) {
             return;
         }
         let layer_index = self.layer_mip_index(key.family_slot, key.material_index, key.mip_level);
@@ -2351,7 +2336,7 @@ impl TerrainMaterialVTRuntime {
     /// mirror -- climb from `key.mip_level` toward coarser mips and return the
     /// first resident tile, or `None` when the whole chain is non-resident.
     fn resolve_resident_mip(&self, key: TileKey) -> Option<TileKey> {
-        if key.family_slot >= TERRAIN_VT_FAMILY_COUNT || key.material_index >= self.material_count {
+        if !feedback_key_in_bounds(key, self.material_count, self.max_mip_levels) {
             return None;
         }
         let mut mip_level = key.mip_level;
@@ -2382,6 +2367,49 @@ impl TerrainMaterialVTRuntime {
             }
             mip_level += 1;
         }
+    }
+
+    fn resolve_feedback_keys_to_tiles(
+        &self,
+        feedback: &[TileKey],
+    ) -> Vec<crate::core::provenance::ContributingTile> {
+        use crate::core::provenance::ContributingTile;
+
+        let mut resolved = HashSet::new();
+        for &key in feedback {
+            if let Some(resident) = self.resolve_resident_mip(key) {
+                resolved.insert(resident);
+            }
+        }
+
+        let mut tiles = Vec::with_capacity(resolved.len());
+        for key in resolved {
+            let Some(source) = self.sources.get(&(key.family_slot, key.material_index)) else {
+                continue;
+            };
+            tiles.push(ContributingTile {
+                family_slot: key.family_slot,
+                source_id: source.source_id,
+                tile_x: key.x,
+                tile_y: key.y,
+                mip_level: key.mip_level,
+                content_hash: self
+                    .resident_page_digests
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(source.content_hash),
+            });
+        }
+        tiles.sort_by_key(|tile| {
+            (
+                tile.family_slot,
+                tile.source_id,
+                tile.mip_level,
+                tile.tile_y,
+                tile.tile_x,
+            )
+        });
+        tiles
     }
 
     fn page_key(key: TileKey) -> crate::terrain::vt::PageKey {
@@ -2775,6 +2803,19 @@ impl TerrainScene {
             .map_err(anyhow::Error::msg)
     }
 
+    /// Resolve a retained raw shader-feedback snapshot against the current
+    /// resident page table without altering latest-frame feedback semantics.
+    pub(super) fn resolve_captured_material_vt_feedback(
+        &self,
+        feedback: &[(u32, u32, u32, u32, u32)],
+    ) -> Result<Vec<crate::core::provenance::ContributingTile>> {
+        let mut material_vt = self
+            .material_vt
+            .lock()
+            .map_err(|_| anyhow!("material_vt mutex poisoned"))?;
+        Ok(material_vt.resolve_captured_feedback_tiles(feedback))
+    }
+
     pub(super) fn drain_latest_material_vt_shader_feedback(
         &self,
     ) -> Result<Vec<(u32, u32, u32, u32, u32)>> {
@@ -2815,6 +2856,42 @@ mod bounded_feedback_tests {
             std::mem::size_of::<TerrainVTUniformsGpu>()
         );
         assert_eq!(VT_UNIFORM_BUFFER_BYTES % 16, 0, "std140 vec4 alignment");
+    }
+
+    #[test]
+    fn captured_feedback_keys_fail_closed_outside_runtime_bounds() {
+        let valid = TileKey {
+            family_slot: 2,
+            material_index: 3,
+            mip_level: 7,
+            x: u32::MAX,
+            y: u32::MAX,
+        };
+        assert!(feedback_key_in_bounds(valid, 4, 8));
+        assert!(!feedback_key_in_bounds(
+            TileKey {
+                family_slot: TERRAIN_VT_FAMILY_COUNT,
+                ..valid
+            },
+            4,
+            8
+        ));
+        assert!(!feedback_key_in_bounds(
+            TileKey {
+                material_index: 4,
+                ..valid
+            },
+            4,
+            8
+        ));
+        assert!(!feedback_key_in_bounds(
+            TileKey {
+                mip_level: u32::MAX,
+                ..valid
+            },
+            4,
+            8
+        ));
     }
 
     /// Win 1's load-bearing claim: the host-visible feedback allocation does not

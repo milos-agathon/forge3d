@@ -344,6 +344,21 @@ def test_256_gib_store_settles_within_eight_frames_under_host_budget(tmp_path):
         assert len(family_feedback) >= 2, family_feedback
         assert any(entry[3] != 0 or entry[4] != 0 for entry in family_feedback)
     digests = _manifest_digests(manifest)
+    # The first upload-blocked frame is historical demand: once albedo becomes
+    # resident it no longer appears in *latest unresolved* feedback. Resolve
+    # that retained snapshot through the current CPU page-table mirror so every
+    # raw family demand is proved against the exact resident page bytes.
+    captured_tiles = renderer.resolve_captured_vt_feedback_provenance(
+        sorted(feedback_probe_keys)
+    )
+    for tile in captured_tiles:
+        key = (
+            tile["family_slot"],
+            tile["mip_level"],
+            tile["tile_x"],
+            tile["tile_y"],
+        )
+        contributing_by_key[key] = tile
     tiles = list(contributing_by_key.values())
     assert tiles
     assert {tile["family_slot"] for tile in tiles} == {0, 1, 2}

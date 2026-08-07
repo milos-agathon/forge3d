@@ -487,12 +487,16 @@ jobs:
             # the same explicit physical-runner selection policy as other
             # expensive acceptance families.
             tessella:
+              - 'src/terrain/clipmap/**'
               - 'src/terrain/renderer/virtual_texture.rs'
+              - 'src/terrain/renderer/visibility_buffer.rs'
+              - 'src/terrain/renderer/py_api.rs'
               - 'src/terrain/culling/two_phase.rs'
               - 'src/core/feedback_buffer.rs'
               - 'src/core/screen_space_effects/hzb.rs'
               - 'src/shaders/hzb_build.wgsl'
               - 'src/shaders/hzb_cull.wgsl'
+              - 'python/forge3d/__init__.pyi'
               - 'scripts/tessella_evidence_contract.py'
               - 'scripts/tessella_evidence_provenance.py'
               - 'scripts/tessella_evidence_report.py'

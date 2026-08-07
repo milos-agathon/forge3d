@@ -715,6 +715,71 @@ def test_depth_aov_matches_known_flat_plane_distance():
     np.testing.assert_allclose(center_patch, expected_f16, atol=5e-4, rtol=0.0)
 
 
+@pytest.mark.gpu_lane
+@requires_terrain
+def test_fixed_camera_stream_center_transition_has_no_pop():
+    """A fully resident stream-center rebuild must not change a fixed camera.
+
+    This isolates clipmap re-centering from the one-pixel camera reprojection
+    used by the 600-frame gate.  Both images use frame zero's camera; the only
+    state transition between them is the public streaming call that changes the
+    snapped clipmap centre and therefore forces a new geometry cache key.
+    """
+    dem = fractal_dem(DEM_SIZE, DEM_OCTAVES, DEM_GAIN, DEM_SEED)
+    first_center = _center_at(0)
+    second_center = _center_at(1)
+
+    with tempfile.TemporaryDirectory() as td:
+        hdr = Path(td) / "probe.hdr"
+        _write_test_hdr(hdr)
+        ibl = f3d.IBL.from_hdr(str(hdr), intensity=1.0)
+        renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        material_set = f3d.MaterialSet.terrain_default()
+        overlay = build_overlay()
+        _enable_streaming(renderer, dem)
+        _warm_streaming_to_full_residency(renderer, first_center)
+
+        before_stream = renderer.height_streaming_stats()
+        before, _before_depth = render_rgba_depth(
+            renderer,
+            _params(z_scale=Z_SCALE, overlay=overlay, depth_aov=True),
+            dem,
+            ibl,
+            material_set,
+        )
+        transition = renderer.stream_height_tiles(
+            (second_center[0], STREAM_ALTITUDE_M, second_center[1]), max_uploads=8
+        )
+        after, _after_depth = render_rgba_depth(
+            renderer,
+            _params(z_scale=Z_SCALE, overlay=overlay, depth_aov=True),
+            dem,
+            ibl,
+            material_set,
+        )
+
+    delta = _motion_compensated_delta_e(before, after, 0.0, 0.0)
+    record_tessella_result(
+        "flythrough_fixed_camera_recenter",
+        {
+            "before_center": tuple(float(value) for value in before_stream["center"]),
+            "after_center": tuple(float(value) for value in transition["center"]),
+            "resident_fine_tiles_before": int(before_stream["resident_fine_tiles"]),
+            "resident_fine_tiles_after": int(transition["resident_fine_tiles"]),
+            "converged_before": bool(before_stream["converged"]),
+            "converged_after": bool(transition["converged"]),
+            "fixed_camera_max_delta_e_2000": delta,
+        },
+    )
+    assert tuple(float(value) for value in transition["center"]) != tuple(
+        float(value) for value in before_stream["center"]
+    )
+    assert before_stream["converged"] is True, before_stream
+    assert transition["converged"] is True, transition
+    assert transition["resident_fine_tiles"] == transition["total_tiles"], transition
+    assert delta < 1.0, delta
+
+
 def test_committed_camera_path_is_a_real_non_vacuous_flythrough():
     targets = [_camera_target_at(index) for index in range(FRAMES)]
     steps = [

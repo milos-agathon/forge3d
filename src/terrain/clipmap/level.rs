@@ -125,7 +125,7 @@ impl ClipmapLevel {
                 &ring_indices,
                 self.config.skirt_depth,
                 ring_idx,
-                self.config.ring_resolution as usize + 1,
+                0,
             );
             ring_verts.extend(skirt_verts);
             ring_indices.extend(skirt_indices);
@@ -239,10 +239,23 @@ impl ClipmapLevel {
 
     /// Calculate triangle count for a full-resolution grid (for reduction comparison).
     pub fn full_resolution_triangle_count(&self) -> u32 {
-        // Full terrain at finest LOD
-        let total_cells = self.config.center_resolution * 4; // Approximate coverage
-        total_cells * total_cells * 2
+        full_resolution_triangle_count(&self.config)
     }
+}
+
+/// Triangles required to cover the complete clipmap footprint at the finest
+/// lattice. This is the meaningful comparator for a nested clipmap; the old
+/// `center_resolution * 4` approximation covered only a small central square.
+pub fn full_resolution_triangle_count(config: &ClipmapConfig) -> u32 {
+    let ring_cells_per_side = (0..config.ring_count)
+        .map(|ring| config.ring_resolution.checked_shl(ring).unwrap_or(u32::MAX))
+        .fold(0u32, u32::saturating_add);
+    let cells_per_side = config
+        .center_resolution
+        .saturating_add(ring_cells_per_side.saturating_mul(2));
+    cells_per_side
+        .saturating_mul(cells_per_side)
+        .saturating_mul(2)
 }
 
 /// Generate a complete clipmap mesh from configuration.
@@ -300,6 +313,13 @@ mod tests {
             "Triangle reduction {:.1}% should be >= 40%",
             reduction
         );
+    }
+
+    #[test]
+    fn test_full_resolution_comparator_covers_outermost_ring() {
+        let config = ClipmapConfig::new(4, 32);
+        // 32 center cells plus two sides of 32*(1+2+4+8) ring cells.
+        assert_eq!(full_resolution_triangle_count(&config), 1_968_128);
     }
 
     #[test]

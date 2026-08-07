@@ -1039,6 +1039,45 @@ impl TerrainRenderer {
         Ok(out.into())
     }
 
+    /// Resolve a retained raw VT shader-feedback snapshot against currently
+    /// resident pages, preserving `read_contributing_tiles()` last-frame
+    /// semantics. Feedback entries are `(family_slot, material_index,
+    /// mip_level, tile_x, tile_y)`.
+    #[pyo3(text_signature = "(self, feedback)")]
+    fn resolve_captured_vt_feedback_provenance(
+        &self,
+        py: Python<'_>,
+        feedback: Vec<(u32, u32, u32, u32, u32)>,
+    ) -> PyResult<PyObject> {
+        use crate::core::provenance::{to_hex, FAMILY_NAMES};
+
+        let tiles = self
+            .scene
+            .resolve_captured_material_vt_feedback(&feedback)
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!(
+                    "Failed to resolve captured VT feedback provenance: {e:#}"
+                ))
+            })?;
+        let out = pyo3::types::PyList::empty_bound(py);
+        for tile in tiles {
+            let dict = pyo3::types::PyDict::new_bound(py);
+            let family = FAMILY_NAMES
+                .get(tile.family_slot as usize)
+                .copied()
+                .unwrap_or("unknown");
+            dict.set_item("family", family)?;
+            dict.set_item("family_slot", tile.family_slot)?;
+            dict.set_item("source_id", tile.source_id)?;
+            dict.set_item("tile_x", tile.tile_x)?;
+            dict.set_item("tile_y", tile.tile_y)?;
+            dict.set_item("mip_level", tile.mip_level)?;
+            dict.set_item("content_hash", to_hex(&tile.content_hash))?;
+            out.append(dict)?;
+        }
+        Ok(out.into())
+    }
+
     #[cfg(feature = "enable-renderer-config")]
     pub fn get_config(&self) -> PyResult<String> {
         let config = self
