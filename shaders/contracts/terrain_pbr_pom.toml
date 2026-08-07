@@ -14,13 +14,13 @@ requires_guards = ["max(h_max - h_min, 1e-6)"]
 [[entry]]
 name = "aether_terrain_segment_transmittance"
 proof_status = "proven"
-inputs = ["value:distance_m:0:3.4028235e38", "value:camera_height_m:0:3.4028235e38", "value:surface_height_m:0:3.4028235e38", "value:density_scale:0:10", "value:turbidity:1:10", "value:ozone_du:0:600", "value:mie_g:0:0.99"]
+inputs = ["value:distance_m:0:3.4028235e38", "value:camera_height_m:0:3.4028235e38", "value:view_mu:-1:1", "value:bottom_radius_m:1:6460000", "value:density_scale:0:10", "value:turbidity:1:10", "value:ozone_du:0:600", "value:mie_g:0:0.99"]
 outputs = ["return:0:1"]
 invariants = []
 
 [[entry]]
 name = "aether_terrain_apply_segment"
 proof_status = "proven"
-inputs = ["value:surface_radiance:-3.4028235e38:3.4028235e38", "value:distance_m:0:3.4028235e38", "value:camera_height_m:0:10000000", "value:surface_height_m:0:10000000", "value:view_direction:-20000000:20000000", "value:sun_direction:-1:1", "value:density_scale:0:10", "value:turbidity:1:10", "value:ozone_du:0:600", "value:mie_g:0:0.99", "uniform:fog_uniforms.sky_params0:0:3.4028235e38", "uniform:fog_uniforms.sky_params1:0:3.4028235e38", "uniform:fog_uniforms.aether_planet_lut:0:6460000", "texture:aether_accumulated_scattering_tex:0:65504:3:aether_accumulated_scattering_tex.width:aether_accumulated_scattering_tex.height:aether_accumulated_scattering_tex.depth"]
+inputs = ["value:surface_radiance:-3.4028235e38:3.4028235e38", "value:distance_m:0:3.4028235e38", "value:camera_height_m:0:10000000", "value:view_direction:-20000000:20000000", "value:sun_direction:-1:1", "value:density_scale:0:10", "value:turbidity:1:10", "value:ozone_du:0:600", "value:mie_g:0:0.99", "uniform:fog_uniforms.sky_params0:0:3.4028235e38", "uniform:fog_uniforms.sky_params1:0:3.4028235e38", "uniform:fog_uniforms.aether_planet_lut:0:6460000", "texture:aether_accumulated_scattering_tex:0:65504:3:aether_accumulated_scattering_tex.width:aether_accumulated_scattering_tex.height:aether_accumulated_scattering_tex.depth"]
 outputs = ["return:0:65504"]
 invariants = []

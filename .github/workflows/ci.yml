@@ -1028,8 +1028,10 @@ jobs:
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_AETHER_PHYSICAL_METAL: '1'
+          FORGE3D_AETHER_METRICS_PATH: tests/artifacts/aether/metrics.json
         run: |
           mkdir -p tests/artifacts/aether
+          git rev-parse HEAD > tests/artifacts/aether/checked-out-head.txt
           junit=tests/artifacts/aether/junit.xml
           python -m pytest \
             tests/test_atmosphere_spectral.py \
@@ -1039,7 +1041,22 @@ jobs:
             tests/test_atmosphere_lut_handoff.py \
             -v --tb=short --junitxml="$junit"
           python scripts/assert_junit_zero_skips.py "$junit"
+          python scripts/aether_acceptance_evidence.py tests/artifacts/aether \
+            --head-sha '${{ github.sha }}' \
+            --repository '${{ github.repository }}' \
+            --run-id '${{ github.run_id }}' \
+            --run-attempt '${{ github.run_attempt }}' \
+            --job '${{ github.job }}'
           echo "aether_lane=ran" >> "$GITHUB_OUTPUT"
+
+      - name: Upload AETHER physical Metal evidence
+        if: always() && steps.aether-metal-probe.outputs.probe == 'positive'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-physical-metal-evidence
+          path: tests/artifacts/aether/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Record AETHER Metal lane ABSENT
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.aether-metal-probe.outputs.probe == 'absent'

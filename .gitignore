@@ -398,6 +398,7 @@ tests/test_*examples*.py
 !tests/test_italy_forest_cover_example.py
 .superpowers/
 scripts/*
+!scripts/aether_acceptance_evidence.py
 !scripts/summarize_m06_evidence.py
 !scripts/check_anamnesis_portability.py
 !scripts/run_dupla_proof.py

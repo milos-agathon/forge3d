@@ -153,11 +153,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let endpoint_height = max(camera_height + ray.y * depth, 0.0);
+    let endpoint_height = aether_eval_spherical_altitude(
+        camera_height,
+        ray.y,
+        depth,
+        prometheus_atmosphere.planet_radii_path.x,
+    );
+    let view_sun_nu = dot(ray, sun_dir);
+    let endpoint_mus = aether_eval_spherical_endpoint_mus(
+        camera_height,
+        ray.y,
+        sun_dir.y,
+        view_sun_nu,
+        depth,
+        prometheus_atmosphere.planet_radii_path.x,
+    );
     let analytic_segment_t = aether_eval_segment_transmittance(
         depth,
         camera_height,
-        endpoint_height,
+        ray.y,
+        prometheus_atmosphere.planet_radii_path.x,
         1.0,
         prometheus_atmosphere.mie_turbidity_scales.y,
         prometheus_atmosphere.planet_radii_path.w,
@@ -167,14 +182,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         camera_height_unit,
         sun_dir.y,
         ray.y,
-        dot(ray, sun_dir),
+        view_sun_nu,
     ) * sun_intensity;
     let endpoint_height_unit = clamp(endpoint_height / atmosphere_height, 0.0, 1.0);
     let endpoint_scattering = prometheus_load_endpoint_scattering(
         endpoint_height_unit,
-        sun_dir.y,
-        ray.y,
-        dot(ray, sun_dir),
+        endpoint_mus.y,
+        endpoint_mus.x,
+        view_sun_nu,
     ) * sun_intensity;
     let distance_unit = depth / max(prometheus_atmosphere.planet_radii_path.z, 1.0);
     let aerial_mean_transmittance = prometheus_load_aerial_transmittance(

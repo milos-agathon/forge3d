@@ -68,6 +68,26 @@ XYZ_TO_NORMALIZED_LINEAR_SRGB = np.asarray(
 )
 
 
+def _record_acceptance_metric(name: str, value: object) -> None:
+    raw_path = os.environ.get("FORGE3D_AETHER_METRICS_PATH")
+    if not raw_path:
+        return
+    path = Path(raw_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {"schema_version": 1}
+    if path.is_file():
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            raise AssertionError("AETHER metrics artifact must contain a JSON object")
+        payload.update(loaded)
+    payload[name] = value
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    temporary.replace(path)
+
+
 def _mean_xyz_to_signed_linear_rgb(mean_xyz: np.ndarray) -> np.ndarray:
     return np.asarray(mean_xyz, dtype=np.float64) @ XYZ_TO_NORMALIZED_LINEAR_SRGB.T
 
@@ -377,6 +397,7 @@ def test_sky_delta_e2000_under_two_for_full_sun_elevation_sweep() -> None:
                 "prometheus_rgb": pt_pixel.tolist(),
             }
     print("AETHER_DELTA_E_SWEEP=" + json.dumps(scores, sort_keys=True))
+    _record_acceptance_metric("delta_e_sweep", scores)
     assert max(scores.values()) < DELTA_E_LIMIT, {
         "limit": DELTA_E_LIMIT,
         "comparisons": comparisons,
@@ -745,6 +766,17 @@ def test_terrain_saturation_falloff_matches_scattering_law_within_ten_percent() 
             sort_keys=True,
         )
     )
+    _record_acceptance_metric(
+        "saturation_falloff",
+        {
+            "distances_m": selected_distances,
+            "measured_saturation": measured_saturation,
+            "predicted_saturation": predicted_saturation,
+            "measured_far_near_ratio": measured_ratio,
+            "predicted_far_near_ratio": predicted_ratio,
+            "relative_error": relative_error,
+        },
+    )
     assert relative_error <= SATURATION_RELATIVE_ERROR_LIMIT
 
 
@@ -979,8 +1011,10 @@ def test_aether_shader_and_depth_source_contracts_are_locked() -> None:
     assert "nu_side < 2" in core
     assert "sun_side < 2" in core
     assert "view_side < 2" in core
-    assert "let h00 = mix(bounded_camera_height_m" in core
-    assert "let h15 = mix(bounded_camera_height_m" in core
+    assert "let h00 = aether_eval_spherical_altitude(" in core
+    assert "let h15 = aether_eval_spherical_altitude(" in core
+    assert "fn aether_eval_spherical_endpoint_mus(" in core
+    assert "mix(bounded_camera_height_m, bounded_surface_height_m" not in core
     assert "AETHER_PT_CIE_XYZ" not in prometheus
     assert "fn prometheus_mu_to_unit" not in prometheus
     assert "fn prometheus_load_scattering_texel" not in prometheus
@@ -994,6 +1028,8 @@ def test_aether_shader_and_depth_source_contracts_are_locked() -> None:
         in prometheus
     )
     assert "surface_or_environment * transmittance + finite_inscatter" in prometheus
+    assert "let endpoint_mus = aether_eval_spherical_endpoint_mus(" in prometheus
+    assert "endpoint_mus.y,\n        endpoint_mus.x," in prometheus
     aerial_loader = prometheus.split("fn prometheus_load_aerial_transmittance", 1)[1].split(
         "@compute", 1
     )[0]

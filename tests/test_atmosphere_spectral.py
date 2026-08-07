@@ -175,14 +175,16 @@ def test_aether_terrain_segment_contract_locks_actual_distance_and_domain_guards
     assert "aether_eval_sample_accumulated_scattering(" in shader
     assert "clamp(distance_m, 0.0, 20000000.0)" in evaluation_core
     assert "clamp(camera_height_m, 0.0, 100000.0)" in evaluation_core
-    assert (
-        "let h00 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.03125);"
-        in evaluation_core
-    )
-    assert (
-        "let h15 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.96875);"
-        in evaluation_core
-    )
+    assert "fn aether_eval_spherical_altitude(" in evaluation_core
+    assert "fn aether_eval_spherical_endpoint_mus(" in evaluation_core
+    assert "2.0 * radius_m * bounded_distance_m * clamp(view_mu" in evaluation_core
+    assert "let h00 = aether_eval_spherical_altitude(" in evaluation_core
+    assert "bounded_camera_height_m, view_mu," in evaluation_core
+    assert "bounded_distance_m * 0.03125, bottom_radius_m," in evaluation_core
+    assert "bounded_distance_m * 0.96875, bottom_radius_m," in evaluation_core
+    assert "mix(bounded_camera_height_m, bounded_surface_height_m" not in evaluation_core
+    assert "let endpoint_mus = aether_eval_spherical_endpoint_mus(" in shader
+    assert "endpoint_mus.y,\n        endpoint_mus.x," in shader
     assert "let rayleigh_density_sum = det_exp(-h00 / 8000.0)" in evaluation_core
     assert "let mie_density_sum = det_exp(-h00 / 1200.0)" in evaluation_core
     assert (
@@ -236,7 +238,7 @@ def test_aether_terrain_segment_contract_locks_actual_distance_and_domain_guards
     assert "sky.aerial_density must be finite and in [0.0, 10.0]" in decoder
     apply_contract = contract.split('name = "aether_terrain_apply_segment"', 1)[1]
     assert '"value:camera_height_m:0:10000000"' in apply_contract
-    assert '"value:surface_height_m:0:10000000"' in apply_contract
+    assert '"value:surface_height_m:0:10000000"' not in apply_contract
     assert '"value:view_direction:-20000000:20000000"' in apply_contract
     assert '"value:sun_direction:-1:1"' in apply_contract
     assert '"uniform:fog_uniforms.sky_params0:0:3.4028235e38"' in apply_contract
@@ -364,7 +366,7 @@ def test_oblique_zup_sky_uses_authoritative_terrain_camera() -> None:
     assert abs(authoritative_zup_eye[2] - legacy_shadow_eye[2]) > 10_000.0
 
 
-def test_terrain_segment_midpoint_columns_cover_the_full_altitude_path() -> None:
+def test_terrain_segment_midpoint_columns_cover_vertical_and_curved_paths() -> None:
     camera_height = 13_681.0
     surface_height = 0.0
     height_delta = surface_height - camera_height
@@ -404,6 +406,72 @@ def test_terrain_segment_midpoint_columns_cover_the_full_altitude_path() -> None
     assert abs(midpoint_rayleigh / exact_rayleigh_mean - 1.0) > 0.10
     assert midpoint_mie / exact_mie_mean < 0.05
     assert midpoint_ozone == 0.0
+
+    bottom_radius = 6_360_000.0
+    horizontal_distance = 200_000.0
+    midpoint_distances = horizontal_distance * midpoint_fractions
+    spherical_heights = np.sqrt(
+        (bottom_radius + surface_height) ** 2 + midpoint_distances**2
+    ) - bottom_radius
+    flat_heights = np.zeros_like(spherical_heights)
+    assert spherical_heights[-1] > 2_500.0
+    spherical_rayleigh = float(np.mean(np.exp(-spherical_heights / 8_000.0)))
+    flat_rayleigh = float(np.mean(np.exp(-flat_heights / 8_000.0)))
+    assert spherical_rayleigh < flat_rayleigh * 0.90
+
+    def endpoint_mus(
+        camera_height_m: float,
+        view_mu: float,
+        sun_mu: float,
+        view_sun_nu: float,
+        distance_m: float,
+    ) -> tuple[float, float]:
+        radius_m = bottom_radius + camera_height_m
+        endpoint_radius_m = np.sqrt(
+            radius_m**2
+            + distance_m**2
+            + 2.0 * radius_m * distance_m * view_mu
+        )
+        return (
+            (radius_m * view_mu + distance_m) / endpoint_radius_m,
+            (radius_m * sun_mu + distance_m * view_sun_nu)
+            / endpoint_radius_m,
+        )
+
+    horizon_view_mu, horizon_sun_mu = endpoint_mus(
+        0.0, 0.0, 0.5, 0.25, horizontal_distance
+    )
+    assert horizon_view_mu == pytest.approx(0.031431, rel=1.0e-5)
+    assert horizon_sun_mu > 0.5
+
+    # A descending ray must rotate both endpoint cosines into the endpoint's
+    # radial frame, not reuse camera-frame mu values.
+    start_height = 10_000.0
+    descending_view_mu = -0.02
+    descending_sun_mu = 0.4
+    view_2d = np.array(
+        [np.sqrt(1.0 - descending_view_mu**2), descending_view_mu]
+    )
+    sun_2d = np.array(
+        [np.sqrt(1.0 - descending_sun_mu**2), descending_sun_mu]
+    )
+    descending_nu = float(np.dot(view_2d, sun_2d))
+    descending_distance = 50_000.0
+    computed_view_mu, computed_sun_mu = endpoint_mus(
+        start_height,
+        descending_view_mu,
+        descending_sun_mu,
+        descending_nu,
+        descending_distance,
+    )
+    endpoint_position = np.array([0.0, bottom_radius + start_height]) + (
+        descending_distance * view_2d
+    )
+    endpoint_up = endpoint_position / np.linalg.norm(endpoint_position)
+    assert computed_view_mu == pytest.approx(float(np.dot(view_2d, endpoint_up)))
+    assert computed_sun_mu == pytest.approx(float(np.dot(sun_2d, endpoint_up)))
+    assert computed_view_mu != pytest.approx(descending_view_mu)
+    assert computed_sun_mu != pytest.approx(descending_sun_mu)
 
 
 def test_python_helper_contains_no_silent_atmosphere_fallback() -> None:

@@ -3070,7 +3070,8 @@ fn debug_water_prefilt_raw(is_water_flag: bool, prefilt_color: vec3<f32>) -> vec
 fn aether_terrain_segment_transmittance(
     distance_m: f32,
     camera_height_m: f32,
-    surface_height_m: f32,
+    view_mu: f32,
+    bottom_radius_m: f32,
     density_scale: f32,
     turbidity: f32,
     ozone_du: f32,
@@ -3082,7 +3083,8 @@ fn aether_terrain_segment_transmittance(
     return aether_eval_segment_transmittance(
         distance_m,
         camera_height_m,
-        surface_height_m,
+        view_mu,
+        bottom_radius_m,
         density_scale,
         turbidity,
         ozone_du,
@@ -3129,7 +3131,6 @@ fn aether_terrain_apply_segment(
     surface_radiance: vec3<f32>,
     distance_m: f32,
     camera_height_m: f32,
-    surface_height_m: f32,
     view_direction: vec3<f32>,
     sun_direction: vec3<f32>,
     density_scale: f32,
@@ -3137,10 +3138,29 @@ fn aether_terrain_apply_segment(
     ozone_du: f32,
     mie_g: f32,
 ) -> vec3<f32> {
+    let view = aether_terrain_finite_normalize(view_direction);
+    let bottom_radius_m = max(fog_uniforms.aether_planet_lut.x, 1.0);
+    let endpoint_height_m = aether_eval_spherical_altitude(
+        camera_height_m,
+        view.z,
+        distance_m,
+        bottom_radius_m,
+    );
+    let sun = aether_terrain_finite_normalize(sun_direction);
+    let view_sun_nu = dot(view, sun);
+    let endpoint_mus = aether_eval_spherical_endpoint_mus(
+        camera_height_m,
+        view.z,
+        sun.z,
+        view_sun_nu,
+        distance_m,
+        bottom_radius_m,
+    );
     let transmittance = aether_terrain_segment_transmittance(
         distance_m,
         camera_height_m,
-        surface_height_m,
+        view.z,
+        bottom_radius_m,
         density_scale,
         turbidity,
         ozone_du,
@@ -3149,28 +3169,27 @@ fn aether_terrain_apply_segment(
     let base_transmittance = aether_terrain_segment_transmittance(
         distance_m,
         camera_height_m,
-        surface_height_m,
+        view.z,
+        bottom_radius_m,
         1.0,
         turbidity,
         ozone_du,
         mie_g,
     );
     let bounded_surface = clamp(surface_radiance, vec3<f32>(0.0), vec3<f32>(65504.0));
-    let view = aether_terrain_finite_normalize(view_direction);
-    let sun = aether_terrain_finite_normalize(sun_direction);
     let sun_intensity = aether_eval_clamp_radiometric_scale(fog_uniforms.sky_params0.w);
     let atmosphere_exposure = aether_eval_clamp_radiometric_scale(fog_uniforms.sky_params1.w);
     let camera_scattering = aether_terrain_sample_inscatter(
         camera_height_m,
         sun.z,
         view.z,
-        dot(view, sun),
+        view_sun_nu,
     ) * sun_intensity;
     let endpoint_scattering = aether_terrain_sample_inscatter(
-        surface_height_m,
-        sun.z,
-        view.z,
-        dot(view, sun),
+        endpoint_height_m,
+        endpoint_mus.y,
+        endpoint_mus.x,
+        view_sun_nu,
     ) * sun_intensity;
     // Finite-segment radiative-transfer identity. Unlike a fog-color lerp,
     // both endpoints come from the accumulated single+higher-order LUT.
@@ -3231,7 +3250,6 @@ fn apply_atmospheric_fog(
             fog_result,
             view_distance,
             max(camera_pos.z, 0.0),
-            max(world_pos.z, 0.0),
             world_pos - camera_pos,
             fog_uniforms.aether_sun_direction.xyz,
             fog_uniforms.sky_params0.y,

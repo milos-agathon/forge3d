@@ -165,35 +165,121 @@ fn aether_eval_sample_accumulated_scattering(
     return max(accumulated.rgb, vec3<f32>(0.0));
 }
 
+fn aether_eval_spherical_radius_m(
+    camera_height_m: f32,
+    view_mu: f32,
+    distance_m: f32,
+    bottom_radius_m: f32,
+) -> f32 {
+    let radius_m = max(bottom_radius_m, 1.0) + clamp(camera_height_m, 0.0, 100000.0);
+    let bounded_distance_m = clamp(distance_m, 0.0, 20000000.0);
+    let radial_squared = max(
+        radius_m * radius_m + bounded_distance_m * bounded_distance_m
+            + 2.0 * radius_m * bounded_distance_m * clamp(view_mu, -1.0, 1.0),
+        0.0,
+    );
+    return sqrt(radial_squared);
+}
+
+fn aether_eval_spherical_altitude(
+    camera_height_m: f32,
+    view_mu: f32,
+    distance_m: f32,
+    bottom_radius_m: f32,
+) -> f32 {
+    let endpoint_radius_m = aether_eval_spherical_radius_m(
+        camera_height_m, view_mu, distance_m, bottom_radius_m,
+    );
+    return clamp(endpoint_radius_m - max(bottom_radius_m, 1.0), 0.0, 100000.0);
+}
+
+fn aether_eval_spherical_endpoint_mus(
+    camera_height_m: f32,
+    view_mu: f32,
+    sun_mu: f32,
+    view_sun_nu: f32,
+    distance_m: f32,
+    bottom_radius_m: f32,
+) -> vec2<f32> {
+    let radius_m = max(bottom_radius_m, 1.0) + clamp(camera_height_m, 0.0, 100000.0);
+    let bounded_distance_m = clamp(distance_m, 0.0, 20000000.0);
+    let endpoint_radius_m = max(
+        aether_eval_spherical_radius_m(
+            camera_height_m, view_mu, bounded_distance_m, bottom_radius_m,
+        ),
+        1.0,
+    );
+    let endpoint_view_mu =
+        (radius_m * clamp(view_mu, -1.0, 1.0) + bounded_distance_m) / endpoint_radius_m;
+    let endpoint_sun_mu = (
+        radius_m * clamp(sun_mu, -1.0, 1.0)
+            + bounded_distance_m * clamp(view_sun_nu, -1.0, 1.0)
+    ) / endpoint_radius_m;
+    return clamp(vec2<f32>(endpoint_view_mu, endpoint_sun_mu), vec2<f32>(-1.0), vec2<f32>(1.0));
+}
+
 fn aether_eval_segment_transmittance(
     distance_m: f32,
     camera_height_m: f32,
-    surface_height_m: f32,
+    view_mu: f32,
+    bottom_radius_m: f32,
     density_scale: f32,
     turbidity: f32,
     ozone_du: f32,
 ) -> vec3<f32> {
     let bounded_distance_m = clamp(distance_m, 0.0, 20000000.0);
     let bounded_camera_height_m = clamp(camera_height_m, 0.0, 100000.0);
-    let bounded_surface_height_m = clamp(surface_height_m, 0.0, 100000.0);
     // Sixteen explicit midpoint samples cover the complete camera-to-hit
-    // segment and keep the terrain standalone lemma loop-free and proofable.
-    let h00 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.03125);
-    let h01 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.09375);
-    let h02 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.15625);
-    let h03 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.21875);
-    let h04 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.28125);
-    let h05 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.34375);
-    let h06 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.40625);
-    let h07 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.46875);
-    let h08 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.53125);
-    let h09 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.59375);
-    let h10 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.65625);
-    let h11 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.71875);
-    let h12 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.78125);
-    let h13 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.84375);
-    let h14 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.90625);
-    let h15 = mix(bounded_camera_height_m, bounded_surface_height_m, 0.96875);
+    // segment along the same spherical geometry as the Bruneton bake. Keeping
+    // the samples explicit preserves the standalone shader-proof contract.
+    let h00 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.03125, bottom_radius_m,
+    );
+    let h01 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.09375, bottom_radius_m,
+    );
+    let h02 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.15625, bottom_radius_m,
+    );
+    let h03 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.21875, bottom_radius_m,
+    );
+    let h04 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.28125, bottom_radius_m,
+    );
+    let h05 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.34375, bottom_radius_m,
+    );
+    let h06 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.40625, bottom_radius_m,
+    );
+    let h07 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.46875, bottom_radius_m,
+    );
+    let h08 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.53125, bottom_radius_m,
+    );
+    let h09 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.59375, bottom_radius_m,
+    );
+    let h10 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.65625, bottom_radius_m,
+    );
+    let h11 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.71875, bottom_radius_m,
+    );
+    let h12 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.78125, bottom_radius_m,
+    );
+    let h13 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.84375, bottom_radius_m,
+    );
+    let h14 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.90625, bottom_radius_m,
+    );
+    let h15 = aether_eval_spherical_altitude(
+        bounded_camera_height_m, view_mu, bounded_distance_m * 0.96875, bottom_radius_m,
+    );
     let rayleigh_density_sum = det_exp(-h00 / 8000.0) + det_exp(-h01 / 8000.0)
         + det_exp(-h02 / 8000.0) + det_exp(-h03 / 8000.0)
         + det_exp(-h04 / 8000.0) + det_exp(-h05 / 8000.0)
