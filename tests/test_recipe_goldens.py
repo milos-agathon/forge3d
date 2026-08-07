@@ -1194,8 +1194,7 @@ def test_recipe_golden_gate_rejects_pixel_regression(
     )
 
 
-@pytest.mark.parametrize("spec", RECIPE_GOLDENS, ids=lambda item: item.scene_id)
-def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
+def _render_recipe_golden_pixels(tmp_path: Path, spec: RecipeGolden) -> None:
     if not terrain_rendering_available():
         import pytest
 
@@ -1250,4 +1249,25 @@ def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
         )
     else:
         _assert_matches_golden(spec, output_path)
+
+
+@pytest.mark.parametrize("spec", RECIPE_GOLDENS, ids=lambda item: item.scene_id)
+def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
+    """Render pixels and enforce the protected signed-certificate contract."""
+    _render_recipe_golden_pixels(tmp_path, spec)
     _emit_or_verify_certificate(spec)
+
+
+def test_nvidia_vulkan_recipe_pixel_golden_render_and_match(tmp_path: Path) -> None:
+    """Verify the required NVIDIA pixel baseline without rotating certificates.
+
+    Production certificate refresh is deliberately main-only. A candidate PR
+    can prove its backend-specific pixels on physical hardware, but it must not
+    bypass or rewrite the separately protected signed-certificate contract.
+    """
+    if not nvidia_vulkan_golden_selected("FORGE3D_RECIPE_GOLDEN_VARIANT"):
+        pytest.skip("NVIDIA/Vulkan recipe pixel proof was not selected")
+    spec = next(
+        item for item in RECIPE_GOLDENS if item.scene_id == "mapscene_terrain_raster"
+    )
+    _render_recipe_golden_pixels(tmp_path, spec)

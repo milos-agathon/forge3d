@@ -646,6 +646,25 @@ def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     assert "FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan" in golden_job
     assert "continue-on-error" not in pytest_step, "golden pytest mismatch is incorrectly non-fatal"
     assert "run_nvidia_visual_acceptance.py --suite visual" in pytest_step
+    visual_runner = (ROOT / "scripts/run_nvidia_visual_acceptance.py").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "test_recipe_goldens_render_and_match[mapscene_terrain_raster]"
+        in visual_runner
+    )
+    assert "test_nvidia_vulkan_recipe_pixel_golden_render_and_match" not in visual_runner
+    recipe_source = (ROOT / "tests/test_recipe_goldens.py").read_text(encoding="utf-8")
+    certificate_test = recipe_source.split(
+        "def test_recipe_goldens_render_and_match", 1
+    )[1].split("def test_nvidia_vulkan_recipe_pixel_golden_render_and_match", 1)[0]
+    nvidia_pixel_test = recipe_source.split(
+        "def test_nvidia_vulkan_recipe_pixel_golden_render_and_match", 1
+    )[1]
+    assert "_render_recipe_golden_pixels" in certificate_test
+    assert "_emit_or_verify_certificate(spec)" in certificate_test
+    assert "_render_recipe_golden_pixels" in nvidia_pixel_test
+    assert "_emit_or_verify_certificate" not in nvidia_pixel_test
     assert "assert_junit_zero_skips.py" in pytest_step
     assert "tests/test_astro_night_golden.py" in sidera_step
     assert "assert_junit_zero_skips.py" in sidera_step
