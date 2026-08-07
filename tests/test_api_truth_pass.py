@@ -80,6 +80,10 @@ def test_terrain_sky_storage_format_matches_rust_texture_contract() -> None:
     assert "format: wgpu::TextureFormat::Rgba8Unorm" in output
     assert "texture_storage_2d<rgba8unorm, write>" in shader
     assert "texture_storage_2d<rgba16float, write>" not in shader
+    assert "try_create_compute_pipeline_scoped" in rust
+    assert "create_compute_pipeline_scoped(" not in rust.replace(
+        "try_create_compute_pipeline_scoped(", ""
+    )
 
     visual_gate = (repo / "tests/test_terrain_visual_goldens.py").read_text(
         encoding="utf-8"

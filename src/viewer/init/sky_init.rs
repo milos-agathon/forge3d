@@ -4,12 +4,44 @@
 use std::sync::Arc;
 use wgpu::{BindGroupLayout, ComputePipeline, Device, TextureView};
 
-use crate::core::error::RenderResult;
+use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{
     tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
 };
 
 use super::super::viewer_types::SkyUniforms;
+
+/// Storage, sampling, and night-overlay format shared by every viewer sky path.
+pub const SKY_OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
+const TERRAIN_SKY_STORAGE_DECLARATION: &str =
+    "@group(0) @binding(1) var output_texture: texture_storage_2d<rgba8unorm, write>;";
+const VIEWER_SKY_STORAGE_DECLARATION: &str =
+    "@group(0) @binding(1) var output_texture: texture_storage_2d<rgba16float, write>;";
+
+/// Specialize the canonical terrain sky shader for the viewer's HDR target.
+///
+/// The terrain renderer consumes `sky.wgsl` directly with an RGBA8 storage
+/// texture. The viewer composites the SIDERA night overlay into an RGBA16F
+/// target, so it must compile an exact one-declaration specialization instead
+/// of changing the shared source and invalidating the terrain pipeline.
+fn viewer_sky_shader_source() -> RenderResult<String> {
+    specialize_viewer_sky_source(include_str!("../../shaders/sky.wgsl"))
+}
+
+fn specialize_viewer_sky_source(shared: &str) -> RenderResult<String> {
+    let declaration_count = shared.matches(TERRAIN_SKY_STORAGE_DECLARATION).count();
+    if declaration_count != 1 || shared.contains(VIEWER_SKY_STORAGE_DECLARATION) {
+        return Err(RenderError::render(format!(
+            "viewer sky specialization expected exactly one canonical RGBA8 storage declaration; found {declaration_count}"
+        )));
+    }
+    Ok(shared.replacen(
+        TERRAIN_SKY_STORAGE_DECLARATION,
+        VIEWER_SKY_STORAGE_DECLARATION,
+        1,
+    ))
+}
 
 /// Resources created during sky initialization
 pub struct SkyResources {
@@ -47,7 +79,7 @@ pub fn sky_output_descriptor(width: u32, height: u32) -> wgpu::TextureDescriptor
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
+        format: SKY_OUTPUT_FORMAT,
         usage: wgpu::TextureUsages::STORAGE_BINDING
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -82,7 +114,7 @@ pub fn create_sky_resources(
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::StorageTexture {
                     access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba16Float,
+                    format: SKY_OUTPUT_FORMAT,
                     view_dimension: wgpu::TextureViewDimension::D2,
                 },
                 count: None,
@@ -105,10 +137,11 @@ pub fn create_sky_resources(
         }],
     });
 
+    let sky_shader_source = viewer_sky_shader_source()?;
     let sky_shader = crate::core::shader_registry::create_labeled_shader_module(
         device,
         "viewer.sky.shader",
-        include_str!("../../shaders/sky.wgsl"),
+        &sky_shader_source,
     );
 
     let sky_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -117,18 +150,16 @@ pub fn create_sky_resources(
         push_constant_ranges: &[],
     });
 
-    let sky_pipeline =
-        crate::core::shader_registry::with_error_scope(device, "viewer.sky.pipeline", || {
-            crate::core::shader_registry::create_compute_pipeline_scoped(
-                device,
-                &wgpu::ComputePipelineDescriptor {
-                    label: Some("viewer.sky.pipeline"),
-                    layout: Some(&sky_pl),
-                    module: &sky_shader,
-                    entry_point: "cs_render_sky",
-                },
-            )
-        });
+    let sky_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("viewer.sky.pipeline"),
+            layout: Some(&sky_pl),
+            module: &sky_shader,
+            entry_point: "cs_render_sky",
+        },
+    )
+    .map_err(|message| RenderError::render(format!("viewer.sky.pipeline: {message}")))?;
 
     let sky_params_data = SkyUniforms::new([0.3, 0.8, -0.5], 2.0, 0.3, 1.0, 5.0, 1.0, 0);
     let sky_params = tracked_create_buffer_init(
@@ -226,12 +257,8 @@ pub fn create_sky_resources(
         make_present_pipeline("viewer.sky.present.depth_pipeline", true);
     let sky_present_flat_pipeline =
         make_present_pipeline("viewer.sky.present.flat_pipeline", false);
-    let night = crate::astro::night_gpu::create_resources(
-        device,
-        queue,
-        &sky_bgl1,
-        wgpu::TextureFormat::Rgba16Float,
-    )?;
+    let night =
+        crate::astro::night_gpu::create_resources(device, queue, &sky_bgl1, SKY_OUTPUT_FORMAT)?;
 
     Ok(SkyResources {
         sky_bind_group_layout0: sky_bgl0,
@@ -291,8 +318,36 @@ fn sky_present_depth_state(depth_aware: bool) -> Option<wgpu::DepthStencilState>
 
 #[cfg(test)]
 mod tests {
-    use super::{create_sky_resources, sky_present_depth_state};
+    use super::{
+        create_sky_resources, sky_output_descriptor, sky_present_depth_state,
+        specialize_viewer_sky_source, viewer_sky_shader_source, SKY_OUTPUT_FORMAT,
+        TERRAIN_SKY_STORAGE_DECLARATION, VIEWER_SKY_STORAGE_DECLARATION,
+    };
     use std::sync::Arc;
+
+    #[test]
+    fn viewer_specialization_preserves_the_canonical_terrain_storage_format() {
+        let shared = include_str!("../../shaders/sky.wgsl");
+        let viewer = viewer_sky_shader_source().expect("viewer sky specialization");
+        assert_eq!(sky_output_descriptor(1, 1).format, SKY_OUTPUT_FORMAT);
+        assert_eq!(shared.matches(TERRAIN_SKY_STORAGE_DECLARATION).count(), 1);
+        assert!(!shared.contains(VIEWER_SKY_STORAGE_DECLARATION));
+        assert_eq!(viewer.matches(VIEWER_SKY_STORAGE_DECLARATION).count(), 1);
+        assert!(!viewer.contains(TERRAIN_SKY_STORAGE_DECLARATION));
+    }
+
+    #[test]
+    fn viewer_specialization_rejects_storage_abi_drift() {
+        assert!(specialize_viewer_sky_source("// missing declaration").is_err());
+        assert!(specialize_viewer_sky_source(&format!(
+            "{TERRAIN_SKY_STORAGE_DECLARATION}\n{TERRAIN_SKY_STORAGE_DECLARATION}"
+        ))
+        .is_err());
+        assert!(specialize_viewer_sky_source(&format!(
+            "{TERRAIN_SKY_STORAGE_DECLARATION}\n{VIEWER_SKY_STORAGE_DECLARATION}"
+        ))
+        .is_err());
+    }
 
     #[test]
     fn creates_sky_pipeline_when_adapter_available() {
