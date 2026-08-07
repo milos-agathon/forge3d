@@ -16,15 +16,19 @@ See VERIFY.md for the check procedure.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import math
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import rasterio
 from PIL import Image
 
-CAPSULE_DIR = Path(__file__).resolve().parent
+RECIPE_PATH = Path(__file__).resolve()
+CAPSULE_DIR = RECIPE_PATH.parent
 EXAMPLES_DIR = CAPSULE_DIR.parents[1]          # examples/
 if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
@@ -36,6 +40,7 @@ import forge3d as f3d                                   # noqa: E402
 OUT_DIR = CAPSULE_DIR / "out"
 SNAPSHOT = OUT_DIR / "swiss_landcover.png"
 CERT_PATH = OUT_DIR / "local.certificate.json"
+RESULT_PATH = OUT_DIR / "recipe_result.json"
 
 # Proven Swiss PT register — the swiss_landcover_pt_3d.py CLI defaults, frozen.
 GRID_MAX = 1536
@@ -52,6 +57,12 @@ SUPERSAMPLE = 2
 EXIT_NO_GPU = 2
 EXIT_NO_HITS = 3
 EXIT_NO_CERT = 4
+
+# The traced heightfield is the full DEM rectangle, and _load_dem_grid scales
+# that rectangle by a single factor, so the hit region and the overlay must
+# share an aspect ratio to within pixel quantisation. Anything larger means the
+# light field is misregistered and would be stretched onto the map.
+ASPECT_TOLERANCE = 0.02
 
 # --- PT scene parameters (swiss_landcover_pt_3d.py lines 43-53, verbatim) ----
 SPAN_X = 100.0
@@ -256,6 +267,69 @@ def _modulate_overlay(overlay_path: Path, shade: np.ndarray, tint: np.ndarray) -
     return Image.fromarray(overlay, mode="RGBA")
 
 
+def _crop_aspect_report(hit: np.ndarray, overlay_size: tuple[int, int]) -> tuple[str, float]:
+    """Compare the traced hit region's aspect against the overlay's.
+
+    This is the aspect leg of the EXIT_NO_HITS guard. The upstream
+    _shade_on_overlay_grid has no such check: it crops to the hit bounding box
+    and resizes straight onto the overlay, so a framing regression would show
+    up as silently stretched shading rather than an error.
+
+    Returns a human-readable report line and the relative mismatch.
+    """
+    ys, xs = np.nonzero(hit)
+    crop_w = int(xs.max()) - int(xs.min()) + 1
+    crop_h = int(ys.max()) - int(ys.min()) + 1
+    crop_aspect = crop_w / crop_h
+    overlay_aspect = overlay_size[0] / overlay_size[1]
+    mismatch = abs(crop_aspect - overlay_aspect) / overlay_aspect
+    report = (
+        f"hit region {crop_w}x{crop_h} (aspect {crop_aspect:.4f}) vs overlay "
+        f"{overlay_size[0]}x{overlay_size[1]} (aspect {overlay_aspect:.4f}), "
+        f"mismatch {mismatch:.2%} (tolerance {ASPECT_TOLERANCE:.0%})"
+    )
+    return report, mismatch
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_recipe_result(
+    result_path: Path,
+    *,
+    snapshot: Path,
+    certificate: Path,
+    inputs: list[tuple[str, Path]],
+    recipe_path: Path | None = None,
+) -> dict:
+    """Write the binding manifest for one run.
+
+    The RenderCertificate covers only the final path-traced tile pass. This
+    manifest binds the recipe source, the exact input rasters and the final
+    image together by hash, so a verifier can tell whether two runs used the
+    same code and the same data.
+    """
+    payload = {
+        "png_sha256": _sha256(snapshot),
+        "inputs": [
+            {"name": name, "path_name": Path(path).name, "sha256": _sha256(path)}
+            for name, path in inputs
+        ],
+        "recipe_sha256": _sha256(recipe_path if recipe_path is not None else RECIPE_PATH),
+        "certificate_sha256": _sha256(certificate),
+        "forge3d_version": f3d.__version__,
+        "created": datetime.now(timezone.utc).date().isoformat(),
+    }
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
 def _present_classes(classes: np.ndarray) -> list[int]:
     """Legend classes actually present, derived exactly as
     bosnia_terrain_landcover_viewer._build_overlay derives `present`
@@ -294,6 +368,11 @@ def main() -> int:
               "(no CPU fallback is offered).", file=sys.stderr)
         return EXIT_NO_GPU
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # Clear every success artifact up front (CERT_PATH is cleared just before
+    # tracing), so a failed run can never leave a previous run's outputs behind
+    # looking like this one succeeded.
+    SNAPSHOT.unlink(missing_ok=True)
+    RESULT_PATH.unlink(missing_ok=True)
     canvas_size = (SNAPSHOT_SIZE[0] * SUPERSAMPLE, SNAPSHOT_SIZE[1] * SUPERSAMPLE)
 
     print("== Fetching pinned datasets (sha256-checked by the registry) ==")
@@ -330,6 +409,12 @@ def main() -> int:
     print("== Modulating overlay + composing plate ==")
     with Image.open(overlay_path) as probe:
         overlay_size = probe.size
+    aspect_report, mismatch = _crop_aspect_report(hit, overlay_size)
+    print(f"[PT] {aspect_report}")
+    if mismatch > ASPECT_TOLERANCE:
+        print(f"ERROR: path-traced light field does not register with the map: "
+              f"{aspect_report}. Check camera framing.", file=sys.stderr)
+        return EXIT_NO_HITS
     shade, tint = _shade_on_overlay_grid(rgb_field, hit, overlay_size)
     raw = _modulate_overlay(overlay_path, shade, tint)
     raw_plate = OUT_DIR / f".{SNAPSHOT.stem}_raw.png"
@@ -343,7 +428,14 @@ def main() -> int:
     if not CERT_PATH.is_file():
         print("ERROR: render completed but no certificate was emitted.", file=sys.stderr)
         return EXIT_NO_CERT
-    print(f"Success! Map: {SNAPSHOT}\nCertificate (development-signed): {CERT_PATH}")
+    result = write_recipe_result(
+        RESULT_PATH,
+        snapshot=SNAPSHOT,
+        certificate=CERT_PATH,
+        inputs=[("swiss", dem_path), ("swiss-land-cover", lc_path)],
+    )
+    print(f"Success! Map: {SNAPSHOT}\nCertificate (development-signed): {CERT_PATH}\n"
+          f"Result manifest: {RESULT_PATH} (png sha256 {result['png_sha256'][:16]}...)")
     return 0
 
 
