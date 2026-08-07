@@ -641,6 +641,11 @@ def _pyramid_dem(path: Path, n: int = 512, pix: float = 20.0) -> Path:
 
 
 @pytest.mark.skipif(not _rasterio_available(), reason="rasterio not installed")
+@pytest.mark.skipif(
+    os.environ.get("RUN_M06_VIEWER_CI") != "1",
+    reason="required M-06 NVIDIA/Vulkan viewer lane only",
+)
+@pytest.mark.interactive_viewer
 @pytest.mark.viewer
 class TestEvsmExposureParity:
     """EVSM must light the scene like the other techniques, not black it out.

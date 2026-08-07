@@ -432,8 +432,12 @@ def test_e_slow_lane_is_marker_selected_and_accounted():
     slow_args = ci_pytest_lane.build_pytest_args(
         "full", [ci_pytest_lane.SLOW_LANE_SELECTOR]
     )
-    assert default_args[default_args.index("-m") + 1] == "not slow"
-    assert slow_args[slow_args.index("-m") + 1] == "slow"
+    assert default_args[default_args.index("-m") + 1] == (
+        "not slow and not interactive_viewer"
+    )
+    assert slow_args[slow_args.index("-m") + 1] == (
+        "slow and not interactive_viewer"
+    )
     assert ci_pytest_lane.SLOW_LANE_SELECTOR not in slow_args
 
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
