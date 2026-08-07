@@ -360,9 +360,11 @@ def thresholds_calibrated(config) -> bool:
     """True once Task 4's calibration has pinned both thresholds."""
     if not isinstance(config, dict):
         return False
-    return isinstance(config.get("ssim_min"), (int, float)) and isinstance(
-        config.get("mean_abs_max"), (int, float)
-    )
+
+    def _number(value) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    return _number(config.get("ssim_min")) and _number(config.get("mean_abs_max"))
 
 
 # ---------------------------------------------------------------------------
@@ -496,41 +498,43 @@ def verify(capsule_dir, *, config, dataset_paths, write: bool = True) -> dict:
             continue
         dataset_hashes[name] = sha256_file(path)
 
-    if dataset_problems and not dataset_hashes:
-        record("input_hashes_match", NOT_EVALUATED, "; ".join(dataset_problems))
+    problems = list(dataset_problems)
+    pinned = None
+    if not manifest_problems:
+        pinned = {entry["name"]: entry["sha256"] for entry in manifest["datasets"]}
+        unchecked = sorted(set(pinned) - set(DATASET_NAMES))
+        if unchecked:
+            problems.append(
+                f"{DATA_MANIFEST_NAME} lists datasets this verifier does not "
+                f"resolve: {', '.join(unchecked)}"
+            )
     else:
-        problems = list(dataset_problems)
-        pinned = {}
-        if not manifest_problems:
-            pinned = {entry["name"]: entry["sha256"] for entry in manifest["datasets"]}
-            unchecked = sorted(set(pinned) - set(DATASET_NAMES))
-            if unchecked:
-                problems.append(
-                    f"{DATA_MANIFEST_NAME} lists datasets this verifier does not "
-                    f"resolve: {', '.join(unchecked)}"
-                )
-        recorded = {}
-        if result is not None:
-            recorded = {entry["name"]: entry["sha256"] for entry in result["inputs"]}
-        for name, digest in dataset_hashes.items():
-            if pinned and pinned.get(name) != digest:
-                problems.append(
-                    f"{name}: fetched bytes {digest[:16]}... != pinned "
-                    f"{str(pinned.get(name))[:16]}... in {DATA_MANIFEST_NAME}"
-                )
-            if recorded and recorded.get(name) != digest:
-                problems.append(
-                    f"{name}: fetched bytes {digest[:16]}... != {BINDING_NAME} "
-                    f"{str(recorded.get(name))[:16]}..."
-                )
-            if not pinned and not recorded:
-                problems.append(f"{name}: nothing to compare against (manifests invalid)")
-        record_bool(
-            "input_hashes_match",
-            not problems,
-            "; ".join(problems)
-            or ", ".join(f"{name} {digest[:16]}..." for name, digest in dataset_hashes.items()),
-        )
+        problems.append(f"{DATA_MANIFEST_NAME} invalid: pinned hashes unusable")
+    # A binding manifest that simply omits an input must not silence the
+    # cross-check, so every expected dataset is looked up by name.
+    recorded = None
+    if result is not None:
+        recorded = {entry["name"]: entry["sha256"] for entry in result["inputs"]}
+    else:
+        problems.append(f"out/{BINDING_NAME} invalid: recorded hashes unusable")
+    for name, digest in dataset_hashes.items():
+        if pinned is not None and pinned.get(name) != digest:
+            problems.append(
+                f"{name}: fetched bytes {digest[:16]}... != pinned "
+                f"{str(pinned.get(name))[:16]}... in {DATA_MANIFEST_NAME}"
+            )
+        if recorded is not None and recorded.get(name) != digest:
+            problems.append(
+                f"{name}: fetched bytes {digest[:16]}... != {BINDING_NAME} "
+                f"{str(recorded.get(name))[:16]}..."
+            )
+    # Inputs we could not hash are UNRUN, not FAIL: nothing was measured.
+    record(
+        "input_hashes_match",
+        NOT_EVALUATED if dataset_problems else (PASS if not problems else FAIL),
+        "; ".join(problems)
+        or ", ".join(f"{name} {digest[:16]}..." for name, digest in dataset_hashes.items()),
+    )
 
     def _hash_check(name: str, path: Path, expected_key: str) -> None:
         if not path.is_file():

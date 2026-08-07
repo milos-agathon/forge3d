@@ -503,6 +503,31 @@ def test_verify_flags_manifest_datasets_it_cannot_resolve(tmp_path):
     assert "extra" in payload["checks"]["input_hashes_match"]["detail"]
 
 
+def test_verify_does_not_let_an_emptied_binding_silence_the_input_check(tmp_path):
+    v = _load_verify_module()
+    capsule, paths = _build_synthetic_capsule(tmp_path)
+    binding = json.loads((capsule / "out" / "recipe_result.json").read_text(encoding="utf-8"))
+    binding["inputs"] = []
+    _write_json(capsule / "out" / "recipe_result.json", binding)
+    payload = v.verify(
+        capsule, config={"ssim_min": 0.99, "mean_abs_max": 2.0}, dataset_paths=paths
+    )
+    assert payload["passed"] is False
+    assert payload["checks"]["input_hashes_match"]["ok"] is False
+
+
+def test_verify_marks_unhashable_inputs_unrun_not_passed(tmp_path):
+    v = _load_verify_module()
+    capsule, paths = _build_synthetic_capsule(tmp_path)
+    paths["swiss"].unlink()
+    payload = v.verify(
+        capsule, config={"ssim_min": 0.99, "mean_abs_max": 2.0}, dataset_paths=paths
+    )
+    assert payload["passed"] is False
+    assert payload["checks"]["input_hashes_match"]["status"] == "not-evaluated"
+    assert "input_hashes_match" in payload["failed_checks"]
+
+
 def test_verify_refuses_an_uncalibrated_config(tmp_path):
     v = _load_verify_module()
     capsule, paths = _build_synthetic_capsule(tmp_path)
