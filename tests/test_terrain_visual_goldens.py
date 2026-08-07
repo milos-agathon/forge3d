@@ -213,6 +213,28 @@ def _assert_matches_golden(scene_name: str, actual: np.ndarray) -> None:
     assert mean_abs <= 2.0, f"{scene_name} mean absolute difference too high: {mean_abs:.4f}"
 
 
+def _assert_sky_scene_is_meaningful(scene_name: str, actual: np.ndarray) -> None:
+    if scene_name not in {"terrain_atmosphere", "terrain_low_sun_sky"}:
+        return
+    rgb = np.asarray(actual[..., :3], dtype=np.float64)
+    if rgb.size and float(rgb.max()) <= 1.5:
+        rgb = rgb * 255.0
+    # Both fixed fixtures reserve the upper eighth for unobstructed sky. Test
+    # that region rather than the whole frame so lit terrain cannot hide a
+    # missing/black atmosphere during an intentional baseline refresh.
+    sky_band = rgb[: max(rgb.shape[0] // 8, 1)]
+    luminance = (
+        0.2126 * sky_band[..., 0]
+        + 0.7152 * sky_band[..., 1]
+        + 0.0722 * sky_band[..., 2]
+    )
+    assert float(luminance.mean()) > 20.0, f"{scene_name} collapsed to a black sky"
+    assert float((luminance > 10.0).mean()) > 0.9, (
+        f"{scene_name} has too little visible sky coverage"
+    )
+    assert float(luminance.std()) > 1.0, f"{scene_name} lost visible sky variation"
+
+
 @pytest.fixture(scope="module")
 def terrain_golden_env():
     session = f3d.Session(window=False)
@@ -339,4 +361,5 @@ def test_terrain_visual_goldens(terrain_golden_env, scene_name: str, scene_kwarg
         kwargs["water_mask"] = water_mask
 
     actual = _render_scene(renderer, material_set, ibl, heightmap, overlay, **kwargs)
+    _assert_sky_scene_is_meaningful(scene_name, actual)
     _assert_matches_golden(scene_name, actual)
