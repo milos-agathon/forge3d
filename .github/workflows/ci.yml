@@ -997,7 +997,11 @@ jobs:
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression 'tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]' -v --tb=short
 
       - name: Probe AETHER physical Metal closure backend
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1'
+        # Preserve independent AETHER evidence even when an earlier visual-
+        # golden/certificate gate fails. The job remains failed;
+        # `!cancelled()` bypasses only the implicit success gate while still
+        # honoring an operator cancellation.
+        if: ${{ !cancelled() && env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' }}
         id: aether-metal-probe
         shell: bash
         env:
@@ -1017,13 +1021,14 @@ jobs:
           fi
 
       - name: Verify exact AETHER wheel custom-bake provenance
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.aether-metal-probe.outputs.probe == 'positive'
+        if: ${{ !cancelled() && env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.aether-metal-probe.outputs.probe == 'positive' }}
+        id: aether_custom_bake
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: python -c 'from forge3d._native import get_native_module; h=get_native_module().atmosphere_bake_luts(ozone_du=321.0, mie_g=0.71, ground_albedo=0.42, scattering_orders=2); assert h.precomputed is False'
 
       - name: Run AETHER Metal closure and golden gates
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.aether-metal-probe.outputs.probe == 'positive'
+        if: ${{ !cancelled() && env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.aether-metal-probe.outputs.probe == 'positive' && steps.aether_custom_bake.outcome == 'success' }}
         id: aether-ran
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
@@ -1059,7 +1064,7 @@ jobs:
           retention-days: 30
 
       - name: Record AETHER Metal lane ABSENT
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.aether-metal-probe.outputs.probe == 'absent'
+        if: ${{ !cancelled() && env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.aether-metal-probe.outputs.probe == 'absent' }}
         id: aether-absent
         shell: bash
         run: |
@@ -1068,7 +1073,7 @@ jobs:
           echo "aether_lane=absent" >> "$GITHUB_OUTPUT"
 
       - name: Record AETHER Metal lane ABSENT under software override
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1'
+        if: ${{ !cancelled() && env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1' }}
         id: aether-software-absent
         shell: bash
         run: |
@@ -1077,7 +1082,7 @@ jobs:
           echo "aether_lane=absent" >> "$GITHUB_OUTPUT"
 
       - name: Upload AETHER Metal lane marker
-        if: steps.aether-absent.outcome == 'success' || steps.aether-software-absent.outcome == 'success'
+        if: always() && (steps.aether-absent.outcome == 'success' || steps.aether-software-absent.outcome == 'success')
         uses: actions/upload-artifact@v4
         with:
           name: aether-metal-lane-marker

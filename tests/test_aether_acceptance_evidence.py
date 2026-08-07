@@ -212,3 +212,38 @@ def test_workflow_retains_exact_head_aether_evidence() -> None:
     assert "name: aether-physical-metal-evidence" in workflow
     assert "path: tests/artifacts/aether/" in workflow
     assert "if-no-files-found: error" in workflow
+
+    # An unrelated signed-golden failure must not suppress AETHER's own
+    # physical proof or its honest ABSENT marker. `!cancelled()` bypasses an
+    # earlier failure without defeating operator cancellation, while uploads
+    # deliberately retain diagnostics under `always()`.
+    executable_steps = (
+        "Probe AETHER physical Metal closure backend",
+        "Verify exact AETHER wheel custom-bake provenance",
+        "Run AETHER Metal closure and golden gates",
+        "Record AETHER Metal lane ABSENT",
+        "Record AETHER Metal lane ABSENT under software override",
+    )
+    blocks: dict[str, str] = {}
+    for step_name in executable_steps:
+        marker = f"      - name: {step_name}"
+        assert marker in workflow
+        block = workflow.split(marker, 1)[1].split("\n      - name:", 1)[0]
+        blocks[step_name] = block
+        assert "!cancelled()" in block, f"{step_name} can be suppressed"
+        assert "if: always()" not in block
+        assert "continue-on-error: true" not in block
+
+    provenance = blocks["Verify exact AETHER wheel custom-bake provenance"]
+    closure = blocks["Run AETHER Metal closure and golden gates"]
+    assert "id: aether_custom_bake" in provenance
+    assert "steps.aether_custom_bake.outcome == 'success'" in closure
+
+    for step_name in (
+        "Upload AETHER physical Metal evidence",
+        "Upload AETHER Metal lane marker",
+    ):
+        marker = f"      - name: {step_name}"
+        assert marker in workflow
+        block = workflow.split(marker, 1)[1].split("\n      - name:", 1)[0]
+        assert "if: always()" in block, f"{step_name} drops diagnostics"
