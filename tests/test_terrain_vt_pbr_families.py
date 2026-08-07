@@ -573,13 +573,16 @@ def test_native_stub_exposes_raw_shader_feedback_records() -> None:
 
 
 def test_shader_carries_family_info_and_residency_gate() -> None:
-    shader = (
-        Path(__file__).resolve().parents[1] / "src" / "shaders" / "terrain_pbr_pom.wgsl"
-    ).read_text(encoding="utf-8")
+    shader_dir = Path(__file__).resolve().parents[1] / "src" / "shaders"
+    shader = (shader_dir / "terrain_pbr_pom.wgsl").read_text(encoding="utf-8")
+    visibility_shader = (shader_dir / "terrain_visibility_fullscreen.wgsl").read_text(
+        encoding="utf-8"
+    )
     for token in (
         "struct TerrainVtFamilyInfo",
         "family_info: array<TerrainVtFamilyInfo, 3>",
         "fn terrain_vt_triplanar_feedback_uvs(",
+        "fn terrain_vt_triplanar_feedback_uvs_from_gradients(",
         "fn terrain_vt_write_surface_feedback(",
         "fn terrain_vt_resolve_family_uv(",
         "fn terrain_vt_sample_family_data(",
@@ -593,15 +596,84 @@ def test_shader_carries_family_info_and_residency_gate() -> None:
     ):
         assert token in shader, f"missing hardened VT shader token: {token}"
 
-    grid_feedback_args = (
-        "grid_uv,\n"
-        "            terrain_screen_ddx_uv(grid_uv),\n"
-        "            terrain_screen_ddy_uv(grid_uv),\n"
-        "            material_index,"
-    )
-    assert shader.count(grid_feedback_args) == 2, (
-        "normal and mask feedback must use the same GridVertex UV derivatives"
-    )
+    feedback_fn = shader.split("fn terrain_vt_write_surface_feedback(", 1)[1].split(
+        "// Shared residency-gated page walk.", 1
+    )[0]
+    for derivative_token in (
+        "terrain_screen_ddx",
+        "terrain_screen_ddy",
+        "dpdx",
+        "dpdy",
+        "fwidth",
+    ):
+        assert derivative_token not in feedback_fn
+    assert "world_feedback_ddx: vec3<f32>" in feedback_fn
+    assert "world_feedback_ddy: vec3<f32>" in feedback_fn
+    assert feedback_fn.count("grid_feedback_ddx,") == 2
+    assert feedback_fn.count("grid_feedback_ddy,") == 2
+
+    triplanar_from_gradients = shader.split(
+        "fn terrain_vt_triplanar_feedback_uvs_from_gradients(", 1
+    )[1].split("fn terrain_vt_triplanar_feedback_uvs(", 1)[0]
+    for derivative_token in (
+        "terrain_screen_ddx",
+        "terrain_screen_ddy",
+        "dpdx",
+        "dpdy",
+        "fwidth",
+    ):
+        assert derivative_token not in triplanar_from_gradients
+    assert "let scaled_ddx_world = ddx_world * scale;" in triplanar_from_gradients
+    assert "let scaled_ddy_world = ddy_world * scale;" in triplanar_from_gradients
+
+    forward_fn = shader.split("fn fs_main(input : VertexOutput)", 1)[1].split(
+        "// TESSELLA pass 1", 1
+    )[0]
+    shade_offset = forward_fn.index("let out = shade_main(input);")
+    for declaration in (
+        "let feedback_ddx_uv = terrain_screen_ddx_uv(input.tex_coord);",
+        "let feedback_ddy_uv = terrain_screen_ddy_uv(input.tex_coord);",
+        "let feedback_ddx_world = terrain_screen_ddx_world(input.world_position);",
+        "let feedback_ddy_world = terrain_screen_ddy_world(input.world_position);",
+    ):
+        assert forward_fn.index(declaration) < shade_offset
+    for argument in (
+        "feedback_ddx_uv,",
+        "feedback_ddy_uv,",
+        "feedback_ddx_world,",
+        "feedback_ddy_world,",
+    ):
+        assert argument in forward_fn
+
+    fullscreen_fn = visibility_shader.split(
+        "fn fs_visibility_resolve_fullscreen(", 1
+    )[1].split("fn fs_visibility_geometry(", 1)[0]
+    feedback_call_offset = fullscreen_fn.index("terrain_vt_write_surface_feedback(")
+    for declaration in (
+        "let feedback_ddx_uv = anchor10.uv - anchor00.uv;",
+        "let feedback_ddy_uv = anchor01.uv - anchor00.uv;",
+        "let feedback_ddx_world = anchor10.world - anchor00.world;",
+        "let feedback_ddy_world = anchor01.world - anchor00.world;",
+    ):
+        assert fullscreen_fn.index(declaration) < feedback_call_offset
+
+    geometry_fn = visibility_shader.split("fn fs_visibility_geometry(", 1)[1]
+    discard_offset = geometry_fn.index("if (encoded != expected)")
+    for declaration in (
+        "let resolve_ddx_uv = dpdx(input.tex_coord);",
+        "let resolve_ddy_uv = dpdy(input.tex_coord);",
+        "let resolve_ddx_world = dpdx(input.world_position);",
+        "let resolve_ddy_world = dpdy(input.world_position);",
+    ):
+        assert geometry_fn.index(declaration) < discard_offset
+    geometry_feedback = geometry_fn.split("terrain_vt_write_surface_feedback(", 1)[1]
+    for argument in (
+        "resolve_ddx_uv,",
+        "resolve_ddy_uv,",
+        "resolve_ddx_world,",
+        "resolve_ddy_world,",
+    ):
+        assert argument in geometry_feedback
 
     # Mixed layer lock: a resident zero-roughness half and a missing half keep
     # the missing layer's weighted base roughness instead of double-blending 1.
