@@ -7,6 +7,16 @@ use crate::terrain::render_params;
 
 const TERRAIN_AOV_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
+fn ensure_aov_shading_supported(shading: &str) -> Result<()> {
+    if shading == "visibility" {
+        return Err(anyhow!(
+            "terrain AOV capture does not support shading='visibility'; use \
+             render_terrain_pbr_pom for visibility rendering"
+        ));
+    }
+    Ok(())
+}
+
 pub(super) struct AovAttachmentTarget {
     pub(super) internal_texture: TrackedTexture,
     pub(super) internal_view: wgpu::TextureView,
@@ -485,6 +495,7 @@ impl TerrainScene {
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
+        ensure_aov_shading_supported(&params.shading)?;
         let (certificate_capture, _allocation_scope) =
             self.begin_certificate_capture("terrain.render_internal_with_aov");
         let decoded = params.decoded();
@@ -982,5 +993,20 @@ impl TerrainScene {
             log::info!(target: "color.debug", "║ LUT texture bound: no");
         }
         log::info!(target: "color.debug", "╚══════════════════════════════════════════════════");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_aov_shading_supported;
+
+    #[test]
+    fn visibility_aov_is_rejected_instead_of_silently_rendering_forward() {
+        ensure_aov_shading_supported("forward").expect("forward AOV must remain supported");
+        let error = ensure_aov_shading_supported("visibility")
+            .expect_err("visibility AOV must fail closed until it has a real resolve path");
+        assert!(error
+            .to_string()
+            .contains("does not support shading='visibility'"));
     }
 }

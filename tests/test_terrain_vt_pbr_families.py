@@ -1387,8 +1387,29 @@ class TestTerrainVTPbrFamilies:
                 vt_upload_budget_bytes=1024 * 1024,
             )
             render_env = vt_render_env
-        _render_beauty(render_env, render_params)
         if shading == "visibility":
+            material_set, ibl, heightmap = render_env[1:]
+            with pytest.raises(
+                RuntimeError, match="does not support shading='visibility'"
+            ):
+                renderer.render_with_aov(
+                    material_set=material_set,
+                    env_maps=ibl,
+                    params=render_params,
+                    heightmap=heightmap,
+                )
+            frame = renderer.render_terrain_pbr_pom(
+                material_set=material_set,
+                env_maps=ibl,
+                params=render_params,
+                heightmap=heightmap,
+                target=None,
+                water_mask=None,
+            )
+            image = np.asarray(frame.to_numpy())
+            assert _is_meaningful_render(image), (
+                "visibility terrain render returned a magenta/empty marker"
+            )
             resolve_stats = visibility_stats()
             assert resolve_stats["visible_pixels"] > 0
             assert (
@@ -1404,6 +1425,8 @@ class TestTerrainVTPbrFamilies:
                 resolve_stats["material_invocations"]
                 == resolve_stats["visible_pixels"]
             )
+        else:
+            _render_beauty(render_env, render_params)
         records = [tuple(int(value) for value in record) for record in renderer.read_latest_vt_shader_feedback()]
         assert records, f"{shading} produced no raw VT shader feedback"
         assert all(len(record) == 5 for record in records)
