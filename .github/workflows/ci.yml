@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 3
+          fetch-depth: 0
 
       - uses: actions/setup-python@v4
         with:
@@ -43,13 +43,19 @@ jobs:
         shell: pwsh
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_TEST_INSTALLED_WHEEL: '1'
         run: |
+          $wheel = Get-ChildItem dist/*.whl
+          if ($wheel.Count -ne 1) { throw "Expected exactly one release wheel" }
+          Get-FileHash $wheel.FullName -Algorithm SHA256 |
+            Format-List | Out-File -Encoding utf8 egm96-windows-baseline.txt
           python -m pytest `
             tests/test_install_smoke.py::test_pre_selene_egm96_windows_release_byte_lock `
-            -v -s --tb=short 2>&1 | Tee-Object egm96-windows-baseline.txt
+            -v -s --tb=short 2>&1 | Tee-Object -Append egm96-windows-baseline.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload SHA-bound baseline evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: egm96-windows-baseline

@@ -119,10 +119,30 @@ def test_pre_selene_egm96_windows_release_byte_lock():
     import forge3d
 
     root = Path(__file__).resolve().parent.parent
-    baseline_source = subprocess.check_output(
-        ["git", "rev-parse", "HEAD~2"], cwd=root, text=True
-    ).strip()
-    assert baseline_source == "7fa1b98464a44b672ebf9077503ad354a2a9285a"
+    baseline_source = "7fa1b98464a44b672ebf9077503ad354a2a9285a"
+    assert (
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", baseline_source, "HEAD"],
+            cwd=root,
+            check=False,
+        ).returncode
+        == 0
+    )
+    changed_files = subprocess.check_output(
+        ["git", "diff", "--name-only", f"{baseline_source}..HEAD"],
+        cwd=root,
+        text=True,
+    ).splitlines()
+    assert set(changed_files) == {
+        ".github/workflows/ci.yml",
+        "tests/test_install_smoke.py",
+    }
+    tracked_status = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=root,
+        text=True,
+    )
+    assert tracked_status == ""
     source_hashes = {
         "src/geo/geoid.rs": "fd9410f851ce7433102d6e40b052f8c76c0c9406be09b2833c819598e7b314c1",
         "assets/geoid/egm96_n120.bin": "b640e9dcefd1040f0b184a101e1eab2740486a85680a560080ec091eab796fe4",
@@ -130,7 +150,17 @@ def test_pre_selene_egm96_windows_release_byte_lock():
         "pyproject.toml": "b9013b02c47808c345f12320c7c7ec77e3f14d89a4b90ddb66c5cef3bb0888a4",
     }
     for relative, expected in source_hashes.items():
-        assert hashlib.sha256((root / relative).read_bytes()).hexdigest() == expected
+        # Hash the canonical Git object rather than platform checkout bytes.
+        # Windows checkout may convert tracked text files to CRLF even though
+        # the exact commit and the compiled source semantics are unchanged.
+        baseline_bytes = subprocess.check_output(
+            ["git", "show", f"{baseline_source}:{relative}"], cwd=root
+        )
+        head_bytes = subprocess.check_output(
+            ["git", "show", f"HEAD:{relative}"], cwd=root
+        )
+        assert head_bytes == baseline_bytes
+        assert hashlib.sha256(baseline_bytes).hexdigest() == expected
 
     payload = b"".join(
         struct.pack("<d", forge3d.geoid_undulation(lat, lon))
