@@ -302,10 +302,14 @@ fn fs_visibility_resolve_fullscreen(
         quad_origin + vec2<f32>(1.0, 0.0), v0, v1, v2, w, dimensions);
     let anchor01 = visibility_sample_surface(
         quad_origin + vec2<f32>(0.0, 1.0), v0, v1, v2, w, dimensions);
-    terrain_explicit_ddx_uv = anchor10.uv - anchor00.uv;
-    terrain_explicit_ddy_uv = anchor01.uv - anchor00.uv;
-    terrain_explicit_ddx_world = anchor10.world - anchor00.world;
-    terrain_explicit_ddy_world = anchor01.world - anchor00.world;
+    let feedback_ddx_uv = anchor10.uv - anchor00.uv;
+    let feedback_ddy_uv = anchor01.uv - anchor00.uv;
+    let feedback_ddx_world = anchor10.world - anchor00.world;
+    let feedback_ddy_world = anchor01.world - anchor00.world;
+    terrain_explicit_ddx_uv = feedback_ddx_uv;
+    terrain_explicit_ddy_uv = feedback_ddy_uv;
+    terrain_explicit_ddx_world = feedback_ddx_world;
+    terrain_explicit_ddy_world = feedback_ddy_world;
     terrain_explicit_gradients = 1u;
 
     var surface: VertexOutput;
@@ -324,7 +328,15 @@ fn fs_visibility_resolve_fullscreen(
     } else {
         atomicAdd(&terrain_frame_counters.material_invocations, 1u);
         terrain_vt_write_surface_feedback(
-            surface.tex_coord, surface.world_position, 0u, input.clip_position.xy);
+            surface.tex_coord,
+            surface.world_position,
+            feedback_ddx_uv,
+            feedback_ddy_uv,
+            feedback_ddx_world,
+            feedback_ddy_world,
+            0u,
+            input.clip_position.xy,
+        );
         if (terrain_vt_uniforms.config2.w != 0u) {
             if (terrain_vt_enabled()
                 && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
@@ -371,7 +383,15 @@ fn fs_visibility_geometry(
     let out = shade_main(input);
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
     terrain_vt_write_surface_feedback(
-        input.tex_coord, input.world_position, 0u, input.clip_position.xy);
+        input.tex_coord,
+        input.world_position,
+        resolve_ddx_uv,
+        resolve_ddy_uv,
+        resolve_ddx_world,
+        resolve_ddy_world,
+        0u,
+        input.clip_position.xy,
+    );
     if (terrain_vt_uniforms.config2.w != 0u) {
         if (terrain_vt_enabled()
             && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)

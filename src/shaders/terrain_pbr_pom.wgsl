@@ -2130,23 +2130,37 @@ struct TerrainVtTriplanarFeedbackUvs {
 
 // One coordinate builder is shared by albedo sampling and feedback. This is
 // the exact world-space triplanar mapping used by `sample_triplanar`.
-fn terrain_vt_triplanar_feedback_uvs(
+fn terrain_vt_triplanar_feedback_uvs_from_gradients(
     world_pos: vec3<f32>,
     scale: f32,
+    ddx_world: vec3<f32>,
+    ddy_world: vec3<f32>,
 ) -> TerrainVtTriplanarFeedbackUvs {
-    let dpdx_world = terrain_screen_ddx_world(world_pos) * scale;
-    let dpdy_world = terrain_screen_ddy_world(world_pos) * scale;
+    let scaled_ddx_world = ddx_world * scale;
+    let scaled_ddy_world = ddy_world * scale;
     var out: TerrainVtTriplanarFeedbackUvs;
     out.uv_x = world_pos.yz * scale;
     out.uv_y = world_pos.xz * scale;
     out.uv_z = world_pos.xy * scale;
-    out.ddx_x = dpdx_world.yz;
-    out.ddx_y = dpdx_world.xz;
-    out.ddx_z = dpdx_world.xy;
-    out.ddy_x = dpdy_world.yz;
-    out.ddy_y = dpdy_world.xz;
-    out.ddy_z = dpdy_world.xy;
+    out.ddx_x = scaled_ddx_world.yz;
+    out.ddx_y = scaled_ddx_world.xz;
+    out.ddx_z = scaled_ddx_world.xy;
+    out.ddy_x = scaled_ddy_world.yz;
+    out.ddy_y = scaled_ddy_world.xz;
+    out.ddy_z = scaled_ddy_world.xy;
     return out;
+}
+
+fn terrain_vt_triplanar_feedback_uvs(
+    world_pos: vec3<f32>,
+    scale: f32,
+) -> TerrainVtTriplanarFeedbackUvs {
+    return terrain_vt_triplanar_feedback_uvs_from_gradients(
+        world_pos,
+        scale,
+        terrain_screen_ddx_world(world_pos),
+        terrain_screen_ddy_world(world_pos),
+    );
 }
 
 fn terrain_vt_write_family_feedback_uv(
@@ -2192,12 +2206,25 @@ fn terrain_vt_write_family_feedback_uv(
 fn terrain_vt_write_surface_feedback(
     grid_uv: vec2<f32>,
     world_pos: vec3<f32>,
+    grid_feedback_ddx: vec2<f32>,
+    grid_feedback_ddy: vec2<f32>,
+    world_feedback_ddx: vec3<f32>,
+    world_feedback_ddy: vec3<f32>,
     _material_index: u32,
     fragment_position: vec2<f32>,
 ) {
     if (!terrain_vt_enabled() || terrain_vt_uniforms.config2.w == 0u) {
         return;
     }
+    // Every derivative is supplied by the fragment entry point before any
+    // per-pixel ownership/discard or feedback-selector divergence. Keeping this
+    // helper derivative-free makes the visibility and forward paths portable.
+    let triplanar_feedback = terrain_vt_triplanar_feedback_uvs_from_gradients(
+        world_pos,
+        max(u_shading.triplanar_params.x, 1e-3),
+        world_feedback_ddx,
+        world_feedback_ddy,
+    );
     atomicAdd(&terrain_frame_counters.feedback_records, 1u);
     let pixel_x = u32(max(fragment_position.x, 0.0));
     let pixel_y = u32(max(fragment_position.y, 0.0));
@@ -2208,34 +2235,45 @@ fn terrain_vt_write_surface_feedback(
     }
     let coordinate_slot = selector % 5u;
     if (coordinate_slot < 3u) {
-        let tri = terrain_vt_triplanar_feedback_uvs(
-            world_pos,
-            max(u_shading.triplanar_params.x, 1e-3),
-        );
         if (coordinate_slot == 0u) {
             terrain_vt_write_family_feedback_uv(
-                TERRAIN_VT_FAMILY_ALBEDO, tri.uv_x, tri.ddx_x, tri.ddy_x, material_index);
+                TERRAIN_VT_FAMILY_ALBEDO,
+                triplanar_feedback.uv_x,
+                triplanar_feedback.ddx_x,
+                triplanar_feedback.ddy_x,
+                material_index,
+            );
         } else if (coordinate_slot == 1u) {
             terrain_vt_write_family_feedback_uv(
-                TERRAIN_VT_FAMILY_ALBEDO, tri.uv_y, tri.ddx_y, tri.ddy_y, material_index);
+                TERRAIN_VT_FAMILY_ALBEDO,
+                triplanar_feedback.uv_y,
+                triplanar_feedback.ddx_y,
+                triplanar_feedback.ddy_y,
+                material_index,
+            );
         } else {
             terrain_vt_write_family_feedback_uv(
-                TERRAIN_VT_FAMILY_ALBEDO, tri.uv_z, tri.ddx_z, tri.ddy_z, material_index);
+                TERRAIN_VT_FAMILY_ALBEDO,
+                triplanar_feedback.uv_z,
+                triplanar_feedback.ddx_z,
+                triplanar_feedback.ddy_z,
+                material_index,
+            );
         }
     } else if (coordinate_slot == 3u) {
         terrain_vt_write_family_feedback_uv(
             TERRAIN_VT_FAMILY_NORMAL,
             grid_uv,
-            terrain_screen_ddx_uv(grid_uv),
-            terrain_screen_ddy_uv(grid_uv),
+            grid_feedback_ddx,
+            grid_feedback_ddy,
             material_index,
         );
     } else {
         terrain_vt_write_family_feedback_uv(
             TERRAIN_VT_FAMILY_MASK,
             grid_uv,
-            terrain_screen_ddx_uv(grid_uv),
-            terrain_screen_ddy_uv(grid_uv),
+            grid_feedback_ddx,
+            grid_feedback_ddy,
             material_index,
         );
     }
@@ -4833,11 +4871,26 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
 
 @fragment
 fn fs_main(input : VertexOutput) -> FragmentOutput {
+    // Capture the quad gradients while every fragment lane is still active.
+    // The feedback helper is intentionally derivative-free so later selector
+    // branches cannot make mip demand backend-dependent.
+    let feedback_ddx_uv = terrain_screen_ddx_uv(input.tex_coord);
+    let feedback_ddy_uv = terrain_screen_ddy_uv(input.tex_coord);
+    let feedback_ddx_world = terrain_screen_ddx_world(input.world_position);
+    let feedback_ddy_world = terrain_screen_ddy_world(input.world_position);
     let out = shade_main(input);
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
     atomicAdd(&terrain_frame_counters.forward_material_invocations, 1u);
     terrain_vt_write_surface_feedback(
-        input.tex_coord, input.world_position, 0u, input.clip_position.xy);
+        input.tex_coord,
+        input.world_position,
+        feedback_ddx_uv,
+        feedback_ddy_uv,
+        feedback_ddx_world,
+        feedback_ddy_world,
+        0u,
+        input.clip_position.xy,
+    );
     return out;
 }
 

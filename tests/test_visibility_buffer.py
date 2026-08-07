@@ -62,17 +62,20 @@ def test_feedback_counter_tracks_the_physical_surface_write():
     fullscreen_compact = "".join(fullscreen.split())
     assert (
         "terrain_vt_write_surface_feedback("
-        "input.tex_coord,input.world_position,0u,input.clip_position.xy)"
+        "input.tex_coord,input.world_position,feedback_ddx_uv,feedback_ddy_uv,"
+        "feedback_ddx_world,feedback_ddy_world,0u,input.clip_position.xy,)"
         in shader_compact
     )
     assert (
         "terrain_vt_write_surface_feedback("
-        "input.tex_coord,input.world_position,0u,input.clip_position.xy)"
+        "input.tex_coord,input.world_position,resolve_ddx_uv,resolve_ddy_uv,"
+        "resolve_ddx_world,resolve_ddy_world,0u,input.clip_position.xy,)"
         in fullscreen_compact
     )
     assert (
         "terrain_vt_write_surface_feedback("
-        "surface.tex_coord,surface.world_position,0u,input.clip_position.xy)"
+        "surface.tex_coord,surface.world_position,feedback_ddx_uv,feedback_ddy_uv,"
+        "feedback_ddx_world,feedback_ddy_world,0u,input.clip_position.xy,)"
         in fullscreen_compact
     )
 
