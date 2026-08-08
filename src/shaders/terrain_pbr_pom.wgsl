@@ -3244,6 +3244,7 @@ fn apply_atmospheric_fog(
     return fog_result;
 }
 
+// TERRAIN_AOV_DEPTH_BEGIN
 fn normalize_aov_depth(linear_depth: f32, clip_near: f32, clip_far: f32) -> f32 {
     return saturate(det_div(
         linear_depth - clip_near,
@@ -3251,7 +3252,6 @@ fn normalize_aov_depth(linear_depth: f32, clip_near: f32, clip_far: f32) -> f32 
     ));
 }
 
-// TERRAIN_AOV_DEPTH_BEGIN
 fn terrain_aov_depth(input : VertexOutput) -> vec4<f32> {
     // AOV Depth: projected mesh/clipmap modes use actual raster depth because
     // their clip position is built from a height-centered instance position
