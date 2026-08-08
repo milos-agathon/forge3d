@@ -192,6 +192,33 @@ class TestHeightStreamingFlyThrough:
     LOD = 2
     TILE_RES = 64
 
+    def test_disable_height_streaming_clears_public_family_stats(self):
+        session = f3d.Session(window=False)
+        renderer = f3d.TerrainRenderer(session)
+        renderer.enable_height_streaming(
+            terrain_extent_m=TERRAIN_SPAN_M,
+            ring_count=2,
+            ring_resolution=16,
+            lod=1,
+            tile_resolution=32,
+            max_in_flight=4,
+            pool_size=1,
+            dem=_steep_dem(64),
+            coarse_prefill=False,
+            max_resident_bytes=1024 * 1024,
+        )
+        renderer.stream_height_tiles((0.0, 500.0, 0.0), max_uploads=1)
+        active_stats = f3d.terrain_vt_stats()
+        assert active_stats["budget_bytes_height"] > 0
+        assert active_stats["height_pending_requests"] > 0
+
+        renderer.disable_height_streaming()
+        disabled_stats = f3d.terrain_vt_stats()
+        assert disabled_stats["resident_tiles_height"] == 0
+        assert disabled_stats["resident_bytes_height"] == 0
+        assert disabled_stats["budget_bytes_height"] == 0
+        assert disabled_stats["height_pending_requests"] == 0
+
     def test_fly_through_streams_tiles_without_holes_and_bounded_memory(self, terrain_ibl):
         session = f3d.Session(window=False)
         renderer = f3d.TerrainRenderer(session)
@@ -262,5 +289,10 @@ class TestHeightStreamingFlyThrough:
         assert abs(last_stats["center"][0] - float(waypoints[-1])) < TERRAIN_SPAN_M * 0.05
 
         renderer.disable_height_streaming()
+        disabled_stats = f3d.terrain_vt_stats()
+        assert disabled_stats["resident_tiles_height"] == 0
+        assert disabled_stats["resident_bytes_height"] == 0
+        assert disabled_stats["budget_bytes_height"] == 0
+        assert disabled_stats["height_pending_requests"] == 0
         with pytest.raises(RuntimeError, match="height streaming not enabled"):
             renderer.height_streaming_stats()

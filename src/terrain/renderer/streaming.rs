@@ -306,6 +306,7 @@ pub(in crate::terrain::renderer) struct HeightStreamingStats {
 /// demand retention and residency accounting are the same feedback-driven
 /// `TileKey`/family policy used by albedo, normal, and mask.
 pub(in crate::terrain::renderer) struct HeightVtFamilyRuntime {
+    residency_owner_id: u64,
     pub(in crate::terrain::renderer) streamer: ClipmapStreamer,
     pub(in crate::terrain::renderer) mosaic: HeightMosaic,
     loader: AsyncTileLoader,
@@ -396,6 +397,8 @@ impl HeightVtFamilyRuntime {
         );
 
         let mut state = Self {
+            residency_owner_id: crate::core::memory_tracker::global_tracker()
+                .allocate_resident_owner(),
             streamer,
             mosaic,
             loader,
@@ -594,6 +597,7 @@ impl HeightVtFamilyRuntime {
             .family_residency
             .family(crate::terrain::vt::HEIGHT_FAMILY as u32);
         super::virtual_texture::publish_height_family_stats(
+            self.residency_owner_id,
             height.resident_tiles,
             height.resident_bytes,
             height.budget_bytes,
@@ -627,6 +631,12 @@ impl HeightVtFamilyRuntime {
             loader_pending,
             loader_completed,
         }
+    }
+}
+
+impl Drop for HeightVtFamilyRuntime {
+    fn drop(&mut self) {
+        super::virtual_texture::clear_height_family_stats(self.residency_owner_id);
     }
 }
 

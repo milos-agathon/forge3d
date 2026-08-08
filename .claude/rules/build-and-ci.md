@@ -20,9 +20,11 @@ paths: ["Cargo.toml", "pyproject.toml", ".cargo/**", ".github/workflows/**", "py
   complete acceptance lanes run `--profile full`. A downstream feature does
   not inherit the complete suite merely because it consumes a CENSOR contract.
 - Golden comparison logic, update safety, and probe outcome classification are
-  routine invariants. Candidate-selected Metal goldens and physical GPU lanes
-  are acceptance evidence summarized by `Full Acceptance Summary`; a probe
-  crash or pixel mismatch remains fatal whenever that lane is selected.
+  routine invariants. Candidate-selected physical NVIDIA/Vulkan goldens and
+  GPU lanes are acceptance evidence summarized by `Full Acceptance Summary`;
+  a probe crash or pixel mismatch remains fatal whenever that lane is selected.
+  Metal coverage is an opt-in support diagnostic and is never a prerequisite
+  for moonshot, pull-request, or release acceptance.
 - Production signing is required only by protected acceptance/release work.
   Routine internal and fork PRs remain explicitly untrusted and verify schema,
   canonicalization, and tamper rejection without the production secret.

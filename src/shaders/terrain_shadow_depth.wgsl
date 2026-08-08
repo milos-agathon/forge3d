@@ -40,6 +40,32 @@ fn height_curve_lut_sample(t: f32) -> f32 {
     return textureLoad(height_curve_lut_tex, vec2<i32>(x, 0), 0).r;
 }
 
+// Keep the shadow caster on the same portable R32Float sampling path as the
+// visible terrain. R32Float is not filterable on every supported adapter, so
+// reconstruct bilinear filtering explicitly instead of relying on a sampler.
+fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
+    let dimensions = textureDimensions(height_tex, 0);
+    let max_x = max(i32(dimensions.x) - 1, 0);
+    let max_y = max(i32(dimensions.y) - 1, 0);
+    let texel_x = clamp(uv.x, 0.0, 1.0) * f32(max_x);
+    let texel_y = clamp(uv.y, 0.0, 1.0) * f32(max_y);
+    let x0 = i32(floor(texel_x));
+    let y0 = i32(floor(texel_y));
+    let x1 = clamp(x0 + 1, 0, max_x);
+    let y1 = clamp(y0 + 1, 0, max_y);
+    let blend = clamp(
+        vec2<f32>(texel_x - f32(x0), texel_y - f32(y0)),
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
+
+    let h00 = textureLoad(height_tex, vec2<i32>(x0, y0), 0).r;
+    let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), 0).r;
+    let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), 0).r;
+    let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), 0).r;
+    return det_mix(det_mix(h00, h10, blend.x), det_mix(h01, h11, blend.x), blend.y);
+}
+
 /// Apply height curve to normalized height value (matching main shader exactly)
 /// t: input normalized height [0, 1]
 /// Returns: curved normalized height [0, 1]
@@ -116,11 +142,7 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
         f32(grid_y) / f32(grid_res - 1u)
     );
     
-    // Sample height from heightmap using textureLoad (R32Float is non-filterable)
-    let tex_dims = textureDimensions(height_tex, 0);
-    let texel = vec2<i32>(uv * vec2<f32>(tex_dims));
-    let texel_clamped = clamp(texel, vec2<i32>(0), vec2<i32>(tex_dims) - vec2<i32>(1));
-    let h_raw = textureLoad(height_tex, texel_clamped, 0).r;
+    let h_raw = sample_height_bilinear(uv);
     
     // Match terrain_pbr_pom.wgsl::normalize_for_shadow exactly.
     let world_xy = (uv - vec2<f32>(0.5)) * terrain_span;

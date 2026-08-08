@@ -69,6 +69,7 @@ SPECS = {
             "baseline_gpu_ms",
             "culled_gpu_ms",
             "speedup",
+            "speedup_target",
             "speedup_gate",
         ),
         booleans=("timestamp_query", "bitwise_identical"),
@@ -89,6 +90,9 @@ SPECS = {
             "fallback_texels",
             "picking_samples",
             "picking_hits",
+            "gpu_picking_repeat_matches",
+            "gpu_cpu_picking_compared",
+            "gpu_cpu_picking_excluded",
             "gpu_cpu_picking_matches",
         ),
         booleans=("bitwise_identical_to_forward",),
@@ -120,6 +124,7 @@ SPECS = {
     "flythrough_popping": GateSpec(
         numeric=(
             "frames",
+            "rendered_frames_total",
             "width",
             "height",
             "worst_frame_crack_count",
@@ -130,6 +135,11 @@ SPECS = {
             "camera_step_px",
             "camera_path_distance_m",
             "distinct_camera_positions",
+            "clipmap_center_step_m",
+            "clipmap_center_path_m",
+            "actual_clipmap_center_transitions",
+            "distinct_clipmap_centers",
+            "regions_on_screen",
         )
     ),
     "vt_request_retention": GateSpec(

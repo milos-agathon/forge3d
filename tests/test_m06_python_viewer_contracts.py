@@ -5,10 +5,12 @@ from __future__ import annotations
 import io
 import math
 import os
+from pathlib import Path
 
 import pytest
 
 import forge3d
+from forge3d import viewer_ipc
 from forge3d.viewer import ViewerHandle
 from tests import test_m06_full_geospatial_viewer as m06_viewer
 from tests import test_terrain_viewer_pbr as terrain_viewer
@@ -21,6 +23,22 @@ VIEWER_BINARY_HELPERS = (
     (terrain_viewer, terrain_viewer.find_viewer_binary, "PROJECT_ROOT"),
     (vector_viewer, vector_viewer.find_viewer_binary, "PROJECT_ROOT"),
 )
+
+
+def test_shared_viewer_launcher_honors_exact_binary_override(tmp_path, monkeypatch):
+    binary = tmp_path / "interactive_viewer.exe"
+    binary.write_bytes(b"fresh viewer")
+    monkeypatch.setenv("FORGE3D_VIEWER_BINARY", str(binary))
+    assert Path(viewer_ipc.find_viewer_binary()) == binary
+
+    missing = tmp_path / "missing-viewer.exe"
+    monkeypatch.setenv("FORGE3D_VIEWER_BINARY", str(missing))
+    with pytest.raises(FileNotFoundError, match="FORGE3D_VIEWER_BINARY does not exist"):
+        viewer_ipc.find_viewer_binary()
+
+    monkeypatch.setenv("FORGE3D_VIEWER_BINARY", "")
+    with pytest.raises(ValueError, match="FORGE3D_VIEWER_BINARY must not be empty"):
+        viewer_ipc.find_viewer_binary()
 
 
 def _capturing_handle() -> tuple[ViewerHandle, list[dict]]:

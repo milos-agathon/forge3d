@@ -604,6 +604,14 @@ impl TerrainScene {
             cache.is_none() || !scheduler.report().hits.is_empty() || submitted > 0,
             "cold native terrain graph must submit production work"
         );
+        if visibility_frame_staged && params.shading == "visibility" && params.culling == "frustum"
+        {
+            self.refresh_cpu_visibility_oracle_from_gpu_selection(
+                params,
+                &height_inputs.heightmap_data,
+                (height_inputs.width, height_inputs.height),
+            )?;
+        }
         if material_vt_started {
             self.finish_material_vt_frame()?;
         }

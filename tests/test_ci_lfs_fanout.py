@@ -264,9 +264,18 @@ def test_m06_acceptance_keeps_only_unique_physical_coverage() -> None:
     for physical in (
         "tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_is_not_black",
         "tests/test_shadow_techniques.py::TestEvsmExposureParity::test_evsm_banding_is_bounded_in_raw_visibility",
+        "tests/test_picking_ipc.py",
         "tests/test_m06_full_geospatial_viewer.py",
         "tests/test_terrain_viewer_pbr.py",
         "tests/test_vector_overlay_rendering.py",
         "tests/test_vector_coverage.py",
     ):
         assert f"'{physical}'" in acceptance
+
+    picking = (ROOT / "tests/test_picking_ipc.py").read_text(encoding="utf-8")
+    shadow = (ROOT / "tests/test_shadow_techniques.py").read_text(encoding="utf-8")
+    assert "pytest.mark.interactive_viewer" in picking
+    assert 'os.environ.get("RUN_M06_VIEWER_CI") == "1"' in picking
+    assert "required M-06 NVIDIA/Vulkan viewer lane only" in picking
+    assert "pytest.mark.interactive_viewer" in shadow
+    assert 'os.environ.get("RUN_M06_VIEWER_CI") != "1"' in shadow
