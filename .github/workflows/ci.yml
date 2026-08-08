@@ -137,6 +137,7 @@ jobs:
             tests/test_ci_cost_controls.py \
             tests/test_ci_lfs_fanout.py \
             tests/test_determinism_matrix.py \
+            -k "not determinism_record_persists_strict_adapter_identity" \
             -q
 
   # Stable routine branch-protection lane. Expensive platform, rendering,

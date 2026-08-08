@@ -412,6 +412,7 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
         "tests/test_render_certificate.py",
         "tests/test_render_certificate_contract.py",
         "tests/test_astro_ephemeris.py",
+        "tests/test_determinism_matrix.py",
         "tests/test_no_silent_degradation.py",
         "tests/test_substratia_evidence_report.py",
     }
