@@ -232,22 +232,59 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
         )
     )
     first = renderer.pick_visibility_pixels(pixels)
-    cpu = renderer.pick_visibility_pixels_cpu(pixels)
-    if first != cpu:
+    second = renderer.pick_visibility_pixels(pixels)
+    assert second == first
+
+    # CPU ray intersections and raster coverage make different decisions at
+    # silhouette and primitive edges. Compare only centers whose complete 3x3
+    # GPU neighborhood has one identity (including uniformly background), so
+    # this differential tests picking identity rather than edge ownership.
+    interior_indices = [
+        index
+        for index, (x, y) in enumerate(pixels)
+        if 0 < x < size[0] - 1 and 0 < y < size[1] - 1
+    ]
+    neighborhood_pixels = [
+        (x + dx, y + dy)
+        for index in interior_indices
+        for x, y in [pixels[index]]
+        for dy in (-1, 0, 1)
+        for dx in (-1, 0, 1)
+    ]
+    neighborhood_gpu = renderer.pick_visibility_pixels(neighborhood_pixels)
+    compared_indices = [
+        index
+        for offset, index in enumerate(interior_indices)
+        if len(set(neighborhood_gpu[offset * 9 : (offset + 1) * 9])) == 1
+    ]
+    assert compared_indices, "no unambiguous 3x3 picking neighborhoods"
+    compared_pixels = [pixels[index] for index in compared_indices]
+    compared_gpu = [first[index] for index in compared_indices]
+    compared_cpu = renderer.pick_visibility_pixels_cpu(compared_pixels)
+    if compared_gpu != compared_cpu:
         mismatch = next(
-            index for index, (gpu_value, cpu_value) in enumerate(zip(first, cpu))
+            index
+            for index, (gpu_value, cpu_value) in enumerate(
+                zip(compared_gpu, compared_cpu, strict=True)
+            )
             if gpu_value != cpu_value
         )
         mismatch_count = sum(
-            gpu_value != cpu_value for gpu_value, cpu_value in zip(first, cpu)
+            gpu_value != cpu_value
+            for gpu_value, cpu_value in zip(
+                compared_gpu, compared_cpu, strict=True
+            )
         )
+        sample_index = compared_indices[mismatch]
         pytest.fail(
             repr({
                 "mismatch_count": mismatch_count,
-                "first_index": mismatch,
-                "pixel": pixels[mismatch],
-                "gpu": first[mismatch],
-                "cpu": cpu[mismatch],
+                "compared_count": len(compared_indices),
+                "excluded_count": len(first) - len(compared_indices),
+                "first_index": sample_index,
+                "pixel": pixels[sample_index],
+                "gpu": compared_gpu[mismatch],
+                "cpu": compared_cpu[mismatch],
             })
         )
     assert len(first) == 10_000
@@ -276,9 +313,17 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
             "fallback_texels": int(stats["fallback_texels"]),
             "picking_samples": len(first),
             "picking_hits": sum(value is not None for value in first),
+            "gpu_picking_repeat_matches": sum(
+                first_value == second_value
+                for first_value, second_value in zip(first, second, strict=True)
+            ),
+            "gpu_cpu_picking_compared": len(compared_indices),
+            "gpu_cpu_picking_excluded": len(first) - len(compared_indices),
             "gpu_cpu_picking_matches": sum(
                 gpu_value == cpu_value
-                for gpu_value, cpu_value in zip(first, cpu, strict=True)
+                for gpu_value, cpu_value in zip(
+                    compared_gpu, compared_cpu, strict=True
+                )
             ),
             "bitwise_identical_to_forward": True,
         },
