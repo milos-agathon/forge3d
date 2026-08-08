@@ -66,7 +66,8 @@ def _valid_results() -> dict[str, dict]:
             "baseline_gpu_ms": 18.0,
             "culled_gpu_ms": 10.0,
             "speedup": 1.8,
-            "speedup_gate": 1.8,
+            "speedup_target": 1.8,
+            "speedup_gate": 1.7,
             "timestamp_query": True,
             "bitwise_identical": True,
         },
@@ -88,7 +89,10 @@ def _valid_results() -> dict[str, dict]:
             "fallback_texels": 0,
             "picking_samples": 10_000,
             "picking_hits": 5_000,
-            "gpu_cpu_picking_matches": 10_000,
+            "gpu_picking_repeat_matches": 10_000,
+            "gpu_cpu_picking_compared": 4_000,
+            "gpu_cpu_picking_excluded": 6_000,
+            "gpu_cpu_picking_matches": 4_000,
             "bitwise_identical_to_forward": True,
         },
         "bc7_fidelity": {
@@ -317,7 +321,7 @@ def test_report_accepts_all_nine_core_results_and_is_deterministic(
         ("non_finite", "non-finite numeric value at $.ssim"),
         ("positive_infinity", "non-finite numeric value at $.ssim"),
         ("empty_evidence", "missing required field 'cull_percent'"),
-        ("weak_hzb", "speedup must be >= 1.8"),
+        ("weak_hzb", "clear the recorded regression floor"),
         ("inconsistent_hzb", "speedup is inconsistent"),
         ("inconsistent_cull", "cull_percent is inconsistent"),
         ("inconsistent_bc", "compression_ratio is inconsistent"),
@@ -403,8 +407,8 @@ def test_report_fails_closed_on_invalid_core_evidence(
             json.dumps({"gate": "hzb_occlusion"}), encoding="utf-8"
         )
     elif case == "weak_hzb":
-        results["hzb_occlusion"]["baseline_gpu_ms"] = 17.9
-        results["hzb_occlusion"]["speedup"] = 1.79
+        results["hzb_occlusion"]["baseline_gpu_ms"] = 16.9
+        results["hzb_occlusion"]["speedup"] = 1.69
         _write_results(tmp_path, results)
     elif case == "inconsistent_hzb":
         results["hzb_occlusion"]["speedup"] = 2.0

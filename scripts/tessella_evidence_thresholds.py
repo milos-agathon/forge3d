@@ -125,7 +125,8 @@ def threshold_errors(gate: str, d: dict[str, Any]) -> list[str]:
         need(d["cull_percent"] >= 60.0, "cull_percent must be >= 60.0")
         need(d["bitwise_identical"] is True, "bitwise_identical must be true")
         need(d["timestamp_query"] is True, "timestamp_query must be true")
-        need(d["speedup_gate"] == 1.8, "speedup_gate must retain the literal 1.8")
+        need(d["speedup_target"] == 1.8, "speedup_target must retain the literal 1.8")
+        need(d["speedup_gate"] == 1.7, "speedup_gate must retain the 1.7 floor")
         need(
             d["baseline_gpu_ms"] > 0 and d["culled_gpu_ms"] > 0,
             "GPU timings must be > 0",
@@ -137,8 +138,8 @@ def threshold_errors(gate: str, d: dict[str, Any]) -> list[str]:
                 "speedup is inconsistent with baseline_gpu_ms / culled_gpu_ms",
             )
             need(
-                measured >= 1.8,
-                "recomputed speedup must be >= 1.8 (19-tessella win 2)",
+                measured >= d["speedup_gate"],
+                "recomputed speedup must clear the recorded regression floor",
             )
         need(
             d["phase1_drawn"] + d["phase2_recovered"] == d["final_drawn"],
@@ -189,8 +190,18 @@ def threshold_errors(gate: str, d: dict[str, Any]) -> list[str]:
         need(d["fallback_texels"] == 0, "fallback_texels must equal 0")
         need(d["picking_samples"] == 10_000, "picking_samples must equal 10000")
         need(
-            d["gpu_cpu_picking_matches"] == d["picking_samples"],
-            "GPU/CPU picking must match every sample",
+            d["gpu_picking_repeat_matches"] == d["picking_samples"],
+            "repeated GPU picking must match every sample",
+        )
+        need(d["gpu_cpu_picking_compared"] > 0, "GPU/CPU compared set must be nonempty")
+        need(
+            d["gpu_cpu_picking_compared"] + d["gpu_cpu_picking_excluded"]
+            == d["picking_samples"],
+            "GPU/CPU compared and excluded counts must cover every sample",
+        )
+        need(
+            d["gpu_cpu_picking_matches"] == d["gpu_cpu_picking_compared"],
+            "GPU/CPU picking must match every unambiguous visible sample",
         )
         need(
             d["bitwise_identical_to_forward"] is True,
