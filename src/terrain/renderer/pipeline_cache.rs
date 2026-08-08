@@ -59,12 +59,36 @@ impl TerrainScene {
     /// Assemble the forward terrain module. `shader_sources` owns the include
     /// expansion (WGSL has no preprocessor) and the two virtual-texture atlas
     /// variants; this layer only picks the variant the device can execute.
-    pub(super) fn preprocess_terrain_shader(device: &wgpu::Device) -> String {
-        if Self::terrain_atlas_is_bindless(device) {
+    pub(super) fn preprocess_terrain_shader(
+        device: &wgpu::Device,
+        include_aov_depth: bool,
+    ) -> String {
+        let mut source = if Self::terrain_atlas_is_bindless(device) {
             crate::shader_sources::terrain_bindless()
         } else {
             crate::shader_sources::terrain()
+        };
+
+        if !include_aov_depth {
+            const BEGIN: &str = "// TERRAIN_AOV_DEPTH_BEGIN";
+            const END: &str = "// TERRAIN_AOV_DEPTH_END";
+            let begin = source
+                .find(BEGIN)
+                .expect("terrain shader must contain the AOV depth begin marker");
+            let end = source[begin..]
+                .find(END)
+                .map(|offset| begin + offset + END.len())
+                .expect("terrain shader must contain the AOV depth end marker");
+            source.replace_range(
+                begin..end,
+                "// AOV depth is source-isolated from ordinary beauty modules.\n\
+                 fn terrain_aov_depth(_input : VertexOutput) -> vec4<f32> {\n\
+                     return vec4<f32>(0.0, 0.0, 0.0, 1.0);\n\
+                 }",
+            );
         }
+
+        source
     }
 
     /// True when the compiled module indexes the atlas `binding_array`. The
@@ -111,7 +135,7 @@ impl TerrainScene {
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader_source = Self::preprocess_terrain_shader(device, false);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.shader",
@@ -185,7 +209,7 @@ impl TerrainScene {
         // `vs_clipmap_main` lives in the shared terrain_pbr_pom.wgsl module, so
         // the clipmap geometry path shades through the exact same PBR fragment
         // stage as the procedural-grid path.
-        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader_source = Self::preprocess_terrain_shader(device, false);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.clipmap.shader",
@@ -466,7 +490,7 @@ impl TerrainScene {
         include_source_id: bool,
         clipmap_geometry: bool,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader_source = Self::preprocess_terrain_shader(device, true);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.aov.shader",

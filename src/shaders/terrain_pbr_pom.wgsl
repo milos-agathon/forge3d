@@ -3251,6 +3251,7 @@ fn normalize_aov_depth(linear_depth: f32, clip_near: f32, clip_far: f32) -> f32 
     ));
 }
 
+// TERRAIN_AOV_DEPTH_BEGIN
 fn terrain_aov_depth(input : VertexOutput) -> vec4<f32> {
     // AOV Depth: projected mesh/clipmap modes use actual raster depth because
     // their clip position is built from a height-centered instance position
@@ -3274,6 +3275,7 @@ fn terrain_aov_depth(input : VertexOutput) -> vec4<f32> {
     let depth_normalized = normalize_aov_depth(linear_depth, clip_near, clip_far);
     return vec4<f32>(depth_normalized, depth_normalized, depth_normalized, 1.0);
 }
+// TERRAIN_AOV_DEPTH_END
 
 fn shade_main(input : VertexOutput) -> FragmentOutput {
     var out : FragmentOutput;
