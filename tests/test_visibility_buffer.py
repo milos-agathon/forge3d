@@ -236,9 +236,10 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
     assert second == first
 
     # CPU ray intersections and raster coverage make different decisions at
-    # silhouette and primitive edges. Compare only centers whose complete 3x3
-    # GPU neighborhood has one identity (including uniformly background), so
-    # this differential tests picking identity rather than edge ownership.
+    # silhouette and primitive edges. Compare only visible centers whose
+    # complete 3x3 GPU neighborhood has one identity. A uniformly background
+    # raster neighborhood can still intersect a subpixel analytic CPU
+    # triangle, so background is covered by repeated GPU stability instead.
     interior_indices = [
         index
         for index, (x, y) in enumerate(pixels)
@@ -256,6 +257,7 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
         index
         for offset, index in enumerate(interior_indices)
         if len(set(neighborhood_gpu[offset * 9 : (offset + 1) * 9])) == 1
+        and neighborhood_gpu[offset * 9 + 4] is not None
     ]
     assert compared_indices, "no unambiguous 3x3 picking neighborhoods"
     compared_pixels = [pixels[index] for index in compared_indices]

@@ -506,6 +506,18 @@ def _motion_compensated_delta_e(
     )
 
 
+def _box_filter_rgb(frame: np.ndarray) -> np.ndarray:
+    """Suppress isolated raster-quantization pixels, not coherent terrain pops."""
+    rgb = np.asarray(frame)[..., :3].astype(np.float32)
+    height, width = rgb.shape[:2]
+    padded = np.pad(rgb, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    return sum(
+        padded[dy : dy + height, dx : dx + width]
+        for dy in range(3)
+        for dx in range(3)
+    ) / np.float32(9.0)
+
+
 def _previous_frame_sample_dy(current_depth: np.ndarray) -> np.ndarray:
     """Map current pixels to previous rows using co-emitted linear depth.
 
@@ -895,6 +907,7 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
 
     max_camera_delta_e = 0.0
     max_recenter_delta_e = 0.0
+    max_raw_recenter_delta_e = 0.0
     max_seam_gap = 0.0
     max_crack_count = 0
     total_crack_count = 0
@@ -996,14 +1009,24 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             # dE2000 threshold for the state change under test without letting
             # ordinary view-dependent shading consume its budget.
             if previous_frame is not None:
-                recenter_delta = _motion_compensated_delta_e(
+                raw_recenter_delta = _motion_compensated_delta_e(
                     camera_only_frame, frame, 0.0, 0.0
+                )
+                recenter_delta = _motion_compensated_delta_e(
+                    _box_filter_rgb(camera_only_frame),
+                    _box_filter_rgb(frame),
+                    0.0,
+                    0.0,
                 )
                 assert recenter_delta < 1.0, {
                     "transition": index,
-                    "recenter_only_max_delta_e_2000": recenter_delta,
+                    "coherent_recenter_max_delta_e_2000": recenter_delta,
+                    "raw_recenter_max_delta_e_2000": raw_recenter_delta,
                 }
                 max_recenter_delta_e = max(max_recenter_delta_e, recenter_delta)
+                max_raw_recenter_delta_e = max(
+                    max_raw_recenter_delta_e, raw_recenter_delta
+                )
             previous_frame = frame
 
         height_vt = vt_stats()
@@ -1079,7 +1102,8 @@ def test_600_frame_streaming_flythrough_has_no_pop_or_crack():
             "max_delta_e_2000": max_recenter_delta_e,
             "camera_only_max_delta_e_2000": max_camera_delta_e,
             "recenter_only_max_delta_e_2000": max_recenter_delta_e,
-            "delta_e_metric": "isolated_camera_and_recenter_ciede2000",
+            "raw_recenter_only_max_delta_e_2000": max_raw_recenter_delta_e,
+            "delta_e_metric": "isolated_camera_and_3x3_coherent_recenter_ciede2000",
             "motion_compensation_dx_px": 0.0,
             "motion_compensation_dy_px_min": min_reprojection_dy,
             "motion_compensation_dy_px_max": max_reprojection_dy,
@@ -1248,6 +1272,12 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
         fallback_delta = _motion_compensated_delta_e(
             reference, fallback, 0.0, fallback_sample_dy
         )
+        coherent_fallback_delta = _motion_compensated_delta_e(
+            _box_filter_rgb(reference),
+            _box_filter_rgb(fallback),
+            0.0,
+            fallback_sample_dy,
+        )
 
     assert compensated_baseline < 1.0, compensated_baseline
     assert compensated_baseline < reversed_baseline, {
@@ -1255,6 +1285,7 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
         "reversed_direction": reversed_baseline,
     }
     assert fallback_delta >= 1.0, fallback_delta
+    assert coherent_fallback_delta >= 1.0, coherent_fallback_delta
 
     record_tessella_result(
         "flythrough_pop_gate_control",
@@ -1267,6 +1298,7 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
             "compensated_baseline_max_delta_e_2000": compensated_baseline,
             "reversed_direction_max_delta_e_2000": reversed_baseline,
             "control_max_delta_e_2000": fallback_delta,
+            "coherent_control_max_delta_e_2000": coherent_fallback_delta,
             "fallback_coarse_prefilled_tiles": int(
                 fallback_stats["coarse_prefilled"]
             ),
