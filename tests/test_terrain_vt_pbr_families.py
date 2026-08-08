@@ -627,8 +627,8 @@ def test_shader_carries_family_info_and_residency_gate() -> None:
     assert "let scaled_ddx_world = ddx_world * scale;" in triplanar_from_gradients
     assert "let scaled_ddy_world = ddy_world * scale;" in triplanar_from_gradients
 
-    forward_fn = shader.split("fn fs_main(input : VertexOutput)", 1)[1].split(
-        "// TESSELLA pass 1", 1
+    forward_fn = shader.split("fn terrain_forward_main(input : VertexOutput)", 1)[1].split(
+        "fn fs_beauty_main(input : VertexOutput)", 1
     )[0]
     shade_offset = forward_fn.index("let out = shade_main(input);")
     for declaration in (
