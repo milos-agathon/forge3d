@@ -72,13 +72,19 @@ impl TerrainScene {
         if !include_aov_depth {
             const BEGIN: &str = "// TERRAIN_AOV_DEPTH_BEGIN";
             const END: &str = "// TERRAIN_AOV_DEPTH_END";
-            let begin = source
-                .find(BEGIN)
-                .expect("terrain shader must contain the AOV depth begin marker");
-            let end = source[begin..]
-                .find(END)
-                .map(|offset| begin + offset + END.len())
-                .expect("terrain shader must contain the AOV depth end marker");
+            let begin = source.find(BEGIN);
+            assert!(
+                begin.is_some(),
+                "terrain shader must contain the AOV depth begin marker"
+            );
+            let begin = begin.unwrap_or(0);
+            let end_offset = source[begin..].find(END);
+            assert!(
+                end_offset.is_some(),
+                "terrain shader must contain the AOV depth end marker"
+            );
+            let end_offset = end_offset.unwrap_or(0);
+            let end = begin + end_offset + END.len();
             source.replace_range(
                 begin..end,
                 "// AOV depth is source-isolated from ordinary beauty modules.\n\
