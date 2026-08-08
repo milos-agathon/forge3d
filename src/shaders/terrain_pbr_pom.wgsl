@@ -3244,6 +3244,13 @@ fn apply_atmospheric_fog(
     return fog_result;
 }
 
+fn normalize_aov_depth(linear_depth: f32, clip_near: f32, clip_far: f32) -> f32 {
+    return saturate(det_div(
+        linear_depth - clip_near,
+        max(clip_far - clip_near, 1e-5)
+    ));
+}
+
 fn shade_main(input : VertexOutput) -> FragmentOutput {
     var out : FragmentOutput;
 
@@ -4863,16 +4870,12 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     );
     var linear_depth = -screen_view_position.z;
     if (u_terrain.camera_mode_params.x >= 0.5) {
-        linear_depth = (clip_near * clip_far) / max(
+        linear_depth = det_div(clip_near * clip_far, max(
             1e-5,
             clip_far - ndc_depth * (clip_far - clip_near)
-        );
+        ));
     }
-    let depth_normalized = clamp(
-        (linear_depth - clip_near) / max(clip_far - clip_near, 1e-5),
-        0.0,
-        1.0
-    );
+    let depth_normalized = normalize_aov_depth(linear_depth, clip_near, clip_far);
     out.aov_depth = vec4<f32>(depth_normalized, depth_normalized, depth_normalized, 1.0);
 
     // VERITAS: co-emitted with the color at composite time so the source map

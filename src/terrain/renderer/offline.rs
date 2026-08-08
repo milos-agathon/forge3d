@@ -829,7 +829,7 @@ impl TerrainScene {
             if state.total_samples == 0 {
                 self.dispatch_offline_depth_extract_pass(
                     &mut encoder,
-                    &aov_targets.required_depth().internal_view,
+                    &aov_targets.required_depth()?.internal_view,
                     &state.depth_reference_view,
                     state.internal_width,
                     state.internal_height,
@@ -845,13 +845,13 @@ impl TerrainScene {
         )?;
         self.dispatch_offline_accumulation_pass(
             &mut encoder,
-            &state.aov_targets.required_albedo().internal_view,
+            &state.aov_targets.required_albedo()?.internal_view,
             &mut state.albedo_accumulation,
             state.total_samples,
         )?;
         self.dispatch_offline_accumulation_pass(
             &mut encoder,
-            &state.aov_targets.required_normal().internal_view,
+            &state.aov_targets.required_normal()?.internal_view,
             &mut state.normal_accumulation,
             state.total_samples,
         )?;
@@ -1031,9 +1031,9 @@ impl TerrainScene {
             .bind_group()
             .expect("LightBuffer should always provide a bind group");
 
-        let albedo = aov_targets.required_albedo();
-        let normal = aov_targets.required_normal();
-        let depth = aov_targets.required_depth();
+        let albedo = aov_targets.required_albedo()?;
+        let normal = aov_targets.required_normal()?;
+        let depth = aov_targets.required_depth()?;
         let albedo_view = albedo.msaa_view.as_ref().unwrap_or(&albedo.internal_view);
         let albedo_resolve = if albedo.msaa_view.is_some() {
             Some(&albedo.internal_view)

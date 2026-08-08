@@ -67,22 +67,22 @@ pub(super) struct TerrainAovTargets {
 }
 
 impl TerrainAovTargets {
-    pub(super) fn required_albedo(&self) -> &AovAttachmentTarget {
+    pub(super) fn required_albedo(&self) -> Result<&AovAttachmentTarget> {
         self.albedo
             .as_ref()
-            .expect("offline AOV graph requires the albedo attachment")
+            .ok_or_else(|| anyhow!("offline AOV graph requires the albedo attachment"))
     }
 
-    pub(super) fn required_normal(&self) -> &AovAttachmentTarget {
+    pub(super) fn required_normal(&self) -> Result<&AovAttachmentTarget> {
         self.normal
             .as_ref()
-            .expect("offline AOV graph requires the normal attachment")
+            .ok_or_else(|| anyhow!("offline AOV graph requires the normal attachment"))
     }
 
-    pub(super) fn required_depth(&self) -> &AovAttachmentTarget {
+    pub(super) fn required_depth(&self) -> Result<&AovAttachmentTarget> {
         self.depth
             .as_ref()
-            .expect("offline AOV graph requires the depth attachment")
+            .ok_or_else(|| anyhow!("offline AOV graph requires the depth attachment"))
     }
 }
 

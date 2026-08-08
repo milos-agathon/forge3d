@@ -31,7 +31,7 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1454
+EXPECTED_CONVERSION_COUNT = 1438
 # The previous 1433-site freeze already covered the reviewed ANAMNESIS,
 # TESSELLA, and first SIDERA transitions described below. The d8313007 base
 # source actually contained 1446 sites because SIDERA's later adversarial
@@ -47,15 +47,17 @@ EXPECTED_CONVERSION_COUNT = 1454
 # texel steps (2), a bounded LUT index (1), and viewport projection (2). All
 # reviewed primitives are render dimensions, normalized directions/UVs,
 # bounded raster indices, or telemetry. None stores absolute world coordinates
-# or bypasses the camera Anchor.
-EXPECTED_CONVERSION_SHA256 = "7e1273b8a9fe1400556d807e2b9c560b515b6e34e0d340ad1475bebbd6263b77"
+# or bypasses the camera Anchor. The subsequent physical-terrain closure
+# consolidated repeated clipmap ring coordinate construction, reducing the
+# reviewed inventory without weakening the Anchor boundary.
+EXPECTED_CONVERSION_SHA256 = "2ddfeed47f0ca486358e2e6bd597550fbbc6451046b2d2ff4a3945e3df2d65e2"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1454,
+    "current_count": 1438,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -79,7 +81,7 @@ REVIEWED_INVENTORY_TRANSITION = {
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
     # Re-based on main at the merge: the pre-transition tree is now main rather
     # than this branch's original base, so the count and digest are main's.
-    "base_count": 1454,
+    "base_count": 1438,
     "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",

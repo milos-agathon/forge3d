@@ -8,7 +8,7 @@ const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xf664_b696_d596_de84;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x4758_e817_2f5b_182e;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x5e7c_5cf1_ff8a_50ca;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xdf51_cc99_d4ac_879b;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {
@@ -1626,6 +1626,7 @@ impl Evaluator<'_> {
                 | "sample_shadow_evsm_terrain"
                 | "sample_shadow_pcf_terrain"
                 | "debug_shadow_with_vis"
+                | "normalize_aov_depth"
                 | "saturate" => (0.0, 1.0),
                 "calculate_pbr_brdf_split_roughness"
                 | "eval_brdf"
