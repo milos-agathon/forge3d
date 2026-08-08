@@ -1806,6 +1806,7 @@ jobs:
             --cache seeded/anamnesis-portable-store `
             --record seeded/anamnesis-portable-record.json `
             --consumer-frame-blob anamnesis-portable-consumer.png `
+            --consumer-golden tests/goldens/determinism/terra_determinata_v1.dx12.sha256 `
             --consumer-adapter-record anamnesis-portable-consumer.jsonl `
             --machine-id-file anamnesis-portability-consumer-machine-id.txt `
             --runner-name '${{ runner.name }}' `
