@@ -336,6 +336,61 @@ fn main(t: f32) -> vec4<f32> {
 }
 
 #[test]
+fn independently_clamped_neighbor_axes_compose_to_an_in_bounds_coordinate() {
+    let source = r#"
+@group(0) @binding(0) var image: texture_2d<f32>;
+fn main(t: vec2<f32>) -> vec4<f32> {
+    let dims = textureDimensions(image);
+    let max_x = max(i32(dims.x) - 1, 0);
+    let max_y = max(i32(dims.y) - 1, 0);
+    let x0 = i32(floor(clamp(t.x, 0.0, 1.0) * f32(max_x)));
+    let y0 = i32(floor(clamp(t.y, 0.0, 1.0) * f32(max_y)));
+    let x1 = clamp(x0 + 1, 0, max_x);
+    let y1 = clamp(y0 + 1, 0, max_y);
+    return textureLoad(image, vec2<i32>(x1, y1), 0);
+}
+"#;
+    let parsed = parse_contract("[module]\npath = \"tests/data/shader_proofs/fixture.wgsl\"\nowner = \"test\"\nexpiry = \"2027-01-17\"\n\n[[entry]]\nname = \"main\"\nproof_status = \"proven\"\ninputs = [\"value:t:-10:10\", \"texture:image:0:1:2:image.width:image.height\"]\noutputs = [\"return:0:1\"]\n").unwrap();
+    let proof = prove_wgsl(source, "main", &parsed.entries[0]).unwrap();
+    assert!(proof.alarms.is_empty(), "{:?}", proof.alarms);
+}
+
+#[test]
+fn portable_height_bilinear_load_is_bounded_and_range_preserving() {
+    let source = r#"
+@group(0) @binding(0) var image: texture_2d<f32>;
+fn main(uv: vec2<f32>, lod: f32) -> f32 {
+    let last_level = i32(textureNumLevels(image)) - 1;
+    let level = clamp(i32(floor(lod + 0.5)), 0, last_level);
+    let dims = textureDimensions(image, level);
+    let max_x = max(i32(dims.x) - 1, 0);
+    let max_y = max(i32(dims.y) - 1, 0);
+    let texel_x = clamp(uv.x, 0.0, 1.0) * f32(max_x);
+    let texel_y = clamp(uv.y, 0.0, 1.0) * f32(max_y);
+    let x0 = i32(floor(texel_x));
+    let y0 = i32(floor(texel_y));
+    let x1 = clamp(x0 + 1, 0, max_x);
+    let y1 = clamp(y0 + 1, 0, max_y);
+    let blend = clamp(
+        vec2<f32>(texel_x - f32(x0), texel_y - f32(y0)),
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
+    let h00 = textureLoad(image, vec2<i32>(x0, y0), level).r;
+    let h10 = textureLoad(image, vec2<i32>(x1, y0), level).r;
+    let h01 = textureLoad(image, vec2<i32>(x0, y1), level).r;
+    let h11 = textureLoad(image, vec2<i32>(x1, y1), level).r;
+    let top = mix(h00, h10, blend.x);
+    let bottom = mix(h01, h11, blend.x);
+    return mix(top, bottom, blend.y);
+}
+"#;
+    let parsed = parse_contract("[module]\npath = \"tests/data/shader_proofs/fixture.wgsl\"\nowner = \"test\"\nexpiry = \"2027-01-17\"\n\n[[entry]]\nname = \"main\"\nproof_status = \"proven\"\ninputs = [\"value:uv:-10:10\", \"value:lod:-100:100\", \"texture:image:0:1:2:image.width:image.height\"]\noutputs = [\"return:0:1\"]\n").unwrap();
+    let proof = prove_wgsl(source, "main", &parsed.entries[0]).unwrap();
+    assert!(proof.alarms.is_empty(), "{:?}", proof.alarms);
+}
+
+#[test]
 fn entry_point_output_ranges_are_checked() {
     let source = "@fragment fn main(@location(0) value: f32) -> @location(0) f32 { return value; }";
     let parsed = parse_contract("[module]\npath = \"tests/data/shader_proofs/fixture.wgsl\"\nowner = \"test\"\nexpiry = \"2027-01-17\"\n\n[[entry]]\nname = \"main\"\nproof_status = \"proven\"\ninputs = [\"value:value:0:2\"]\noutputs = [\"location0:0:1\"]\n").unwrap();

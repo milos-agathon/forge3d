@@ -1343,24 +1343,52 @@ class VTLayerFamily:
     normal feeds terrain normal perturbation; mask gates per-texel material-map
     effects.
     """
-    """Describes one paged terrain material family."""
     family: str                        # "albedo" | "normal" | "mask"
     virtual_size_px: Tuple[int, int] = (4096, 4096)  # family-wide invariant
     tile_size: int = 248               # content pixels per tile edge
     tile_border: int = 4               # gutter pixels per tile edge (slot_size = 256)
-    fallback: Tuple[float, ...] = (0.5, 0.5, 0.5, 1.0)  # last-resort per-family fallback
+    fallback: Optional[Tuple[float, ...]] = None  # family-safe last-resort value
 
     def __post_init__(self) -> None:
-        VALID_FAMILIES = {"albedo", "normal", "mask"}
-        if self.family not in VALID_FAMILIES:
-            raise ValueError(f"family must be one of {VALID_FAMILIES}")
+        valid_families = ("albedo", "normal", "mask")
+        if self.family not in valid_families:
+            raise ValueError(f"family must be one of {valid_families}")
+        if isinstance(self.tile_size, bool) or not isinstance(self.tile_size, Integral):
+            raise ValueError("tile_size must be an integer")
         if self.tile_size < 16:
             raise ValueError("tile_size must be >= 16")
+        if isinstance(self.tile_border, bool) or not isinstance(self.tile_border, Integral):
+            raise ValueError("tile_border must be an integer")
         if self.tile_border < 0:
             raise ValueError("tile_border must be >= 0")
+        if (
+            not isinstance(self.virtual_size_px, Sequence)
+            or isinstance(self.virtual_size_px, (str, bytes))
+            or len(self.virtual_size_px) != 2
+        ):
+            raise ValueError("virtual_size_px must contain exactly two dimensions")
         w, h = self.virtual_size_px
+        if any(isinstance(value, bool) or not isinstance(value, Integral) for value in (w, h)):
+            raise ValueError("virtual_size_px dimensions must be integers")
         if w < self.tile_size or h < self.tile_size:
             raise ValueError("virtual_size_px must be >= tile_size in both dimensions")
+        default_fallbacks = {
+            "albedo": (0.5, 0.5, 0.5, 1.0),
+            "normal": (0.5, 0.5, 1.0, 1.0),
+            "mask": (1.0, 1.0, 1.0, 1.0),
+        }
+        if self.fallback is None:
+            self.fallback = default_fallbacks[self.family]
+        if (
+            not isinstance(self.fallback, Sequence)
+            or isinstance(self.fallback, (str, bytes))
+            or len(self.fallback) != 4
+        ):
+            raise ValueError("fallback must contain exactly four channels")
+        fallback = tuple(float(value) for value in self.fallback)
+        if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in fallback):
+            raise ValueError("fallback channels must be finite values in [0, 1]")
+        self.fallback = fallback
 
     @property
     def slot_size(self) -> int:
@@ -1403,7 +1431,6 @@ class TerrainVTSettings:
     normal, and mask families share one page-table layout and must use matching
     virtual size and tile geometry when enabled together.
     """
-    """Terrain material virtual texturing configuration."""
     enabled: bool = False
     layers: List[VTLayerFamily] = field(default_factory=lambda: [
         VTLayerFamily(family="albedo")
@@ -1424,13 +1451,17 @@ class TerrainVTSettings:
         return tuple(layer.family for layer in self.layers)
 
     def __post_init__(self) -> None:
+        if self.enabled and not self.layers:
+            raise ValueError("enabled terrain VT requires at least one family")
         families = [l.family for l in self.layers]
         if len(families) != len(set(families)):
             raise ValueError("duplicate family in layers")
         if self.atlas_size < 256:
             raise ValueError("atlas_size must be >= 256")
-        if self.residency_budget_mb <= 0:
-            raise ValueError("residency_budget_mb must be > 0")
+        if not math.isfinite(float(self.residency_budget_mb)) or self.residency_budget_mb <= 0:
+            raise ValueError("residency_budget_mb must be a positive finite value")
+        if self.residency_budget_mb > 512.0:
+            raise ValueError("residency_budget_mb must not exceed the 512 MiB host-visible limit")
         if self.max_mip_levels < 1:
             raise ValueError("max_mip_levels must be >= 1")
         for layer in self.layers:
@@ -1438,6 +1469,34 @@ class TerrainVTSettings:
                 raise ValueError(
                     f"atlas_size ({self.atlas_size}) must be divisible by "
                     f"slot_size ({layer.slot_size}) for family '{layer.family}'"
+                )
+        if self.layers:
+            geometry = {
+                (layer.virtual_size_px, layer.tile_size, layer.tile_border)
+                for layer in self.layers
+            }
+            if len(geometry) != 1:
+                raise ValueError(
+                    "enabled terrain VT families must share virtual_size_px, "
+                    "tile_size, and tile_border"
+                )
+            # The runtime splits the total budget evenly. Reject a setting
+            # that cannot hold one raw RGBA logical slot for every requested
+            # family; silently rounding each share up would exceed the budget.
+            slot_size = self.layers[0].slot_size
+            atlas_slots = (self.atlas_size // slot_size) ** 2
+            if atlas_slots < len(self.layers):
+                raise ValueError(
+                    "atlas_size must provide at least one physical slot per "
+                    f"enabled family ({len(self.layers)} required, {atlas_slots} available)"
+                )
+            minimum_bytes = len(self.layers) * slot_size * slot_size * 4
+            budget_bytes = int(self.residency_budget_mb * 1024.0 * 1024.0)
+            if budget_bytes < minimum_bytes:
+                minimum_mb = minimum_bytes / (1024.0 * 1024.0)
+                raise ValueError(
+                    "residency_budget_mb must hold at least one logical tile "
+                    f"per enabled family ({minimum_mb:.6g} MiB required)"
                 )
 
     def actual_mip_count(self, family: str = "albedo") -> int:

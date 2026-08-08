@@ -364,6 +364,11 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
             for index, step in enumerate(steps)
             if step.get("name") == "Checkout live policy base"
         )
+        manual_base_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Resolve protected policy base for manual acceptance"
+        )
         snapshot_index = next(
             index
             for index, step in enumerate(steps)
@@ -379,6 +384,11 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
             for index, step in enumerate(steps)
             if step.get("name") == "Materialize current-base candidate tree"
         )
+        manual_merge_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Materialize manual-dispatch candidate tree"
+        )
         setup_index = next(
             index
             for index, step in enumerate(steps)
@@ -391,9 +401,11 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
         )
         assert (
             base_index
+            < manual_base_index
             < snapshot_index
             < trusted_index
             < merge_index
+            < manual_merge_index
             < setup_index
             < validate_index
         )
@@ -402,6 +414,12 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
             "ref": live_base_ref,
             "fetch-depth": "0",
         }
+        manual_base_step = steps[manual_base_index]
+        assert manual_base_step["if"] == "github.event_name == 'workflow_dispatch'"
+        assert manual_base_step["env"] == {
+            "POLICY_BRANCH": "${{ github.event.repository.default_branch }}"
+        }
+        assert 'refs/remotes/origin/${POLICY_BRANCH}' in manual_base_step["run"]
         snapshot_step = steps[snapshot_index]
         assert snapshot_step["id"] == "policy-base"
         assert 'sha=$(git rev-parse HEAD)' in snapshot_step["run"]
@@ -435,6 +453,17 @@ def test_preflight_uses_evaluated_state_without_weakening_source_provenance():
         assert 'git merge --no-commit --no-ff "$PR_HEAD_SHA"' in merge_run
         assert 'test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"' in merge_run
         assert 'test "$(git rev-parse MERGE_HEAD)" = "$PR_HEAD_SHA"' in merge_run
+        manual_merge_step = steps[manual_merge_index]
+        assert manual_merge_step["if"] == "github.event_name == 'workflow_dispatch'"
+        assert manual_merge_step["env"] == {
+            "POLICY_BASE_SHA": trusted_base_ref,
+            "CANDIDATE_HEAD_SHA": "${{ github.sha }}",
+        }
+        manual_merge_run = manual_merge_step["run"]
+        assert 'git fetch --no-tags origin "$CANDIDATE_HEAD_SHA"' in manual_merge_run
+        assert 'test "$(git rev-parse FETCH_HEAD)" = "$CANDIDATE_HEAD_SHA"' in manual_merge_run
+        assert 'git merge --no-commit --no-ff "$CANDIDATE_HEAD_SHA"' in manual_merge_run
+        assert 'test "$(git rev-parse MERGE_HEAD)" = "$CANDIDATE_HEAD_SHA"' in manual_merge_run
         validate_step = steps[validate_index]
         assert validate_step["working-directory"] == ".ci-contracts"
         assert validate_step["env"] == {

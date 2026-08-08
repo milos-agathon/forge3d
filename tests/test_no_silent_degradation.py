@@ -21,7 +21,14 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from _toml_compat import load_toml
+from tests._golden_variants import (
+    assert_nvidia_vulkan_golden_adapter,
+    selected_golden_path,
+    selected_golden_variant,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
@@ -406,6 +413,7 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
         "tests/test_render_certificate_contract.py",
         "tests/test_astro_ephemeris.py",
         "tests/test_no_silent_degradation.py",
+        "tests/test_substratia_evidence_report.py",
     }
     assert fast_lane == expected_fast, (
         "fast profile changed without updating the architectural-contract lock: "
@@ -424,8 +432,12 @@ def test_e_slow_lane_is_marker_selected_and_accounted():
     slow_args = ci_pytest_lane.build_pytest_args(
         "full", [ci_pytest_lane.SLOW_LANE_SELECTOR]
     )
-    assert default_args[default_args.index("-m") + 1] == "not slow"
-    assert slow_args[slow_args.index("-m") + 1] == "slow"
+    assert default_args[default_args.index("-m") + 1] == (
+        "not slow and not interactive_viewer"
+    )
+    assert slow_args[slow_args.index("-m") + 1] == (
+        "slow and not interactive_viewer"
+    )
     assert ci_pytest_lane.SLOW_LANE_SELECTOR not in slow_args
 
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
@@ -548,72 +560,158 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
 # ---------------------------------------------------------------------------
 # (f) visual-golden lane honesty
 # ---------------------------------------------------------------------------
-def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent():
+def test_f_backend_golden_variants_are_explicit_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_name = "FORGE3D_TERRAIN_GOLDEN_VARIANT"
+    monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.delenv("WGPU_BACKEND", raising=False)
+    assert selected_golden_variant(env_name, implicit_metal=True) is None
+
+    monkeypatch.setenv("WGPU_BACKEND", "metal")
+    assert selected_golden_variant(env_name, implicit_metal=True) == "metal"
+    assert selected_golden_path(
+        Path("goldens"), "scene", env_name, implicit_metal=True
+    ) == Path("goldens/scene.metal.png")
+
+    monkeypatch.setenv("WGPU_BACKEND", "vulkan")
+    assert selected_golden_variant(env_name, implicit_metal=True) is None
+    assert selected_golden_path(
+        Path("goldens"), "scene", env_name, implicit_metal=True
+    ) == Path("goldens/scene.png")
+    monkeypatch.setenv(env_name, "nvidia-vulkan")
+    assert selected_golden_variant(env_name, implicit_metal=True) == "nvidia-vulkan"
+    assert selected_golden_path(
+        Path("goldens"), "scene", env_name, implicit_metal=True
+    ) == Path("goldens/scene.nvidia-vulkan.png")
+    assert_nvidia_vulkan_golden_adapter(
+        env_name,
+        {
+            "status": "ok",
+            "backend": "Vulkan",
+            "device_type": "DiscreteGpu",
+            "vendor": 0x10DE,
+            "name": "NVIDIA test adapter",
+            "software_fallback": False,
+        },
+    )
+    with pytest.raises(AssertionError):
+        assert_nvidia_vulkan_golden_adapter(
+            env_name,
+            {
+                "status": "ok",
+                "backend": "Vulkan",
+                "device_type": "DiscreteGpu",
+                "vendor": 0x1002,
+                "name": "wrong adapter",
+                "software_fallback": False,
+            },
+        )
+
+    monkeypatch.setenv("WGPU_BACKEND", "metal")
+    with pytest.raises(ValueError, match="requires WGPU_BACKEND"):
+        selected_golden_variant(env_name, implicit_metal=True)
+
+    monkeypatch.setenv("WGPU_BACKEND", "vulkan")
+    monkeypatch.setenv(env_name, "generic-vulkan")
+    with pytest.raises(ValueError, match="Unknown golden variant"):
+        selected_golden_variant(env_name, implicit_metal=True)
+
+
+def test_f_nvidia_visual_acceptance_is_physical_and_fail_closed():
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     fast_job = _workflow_job(ci_yml, "test-fast-contract")
-    # Certificate mutation lives in a different manual-only workflow; the
-    # hosted Metal golden lane itself must remain macOS-wheel-only.
-    golden_job = _workflow_job(ci_yml, "test-golden-images")
+    golden_job = _workflow_job(ci_yml, "test-golden-images-nvidia")
+    metal_diagnostic = _workflow_job(ci_yml, "test-golden-images")
     pytest_step = golden_job.split("- name: Run visual golden tests", 1)[1].split("\n      - name:", 1)[0]
-    sidera_step = golden_job.split("- name: Run SIDERA Metal night golden", 1)[1].split(
+    sidera_step = golden_job.split("- name: Run SIDERA NVIDIA Vulkan night golden", 1)[1].split(
         "\n      - name:", 1
     )[0]
-    probe_step = golden_job.split("- name: Probe terrain golden backend", 1)[1].split("\n      - name:", 1)[0]
-    sidera_probe_step = golden_job.split(
-        "- name: Probe SIDERA physical Metal reference backend", 1
-    )[1].split("\n      - name:", 1)[0]
+    probe_step = golden_job.split("- name: Require physical NVIDIA Vulkan terrain adapter", 1)[
+        1
+    ].split("\n      - name:", 1)[0]
     aggregate = _workflow_job(ci_yml, "full-acceptance-summary")
 
     assert "github.event_name == 'pull_request'" not in golden_job
     assert "inputs.scope == 'full'" in golden_job
-    assert "runs-on: macos-14" in golden_job, "golden lane must use the gated Metal runner"
-    assert "WGPU_BACKEND: metal" in golden_job
-    assert "name: wheels-macos" in golden_job, "golden lane must install its runner-compatible wheel"
-    assert "name: wheels-windows" not in golden_job
-    # F-10: the probe must distinguish "no adapter" (ABSENT, exit 2) from
-    # "renderer crashed on a real adapter" (exit 3, fails the job). That means
-    # NO continue-on-error on the probe — only the ABSENT branch exits zero.
-    assert "continue-on-error" not in probe_step, (
-        "probe must fail the job on a crash; only ABSENT (exit 2) may pass"
-    )
-    assert 'probe=absent' in probe_step and 'probe=crash' in probe_step
-    assert 'exit "$code"' in probe_step, "probe crash must propagate a nonzero exit"
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in golden_job
+    assert "WGPU_BACKEND: vulkan" in golden_job
+    assert "name: wheels-windows" in golden_job
+    assert "name: wheels-macos" not in golden_job
+    assert "--require-nvidia-vulkan" in probe_step
+    assert "continue-on-error" not in probe_step
+    assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in golden_job
+    assert "FORGE3D_UPDATE_TERRAIN_GOLDENS" not in golden_job
+    assert "FORGE3D_UPDATE_RECIPE_GOLDENS" not in golden_job
+    assert "FORGE3D_UPDATE_TERRAIN_GOLDENS" not in pytest_step
+    assert "FORGE3D_UPDATE_RECIPE_GOLDENS" not in pytest_step
+    assert "FORGE3D_TERRAIN_GOLDEN_VARIANT: nvidia-vulkan" in golden_job
+    assert "FORGE3D_RECIPE_GOLDEN_VARIANT: nvidia-vulkan" in golden_job
+    assert "FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan" in golden_job
     assert "continue-on-error" not in pytest_step, "golden pytest mismatch is incorrectly non-fatal"
-    assert "terrain-goldens-probe.outputs.probe == 'positive'" in pytest_step
+    assert "run_nvidia_visual_acceptance.py --suite visual" in pytest_step
+    visual_runner = (ROOT / "scripts/run_nvidia_visual_acceptance.py").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "test_recipe_goldens_render_and_match[mapscene_terrain_raster]"
+        not in visual_runner
+    )
+    assert "test_nvidia_vulkan_recipe_pixel_golden_render_and_match" in visual_runner
+    recipe_source = (ROOT / "tests/test_recipe_goldens.py").read_text(encoding="utf-8")
+    certificate_test = recipe_source.split(
+        "def test_recipe_goldens_render_and_match", 1
+    )[1].split("def test_nvidia_vulkan_recipe_pixel_golden_render_and_match", 1)[0]
+    nvidia_pixel_test = recipe_source.split(
+        "def test_nvidia_vulkan_recipe_pixel_golden_render_and_match", 1
+    )[1]
+    assert "_render_recipe_golden_pixels" in certificate_test
+    assert "_emit_or_verify_certificate(spec)" in certificate_test
+    assert "_render_recipe_golden_pixels" in nvidia_pixel_test
+    assert "_emit_or_verify_certificate" not in nvidia_pixel_test
+    assert "FORGE3D_CERT_SIGNING_KEY" not in golden_job
+    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" not in golden_job
+    assert "assert_junit_zero_skips.py" in pytest_step
     assert "tests/test_astro_night_golden.py" in sidera_step
     assert "assert_junit_zero_skips.py" in sidera_step
     assert "continue-on-error" not in sidera_step
-    assert "sidera-metal-probe.outputs.probe == 'positive'" in sidera_step
-    assert "continue-on-error" not in sidera_probe_step
-    assert "--mode sidera-metal" in sidera_probe_step
-    assert 'probe=absent' in sidera_probe_step and 'exit "$code"' in sidera_probe_step
-    assert "sidera-metal-probe.outputs.probe == 'absent'" in golden_job
-    assert "sidera-night.ABSENT" in golden_job and "sidera-metal-lane-marker" in golden_job
     assert "sidera_lane:" in golden_job
-    assert 'echo "sidera_lane=ran" >> "$GITHUB_OUTPUT"' in sidera_step
-    assert "sidera_lane=absent" in golden_job
-    assert "software goldens do not prove physical Metal" in golden_job
-    assert "goldens.ABSENT" in golden_job and "golden-lane-marker" in golden_job
-    assert "terrain-goldens-probe.outputs.probe == 'absent'" in golden_job
-    signing_step = golden_job.split(
-        "- name: Require production certificate signing key", 1
-    )[1].split("\n      - name:", 1)[0]
-    assert "FORGE3D_CERT_SIGNING_KEY" in golden_job
-    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" in golden_job
-    assert 'if [ -z "$FORGE3D_CERT_SIGNING_KEY" ]' in signing_step
-    assert "exit 1" in signing_step
+    assert "FORGE3D_EXPECTED_ADAPTER_PROBE" in golden_job
+    for path, evidence_name in (
+        ("test_terrain_visual_goldens.py", "terrain-render-adapter.json"),
+        ("test_terrain_tv10_goldens.py", "tv10-render-adapter.json"),
+        ("test_recipe_goldens.py", "recipe-render-adapter.json"),
+    ):
+        source = (TESTS / path).read_text(encoding="utf-8")
+        assert "assert_nvidia_vulkan_golden_adapter" in source
+        assert evidence_name in source
+        if path != "test_recipe_goldens.py":
+            assert "selected_golden_path(" in source
+    assert "visual-gpu-evidence" in golden_job and "retention-days: 90" in golden_job
+    assert "Require production certificate signing key" not in golden_job
+    certificate_refresh = (
+        ROOT / ".github/workflows/certificate-refresh.yml"
+    ).read_text(encoding="utf-8")
+    assert "FORGE3D_CERT_SIGNING_KEY" in certificate_refresh
+    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" in certificate_refresh
+    assert "github.ref == 'refs/heads/main'" in certificate_refresh
+    assert "github.ref_protected" in certificate_refresh
     assert "FORGE3D_CERT_SIGNING_KEY" not in fast_job
     assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" not in fast_job
     assert "FORGE3D_RUN_TERRAIN_GOLDENS" not in fast_job
     assert "test_recipe_goldens.py" not in fast_job
     assert (
         "check_selected \"$full_selected\" "
-        "'${{ needs.test-golden-images.result }}' visual-goldens"
+        "'${{ needs.test-golden-images-nvidia.result }}' visual-goldens-nvidia"
         in aggregate
     )
-    assert "needs.test-golden-images.outputs.sidera_lane" in aggregate
+    assert "needs.test-golden-images-nvidia.outputs.lane" in aggregate
+    assert "needs.test-golden-images-nvidia.outputs.sidera_lane" in aggregate
     assert 'if [ "$sidera_lane" != "ran" ]' in aggregate
-    assert "SIDERA physical Metal lane was selected" in aggregate
+    assert "SIDERA physical NVIDIA Vulkan lane was selected" in aggregate
+    assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
+    assert "continue-on-error: true" in metal_diagnostic
+    assert "test-golden-images," not in aggregate.split("\n    runs-on:", 1)[0]
 
 
 def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
@@ -652,3 +750,65 @@ def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
     slow_job = _workflow_job(ci_yml, "test-python-slow")
     assert "python scripts/ci_pytest_lane.py --profile full --slow-lane" in slow_job
     assert "github.event_name == 'pull_request'" not in slow_job
+
+
+def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
+    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = _workflow_job(ci_yml, "test-substratia-gpu-nvidia")
+    metal_diagnostic = _workflow_job(ci_yml, "test-substratia-gpu")
+    core = _workflow_job(ci_yml, "pr-core-success")
+    acceptance = _workflow_job(ci_yml, "full-acceptance-summary")
+    probe = (ROOT / "scripts" / "terrain_ci_probe.py").read_text(encoding="utf-8")
+    lane = (ROOT / "scripts" / "ci_pytest_lane.py").read_text(encoding="utf-8")
+    launcher = (ROOT / "scripts" / "run_nvidia_visual_acceptance.py").read_text(
+        encoding="utf-8"
+    )
+
+    # Physical acceptance remains outside the stable hosted PR context.
+    assert "test-substratia-gpu-nvidia" not in core.split("\n    runs-on:", 1)[0]
+    assert "github.event_name == 'pull_request'" not in job
+    assert "inputs.scope == 'full'" in job
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
+    assert "WGPU_BACKEND: vulkan" in job
+    assert "--require-nvidia-vulkan" in job
+    assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in job
+    assert "continue-on-error" not in job
+
+    # The lane is bound to an explicit clean candidate and produces exact test,
+    # image, adapter, and verifier evidence rather than trusting artifact presence.
+    assert "FORGE3D_SUBSTRATIA_CANDIDATE_SHA" in job
+    assert 'git status --porcelain --untracked-files=no' in job
+    assert "run_nvidia_visual_acceptance.py --suite substratia" in job
+    assert "assert_junit_zero_skips.py" in job
+    for test_name in (
+        "test_normal_family_changes_lighting_ssim",
+        "test_all_families_page_within_budget",
+        "test_missing_family_is_fatal",
+        "test_partial_normal_residency_degrades_gracefully",
+    ):
+        assert test_name in launcher
+    assert "scripts/substratia_evidence_report.py" in job
+    assert '--candidate-sha "$env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA"' in job
+    assert "--render-adapter" in job
+    assert "adapter-probe.json" in job
+    assert "lane-ran.json" in job and "verification.json" in job
+    assert "if-no-files-found: error" in job
+    assert "retention-days: 90" in job
+
+    # Full Acceptance consumes explicit RAN and PASS outputs; a successful upload
+    # alone is not sufficient.
+    assert "test-substratia-gpu-nvidia" in acceptance.split("\n    runs-on:", 1)[0]
+    assert "needs.test-substratia-gpu-nvidia.outputs.lane" in acceptance
+    assert "needs.test-substratia-gpu-nvidia.outputs.verifier" in acceptance
+    assert "SUBSTRATIA physical lane did not record RAN" in acceptance
+    assert "SUBSTRATIA evidence verifier did not record PASS" in acceptance
+
+    # The SUBSTRATIA physical proof excludes virtual devices even though the
+    # general CI-safe probe retains main's virtual-GPU support.
+    for token in ("software", "virtual", "paravirtual", "virtio", "llvmpipe"):
+        assert f'"{token}"' in probe
+    assert "return 2" in probe and "return 3" in probe
+    assert "tests/test_substratia_evidence_report.py" in lane
+    assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
+    assert "continue-on-error: true" in metal_diagnostic
+    assert "test-substratia-gpu," not in acceptance.split("\n    runs-on:", 1)[0]

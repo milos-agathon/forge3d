@@ -42,6 +42,7 @@ FAST_LANE_FILES = [
     "tests/test_render_certificate_contract.py",
     "tests/test_astro_ephemeris.py",
     "tests/test_no_silent_degradation.py",
+    "tests/test_substratia_evidence_report.py",
 ]
 
 
@@ -118,7 +119,12 @@ def build_pytest_args(
         forwarded.remove(SLOW_LANE_SELECTOR)
     if slow and profile != "full":
         raise ValueError("--slow-lane is valid only with --profile full")
-    return [*profile_files(profile), "-m", "slow" if slow else "not slow", *forwarded]
+    marker = (
+        "slow and not interactive_viewer"
+        if slow
+        else "not slow and not interactive_viewer"
+    )
+    return [*profile_files(profile), "-m", marker, *forwarded]
 
 
 def _github_escape(message: str) -> str:

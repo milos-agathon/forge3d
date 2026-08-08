@@ -58,8 +58,26 @@ def test_feedback_counter_tracks_the_physical_surface_write():
     assert shader.count(
         "atomicAdd(&terrain_frame_counters.feedback_records, 1u)"
     ) == 1
-    assert "terrain_vt_write_surface_feedback(input.tex_coord, 0u)" in shader
-    assert "terrain_vt_write_surface_feedback(surface.tex_coord, 0u)" in fullscreen
+    shader_compact = "".join(shader.split())
+    fullscreen_compact = "".join(fullscreen.split())
+    assert (
+        "terrain_vt_write_surface_feedback("
+        "input.tex_coord,input.world_position,feedback_ddx_uv,feedback_ddy_uv,"
+        "feedback_ddx_world,feedback_ddy_world,0u,input.clip_position.xy,)"
+        in shader_compact
+    )
+    assert (
+        "terrain_vt_write_surface_feedback("
+        "input.tex_coord,input.world_position,resolve_ddx_uv,resolve_ddy_uv,"
+        "resolve_ddx_world,resolve_ddy_world,0u,input.clip_position.xy,)"
+        in fullscreen_compact
+    )
+    assert (
+        "terrain_vt_write_surface_feedback("
+        "surface.tex_coord,surface.world_position,feedback_ddx_uv,feedback_ddy_uv,"
+        "feedback_ddx_world,feedback_ddy_world,0u,input.clip_position.xy,)"
+        in fullscreen_compact
+    )
 
 
 def test_visibility_write_and_resolve_are_separate_shader_sources():
@@ -147,14 +165,32 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
         dem = _steep_dem(96)
         forward_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         register_sources(forward_renderer)
-        forward_params = _make_params(size_px=size, vt=vt)
+        # A 1 m camera radius against a 100 km terrain puts the eye inside the
+        # near-origin relief and makes the visibility differential vacuous on
+        # some adapters. Span several rings at a real view distance and keep
+        # the indirect frustum path active so the 10,000-pixel differential
+        # covers tile/LOD packing as well as primitive identity.
+        forward_params = _make_params(
+            size_px=size,
+            theta_deg=10.0,
+            cam_radius=50_000.0,
+            culling="frustum",
+            vt=vt,
+        )
         forward = _render_rgba(forward_renderer, forward_params, dem, ibl)
 
         renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         register_sources(renderer)
         visibility = _render_rgba(
             renderer,
-            _make_params(size_px=size, shading="visibility", vt=vt),
+            _make_params(
+                size_px=size,
+                theta_deg=10.0,
+                cam_radius=50_000.0,
+                culling="frustum",
+                shading="visibility",
+                vt=vt,
+            ),
             dem,
             ibl,
         )
@@ -162,8 +198,10 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
     np.testing.assert_array_equal(visibility, forward)
     stats = visibility_stats()
     assert stats["visible_pixels"] + stats["background_pixels"] == size[0] * size[1]
+    assert stats["visible_pixels"] > 0
     assert stats["visibility_feedback_records"] == stats["visible_pixels"]
     assert stats["material_invocations"] == stats["visible_pixels"]
+    assert stats["material_invocations"] > 0
     assert stats["forward_material_invocations"] >= stats["visible_pixels"]
     assert (
         stats["forward_feedback_records"] == stats["forward_material_invocations"]
@@ -194,10 +232,69 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
         )
     )
     first = renderer.pick_visibility_pixels(pixels)
-    cpu = renderer.pick_visibility_pixels_cpu(pixels)
-    assert first == cpu
+    second = renderer.pick_visibility_pixels(pixels)
+    assert second == first
+
+    # CPU ray intersections and raster coverage make different decisions at
+    # silhouette and primitive edges. Compare only visible centers whose
+    # complete 3x3 GPU neighborhood has one identity. A uniformly background
+    # raster neighborhood can still intersect a subpixel analytic CPU
+    # triangle, so background is covered by repeated GPU stability instead.
+    interior_indices = [
+        index
+        for index, (x, y) in enumerate(pixels)
+        if 0 < x < size[0] - 1 and 0 < y < size[1] - 1
+    ]
+    neighborhood_pixels = [
+        (x + dx, y + dy)
+        for index in interior_indices
+        for x, y in [pixels[index]]
+        for dy in (-1, 0, 1)
+        for dx in (-1, 0, 1)
+    ]
+    neighborhood_gpu = renderer.pick_visibility_pixels(neighborhood_pixels)
+    compared_indices = [
+        index
+        for offset, index in enumerate(interior_indices)
+        if len(set(neighborhood_gpu[offset * 9 : (offset + 1) * 9])) == 1
+        and neighborhood_gpu[offset * 9 + 4] is not None
+    ]
+    assert compared_indices, "no unambiguous 3x3 picking neighborhoods"
+    compared_pixels = [pixels[index] for index in compared_indices]
+    compared_gpu = [first[index] for index in compared_indices]
+    compared_cpu = renderer.pick_visibility_pixels_cpu(compared_pixels)
+    if compared_gpu != compared_cpu:
+        mismatch = next(
+            index
+            for index, (gpu_value, cpu_value) in enumerate(
+                zip(compared_gpu, compared_cpu, strict=True)
+            )
+            if gpu_value != cpu_value
+        )
+        mismatch_count = sum(
+            gpu_value != cpu_value
+            for gpu_value, cpu_value in zip(
+                compared_gpu, compared_cpu, strict=True
+            )
+        )
+        sample_index = compared_indices[mismatch]
+        pytest.fail(
+            repr({
+                "mismatch_count": mismatch_count,
+                "compared_count": len(compared_indices),
+                "excluded_count": len(first) - len(compared_indices),
+                "first_index": sample_index,
+                "pixel": pixels[sample_index],
+                "gpu": compared_gpu[mismatch],
+                "cpu": compared_cpu[mismatch],
+            })
+        )
     assert len(first) == 10_000
-    assert sum(value is not None for value in first) > 0
+    visible_identities = [value for value in first if value is not None]
+    assert len(visible_identities) >= 1_000, len(visible_identities)
+    tile_lod_ids = {value[0] for value in visible_identities}
+    assert len(tile_lod_ids) > 1, tile_lod_ids
+    assert any(tile_lod_id != 0 for tile_lod_id in tile_lod_ids), tile_lod_ids
     record_tessella_result(
         "visibility_buffer",
         {
@@ -215,9 +312,17 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
             "fallback_texels": int(stats["fallback_texels"]),
             "picking_samples": len(first),
             "picking_hits": sum(value is not None for value in first),
+            "gpu_picking_repeat_matches": sum(
+                first_value == second_value
+                for first_value, second_value in zip(first, second, strict=True)
+            ),
+            "gpu_cpu_picking_compared": len(compared_indices),
+            "gpu_cpu_picking_excluded": len(first) - len(compared_indices),
             "gpu_cpu_picking_matches": sum(
                 gpu_value == cpu_value
-                for gpu_value, cpu_value in zip(first, cpu, strict=True)
+                for gpu_value, cpu_value in zip(
+                    compared_gpu, compared_cpu, strict=True
+                )
             ),
             "bitwise_identical_to_forward": True,
         },

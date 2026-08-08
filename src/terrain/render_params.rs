@@ -41,9 +41,10 @@ use native_lighting::{
 pub(crate) use native_material::MaterialLayerSettingsNative;
 use native_material::{DetailSettingsNative, MaterialNoiseSettingsNative};
 use native_overlays::VectorOverlaySettingsNative;
+pub(crate) use native_postfx::AovSettingsNative;
 use native_postfx::{
-    AovSettingsNative, DenoiseMethodNative, DenoiseSettingsNative, DofMethodNative,
-    DofQualityNative, DofSettingsNative, LensEffectsSettingsNative, MotionBlurSettingsNative,
+    DenoiseMethodNative, DenoiseSettingsNative, DofMethodNative, DofQualityNative,
+    DofSettingsNative, LensEffectsSettingsNative, MotionBlurSettingsNative,
     ScreenSpaceSettingsNative, SkySettingsNative, TonemapSettingsNative, VolumetricsModeNative,
     VolumetricsSettingsNative,
 };

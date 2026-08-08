@@ -124,7 +124,7 @@ pub(crate) fn terrain_bindless() -> String {
         )
         .replace(
             "textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0)",
-            "textureSampleLevel(terrain_vt_atlas[family_slot], terrain_vt_sampler, atlas_uv, 0.0)",
+            "textureSampleLevel(terrain_vt_atlas[terrain_vt_atlas_layer(family_slot)], terrain_vt_sampler, atlas_uv, 0.0)",
         )
 }
 
@@ -189,6 +189,41 @@ mod tests {
     }
 
     #[test]
+    fn terrain_height_sampling_is_portable_manual_bilinear() {
+        let source = terrain();
+        assert!(source.contains("fn sample_height_bilinear_level("));
+        assert_eq!(source.matches("textureLoad(height_tex").count(), 4);
+        assert!(!source.contains("textureSample(height_tex"));
+        assert!(!source.contains("textureSampleLevel(height_tex"));
+
+        // Both the ordinary geometry path and every clipmap morph lookup must
+        // share the same reconstruction instead of drifting by callsite.
+        assert!(source.contains("let h_raw = sample_height_bilinear(uv);"));
+        assert!(source.contains("let h_fine = sample_height_bilinear(uv);"));
+        assert_eq!(
+            source.matches("sample_height_bilinear(coarse_base").count(),
+            4
+        );
+
+        // Resolve reconstructs the exact vertices emitted by the visibility
+        // write pass. It must therefore reuse the same helper rather than
+        // silently reintroducing filterable R32Float sampling.
+        let resolve = terrain_visbuffer_resolve(false);
+        assert!(!resolve.contains("textureSample(height_tex"));
+        assert!(!resolve.contains("textureSampleLevel(height_tex"));
+        assert_eq!(resolve.matches("textureLoad(height_tex").count(), 4);
+        assert!(resolve.contains("let h_fine = sample_height_bilinear(uv);"));
+
+        // The CSM caster and visible surface must agree between texel centres.
+        let shadow = terrain_shadow_depth();
+        assert!(shadow.contains("fn sample_height_bilinear("));
+        assert_eq!(shadow.matches("textureLoad(height_tex").count(), 4);
+        assert!(!shadow.contains("textureSample(height_tex"));
+        assert!(!shadow.contains("textureSampleLevel(height_tex"));
+        assert!(shadow.contains("let h_raw = sample_height_bilinear(uv);"));
+    }
+
+    #[test]
     fn actual_pbr_terrain_and_csm_assemblies_are_valid_wgsl() {
         for source in [
             pbr(),
@@ -241,7 +276,7 @@ mod tests {
         let bindless = terrain_bindless();
         assert!(fixed.contains("var terrain_vt_atlas: texture_2d<f32>;"));
         assert!(!fixed.contains("binding_array"));
-        assert!(!fixed.contains("terrain_vt_atlas[family_slot]"));
+        assert!(!fixed.contains("terrain_vt_atlas[terrain_vt_atlas_layer(family_slot)]"));
         // The array must be SIZED and must agree with the bind-group layout's
         // `count`; an unsized array against a counted layout entry is what
         // faulted the Vulkan device.
@@ -249,7 +284,9 @@ mod tests {
             "var terrain_vt_atlas: binding_array<texture_2d<f32>, {VT_ATLAS_BINDING_COUNT}>;"
         )));
         assert!(!bindless.contains("binding_array<texture_2d<f32>>"));
-        assert!(bindless.contains("terrain_vt_atlas[family_slot], terrain_vt_sampler"));
+        assert!(bindless
+            .contains("terrain_vt_atlas[terrain_vt_atlas_layer(family_slot)], terrain_vt_sampler"));
+        assert!(bindless.contains("fn terrain_vt_atlas_layer(family_slot: u32) -> u32"));
         assert_ne!(fixed, bindless);
     }
 }

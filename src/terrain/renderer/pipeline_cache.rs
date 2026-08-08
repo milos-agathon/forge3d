@@ -59,12 +59,58 @@ impl TerrainScene {
     /// Assemble the forward terrain module. `shader_sources` owns the include
     /// expansion (WGSL has no preprocessor) and the two virtual-texture atlas
     /// variants; this layer only picks the variant the device can execute.
-    pub(super) fn preprocess_terrain_shader(device: &wgpu::Device) -> String {
-        if Self::terrain_atlas_is_bindless(device) {
+    pub(super) fn preprocess_terrain_shader(
+        device: &wgpu::Device,
+        include_aov_depth: bool,
+    ) -> String {
+        let mut source = if Self::terrain_atlas_is_bindless(device) {
             crate::shader_sources::terrain_bindless()
         } else {
             crate::shader_sources::terrain()
+        };
+
+        if !include_aov_depth {
+            const BEGIN: &str = "// TERRAIN_AOV_DEPTH_BEGIN";
+            const END: &str = "// TERRAIN_AOV_DEPTH_END";
+            let begin = source.find(BEGIN);
+            assert!(
+                begin.is_some(),
+                "terrain shader must contain the AOV depth begin marker"
+            );
+            let begin = begin.unwrap_or(0);
+            let end_offset = source[begin..].find(END);
+            assert!(
+                end_offset.is_some(),
+                "terrain shader must contain the AOV depth end marker"
+            );
+            let end_offset = end_offset.unwrap_or(0);
+            let end = begin + end_offset + END.len();
+            source.replace_range(
+                begin..end,
+                "// AOV depth is source-isolated from ordinary beauty modules.",
+            );
+
+            const ENTRY_BEGIN: &str = "// TERRAIN_AOV_ENTRY_BEGIN";
+            const ENTRY_END: &str = "// TERRAIN_AOV_ENTRY_END";
+            let entry_begin = source.find(ENTRY_BEGIN);
+            assert!(
+                entry_begin.is_some(),
+                "terrain shader must contain the AOV entry begin marker"
+            );
+            let entry_begin = entry_begin.unwrap_or(0);
+            let entry_end_offset = source[entry_begin..].find(ENTRY_END);
+            assert!(
+                entry_end_offset.is_some(),
+                "terrain shader must contain the AOV entry end marker"
+            );
+            let entry_end = entry_begin + entry_end_offset.unwrap_or(0) + ENTRY_END.len();
+            source.replace_range(
+                entry_begin..entry_end,
+                "// AOV entry is source-isolated from ordinary beauty modules.",
+            );
         }
+
+        source
     }
 
     /// True when the compiled module indexes the atlas `binding_array`. The
@@ -111,7 +157,7 @@ impl TerrainScene {
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader_source = Self::preprocess_terrain_shader(device, false);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.shader",
@@ -185,7 +231,7 @@ impl TerrainScene {
         // `vs_clipmap_main` lives in the shared terrain_pbr_pom.wgsl module, so
         // the clipmap geometry path shades through the exact same PBR fragment
         // stage as the procedural-grid path.
-        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader_source = Self::preprocess_terrain_shader(device, false);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.clipmap.shader",
@@ -462,10 +508,11 @@ impl TerrainScene {
         material_layer_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
+        output_mask: u8,
         include_source_id: bool,
         clipmap_geometry: bool,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader(device);
+        let shader_source = Self::preprocess_terrain_shader(device, true);
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.aov.shader",
@@ -486,7 +533,9 @@ impl TerrainScene {
             push_constant_ranges: &[],
         });
 
-        // M1: AOV pipeline with 4 color targets
+        // M1: AOV pipeline with beauty plus only the requested auxiliary
+        // targets. `None` preserves WGSL location numbering without allocating,
+        // clearing, writing, or resolving an unused RGBA16F texture.
         // Target 0: Beauty (tonemapped color)
         // Target 1: Albedo (base color before lighting)
         // Target 2: Normal (normalized world-space normal, signed float)
@@ -500,19 +549,19 @@ impl TerrainScene {
                 write_mask: wgpu::ColorWrites::ALL,
             }),
             // Target 1: Albedo
-            Some(wgpu::ColorTargetState {
+            (output_mask & super::aov::AOV_ALBEDO_BIT != 0).then_some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             }),
             // Target 2: Normal
-            Some(wgpu::ColorTargetState {
+            (output_mask & super::aov::AOV_NORMAL_BIT != 0).then_some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             }),
             // Target 3: Depth
-            Some(wgpu::ColorTargetState {
+            (output_mask & super::aov::AOV_DEPTH_BIT != 0).then_some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
@@ -553,7 +602,7 @@ impl TerrainScene {
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: "fs_main",
+                        entry_point: "fs_aov_main",
                         targets: &targets,
                     }),
                     primitive: wgpu::PrimitiveState::default(),

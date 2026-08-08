@@ -796,6 +796,9 @@ class TerrainRenderer:
     def read_retained_vt_requests(
         self,
     ) -> List[Tuple[int, int, int, int, int]]: ...
+    def read_latest_vt_shader_feedback(
+        self,
+    ) -> List[Tuple[int, int, int, int, int]]: ...
     def pick_visibility_pixels(
         self, pixels: Sequence[Tuple[int, int]]
     ) -> List[Optional[Tuple[int, int]]]: ...
@@ -803,6 +806,9 @@ class TerrainRenderer:
         self, pixels: Sequence[Tuple[int, int]]
     ) -> List[Optional[Tuple[int, int]]]: ...
     def read_contributing_tiles(self) -> List[Dict[str, Any]]: ...
+    def resolve_captured_vt_feedback_provenance(
+        self, feedback: Sequence[Tuple[int, int, int, int, int]]
+    ) -> List[Dict[str, Any]]: ...
     # BOP-P2-02: runtime height-tile streaming for clipmap terrain.
     def enable_height_streaming(
         self,
