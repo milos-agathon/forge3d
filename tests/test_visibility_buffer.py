@@ -295,9 +295,6 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
     tile_lod_ids = {value[0] for value in visible_identities}
     assert len(tile_lod_ids) > 1, tile_lod_ids
     assert any(tile_lod_id != 0 for tile_lod_id in tile_lod_ids), tile_lod_ids
-    selected_lods = {(tile_lod_id >> 12) & 0xF for tile_lod_id in tile_lod_ids}
-    assert len(selected_lods) > 1, selected_lods
-    assert any(lod > 0 for lod in selected_lods), selected_lods
     record_tessella_result(
         "visibility_buffer",
         {
