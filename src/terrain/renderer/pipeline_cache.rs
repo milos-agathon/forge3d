@@ -145,7 +145,7 @@ impl TerrainScene {
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: "fs_main",
+                        entry_point: "fs_beauty_main",
                         targets: &[Some(wgpu::ColorTargetState {
                             format: color_format,
                             blend: None,
@@ -225,7 +225,7 @@ impl TerrainScene {
                         },
                         fragment: Some(wgpu::FragmentState {
                             module: &shader,
-                            entry_point: "fs_main",
+                            entry_point: "fs_beauty_main",
                             targets: &[Some(wgpu::ColorTargetState {
                                 format: color_format,
                                 blend: None,

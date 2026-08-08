@@ -3251,6 +3251,30 @@ fn normalize_aov_depth(linear_depth: f32, clip_near: f32, clip_far: f32) -> f32 
     ));
 }
 
+fn terrain_aov_depth(input : VertexOutput) -> vec4<f32> {
+    // AOV Depth: projected mesh/clipmap modes use actual raster depth because
+    // their clip position is built from a height-centered instance position
+    // while public `world_position` intentionally retains original elevation.
+    // Legacy fullscreen mode has fixed clip Z and retains its established
+    // height-varying view-space depth contract.
+    let clip_near = max(u_terrain.camera_mode_params.z, 1e-5);
+    let clip_far = max(u_terrain.camera_mode_params.w, clip_near + 1e-5);
+    let ndc_depth = clamp(input.clip_position.z, 0.0, 1.0);
+    let screen_view_position = det_mat4_mul_vec4(
+        u_terrain.view,
+        vec4<f32>(input.world_position, 1.0)
+    );
+    var linear_depth = -screen_view_position.z;
+    if (u_terrain.camera_mode_params.x >= 0.5) {
+        linear_depth = det_div(clip_near * clip_far, max(
+            1e-5,
+            clip_far - ndc_depth * (clip_far - clip_near)
+        ));
+    }
+    let depth_normalized = normalize_aov_depth(linear_depth, clip_near, clip_far);
+    return vec4<f32>(depth_normalized, depth_normalized, depth_normalized, 1.0);
+}
+
 fn shade_main(input : VertexOutput) -> FragmentOutput {
     var out : FragmentOutput;
 
@@ -4856,27 +4880,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         select(1.0, clamp(vt_normal_residency, 0.0, 1.0), vt_normal_enabled),
     );
 
-    // AOV Depth: projected mesh/clipmap modes use actual raster depth because
-    // their clip position is built from a height-centered instance position
-    // while public `world_position` intentionally retains original elevation.
-    // Legacy fullscreen mode has fixed clip Z and retains its established
-    // height-varying view-space depth contract.
-    let clip_near = max(u_terrain.camera_mode_params.z, 1e-5);
-    let clip_far = max(u_terrain.camera_mode_params.w, clip_near + 1e-5);
-    let ndc_depth = clamp(input.clip_position.z, 0.0, 1.0);
-    let screen_view_position = det_mat4_mul_vec4(
-        u_terrain.view,
-        vec4<f32>(input.world_position, 1.0)
-    );
-    var linear_depth = -screen_view_position.z;
-    if (u_terrain.camera_mode_params.x >= 0.5) {
-        linear_depth = det_div(clip_near * clip_far, max(
-            1e-5,
-            clip_far - ndc_depth * (clip_far - clip_near)
-        ));
-    }
-    let depth_normalized = normalize_aov_depth(linear_depth, clip_near, clip_far);
-    out.aov_depth = vec4<f32>(depth_normalized, depth_normalized, depth_normalized, 1.0);
+    // The beauty entry point must not reach AOV-only raster-depth arithmetic.
+    // The MRT entry overwrites this inert field with `terrain_aov_depth`.
+    out.aov_depth = vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
     // VERITAS: co-emitted with the color at composite time so the source map
     // and the image always describe the same frame.
@@ -4885,8 +4891,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     return out;
 }
 
-@fragment
-fn fs_main(input : VertexOutput) -> FragmentOutput {
+fn terrain_forward_main(input : VertexOutput) -> FragmentOutput {
     // Capture the quad gradients while every fragment lane is still active.
     // The feedback helper is intentionally derivative-free so later selector
     // branches cannot make mip demand backend-dependent.
@@ -4907,6 +4912,21 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         0u,
         input.clip_position.xy,
     );
+    return out;
+}
+
+// Keep the ordinary beauty pipeline's fragment interface independent from the
+// MRT-only AOV fields. In particular, depth reconstruction must not perturb
+// backend compilation of a render that has no AOV attachments.
+@fragment
+fn fs_beauty_main(input : VertexOutput) -> @location(0) vec4<f32> {
+    return terrain_forward_main(input).color;
+}
+
+@fragment
+fn fs_main(input : VertexOutput) -> FragmentOutput {
+    var out = terrain_forward_main(input);
+    out.aov_depth = terrain_aov_depth(input);
     return out;
 }
 
