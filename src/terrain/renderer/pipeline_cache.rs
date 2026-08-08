@@ -87,10 +87,26 @@ impl TerrainScene {
             let end = begin + end_offset + END.len();
             source.replace_range(
                 begin..end,
-                "// AOV depth is source-isolated from ordinary beauty modules.\n\
-                 fn terrain_aov_depth(_input : VertexOutput) -> vec4<f32> {\n\
-                     return vec4<f32>(0.0, 0.0, 0.0, 1.0);\n\
-                 }",
+                "// AOV depth is source-isolated from ordinary beauty modules.",
+            );
+
+            const ENTRY_BEGIN: &str = "// TERRAIN_AOV_ENTRY_BEGIN";
+            const ENTRY_END: &str = "// TERRAIN_AOV_ENTRY_END";
+            let entry_begin = source.find(ENTRY_BEGIN);
+            assert!(
+                entry_begin.is_some(),
+                "terrain shader must contain the AOV entry begin marker"
+            );
+            let entry_begin = entry_begin.unwrap_or(0);
+            let entry_end_offset = source[entry_begin..].find(ENTRY_END);
+            assert!(
+                entry_end_offset.is_some(),
+                "terrain shader must contain the AOV entry end marker"
+            );
+            let entry_end = entry_begin + entry_end_offset.unwrap_or(0) + ENTRY_END.len();
+            source.replace_range(
+                entry_begin..entry_end,
+                "// AOV entry is source-isolated from ordinary beauty modules.",
             );
         }
 
@@ -175,7 +191,7 @@ impl TerrainScene {
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: "fs_beauty_main",
+                        entry_point: "fs_main",
                         targets: &[Some(wgpu::ColorTargetState {
                             format: color_format,
                             blend: None,
@@ -255,7 +271,7 @@ impl TerrainScene {
                         },
                         fragment: Some(wgpu::FragmentState {
                             module: &shader,
-                            entry_point: "fs_beauty_main",
+                            entry_point: "fs_main",
                             targets: &[Some(wgpu::ColorTargetState {
                                 format: color_format,
                                 blend: None,
@@ -586,7 +602,7 @@ impl TerrainScene {
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: "fs_main",
+                        entry_point: "fs_aov_main",
                         targets: &targets,
                     }),
                     primitive: wgpu::PrimitiveState::default(),

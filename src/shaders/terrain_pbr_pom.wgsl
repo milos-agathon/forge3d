@@ -4882,9 +4882,19 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         select(1.0, clamp(vt_normal_residency, 0.0, 1.0), vt_normal_enabled),
     );
 
-    // The beauty entry point must not reach AOV-only raster-depth arithmetic.
-    // The MRT entry overwrites this inert field with `terrain_aov_depth`.
-    out.aov_depth = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    // Preserve the legacy unused AOV dataflow in ordinary beauty modules: its
+    // exact arithmetic is part of the cross-backend deterministic compilation
+    // contract. The MRT entry overwrites this with accurate raster depth.
+    let view_pos_for_depth = det_mat4_mul_vec4(u_terrain.view, vec4<f32>(input.world_position, 1.0));
+    let linear_depth = -view_pos_for_depth.z;
+    let clip_near = max(u_terrain.camera_mode_params.z, 1e-5);
+    let clip_far = max(u_terrain.camera_mode_params.w, clip_near + 1e-5);
+    let depth_normalized = clamp(
+        (linear_depth - clip_near) / max(clip_far - clip_near, 1e-5),
+        0.0,
+        1.0
+    );
+    out.aov_depth = vec4<f32>(depth_normalized, depth_normalized, depth_normalized, 1.0);
 
     // VERITAS: co-emitted with the color at composite time so the source map
     // and the image always describe the same frame.
@@ -4893,7 +4903,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     return out;
 }
 
-fn terrain_forward_main(input : VertexOutput) -> FragmentOutput {
+@fragment
+fn fs_main(input : VertexOutput) -> FragmentOutput {
     // Capture the quad gradients while every fragment lane is still active.
     // The feedback helper is intentionally derivative-free so later selector
     // branches cannot make mip demand backend-dependent.
@@ -4917,20 +4928,30 @@ fn terrain_forward_main(input : VertexOutput) -> FragmentOutput {
     return out;
 }
 
-// Keep the ordinary beauty pipeline's fragment interface independent from the
-// MRT-only AOV fields. In particular, depth reconstruction must not perturb
-// backend compilation of a render that has no AOV attachments.
+// TERRAIN_AOV_ENTRY_BEGIN
 @fragment
-fn fs_beauty_main(input : VertexOutput) -> @location(0) vec4<f32> {
-    return terrain_forward_main(input).color;
-}
-
-@fragment
-fn fs_main(input : VertexOutput) -> FragmentOutput {
-    var out = terrain_forward_main(input);
+fn fs_aov_main(input : VertexOutput) -> FragmentOutput {
+    let feedback_ddx_uv = terrain_screen_ddx_uv(input.tex_coord);
+    let feedback_ddy_uv = terrain_screen_ddy_uv(input.tex_coord);
+    let feedback_ddx_world = terrain_screen_ddx_world(input.world_position);
+    let feedback_ddy_world = terrain_screen_ddy_world(input.world_position);
+    var out = shade_main(input);
+    atomicAdd(&terrain_frame_counters.material_invocations, 1u);
+    atomicAdd(&terrain_frame_counters.forward_material_invocations, 1u);
+    terrain_vt_write_surface_feedback(
+        input.tex_coord,
+        input.world_position,
+        feedback_ddx_uv,
+        feedback_ddy_uv,
+        feedback_ddx_world,
+        feedback_ddy_world,
+        0u,
+        input.clip_position.xy,
+    );
     out.aov_depth = terrain_aov_depth(input);
     return out;
 }
+// TERRAIN_AOV_ENTRY_END
 
 // TESSELLA pass 1 (`fs_visibility`) lives in src/shaders/terrain_visbuffer_write.wgsl
 // and pass 2 (`fs_visibility_resolve_fullscreen`) in
