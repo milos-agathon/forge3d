@@ -5016,7 +5016,12 @@ fn vs_clipmap_main(
     let h_disp = det_fma(apply_height_curve01(t_geom), h_max - h_min, h_min);
     let h_exag = u_terrain.spacing_h_exag.z;
     let h_center = (h_min + h_max) * 0.5;
-    let skirt_offset = select(0.0, u_terrain.camera_mode_params.y * 0.001, clip_morph.x < 0.0);
+    let skirt_depth = select(
+        u_terrain.camera_mode_params.y * 0.001,
+        -clip_morph.x,
+        clip_morph.y < 0.0,
+    );
+    let skirt_offset = select(0.0, skirt_depth, clip_morph.x < 0.0);
     let world_z_centered = (h_disp - h_center - skirt_offset) * h_exag;
     let world_z_original = (h_disp - skirt_offset) * h_exag;
     let instance_transform = mat4x4<f32>(

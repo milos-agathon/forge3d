@@ -228,8 +228,45 @@ pub fn make_ring_skirts(
         skirt_indices.extend_from_slice(&[a, b, skirt_a, b, skirt_b, skirt_a]);
     }
 
-    let _ = skirt_depth; // Used in shader for the vertical offset.
+    let _ = skirt_depth;
     (skirt_verts, skirt_indices)
+}
+
+/// Minimum depth that hides a curved globe patch's chord-to-surface sagitta
+/// plus its altitude allowance. Invalid inputs fail closed to the configured
+/// depth, and the f64 intermediate avoids cancellation at planet scale.
+pub fn curvature_safe_skirt_depth(
+    configured_depth: f32,
+    curvature_radius: f32,
+    patch_chord: f32,
+    altitude_allowance: f32,
+) -> f32 {
+    let configured_depth = if configured_depth.is_finite() {
+        configured_depth.max(0.0)
+    } else {
+        0.0
+    };
+    if !curvature_radius.is_finite()
+        || !patch_chord.is_finite()
+        || curvature_radius <= 0.0
+        || patch_chord < 0.0
+    {
+        return configured_depth;
+    }
+    let radius = f64::from(curvature_radius);
+    let half_chord = (f64::from(patch_chord) * 0.5).min(radius);
+    let sagitta = radius - (radius * radius - half_chord * half_chord).max(0.0).sqrt();
+    let allowance = if altitude_allowance.is_finite() {
+        f64::from(altitude_allowance.max(0.0))
+    } else {
+        0.0
+    };
+    let safe = (sagitta + allowance) as f32;
+    if safe.is_finite() {
+        configured_depth.max(safe)
+    } else {
+        configured_depth
+    }
 }
 
 #[cfg(test)]
@@ -371,5 +408,35 @@ mod tests {
             max_edge,
             adjacent_spacing
         );
+    }
+
+    #[test]
+    fn curvature_safe_skirt_depth_is_finite_and_monotonic() {
+        // This catches a shallow or non-finite globe skirt calculation that
+        // exposes the horizon seam as patch span or altitude increases.
+        let configured = 10.0;
+        let short = curvature_safe_skirt_depth(configured, 6_371_000.0, 1_000.0, 5.0);
+        let wide = curvature_safe_skirt_depth(configured, 6_371_000.0, 10_000.0, 5.0);
+        let higher = curvature_safe_skirt_depth(configured, 6_371_000.0, 10_000.0, 50.0);
+
+        assert!(short.is_finite() && wide.is_finite() && higher.is_finite());
+        assert!(short >= configured);
+        assert!(wide >= short);
+        assert!(higher >= wide);
+        assert_eq!(
+            curvature_safe_skirt_depth(configured, 0.0, f32::INFINITY, f32::NAN),
+            configured
+        );
+    }
+
+    #[test]
+    fn curvature_safe_skirt_depth_sanitizes_non_finite_configured_depth() {
+        // This catches returning an infinite configured depth unchanged, which
+        // leaks non-finite bounds into globe skirts and culling.
+        for configured in [f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
+            let depth = curvature_safe_skirt_depth(configured, 6_371_000.0, 0.0, 0.0);
+            assert!(depth.is_finite());
+            assert_eq!(depth, 0.0);
+        }
     }
 }

@@ -45,9 +45,14 @@ impl CpuVisibilityOracle {
         let decoded = params.decoded();
         let (h_min, h_max) = decoded.clamp.height_range;
         let h_center = (h_min + h_max) * 0.5;
-        let skirt = super::core::clipmap_camera_config(&params.camera_mode)
+        let legacy_skirt_depth = super::core::clipmap_camera_config(&params.camera_mode)
             .map(|config| config.ring_resolution as f32 * 0.001)
             .unwrap_or(0.0);
+        let skirt = clipmap
+            .vertices
+            .iter()
+            .map(|vertex| vertex.skirt_depth_or(legacy_skirt_depth))
+            .fold(0.0_f32, f32::max);
         let vertices = clipmap
             .vertices
             .iter()

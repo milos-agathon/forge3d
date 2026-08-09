@@ -41,6 +41,7 @@ pub(in crate::terrain::renderer) struct ClipmapGeometryKey {
     height_range_bits: (u32, u32),
     height_curve_hash: u64,
     z_scale_bits: u32,
+    readiness: Vec<u8>,
 }
 
 impl ClipmapGeometryKey {
@@ -56,6 +57,7 @@ impl ClipmapGeometryKey {
         height_range: (f32, f32),
         height_curve_hash: u64,
         z_scale: f32,
+        readiness: Vec<crate::terrain::clipmap::geomorph::TileReadiness>,
     ) -> Self {
         Self {
             ring_count: config.ring_count,
@@ -73,6 +75,10 @@ impl ClipmapGeometryKey {
             height_range_bits: (height_range.0.to_bits(), height_range.1.to_bits()),
             height_curve_hash,
             z_scale_bits: z_scale.to_bits(),
+            readiness: readiness
+                .into_iter()
+                .map(|state| u8::from(state.fine_resident) | (u8::from(state.coarse_resident) << 1))
+                .collect(),
         }
     }
 }
@@ -585,6 +591,17 @@ impl TerrainScene {
 
         let center = self.height_streaming_center();
         let terrain_span = params.terrain_span.max(1.0);
+        let readiness = (0..config.ring_count)
+            .map(|ring_index| {
+                self.height_streaming
+                    .as_ref()
+                    .map(|streaming| streaming.streamer.ring_readiness(ring_index))
+                    .unwrap_or(crate::terrain::clipmap::geomorph::TileReadiness {
+                        fine_resident: true,
+                        coarse_resident: true,
+                    })
+            })
+            .collect::<Vec<_>>();
         let cache_key = ClipmapGeometryKey::new(
             &config,
             terrain_span,
@@ -597,6 +614,7 @@ impl TerrainScene {
             params.decoded().clamp.height_range,
             height_curve_hash(params),
             params.z_scale,
+            readiness.clone(),
         );
         if let Some(TerrainGeometryProvider::Clipmap {
             cache_key: existing,
@@ -620,10 +638,14 @@ impl TerrainScene {
             let range =
                 bounds.vertex_start as usize..(bounds.vertex_start + bounds.vertex_count) as usize;
             crate::terrain::clipmap::geomorph::correct_seam_vertices(
-                &mut mesh.vertices[range],
+                &mut mesh.vertices[range.clone()],
                 ring_index as u32,
                 config.ring_resolution << ((ring_index as u32 + 1).min(16)),
                 &geomorph_config,
+            );
+            crate::terrain::clipmap::geomorph::apply_tile_readiness(
+                &mut mesh.vertices[range],
+                readiness[ring_index],
             );
         }
         let seam_regions = std::iter::once(mesh.center_bounds)
@@ -746,7 +768,13 @@ impl TerrainScene {
                     bounds_max,
                 );
                 if let Some(minmax) = minmax.as_ref() {
-                    let skirt = config.ring_resolution as f32 * 0.001 * params.z_scale.abs();
+                    let legacy_skirt_depth = config.ring_resolution as f32 * 0.001;
+                    let skirt = mesh
+                        .vertices
+                        .iter()
+                        .map(|vertex| vertex.skirt_depth_or(legacy_skirt_depth))
+                        .fold(0.0_f32, f32::max)
+                        * params.z_scale.abs();
                     let bounds = local_height_bounds(
                         minmax,
                         bounds_min,

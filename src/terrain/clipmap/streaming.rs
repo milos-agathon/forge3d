@@ -1,5 +1,6 @@
 //! P2.1/M5: Clipmap streaming integration with HeightMosaic and PageTable.
 
+use super::geomorph::TileReadiness;
 use super::level::ClipmapLevel;
 use super::ClipmapConfig;
 use crate::terrain::lod::LodConfig;
@@ -16,6 +17,7 @@ pub struct ClipmapStreamer {
     pub clipmap: ClipmapLevel,
     pending_tiles: Vec<TileId>,
     loaded_tiles: Vec<TileId>,
+    required_tiles: Vec<TileId>,
 }
 
 impl ClipmapStreamer {
@@ -25,6 +27,7 @@ impl ClipmapStreamer {
             clipmap: ClipmapLevel::new(config, center, terrain_extent),
             pending_tiles: Vec::new(),
             loaded_tiles: Vec::new(),
+            required_tiles: Vec::new(),
         }
     }
 
@@ -39,6 +42,7 @@ impl ClipmapStreamer {
             clipmap: ClipmapLevel::new_globe(config, center_ecef, frame, terrain_extent)?,
             pending_tiles: Vec::new(),
             loaded_tiles: Vec::new(),
+            required_tiles: Vec::new(),
         })
     }
 
@@ -53,6 +57,11 @@ impl ClipmapStreamer {
         // Update clipmap center to camera XZ position
         let new_center = Vec2::new(camera_pos.x, camera_pos.z);
         let required_tiles = self.clipmap.update_center(new_center);
+        let required_tiles = if required_tiles.is_empty() {
+            self.clipmap.calculate_required_tiles()
+        } else {
+            required_tiles
+        };
 
         self.queue_required(required_tiles)
     }
@@ -67,10 +76,16 @@ impl ClipmapStreamer {
         let surface_center = camera_anchor.normalize() * surface_radius;
         self.clipmap.recenter(camera_anchor);
         let required_tiles = self.clipmap.update_globe_center(surface_center);
+        let required_tiles = if required_tiles.is_empty() {
+            self.clipmap.calculate_required_tiles()
+        } else {
+            required_tiles
+        };
         self.queue_required(required_tiles)
     }
 
     fn queue_required(&mut self, required_tiles: Vec<TileId>) -> Vec<TileId> {
+        self.required_tiles = required_tiles.clone();
         let new_tiles: Vec<TileId> = required_tiles
             .into_iter()
             .filter(|t| !self.loaded_tiles.contains(t) && !self.pending_tiles.contains(t))
@@ -118,6 +133,35 @@ impl ClipmapStreamer {
     /// Get loaded tile count.
     pub fn loaded_count(&self) -> usize {
         self.loaded_tiles.len()
+    }
+
+    /// Return whether the fine ring and its next-coarser neighbour are fully
+    /// resident for safe boundary morphing. Pending keys are explicitly not
+    /// resident, even when an older tile at the same LOD is loaded.
+    pub fn ring_readiness(&self, ring_index: u32) -> TileReadiness {
+        let loaded_for_lod = |lod: u32| {
+            let required: Vec<_> = self
+                .required_tiles
+                .iter()
+                .filter(|tile| tile.lod == lod)
+                .collect();
+            !required.is_empty()
+                && required.iter().all(|tile| self.loaded_tiles.contains(tile))
+                && required
+                    .iter()
+                    .all(|tile| !self.pending_tiles.contains(tile))
+        };
+        let fine_resident = loaded_for_lod(self.ring_to_tile_lod(ring_index));
+        let coarse_ring = ring_index.saturating_add(1);
+        let coarse_resident = if coarse_ring >= self.clipmap.config.ring_count {
+            fine_resident
+        } else {
+            loaded_for_lod(self.ring_to_tile_lod(coarse_ring))
+        };
+        TileReadiness {
+            fine_resident,
+            coarse_resident,
+        }
     }
 }
 
@@ -189,6 +233,267 @@ mod tests {
             assert!(streamer.pending_count() < pending_before || pending_before == 0);
             assert!(streamer.loaded_count() > 0);
         }
+    }
+
+    #[test]
+    fn throttled_arrivals_keep_each_boundary_coarse_snapped_until_both_sides_are_loaded() {
+        // This catches inverted readiness semantics that treat pending tiles
+        // as resident and permit a fine/coarse transition crack mid-arrival.
+        let mut streamer = ClipmapStreamer::new(ClipmapConfig::new(2, 4), Vec2::ZERO, 1000.0);
+        let fine = TileId::new(0, 0, 0);
+        let coarse = TileId::new(1, 0, 0);
+        streamer.queue_required(vec![fine, coarse]);
+
+        assert_eq!(
+            streamer.ring_readiness(0),
+            TileReadiness {
+                fine_resident: false,
+                coarse_resident: false,
+            }
+        );
+        streamer.mark_loaded(&[fine]);
+        assert_eq!(
+            streamer.ring_readiness(0),
+            TileReadiness {
+                fine_resident: true,
+                coarse_resident: false,
+            }
+        );
+        streamer.mark_loaded(&[coarse]);
+        assert_eq!(
+            streamer.ring_readiness(0),
+            TileReadiness {
+                fine_resident: true,
+                coarse_resident: true,
+            }
+        );
+    }
+
+    #[test]
+    fn stationary_update_keeps_loaded_required_keys_ready() {
+        // This catches clearing the current required keys when the camera has
+        // not crossed a recenter threshold after tiles have arrived.
+        let mut streamer = ClipmapStreamer::new(ClipmapConfig::new(2, 4), Vec2::ZERO, 1000.0);
+        let lod_config = LodConfig::new(2.0, 1024, 768, 45.0_f32.to_radians());
+        let camera = Vec3::new(100.0, 50.0, 100.0);
+        let requested = streamer.update(camera, Mat4::IDENTITY, Mat4::IDENTITY, &lod_config);
+        streamer.mark_loaded(&requested);
+        assert_eq!(
+            streamer.ring_readiness(0),
+            TileReadiness {
+                fine_resident: true,
+                coarse_resident: true,
+            }
+        );
+
+        assert!(streamer
+            .update(camera, Mat4::IDENTITY, Mat4::IDENTITY, &lod_config)
+            .is_empty());
+        assert_eq!(
+            streamer.ring_readiness(0),
+            TileReadiness {
+                fine_resident: true,
+                coarse_resident: true,
+            }
+        );
+    }
+
+    #[test]
+    fn multi_key_arrivals_preserve_boundary_parity_and_topology_at_every_transition() {
+        use super::super::geomorph::{
+            analyze_depth_discontinuities, analyze_seams, apply_tile_readiness, GeomorphConfig,
+        };
+        use super::super::{make_ring, ClipmapVertex};
+
+        // Exercise the same producer -> readiness mutation -> height consumer
+        // path used by TerrainScene::prepare_geometry. The checkerboard DEM is
+        // an independent oracle: fine samples on odd texels are 1, while the
+        // next-coarser two-texel lattice interpolates only zero-valued texels.
+        const TERRAIN_EXTENT: f32 = 64.0;
+        const HEIGHT_SIZE: u32 = 65;
+        let heightmap = (0..HEIGHT_SIZE)
+            .flat_map(|y| (0..HEIGHT_SIZE).map(move |x| ((x + y) & 1) as f32))
+            .collect::<Vec<_>>();
+        let boundary_at = |vertices: &[ClipmapVertex], extent: f32| {
+            vertices
+                .iter()
+                .copied()
+                .filter(|vertex| {
+                    !vertex.is_skirt()
+                        && (Vec2::new(vertex.position[0], vertex.position[1])
+                            .abs()
+                            .max_element()
+                            - extent)
+                            .abs()
+                            < 1.0e-5
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Both sides come from separate calls to the production mesh
+        // generator. Ring 0's real outer boundary meets ring 1's inner edge.
+        let (fine_template, _) = make_ring(0, 10.0, 20.0, 20, Vec2::ZERO, TERRAIN_EXTENT, 0.3);
+        let (coarse_vertices, _) = make_ring(1, 20.0, 28.0, 8, Vec2::ZERO, TERRAIN_EXTENT, 0.3);
+        let coarse_boundary = boundary_at(&coarse_vertices, 20.0);
+
+        // The 18-unit contour is a real set of production ring-0 transition
+        // vertices. A separately generated ring-1 inner edge provides the
+        // coarse-lattice height oracle at exactly that contour.
+        let (transition_coarse_vertices, _) =
+            make_ring(1, 18.0, 26.0, 8, Vec2::ZERO, TERRAIN_EXTENT, 0.3);
+        let transition_coarse_boundary = boundary_at(&transition_coarse_vertices, 18.0);
+        let geomorph = GeomorphConfig {
+            max_seam_gap: 1.0e-5,
+            ..Default::default()
+        };
+
+        let fine_a = TileId::new(0, 0, 0);
+        let fine_b = TileId::new(0, 1, 0);
+        let coarse_a = TileId::new(1, 0, 0);
+        let coarse_b = TileId::new(1, 1, 0);
+
+        for (state, loaded, expected) in [
+            (
+                "pending",
+                &[][..],
+                TileReadiness {
+                    fine_resident: false,
+                    coarse_resident: false,
+                },
+            ),
+            (
+                "fine partial",
+                &[fine_a][..],
+                TileReadiness {
+                    fine_resident: false,
+                    coarse_resident: false,
+                },
+            ),
+            (
+                "fine ready, coarse pending",
+                &[fine_a, fine_b][..],
+                TileReadiness {
+                    fine_resident: true,
+                    coarse_resident: false,
+                },
+            ),
+            (
+                "coarse partial",
+                &[coarse_a][..],
+                TileReadiness {
+                    fine_resident: false,
+                    coarse_resident: false,
+                },
+            ),
+            (
+                "fine pending, coarse ready",
+                &[coarse_a, coarse_b][..],
+                TileReadiness {
+                    fine_resident: false,
+                    coarse_resident: true,
+                },
+            ),
+            (
+                "both partial",
+                &[fine_a, coarse_a][..],
+                TileReadiness {
+                    fine_resident: false,
+                    coarse_resident: false,
+                },
+            ),
+            (
+                "ready",
+                &[fine_a, fine_b, coarse_a, coarse_b][..],
+                TileReadiness {
+                    fine_resident: true,
+                    coarse_resident: true,
+                },
+            ),
+        ] {
+            let mut streamer = ClipmapStreamer::new(ClipmapConfig::new(2, 4), Vec2::ZERO, 1000.0);
+            streamer.queue_required(vec![fine_a, fine_b, coarse_a, coarse_b]);
+            streamer.mark_loaded(loaded);
+            let readiness = streamer.ring_readiness(0);
+            assert_eq!(readiness, expected, "{state}");
+
+            let mut fine_vertices = fine_template.clone();
+            apply_tile_readiness(&mut fine_vertices, readiness);
+
+            let fine_boundary = boundary_at(&fine_vertices, 20.0);
+            let seam = analyze_seams(&fine_boundary, &coarse_boundary, &geomorph);
+            assert!(seam.seams_valid, "{state}: {readiness:?}: {seam:?}");
+            assert_eq!(seam.crack_count, 0, "{state}: {readiness:?}: {seam:?}");
+            let depth = analyze_depth_discontinuities(
+                &fine_boundary,
+                &coarse_boundary,
+                &heightmap,
+                (HEIGHT_SIZE, HEIGHT_SIZE),
+                1.0,
+                geomorph.max_seam_gap,
+            );
+            assert!(depth.sample_count > 0, "{state}: {readiness:?}: {depth:?}");
+            assert_eq!(depth.crack_count, 0, "{state}: {readiness:?}: {depth:?}");
+
+            let transition_boundary = boundary_at(&fine_vertices, 18.0);
+            let transition_seam =
+                analyze_seams(&transition_boundary, &transition_coarse_boundary, &geomorph);
+            assert!(
+                transition_seam.seams_valid,
+                "{state}: {readiness:?}: {transition_seam:?}"
+            );
+            let transition_depth = analyze_depth_discontinuities(
+                &transition_boundary,
+                &transition_coarse_boundary,
+                &heightmap,
+                (HEIGHT_SIZE, HEIGHT_SIZE),
+                1.0,
+                geomorph.max_seam_gap,
+            );
+            assert!(
+                transition_depth.sample_count > 0,
+                "{state}: {readiness:?}: {transition_depth:?}"
+            );
+            if readiness.fine_resident && readiness.coarse_resident {
+                assert!(transition_boundary.iter().all(|vertex| {
+                    let weight = vertex.morph_weight();
+                    weight > 0.0 && weight < 1.0
+                }));
+                assert!(
+                    transition_depth.crack_count > 0,
+                    "ready distance morph was replaced by a coarse snap: {transition_depth:?}"
+                );
+            } else {
+                assert!(
+                    transition_boundary
+                        .iter()
+                        .all(|vertex| vertex.morph_weight() == 1.0),
+                    "unavailable transition was not coarse-snapped: {state}: {readiness:?}"
+                );
+                assert_eq!(
+                    transition_depth.crack_count, 0,
+                    "unavailable transition opened depth holes: {state}: {readiness:?}: {transition_depth:?}"
+                );
+            }
+        }
+
+        // Negative control: move one complete side of the independently
+        // generated fine boundary away from its coarse neighbour. The spatial
+        // oracle must reject it, proving zero cracks above is not fail-open.
+        let mut open_fine_boundary = boundary_at(&fine_template, 20.0);
+        for vertex in &mut open_fine_boundary {
+            if (vertex.position[0] - 20.0).abs() < 1.0e-5 {
+                vertex.position[0] += 0.25;
+            }
+        }
+        let negative = analyze_seams(&open_fine_boundary, &coarse_boundary, &geomorph);
+        assert!(
+            !negative.seams_valid,
+            "negative control passed: {negative:?}"
+        );
+        assert!(
+            negative.crack_count > 0,
+            "negative control passed: {negative:?}"
+        );
     }
 
     #[cfg(feature = "enable-globe")]

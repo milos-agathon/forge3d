@@ -254,7 +254,9 @@ class TestHeightStreamingFlyThrough:
         last_stats = stats
         for step, wx in enumerate(waypoints):
             last_stats = renderer.stream_height_tiles(
-                (float(wx), 500.0, float(wx) * 0.5), max_uploads=4
+                # One upload per step exercises every pending/partially-ready
+                # boundary state before a ring can be marked resident.
+                (float(wx), 500.0, float(wx) * 0.5), max_uploads=1
             )
             rgba = _render_rgba(renderer, params, overview, terrain_ibl)
             h, w = rgba.shape[:2]

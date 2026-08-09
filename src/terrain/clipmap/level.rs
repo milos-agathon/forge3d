@@ -235,10 +235,32 @@ impl ClipmapLevel {
                 ));
                 vertex.uv = [uv.x, uv.y];
                 vertex.set_globe_position(render.position, render.up);
+                if vertex.is_skirt() {
+                    vertex.morph_data[0] =
+                        -self.curvature_safe_skirt_depth_for_ring(vertex.ring_index());
+                }
             }
         }
         #[cfg(not(feature = "enable-globe"))]
         let _ = vertices;
+    }
+
+    #[cfg(feature = "enable-globe")]
+    fn curvature_safe_skirt_depth_for_ring(&self, ring_index: u32) -> f32 {
+        let radius = self.center.length() as f32;
+        let ClipmapFrame::Globe { camera, .. } = self.frame else {
+            unreachable!("curvature-safe skirt depth is globe-only")
+        };
+        let altitude = (camera.camera_anchor().length() - camera.radius()).max(0.0) as f32;
+        let (_, outer_extent) =
+            self.config
+                .ring_bounds(ring_index, self.base_cell_size, self.generation_center());
+        super::ring::curvature_safe_skirt_depth(
+            self.config.skirt_depth,
+            radius,
+            outer_extent.max(0.0) * 2.0,
+            altitude,
+        )
     }
 
     /// Get the generated mesh, generating if needed.
@@ -251,6 +273,7 @@ impl ClipmapLevel {
 
     /// Update the clipmap center position.
     /// Returns list of TileIds that should be requested for streaming.
+    #[allow(clippy::infallible_destructuring_match)]
     pub fn update_center(&mut self, new_center: Vec2) -> Vec<TileId> {
         let new_center = snap_center_to_finest_grid(new_center, self.base_cell_size);
         let current_center = match &mut self.frame {
@@ -739,6 +762,36 @@ mod tests {
             .vertices
             .iter()
             .all(|vertex| vertex.is_globe()));
+    }
+
+    #[cfg(feature = "enable-globe")]
+    #[test]
+    fn globe_skirts_cover_the_patch_sagitta_without_changing_flat_vertex_encoding() {
+        // This catches a globe path that leaves the legacy one-unit skirt in
+        // place, which is too shallow to cover a wide curved patch horizon.
+        use crate::terrain::clipmap::globe::GlobeFrame;
+
+        let radius = 1_000.0;
+        let center = DVec3::X * radius;
+        let frame = GlobeFrame::globe(radius, center + DVec3::X * 1_000.0).unwrap();
+        let config = ClipmapConfig {
+            ring_count: 1,
+            ring_resolution: 4,
+            center_resolution: 4,
+            skirt_depth: 1.0,
+            ..ClipmapConfig::default()
+        };
+        let mut level = ClipmapLevel::new_globe(config, center, frame, 100.0).unwrap();
+        let mesh = level.generate();
+        let max_globe_skirt_depth = mesh
+            .vertices
+            .iter()
+            .filter(|vertex| vertex.is_skirt())
+            .map(|vertex| -vertex.morph_data[0])
+            .fold(0.0_f32, f32::max);
+
+        assert!(max_globe_skirt_depth.is_finite());
+        assert!(max_globe_skirt_depth >= 1_000.0);
     }
 
     #[cfg(feature = "enable-globe")]

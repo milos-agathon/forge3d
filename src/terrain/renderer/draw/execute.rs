@@ -256,9 +256,20 @@ impl TerrainScene {
         let half_height = (decoded.clamp.height_range.1 - decoded.clamp.height_range.0).abs()
             * params.z_scale.abs()
             * 0.5;
-        let skirt = clipmap_camera_config(&params.camera_mode)
-            .map(|config| config.ring_resolution as f32 * 0.001 * params.z_scale.abs())
-            .unwrap_or(0.0);
+        let skirt = match geometry {
+            TerrainGeometryProvider::Clipmap { cpu_mesh, .. } => {
+                let legacy_skirt_depth = clipmap_camera_config(&params.camera_mode)
+                    .map(|config| config.ring_resolution as f32 * 0.001)
+                    .unwrap_or(0.0);
+                cpu_mesh
+                    .vertices
+                    .iter()
+                    .map(|vertex| vertex.skirt_depth_or(legacy_skirt_depth))
+                    .fold(0.0_f32, f32::max)
+                    * params.z_scale.abs()
+            }
+            TerrainGeometryProvider::Grid { .. } => 0.0,
+        };
         // `culling="none"` is the pixel-correctness oracle: submit the exact
         // combined clipmap mesh once. Feeding every off-screen region through
         // the compacted indirect path changes overlap/order at ring corners

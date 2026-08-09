@@ -86,6 +86,19 @@ impl ClipmapVertex {
         self.morph_data[0].max(0.0)
     }
 
+    /// Return the encoded curvature-safe depth for globe skirts, while flat
+    /// vertices retain their legacy camera-mode depth contract.
+    pub fn skirt_depth_or(&self, legacy_flat_depth: f32) -> f32 {
+        if !self.is_skirt() {
+            return 0.0;
+        }
+        if self.is_globe() && self.morph_data[0].is_finite() {
+            (-self.morph_data[0]).max(0.0)
+        } else {
+            legacy_flat_depth.max(0.0)
+        }
+    }
+
     pub fn ring_index(&self) -> u32 {
         if self.is_globe() {
             (-self.morph_data[1] - 1.0) as u32
@@ -188,6 +201,19 @@ mod tests {
     }
 
     #[test]
+    fn skirt_depth_uses_legacy_flat_depth_and_globe_payload_depth() {
+        // This catches interpreting the historical flat -1 marker as a
+        // one-unit offset instead of preserving the camera-mode uniform.
+        let flat = ClipmapVertex::skirt(0.0, 0.0, 0.0, 0.0, 1);
+        assert_eq!(flat.skirt_depth_or(0.032), 0.032);
+
+        let mut globe = flat;
+        globe.set_globe_position(Vec3::ZERO, Vec3::Z);
+        globe.morph_data[0] = -12.0;
+        assert_eq!(globe.skirt_depth_or(0.032), 12.0);
+    }
+
+    #[test]
     fn test_vertex_layout() {
         let layout = ClipmapVertex::desc();
         assert_eq!(layout.array_stride, 36);
@@ -203,6 +229,7 @@ mod tests {
         ));
         assert!(shader
             .contains("let coarse_texels = exp2(min(max(clip_ring_index, 0.0) + 1.0, 16.0));"));
+        assert!(shader.contains("u_terrain.camera_mode_params.y * 0.001"));
     }
 
     #[test]
