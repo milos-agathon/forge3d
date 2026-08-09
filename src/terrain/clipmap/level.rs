@@ -33,7 +33,7 @@ pub struct MeshBounds {
 }
 
 /// Complete clipmap mesh data ready for GPU upload.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClipmapMesh {
     pub vertices: Vec<ClipmapVertex>,
     pub indices: Vec<u32>,

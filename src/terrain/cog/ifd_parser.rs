@@ -17,6 +17,10 @@ const TAG_TILE_WIDTH: u16 = 322;
 const TAG_TILE_LENGTH: u16 = 323;
 const TAG_TILE_OFFSETS: u16 = 324;
 const TAG_TILE_BYTE_COUNTS: u16 = 325;
+const TAG_MODEL_PIXEL_SCALE: u16 = 33550;
+const TAG_MODEL_TIEPOINT: u16 = 33922;
+const TAG_MODEL_TRANSFORMATION: u16 = 34264;
+const TAG_GEO_KEY_DIRECTORY: u16 = 34735;
 
 /// Compression constants.
 pub const COMPRESSION_NONE: u16 = 1;
@@ -52,6 +56,85 @@ pub struct IfdEntry {
     pub overview_level: u32,
     pub tiles_across: u32,
     pub tiles_down: u32,
+    pub geo_reference: Option<GeoReference>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeoReference {
+    pub model_pixel_scale: Option<[f64; 3]>,
+    pub model_tiepoint: Option<[f64; 6]>,
+    pub model_transformation: Option<[f64; 16]>,
+    pub epsg: u32,
+}
+
+impl GeoReference {
+    pub fn pixel_to_model(&self, x: f64, y: f64) -> Result<(f64, f64), CogError> {
+        let result = if let Some(matrix) = self.model_transformation {
+            (
+                matrix[0] * x + matrix[1] * y + matrix[3],
+                matrix[4] * x + matrix[5] * y + matrix[7],
+            )
+        } else if let (Some(scale), Some(tie)) = (self.model_pixel_scale, self.model_tiepoint) {
+            (
+                tie[3] + (x - tie[0]) * scale[0],
+                tie[4] - (y - tie[1]) * scale[1],
+            )
+        } else {
+            return Err(CogError::InvalidIfd(
+                "GeoTIFF requires ModelTransformation or ModelPixelScale+ModelTiepoint"
+                    .to_string(),
+            ));
+        };
+        if result.0.is_finite() && result.1.is_finite() {
+            Ok(result)
+        } else {
+            Err(CogError::InvalidIfd(
+                "GeoTIFF transform produced non-finite coordinates".to_string(),
+            ))
+        }
+    }
+
+    pub fn model_to_pixel(&self, model_x: f64, model_y: f64) -> Result<(f64, f64), CogError> {
+        let result = if let Some(matrix) = self.model_transformation {
+            let a = matrix[0];
+            let b = matrix[1];
+            let c = matrix[3];
+            let d = matrix[4];
+            let e = matrix[5];
+            let f = matrix[7];
+            let det = a * e - b * d;
+            if !det.is_finite() || det.abs() <= f64::EPSILON {
+                return Err(CogError::InvalidIfd(
+                    "GeoTIFF ModelTransformation is not invertible".to_string(),
+                ));
+            }
+            let dx = model_x - c;
+            let dy = model_y - f;
+            ((e * dx - b * dy) / det, (-d * dx + a * dy) / det)
+        } else if let (Some(scale), Some(tie)) = (self.model_pixel_scale, self.model_tiepoint) {
+            if scale[0] == 0.0 || scale[1] == 0.0 {
+                return Err(CogError::InvalidIfd(
+                    "GeoTIFF ModelPixelScale is not invertible".to_string(),
+                ));
+            }
+            (
+                tie[0] + (model_x - tie[3]) / scale[0],
+                tie[1] - (model_y - tie[4]) / scale[1],
+            )
+        } else {
+            return Err(CogError::InvalidIfd(
+                "GeoTIFF requires ModelTransformation or ModelPixelScale+ModelTiepoint"
+                    .to_string(),
+            ));
+        };
+        if result.0.is_finite() && result.1.is_finite() {
+            Ok(result)
+        } else {
+            Err(CogError::InvalidIfd(
+                "GeoTIFF inverse transform produced non-finite pixels".to_string(),
+            ))
+        }
+    }
 }
 
 impl IfdEntry {
@@ -88,6 +171,16 @@ pub struct CogHeader {
 }
 
 impl CogHeader {
+    pub fn geo_reference(&self) -> Result<&GeoReference, CogError> {
+        self.ifds
+            .iter()
+            .find_map(|ifd| ifd.geo_reference.as_ref())
+            .ok_or_else(|| {
+                CogError::InvalidIfd(
+                    "COG lacks required GeoTIFF transform/CRS metadata".to_string(),
+                )
+            })
+    }
     /// Get the full-resolution IFD (first one).
     pub fn full_resolution(&self) -> Option<&IfdEntry> {
         self.ifds.first()
@@ -279,6 +372,10 @@ async fn parse_ifd(
     let mut strip_offsets_info: Option<(u64, u64, u16)> = None;
     let mut strip_byte_counts_info: Option<(u64, u64, u16)> = None;
     let mut rows_per_strip = 0u32;
+    let mut pixel_scale_info: Option<(u64, u64, u16)> = None;
+    let mut tiepoint_info: Option<(u64, u64, u16)> = None;
+    let mut transformation_info: Option<(u64, u64, u16)> = None;
+    let mut geo_keys_info: Option<(u64, u64, u16)> = None;
 
     for i in 0..entry_count {
         let entry_offset = (i * entry_size) as usize;
@@ -340,9 +437,61 @@ async fn parse_ifd(
                 };
                 tile_byte_counts_info = Some((data_offset, count, field_type));
             }
+            TAG_MODEL_PIXEL_SCALE | TAG_MODEL_TIEPOINT | TAG_MODEL_TRANSFORMATION
+            | TAG_GEO_KEY_DIRECTORY => {
+                let inline_capacity = if bigtiff { 8 } else { 4 };
+                let data_offset = if type_size(field_type) * count as usize > inline_capacity {
+                    value
+                } else {
+                    offset + count_size + (i * entry_size) + value_offset as u64
+                };
+                let info = Some((data_offset, count, field_type));
+                match tag {
+                    TAG_MODEL_PIXEL_SCALE => pixel_scale_info = info,
+                    TAG_MODEL_TIEPOINT => tiepoint_info = info,
+                    TAG_MODEL_TRANSFORMATION => transformation_info = info,
+                    TAG_GEO_KEY_DIRECTORY => geo_keys_info = info,
+                    _ => unreachable!(),
+                }
+            }
             _ => {}
         }
     }
+
+    let model_pixel_scale = if let Some((off, count, field_type)) = pixel_scale_info {
+        let values = read_f64_array(reader, off, count as usize, field_type, big_endian).await?;
+        (values.len() >= 3).then(|| [values[0], values[1], values[2]])
+    } else {
+        None
+    };
+    let model_tiepoint = if let Some((off, count, field_type)) = tiepoint_info {
+        let values = read_f64_array(reader, off, count as usize, field_type, big_endian).await?;
+        (values.len() >= 6).then(|| [values[0], values[1], values[2], values[3], values[4], values[5]])
+    } else {
+        None
+    };
+    let model_transformation = if let Some((off, count, field_type)) = transformation_info {
+        let values = read_f64_array(reader, off, count as usize, field_type, big_endian).await?;
+        (values.len() >= 16).then(|| {
+            let mut matrix = [0.0; 16];
+            matrix.copy_from_slice(&values[..16]);
+            matrix
+        })
+    } else {
+        None
+    };
+    let epsg = if let Some((off, count, field_type)) = geo_keys_info {
+        let keys = read_u16_array(reader, off, count as usize, field_type, big_endian).await?;
+        parse_epsg_from_geo_keys(&keys)
+    } else {
+        None
+    };
+    let geo_reference = epsg.map(|epsg| GeoReference {
+        model_pixel_scale,
+        model_tiepoint,
+        model_transformation,
+        epsg,
+    });
 
     let mut tile_offsets = if let Some((off, count, field_type)) = tile_offsets_info {
         read_offset_array(reader, off, count as usize, field_type, big_endian).await?
@@ -406,9 +555,70 @@ async fn parse_ifd(
             overview_level,
             tiles_across,
             tiles_down,
+            geo_reference,
         },
         next_ifd_offset,
     ))
+}
+
+async fn read_f64_array(
+    reader: &RangeReader,
+    offset: u64,
+    count: usize,
+    field_type: u16,
+    big_endian: bool,
+) -> Result<Vec<f64>, CogError> {
+    if field_type != 12 {
+        return Err(CogError::InvalidIfd(format!(
+            "GeoTIFF floating tag uses unsupported TIFF field type {field_type}"
+        )));
+    }
+    let bytes = reader.read_range(offset, (count as u64).saturating_mul(8)).await?;
+    Ok(bytes
+        .chunks_exact(8)
+        .map(|chunk| {
+            if big_endian {
+                f64::from_be_bytes(chunk.try_into().unwrap())
+            } else {
+                f64::from_le_bytes(chunk.try_into().unwrap())
+            }
+        })
+        .collect())
+}
+
+async fn read_u16_array(
+    reader: &RangeReader,
+    offset: u64,
+    count: usize,
+    field_type: u16,
+    big_endian: bool,
+) -> Result<Vec<u16>, CogError> {
+    if field_type != 3 {
+        return Err(CogError::InvalidIfd(format!(
+            "GeoKeyDirectory uses unsupported TIFF field type {field_type}"
+        )));
+    }
+    let bytes = reader.read_range(offset, (count as u64).saturating_mul(2)).await?;
+    Ok((0..count)
+        .map(|index| read_u16(&bytes, index * 2, big_endian))
+        .collect())
+}
+
+fn parse_epsg_from_geo_keys(keys: &[u16]) -> Option<u32> {
+    let key_count = usize::from(*keys.get(3)?);
+    let mut geographic = None;
+    let mut projected = None;
+    for entry in keys.get(4..)?.chunks_exact(4).take(key_count) {
+        if entry[1] != 0 || entry[2] != 1 {
+            continue;
+        }
+        match entry[0] {
+            2048 => geographic = Some(u32::from(entry[3])),
+            3072 => projected = Some(u32::from(entry[3])),
+            _ => {}
+        }
+    }
+    projected.or(geographic).filter(|code| *code != 0 && *code != 32767)
 }
 
 async fn read_offset_array(
@@ -548,5 +758,20 @@ mod tests {
             error,
             CogError::InvalidIfd(message) if message.contains("no image file directories")
         ));
+    }
+
+    #[test]
+    fn geokeys_and_pixel_transform_are_validated() {
+        let keys = [
+            1, 1, 0, 3, 1024, 0, 1, 2, 1025, 0, 1, 1, 2048, 0, 1, 4326,
+        ];
+        assert_eq!(parse_epsg_from_geo_keys(&keys), Some(4326));
+        let georef = GeoReference {
+            model_pixel_scale: Some([0.25, 0.5, 0.0]),
+            model_tiepoint: Some([0.0, 0.0, 0.0, -123.0, 48.0, 0.0]),
+            model_transformation: None,
+            epsg: 4326,
+        };
+        assert_eq!(georef.pixel_to_model(4.0, 6.0).unwrap(), (-122.0, 45.0));
     }
 }

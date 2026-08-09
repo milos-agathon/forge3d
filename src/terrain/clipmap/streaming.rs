@@ -10,6 +10,7 @@ use crate::terrain::tiling::TileId;
 #[cfg(feature = "enable-globe")]
 use glam::DVec3;
 use glam::{Mat4, Vec2, Vec3};
+use std::collections::HashSet;
 use wgpu::Queue;
 
 /// Clipmap streamer connecting clipmap mesh to tile streaming infrastructure.
@@ -85,6 +86,9 @@ impl ClipmapStreamer {
     }
 
     fn queue_required(&mut self, required_tiles: Vec<TileId>) -> Vec<TileId> {
+        let required: HashSet<_> = required_tiles.iter().copied().collect();
+        self.pending_tiles.retain(|tile| required.contains(tile));
+        self.loaded_tiles.retain(|tile| required.contains(tile));
         self.required_tiles = required_tiles.clone();
         let new_tiles: Vec<TileId> = required_tiles
             .into_iter()
@@ -93,6 +97,44 @@ impl ClipmapStreamer {
 
         self.pending_tiles.extend(new_tiles.iter().cloned());
         new_tiles
+    }
+
+    /// Reconcile logical clipmap readiness with exact physical atlas
+    /// residency. Returns every currently required tile still missing.
+    pub fn reconcile_residency(&mut self, resident: &HashSet<TileId>) -> Vec<TileId> {
+        let required: HashSet<_> = self.required_tiles.iter().copied().collect();
+        self.loaded_tiles
+            .retain(|tile| required.contains(tile) && resident.contains(tile));
+        self.pending_tiles
+            .retain(|tile| required.contains(tile) && !resident.contains(tile));
+        for tile in &self.required_tiles {
+            if resident.contains(tile) {
+                if !self.loaded_tiles.contains(tile) {
+                    self.loaded_tiles.push(*tile);
+                }
+                self.pending_tiles.retain(|pending| pending != tile);
+            } else if !self.pending_tiles.contains(tile) {
+                self.pending_tiles.push(*tile);
+            }
+        }
+        self.required_tiles
+            .iter()
+            .copied()
+            .filter(|tile| !resident.contains(tile))
+            .collect()
+    }
+
+    pub fn required_tiles(&self) -> &[TileId] {
+        &self.required_tiles
+    }
+
+    pub fn invalidate_loaded(&mut self, tiles: &[TileId]) {
+        for tile in tiles {
+            self.loaded_tiles.retain(|loaded| loaded != tile);
+            if self.required_tiles.contains(tile) && !self.pending_tiles.contains(tile) {
+                self.pending_tiles.push(*tile);
+            }
+        }
     }
 
     /// Mark tiles as loaded (call after successful upload to mosaic).
@@ -296,6 +338,27 @@ mod tests {
                 coarse_resident: true,
             }
         );
+    }
+
+    #[test]
+    fn move_away_evict_and_return_requeues_missing_readiness() {
+        let mut streamer = ClipmapStreamer::new(ClipmapConfig::new(2, 4), Vec2::ZERO, 1000.0);
+        let first = TileId::new(2, 0, 0);
+        let away = TileId::new(2, 3, 3);
+        streamer.queue_required(vec![first]);
+        streamer.mark_loaded(&[first]);
+        assert!(streamer.reconcile_residency(&HashSet::from([first])).is_empty());
+
+        streamer.queue_required(vec![away]);
+        streamer.mark_loaded(&[away]);
+        assert!(streamer.reconcile_residency(&HashSet::from([away])).is_empty());
+
+        // `first` was evicted while away. Returning must not trust historical
+        // loaded state or unrelated feedback; exact residency makes it pending.
+        streamer.queue_required(vec![first]);
+        assert_eq!(streamer.reconcile_residency(&HashSet::from([away])), vec![first]);
+        assert_eq!(streamer.pending_count(), 1);
+        assert_eq!(streamer.loaded_count(), 0);
     }
 
     #[test]

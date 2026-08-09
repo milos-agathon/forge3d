@@ -124,7 +124,8 @@ impl QuadTreeNode {
 #[derive(Debug)]
 pub struct TileData {
     pub tile_id: TileId,
-    pub height_data: Vec<f32>, // Height values (width * height)
+    pub height_data: Vec<f32>,  // Height values (width * height)
+    pub coverage_data: Vec<u8>, // 255 = dynamic source, 0 = overview fallback
     pub width: u32,
     pub height: u32,
     pub host_memory_size: u64, // Size in bytes for memory tracking
@@ -132,10 +133,23 @@ pub struct TileData {
 
 impl TileData {
     pub fn new(tile_id: TileId, height_data: Vec<f32>, width: u32, height: u32) -> Self {
-        let host_memory_size = (height_data.len() * std::mem::size_of::<f32>()) as u64;
+        let coverage_data = vec![u8::MAX; height_data.len()];
+        Self::new_covered(tile_id, height_data, coverage_data, width, height)
+    }
+
+    pub fn new_covered(
+        tile_id: TileId,
+        height_data: Vec<f32>,
+        coverage_data: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let host_memory_size =
+            (height_data.len() * std::mem::size_of::<f32>() + coverage_data.len()) as u64;
         Self {
             tile_id,
             height_data,
+            coverage_data,
             width,
             height,
             host_memory_size,

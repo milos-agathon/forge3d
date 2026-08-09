@@ -687,8 +687,10 @@ impl TerrainScene {
             }
         }
 
-        let mut mesh =
-            crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span);
+        let mut mesh = match self.height_streaming.as_mut() {
+            Some(streaming) if streaming.is_globe() => streaming.streamer.mesh().clone(),
+            _ => crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span),
+        };
         let geomorph_config = crate::terrain::clipmap::geomorph::GeomorphConfig {
             morph_range: config.morph_range,
             max_seam_gap: (terrain_span * 1e-6).max(0.001),

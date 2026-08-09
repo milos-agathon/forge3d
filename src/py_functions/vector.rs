@@ -15,7 +15,7 @@ mod timing;
 
 use inputs::*;
 use readback::*;
-use render::*;
+use self::render::*;
 #[cfg(all(feature = "extension-module", feature = "weighted-oit"))]
 use timing::*;
 

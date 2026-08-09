@@ -208,34 +208,194 @@ var height_tex : texture_2d<f32>;
 @group(0) @binding(2)
 var height_samp : sampler;
 
+struct HeightPageTableHeader {
+    enabled: u32,
+    root_ready: u32,
+    table_mask: u32,
+    max_probe_count: u32,
+    target_lod: u32,
+    tile_resolution: u32,
+    atlas_width: u32,
+    atlas_height: u32,
+};
+
+struct HeightPageTableEntry {
+    lod: u32,
+    x: u32,
+    y: u32,
+    _pad0: u32,
+    sx: u32,
+    sy: u32,
+    slot: u32,
+    _pad1: u32,
+};
+
+struct HeightPageTable {
+    header: HeightPageTableHeader,
+    buckets: array<HeightPageTableEntry>,
+};
+
+@group(0) @binding(20)
+var<storage, read> height_pages: HeightPageTable;
+
+@group(0) @binding(21)
+var height_atlas: texture_2d<f32>;
+
+@group(0) @binding(22)
+var height_coverage_atlas: texture_2d<f32>;
+
+const HEIGHT_PAGE_EMPTY: u32 = 0xffffffffu;
+
+fn height_page_hash(lod: u32, x: u32, y: u32) -> u32 {
+    var h = lod * 0x9e3779b9u;
+    h = h ^ (x * 0x85ebca6bu);
+    h = (h << 13u) | (h >> 19u);
+    h = h ^ (y * 0xc2b2ae35u);
+    return h ^ (h >> 16u);
+}
+
+fn height_page_lookup(lod: u32, x: u32, y: u32) -> HeightPageTableEntry {
+    var missing: HeightPageTableEntry;
+    missing.lod = HEIGHT_PAGE_EMPTY;
+    if (height_pages.header.enabled == 0u) {
+        return missing;
+    }
+    var bucket = height_page_hash(lod, x, y) & height_pages.header.table_mask;
+    for (var probe = 0u; probe < height_pages.header.max_probe_count; probe = probe + 1u) {
+        let entry = height_pages.buckets[bucket];
+        if (entry.lod == HEIGHT_PAGE_EMPTY) {
+            return missing;
+        }
+        if (entry.lod == lod && entry.x == x && entry.y == y) {
+            return entry;
+        }
+        bucket = (bucket + 1u) & height_pages.header.table_mask;
+    }
+    return missing;
+}
+
+fn height_page_resolve(uv: vec2<f32>, sample_lod: f32) -> HeightPageTableEntry {
+    let rounded_lod = u32(max(floor(sample_lod + 0.5), 0.0));
+    var requested_lod = height_pages.header.target_lod - min(rounded_lod, height_pages.header.target_lod);
+    // Keep uv==1 on the final virtual tile instead of wrapping fract(1) to 0.
+    let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+    for (var depth = 0u; depth <= height_pages.header.target_lod; depth = depth + 1u) {
+        let axis = 1u << requested_lod;
+        let tile_xy = min(vec2<u32>(bounded_uv * f32(axis)), vec2<u32>(axis - 1u));
+        let entry = height_page_lookup(requested_lod, tile_xy.x, tile_xy.y);
+        if (entry.lod != HEIGHT_PAGE_EMPTY || requested_lod == 0u) {
+            return entry;
+        }
+        requested_lod = requested_lod - 1u;
+    }
+    var missing: HeightPageTableEntry;
+    missing.lod = HEIGHT_PAGE_EMPTY;
+    return missing;
+}
+
+// Returns (coverage-weighted height sum, covered bilinear weight).
+fn height_page_sample_covered(entry: HeightPageTableEntry, uv: vec2<f32>) -> vec2<f32> {
+    let tile_resolution = max(i32(height_pages.header.tile_resolution), 1);
+    let atlas_min_x = i32(entry.sx) * tile_resolution;
+    let atlas_min_y = i32(entry.sy) * tile_resolution;
+    let atlas_max_x = atlas_min_x + tile_resolution - 1;
+    let atlas_max_y = atlas_min_y + tile_resolution - 1;
+    let axis = 1u << entry.lod;
+    let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+    let local_uv = fract(bounded_uv * f32(axis));
+    let atlas_texel_x = f32(atlas_min_x) + local_uv.x * f32(tile_resolution - 1);
+    let atlas_texel_y = f32(atlas_min_y) + local_uv.y * f32(tile_resolution - 1);
+    let atlas_x0 = i32(floor(atlas_texel_x));
+    let atlas_y0 = i32(floor(atlas_texel_y));
+    let atlas_x1 = clamp(atlas_x0 + 1, atlas_min_x, atlas_max_x);
+    let atlas_y1 = clamp(atlas_y0 + 1, atlas_min_y, atlas_max_y);
+    let atlas_blend = clamp(
+        vec2<f32>(atlas_texel_x - f32(atlas_x0), atlas_texel_y - f32(atlas_y0)),
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
+    let a00 = textureLoad(height_atlas, vec2<i32>(atlas_x0, atlas_y0), 0).r;
+    let a10 = textureLoad(height_atlas, vec2<i32>(atlas_x1, atlas_y0), 0).r;
+    let a01 = textureLoad(height_atlas, vec2<i32>(atlas_x0, atlas_y1), 0).r;
+    let a11 = textureLoad(height_atlas, vec2<i32>(atlas_x1, atlas_y1), 0).r;
+    let c00 = textureLoad(height_coverage_atlas, vec2<i32>(atlas_x0, atlas_y0), 0).r;
+    let c10 = textureLoad(height_coverage_atlas, vec2<i32>(atlas_x1, atlas_y0), 0).r;
+    let c01 = textureLoad(height_coverage_atlas, vec2<i32>(atlas_x0, atlas_y1), 0).r;
+    let c11 = textureLoad(height_coverage_atlas, vec2<i32>(atlas_x1, atlas_y1), 0).r;
+    let w00 = (1.0 - atlas_blend.x) * (1.0 - atlas_blend.y);
+    let w10 = atlas_blend.x * (1.0 - atlas_blend.y);
+    let w01 = (1.0 - atlas_blend.x) * atlas_blend.y;
+    let w11 = atlas_blend.x * atlas_blend.y;
+    return vec2<f32>(
+        a00 * c00 * w00 + a10 * c10 * w10 + a01 * c01 * w01 + a11 * c11 * w11,
+        clamp(c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11, 0.0, 1.0),
+    );
+}
+
+fn logical_height_dimensions() -> vec2<f32> {
+    if (height_pages.header.enabled != 0u) {
+        let axis = 1u << height_pages.header.target_lod;
+        let logical = max(axis * height_pages.header.tile_resolution, 1u);
+        return vec2<f32>(f32(logical));
+    }
+    return vec2<f32>(textureDimensions(height_tex, 0));
+}
+
 // R32Float height textures are intentionally bound as unfilterable on the
 // portable terrain path. Reconstruct bilinear filtering explicitly so height
 // sampling is identical on adapters that cannot filter this format.
 fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
     let last_level = i32(textureNumLevels(height_tex)) - 1;
-    let level = clamp(i32(floor(lod + 0.5)), 0, last_level);
+    var level = clamp(i32(floor(lod + 0.5)), 0, last_level);
     let dimensions = textureDimensions(height_tex, level);
-    let max_x = max(i32(dimensions.x) - 1, 0);
-    let max_y = max(i32(dimensions.y) - 1, 0);
-    let texel_x = clamp(uv.x, 0.0, 1.0) * f32(max_x);
-    let texel_y = clamp(uv.y, 0.0, 1.0) * f32(max_y);
+    var min_x = 0;
+    var min_y = 0;
+    var max_x = max(i32(dimensions.x) - 1, 0);
+    var max_y = max(i32(dimensions.y) - 1, 0);
+    var texel_x = clamp(uv.x, 0.0, 1.0) * f32(max_x);
+    var texel_y = clamp(uv.y, 0.0, 1.0) * f32(max_y);
     let x0 = i32(floor(texel_x));
     let y0 = i32(floor(texel_y));
-    // Keep each upper-bound relation explicit for the CENSOR IR proof as well
-    // as for runtime safety; all four coordinates are clamped to this texture.
-    let x1 = clamp(x0 + 1, 0, max_x);
-    let y1 = clamp(y0 + 1, 0, max_y);
+    let x1 = clamp(x0 + 1, min_x, max_x);
+    let y1 = clamp(y0 + 1, min_y, max_y);
     let blend = clamp(
         vec2<f32>(texel_x - f32(x0), texel_y - f32(y0)),
         vec2<f32>(0.0),
         vec2<f32>(1.0),
     );
-
     let h00 = textureLoad(height_tex, vec2<i32>(x0, y0), level).r;
     let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), level).r;
     let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), level).r;
     let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), level).r;
-    return det_mix(det_mix(h00, h10, blend.x), det_mix(h01, h11, blend.x), blend.y);
+    let overview_height = det_mix(
+        det_mix(h00, h10, blend.x),
+        det_mix(h01, h11, blend.x),
+        blend.y,
+    );
+    if (height_pages.header.enabled != 0u) {
+        let rounded_lod = u32(max(floor(lod + 0.5), 0.0));
+        var requested_lod = height_pages.header.target_lod
+            - min(rounded_lod, height_pages.header.target_lod);
+        let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+        var accumulated_height = 0.0;
+        var remaining_weight = 1.0;
+        for (var depth = 0u; depth <= height_pages.header.target_lod; depth = depth + 1u) {
+            let axis = 1u << requested_lod;
+            let tile_xy = min(vec2<u32>(bounded_uv * f32(axis)), vec2<u32>(axis - 1u));
+            let entry = height_page_lookup(requested_lod, tile_xy.x, tile_xy.y);
+            if (entry.lod != HEIGHT_PAGE_EMPTY) {
+                let covered = height_page_sample_covered(entry, bounded_uv);
+                accumulated_height = accumulated_height + remaining_weight * covered.x;
+                remaining_weight = remaining_weight * (1.0 - covered.y);
+            }
+            if (requested_lod == 0u || remaining_weight <= 0.000001) {
+                break;
+            }
+            requested_lod = requested_lod - 1u;
+        }
+        return accumulated_height + remaining_weight * overview_height;
+    }
+    return overview_height;
 }
 
 fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
@@ -1558,7 +1718,7 @@ fn height_curve_lut_sample(t: f32) -> f32 {
 }
 
 fn calculate_texel_size() -> vec2<f32> {
-    let dims = vec2<f32>(textureDimensions(height_tex, 0));
+    let dims = logical_height_dimensions();
     return vec2<f32>(
         select(1.0, 1.0 / dims.x, dims.x > 0.0),
         select(1.0, 1.0 / dims.y, dims.y > 0.0),
@@ -1749,8 +1909,12 @@ struct LodInfo {
 
 fn compute_height_lod(uv: vec2<f32>) -> LodInfo {
     var info: LodInfo;
-    let dims = vec2<f32>(textureDimensions(height_tex, 0));
-    let max_lod = f32(textureNumLevels(height_tex) - 1u);
+    let dims = logical_height_dimensions();
+    let max_lod = select(
+        f32(textureNumLevels(height_tex) - 1u),
+        f32(height_pages.header.target_lod),
+        height_pages.header.enabled != 0u,
+    );
     
     // Compute screen-space derivatives of UV
     let ddx_uv = terrain_screen_ddx_uv(uv);
@@ -4996,7 +5160,7 @@ fn vs_clipmap_main(
 
     let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
     let h_fine = sample_height_bilinear(uv);
-    let height_dims = vec2<f32>(textureDimensions(height_tex));
+    let height_dims = logical_height_dimensions();
     let clip_ring_index = select(clip_morph.y, -clip_morph.y - 1.0, clip_morph.y < 0.0);
     let coarse_texels = exp2(min(max(clip_ring_index, 0.0) + 1.0, 16.0));
     let coarse_step = vec2<f32>(coarse_texels)

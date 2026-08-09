@@ -118,6 +118,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         "prepare-lfs-fixtures",
         "terrain-golden-paths",
         "test-rust",
+        "test-orbis-wasm",
         "build-wheel-windows",
         "build-wheel-linux",
         "build-wheel-macos",
@@ -229,6 +230,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
 
 def test_only_the_small_core_jobs_can_run_on_pr_or_push_events() -> None:
     """Any new CI job is acceptance-only until this allowlist is reviewed."""
+    workflow = _workflow("ci.yml")
     jobs = _workflow_data("ci.yml")["jobs"]
     routine = {"preflight", "test-fast-contract", "pr-core-success"}
     assert routine <= set(jobs)
@@ -236,6 +238,17 @@ def test_only_the_small_core_jobs_can_run_on_pr_or_push_events() -> None:
     assert jobs["preflight"].get("if") is None
     assert jobs["test-fast-contract"].get("if") is None
     assert jobs["pr-core-success"].get("if") == "always()"
+
+    wasm = _job(workflow, "test-orbis-wasm")
+    assert "targets: wasm32-unknown-unknown" in wasm
+    assert "actions/setup-node@v4" in wasm
+    assert "tests/test_orbis_wasm_contract.py -m wasm" in wasm
+    assert "scripts/assert_junit_zero_skips.py orbis-wasm-junit.xml" in wasm
+    assert "github.event_name == 'schedule'" in wasm
+    assert "inputs.scope == 'full'" in wasm
+    acceptance = _job(workflow, "full-acceptance-summary")
+    assert "test-orbis-wasm" in acceptance.split("\n    runs-on:", 1)[0]
+    assert "needs.test-orbis-wasm.result" in acceptance
 
     for name, job in jobs.items():
         if name in routine:

@@ -91,6 +91,7 @@ pub struct TerrainScene {
     pub(super) _vt_page_table_fallback_texture: TrackedTexture,
     pub(super) vt_page_table_fallback_view: wgpu::TextureView,
     pub(super) vt_feedback_fallback_buffer: TrackedBuffer,
+    pub(super) height_page_table_fallback_buffer: TrackedBuffer,
     /// Shader-written per-frame counters: material invocations, logical
     /// feedback records, fallback texels, and forward invocations.
     pub(super) vt_frame_counters_buffer: TrackedBuffer,

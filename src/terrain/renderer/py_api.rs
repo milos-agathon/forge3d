@@ -1091,14 +1091,12 @@ impl TerrainRenderer {
 
     /// BOP-P2-02: enable runtime height-tile streaming for clipmap terrain.
     ///
-    /// Builds a fixed-LOD `HeightMosaic` (`2^lod` tiles per axis at
-    /// `tile_resolution` texels per tile), an `AsyncTileLoader` worker pool,
-    /// and a `ClipmapStreamer` for camera-driven tile demand. When `dem` is
-    /// given, tiles are bilinearly sliced from it on worker threads. Shipped
-    /// render paths require an explicit source and never synthesize I/O. With
-    /// `coarse_prefill=True` (default) every tile slot is filled from a
-    /// low-resolution read so streaming frames show coarse terrain instead
-    /// of holes while fine tiles are in flight.
+    /// Builds a bounded sparse height atlas, GPU page table, asynchronous
+    /// loader, and camera-driven clipmap demand. Until the asynchronously
+    /// requested root tile is resident, all terrain passes keep using the
+    /// overview supplied to the render call; afterwards page misses walk to
+    /// the pinned root. `coarse_prefill` is retained for API compatibility but
+    /// no longer performs synchronous eager reads.
     #[pyo3(signature = (terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, dem=None, coarse_prefill=true, max_resident_bytes=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn enable_height_streaming(
@@ -1145,8 +1143,9 @@ impl TerrainRenderer {
             }
         };
         let state = super::streaming::HeightVtFamilyRuntime::new(
-            self.scene.device.as_ref(),
-            self.scene.queue.as_ref(),
+            self.scene.device.clone(),
+            self.scene.queue.clone(),
+            self.scene.allocation_owner.clone(),
             terrain_extent_m,
             ring_count,
             ring_resolution,
@@ -1157,6 +1156,7 @@ impl TerrainRenderer {
             reader,
             coarse_prefill,
             max_resident_bytes,
+            false,
         )
         .map_err(|e| PyRuntimeError::new_err(format!("enable_height_streaming failed: {:#}", e)))?;
         self.scene.height_streaming = Some(state);
@@ -1191,14 +1191,12 @@ impl TerrainRenderer {
             ));
         }
         let tile_resolution = tile_resolution.clamp(8, 1024);
-        let store = std::sync::Arc::new(crate::terrain::vt::CogPageStore::from_reader(
-            dataset.reader(),
-            tile_resolution,
-        ));
-        let reader = std::sync::Arc::new(super::streaming::StoreHeightReader::new(store));
+        let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> =
+            dataset.reader();
         let state = super::streaming::HeightVtFamilyRuntime::new(
-            self.scene.device.as_ref(),
-            self.scene.queue.as_ref(),
+            self.scene.device.clone(),
+            self.scene.queue.clone(),
+            self.scene.allocation_owner.clone(),
             terrain_extent_m,
             ring_count,
             ring_resolution,
@@ -1209,6 +1207,7 @@ impl TerrainRenderer {
             reader,
             coarse_prefill,
             max_resident_bytes,
+            true,
         )
         .map_err(|error| {
             PyRuntimeError::new_err(format!("enable_height_streaming_cog failed: {error:#}"))
@@ -1247,12 +1246,67 @@ impl TerrainRenderer {
                 "height streaming not enabled; call enable_height_streaming() first",
             )
         })?;
+        if state.is_globe() {
+            return Err(PyRuntimeError::new_err(
+                "COG globe height streaming requires stream_height_tiles_globe() with f64 ECEF coordinates",
+            ));
+        }
         let stats = state.stream_step(
             queue.as_ref(),
-            glam::Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2),
+            super::streaming::HeightStreamingCamera::Flat(glam::Vec3::new(
+                camera_pos.0,
+                camera_pos.1,
+                camera_pos.2,
+            )),
             &feedback_uvs,
             max_uploads,
-        );
+        )
+        .map_err(|error| PyRuntimeError::new_err(format!("height streaming failed: {error:#}")))?;
+        height_streaming_stats_to_py(py, &stats)
+    }
+
+    /// Advance planetary COG streaming from a double-precision ECEF camera.
+    /// The dedicated entry point avoids truncating Earth-scale positions to
+    /// f32 before the clipmap establishes its camera-relative frame.
+    #[cfg(feature = "enable-globe")]
+    #[pyo3(signature = (camera_ecef, max_uploads=8))]
+    pub fn stream_height_tiles_globe(
+        &mut self,
+        py: Python<'_>,
+        camera_ecef: (f64, f64, f64),
+        max_uploads: usize,
+    ) -> PyResult<PyObject> {
+        let queue = self.scene.queue.clone();
+        let feedback_uvs = self
+            .scene
+            .material_vt
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("material VT mutex poisoned"))?
+            .latest_feedback_uvs();
+        let state = self.scene.height_streaming.as_mut().ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "height streaming not enabled; call enable_height_streaming_cog() first",
+            )
+        })?;
+        if !state.is_globe() {
+            return Err(PyRuntimeError::new_err(
+                "flat height streaming requires stream_height_tiles()",
+            ));
+        }
+        let stats = state.stream_step(
+            queue.as_ref(),
+            super::streaming::HeightStreamingCamera::Globe(glam::DVec3::new(
+                camera_ecef.0,
+                camera_ecef.1,
+                camera_ecef.2,
+            )),
+            &feedback_uvs,
+            max_uploads,
+        )
+        .map_err(|error| PyRuntimeError::new_err(format!("height streaming failed: {error:#}")))?;
+        // Globe meshes encode a new camera-relative tangent frame after each
+        // ECEF update, even when their local 2D center remains near zero.
+        self.scene.geometry_provider = None;
         height_streaming_stats_to_py(py, &stats)
     }
 
@@ -1281,6 +1335,15 @@ fn height_streaming_stats_to_py(
     dict.set_item("tiles_uploaded", stats.tiles_uploaded)?;
     dict.set_item("coarse_prefilled", stats.coarse_prefilled)?;
     dict.set_item("resident_height_bytes", stats.resident_height_bytes)?;
+    dict.set_item(
+        "gpu_visible_current_bytes",
+        stats.gpu_visible_current_bytes,
+    )?;
+    dict.set_item(
+        "gpu_visible_high_water_bytes",
+        stats.gpu_visible_high_water_bytes,
+    )?;
+    dict.set_item("ancestor_fallbacks", stats.ancestor_fallbacks)?;
     dict.set_item("converged", stats.converged)?;
     dict.set_item("loader_pending", stats.loader_pending)?;
     dict.set_item("loader_completed", stats.loader_completed)?;

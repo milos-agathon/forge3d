@@ -29,6 +29,7 @@ pub use cog::{CogCacheStats, CogError, CogHeightReader, CogTileCache};
 
 // B11-BEGIN:tiling-mod
 pub mod tiling;
+pub mod planetary_tiles;
 pub use tiling::{
     CacheStats, Frustum, QuadTreeNode, TileBounds, TileCache, TileData, TileId, TilingSystem,
 };

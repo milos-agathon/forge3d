@@ -136,6 +136,22 @@ impl TerrainScene {
                     binding: 19,
                     resource: wgpu::BindingResource::Sampler(&self.sun_vis_sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 20,
+                    resource: self.main_pass_height_page_table().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 21,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.main_pass_height_atlas_view(heightmap_view),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 22,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.main_pass_height_coverage_view(heightmap_view),
+                    ),
+                },
             ],
         });
         drop(sun_vis_sample_guard);

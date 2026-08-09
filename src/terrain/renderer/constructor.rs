@@ -14,6 +14,10 @@ impl TerrainScene {
     ) -> Result<Self> {
         let allocation_owner = crate::core::resource_tracker::AllocationOwner::new();
         let _allocation_scope = allocation_owner.activate();
+        let height_page_table_fallback_buffer = {
+            let _height_scope = allocation_owner.activate_group("orbis.height");
+            crate::terrain::page_table::create_disabled_page_table(device.as_ref())?
+        };
         let base_layouts = create_base_bind_group_layouts(device.as_ref());
         let bind_group_layout = base_layouts.bind_group_layout;
         let ibl_bind_group_layout = base_layouts.ibl_bind_group_layout;
@@ -598,6 +602,7 @@ impl TerrainScene {
             _vt_page_table_fallback_texture: vt_page_table_fallback_texture,
             vt_page_table_fallback_view,
             vt_feedback_fallback_buffer,
+            height_page_table_fallback_buffer,
             vt_frame_counters_buffer,
             vt_atlas_sampler,
             probe_grid_uniform_buffer,

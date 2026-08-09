@@ -6,8 +6,10 @@
 mod color;
 mod config;
 mod height;
+mod residency;
 mod util;
 
 pub use color::ColorMosaic;
 pub use config::MosaicConfig;
-pub use height::HeightMosaic;
+pub use height::{HeightMosaic, PreparedHeightUpload};
+pub use residency::{EvictionPolicy, HeightPageResidency, Placement};
