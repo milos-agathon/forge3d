@@ -16,7 +16,7 @@ use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use crate::terrain::clipmap::{
     gpu_lod::{
         ClipmapDrawInstance, GpuLodConfig, GpuLodDrawResources, GpuLodSelector,
-        IndirectDrawTemplate, TileInfo,
+        IndirectDrawTemplate, LodSelectionProvenance, SelectionReadbackTicket, TileInfo,
     },
     ClipmapConfig,
 };
@@ -24,7 +24,7 @@ use crate::terrain::clipmap::{
 /// Cache key for the generated clipmap mesh. Regeneration only happens when
 /// the clipmap configuration, terrain span, or streaming center changes —
 /// not every frame.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(in crate::terrain::renderer) struct ClipmapGeometryKey {
     ring_count: u32,
     ring_resolution: u32,
@@ -42,6 +42,37 @@ pub(in crate::terrain::renderer) struct ClipmapGeometryKey {
     height_curve_hash: u64,
     z_scale_bits: u32,
     readiness: Vec<u8>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::terrain::renderer) struct EncodedLodDraw<'a> {
+    pub(in crate::terrain::renderer) resources: &'a GpuLodDrawResources,
+    pub(in crate::terrain::renderer) ticket: Option<SelectionReadbackTicket>,
+}
+
+fn lod_selection_provenance(
+    cache_key: &ClipmapGeometryKey,
+    view_proj: glam::Mat4,
+    camera_pos: glam::Vec3,
+    height_bounds: (f32, f32),
+    frustum_culling: bool,
+) -> LodSelectionProvenance {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    cache_key.hash(&mut hasher);
+    view_proj
+        .to_cols_array()
+        .iter()
+        .for_each(|value| value.to_bits().hash(&mut hasher));
+    camera_pos
+        .to_array()
+        .iter()
+        .for_each(|value| value.to_bits().hash(&mut hasher));
+    height_bounds.0.to_bits().hash(&mut hasher);
+    height_bounds.1.to_bits().hash(&mut hasher);
+    frustum_culling.hash(&mut hasher);
+    LodSelectionProvenance(hasher.finish())
 }
 
 impl ClipmapGeometryKey {
@@ -109,6 +140,26 @@ impl TerrainGeometryProvider {
         matches!(self, Self::Clipmap { .. })
     }
 
+    pub(in crate::terrain::renderer) fn mark_lod_selection_submitted(
+        &self,
+        ticket: SelectionReadbackTicket,
+    ) -> bool {
+        match self {
+            Self::Clipmap { lod_resources, .. } => lod_resources.mark_selection_submitted(ticket),
+            Self::Grid { .. } => false,
+        }
+    }
+
+    pub(in crate::terrain::renderer) fn cancel_lod_selection(
+        &self,
+        ticket: SelectionReadbackTicket,
+    ) -> bool {
+        match self {
+            Self::Clipmap { lod_resources, .. } => lod_resources.cancel_selection(ticket),
+            Self::Grid { .. } => false,
+        }
+    }
+
     /// Issue the draw for this geometry. The caller must have selected the
     /// matching pipeline (`vs_main` for `Grid`, `vs_clipmap_main` for
     /// `Clipmap`) before calling.
@@ -137,27 +188,36 @@ impl TerrainGeometryProvider {
         params: &crate::terrain::render_params::TerrainRenderParams,
         height_bounds: (f32, f32),
         first_instance: bool,
-    ) -> Option<&GpuLodDrawResources> {
+    ) -> Option<EncodedLodDraw<'_>> {
         let Self::Clipmap {
             lod_selector,
             lod_resources,
+            cache_key,
             ..
         } = self
         else {
             return None;
         };
         let (eye, view, proj) = TerrainScene::build_camera_matrices(params);
-        lod_selector.encode_indirect(
+        let view_proj = proj * view;
+        let frustum_culling = params.culling != "none";
+        let provenance =
+            lod_selection_provenance(cache_key, view_proj, eye, height_bounds, frustum_culling);
+        let ticket = lod_selector.encode_indirect_tracked(
             queue,
             encoder,
             lod_resources,
-            proj * view,
+            view_proj,
             eye,
             first_instance,
             height_bounds,
-            params.culling != "none",
+            frustum_culling,
+            provenance,
         );
-        Some(lod_resources)
+        Some(EncodedLodDraw {
+            resources: lod_resources,
+            ticket,
+        })
     }
 
     pub(in crate::terrain::renderer) fn draw_indirect<'p>(
@@ -936,15 +996,35 @@ impl TerrainScene {
         params: &crate::terrain::render_params::TerrainRenderParams,
         heightmap: &[f32],
         height_dims: (u32, u32),
+        rendered_provenance: Option<LodSelectionProvenance>,
     ) -> Result<()> {
-        if params.shading != "visibility" || params.culling != "frustum" {
+        let expected = (params.shading == "visibility" && params.culling == "frustum")
+            .then_some(rendered_provenance)
+            .flatten();
+        let Some(TerrainGeometryProvider::Clipmap { lod_resources, .. }) =
+            self.geometry_provider.as_ref()
+        else {
             return Ok(());
-        }
-        let selection = match self.geometry_provider.as_ref() {
-            Some(TerrainGeometryProvider::Clipmap { lod_resources, .. }) => lod_resources
-                .read_selection_blocking(self.device.as_ref(), self.queue.as_ref())
-                .map_err(anyhow::Error::msg)?,
-            _ => return Ok(()),
+        };
+        let selection = loop {
+            let Some(completed) = lod_resources
+                .try_read_selection(self.device.as_ref())
+                .map_err(anyhow::Error::msg)?
+            else {
+                break None;
+            };
+            let Some(expected) = expected else {
+                continue;
+            };
+            if let Some(selection) = completed.into_selection_for(expected) {
+                break Some(selection);
+            }
+            // A completed selection from a different camera/geometry/height
+            // frame is drained explicitly and must never be rebuilt using the
+            // current frame's inputs.
+        };
+        let Some(selection) = selection else {
+            return Ok(());
         };
         self.refresh_cpu_visibility_oracle(
             params,

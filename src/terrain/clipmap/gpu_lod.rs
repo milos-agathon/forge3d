@@ -41,6 +41,59 @@ impl Default for GpuLodConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PlanetLodParams {
+    radius: f32,
+    altitude: f32,
+    camera_up: Vec3,
+}
+
+impl PlanetLodParams {
+    #[cfg(feature = "enable-globe")]
+    fn from_globe(frame: &crate::terrain::clipmap::globe::GlobeFrame) -> Self {
+        let camera_anchor = frame.camera_anchor();
+        let radius = frame.radius();
+        let camera_up = frame
+            .ecef_to_local_vector(camera_anchor.normalize())
+            .as_vec3()
+            .normalize();
+        Self {
+            radius: radius as f32,
+            altitude: (camera_anchor.length() - radius).max(0.0) as f32,
+            camera_up,
+        }
+    }
+}
+
+fn horizon_visible(
+    tile_center_relative: Vec3,
+    tile_angular_radius: f32,
+    planet: PlanetLodParams,
+) -> bool {
+    if !planet.radius.is_finite()
+        || planet.radius <= 0.0
+        || !planet.altitude.is_finite()
+        || !planet.camera_up.is_finite()
+    {
+        return true;
+    }
+    let camera_up = planet.camera_up.normalize_or_zero();
+    let center_from_planet =
+        tile_center_relative + camera_up * (planet.radius + planet.altitude.max(0.0));
+    if camera_up == Vec3::ZERO
+        || !center_from_planet.is_finite()
+        || center_from_planet.length_squared() == 0.0
+    {
+        return true;
+    }
+
+    let tangent_cos = (planet.radius / (planet.radius + planet.altitude.max(0.0))).clamp(0.0, 1.0);
+    let angular_radius = tile_angular_radius.max(0.0).min(std::f32::consts::PI);
+    let expanded_horizon = (tangent_cos.acos() + angular_radius).min(std::f32::consts::PI);
+    let conservative_threshold = expanded_horizon.cos();
+    camera_up.dot(center_from_planet.normalize()) >= conservative_threshold
+}
+
 /// Uniform buffer for LOD selection parameters.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -51,10 +104,12 @@ pub struct LodSelectParams {
     pub lod_params: [f32; 4], // pixel_error_budget, viewport_height, fov_y, max_lod
     pub terrain_params: [f32; 4], // tile_size, num_tiles, variant_count, first_instance
     pub height_params: [f32; 4], // conservative world-space min/max
+    pub planet_params: [f32; 4], // radius, camera altitude, globe enabled, reserved
+    pub camera_up: [f32; 4],
 }
 
 impl LodSelectParams {
-    pub fn new(
+    fn new(
         view_proj: Mat4,
         camera_pos: Vec3,
         frustum: &FrustumPlanes,
@@ -64,7 +119,14 @@ impl LodSelectParams {
         first_instance: bool,
         height_bounds: (f32, f32),
         frustum_culling: bool,
+        planet: Option<PlanetLodParams>,
     ) -> Self {
+        let planet_params = planet
+            .map(|planet| [planet.radius, planet.altitude, 1.0, 0.0])
+            .unwrap_or([0.0; 4]);
+        let camera_up = planet
+            .map(|planet| planet.camera_up.extend(0.0).to_array())
+            .unwrap_or([0.0, 0.0, 1.0, 0.0]);
         Self {
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z, 0.0],
@@ -87,6 +149,8 @@ impl LodSelectParams {
                 u32::from(frustum_culling) as f32,
                 0.0,
             ],
+            planet_params,
+            camera_up,
         }
     }
 }
@@ -103,10 +167,16 @@ pub struct TileInfo {
     pub selected_lod: u32,
     pub visible: u32,
     pub height_max: f32,
+    /// Tile center after f64 camera-anchor subtraction. Flat tiles retain
+    /// their historical world-space XY center with Z = 0.
+    pub camera_relative_center: [f32; 3],
+    /// Conservative angular half-width of a planetary tile in radians.
+    pub angular_radius: f32,
 }
 
 impl TileInfo {
     pub fn new(lod: u32, x: u32, y: u32, bounds_min: Vec2, bounds_max: Vec2) -> Self {
+        let center = (bounds_min + bounds_max) * 0.5;
         Self {
             tile_id: Self::pack_id(lod, x, y),
             height_min: f32::INFINITY,
@@ -116,12 +186,27 @@ impl TileInfo {
             selected_lod: lod,
             visible: 1,
             height_max: f32::NEG_INFINITY,
+            camera_relative_center: [center.x, center.y, 0.0],
+            angular_radius: 0.0,
         }
     }
 
     pub fn with_height_bounds(mut self, height_min: f32, height_max: f32) -> Self {
         self.height_min = height_min;
         self.height_max = height_max;
+        self
+    }
+
+    #[cfg(feature = "enable-globe")]
+    pub fn with_globe_center(
+        mut self,
+        frame: &crate::terrain::clipmap::globe::GlobeFrame,
+        center_ecef: glam::DVec3,
+        angular_radius: f32,
+    ) -> Self {
+        let relative = frame.camera_relative(center_ecef).position;
+        self.camera_relative_center = relative.to_array();
+        self.angular_radius = angular_radius.max(0.0);
         self
     }
 
@@ -197,78 +282,12 @@ impl ClipmapDrawInstance {
     }
 }
 
-/// GPU resources kept alive until the render pass consumes the indirect list.
-pub struct GpuLodDrawResources {
-    pub indirect_buffer: crate::core::resource_tracker::TrackedBuffer,
-    pub instance_buffer: crate::core::resource_tracker::TrackedBuffer,
-    pub output_tiles: crate::core::resource_tracker::TrackedBuffer,
-    pub output_header: crate::core::resource_tracker::TrackedBuffer,
-    pub max_draw_count: u32,
-    variant_count: u32,
-    params: crate::core::resource_tracker::TrackedBuffer,
-    _input_tiles: crate::core::resource_tracker::TrackedBuffer,
-    _draw_templates: crate::core::resource_tracker::TrackedBuffer,
-    bind_group: wgpu::BindGroup,
-}
-
-impl GpuLodDrawResources {
-    /// Read back the compact tile list produced by the most recently submitted
-    /// LOD compute pass. Queue ordering guarantees this copy observes the exact
-    /// list consumed by the indirect terrain draw.
-    pub(crate) fn read_selection_blocking(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> RenderResult<LodSelectionResult> {
-        let header_bytes = std::mem::size_of::<OutputHeader>() as u64;
-        let tile_bytes = u64::from(self.max_draw_count) * std::mem::size_of::<TileInfo>() as u64;
-        let readback = tracked_create_buffer(
-            device,
-            &wgpu::BufferDescriptor {
-                label: Some("lod_selection_readback"),
-                size: header_bytes + tile_bytes,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            },
-        )?;
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("lod_selection_readback_encoder"),
-        });
-        encoder.copy_buffer_to_buffer(&self.output_header, 0, &readback, 0, header_bytes);
-        encoder.copy_buffer_to_buffer(&self.output_tiles, 0, &readback, header_bytes, tile_bytes);
-        queue.submit(Some(encoder.finish()));
-
-        let slice = readback.slice(..);
-        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            sender.send(result).ok();
-        });
-        device.poll(wgpu::Maintain::Wait);
-        pollster::block_on(receiver.receive())
-            .ok_or_else(|| RenderError::readback("LOD selection callback dropped"))?
-            .map_err(|error| RenderError::readback(format!("LOD selection map failed: {error}")))?;
-        let mapped = slice.get_mapped_range();
-        let header = bytemuck::pod_read_unaligned::<OutputHeader>(
-            &mapped[..std::mem::size_of::<OutputHeader>()],
-        );
-        let visible_count = header.visible_count.min(self.max_draw_count) as usize;
-        let tile_size = std::mem::size_of::<TileInfo>();
-        let visible_tiles = (0..visible_count)
-            .map(|index| {
-                let start = header_bytes as usize + index * tile_size;
-                bytemuck::pod_read_unaligned::<TileInfo>(&mapped[start..start + tile_size])
-            })
-            .collect();
-        drop(mapped);
-        readback.unmap();
-        Ok(LodSelectionResult {
-            visible_tiles,
-            total_triangles: header.total_triangles,
-            culled_count: self.max_draw_count - header.visible_count.min(self.max_draw_count),
-        })
-    }
-}
-
+mod readback;
+pub use readback::GpuLodDrawResources;
+use readback::SelectionReadbackRuntime;
+#[cfg(test)]
+use readback::{CompletedLodSelection, SelectionReadbackTicketState, SelectionReadbackTickets};
+pub(crate) use readback::{LodSelectionProvenance, SelectionReadbackTicket};
 /// Frustum planes for culling (Ax + By + Cz + D = 0 format).
 #[derive(Debug, Clone)]
 pub struct FrustumPlanes {
@@ -465,6 +484,7 @@ impl GpuLodSelector {
             false,
             (-f32::MAX, f32::MAX),
             true,
+            None,
         );
         let params_buffer = tracked_create_buffer_init(
             device,
@@ -480,7 +500,7 @@ impl GpuLodSelector {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("lod_input_tiles"),
                 contents: bytemuck::cast_slice(tiles),
-                usage: wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             },
         )?;
         let template_buffer = tracked_create_buffer_init(
@@ -578,6 +598,28 @@ impl GpuLodSelector {
                 },
             ],
         });
+        let selection_readback_size = std::mem::size_of::<OutputHeader>() as u64
+            + tiles.len() as u64 * std::mem::size_of::<TileInfo>() as u64;
+        let selection_readbacks = [
+            tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("lod_selection_readback_0"),
+                    size: selection_readback_size,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            )?,
+            tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("lod_selection_readback_1"),
+                    size: selection_readback_size,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            )?,
+        ];
 
         Ok(GpuLodDrawResources {
             indirect_buffer,
@@ -587,8 +629,10 @@ impl GpuLodSelector {
             max_draw_count: tiles.len() as u32,
             variant_count,
             params: params_buffer,
-            _input_tiles: input_buffer,
+            input_tiles: input_buffer,
             _draw_templates: template_buffer,
+            selection_readbacks,
+            selection_readback: std::sync::Mutex::new(SelectionReadbackRuntime::default()),
             bind_group,
         })
     }
@@ -605,6 +649,131 @@ impl GpuLodSelector {
         height_bounds: (f32, f32),
         frustum_culling: bool,
     ) {
+        let _ = self.encode_indirect_in_space(
+            queue,
+            encoder,
+            resources,
+            None,
+            view_proj,
+            camera_pos,
+            first_instance,
+            height_bounds,
+            frustum_culling,
+            None,
+            None,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn encode_indirect_tracked(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        resources: &GpuLodDrawResources,
+        view_proj: Mat4,
+        camera_pos: Vec3,
+        first_instance: bool,
+        height_bounds: (f32, f32),
+        frustum_culling: bool,
+        provenance: LodSelectionProvenance,
+    ) -> Option<SelectionReadbackTicket> {
+        self.encode_indirect_in_space(
+            queue,
+            encoder,
+            resources,
+            None,
+            view_proj,
+            camera_pos,
+            first_instance,
+            height_bounds,
+            frustum_culling,
+            None,
+            Some(provenance),
+        )
+    }
+
+    #[cfg(feature = "enable-globe")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_indirect_globe(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        resources: &GpuLodDrawResources,
+        camera_relative_tiles: &[TileInfo],
+        view_proj: Mat4,
+        frame: &crate::terrain::clipmap::globe::GlobeFrame,
+        first_instance: bool,
+        height_bounds: (f32, f32),
+        frustum_culling: bool,
+    ) -> bool {
+        if camera_relative_tiles.len() != resources.max_draw_count as usize {
+            return false;
+        }
+        let _ = self.encode_indirect_in_space(
+            queue,
+            encoder,
+            resources,
+            Some(camera_relative_tiles),
+            view_proj,
+            Vec3::ZERO,
+            first_instance,
+            height_bounds,
+            frustum_culling,
+            Some(PlanetLodParams::from_globe(frame)),
+            None,
+        );
+        true
+    }
+
+    #[cfg(feature = "enable-globe")]
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn encode_indirect_globe_tracked(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        resources: &GpuLodDrawResources,
+        camera_relative_tiles: &[TileInfo],
+        view_proj: Mat4,
+        frame: &crate::terrain::clipmap::globe::GlobeFrame,
+        first_instance: bool,
+        height_bounds: (f32, f32),
+        frustum_culling: bool,
+        provenance: LodSelectionProvenance,
+    ) -> Option<SelectionReadbackTicket> {
+        if camera_relative_tiles.len() != resources.max_draw_count as usize {
+            return None;
+        }
+        self.encode_indirect_in_space(
+            queue,
+            encoder,
+            resources,
+            Some(camera_relative_tiles),
+            view_proj,
+            Vec3::ZERO,
+            first_instance,
+            height_bounds,
+            frustum_culling,
+            Some(PlanetLodParams::from_globe(frame)),
+            Some(provenance),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_indirect_in_space(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        resources: &GpuLodDrawResources,
+        camera_relative_tiles: Option<&[TileInfo]>,
+        view_proj: Mat4,
+        camera_pos: Vec3,
+        first_instance: bool,
+        height_bounds: (f32, f32),
+        frustum_culling: bool,
+        planet: Option<PlanetLodParams>,
+        provenance: Option<LodSelectionProvenance>,
+    ) -> Option<SelectionReadbackTicket> {
         let frustum = FrustumPlanes::from_view_proj(view_proj);
         let params = LodSelectParams::new(
             view_proj,
@@ -616,8 +785,12 @@ impl GpuLodSelector {
             first_instance,
             height_bounds,
             frustum_culling,
+            planet,
         );
         queue.write_buffer(&resources.params, 0, bytemuck::bytes_of(&params));
+        if let Some(tiles) = camera_relative_tiles {
+            queue.write_buffer(&resources.input_tiles, 0, bytemuck::cast_slice(tiles));
+        }
         encoder.clear_buffer(&resources.output_header, 0, None);
         encoder.clear_buffer(&resources.indirect_buffer, 0, None);
         encoder.clear_buffer(&resources.instance_buffer, 0, None);
@@ -631,112 +804,7 @@ impl GpuLodSelector {
             pass.set_bind_group(0, &resources.bind_group, &[]);
             pass.dispatch_workgroups(1, 1, 1);
         }
-    }
-
-    #[cfg(test)]
-    fn select_batch_blocking(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        tiles: &[TileInfo],
-        cameras: &[(Mat4, Vec3)],
-    ) -> Vec<LodSelectionResult> {
-        let templates: Vec<_> = tiles
-            .iter()
-            .flat_map(|tile| {
-                (0..=self.config.max_lod).map(move |_| IndirectDrawTemplate {
-                    index_count: 3,
-                    first_index: 0,
-                    base_vertex: 0,
-                    tile_id: tile.tile_id,
-                })
-            })
-            .collect();
-        let resources = self
-            .create_draw_resources(device, tiles, &templates)
-            .expect("create GPU LOD draw resources");
-        let header_bytes = std::mem::size_of::<OutputHeader>() as u64;
-        let tile_bytes = std::mem::size_of_val(tiles) as u64;
-        let camera_stride = header_bytes + tile_bytes;
-        let readback = tracked_create_buffer(
-            device,
-            &wgpu::BufferDescriptor {
-                label: Some("lod_batch_test_readback"),
-                size: camera_stride * cameras.len() as u64,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            },
-        )
-        .expect("create LOD batch readback");
-        for (camera_index, (view_proj, camera_pos)) in cameras.iter().copied().enumerate() {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("lod_batch_test_encoder"),
-            });
-            self.encode_indirect(
-                queue,
-                &mut encoder,
-                &resources,
-                view_proj,
-                camera_pos,
-                false,
-                (0.0, 1000.0),
-                true,
-            );
-            let offset = camera_stride * camera_index as u64;
-            encoder.copy_buffer_to_buffer(
-                &resources.output_header,
-                0,
-                &readback,
-                offset,
-                header_bytes,
-            );
-            encoder.copy_buffer_to_buffer(
-                &resources.output_tiles,
-                0,
-                &readback,
-                offset + header_bytes,
-                tile_bytes,
-            );
-            queue.submit(Some(encoder.finish()));
-        }
-
-        let slice = readback.slice(..);
-        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            sender.send(result).ok();
-        });
-        device.poll(wgpu::Maintain::Wait);
-        pollster::block_on(receiver.receive())
-            .expect("LOD readback callback")
-            .expect("LOD readback mapping");
-        let mapped = slice.get_mapped_range();
-        let results = cameras
-            .iter()
-            .enumerate()
-            .map(|(camera_index, _)| {
-                let offset = camera_stride as usize * camera_index;
-                let header = bytemuck::pod_read_unaligned::<OutputHeader>(
-                    &mapped[offset..offset + header_bytes as usize],
-                );
-                let visible_count = (header.visible_count as usize).min(tiles.len());
-                let tile_start = offset + header_bytes as usize;
-                let tile_size = std::mem::size_of::<TileInfo>();
-                let visible_tiles = (0..visible_count)
-                    .map(|index| {
-                        let start = tile_start + index * tile_size;
-                        bytemuck::pod_read_unaligned::<TileInfo>(&mapped[start..start + tile_size])
-                    })
-                    .collect();
-                LodSelectionResult {
-                    visible_tiles,
-                    total_triangles: header.total_triangles,
-                    culled_count: tiles.len() as u32 - header.visible_count.min(tiles.len() as u32),
-                }
-            })
-            .collect();
-        drop(mapped);
-        readback.unmap();
-        results
+        provenance.and_then(|provenance| resources.stage_selection_readback(encoder, provenance))
     }
 }
 
@@ -783,6 +851,35 @@ pub fn cpu_lod_select(
     config: &GpuLodConfig,
     height_bounds: (f32, f32),
 ) -> LodSelectionResult {
+    cpu_lod_select_in_space(tiles, view_proj, camera_pos, config, height_bounds, None)
+}
+
+#[cfg(feature = "enable-globe")]
+pub fn cpu_lod_select_globe(
+    tiles: &[TileInfo],
+    view_proj: Mat4,
+    config: &GpuLodConfig,
+    height_bounds: (f32, f32),
+    frame: &crate::terrain::clipmap::globe::GlobeFrame,
+) -> LodSelectionResult {
+    cpu_lod_select_in_space(
+        tiles,
+        view_proj,
+        Vec3::ZERO,
+        config,
+        height_bounds,
+        Some(PlanetLodParams::from_globe(frame)),
+    )
+}
+
+fn cpu_lod_select_in_space(
+    tiles: &[TileInfo],
+    view_proj: Mat4,
+    camera_pos: Vec3,
+    config: &GpuLodConfig,
+    height_bounds: (f32, f32),
+    planet: Option<PlanetLodParams>,
+) -> LodSelectionResult {
     let frustum = FrustumPlanes::from_view_proj(view_proj);
     let camera_pos_2d = Vec2::new(camera_pos.x, camera_pos.y);
 
@@ -800,7 +897,11 @@ pub fn cpu_lod_select(
         } else {
             height_bounds
         };
-        let visible = frustum_test_aabb(bounds_min, bounds_max, height_min, height_max, &frustum);
+        let center_relative = Vec3::from(tile.camera_relative_center);
+        let visible = frustum_test_aabb(bounds_min, bounds_max, height_min, height_max, &frustum)
+            && planet.map_or(true, |planet| {
+                horizon_visible(center_relative, tile.angular_radius, planet)
+            });
 
         if !visible {
             culled_count += 1;
@@ -808,7 +909,11 @@ pub fn cpu_lod_select(
         }
 
         // Calculate distance and select LOD
-        let distance = camera_pos_2d.distance(center);
+        let distance = if planet.is_some() {
+            center_relative.length()
+        } else {
+            camera_pos_2d.distance(center)
+        };
         let selected_lod = select_lod_cpu(distance, config);
 
         let mut selected_tile = *tile;
@@ -888,214 +993,4 @@ fn select_lod_cpu(distance: f32, config: &GpuLodConfig) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn oracle_selection_prefers_exact_submitted_tiles_without_recomputing() {
-        let submitted = [TileInfo {
-            tile_id: 97,
-            height_min: -1.0,
-            bounds_min: [-2.0, -3.0],
-            bounds_max: [4.0, 5.0],
-            distance: 12.0,
-            selected_lod: 2,
-            visible: 1,
-            height_max: 6.0,
-        }];
-        let selected = prefer_submitted_tiles(Some(&submitted), || {
-            panic!("CPU LOD selection must not replace submitted GPU provenance")
-        });
-
-        assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].tile_id, 97);
-        assert_eq!(selected[0].selected_lod, 2);
-    }
-
-    #[test]
-    fn test_tile_id_packing() {
-        let (lod, x, y) = (3, 100, 200);
-        let packed = TileInfo::pack_id(lod, x, y);
-        let (l, xx, yy) = TileInfo::unpack_id(packed);
-        assert_eq!((l, xx, yy), (lod, x, y));
-    }
-
-    #[test]
-    fn test_frustum_planes_extraction() {
-        let view = Mat4::look_at_rh(Vec3::new(0.0, 100.0, 100.0), Vec3::ZERO, Vec3::Y);
-        let proj = Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 1.0, 1000.0);
-        let vp = proj * view;
-
-        let frustum = FrustumPlanes::from_view_proj(vp);
-
-        // Planes should be normalized
-        assert!((frustum.left.xyz().length() - 1.0).abs() < 0.01);
-        assert!((frustum.right.xyz().length() - 1.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_cpu_lod_selection() {
-        let tiles = vec![
-            TileInfo::new(0, 0, 0, Vec2::new(0.0, 0.0), Vec2::new(256.0, 256.0)),
-            TileInfo::new(0, 1, 0, Vec2::new(256.0, 0.0), Vec2::new(512.0, 256.0)),
-        ];
-
-        let view = Mat4::look_at_rh(
-            Vec3::new(128.0, 100.0, 128.0),
-            Vec3::new(128.0, 0.0, 128.0),
-            Vec3::Y,
-        );
-        let proj = Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 1.0, 10000.0);
-        let vp = proj * view;
-
-        let config = GpuLodConfig::default();
-        let result = cpu_lod_select(
-            &tiles,
-            vp,
-            Vec3::new(128.0, 100.0, 128.0),
-            &config,
-            (0.0, 1000.0),
-        );
-
-        assert!(!result.visible_tiles.is_empty());
-        assert!(result.total_triangles > 0);
-    }
-
-    #[test]
-    fn test_lod_selection_distance_based() {
-        let config = GpuLodConfig {
-            pixel_error_budget: 2.0,
-            viewport_height: 1080,
-            fov_y: 45.0_f32.to_radians(),
-            max_lod: 4,
-            tile_size: 256.0,
-            ..Default::default()
-        };
-
-        // Close distance should select low LOD (high detail)
-        let lod_close = select_lod_cpu(100.0, &config);
-        // Far distance should select higher LOD (lower detail)
-        let lod_far = select_lod_cpu(10000.0, &config);
-
-        assert!(lod_far >= lod_close, "Far tiles should use coarser LOD");
-    }
-
-    #[test]
-    fn cpu_selection_keeps_a_tile_whose_bounds_intersect_the_frustum() {
-        let tiles = vec![TileInfo::new(
-            0,
-            0,
-            0,
-            Vec2::new(0.9, -0.1),
-            Vec2::new(1.5, 0.1),
-        )];
-
-        let result = cpu_lod_select(
-            &tiles,
-            Mat4::IDENTITY,
-            Vec3::ZERO,
-            &GpuLodConfig::default(),
-            (0.0, 1000.0),
-        );
-
-        assert_eq!(
-            result.visible_tiles.len(),
-            1,
-            "conservative culling must keep an AABB that crosses the frustum edge"
-        );
-    }
-
-    #[test]
-    fn zero_to_one_near_plane_keeps_points_in_front_of_camera() {
-        let eye = Vec3::new(0.0, 0.0, 10.0);
-        let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
-        let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 0.1, 100.0);
-        let planes = FrustumPlanes::from_view_proj(projection * view);
-        for plane in planes.to_array() {
-            let distance = Vec3::new(plane[0], plane[1], plane[2]).dot(Vec3::ZERO) + plane[3];
-            assert!(distance >= 0.0, "origin rejected by plane {plane:?}");
-        }
-    }
-
-    #[test]
-    #[ignore = "requires a physical GPU; the TESSELLA lane runs this exact test"]
-    fn gpu_and_cpu_select_identical_tile_sets_for_1000_cameras() {
-        let context = crate::core::gpu::try_ctx()
-            .expect("TESSELLA GPU/CPU differential requires a physical GPU adapter");
-        let config = GpuLodConfig {
-            pixel_error_budget: 256.0,
-            terrain_width: 2048.0,
-            tile_size: 256.0,
-            max_lod: 4,
-            ..Default::default()
-        };
-        let selector = GpuLodSelector::new(&context.device, config.clone());
-        let tiles: Vec<_> = (0..8)
-            .flat_map(|y| {
-                (0..8).map(move |x| {
-                    let min = Vec2::new(-1024.0 + x as f32 * 256.0, -1024.0 + y as f32 * 256.0);
-                    TileInfo::new(0, x, y, min, min + Vec2::splat(256.0))
-                })
-            })
-            .collect();
-
-        let mut state = 0xA511_E9B3_u32;
-        let cameras: Vec<_> = (0..1000)
-            .map(|_| {
-                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                let angle = (state as f32 / u32::MAX as f32) * std::f32::consts::TAU;
-                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                let radius = 900.0 + (state as f32 / u32::MAX as f32) * 900.0;
-                let eye = Vec3::new(angle.cos() * radius, angle.sin() * radius, 1200.0);
-                let target = Vec3::new(0.0, 0.0, 400.0);
-                let view = Mat4::look_at_rh(eye, target, Vec3::Z);
-                let proj = Mat4::perspective_rh(config.fov_y, 16.0 / 9.0, 1.0, 5000.0);
-                (proj * view, eye)
-            })
-            .collect();
-        let gpu = selector.select_batch_blocking(&context.device, &context.queue, &tiles, &cameras);
-        let visible_sets: std::collections::BTreeSet<_> = gpu
-            .iter()
-            .map(|result| {
-                let mut ids: Vec<_> = result
-                    .visible_tiles
-                    .iter()
-                    .map(|tile| tile.tile_id)
-                    .collect();
-                ids.sort_unstable();
-                ids
-            })
-            .collect();
-        let selected_lods: std::collections::BTreeSet<_> = gpu
-            .iter()
-            .flat_map(|result| result.visible_tiles.iter().map(|tile| tile.selected_lod))
-            .collect();
-        assert!(
-            visible_sets.len() > 1,
-            "camera sweep must exercise multiple visible tile sets"
-        );
-        assert!(
-            selected_lods.len() > 1,
-            "camera sweep must exercise multiple selected LODs"
-        );
-
-        for (camera_index, ((view_proj, eye), gpu_result)) in
-            cameras.iter().zip(gpu.iter()).enumerate()
-        {
-            let cpu_result = cpu_lod_select(&tiles, *view_proj, *eye, &config, (0.0, 1000.0));
-            let mut cpu_ids: Vec<_> = cpu_result
-                .visible_tiles
-                .iter()
-                .map(|tile| (tile.tile_id, tile.selected_lod))
-                .collect();
-            let mut gpu_ids: Vec<_> = gpu_result
-                .visible_tiles
-                .iter()
-                .map(|tile| (tile.tile_id, tile.selected_lod))
-                .collect();
-            cpu_ids.sort_unstable();
-            gpu_ids.sort_unstable();
-            assert_eq!(gpu_ids, cpu_ids, "camera {camera_index}");
-        }
-    }
-}
+mod tests;

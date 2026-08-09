@@ -28,6 +28,7 @@ impl TerrainScene {
         sun_vis_computed: bool,
         time_seconds: f32,
         timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+        staged_lod_ticket: &mut Option<crate::terrain::clipmap::gpu_lod::SelectionReadbackTicket>,
     ) -> Result<()> {
         let shadow_bind_group = shadow_setup
             .shadow_bind_group
@@ -116,6 +117,7 @@ impl TerrainScene {
             &water_reflection_bind_group,
             &pass_bind_groups.material_layer,
             sky_texture.is_some(),
+            staged_lod_ticket,
         )?;
         ts_end(timing, encoder, main_scope, terrain_draw_calls);
 
@@ -244,6 +246,7 @@ impl TerrainScene {
         water_reflection_bind_group: &wgpu::BindGroup,
         material_layer_bind_group: &wgpu::BindGroup,
         preserve_background: bool,
+        staged_lod_ticket: &mut Option<crate::terrain::clipmap::gpu_lod::SelectionReadbackTicket>,
     ) -> Result<u32> {
         let geometry = self.geometry_provider()?;
         // TESSELLA: the indirect-draw capability decision lives in
@@ -274,7 +277,7 @@ impl TerrainScene {
         // combined clipmap mesh once. Feeding every off-screen region through
         // the compacted indirect path changes overlap/order at ring corners
         // and previously produced a uniformly magenta baseline on Metal.
-        let indirect = if params.culling == "none" {
+        let encoded_lod = if params.culling == "none" {
             None
         } else {
             geometry.encode_indirect(
@@ -285,6 +288,10 @@ impl TerrainScene {
                 first_instance,
             )
         };
+        if let Some(ticket) = encoded_lod.and_then(|encoded| encoded.ticket) {
+            *staged_lod_ticket = Some(ticket);
+        }
+        let indirect = encoded_lod.map(|encoded| encoded.resources);
         // Only a frame that actually issues indirect draws may claim the CPU
         // draw-loop fallback: `culling="none"` and non-clipmap Grid geometry both
         // leave `indirect` as None and draw once, directly. Recording here (and
