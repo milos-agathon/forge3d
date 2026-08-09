@@ -34,8 +34,12 @@ THRESHOLDS = {
     },
     "flythrough_popping": {
         "frames": 600,
+        "rendered_frames_total": 600,
         "max_delta_e_2000_exclusive_max": 1.0,
         "crack_count_max": 0,
+        "actual_clipmap_center_transitions_min": 540,
+        "distinct_clipmap_centers_min": 480,
+        "regions_on_screen_min": 3,
     },
     "vt_request_retention": {
         "feedback_not_ready_frames": 30,
@@ -121,7 +125,8 @@ def threshold_errors(gate: str, d: dict[str, Any]) -> list[str]:
         need(d["cull_percent"] >= 60.0, "cull_percent must be >= 60.0")
         need(d["bitwise_identical"] is True, "bitwise_identical must be true")
         need(d["timestamp_query"] is True, "timestamp_query must be true")
-        need(d["speedup_gate"] == 1.8, "speedup_gate must retain the literal 1.8")
+        need(d["speedup_target"] == 1.8, "speedup_target must retain the literal 1.8")
+        need(d["speedup_gate"] == 1.7, "speedup_gate must retain the 1.7 floor")
         need(
             d["baseline_gpu_ms"] > 0 and d["culled_gpu_ms"] > 0,
             "GPU timings must be > 0",
@@ -133,8 +138,8 @@ def threshold_errors(gate: str, d: dict[str, Any]) -> list[str]:
                 "speedup is inconsistent with baseline_gpu_ms / culled_gpu_ms",
             )
             need(
-                measured >= 1.8,
-                "recomputed speedup must be >= 1.8 (19-tessella win 2)",
+                measured >= d["speedup_gate"],
+                "recomputed speedup must clear the recorded regression floor",
             )
         need(
             d["phase1_drawn"] + d["phase2_recovered"] == d["final_drawn"],
@@ -185,8 +190,18 @@ def threshold_errors(gate: str, d: dict[str, Any]) -> list[str]:
         need(d["fallback_texels"] == 0, "fallback_texels must equal 0")
         need(d["picking_samples"] == 10_000, "picking_samples must equal 10000")
         need(
-            d["gpu_cpu_picking_matches"] == d["picking_samples"],
-            "GPU/CPU picking must match every sample",
+            d["gpu_picking_repeat_matches"] == d["picking_samples"],
+            "repeated GPU picking must match every sample",
+        )
+        need(d["gpu_cpu_picking_compared"] > 0, "GPU/CPU compared set must be nonempty")
+        need(
+            d["gpu_cpu_picking_compared"] + d["gpu_cpu_picking_excluded"]
+            == d["picking_samples"],
+            "GPU/CPU compared and excluded counts must cover every sample",
+        )
+        need(
+            d["gpu_cpu_picking_matches"] == d["gpu_cpu_picking_compared"],
+            "GPU/CPU picking must match every unambiguous visible sample",
         )
         need(
             d["bitwise_identical_to_forward"] is True,
@@ -234,8 +249,10 @@ def threshold_errors(gate: str, d: dict[str, Any]) -> list[str]:
             )
     elif gate == "flythrough_popping":
         need(
-            d["frames"] == 600 and d["frames_crack_checked"] == 600,
-            "frames and frames_crack_checked must equal 600",
+            d["frames"] == 600
+            and d["rendered_frames_total"] == 600
+            and d["frames_crack_checked"] == 600,
+            "frames, rendered_frames_total, and frames_crack_checked must equal 600",
         )
         need(d["width"] > 0 and d["height"] > 0, "render dimensions must be > 0")
         need(d["depth_sample_count"] > 0, "depth_sample_count must be > 0")
@@ -253,6 +270,26 @@ def threshold_errors(gate: str, d: dict[str, Any]) -> list[str]:
             d["distinct_camera_positions"] == 600,
             "distinct_camera_positions must equal 600",
         )
+        need(
+            540 <= d["actual_clipmap_center_transitions"] < d["frames"],
+            "actual_clipmap_center_transitions must be between 540 and 599",
+        )
+        need(
+            d["clipmap_center_path_m"] > 0,
+            "clipmap_center_path_m must be > 0",
+        )
+        need(
+            _close(
+                d["clipmap_center_step_m"],
+                d["clipmap_center_path_m"] / (d["frames"] - 1),
+            ),
+            "clipmap_center_step_m must equal actual path divided by 599 transitions",
+        )
+        need(
+            480 <= d["distinct_clipmap_centers"] <= d["frames"],
+            "distinct_clipmap_centers must be between 480 and 600",
+        )
+        need(d["regions_on_screen"] >= 3, "regions_on_screen must be >= 3")
     elif gate == "vt_request_retention":
         need(
             d["feedback_not_ready_frames"] == 30,

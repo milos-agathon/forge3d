@@ -127,6 +127,10 @@ pub struct TerrainScene {
     pub(super) reflection_probe_mip_levels: u32,
     pub(super) aov_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
     pub(super) aov_pipeline_sample_count: Mutex<u32>,
+    /// Bitmask of the albedo/normal/depth color targets carried by the cached
+    /// one-shot AOV pipeline. Depth-only evidence must not pay for two unused
+    /// RGBA16F attachments on every frame.
+    pub(super) aov_pipeline_output_mask: Mutex<u8>,
     /// VERITAS: whether the cached AOV pipeline carries the 5th R32Uint
     /// source-id target (rebuilt when this toggles, like sample count).
     pub(super) aov_pipeline_source_id: Mutex<bool>,

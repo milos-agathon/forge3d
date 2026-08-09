@@ -94,7 +94,6 @@ pub(in crate::terrain::renderer) enum TerrainGeometryProvider {
         lod_tiles: Vec<TileInfo>,
         draw_templates: Vec<IndirectDrawTemplate>,
         variant_count: u32,
-        visibility_meta_buffer: TrackedBuffer,
         cache_key: ClipmapGeometryKey,
     },
 }
@@ -102,27 +101,6 @@ pub(in crate::terrain::renderer) enum TerrainGeometryProvider {
 impl TerrainGeometryProvider {
     pub(in crate::terrain::renderer) fn is_clipmap(&self) -> bool {
         matches!(self, Self::Clipmap { .. })
-    }
-
-    pub(in crate::terrain::renderer) fn visibility_resolve_buffers(
-        &self,
-    ) -> Option<(&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer)> {
-        let Self::Clipmap {
-            vertex_buffer,
-            index_buffer,
-            lod_resources,
-            visibility_meta_buffer,
-            ..
-        } = self
-        else {
-            return None;
-        };
-        Some((
-            vertex_buffer,
-            index_buffer,
-            lod_resources.template_buffer(),
-            visibility_meta_buffer,
-        ))
     }
 
     /// Issue the draw for this geometry. The caller must have selected the
@@ -619,7 +597,7 @@ impl TerrainScene {
         }) = self.geometry_provider.as_ref()
         {
             if *existing == cache_key {
-                self.refresh_cpu_visibility_oracle(params, heightmap, height_dims)?;
+                self.refresh_cpu_visibility_oracle(params, heightmap, height_dims, None)?;
                 return Ok(());
             }
         }
@@ -802,7 +780,7 @@ impl TerrainScene {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.clipmap.vertex_buffer"),
                 contents: bytemuck::cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::VERTEX,
             },
         )?;
         let index_buffer = tracked_create_buffer_init(
@@ -810,7 +788,7 @@ impl TerrainScene {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.clipmap.index_buffer"),
                 contents: bytemuck::cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::INDEX,
             },
         )?;
         let fallback_instance = ClipmapDrawInstance::identity(lod_tiles[0].tile_id, 0);
@@ -837,14 +815,6 @@ impl TerrainScene {
             &lod_tiles,
             &draw_templates,
         )?;
-        let visibility_meta_buffer = tracked_create_buffer_init(
-            self.device.as_ref(),
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("terrain.visibility.resolve_meta"),
-                contents: bytemuck::cast_slice(&[variant_count, 0, 0, 0]),
-                usage: wgpu::BufferUsages::UNIFORM,
-            },
-        )?;
         let scale = params.render_scale.clamp(0.25, 4.0);
         self.two_phase_culler = if params.culling == "hzb_two_phase" {
             Some(
@@ -870,10 +840,9 @@ impl TerrainScene {
             lod_tiles,
             draw_templates,
             variant_count,
-            visibility_meta_buffer,
             cache_key,
         });
-        self.refresh_cpu_visibility_oracle(params, heightmap, height_dims)?;
+        self.refresh_cpu_visibility_oracle(params, heightmap, height_dims, None)?;
         Ok(())
     }
 
@@ -882,6 +851,7 @@ impl TerrainScene {
         params: &crate::terrain::render_params::TerrainRenderParams,
         heightmap: &[f32],
         height_dims: (u32, u32),
+        submitted_tiles: Option<&[TileInfo]>,
     ) -> Result<()> {
         let mut oracle = self
             .cpu_visibility_oracle
@@ -891,12 +861,20 @@ impl TerrainScene {
             *oracle = None;
             return Ok(());
         }
+        // Frustum draws consume the compute shader's compact indirect list.
+        // The exact list is only available after submission, so do not publish
+        // a CPU-recomputed oracle in the interim.
+        if params.culling == "frustum" && submitted_tiles.is_none() {
+            *oracle = None;
+            return Ok(());
+        }
         let Some(TerrainGeometryProvider::Clipmap {
             lod_config,
             cpu_mesh,
             lod_tiles,
             draw_templates,
             variant_count,
+            index_count,
             ..
         }) = self.geometry_provider.as_ref()
         else {
@@ -911,9 +889,34 @@ impl TerrainScene {
             lod_tiles,
             draw_templates,
             *variant_count,
+            *index_count,
             lod_config,
+            submitted_tiles,
         )?);
         Ok(())
+    }
+
+    pub(in crate::terrain::renderer) fn refresh_cpu_visibility_oracle_from_gpu_selection(
+        &self,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        heightmap: &[f32],
+        height_dims: (u32, u32),
+    ) -> Result<()> {
+        if params.shading != "visibility" || params.culling != "frustum" {
+            return Ok(());
+        }
+        let selection = match self.geometry_provider.as_ref() {
+            Some(TerrainGeometryProvider::Clipmap { lod_resources, .. }) => lod_resources
+                .read_selection_blocking(self.device.as_ref(), self.queue.as_ref())
+                .map_err(anyhow::Error::msg)?,
+            _ => return Ok(()),
+        };
+        self.refresh_cpu_visibility_oracle(
+            params,
+            heightmap,
+            height_dims,
+            Some(&selection.visible_tiles),
+        )
     }
 
     pub(in crate::terrain::renderer) fn geometry_provider(

@@ -56,7 +56,7 @@ struct VisibilityReconstructedVertex {
 fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     let source = terrain_visibility_vertices[index];
     let uv = clamp(source.uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_fine = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_fine = sample_height_bilinear(uv);
     // Geomorphing, mirrored from `vs_clipmap_main`. Reconstructing from the
     // FINE height alone put every morphing vertex at a different clip position
     // than pass 1 rasterised it from, which tilts the triangle and biases the
@@ -69,10 +69,10 @@ fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     let coarse_cell = uv / coarse_step;
     let coarse_base = floor(coarse_cell) * coarse_step;
     let coarse_t = fract(coarse_cell);
-    let h00 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h10 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h01 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-    let h11 = textureSampleLevel(height_tex, height_samp, clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+    let h00 = sample_height_bilinear(clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h10 = sample_height_bilinear(clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h01 = sample_height_bilinear(clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h11 = sample_height_bilinear(clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)));
     let h_coarse = mix(mix(h00, h10, coarse_t.x), mix(h01, h11, coarse_t.x), coarse_t.y);
     let h_raw = mix(h_fine, h_coarse, clamp(source.morph_data.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
@@ -302,10 +302,14 @@ fn fs_visibility_resolve_fullscreen(
         quad_origin + vec2<f32>(1.0, 0.0), v0, v1, v2, w, dimensions);
     let anchor01 = visibility_sample_surface(
         quad_origin + vec2<f32>(0.0, 1.0), v0, v1, v2, w, dimensions);
-    terrain_explicit_ddx_uv = anchor10.uv - anchor00.uv;
-    terrain_explicit_ddy_uv = anchor01.uv - anchor00.uv;
-    terrain_explicit_ddx_world = anchor10.world - anchor00.world;
-    terrain_explicit_ddy_world = anchor01.world - anchor00.world;
+    let feedback_ddx_uv = anchor10.uv - anchor00.uv;
+    let feedback_ddy_uv = anchor01.uv - anchor00.uv;
+    let feedback_ddx_world = anchor10.world - anchor00.world;
+    let feedback_ddy_world = anchor01.world - anchor00.world;
+    terrain_explicit_ddx_uv = feedback_ddx_uv;
+    terrain_explicit_ddy_uv = feedback_ddy_uv;
+    terrain_explicit_ddx_world = feedback_ddx_world;
+    terrain_explicit_ddy_world = feedback_ddy_world;
     terrain_explicit_gradients = 1u;
 
     var surface: VertexOutput;
@@ -323,7 +327,16 @@ fn fs_visibility_resolve_fullscreen(
         discard;
     } else {
         atomicAdd(&terrain_frame_counters.material_invocations, 1u);
-        terrain_vt_write_surface_feedback(surface.tex_coord, 0u);
+        terrain_vt_write_surface_feedback(
+            surface.tex_coord,
+            surface.world_position,
+            feedback_ddx_uv,
+            feedback_ddy_uv,
+            feedback_ddx_world,
+            feedback_ddy_world,
+            0u,
+            input.clip_position.xy,
+        );
         if (terrain_vt_uniforms.config2.w != 0u) {
             if (terrain_vt_enabled()
                 && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)
@@ -345,6 +358,16 @@ fn fs_visibility_geometry(
     input: VertexOutput,
     @builtin(primitive_index) primitive_index: u32,
 ) -> FragmentOutput {
+    // Capture the rasteriser's real quad gradients before the visibility-ID
+    // ownership test discards neighbouring helper/non-owning lanes. The
+    // Grid-UV normal and mask families now consume UV derivatives, while
+    // albedo consumes world-space triplanar derivatives; evaluating either
+    // after the divergent discard makes boundary derivatives undefined and
+    // produced a one-pixel forward/visibility mismatch on Metal.
+    let resolve_ddx_uv = dpdx(input.tex_coord);
+    let resolve_ddy_uv = dpdy(input.tex_coord);
+    let resolve_ddx_world = dpdx(input.world_position);
+    let resolve_ddy_world = dpdy(input.world_position);
     let pixel = vec2<i32>(input.clip_position.xy);
     let encoded = textureLoad(terrain_visibility_ids, pixel, 0).x;
     let expected = (((input.tile_id & 0xffffu) << 16u)
@@ -352,9 +375,23 @@ fn fs_visibility_geometry(
     if (encoded != expected) {
         discard;
     }
+    terrain_explicit_ddx_uv = resolve_ddx_uv;
+    terrain_explicit_ddy_uv = resolve_ddy_uv;
+    terrain_explicit_ddx_world = resolve_ddx_world;
+    terrain_explicit_ddy_world = resolve_ddy_world;
+    terrain_explicit_gradients = 1u;
     let out = shade_main(input);
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
-    terrain_vt_write_surface_feedback(input.tex_coord, 0u);
+    terrain_vt_write_surface_feedback(
+        input.tex_coord,
+        input.world_position,
+        resolve_ddx_uv,
+        resolve_ddy_uv,
+        resolve_ddx_world,
+        resolve_ddy_world,
+        0u,
+        input.clip_position.xy,
+    );
     if (terrain_vt_uniforms.config2.w != 0u) {
         if (terrain_vt_enabled()
             && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)

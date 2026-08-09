@@ -236,9 +236,31 @@ def test_retained_request_set_accessor_is_registered():
     assert "def read_retained_vt_requests(" in stub
 
 
+def test_captured_feedback_provenance_accessor_is_registered():
+    assert hasattr(
+        f3d.TerrainRenderer, "resolve_captured_vt_feedback_provenance"
+    )
+    stub = (
+        Path(__file__).resolve().parents[1] / "python/forge3d/__init__.pyi"
+    ).read_text(encoding="utf-8")
+    assert "def resolve_captured_vt_feedback_provenance(" in stub
+
+
 def test_selected_tessella_acceptance_is_a_required_zero_skip_hardware_lane():
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    tessella_paths = workflow.split("\n            tessella:\n", 1)[1].split(
+        "\n\n  # ============================================================================",
+        1,
+    )[0]
+    for source_owner in (
+        "src/terrain/clipmap/**",
+        "src/terrain/renderer/virtual_texture.rs",
+        "src/terrain/renderer/visibility_buffer.rs",
+        "src/terrain/renderer/py_api.rs",
+        "python/forge3d/__init__.pyi",
+    ):
+        assert f"- '{source_owner}'" in tessella_paths
     job = workflow.split("\n  test-tessella-gpu:", 1)[1].split(
         "\n  # ============================================================================",
         1,

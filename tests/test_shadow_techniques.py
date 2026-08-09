@@ -641,6 +641,11 @@ def _pyramid_dem(path: Path, n: int = 512, pix: float = 20.0) -> Path:
 
 
 @pytest.mark.skipif(not _rasterio_available(), reason="rasterio not installed")
+@pytest.mark.skipif(
+    os.environ.get("RUN_M06_VIEWER_CI") != "1",
+    reason="required M-06 NVIDIA/Vulkan viewer lane only",
+)
+@pytest.mark.interactive_viewer
 @pytest.mark.viewer
 class TestEvsmExposureParity:
     """EVSM must light the scene like the other techniques, not black it out.
@@ -674,6 +679,7 @@ class TestEvsmExposureParity:
             "cmd": "set_terrain_pbr", "enabled": True, "shadow_technique": technique,
             "shadow_map_res": 2048, "exposure": 1.0, "msaa": 1,
             "ibl_intensity": 0.0, "debug_mode": debug_mode,
+            "sky": {"enabled": False},
         })
         viewer.snapshot(str(out), width=640, height=400)
         from PIL import Image
@@ -702,7 +708,11 @@ class TestEvsmExposureParity:
         means = {}
         for tech, l in lum.items():
             terrain = l < 0.97  # exclude the white background
-            assert terrain.any(), f"{tech}: no terrain pixels found"
+            terrain_pixels = int(terrain.sum())
+            assert 0 < terrain_pixels < terrain.size, (
+                f"{tech}: terrain mask must exclude the white background; "
+                f"selected {terrain_pixels}/{terrain.size} pixels"
+            )
             means[tech] = float(l[terrain].mean())
 
         # EVSM must not be globally darker than PCF by more than 20%.

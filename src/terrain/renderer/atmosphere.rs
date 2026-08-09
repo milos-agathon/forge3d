@@ -123,7 +123,7 @@ pub(super) fn create_atmosphere_init_resources(
         push_constant_ranges: &[],
     });
 
-    let sky_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+    let sky_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
         device,
         &wgpu::ComputePipelineDescriptor {
             label: Some("terrain.sky.pipeline"),
@@ -131,7 +131,8 @@ pub(super) fn create_atmosphere_init_resources(
             module: &sky_shader,
             entry_point: "cs_render_sky",
         },
-    );
+    )
+    .map_err(|message| anyhow!("terrain.sky.pipeline: {message}"))?;
 
     let aether_sky_bind_group_layout2 =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

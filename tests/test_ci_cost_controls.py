@@ -85,6 +85,9 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert "name: Snapshot live policy base" in preflight
         assert "id: policy-base" in preflight
         assert 'echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"' in preflight
+        assert "name: Resolve protected policy base for manual acceptance" in preflight
+        assert "POLICY_BRANCH: ${{ github.event.repository.default_branch }}" in preflight
+        assert 'refs/remotes/origin/${POLICY_BRANCH}' in preflight
         assert "ref: ${{ steps.policy-base.outputs.sha }}" in preflight
         assert "path: .ci-contracts" in preflight
         assert "POLICY_BASE_SHA: ${{ steps.policy-base.outputs.sha }}" in preflight
@@ -96,6 +99,10 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         )
         assert 'git merge --no-commit --no-ff "$PR_HEAD_SHA"' in preflight
         assert 'test "$(git rev-parse MERGE_HEAD)" = "$PR_HEAD_SHA"' in preflight
+        assert "name: Materialize manual-dispatch candidate tree" in preflight
+        assert "CANDIDATE_HEAD_SHA: ${{ github.sha }}" in preflight
+        assert 'git merge --no-commit --no-ff "$CANDIDATE_HEAD_SHA"' in preflight
+        assert 'test "$(git rev-parse MERGE_HEAD)" = "$CANDIDATE_HEAD_SHA"' in preflight
         assert "working-directory: .ci-contracts" in preflight
         assert "FORGE3D_CI_CONTRACT_ROOT: ${{ github.workspace }}" in preflight
         assert "PYTHONPATH: ${{ github.workspace }}/.ci-contracts" in preflight
@@ -162,6 +169,9 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         assert "retention-days: 7" in _artifact_step(_job(workflow, job), artifact)
 
     physical_artifacts = [
+        ("test-substratia-gpu", "substratia-metal-diagnostic-evidence"),
+        ("test-golden-images-nvidia", "visual-gpu-evidence"),
+        ("test-substratia-gpu-nvidia", "substratia-nvidia-physical-gpu-evidence"),
         ("test-m06-full-geospatial-viewer", "m06-full-geospatial-viewer-evidence"),
         ("test-f3dz-gpu", "f3dz-physical-gpu-evidence"),
         ("test-anamnesis-portability-seed", "anamnesis-physical-portable-store"),
@@ -174,6 +184,24 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         )
     for job, artifact in physical_artifacts:
         assert "retention-days: 90" in _artifact_step(_job(workflow, job), artifact)
+
+    substratia = _job(workflow, "test-substratia-gpu")
+    assert "runs-on: macos-14" in substratia
+    assert "inputs.scope == 'full'" in substratia
+    assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in substratia
+    assert "substratia_evidence_report.py" in substratia
+
+    visual_nvidia = _job(workflow, "test-golden-images-nvidia")
+    substratia_nvidia = _job(workflow, "test-substratia-gpu-nvidia")
+    for job in (visual_nvidia, substratia_nvidia):
+        assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
+        assert "inputs.scope == 'full'" in job
+        assert "WGPU_BACKEND: vulkan" in job
+        assert "--require-nvidia-vulkan" in job
+        assert "FORGE3D_ALLOW_SOFTWARE_GOLDENS" not in job
+    assert "name: wheels-windows" in visual_nvidia
+    assert "name: wheels-windows" in substratia_nvidia
+    assert "substratia_evidence_report.py" in substratia_nvidia
 
     assert "sphinx" not in workflow.lower()
     assert "name: documentation" not in workflow
@@ -223,7 +251,7 @@ def test_only_the_small_core_jobs_can_run_on_pr_or_push_events() -> None:
         ), f"{name} is not routed through schedule or explicit dispatch"
 
 
-def test_aether_closure_lane_requires_live_physical_metal_and_zero_skips() -> None:
+def test_aether_closure_lane_is_explicit_and_optional_on_metal() -> None:
     workflow = _workflow("ci.yml")
     golden = _job(workflow, "test-golden-images")
     probe = (ROOT / "scripts" / "terrain_ci_probe.py").read_text(encoding="utf-8")
@@ -250,10 +278,15 @@ def test_aether_closure_lane_requires_live_physical_metal_and_zero_skips() -> No
     assert "FORGE3D_TEST_INSTALLED_WHEEL: '1'" in golden
     assert "aether_lane=absent" in golden
     assert "software execution does not prove physical Metal" in golden
+    # Candidate acceptance must never receive production certificate material.
+    assert "FORGE3D_CERT_SIGNING_KEY" not in golden
+    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" not in golden
 
     summary = _job(workflow, "full-acceptance-summary")
-    assert "needs.test-golden-images.outputs.aether_lane" in summary
-    assert 'if [ "$aether_lane" != "ran" ]' in summary
+    # The protected NVIDIA lane is the required full-acceptance proof. Metal is
+    # an explicitly opt-in diagnostic and therefore must not gate the summary.
+    assert "needs.test-golden-images.outputs.aether_lane" not in summary
+    assert "test-golden-images," not in summary.split("\n    runs-on:", 1)[0]
 
 
 def test_aether_offline_bake_feature_is_explicit_in_acceptance_and_wheel() -> None:
@@ -474,6 +507,11 @@ def test_tessella_acceptance_is_absent_or_exactly_scoped() -> None:
     lane_text = _job(workflow, "test-tessella-gpu")
     assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in lane_text
     assert "--require-nvidia-vulkan" in lane_text
+    assert "rustup default stable" in lane_text
+    assert "rust-toolchain.txt" in lane_text
+    assert lane_text.index("rustup default stable") < lane_text.index(
+        "cargo test --release --lib"
+    )
     assert (
         "terrain::clipmap::gpu_lod::tests::"
         "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras" in lane_text

@@ -512,6 +512,7 @@ impl TerrainScene {
             render_targets.internal_width,
             render_targets.internal_height,
             1,
+            super::aov::AOV_ALL_BITS,
             false,
         )?;
         let beauty_accumulation = crate::terrain::AccumulationBuffer::new(
@@ -565,6 +566,7 @@ impl TerrainScene {
             &self.material_layer_bind_group_layout,
             OFFLINE_HDR_FORMAT,
             1,
+            super::aov::AOV_ALL_BITS,
             // VERITAS source-id capture is one-shot only; accumulation would
             // average ids, which is meaningless.
             false,
@@ -861,7 +863,7 @@ impl TerrainScene {
             if state.total_samples == 0 {
                 self.dispatch_offline_depth_extract_pass(
                     &mut encoder,
-                    &aov_targets.depth.internal_view,
+                    &aov_targets.required_depth()?.internal_view,
                     &state.depth_reference_view,
                     state.internal_width,
                     state.internal_height,
@@ -877,13 +879,13 @@ impl TerrainScene {
         )?;
         self.dispatch_offline_accumulation_pass(
             &mut encoder,
-            &state.aov_targets.albedo.internal_view,
+            &state.aov_targets.required_albedo()?.internal_view,
             &mut state.albedo_accumulation,
             state.total_samples,
         )?;
         self.dispatch_offline_accumulation_pass(
             &mut encoder,
-            &state.aov_targets.normal.internal_view,
+            &state.aov_targets.required_normal()?.internal_view,
             &mut state.normal_accumulation,
             state.total_samples,
         )?;
@@ -1063,33 +1065,24 @@ impl TerrainScene {
             .bind_group()
             .expect("LightBuffer should always provide a bind group");
 
-        let albedo_view = aov_targets
-            .albedo
-            .msaa_view
-            .as_ref()
-            .unwrap_or(&aov_targets.albedo.internal_view);
-        let albedo_resolve = if aov_targets.albedo.msaa_view.is_some() {
-            Some(&aov_targets.albedo.internal_view)
+        let albedo = aov_targets.required_albedo()?;
+        let normal = aov_targets.required_normal()?;
+        let depth = aov_targets.required_depth()?;
+        let albedo_view = albedo.msaa_view.as_ref().unwrap_or(&albedo.internal_view);
+        let albedo_resolve = if albedo.msaa_view.is_some() {
+            Some(&albedo.internal_view)
         } else {
             None
         };
-        let normal_view = aov_targets
-            .normal
-            .msaa_view
-            .as_ref()
-            .unwrap_or(&aov_targets.normal.internal_view);
-        let normal_resolve = if aov_targets.normal.msaa_view.is_some() {
-            Some(&aov_targets.normal.internal_view)
+        let normal_view = normal.msaa_view.as_ref().unwrap_or(&normal.internal_view);
+        let normal_resolve = if normal.msaa_view.is_some() {
+            Some(&normal.internal_view)
         } else {
             None
         };
-        let depth_view = aov_targets
-            .depth
-            .msaa_view
-            .as_ref()
-            .unwrap_or(&aov_targets.depth.internal_view);
-        let depth_resolve = if aov_targets.depth.msaa_view.is_some() {
-            Some(&aov_targets.depth.internal_view)
+        let depth_view = depth.msaa_view.as_ref().unwrap_or(&depth.internal_view);
+        let depth_resolve = if depth.msaa_view.is_some() {
+            Some(&depth.internal_view)
         } else {
             None
         };
@@ -1571,6 +1564,17 @@ impl TerrainRenderer {
                 "An offline accumulation session is already active.",
             ));
         }
+
+        // Keep missing or malformed VT family requests fail-before-mutation:
+        // build_offline_state allocates the complete offline graph and the
+        // returned state is installed as an active session below.
+        self.scene
+            .validate_material_vt_request(params, material_set.materials().len() as u32)
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!(
+                    "Failed to begin offline accumulation during material VT preflight: {error:#}"
+                ))
+            })?;
 
         let jitter_sequence_samples =
             resolve_offline_jitter_sequence_samples(params.aa_samples, jitter_sequence_samples)

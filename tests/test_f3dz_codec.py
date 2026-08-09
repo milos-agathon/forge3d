@@ -298,6 +298,11 @@ def test_physical_gpu_ci_contract_is_zero_skip_and_records_benchmark() -> None:
     assert "python -m pytest tests/test_f3dz_codec.py" in job
     assert "scripts/assert_junit_zero_skips.py" in job
     assert "cargo bench --bench f3dz_bench" in job
+    assert "rustup default stable" in job
+    assert "rust-toolchain.txt" in job
+    assert job.index("rustup default stable") < job.index(
+        "cargo bench --bench f3dz_bench"
+    )
     benchmark = job.split(
         "      - name: Record separate source benchmark (nightly/full only)", 1
     )[1].split("\n      - name: Upload F3DZ physical-GPU evidence", 1)[0]

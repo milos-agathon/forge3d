@@ -8,7 +8,7 @@ const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xf664_b696_d596_de84;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0xe432_9f04_12a5_3f13;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xc270_cbb7_d41f_b68c;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xf968_57bd_7131_08df;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {
@@ -1187,6 +1187,11 @@ impl Evaluator<'_> {
                 Some(Relation::ImageUpperIndexAxis(image, bound_axis)) if bound_axis == axis => {
                     Some(image)
                 }
+                Some(Relation::InImageAxes(image, component_mask))
+                    if component_mask & (1u8.checked_shl(axis as u32).unwrap_or(0)) != 0 =>
+                {
+                    Some(image)
+                }
                 Some(Relation::LessThan(bound)) => {
                     self.image_with_symbolic_axis_bound(function_ref, &bound, axis)
                 }
@@ -1621,6 +1626,7 @@ impl Evaluator<'_> {
                 | "sample_shadow_evsm_terrain"
                 | "sample_shadow_pcf_terrain"
                 | "debug_shadow_with_vis"
+                | "normalize_aov_depth"
                 | "saturate" => (0.0, 1.0),
                 "calculate_pbr_brdf_split_roughness"
                 | "eval_brdf"

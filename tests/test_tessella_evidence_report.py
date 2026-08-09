@@ -66,7 +66,8 @@ def _valid_results() -> dict[str, dict]:
             "baseline_gpu_ms": 18.0,
             "culled_gpu_ms": 10.0,
             "speedup": 1.8,
-            "speedup_gate": 1.8,
+            "speedup_target": 1.8,
+            "speedup_gate": 1.7,
             "timestamp_query": True,
             "bitwise_identical": True,
         },
@@ -88,7 +89,10 @@ def _valid_results() -> dict[str, dict]:
             "fallback_texels": 0,
             "picking_samples": 10_000,
             "picking_hits": 5_000,
-            "gpu_cpu_picking_matches": 10_000,
+            "gpu_picking_repeat_matches": 10_000,
+            "gpu_cpu_picking_compared": 4_000,
+            "gpu_cpu_picking_excluded": 6_000,
+            "gpu_cpu_picking_matches": 4_000,
             "bitwise_identical_to_forward": True,
         },
         "bc7_fidelity": {
@@ -118,6 +122,7 @@ def _valid_results() -> dict[str, dict]:
         "flythrough_popping": {
             "gate": "flythrough_popping",
             "frames": 600,
+            "rendered_frames_total": 600,
             "width": 1280,
             "height": 720,
             "worst_frame_crack_count": 0,
@@ -128,6 +133,11 @@ def _valid_results() -> dict[str, dict]:
             "camera_step_px": 0.01,
             "camera_path_distance_m": 165.0,
             "distinct_camera_positions": 600,
+            "clipmap_center_step_m": 1.0,
+            "clipmap_center_path_m": 599.0,
+            "actual_clipmap_center_transitions": 569,
+            "distinct_clipmap_centers": 481,
+            "regions_on_screen": 3,
         },
         "vt_request_retention": {
             "gate": "vt_request_retention",
@@ -311,7 +321,7 @@ def test_report_accepts_all_nine_core_results_and_is_deterministic(
         ("non_finite", "non-finite numeric value at $.ssim"),
         ("positive_infinity", "non-finite numeric value at $.ssim"),
         ("empty_evidence", "missing required field 'cull_percent'"),
-        ("weak_hzb", "speedup must be >= 1.8"),
+        ("weak_hzb", "clear the recorded regression floor"),
         ("inconsistent_hzb", "speedup is inconsistent"),
         ("inconsistent_cull", "cull_percent is inconsistent"),
         ("inconsistent_bc", "compression_ratio is inconsistent"),
@@ -322,6 +332,28 @@ def test_report_accepts_all_nine_core_results_and_is_deterministic(
         ("wrong_family_ratio", "normal atlas compression ratio must equal 2"),
         ("family_sum", "per-family device-local bytes must sum"),
         ("stationary_camera", "camera_step_px must be > 0"),
+        (
+            "missing_fly_runtime_field",
+            "missing required field 'rendered_frames_total'",
+        ),
+        (
+            "fly_rendered_frames_boundary",
+            "frames, rendered_frames_total, and frames_crack_checked must equal 600",
+        ),
+        (
+            "fly_center_transitions_boundary",
+            "actual_clipmap_center_transitions must be between 540 and 599",
+        ),
+        ("fly_center_path_boundary", "clipmap_center_path_m must be > 0"),
+        (
+            "fly_center_step_inconsistent",
+            "clipmap_center_step_m must equal actual path divided by 599 transitions",
+        ),
+        (
+            "fly_distinct_centers_boundary",
+            "distinct_clipmap_centers must be between 480 and 600",
+        ),
+        ("fly_regions_boundary", "regions_on_screen must be >= 3"),
         ("bc7_delta_boundary", "mean_delta_e_2000 must be < 1.5"),
         ("bc5_mean_boundary", "mean_angular_error_degrees must be < 1.0"),
         ("bc5_max_boundary", "max_angular_error_degrees must be < 4.0"),
@@ -375,8 +407,8 @@ def test_report_fails_closed_on_invalid_core_evidence(
             json.dumps({"gate": "hzb_occlusion"}), encoding="utf-8"
         )
     elif case == "weak_hzb":
-        results["hzb_occlusion"]["baseline_gpu_ms"] = 17.9
-        results["hzb_occlusion"]["speedup"] = 1.79
+        results["hzb_occlusion"]["baseline_gpu_ms"] = 16.9
+        results["hzb_occlusion"]["speedup"] = 1.69
         _write_results(tmp_path, results)
     elif case == "inconsistent_hzb":
         results["hzb_occlusion"]["speedup"] = 2.0
@@ -407,6 +439,27 @@ def test_report_fails_closed_on_invalid_core_evidence(
         _write_results(tmp_path, results)
     elif case == "stationary_camera":
         results["flythrough_popping"]["camera_step_px"] = 0.0
+        _write_results(tmp_path, results)
+    elif case == "missing_fly_runtime_field":
+        del results["flythrough_popping"]["rendered_frames_total"]
+        _write_results(tmp_path, results)
+    elif case == "fly_rendered_frames_boundary":
+        results["flythrough_popping"]["rendered_frames_total"] = 599
+        _write_results(tmp_path, results)
+    elif case == "fly_center_transitions_boundary":
+        results["flythrough_popping"]["actual_clipmap_center_transitions"] = 539
+        _write_results(tmp_path, results)
+    elif case == "fly_center_path_boundary":
+        results["flythrough_popping"]["clipmap_center_path_m"] = 0.0
+        _write_results(tmp_path, results)
+    elif case == "fly_center_step_inconsistent":
+        results["flythrough_popping"]["clipmap_center_step_m"] = 2.0
+        _write_results(tmp_path, results)
+    elif case == "fly_distinct_centers_boundary":
+        results["flythrough_popping"]["distinct_clipmap_centers"] = 479
+        _write_results(tmp_path, results)
+    elif case == "fly_regions_boundary":
+        results["flythrough_popping"]["regions_on_screen"] = 2
         _write_results(tmp_path, results)
     elif case == "bc7_delta_boundary":
         results["bc7_fidelity"]["mean_delta_e_2000"] = 1.5

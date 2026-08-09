@@ -24,7 +24,11 @@ SOFTWARE_ADAPTER_TOKENS = (
     "basic render driver",
     "lavapipe",
     "llvmpipe",
+    "paravirtual",
+    "software",
     "swiftshader",
+    "virtual",
+    "virtio",
     "warp",
 )
 HARDWARE_DEVICE_TYPES = {"discretegpu", "integratedgpu", "virtualgpu"}
@@ -83,13 +87,20 @@ def _adapter_is_ci_safe(
     name = str(probe.get("name", "")).lower()
     if any(token in name for token in SOFTWARE_ADAPTER_TOKENS):
         return False
-    if required_backend is not None and str(probe.get("backend", "")).lower() != required_backend.lower():
+    if (
+        required_backend is not None
+        and str(probe.get("backend", "")).lower() != required_backend.lower()
+    ):
         return False
     if require_nvidia:
         vendor = int(probe.get("vendor", 0))
+        if probe.get("software_fallback") is not False:
+            return False
         if device_type != "discretegpu":
             return False
-        if vendor != 0x10DE and "nvidia" not in name:
+        if vendor != 0x10DE:
+            return False
+        if "nvidia" not in name:
             return False
     return True
 
