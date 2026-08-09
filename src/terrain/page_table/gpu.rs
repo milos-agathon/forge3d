@@ -8,11 +8,11 @@ use crate::terrain::tiling::TileId;
 
 pub const EMPTY_PAGE_KEY: u32 = u32::MAX;
 
-/// The first 32 bytes of the GPU page-table buffer. The buckets immediately
+/// The first 64 bytes of the GPU page-table buffer. The buckets immediately
 /// follow this header, which lets one storage binding carry the entire lookup
 /// contract used by every terrain render path.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct PageTableHeader {
     pub enabled: u32,
     pub root_ready: u32,
@@ -22,6 +22,70 @@ pub struct PageTableHeader {
     pub tile_resolution: u32,
     pub atlas_width: u32,
     pub atlas_height: u32,
+    pub overview_u_min: f32,
+    pub overview_v_min: f32,
+    pub overview_u_max: f32,
+    pub overview_v_max: f32,
+    pub overview_valid: u32,
+    pub _overview_pad: [u32; 3],
+}
+
+/// Maps global equirectangular UVs into the local overview texture supplied to
+/// the terrain renderer. A disabled transform is the exact flat-path identity.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct OverviewUvTransform {
+    bounds: [f32; 4],
+    valid: bool,
+}
+
+impl OverviewUvTransform {
+    pub fn identity() -> Self {
+        Self::default()
+    }
+
+    pub fn from_lonlat_bounds(bounds: (f64, f64, f64, f64)) -> Result<Self, String> {
+        let (west, south, east, north) = bounds;
+        if ![west, south, east, north]
+            .iter()
+            .all(|value| value.is_finite())
+            || west >= east
+            || south >= north
+            || west < -180.0
+            || east > 180.0
+            || south < -90.0
+            || north > 90.0
+        {
+            return Err(format!("invalid overview lon/lat bounds {bounds:?}"));
+        }
+        let uv = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+            (west + 180.0) / 360.0,
+            (90.0 - north) / 180.0,
+            0.0,
+        ));
+        let uv_max = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+            (east + 180.0) / 360.0,
+            (90.0 - south) / 180.0,
+            0.0,
+        ));
+        Ok(Self {
+            bounds: [uv.x, uv.y, uv_max.x, uv_max.y],
+            valid: true,
+        })
+    }
+
+    pub fn map_global_uv(self, uv: [f32; 2]) -> Option<[f32; 2]> {
+        if !self.valid {
+            return Some(uv);
+        }
+        let [u_min, v_min, u_max, v_max] = self.bounds;
+        if uv[0] < u_min || uv[0] > u_max || uv[1] < v_min || uv[1] > v_max {
+            return None;
+        }
+        Some([
+            (uv[0] - u_min) / (u_max - u_min),
+            (uv[1] - v_min) / (v_max - v_min),
+        ])
+    }
 }
 
 #[repr(C)]
@@ -88,6 +152,27 @@ impl SerializedPageTable {
         atlas_dimensions: (u32, u32),
         tiles_x: u32,
     ) -> Result<Self, String> {
+        Self::from_entries_with_overview(
+            entries,
+            capacity,
+            target_lod,
+            tile_resolution,
+            atlas_dimensions,
+            tiles_x,
+            OverviewUvTransform::identity(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_entries_with_overview(
+        entries: &[(TileId, (u32, u32))],
+        capacity: usize,
+        target_lod: u32,
+        tile_resolution: u32,
+        atlas_dimensions: (u32, u32),
+        tiles_x: u32,
+        overview: OverviewUvTransform,
+    ) -> Result<Self, String> {
         if entries.len() > capacity {
             return Err(format!(
                 "{} resident height pages exceed page-table capacity {}",
@@ -127,6 +212,12 @@ impl SerializedPageTable {
                 tile_resolution,
                 atlas_width: atlas_dimensions.0,
                 atlas_height: atlas_dimensions.1,
+                overview_u_min: overview.bounds[0],
+                overview_v_min: overview.bounds[1],
+                overview_u_max: overview.bounds[2],
+                overview_v_max: overview.bounds[3],
+                overview_valid: u32::from(overview.valid),
+                _overview_pad: [0; 3],
             },
             buckets,
         })
@@ -181,6 +272,7 @@ pub struct PageTable {
     target_lod: u32,
     tile_resolution: u32,
     atlas_dimensions: (u32, u32),
+    overview: OverviewUvTransform,
 }
 
 impl PageTable {
@@ -201,6 +293,24 @@ impl PageTable {
         tile_resolution: u32,
         atlas_dimensions: (u32, u32),
     ) -> RenderResult<Self> {
+        Self::new_sparse_with_overview(
+            device,
+            capacity,
+            target_lod,
+            tile_resolution,
+            atlas_dimensions,
+            OverviewUvTransform::identity(),
+        )
+    }
+
+    pub fn new_sparse_with_overview(
+        device: &wgpu::Device,
+        capacity: usize,
+        target_lod: u32,
+        tile_resolution: u32,
+        atlas_dimensions: (u32, u32),
+        overview: OverviewUvTransform,
+    ) -> RenderResult<Self> {
         let capacity = capacity.max(1);
         let bucket_count = capacity_for_entries(capacity);
         let size = Self::allocation_bytes_for_capacity(capacity);
@@ -210,17 +320,34 @@ impl PageTable {
                 label: Some("orbis.height.page-table"),
                 size,
                 usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
+                mapped_at_creation: true,
             },
         )?;
-        Ok(Self {
+        let table = Self {
             buffer,
             capacity,
             bucket_count,
             target_lod,
             tile_resolution,
             atlas_dimensions,
-        })
+            overview,
+        };
+        let initial = SerializedPageTable::from_entries_with_overview(
+            &[],
+            capacity,
+            target_lod,
+            tile_resolution,
+            atlas_dimensions,
+            1,
+            overview,
+        )
+        .map_err(crate::core::error::RenderError::Device)?;
+        {
+            let mut mapped = table.buffer.slice(..).get_mapped_range_mut();
+            mapped.copy_from_slice(&initial.bytes());
+        }
+        table.buffer.unmap();
+        Ok(table)
     }
 
     pub fn gpu_visible_bytes(&self) -> u64 {
@@ -243,13 +370,14 @@ impl PageTable {
 
     pub fn serialize(&self, mosaic: &HeightMosaic) -> Result<SerializedPageTable, String> {
         let entries = mosaic.entries();
-        SerializedPageTable::from_entries(
+        SerializedPageTable::from_entries_with_overview(
             &entries,
             self.capacity,
             self.target_lod,
             self.tile_resolution,
             self.atlas_dimensions,
             mosaic.config.tiles_x,
+            self.overview,
         )
     }
 
@@ -326,6 +454,12 @@ mod tests {
                 tile_resolution: 16,
                 atlas_width: 64,
                 atlas_height: 64,
+                overview_u_min: 0.0,
+                overview_v_min: 0.0,
+                overview_u_max: 0.0,
+                overview_v_max: 0.0,
+                overview_valid: 0,
+                _overview_pad: [0; 3],
             },
             buckets,
         }
@@ -390,4 +524,43 @@ mod tests {
             assert!(entries * 2 <= capacity);
         }
     }
+
+    #[test]
+    fn overview_header_maps_global_equirect_uv_and_serializes_without_pages() {
+        let overview = OverviewUvTransform::from_lonlat_bounds((-122.0, 46.0, -121.0, 47.0))
+            .expect("finite non-empty geographic bounds");
+        let table =
+            SerializedPageTable::from_entries_with_overview(&[], 4, 6, 64, (128, 128), 2, overview)
+                .unwrap();
+        assert_eq!(std::mem::size_of::<PageTableHeader>(), 64);
+        assert_eq!(std::mem::offset_of!(PageTableHeader, overview_u_min), 32);
+        assert_eq!(std::mem::offset_of!(PageTableHeader, overview_valid), 48);
+        assert_eq!(table.header.enabled, 0);
+        assert_eq!(table.header.overview_valid, 1);
+        let center = overview.map_global_uv([58.5 / 360.0, 43.5 / 180.0]);
+        let center = center.unwrap();
+        assert!((center[0] - 0.5).abs() < 1.0e-5);
+        assert!((center[1] - 0.5).abs() < 1.0e-5);
+        assert_eq!(overview.map_global_uv([0.0, 0.0]), None);
+        let bytes = table.bytes();
+        assert_eq!(&bytes[..64], bytemuck::bytes_of(&table.header));
+        let populated = SerializedPageTable::from_entries_with_overview(
+            &[(TileId::new(0, 0, 0), (0, 0))],
+            4,
+            6,
+            64,
+            (128, 128),
+            2,
+            overview,
+        )
+        .unwrap();
+        assert_eq!(
+            &bytemuck::bytes_of(&populated.header)[32..52],
+            &bytemuck::bytes_of(&table.header)[32..52]
+        );
+    }
 }
+
+#[cfg(test)]
+#[path = "gpu/gpu_probe_tests.rs"]
+mod gpu_probe_tests;

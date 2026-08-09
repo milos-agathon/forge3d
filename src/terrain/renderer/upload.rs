@@ -335,7 +335,7 @@ impl TerrainScene {
         uniforms
     }
 
-    pub(super) fn build_camera_matrices(
+    pub(crate) fn build_camera_matrices(
         params: &render_params::TerrainRenderParams,
     ) -> (glam::Vec3, glam::Mat4, glam::Mat4) {
         let phi_rad = params.cam_phi_deg.to_radians();

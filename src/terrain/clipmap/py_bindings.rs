@@ -214,5 +214,7 @@ pub fn register_clipmap_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyClipmapMesh>()?;
     m.add_function(wrap_pyfunction!(clipmap_generate_py, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_triangle_reduction_py, m)?)?;
+    #[cfg(feature = "enable-globe")]
+    super::globe_scene::register_globe_scene_bindings(m)?;
     Ok(())
 }

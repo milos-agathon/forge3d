@@ -1157,6 +1157,7 @@ impl TerrainRenderer {
             coarse_prefill,
             max_resident_bytes,
             false,
+            crate::terrain::page_table::OverviewUvTransform::identity(),
         )
         .map_err(|e| PyRuntimeError::new_err(format!("enable_height_streaming failed: {:#}", e)))?;
         self.scene.height_streaming = Some(state);
@@ -1170,7 +1171,7 @@ impl TerrainRenderer {
     /// therefore share the page contract instead of maintaining a third
     /// render-time streamer.
     #[cfg(feature = "cog_streaming")]
-    #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None))]
+    #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None, overview_lonlat_bounds=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn enable_height_streaming_cog(
         &mut self,
@@ -1184,6 +1185,7 @@ impl TerrainRenderer {
         pool_size: usize,
         coarse_prefill: bool,
         max_resident_bytes: Option<u64>,
+        overview_lonlat_bounds: Option<(f64, f64, f64, f64)>,
     ) -> PyResult<()> {
         if !(terrain_extent_m.is_finite() && terrain_extent_m > 0.0) {
             return Err(PyRuntimeError::new_err(
@@ -1193,6 +1195,11 @@ impl TerrainRenderer {
         let tile_resolution = tile_resolution.clamp(8, 1024);
         let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> =
             dataset.reader();
+        let overview = overview_lonlat_bounds
+            .map(crate::terrain::page_table::OverviewUvTransform::from_lonlat_bounds)
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?
+            .unwrap_or_else(crate::terrain::page_table::OverviewUvTransform::identity);
         let state = super::streaming::HeightVtFamilyRuntime::new(
             self.scene.device.clone(),
             self.scene.queue.clone(),
@@ -1208,6 +1215,7 @@ impl TerrainRenderer {
             coarse_prefill,
             max_resident_bytes,
             true,
+            overview,
         )
         .map_err(|error| {
             PyRuntimeError::new_err(format!("enable_height_streaming_cog failed: {error:#}"))

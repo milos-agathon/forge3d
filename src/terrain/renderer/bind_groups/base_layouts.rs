@@ -184,7 +184,7 @@ pub(in crate::terrain::renderer) fn create_base_bind_group_layouts(
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
-                    min_binding_size: std::num::NonZeroU64::new(64),
+                    min_binding_size: std::num::NonZeroU64::new(96),
                 },
                 count: None,
             },

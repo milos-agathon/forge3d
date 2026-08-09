@@ -22,7 +22,7 @@ use crate::core::resource_tracker::{
 use crate::terrain::clipmap::{ClipmapConfig, ClipmapStreamer};
 use crate::terrain::lod::LodConfig;
 use crate::terrain::page_table::{
-    AsyncTileLoader, CoalescePolicy, HeightReader, PageTable, TileLoadTerminal,
+    AsyncTileLoader, CoalescePolicy, HeightReader, OverviewUvTransform, PageTable, TileLoadTerminal,
     MAX_LOADER_WORKERS,
 };
 use crate::terrain::stream::{HeightMosaic, MosaicConfig, PreparedHeightUpload};
@@ -467,6 +467,7 @@ impl HeightVtFamilyRuntime {
         coarse_prefill: bool,
         max_resident_bytes: Option<u64>,
         globe_mode: bool,
+        overview: OverviewUvTransform,
     ) -> Result<Self> {
         let tiles_axis = 1u32 << lod;
         let virtual_tiles = u64::from(tiles_axis) * u64::from(tiles_axis);
@@ -488,7 +489,20 @@ impl HeightVtFamilyRuntime {
         // The pinned root is fallback coverage, not one of the target-LOD
         // leaves. Budget a distinct slot so a comfortably sized cache can
         // converge all leaves without ever evicting that root.
-        let mut slots = virtual_tiles.saturating_add(1).max(1) as u32;
+        // Start at a budget-derived upper bound. At planetary LODs the virtual
+        // address space contains millions of leaves, while the sparse physical
+        // atlas intentionally contains only a bounded working set. Counting
+        // down from every virtual leaf would make scene construction scale with
+        // the planet rather than the residency budget.
+        let max_slots_from_texels = gpu_visible_budget_bytes
+            .saturating_sub(existing_group_bytes)
+            .checked_div(tile_bytes.max(1))
+            .unwrap_or(0)
+            .max(1);
+        let mut slots = virtual_tiles
+            .saturating_add(1)
+            .min(max_slots_from_texels)
+            .min(u64::from(u32::MAX)) as u32;
         let (mosaic_tiles_x, mosaic_tiles_y, upload_buffer_size, prebudget_total) = loop {
             let tiles_x = (slots as f64).sqrt().ceil().max(1.0) as u32;
             let tiles_y = slots.div_ceil(tiles_x);
@@ -537,12 +551,13 @@ impl HeightVtFamilyRuntime {
                 },
                 false,
             )?;
-            let page_table = PageTable::new_sparse(
+            let page_table = PageTable::new_sparse_with_overview(
                 &device,
                 slots as usize,
                 lod,
                 tile_resolution,
                 mosaic.config.texture_size(),
+                overview,
             )?;
             (mosaic, page_table)
         };
@@ -1057,12 +1072,12 @@ impl TerrainScene {
     }
 
     /// Sparse dynamic-height indirection shared by beauty, AOV and offline
-    /// terrain passes. Until the asynchronous root is resident, the disabled
-    /// fallback preserves the caller's ordinary overview rendering exactly.
+    /// terrain passes. The runtime header is bound from frame zero so its
+    /// regional overview transform remains authoritative before any page is
+    /// resident; `enabled=0` still prevents atlas reads.
     pub(in crate::terrain::renderer) fn main_pass_height_page_table(&self) -> &wgpu::Buffer {
         self.height_streaming
             .as_ref()
-            .filter(|runtime| runtime.mosaic.resident_tile_count() > 0)
             .map(|runtime| runtime.page_table.buffer.inner())
             .unwrap_or(self.height_page_table_fallback_buffer.inner())
     }

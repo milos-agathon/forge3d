@@ -17,6 +17,8 @@
 pub mod geomorph;
 #[cfg(feature = "enable-globe")]
 pub mod globe;
+#[cfg(all(feature = "enable-globe", feature = "extension-module"))]
+pub mod globe_scene;
 pub mod gpu_lod;
 pub mod level;
 #[cfg(feature = "extension-module")]

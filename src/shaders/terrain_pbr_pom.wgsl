@@ -217,6 +217,14 @@ struct HeightPageTableHeader {
     tile_resolution: u32,
     atlas_width: u32,
     atlas_height: u32,
+    overview_u_min: f32,
+    overview_v_min: f32,
+    overview_u_max: f32,
+    overview_v_max: f32,
+    overview_valid: u32,
+    _overview_pad0: u32,
+    _overview_pad1: u32,
+    _overview_pad2: u32,
 };
 
 struct HeightPageTableEntry {
@@ -338,7 +346,43 @@ fn logical_height_dimensions() -> vec2<f32> {
         let logical = max(axis * height_pages.header.tile_resolution, 1u);
         return vec2<f32>(f32(logical));
     }
-    return vec2<f32>(textureDimensions(height_tex, 0));
+    let overview_dimensions = vec2<f32>(textureDimensions(height_tex, 0));
+    if (height_pages.header.overview_valid != 0u) {
+        let global_span = max(
+            vec2<f32>(
+                height_pages.header.overview_u_max - height_pages.header.overview_u_min,
+                height_pages.header.overview_v_max - height_pages.header.overview_v_min,
+            ),
+            vec2<f32>(0.0000001),
+        );
+        return vec2<f32>(
+            det_div(overview_dimensions.x, global_span.x),
+            det_div(overview_dimensions.y, global_span.y),
+        );
+    }
+    return overview_dimensions;
+}
+
+// Returns local overview UV and 1 when the global equirectangular coordinate
+// is covered. Flat/disabled headers preserve the input UV exactly.
+fn height_overview_uv(global_uv: vec2<f32>) -> vec3<f32> {
+    if (height_pages.header.overview_valid == 0u) {
+        return vec3<f32>(global_uv, 1.0);
+    }
+    let overview_min = vec2<f32>(
+        height_pages.header.overview_u_min,
+        height_pages.header.overview_v_min,
+    );
+    let overview_max = vec2<f32>(
+        height_pages.header.overview_u_max,
+        height_pages.header.overview_v_max,
+    );
+    if (any(global_uv < overview_min) || any(global_uv > overview_max)) {
+        return vec3<f32>(0.0, 0.0, 0.0);
+    }
+    let offset = global_uv - overview_min;
+    let span = overview_max - overview_min;
+    return vec3<f32>(det_div(offset.x, span.x), det_div(offset.y, span.y), 1.0);
 }
 
 // R32Float height textures are intentionally bound as unfilterable on the
@@ -352,8 +396,9 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
     var min_y = 0;
     var max_x = max(i32(dimensions.x) - 1, 0);
     var max_y = max(i32(dimensions.y) - 1, 0);
-    var texel_x = clamp(uv.x, 0.0, 1.0) * f32(max_x);
-    var texel_y = clamp(uv.y, 0.0, 1.0) * f32(max_y);
+    let overview_mapping = height_overview_uv(uv);
+    var texel_x = clamp(overview_mapping.x, 0.0, 1.0) * f32(max_x);
+    var texel_y = clamp(overview_mapping.y, 0.0, 1.0) * f32(max_y);
     let x0 = i32(floor(texel_x));
     let y0 = i32(floor(texel_y));
     let x1 = clamp(x0 + 1, min_x, max_x);
@@ -367,7 +412,7 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
     let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), level).r;
     let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), level).r;
     let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), level).r;
-    let overview_height = det_mix(
+    let overview_height = overview_mapping.z * det_mix(
         det_mix(h00, h10, blend.x),
         det_mix(h01, h11, blend.x),
         blend.y,

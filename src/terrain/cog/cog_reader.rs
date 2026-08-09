@@ -450,6 +450,18 @@ impl CogHeightReader {
         self.runtime.block_on(self.read_height_tile_async(request))
     }
 
+    /// Synchronous construction-time read retaining the authoritative coverage
+    /// plane. Runtime frame streaming uses the bounded asynchronous loader;
+    /// this entry point is for validating and seeding a scene before it exists.
+    #[cfg(all(feature = "enable-globe", feature = "extension-module"))]
+    pub(crate) fn read_height_tile_covered(
+        &self,
+        request: HeightTileRequest,
+    ) -> Result<HeightRead, CogError> {
+        self.runtime
+            .block_on(self.read_height_tile_covered_async(request))
+    }
+
     pub async fn read_height_tile_async(
         &self,
         request: HeightTileRequest,
@@ -825,7 +837,11 @@ fn decompress_lzw(data: &[u8]) -> Result<Vec<u8>, CogError> {
                 new_entry.push(entry[0]);
                 table.push(new_entry);
 
-                if table.len() == (1 << code_size) && code_size < 12 {
+                // TIFF 6.0 LZW uses the "early change" convention: the code
+                // width grows one dictionary entry before the GIF-style
+                // threshold. Without this, ordinary GDAL/rasterio LZW tiles
+                // desynchronize at the 9->10 bit boundary.
+                if table.len() == (1 << code_size) - 1 && code_size < 12 {
                     code_size += 1;
                 }
             }

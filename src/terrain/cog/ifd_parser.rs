@@ -394,6 +394,15 @@ async fn parse_ifd(
             field_type,
             big_endian,
         );
+        let external_offset = if bigtiff {
+            read_u64(&ifd_data, entry_offset + value_offset, big_endian)
+        } else {
+            u64::from(read_u32(
+                &ifd_data,
+                entry_offset + value_offset,
+                big_endian,
+            ))
+        };
 
         match tag {
             TAG_IMAGE_WIDTH => width = value as u32,
@@ -401,8 +410,9 @@ async fn parse_ifd(
             TAG_BITS_PER_SAMPLE => bits_per_sample = value as u16,
             TAG_COMPRESSION => compression = value as u16,
             TAG_STRIP_OFFSETS => {
-                let data_offset = if count > 1 || type_size(field_type) * count as usize > 4 {
-                    value
+                let inline_capacity = if bigtiff { 8 } else { 4 };
+                let data_offset = if type_size(field_type) * count as usize > inline_capacity {
+                    external_offset
                 } else {
                     offset + count_size + (i * entry_size) + value_offset as u64
                 };
@@ -411,8 +421,9 @@ async fn parse_ifd(
             TAG_PREDICTOR => predictor = value as u16,
             TAG_ROWS_PER_STRIP => rows_per_strip = value as u32,
             TAG_STRIP_BYTE_COUNTS => {
-                let data_offset = if count > 1 || type_size(field_type) * count as usize > 4 {
-                    value
+                let inline_capacity = if bigtiff { 8 } else { 4 };
+                let data_offset = if type_size(field_type) * count as usize > inline_capacity {
+                    external_offset
                 } else {
                     offset + count_size + (i * entry_size) + value_offset as u64
                 };
@@ -422,16 +433,18 @@ async fn parse_ifd(
             TAG_TILE_WIDTH => tile_width = value as u32,
             TAG_TILE_LENGTH => tile_height = value as u32,
             TAG_TILE_OFFSETS => {
-                let data_offset = if count > 1 || type_size(field_type) * count as usize > 4 {
-                    value
+                let inline_capacity = if bigtiff { 8 } else { 4 };
+                let data_offset = if type_size(field_type) * count as usize > inline_capacity {
+                    external_offset
                 } else {
                     offset + count_size + (i * entry_size) + value_offset as u64
                 };
                 tile_offsets_info = Some((data_offset, count, field_type));
             }
             TAG_TILE_BYTE_COUNTS => {
-                let data_offset = if count > 1 || type_size(field_type) * count as usize > 4 {
-                    value
+                let inline_capacity = if bigtiff { 8 } else { 4 };
+                let data_offset = if type_size(field_type) * count as usize > inline_capacity {
+                    external_offset
                 } else {
                     offset + count_size + (i * entry_size) + value_offset as u64
                 };
@@ -441,7 +454,7 @@ async fn parse_ifd(
             | TAG_GEO_KEY_DIRECTORY => {
                 let inline_capacity = if bigtiff { 8 } else { 4 };
                 let data_offset = if type_size(field_type) * count as usize > inline_capacity {
-                    value
+                    external_offset
                 } else {
                     offset + count_size + (i * entry_size) + value_offset as u64
                 };
@@ -735,6 +748,88 @@ fn type_size(field_type: u16) -> usize {
 mod tests {
     use super::*;
 
+    fn parse_full_file_array_fixture(bigtiff: bool, external: bool) -> CogHeader {
+        let (ifd_offset, count_size, entry_size, value_offset, inline_capacity) = if bigtiff {
+            (16usize, 8usize, 20usize, 12usize, 8usize)
+        } else {
+            (8usize, 2usize, 12usize, 8usize, 4usize)
+        };
+        let value_count = match (bigtiff, external) {
+            (false, false) => 2usize,
+            (false, true) => 3usize,
+            (true, false) => 4usize,
+            (true, true) => 5usize,
+        };
+        let field_type = 3u16;
+        let element_size = 2usize;
+        assert_eq!(value_count * element_size > inline_capacity, external);
+        let entries_offset = ifd_offset + count_size;
+        let next_offset = entries_offset + 2 * entry_size;
+        let external_offset = 0x1_0000usize;
+        let mut bytes = vec![0u8; external_offset + 2 * value_count * element_size + 16];
+        bytes[0..2].copy_from_slice(b"II");
+        if bigtiff {
+            bytes[2..4].copy_from_slice(&43u16.to_le_bytes());
+            bytes[4..6].copy_from_slice(&8u16.to_le_bytes());
+            bytes[6..8].copy_from_slice(&0u16.to_le_bytes());
+            bytes[8..16].copy_from_slice(&(ifd_offset as u64).to_le_bytes());
+            bytes[ifd_offset..ifd_offset + 8].copy_from_slice(&2u64.to_le_bytes());
+        } else {
+            bytes[2..4].copy_from_slice(&42u16.to_le_bytes());
+            bytes[4..8].copy_from_slice(&(ifd_offset as u32).to_le_bytes());
+            bytes[ifd_offset..ifd_offset + 2].copy_from_slice(&2u16.to_le_bytes());
+        }
+        for (entry_index, (tag, values)) in [
+            (TAG_TILE_OFFSETS, vec![40u64, 50, 60, 70, 80]),
+            (TAG_TILE_BYTE_COUNTS, vec![4u64, 5, 6, 7, 8]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let start = entries_offset + entry_index * entry_size;
+            bytes[start..start + 2].copy_from_slice(&tag.to_le_bytes());
+            bytes[start + 2..start + 4].copy_from_slice(&field_type.to_le_bytes());
+            if bigtiff {
+                bytes[start + 4..start + 12]
+                    .copy_from_slice(&(value_count as u64).to_le_bytes());
+            } else {
+                bytes[start + 4..start + 8]
+                    .copy_from_slice(&(value_count as u32).to_le_bytes());
+            }
+            let data_start = if external {
+                let array_offset = external_offset + entry_index * value_count * element_size;
+                if bigtiff {
+                    bytes[start + value_offset..start + value_offset + 8]
+                        .copy_from_slice(&(array_offset as u64).to_le_bytes());
+                } else {
+                    bytes[start + value_offset..start + value_offset + 4]
+                        .copy_from_slice(&(array_offset as u32).to_le_bytes());
+                }
+                array_offset
+            } else {
+                start + value_offset
+            };
+            for (index, value) in values.into_iter().take(value_count).enumerate() {
+                let pos = data_start + index * element_size;
+                bytes[pos..pos + 2].copy_from_slice(&(value as u16).to_le_bytes());
+            }
+        }
+        // A valid zero next-IFD pointer completes the full TIFF directory.
+        let next_size = if bigtiff { 8 } else { 4 };
+        bytes[next_offset..next_offset + next_size].fill(0);
+        let path = std::env::temp_dir().join(format!(
+            "forge3d-full-tiff-array-{}-{}-{}.tif",
+            std::process::id(),
+            u8::from(bigtiff),
+            u8::from(external)
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        let reader = RangeReader::new_local(path.to_str().unwrap()).unwrap();
+        let parsed = pollster::block_on(parse_cog_header(&reader)).unwrap();
+        let _ = std::fs::remove_file(path);
+        parsed
+    }
+
     #[test]
     fn short_bigtiff_header_returns_typed_error() {
         let header = b"II+\0\x08\0\0\0";
@@ -773,5 +868,37 @@ mod tests {
             epsg: 4326,
         };
         assert_eq!(georef.pixel_to_model(4.0, 6.0).unwrap(), (-122.0, 45.0));
+    }
+
+    #[test]
+    fn classic_full_file_arrays_classify_inline_and_external_by_byte_size() {
+        let inline_header = parse_full_file_array_fixture(false, false);
+        assert!(!inline_header.is_bigtiff);
+        assert_eq!(inline_header.ifds.len(), 1);
+        let inline = &inline_header.ifds[0];
+        assert_eq!(inline.tile_offsets, vec![40, 50]);
+        assert_eq!(inline.tile_byte_counts, vec![4, 5]);
+        let external_header = parse_full_file_array_fixture(false, true);
+        assert!(!external_header.is_bigtiff);
+        assert_eq!(external_header.ifds.len(), 1);
+        let external = &external_header.ifds[0];
+        assert_eq!(external.tile_offsets, vec![40, 50, 60]);
+        assert_eq!(external.tile_byte_counts, vec![4, 5, 6]);
+    }
+
+    #[test]
+    fn bigtiff_full_file_arrays_classify_inline_and_external_by_byte_size() {
+        let inline_header = parse_full_file_array_fixture(true, false);
+        assert!(inline_header.is_bigtiff);
+        assert_eq!(inline_header.ifds.len(), 1);
+        let inline = &inline_header.ifds[0];
+        assert_eq!(inline.tile_offsets, vec![40, 50, 60, 70]);
+        assert_eq!(inline.tile_byte_counts, vec![4, 5, 6, 7]);
+        let external_header = parse_full_file_array_fixture(true, true);
+        assert!(external_header.is_bigtiff);
+        assert_eq!(external_header.ifds.len(), 1);
+        let external = &external_header.ifds[0];
+        assert_eq!(external.tile_offsets, vec![40, 50, 60, 70, 80]);
+        assert_eq!(external.tile_byte_counts, vec![4, 5, 6, 7, 8]);
     }
 }
