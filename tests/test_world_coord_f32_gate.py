@@ -31,23 +31,37 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1327
-# Re-frozen when ANAMNESIS merged with main. The site COUNT is unchanged, and a
-# site-by-site diff against main shows exactly five added and five removed --
-# the same five `as_f32` statements in src/offscreen/adjudication_raster.rs,
-# moved from `render_raster_reference` to `render_raster_reference_incremental`
-# by the incremental-render rename. A site record is
-# (file, function, operation, nth, statement) with no line numbers, so the
-# digest moved only because the enclosing function was renamed. No new
-# narrowing conversion was introduced by this merge.
-EXPECTED_CONVERSION_SHA256 = "e7db7db0a692556e171ec2954993eb97d889786f442b881d0ebfb9bfa0e960dd"
+EXPECTED_CONVERSION_COUNT = 1438
+# The previous 1433-site freeze already covered the reviewed ANAMNESIS,
+# TESSELLA, and first SIDERA transitions described below. The d8313007 base
+# source actually contained 1446 sites because SIDERA's later adversarial
+# closure added twelve u32 viewport-dimension/reciprocal casts and one
+# normalized celestial unit-direction conversion without refreshing this
+# constant. SUBSTRATIA adds one u32 feedback-origin telemetry counter converted
+# for Python float stats. It also moves four existing tile-index-to-normalized-
+# UV casts from finish_frame to ingest_shader_feedback; that changes their
+# occurrence ownership, but not the count. The physical TESSELLA picking audit
+# also moved two existing screen-coordinate conversions from pixel corners to
+# raster pixel centres; their count is unchanged. Its visibility CPU oracle
+# adds seven raster-only conversions: pixel centres (2), normalized coarse
+# texel steps (2), a bounded LUT index (1), and viewport projection (2). All
+# reviewed primitives are render dimensions, normalized directions/UVs,
+# bounded raster indices, or telemetry. None stores absolute world coordinates
+# or bypasses the camera Anchor. The subsequent physical-terrain closure
+# consolidated repeated clipmap ring coordinate construction, reducing the
+# reviewed inventory without weakening the Anchor boundary.
+# ORBIS preserves that 1438-site count. Its globe vertex refactor moves the two
+# reviewed ring-index attribute casts from `new`/`skirt` into
+# `with_position`/`skirt_from`. Those values remain bounded LOD identifiers;
+# neither cast narrows an absolute world position or bypasses the active Anchor.
+EXPECTED_CONVERSION_SHA256 = "40e686311a8ee3a1c0f15ca4d66a0ebe1708ac1067dcc3b43d341a1f93845b77"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1327,
+    "current_count": 1438,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -71,7 +85,7 @@ REVIEWED_INVENTORY_TRANSITION = {
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
     # Re-based on main at the merge: the pre-transition tree is now main rather
     # than this branch's original base, so the count and digest are main's.
-    "base_count": 1327,
+    "base_count": 1438,
     "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",

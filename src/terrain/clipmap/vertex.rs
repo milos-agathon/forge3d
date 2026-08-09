@@ -26,7 +26,7 @@ impl ClipmapVertex {
         0 => Float32x3,
         1 => Float32x2,
         2 => Float32x2,
-        3 => Float32x2
+        8 => Float32x2
     ];
 
     pub fn new(x: f32, z: f32, u: f32, v: f32, morph_weight: f32, ring_index: u32) -> Self {
@@ -192,6 +192,17 @@ mod tests {
         let layout = ClipmapVertex::desc();
         assert_eq!(layout.array_stride, 36);
         assert_eq!(layout.attributes.len(), 4);
+        assert_eq!(layout.attributes[3].shader_location, 8);
+    }
+
+    #[test]
+    fn shader_decodes_globe_ring_before_selecting_coarse_height_lod() {
+        let shader = include_str!("../../shaders/terrain_pbr_pom.wgsl");
+        assert!(shader.contains(
+            "let clip_ring_index = select(clip_morph.y, -clip_morph.y - 1.0, clip_morph.y < 0.0);"
+        ));
+        assert!(shader
+            .contains("let coarse_texels = exp2(min(max(clip_ring_index, 0.0) + 1.0, 16.0));"));
     }
 
     #[test]

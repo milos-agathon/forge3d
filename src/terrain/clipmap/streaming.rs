@@ -198,7 +198,7 @@ mod tests {
 
         let radius = GlobeFrame::WGS84_MEAN_RADIUS_M;
         let camera = DVec3::X * (radius + 1_000.0);
-        let frame = GlobeFrame::globe(camera).unwrap();
+        let frame = GlobeFrame::globe(radius, camera).unwrap();
         let mut streamer = ClipmapStreamer::new_globe(
             ClipmapConfig::new(2, 4),
             DVec3::X * radius,

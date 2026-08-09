@@ -123,6 +123,13 @@ class TestNativeModuleSymbols:
         "device_probe",
         "sun_position",
         "sun_position_utc",
+        "astro_body_position",
+        "astro_moon_phase",
+        "astro_delta_t_seconds",
+        "astro_sidereal_time",
+        "astro_refraction_arcminutes",
+        "sky_set_observation",
+        "astro_validation_metrics",
         "clipmap_generate_py",
         "engine_info",
         "hybrid_render",
@@ -182,6 +189,8 @@ class TestNativeModuleSymbols:
         "geometry_measure",
         "measure_geometries",
         # MENSURA geodesy surface (src/py_functions/geodesy.rs)
+        "body_info",
+        "areoid_undulation",
         "geoid_undulation",
         "orthometric_to_ellipsoidal",
         "ellipsoidal_to_orthometric",
@@ -270,6 +279,14 @@ class TestNativeModuleSymbols:
         # CENSOR: global degradation sink
         "native_degradations",
         "clear_native_degradations",
+        "terrain_culling_stats",
+        "terrain_visibility_stats",
+        "terrain_vt_stats",
+        "terrain_seam_stats",
+        "encode_bc7_rgba8",
+        "decode_bc7_rgba8",
+        "encode_bc5_rg8",
+        "decode_bc5_rg8",
         # CENSOR: negotiated GPU capability report
         "capabilities",
         # CENSOR: last-render execution certificate JSON

@@ -179,7 +179,13 @@ impl TerrainScene {
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    count: None,
+                    count: if super::super::virtual_texture::bindless_bc_supported(device) {
+                        // Must equal the sized `binding_array` emitted by
+                        // `shader_sources::terrain_bindless`.
+                        std::num::NonZeroU32::new(crate::shader_sources::VT_ATLAS_BINDING_COUNT)
+                    } else {
+                        None
+                    },
                 },
                 // binding 9: VT atlas sampler
                 wgpu::BindGroupLayoutEntry {
@@ -245,6 +251,16 @@ impl TerrainScene {
                     binding: 15,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 16,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],
@@ -322,6 +338,16 @@ impl TerrainScene {
                     binding: 2,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],

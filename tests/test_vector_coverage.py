@@ -41,14 +41,13 @@ def _hardware_adapter_available() -> bool:
     (WARP on windows-latest, lavapipe/llvmpipe on Linux images). Those are not
     a valid substrate for these gates on two independent counts, both measured
     on run 30112398437: `thin_sliver_0_1px` took 17 minutes on hosted Windows
-    against 0.13 s on the macOS Metal lane -- which alone overruns the
+    against 0.13 s on a physical GPU -- which alone overruns the
     35-minute job budget and cancelled the lane mid-suite -- and it also failed
     the committed 64x64 supersampled reference gate there while passing on both
     real adapters. This is the same classification `_terrain_runtime` applies,
-    and the same reason ci.yml moved the visual-golden lane off hosted Windows
-    to macos-14. The gates keep running on every real adapter: the macOS Metal
-    lane and the self-hosted RTX 3070 lane, which is where this file is
-    enumerated in ci.yml.
+    and the same reason ci.yml routes required visual acceptance to the
+    self-hosted RTX 3070. Optional backend diagnostics may exercise other real
+    adapters, but they are not acceptance prerequisites.
     """
 
     if not f3d.has_gpu():

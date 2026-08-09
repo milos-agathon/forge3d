@@ -50,6 +50,8 @@ struct FinishedCapture {
     granted: Vec<String>,
     limits: BTreeMap<String, u64>,
     passes: Vec<PassRecord>,
+    /// Signed model declarations are properties, not GPU pass claims.
+    models: BTreeMap<String, String>,
     peak_host_visible_bytes: u64,
     peak_device_local_bytes: u64,
     by_label: BTreeMap<String, u64>,
@@ -111,6 +113,7 @@ thread_local! {
     static CURRENT_CODEC: RefCell<Option<CodecSnapshot>> = const { RefCell::new(None) };
     static CURRENT_PRECISION: RefCell<Option<PrecisionEvidence>> = const { RefCell::new(None) };
     static CURRENT_JITTER: RefCell<Option<JitterEvidence>> = const { RefCell::new(None) };
+    static CURRENT_MODELS: RefCell<BTreeMap<String, String>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 pub fn record_precision_evidence(evidence: PrecisionEvidence) {
@@ -226,6 +229,7 @@ pub fn begin_render_capture_with_resources(
     begin_degradation_capture();
     CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
     CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
+    CURRENT_MODELS.with(|models| models.borrow_mut().clear());
     notify_python_degradation_capture("begin_capture");
     let mut cur = lock_current();
     cur.clear();
@@ -243,6 +247,21 @@ pub fn record_pass(label: &str, gpu_ms: f64, draw_calls: u32) {
         gpu_ms,
         draw_calls,
     });
+}
+
+/// Declare a rendering or physical model used by the active render.
+///
+/// This is deliberately separate from [`record_pass`]: a model assumption is
+/// signed certificate context, not a fabricated timed GPU pass.
+pub fn record_model(name: &str, description: &str) {
+    let active = CAPTURE_DEPTH.with(|depth| depth.get() > 0);
+    if active {
+        CURRENT_MODELS.with(|models| {
+            models
+                .borrow_mut()
+                .insert(name.to_string(), description.to_string());
+        });
+    }
 }
 
 /// Attach F3DZ source evidence to the render capture currently active on this
@@ -281,6 +300,7 @@ pub fn record_f3dz_pages(eps: f32, page_count: u32, base_quality: bool) {
 fn finish_render_capture() {
     let uses_gpu = CAPTURE_USES_GPU.load(Ordering::Relaxed);
     let passes = lock_current().clone();
+    let models = CURRENT_MODELS.with(|models| std::mem::take(&mut *models.borrow_mut()));
     let ledger = finish_ledger_capture();
     let codec = CURRENT_CODEC.with(|slot| slot.borrow_mut().take());
 
@@ -388,6 +408,7 @@ fn finish_render_capture() {
         granted,
         limits,
         passes,
+        models,
         peak_host_visible_bytes: ledger.peak_host_visible_bytes,
         peak_device_local_bytes: ledger.peak_device_local_bytes,
         by_label: ledger.by_label,
@@ -410,6 +431,7 @@ pub fn abort_render_capture() {
     lock_current().clear();
     CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
     CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
+    CURRENT_MODELS.with(|models| models.borrow_mut().clear());
 }
 
 /// Start a render-local capture owned by a Python renderer.
@@ -502,6 +524,8 @@ struct ReportJson<'a> {
     adapter: AdapterJson<'a>,
     capabilities: CapabilitiesJson<'a>,
     passes: Vec<PassJson<'a>>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    models: &'a BTreeMap<String, String>,
     allocations: AllocationsJson<'a>,
     degradations: Vec<DegradationJson<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -551,6 +575,7 @@ pub fn execution_report_json() -> Result<String, RenderError> {
                 draw_calls: p.draw_calls,
             })
             .collect(),
+        models: &cap.models,
         allocations: AllocationsJson {
             peak_host_visible_bytes: cap.peak_host_visible_bytes,
             peak_device_local_bytes: cap.peak_device_local_bytes,
@@ -680,6 +705,10 @@ mod tests {
         let mut vb: serde_json::Value = serde_json::from_str(&b).expect("report b parses");
 
         assert_eq!(va["schema"], "forge3d.render_certificate/1");
+        assert!(
+            va.get("models").is_none(),
+            "model-free reports must preserve the pre-SIDERA schema/1 payload shape"
+        );
         // Passes are preserved in recorded order.
         assert_eq!(va["passes"][0]["label"], "terrain.main");
         assert_eq!(va["passes"][1]["label"], "terrain.sky");
@@ -691,6 +720,39 @@ mod tests {
         assert_eq!(
             va, vb,
             "certificate must be byte-stable across renders once gpu_ms is zeroed"
+        );
+    }
+
+    #[test]
+    fn model_declarations_are_signed_context_not_fake_passes() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let capture = begin_render_capture("test.models");
+        record_model(
+            "astro.twilight",
+            "civil-to-astronomical smoothstep over solar altitude",
+        );
+        record_pass("astro.night.overlay", 0.5, 1);
+        capture.finish();
+
+        let report: serde_json::Value =
+            serde_json::from_str(&execution_report_json().expect("report assembles"))
+                .expect("report parses");
+        assert_eq!(
+            report["models"]["astro.twilight"],
+            "civil-to-astronomical smoothstep over solar altitude"
+        );
+        assert_eq!(report["passes"].as_array().map(Vec::len), Some(1));
+        assert_eq!(report["passes"][0]["label"], "astro.night.overlay");
+
+        let clean = begin_render_capture("test.models.clean");
+        clean.finish();
+        let report: serde_json::Value =
+            serde_json::from_str(&execution_report_json().expect("clean report assembles"))
+                .expect("clean report parses");
+        assert!(
+            report.get("models").is_none(),
+            "model declarations must be capture-local and absent when unused"
         );
     }
 

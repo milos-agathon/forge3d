@@ -16,6 +16,13 @@ enum ClipmapFrame {
     },
 }
 
+fn snap_center_to_finest_grid(center: Vec2, base_cell_size: f32) -> Vec2 {
+    if !base_cell_size.is_finite() || base_cell_size <= 0.0 {
+        return center;
+    }
+    (center / base_cell_size).round() * base_cell_size
+}
+
 /// Bounds for a mesh region (start index, index count).
 #[derive(Debug, Clone, Copy)]
 pub struct MeshBounds {
@@ -166,7 +173,7 @@ impl ClipmapLevel {
                 &ring_indices,
                 self.config.skirt_depth,
                 ring_idx,
-                self.config.ring_resolution as usize + 1,
+                0,
             );
             ring_verts.extend(skirt_verts);
             ring_indices.extend(skirt_indices);
@@ -219,9 +226,7 @@ impl ClipmapLevel {
                 let world = self
                     .globe_vertex_world(local)
                     .expect("globe frame owns a center tangent transform");
-                let render = camera
-                    .camera_relative(world)
-                    .expect("validated globe geometry stays finite");
+                let render = camera.camera_relative(world);
                 let direction = world.normalize();
                 let uv = crate::camera::Anchor::direction_to_render(DVec3::new(
                     (direction.y.atan2(direction.x) / std::f64::consts::TAU + 0.5).rem_euclid(1.0),
@@ -247,6 +252,7 @@ impl ClipmapLevel {
     /// Update the clipmap center position.
     /// Returns list of TileIds that should be requested for streaming.
     pub fn update_center(&mut self, new_center: Vec2) -> Vec<TileId> {
+        let new_center = snap_center_to_finest_grid(new_center, self.base_cell_size);
         let current_center = match &mut self.frame {
             ClipmapFrame::Flat(center) => center,
             #[cfg(feature = "enable-globe")]
@@ -398,10 +404,7 @@ impl ClipmapLevel {
             ClipmapFrame::Flat(center) => center,
             #[cfg(feature = "enable-globe")]
             ClipmapFrame::Globe { camera, .. } => {
-                let position = camera
-                    .camera_relative(self.center)
-                    .expect("validated globe center stays finite")
-                    .position;
+                let position = camera.camera_relative(self.center).position;
                 Vec2::new(position.x, position.y)
             }
         }
@@ -486,10 +489,23 @@ impl ClipmapLevel {
 
     /// Calculate triangle count for a full-resolution grid (for reduction comparison).
     pub fn full_resolution_triangle_count(&self) -> u32 {
-        // Full terrain at finest LOD
-        let total_cells = self.config.center_resolution * 4; // Approximate coverage
-        total_cells * total_cells * 2
+        full_resolution_triangle_count(&self.config)
     }
+}
+
+/// Triangles required to cover the complete clipmap footprint at the finest
+/// lattice. This is the meaningful comparator for a nested clipmap; the old
+/// `center_resolution * 4` approximation covered only a small central square.
+pub fn full_resolution_triangle_count(config: &ClipmapConfig) -> u32 {
+    let ring_cells_per_side = (0..config.ring_count)
+        .map(|ring| config.ring_resolution.checked_shl(ring).unwrap_or(u32::MAX))
+        .fold(0u32, u32::saturating_add);
+    let cells_per_side = config
+        .center_resolution
+        .saturating_add(ring_cells_per_side.saturating_mul(2));
+    cells_per_side
+        .saturating_mul(cells_per_side)
+        .saturating_mul(2)
 }
 
 /// Generate a complete clipmap mesh from configuration.
@@ -551,6 +567,13 @@ mod tests {
     }
 
     #[test]
+    fn test_full_resolution_comparator_covers_outermost_ring() {
+        let config = ClipmapConfig::new(4, 32);
+        // 32 center cells plus two sides of 32*(1+2+4+8) ring cells.
+        assert_eq!(full_resolution_triangle_count(&config), 1_968_128);
+    }
+
+    #[test]
     fn test_center_update_triggers_tile_requests() {
         let config = ClipmapConfig::new(4, 64);
         let mut level = ClipmapLevel::new(config, Vec2::ZERO, 1000.0);
@@ -569,6 +592,37 @@ mod tests {
         // Small movement should not regenerate
         let tiles = level.update_center(Vec2::new(0.1, 0.1));
         assert!(tiles.is_empty());
+    }
+
+    #[test]
+    fn test_center_updates_snap_to_the_finest_grid() {
+        let config = ClipmapConfig::new(4, 64);
+        let mut level = ClipmapLevel::new(config, Vec2::ZERO, 1000.0);
+        let base_cell = level.base_cell_size;
+
+        let requested = Vec2::new(base_cell * 0.6, -base_cell * 1.6);
+        assert!(!level.update_center(requested).is_empty());
+        assert_eq!(
+            level.center,
+            DVec3::new(f64::from(base_cell), 0.0, f64::from(-base_cell * 2.0))
+        );
+
+        // Another raw camera position inside the same snapped cell neither
+        // changes the mesh lattice nor spuriously requests tiles.
+        let same_cell = Vec2::new(base_cell * 0.7, -base_cell * 1.7);
+        assert!(level.update_center(same_cell).is_empty());
+        assert_eq!(
+            level.center,
+            DVec3::new(f64::from(base_cell), 0.0, f64::from(-base_cell * 2.0))
+        );
+    }
+
+    #[test]
+    fn test_initial_center_preserves_static_clipmap_semantics() {
+        let config = ClipmapConfig::new(4, 64);
+        let center = Vec2::new(12.25, -31.75);
+        let level = ClipmapLevel::new(config, center, 1000.0);
+        assert_eq!(level.center, DVec3::new(12.25, 0.0, -31.75));
     }
 
     #[test]
@@ -604,7 +658,7 @@ mod tests {
         digest.update(bytemuck::cast_slice(&mesh.indices));
         assert_eq!(
             format!("{:x}", digest.finalize()),
-            "43ba5df020284c48fd185ed5f7f643234fe47941bcaada047aa753ca1500a9e2"
+            "606d974cc49ef48a5821aee06c5c7c3013b67a0e58e94e2bb54a0ec2fd447b4e"
         );
     }
 
@@ -614,10 +668,14 @@ mod tests {
         use crate::terrain::clipmap::globe::GlobeFrame;
         use glam::DVec3;
 
-        let seed = GlobeFrame::globe(DVec3::X * GlobeFrame::WGS84_MEAN_RADIUS_M).unwrap();
+        let seed = GlobeFrame::globe(
+            GlobeFrame::WGS84_MEAN_RADIUS_M,
+            DVec3::X * GlobeFrame::WGS84_MEAN_RADIUS_M,
+        )
+        .unwrap();
         let center = seed.lonlat_alt_to_ecef(-121.7603, 46.8523, 0.0).unwrap();
         let camera = center + center.normalize() * 1_000.0;
-        let frame = GlobeFrame::globe(camera).unwrap();
+        let frame = GlobeFrame::globe(GlobeFrame::WGS84_MEAN_RADIUS_M, camera).unwrap();
         let config = ClipmapConfig {
             ring_count: 0,
             ring_resolution: 2,
@@ -627,7 +685,7 @@ mod tests {
         let mut level = ClipmapLevel::new_globe(config, center, frame, 0.004).unwrap();
         let mesh = level.generate();
 
-        let expected_center = frame.camera_relative(center).unwrap().position;
+        let expected_center = frame.camera_relative(center).position;
         assert!((glam::Vec3::from(mesh.vertices[4].position) - expected_center).length() < 1.0e-7);
         let left = mesh.vertices[3].position[0];
         let right = mesh.vertices[5].position[0];
@@ -645,8 +703,7 @@ mod tests {
         assert!((mesh.vertices[4].uv[0] - expected_uv.x).abs() < 1.0e-6);
         assert!((mesh.vertices[4].uv[1] - expected_uv.y).abs() < 1.0e-6);
         assert!(
-            (mesh.vertices[4].geodetic_up() - frame.camera_relative(center).unwrap().up).length()
-                < 1.0e-6
+            (mesh.vertices[4].geodetic_up() - frame.camera_relative(center).up).length() < 1.0e-6
         );
         assert_eq!(level.center_ecef(), center);
 
@@ -661,8 +718,11 @@ mod tests {
     fn globe_arc_length_uses_elevated_patch_radius() {
         use crate::terrain::clipmap::globe::GlobeFrame;
 
-        let frame =
-            GlobeFrame::globe(DVec3::X * (GlobeFrame::WGS84_MEAN_RADIUS_M + 2_000.0)).unwrap();
+        let frame = GlobeFrame::globe(
+            GlobeFrame::WGS84_MEAN_RADIUS_M,
+            DVec3::X * (GlobeFrame::WGS84_MEAN_RADIUS_M + 2_000.0),
+        )
+        .unwrap();
         let center = DVec3::X * (GlobeFrame::WGS84_MEAN_RADIUS_M + 1_000.0);
         let mut level =
             ClipmapLevel::new_globe(ClipmapConfig::new(1, 4), center, frame, 20_000.0).unwrap();
@@ -688,7 +748,7 @@ mod tests {
         use glam::DVec3;
 
         let camera = DVec3::X * (GlobeFrame::WGS84_MEAN_RADIUS_M + 1_000.0);
-        let frame = GlobeFrame::globe(camera).unwrap();
+        let frame = GlobeFrame::globe(GlobeFrame::WGS84_MEAN_RADIUS_M, camera).unwrap();
         let config = ClipmapConfig::new(1, 4);
         let mut level =
             ClipmapLevel::new_globe(config, DVec3::X * 6_371_000.0, frame, 1000.0).unwrap();
@@ -723,7 +783,7 @@ mod tests {
 
         let radius = GlobeFrame::WGS84_MEAN_RADIUS_M;
         let camera = DVec3::X * (radius + 1_000.0);
-        let frame = GlobeFrame::globe(camera).unwrap();
+        let frame = GlobeFrame::globe(radius, camera).unwrap();
         let mut level =
             ClipmapLevel::new_globe(ClipmapConfig::new(2, 4), DVec3::X * radius, frame, 10_000.0)
                 .unwrap();
@@ -746,7 +806,7 @@ mod tests {
 
         let radius = GlobeFrame::WGS84_MEAN_RADIUS_M;
         let center = DVec3::X * radius;
-        let frame = GlobeFrame::globe(center + DVec3::X * 1_000.0).unwrap();
+        let frame = GlobeFrame::globe(radius, center + DVec3::X * 1_000.0).unwrap();
         let level =
             ClipmapLevel::new_globe(ClipmapConfig::new(2, 4), center, frame, 10_000.0).unwrap();
         let tiles = level.calculate_required_tiles();

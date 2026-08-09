@@ -27,38 +27,32 @@ pub struct GlobeFrame {
 impl GlobeFrame {
     pub const WGS84_MEAN_RADIUS_M: f64 = 6_371_000.0;
 
-    /// Create a spherical Earth frame using the WGS84 mean radius.
-    pub fn globe(camera_anchor: DVec3) -> Option<Self> {
-        Self::with_radius(Self::WGS84_MEAN_RADIUS_M, camera_anchor)
-    }
-
     /// Create a spherical planetary frame with a caller-supplied radius.
-    pub fn with_radius(radius: f64, camera_anchor: DVec3) -> Option<Self> {
+    pub fn globe(radius: f64, camera_anchor: DVec3) -> Result<Self, String> {
         let camera_distance = camera_anchor.length();
-        if !radius.is_finite()
-            || radius <= 0.0
-            || !camera_anchor.is_finite()
-            || !camera_distance.is_finite()
-            || camera_distance == 0.0
-        {
-            return None;
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err("globe radius must be finite and positive".to_string());
         }
-        Some(Self {
+        if !camera_anchor.is_finite() || !camera_distance.is_finite() || camera_distance == 0.0 {
+            return Err("camera anchor must be a finite non-zero ECEF position".to_string());
+        }
+        Ok(Self {
             radius,
-            anchor: anchor_at(camera_anchor)?,
+            anchor: anchor_at(camera_anchor)
+                .ok_or_else(|| "camera anchor could not be represented".to_string())?,
             ecef_to_local: tangent_transform(camera_anchor),
             mode: GlobeMode::Globe,
         })
     }
 
     /// Create an identity local frame for the existing flat clipmap path.
-    pub fn flat(camera_anchor: DVec3) -> Option<Self> {
-        camera_anchor.is_finite().then(|| Self {
+    pub fn flat(camera_anchor: DVec3) -> Self {
+        Self {
             radius: Self::WGS84_MEAN_RADIUS_M,
-            anchor: anchor_at(camera_anchor).expect("finite anchor is valid"),
+            anchor: anchor_at(camera_anchor).expect("flat camera anchor must be finite"),
             ecef_to_local: DMat4::IDENTITY,
             mode: GlobeMode::Flat,
-        })
+        }
     }
 
     pub fn radius(&self) -> f64 {
@@ -75,9 +69,12 @@ impl GlobeFrame {
 
     /// Return the same frame mode and radius anchored at a new camera.
     pub fn reanchored(&self, camera_anchor: DVec3) -> Option<Self> {
+        if !camera_anchor.is_finite() {
+            return None;
+        }
         match self.mode {
-            GlobeMode::Flat => Self::flat(camera_anchor),
-            GlobeMode::Globe => Self::with_radius(self.radius, camera_anchor),
+            GlobeMode::Flat => Some(Self::flat(camera_anchor)),
+            GlobeMode::Globe => Self::globe(self.radius, camera_anchor).ok(),
         }
     }
 
@@ -131,14 +128,12 @@ impl GlobeFrame {
     }
 
     /// Subtract the f64 camera anchor before the sole f32 render conversion.
-    pub fn camera_relative(&self, ecef: DVec3) -> Option<CameraRelative> {
-        if !ecef.is_finite() {
-            return None;
-        }
-        let globe_distance = (self.mode == GlobeMode::Globe).then(|| ecef.length());
-        if globe_distance.is_some_and(|distance| !distance.is_finite() || distance == 0.0) {
-            return None;
-        }
+    pub fn camera_relative(&self, ecef: DVec3) -> CameraRelative {
+        assert!(ecef.is_finite(), "ECEF position must be finite");
+        assert!(
+            self.mode != GlobeMode::Globe || ecef.length_squared() > 0.0,
+            "globe ECEF position must be non-zero"
+        );
         let local = self.ecef_to_local_vector(ecef - self.anchor.origin());
         let position = self.anchor.to_render_vec3(self.anchor.origin() + local);
         let up = match self.mode {
@@ -148,7 +143,7 @@ impl GlobeFrame {
                 Anchor::direction_to_render(local_up).normalize()
             }
         };
-        Some(CameraRelative { position, up })
+        CameraRelative { position, up }
     }
 }
 
@@ -185,7 +180,11 @@ mod tests {
 
     #[test]
     fn default_radius_and_cardinal_ecef_points_are_exact() {
-        let frame = GlobeFrame::globe(DVec3::new(6_371_000.0, 0.0, 0.0)).unwrap();
+        let frame = GlobeFrame::globe(
+            GlobeFrame::WGS84_MEAN_RADIUS_M,
+            DVec3::new(6_371_000.0, 0.0, 0.0),
+        )
+        .unwrap();
         assert_eq!(frame.radius(), GlobeFrame::WGS84_MEAN_RADIUS_M);
         assert_eq!(frame.mode(), GlobeMode::Globe);
         assert!(
@@ -207,7 +206,11 @@ mod tests {
 
     #[test]
     fn geodetic_round_trip_is_better_than_one_part_per_million() {
-        let frame = GlobeFrame::globe(DVec3::new(6_371_000.0, 0.0, 0.0)).unwrap();
+        let frame = GlobeFrame::globe(
+            GlobeFrame::WGS84_MEAN_RADIUS_M,
+            DVec3::new(6_371_000.0, 0.0, 0.0),
+        )
+        .unwrap();
         for geodetic in [
             DVec3::new(-121.7603, 46.8523, 4_392.0),
             DVec3::new(179.999, -80.0, 408_000.0),
@@ -226,9 +229,9 @@ mod tests {
     #[test]
     fn camera_relative_subtraction_preserves_small_offsets_at_planet_scale() {
         let camera = DVec3::new(6_371_000.0 + 408_000.0, 25.0, -10.0);
-        let frame = GlobeFrame::globe(camera).unwrap();
+        let frame = GlobeFrame::globe(GlobeFrame::WGS84_MEAN_RADIUS_M, camera).unwrap();
         let point = camera + DVec3::new(0.000_25, 2.0, -1.0);
-        let relative = frame.camera_relative(point).unwrap();
+        let relative = frame.camera_relative(point);
         let truth = frame.ecef_to_local_vector(point - camera);
         assert!((relative.position.as_dvec3() - truth).length() < 1.0e-6);
         assert!((relative.up.length() - 1.0).abs() < 1.0e-6);
@@ -237,9 +240,9 @@ mod tests {
     #[test]
     fn flat_mode_is_identity_camera_relative_space() {
         let camera = DVec3::new(125.0, -75.0, 12.0);
-        let frame = GlobeFrame::flat(camera).unwrap();
+        let frame = GlobeFrame::flat(camera);
         let point = camera + DVec3::new(3.5, -2.0, 9.0);
-        let relative = frame.camera_relative(point).unwrap();
+        let relative = frame.camera_relative(point);
         assert_eq!(frame.mode(), GlobeMode::Flat);
         assert!((relative.position.as_dvec3() - (point - camera)).length() < 1.0e-6);
         assert_eq!(relative.up, glam::Vec3::Z);
@@ -247,17 +250,19 @@ mod tests {
 
     #[test]
     fn invalid_world_inputs_are_rejected() {
-        assert!(GlobeFrame::with_radius(0.0, DVec3::X).is_none());
-        assert!(GlobeFrame::with_radius(f64::NAN, DVec3::X).is_none());
-        assert!(GlobeFrame::globe(DVec3::ZERO).is_none());
-        assert!(GlobeFrame::globe(DVec3::new(f64::NAN, 0.0, 0.0)).is_none());
-        assert!(GlobeFrame::globe(DVec3::splat(f64::MAX)).is_none());
+        assert!(GlobeFrame::globe(0.0, DVec3::X).is_err());
+        assert!(GlobeFrame::globe(f64::NAN, DVec3::X).is_err());
+        assert!(GlobeFrame::globe(1.0, DVec3::ZERO).is_err());
+        assert!(GlobeFrame::globe(1.0, DVec3::new(f64::NAN, 0.0, 0.0)).is_err());
+        assert!(GlobeFrame::globe(1.0, DVec3::splat(f64::MAX)).is_err());
 
-        let frame = GlobeFrame::globe(DVec3::new(6_371_000.0, 0.0, 0.0)).unwrap();
+        let frame = GlobeFrame::globe(
+            GlobeFrame::WGS84_MEAN_RADIUS_M,
+            DVec3::new(6_371_000.0, 0.0, 0.0),
+        )
+        .unwrap();
         assert!(frame.lonlat_alt_to_ecef(f64::NAN, 0.0, 0.0).is_none());
         assert!(frame.lonlat_alt_to_ecef(0.0, 91.0, 0.0).is_none());
         assert!(frame.ecef_to_lonlat_alt(DVec3::ZERO).is_none());
-        assert!(frame.camera_relative(DVec3::ZERO).is_none());
-        assert!(frame.camera_relative(DVec3::splat(f64::INFINITY)).is_none());
     }
 }

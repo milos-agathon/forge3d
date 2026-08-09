@@ -1,8 +1,21 @@
 [alias]
-# Canonical Rust lint gate used by local hooks and CI.
-# This mirrors the supported feature matrix without requiring optional
-# system dependencies from `--all-features` such as PROJ.
+# Canonical routine Rust lint gate used by local hooks and pull-request CI.
+# Keep this to the extension/default architectural surface; exhaustive feature
+# linting is an explicit acceptance concern below.
 forge3d-clippy = [
+    "clippy",
+    "--workspace",
+    "--all-targets",
+    "--features",
+    "extension-module,default,cog_streaming,shader-contract-asserts",
+    "--",
+    "-D",
+    "warnings",
+]
+
+# Explicit acceptance/release lint gate. This mirrors the supported portable
+# feature matrix without requiring system-PROJ from `--all-features`.
+forge3d-clippy-acceptance = [
     "clippy",
     "--workspace",
     "--all-targets",
