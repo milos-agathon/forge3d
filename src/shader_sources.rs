@@ -14,7 +14,45 @@ pub(crate) fn hybrid_kernel() -> String {
         strip_includes(include_str!("shaders/sdf_operations.wgsl")),
         strip_includes(include_str!("shaders/hybrid_traversal.wgsl")),
         strip_includes(include_str!("shaders/hybrid_terrain_traversal.wgsl")),
+        include_str!("shaders/atmosphere/prometheus_spectral_reference.wgsl").to_string(),
         strip_includes(include_str!("shaders/hybrid_kernel.wgsl")),
+    ]
+    .join("\n")
+}
+
+/// AETHER sky module: the established camera/sky ABI plus the spectral LUT
+/// evaluator in its dedicated bind group. The legacy sky module remains a
+/// separate source and cannot accidentally claim AETHER shader provenance.
+pub(crate) fn aether_sky() -> String {
+    [
+        include_str!("shaders/includes/determinism.wgsl").to_string(),
+        include_str!("shaders/sky.wgsl").to_string(),
+        include_str!("shaders/atmosphere/evaluation_core.wgsl").to_string(),
+        include_str!("shaders/atmosphere/scattering.wgsl").to_string(),
+    ]
+    .join("\n")
+}
+
+/// Display-only AETHER resolve. Atmosphere evaluation itself stays linear HDR
+/// and reaches the existing tonemap operator unchanged through this assembly.
+pub(crate) fn aether_blit() -> String {
+    [
+        include_str!("shaders/includes/determinism.wgsl").to_string(),
+        include_str!("shaders/includes/tonemap_common.wgsl").to_string(),
+        include_str!("shaders/terrain_aether_blit.wgsl").to_string(),
+    ]
+    .join("\n")
+}
+
+/// Standalone PROMETHEUS aerial post. Keeping this source out of
+/// `hybrid_kernel()` is the contract that the established traversal and
+/// accumulation bind-group layouts remain byte-for-byte untouched.
+pub(crate) fn prometheus_aerial() -> String {
+    [
+        include_str!("shaders/includes/determinism.wgsl").to_string(),
+        include_str!("shaders/includes/tonemap_common.wgsl").to_string(),
+        include_str!("shaders/atmosphere/evaluation_core.wgsl").to_string(),
+        include_str!("shaders/atmosphere/prometheus_aerial.wgsl").to_string(),
     ]
     .join("\n")
 }
@@ -22,6 +60,7 @@ pub(crate) fn hybrid_kernel() -> String {
 pub(crate) fn terrain() -> String {
     [
         include_str!("shaders/includes/determinism.wgsl").to_string(),
+        include_str!("shaders/atmosphere/evaluation_core.wgsl").to_string(),
         include_str!("shaders/includes/shadow_moments.wgsl").to_string(),
         include_str!("shaders/lights.wgsl").to_string(),
         include_str!("shaders/brdf/common.wgsl").to_string(),
@@ -167,6 +206,9 @@ mod tests {
         let stats = include_str!("shaders/terrain_visbuffer_resolve.wgsl").to_string();
         vec![
             ("hybrid_kernel", hybrid_kernel()),
+            ("aether_sky", aether_sky()),
+            ("aether_blit", aether_blit()),
+            ("prometheus_aerial", prometheus_aerial()),
             ("terrain", terrain()),
             ("terrain_bindless", terrain_bindless()),
             ("visbuffer_write", terrain_visbuffer_write(false)),
@@ -186,6 +228,74 @@ mod tests {
             assert_valid_wgsl(&source);
             assert!(!source.is_empty(), "{name} assembled an empty shader");
         }
+    }
+
+    #[test]
+    fn production_aether_consumers_share_one_evaluation_core() {
+        let marker = "AETHER's single production LUT-evaluation core";
+        let core = include_str!("shaders/atmosphere/evaluation_core.wgsl");
+        assert!(!core.contains("@group("));
+        assert!(!core.contains("@binding("));
+        for (name, source) in [
+            ("sky", aether_sky()),
+            ("terrain", terrain()),
+            ("prometheus", prometheus_aerial()),
+        ] {
+            assert_eq!(
+                source.matches(marker).count(),
+                1,
+                "{name} must assemble exactly one AETHER evaluation core"
+            );
+            assert!(source.contains("AETHER_EVAL_WAVELENGTHS_NM"));
+            assert!(source.contains("AETHER_EVAL_CIE_XYZ"));
+            assert!(source.contains("fn aether_eval_xyz_to_rgb"));
+            assert!(source.contains("fn aether_eval_mu_to_unit"));
+            assert!(source.contains("fn aether_eval_nu_to_unit"));
+            assert!(source.contains("fn aether_eval_sample_accumulated_scattering"));
+            assert!(source.contains("fn aether_eval_segment_transmittance"));
+        }
+
+        let sky = include_str!("shaders/atmosphere/scattering.wgsl");
+        let terrain_source = include_str!("shaders/terrain_pbr_pom.wgsl");
+        let prometheus = include_str!("shaders/atmosphere/prometheus_aerial.wgsl");
+        assert!(sky.contains("aether_eval_sample_accumulated_scattering("));
+        assert!(terrain_source.contains("aether_eval_sample_accumulated_scattering("));
+        assert!(terrain_source.contains("aether_eval_segment_transmittance("));
+        assert!(prometheus.contains("aether_eval_sample_accumulated_scattering("));
+        assert!(prometheus.contains("aether_eval_segment_transmittance("));
+
+        for duplicate in [
+            "AETHER_TERRAIN_WAVELENGTHS_NM",
+            "AETHER_TERRAIN_CIE_XYZ",
+            "AETHER_TERRAIN_OZONE_ABSORPTION",
+            "fn aether_terrain_xyz_to_rgb",
+            "fn aether_terrain_spectral_xyz",
+            "fn aether_terrain_mu_to_unit",
+            "fn aether_terrain_nu_to_unit",
+            "fn aether_terrain_load_scattering",
+            "AETHER_PT_WAVELENGTHS_NM",
+            "AETHER_PT_CIE_XYZ",
+            "AETHER_PT_OZONE_ABSORPTION",
+            "fn prometheus_xyz_to_rgb",
+            "fn prometheus_mu_to_unit",
+            "fn prometheus_nu_to_unit",
+            "fn prometheus_segment_transmittance",
+            "fn prometheus_load_scattering_texel",
+            "fn atmosphere_mu_to_unit",
+            "fn atmosphere_relative_cosine_to_unit",
+            "fn atmosphere_load_scattering",
+        ] {
+            assert!(
+                !sky.contains(duplicate)
+                    && !terrain_source.contains(duplicate)
+                    && !prometheus.contains(duplicate),
+                "production consumer retained divergent evaluator {duplicate}"
+            );
+        }
+
+        let stochastic = include_str!("shaders/atmosphere/prometheus_spectral_reference.wgsl");
+        assert!(!stochastic.contains(marker));
+        assert!(!stochastic.contains("aether_eval_sample_accumulated_scattering"));
     }
 
     #[test]

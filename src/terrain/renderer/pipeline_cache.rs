@@ -9,7 +9,7 @@ impl TerrainScene {
         sample_count: u32,
         pipeline_label: &'static str,
         shader_label: &'static str,
-        shader_source: &'static str,
+        shader_source: &str,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> wgpu::RenderPipeline {
         let shader = crate::core::shader_registry::create_labeled_shader_module(
@@ -171,7 +171,7 @@ impl TerrainScene {
                 light_buffer_layout,       // @group(1): lights (bindings 3-5)
                 ibl_bind_group_layout,     // @group(2): IBL (bindings 0-4)
                 &shadow_bind_group_layout, // @group(3): shadows (bindings 0-4)
-                fog_bind_group_layout,     // @group(4): fog (binding 0)
+                fog_bind_group_layout,     // @group(4): dedicated shared atmosphere (bindings 0-2)
                 water_reflection_bind_group_layout, // @group(5): water reflections (bindings 0-2)
                 material_layer_bind_group_layout, // @group(6): material layers + probes
             ],
@@ -463,6 +463,31 @@ impl TerrainScene {
             "terrain.blit.depth.pipeline",
             "terrain.blit.depth.shader",
             include_str!("../../shaders/terrain_blit.wgsl"),
+            Some(wgpu::DepthStencilState {
+                format: TERRAIN_DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+        )
+    }
+
+    pub(super) fn create_aether_depth_blit_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        let source = crate::shader_sources::aether_blit();
+        Self::create_fullscreen_blit_pipeline(
+            device,
+            bind_group_layout,
+            color_format,
+            sample_count,
+            "terrain.aether.blit.depth.pipeline",
+            "terrain.aether.blit.shader",
+            &source,
             Some(wgpu::DepthStencilState {
                 format: TERRAIN_DEPTH_FORMAT,
                 depth_write_enabled: false,

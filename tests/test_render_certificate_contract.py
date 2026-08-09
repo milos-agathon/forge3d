@@ -56,6 +56,9 @@ DOCUMENTED_EXCLUSIONS = {
     # Certificate-report getter: returns the last render's execution report,
     # renders nothing itself.
     "render_execution_report": "execution-report getter, produces no pixels",
+    # CPU validation fixture used as an input to the separately certified PT
+    # closure harness; it is not a product render and submits no GPU work.
+    "atmosphere_generate_environment": "CPU validation fixture, no GPU render",
 }
 
 
@@ -69,6 +72,8 @@ RENDER_ENTRYPOINTS = {
     "TerrainRenderer.render_with_aov": f3d.TerrainRenderer.render_with_aov,
     "render_adjudication_pair": f3d.render_adjudication_pair,
     "hybrid_render_terrain_reference": f3d.hybrid_render_terrain_reference,
+    "hybrid_render_aether_spectral_reference": f3d.hybrid_render_aether_spectral_reference,
+    "native.hybrid_render_aether_spectral_reference": _native.hybrid_render_aether_spectral_reference,
     "render_offscreen_rgba": render_offscreen_rgba,
     "Renderer.render_triangle_rgba": f3d.Renderer.render_triangle_rgba,
     "Renderer.render_triangle_png": f3d.Renderer.render_triangle_png,
@@ -276,6 +281,7 @@ def test_documented_exclusions_explain_their_certificate_scope() -> None:
         "export_svg": export_svg,
         "export_pdf": export_pdf,
         "run_benchmark": run_benchmark,
+        "atmosphere_generate_environment": f3d.atmosphere_generate_environment,
     }
     for name, entrypoint in exclusions.items():
         assert name in DOCUMENTED_EXCLUSIONS

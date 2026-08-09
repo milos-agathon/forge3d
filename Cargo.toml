@@ -24,6 +24,9 @@ default = ["images", "enable-gpu-instancing", "enable-staging-rings"]
 extension-module = ["pyo3/extension-module"]
 # Debug-only runtime contract assertions for proven shader inputs.
 shader-contract-asserts = []
+# AETHER's CPU multiple-scattering bake is an offline acceptance tool. Runtime
+# evaluation always uses the shipped, provenance-locked LUT bank.
+atmosphere-bake = []
 # Optional async/double-buffered readback (R9)
 async_readback = ["dep:tokio"]
 weighted-oit = []

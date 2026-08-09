@@ -421,12 +421,17 @@ var moment_sampler: sampler;
 struct FogUniforms {
     // x=density, y=height falloff, z=base height, w=camera height
     params0: vec4<f32>,
-    // rgb=fog inscatter tint, w=padding
+    // rgb=fog inscatter tint, w=AETHER model enabled
     fog_inscatter: vec4<f32>,
     // x=sky enabled, y=sky aerial density, z=sky aerial enabled, w=sky sun intensity
     sky_params0: vec4<f32>,
-    // x=sky sun size, y=sun elevation, z=turbidity, w=sky exposure
+    // Legacy: x=sun size, y=sun elevation, z=turbidity, w=exposure.
+    // AETHER: x=ozone DU, y=Mie g, z=turbidity, w=exposure.
     sky_params1: vec4<f32>,
+    // xyz=sun direction in the terrain's Z-up world frame.
+    aether_sun_direction: vec4<f32>,
+    // x=bottom radius, y=top radius, z=scattering height count, w=nu count.
+    aether_planet_lut: vec4<f32>,
 }
 
 @group(4) @binding(0)
@@ -434,6 +439,9 @@ var<uniform> fog_uniforms: FogUniforms;
 
 @group(4) @binding(1)
 var sky_atmosphere_tex: texture_2d<f32>;
+
+@group(4) @binding(2)
+var aether_accumulated_scattering_tex: texture_3d<f32>;
 
 // ──────────────────────────────────────────────────────────────────────────
 // P4: Water Planar Reflection Uniforms (@group(5))
@@ -3176,6 +3184,150 @@ fn debug_water_prefilt_raw(is_water_flag: bool, prefilt_color: vec3<f32>) -> vec
 // Coordinate system: Z-up (world_pos.z = elevation)
 // Density scaling: quadratic (density²) for perceptually linear 0-1 range
 // ──────────────────────────────────────────────────────────────────────────
+fn aether_terrain_segment_transmittance(
+    distance_m: f32,
+    camera_height_m: f32,
+    view_mu: f32,
+    bottom_radius_m: f32,
+    density_scale: f32,
+    turbidity: f32,
+    ozone_du: f32,
+    mie_g: f32,
+) -> vec3<f32> {
+    // Mie anisotropy changes phase, not Beer-Lambert extinction. Retain the
+    // validated ABI argument while delegating the complete integral.
+    let _validated_mie_g = mie_g;
+    return aether_eval_segment_transmittance(
+        distance_m,
+        camera_height_m,
+        view_mu,
+        bottom_radius_m,
+        density_scale,
+        turbidity,
+        ozone_du,
+    );
+}
+
+fn aether_terrain_finite_normalize(direction: vec3<f32>) -> vec3<f32> {
+    let largest_component = max(
+        max(abs(direction.x), abs(direction.y)),
+        abs(direction.z),
+    );
+    let scaled = direction / max(largest_component, 1.0);
+    let length_squared = dot(scaled, scaled);
+    let normalized = scaled * inverseSqrt(max(length_squared, 1.0e-12));
+    return select(
+        vec3<f32>(0.0, 0.0, 1.0),
+        normalized,
+        length_squared > 1.0e-12,
+    );
+}
+
+fn aether_terrain_sample_inscatter(
+    altitude_m: f32,
+    mu_sun: f32,
+    mu_view: f32,
+    nu: f32,
+) -> vec3<f32> {
+    let atmosphere_height = max(
+        fog_uniforms.aether_planet_lut.y - fog_uniforms.aether_planet_lut.x,
+        1.0,
+    );
+    return aether_eval_sample_accumulated_scattering(
+        aether_accumulated_scattering_tex,
+        altitude_m / atmosphere_height,
+        mu_sun,
+        mu_view,
+        nu,
+        max(u32(fog_uniforms.aether_planet_lut.z + 0.5), 2u),
+        max(u32(fog_uniforms.aether_planet_lut.w + 0.5), 2u),
+    );
+}
+
+fn aether_terrain_apply_segment(
+    surface_radiance: vec3<f32>,
+    distance_m: f32,
+    camera_height_m: f32,
+    view_direction: vec3<f32>,
+    sun_direction: vec3<f32>,
+    density_scale: f32,
+    turbidity: f32,
+    ozone_du: f32,
+    mie_g: f32,
+) -> vec3<f32> {
+    let view = aether_terrain_finite_normalize(view_direction);
+    let bottom_radius_m = max(fog_uniforms.aether_planet_lut.x, 1.0);
+    let endpoint_height_m = aether_eval_spherical_altitude(
+        camera_height_m,
+        view.z,
+        distance_m,
+        bottom_radius_m,
+    );
+    let sun = aether_terrain_finite_normalize(sun_direction);
+    let view_sun_nu = dot(view, sun);
+    let endpoint_mus = aether_eval_spherical_endpoint_mus(
+        camera_height_m,
+        view.z,
+        sun.z,
+        view_sun_nu,
+        distance_m,
+        bottom_radius_m,
+    );
+    let transmittance = aether_terrain_segment_transmittance(
+        distance_m,
+        camera_height_m,
+        view.z,
+        bottom_radius_m,
+        density_scale,
+        turbidity,
+        ozone_du,
+        mie_g,
+    );
+    let base_transmittance = aether_terrain_segment_transmittance(
+        distance_m,
+        camera_height_m,
+        view.z,
+        bottom_radius_m,
+        1.0,
+        turbidity,
+        ozone_du,
+        mie_g,
+    );
+    let bounded_surface = clamp(surface_radiance, vec3<f32>(0.0), vec3<f32>(65504.0));
+    let sun_intensity = aether_eval_clamp_radiometric_scale(fog_uniforms.sky_params0.w);
+    let atmosphere_exposure = aether_eval_clamp_radiometric_scale(fog_uniforms.sky_params1.w);
+    let camera_scattering = aether_terrain_sample_inscatter(
+        camera_height_m,
+        sun.z,
+        view.z,
+        view_sun_nu,
+    ) * sun_intensity;
+    let endpoint_scattering = aether_terrain_sample_inscatter(
+        endpoint_height_m,
+        endpoint_mus.y,
+        endpoint_mus.x,
+        view_sun_nu,
+    ) * sun_intensity;
+    // Finite-segment radiative-transfer identity. Unlike a fog-color lerp,
+    // both endpoints come from the accumulated single+higher-order LUT.
+    let base_finite_inscatter = max(
+        camera_scattering - base_transmittance * endpoint_scattering,
+        vec3<f32>(0.0),
+    );
+    let density_adjustment = clamp(
+        (vec3<f32>(1.0) - transmittance)
+            / max(vec3<f32>(1.0) - base_transmittance, vec3<f32>(1.0e-6)),
+        vec3<f32>(0.0),
+        vec3<f32>(10.0),
+    );
+    // Match the boundary sky's exposure without scaling surface radiance:
+    // sky_exposure is an atmosphere-only radiometric multiplier.
+    let finite_inscatter =
+        base_finite_inscatter * density_adjustment * atmosphere_exposure;
+    let transported = bounded_surface * transmittance + finite_inscatter;
+    return clamp(transported, vec3<f32>(0.0), vec3<f32>(65504.0));
+}
+
 fn apply_atmospheric_fog(
     base_color: vec3<f32>,
     world_pos: vec3<f32>,
@@ -3186,10 +3338,10 @@ fn apply_atmospheric_fog(
     let fog_enabled = density_raw > 0.0;
     let sky_enabled = fog_uniforms.sky_params0.x > 0.5;
     let sky_aerial_enabled = sky_enabled && fog_uniforms.sky_params0.z > 0.5;
+    let aether_enabled = fog_uniforms.fog_inscatter.w > 0.5;
     if (!fog_enabled && !sky_aerial_enabled) {
         return base_color;
     }
-
     let to_camera = camera_pos - world_pos;
     let view_distance = length(to_camera);
     let sky_color = sample_atmosphere_sky(screen_pos);
@@ -3201,14 +3353,28 @@ fn apply_atmospheric_fog(
 
     var fog_result = base_color;
 
-    if (fog_enabled) {
+    // AETHER owns the complete transport when active. Never pre-compose the
+    // legacy RGB fog lerp and then apply spectral transport a second time.
+    if (fog_enabled && !(aether_enabled && sky_aerial_enabled)) {
         let density = density_raw * density_raw;
         let extinction = det_exp(-density * view_distance * height_factor * 0.005);
         let inscatter = select(fog_uniforms.fog_inscatter.rgb, sky_color, sky_enabled);
         fog_result = det_mix3(inscatter, fog_result, extinction);
     }
 
-    if (sky_aerial_enabled) {
+    if (sky_aerial_enabled && aether_enabled) {
+        fog_result = aether_terrain_apply_segment(
+            fog_result,
+            view_distance,
+            max(camera_pos.z, 0.0),
+            world_pos - camera_pos,
+            fog_uniforms.aether_sun_direction.xyz,
+            fog_uniforms.sky_params0.y,
+            fog_uniforms.sky_params1.z,
+            fog_uniforms.sky_params1.x,
+            fog_uniforms.sky_params1.y,
+        );
+    } else if (sky_aerial_enabled) {
         let aerial_density = fog_uniforms.sky_params0.y;
         let sun_intensity = fog_uniforms.sky_params0.w;
         let sun_size = fog_uniforms.sky_params1.x;
@@ -4845,7 +5011,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // Output Encoding (P6.1: Color Space Correctness)
     // ──────────────────────────────────────────────────────────────────────────
     // Render target is Rgba8Unorm (linear). We must encode for sRGB display.
-    // P6.1: output_srgb_eotf selects between:
+    // P6.1: output_srgb_eotf selects between (the host forces it on for
+    // active AETHER so sky and terrain share one exact IEC sRGB transfer):
     //   - false (P5 legacy): pow-gamma approximation via gamma_correct()
     //   - true (P6 correct): exact piecewise linear_to_srgb() EOTF
     let output_srgb_eotf = u_overlay.params5.z > 0.5;

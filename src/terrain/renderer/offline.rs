@@ -747,8 +747,12 @@ impl TerrainScene {
             )?;
             let sky_view = sky_texture
                 .as_ref()
-                .map(|(_, view)| view)
+                .map(|sky| &sky.view)
                 .unwrap_or(&self.sky_fallback_view);
+            let atmosphere_scattering_view = sky_texture
+                .as_ref()
+                .and_then(|sky| sky.scattering_view.as_ref())
+                .unwrap_or(&self.atmosphere_scattering_fallback_view);
 
             let main_height_view = self.main_pass_height_view(&state.height_inputs.heightmap_view);
             let pass_bind_groups = self.create_terrain_pass_bind_groups(
@@ -767,12 +771,17 @@ impl TerrainScene {
                 &height_curve_view,
                 state.height_inputs.water_mask_view_uploaded.as_ref(),
                 sky_view,
+                atmosphere_scattering_view,
                 height_ao_computed,
                 sun_vis_computed,
                 &state.decoded,
                 shadow_setup.height_min,
                 shadow_setup.height_exag,
-                eye.y,
+                if is_zup_camera_mode(&state.params.camera_mode) {
+                    eye.z
+                } else {
+                    eye.y
+                },
                 material_vt_ready,
             )?;
 
@@ -802,13 +811,38 @@ impl TerrainScene {
                 &pass_bind_groups.material_layer,
             )?;
 
-            if let Some((_, background_view)) = sky_texture.as_ref() {
-                self.blit_background_texture_with_pipeline(
-                    &mut encoder,
-                    render_targets,
-                    background_view,
-                    &state.hdr_background_blit_pipeline,
-                )?;
+            if let Some(sky) = sky_texture.as_ref() {
+                if sky.linear_hdr {
+                    // Both textures are exact-resolution RGBA16F. A direct
+                    // copy preserves linear HDR radiance and avoids a filtered
+                    // fullscreen presentation pass before accumulation.
+                    encoder.copy_texture_to_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: &sky.texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::ImageCopyTexture {
+                            texture: &render_targets.internal_texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::Extent3d {
+                            width: render_targets.internal_width,
+                            height: render_targets.internal_height,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                } else {
+                    self.blit_background_texture_with_pipeline(
+                        &mut encoder,
+                        render_targets,
+                        &sky.view,
+                        &state.hdr_background_blit_pipeline,
+                    )?;
+                }
             }
 
             self.run_main_pass_with_aov_pipeline(
@@ -1103,11 +1137,11 @@ impl TerrainScene {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &render_targets.depth_view,
                 depth_ops: Some(wgpu::Operations {
-                    load: if preserve_background {
-                        wgpu::LoadOp::Load
-                    } else {
-                        wgpu::LoadOp::Clear(1.0)
-                    },
+                    // Background may arrive through an AETHER texture copy,
+                    // which never initializes depth. Clear explicitly for
+                    // every offline terrain pass; color preservation is an
+                    // independent concern.
+                    load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
