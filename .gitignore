@@ -287,6 +287,11 @@ __pycache__/
 !tests/golden/
 !tests/golden/terrain/
 !tests/golden/terrain/*.png
+!tests/golden/helios/
+!tests/golden/helios/*.png
+!tests/golden/viewshed/
+!tests/golden/viewshed/*.png
+!tests/golden/viewshed/PROVENANCE.md
 !tests/golden/recipes/
 !tests/golden/recipes/*.png
 !tests/golden/presets/

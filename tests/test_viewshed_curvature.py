@@ -1,15 +1,55 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import numpy as np
 import pytest
+import rasterio
+from rasterio.enums import Resampling
+from rasterio.windows import from_bounds
 
 import forge3d as f3d
 from forge3d.terrain import viewshed
 
 
 pytestmark = pytest.mark.skipif(not f3d.has_gpu(), reason="viewshed requires a GPU")
+
+SWISS_BOUNDS = (7.0, 46.4, 8.0, 47.2)
+SWISS_SHAPE = (64, 64)
+SWISS_OBSERVER_CELL = (55, 49)
+
+
+def _switzerland_dem() -> np.ndarray:
+    source = Path(__file__).parents[1] / "assets" / "tif" / "switzerland_dem.tif"
+    assert (
+        hashlib.sha256(source.read_bytes()).hexdigest()
+        == "d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478"
+    )
+    with rasterio.open(source) as dataset:
+        dem = dataset.read(
+            1,
+            window=from_bounds(*SWISS_BOUNDS, dataset.transform),
+            out_shape=SWISS_SHAPE,
+            resampling=Resampling.bilinear,
+            masked=True,
+        )
+    assert dem.count() == dem.size, "committed HELIOS crop must contain no nodata"
+    return np.asarray(dem, dtype=np.float32)
+
+
+def _switzerland_observer() -> tuple[float, float]:
+    row, column = SWISS_OBSERVER_CELL
+    height, width = SWISS_SHAPE
+    left, bottom, right, top = SWISS_BOUNDS
+    return (
+        top - (row + 0.5) * (top - bottom) / height,
+        left + (column + 0.5) * (right - left) / width,
+    )
+
+
+def _iou(left: np.ndarray, right: np.ndarray) -> float:
+    return float(np.count_nonzero(left & right) / np.count_nonzero(left | right))
 
 
 def test_viewshed_returns_deterministic_visibility_and_physics_arrays() -> None:
@@ -260,3 +300,57 @@ def test_viewshed_height_system_is_explicit_and_strict() -> None:
         refraction_model="none",
     )
     assert result.shape == (2, 2)
+
+
+def test_real_dem_curvature_and_refraction_are_load_bearing() -> None:
+    dem = _switzerland_dem()
+    observer = _switzerland_observer()
+    east_west_m = f3d.geodesic_inverse(
+        observer[0], SWISS_BOUNDS[0], observer[0], SWISS_BOUNDS[2]
+    )["s12"]
+    north_south_m = f3d.geodesic_inverse(
+        SWISS_BOUNDS[1], observer[1], SWISS_BOUNDS[3], observer[1]
+    )["s12"]
+    assert min(east_west_m, north_south_m) >= 60_000.0
+
+    common = dict(
+        observer=observer,
+        bounds=SWISS_BOUNDS,
+        height_system="orthometric_egm96",
+        observer_height=2.0,
+        target_height=0.0,
+    )
+    flat = viewshed(dem, earth_model="flat", refraction_model="none", **common)
+    curved = viewshed(
+        dem, earth_model="ellipsoid", refraction_model="bennett", **common
+    )
+    iou = _iou(flat, curved)
+    flipped = int(np.count_nonzero(flat ^ curved))
+    print(
+        f"HELIOS load-bearing: IoU={iou:.9f}, flipped={flipped}, "
+        f"extent={east_west_m:.1f}x{north_south_m:.1f} m"
+    )
+    assert iou <= 0.96
+    assert flipped > 0
+
+
+def test_viewshed_matches_committed_whitebox_reference() -> None:
+    reference_path = (
+        Path(__file__).parent / "golden" / "viewshed" / "whitebox_switzerland_64.png"
+    )
+    reference = f3d.png_to_numpy(reference_path)[..., 0] > 0
+    actual = viewshed(
+        _switzerland_dem(),
+        _switzerland_observer(),
+        bounds=SWISS_BOUNDS,
+        height_system="orthometric_egm96",
+        observer_height=8_000.0,
+        target_height=0.0,
+        earth_model="ellipsoid",
+        refraction_model="effective_radius",
+        refraction_k=0.13,
+    )
+    iou = _iou(actual, reference)
+    flipped = int(np.count_nonzero(actual ^ reference))
+    print(f"HELIOS Whitebox reference: IoU={iou:.9f}, flipped={flipped}")
+    assert iou >= 0.98

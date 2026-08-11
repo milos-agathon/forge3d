@@ -225,9 +225,7 @@ fn compute_visibility(
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("helios.viewshed.shader"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../../shaders/terrain_viewshed.wgsl").into(),
-        ),
+        source: wgpu::ShaderSource::Wgsl(shader_source().into()),
     });
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("helios.viewshed.pipeline"),
@@ -308,6 +306,14 @@ pub fn compute_viewshed(
     options: &ViewshedOptions,
 ) -> RenderResult<ViewshedOutput> {
     compute_visibility(heights, positions_m, options)
+}
+
+fn shader_source() -> String {
+    format!(
+        "{}\n{}",
+        include_str!("../../shaders/includes/determinism.wgsl"),
+        include_str!("../../shaders/terrain_viewshed.wgsl")
+    )
 }
 
 pub fn compute_shadow_mask(
@@ -400,9 +406,7 @@ pub fn compute_shadow_mask(
     )?;
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("helios.shadow_mask.shader"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../../shaders/terrain_viewshed.wgsl").into(),
-        ),
+        source: wgpu::ShaderSource::Wgsl(shader_source().into()),
     });
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("helios.shadow_mask.pipeline"),

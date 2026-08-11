@@ -85,6 +85,7 @@ jobs:
     outputs:
       terrain_goldens: ${{ steps.filter.outputs.terrain_goldens }}
       f3dz: ${{ steps.filter.outputs.f3dz }}
+      helios: ${{ steps.filter.outputs.helios }}
 
     steps:
       - uses: actions/checkout@v4
@@ -136,6 +137,21 @@ jobs:
               - 'tests/data/codec_corpus/**'
               - 'tests/test_f3dz_codec.py'
               - 'tools/f3dz_determinism_report.py'
+            helios:
+              - '.github/workflows/ci.yml'
+              - 'src/geo/refraction.rs'
+              - 'src/geo/solar.rs'
+              - 'src/path_tracing/hybrid_compute/terrain_heightfield.rs'
+              - 'src/shaders/hybrid_terrain_traversal.wgsl'
+              - 'src/shaders/terrain_viewshed.wgsl'
+              - 'src/terrain/analysis/viewshed.rs'
+              - 'python/forge3d/geo.py'
+              - 'python/forge3d/terrain.py'
+              - 'tests/test_solar_spa.py'
+              - 'tests/test_viewshed_curvature.py'
+              - 'tests/test_shadow_tip.py'
+              - 'tests/golden/helios/**'
+              - 'tests/golden/viewshed/**'
 
   # ============================================================================
   # Rust Tests (cargo test)
@@ -602,6 +618,55 @@ jobs:
         with:
           name: visual-golden-diffs
           path: tests/artifacts/
+
+  # ============================================================================
+  # HELIOS physical-GPU acceptance
+  # ============================================================================
+  test-helios-gpu:
+    name: HELIOS (NVIDIA DX12 + Vulkan)
+    needs: [build-wheels, prepare-lfs-fixtures, terrain-golden-paths]
+    if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.helios == 'true'
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 20
+    env:
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+      WGPU_BACKEND: vulkan
+      WGPU_BACKENDS: vulkan
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: lfs-fixture-bundles
+      - name: Restore HELIOS real-DEM fixture
+        shell: pwsh
+        run: python -m zipfile -e lfs-fixture-bundles/python-tiffs.zip .
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install exact-head wheel and acceptance dependencies
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          python -m pip install pytest numpy rasterio
+      - name: Require physical NVIDIA Vulkan
+        shell: pwsh
+        run: python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan
+      - name: Run all HELIOS wins with zero skips
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:RUNNER_TEMP "helios-junit.xml"
+          python -m pytest tests/test_solar_spa.py tests/test_viewshed_curvature.py tests/test_shadow_tip.py -v --tb=short --junitxml="$junit"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          exit $verifyCode
 
   refresh-recipe-certificates:
     name: Refresh Recipe Certificates
@@ -1241,7 +1306,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
+    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, test-helios-gpu, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -1265,6 +1330,7 @@ jobs:
              [ "${{ needs.test-terminus-fuzz.result }}" != "success" ] || \
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
              { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
+             { [ "${{ needs.test-helios-gpu.result }}" != "success" ] && [ "${{ needs.test-helios-gpu.result }}" != "skipped" ]; } || \
              { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
              [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
              { [ "${{ needs.test-f3dz-gpu.result }}" != "success" ] && [ "${{ needs.test-f3dz-gpu.result }}" != "skipped" ]; } || \
