@@ -213,6 +213,7 @@ pub struct TerrainMinMaxPyramid {
     pub byte_size: u64,
     width: u32,
     height: u32,
+    cpu_mips: MinMaxMips,
 }
 
 impl TerrainMinMaxPyramid {
@@ -330,7 +331,15 @@ impl TerrainMinMaxPyramid {
             byte_size,
             width: w,
             height: h,
+            cpu_mips: mips,
         })
+    }
+
+    /// CPU mirror used to derive conservative tile AABBs for raster HZB
+    /// culling. This is the same PROMETHEUS pyramid uploaded above, not a
+    /// separately constructed terrain min-max hierarchy.
+    pub(crate) fn cpu_mips(&self) -> &MinMaxMips {
+        &self.cpu_mips
     }
 
     /// Uniform block for the traversal kernel; terrain is centered on the

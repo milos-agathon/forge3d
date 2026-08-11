@@ -664,6 +664,26 @@ pub(crate) fn terrain_shadow_tip(
     Ok(dict.into_py(py))
 }
 
+/// Return the registered datum constants for Earth, Moon, or Mars.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (name))]
+pub(crate) fn body_info(py: Python<'_>, name: &str) -> PyResult<PyObject> {
+    let body = crate::geo::body::body(name).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let dict = PyDict::new_bound(py);
+    dict.set_item("name", body.name)?;
+    dict.set_item("semi_major_m", body.ellipsoid.a)?;
+    dict.set_item("semi_minor_m", body.ellipsoid.b())?;
+    dict.set_item("flattening", body.ellipsoid.f)?;
+    dict.set_item("prime_meridian_w0_deg", body.prime_meridian_w0)?;
+    dict.set_item("rotation_rate_deg_per_day", body.rotation_rate)?;
+    dict.set_item(
+        "gravity_surface",
+        body.gravity_surface.map(|surface| surface.name()),
+    )?;
+    Ok(dict.into_py(py))
+}
+
 /// EGM96 geoid undulation N(lat, lon) in metres (degree/order 120 synthesis,
 /// NGA F477 convention, WGS84 ellipsoid).
 #[cfg(feature = "extension-module")]
@@ -676,6 +696,19 @@ pub(crate) fn geoid_undulation(lat: f64, lon: f64) -> PyResult<f64> {
         )));
     }
     Ok(crate::geo::geoid::undulation_deg(lat, lon))
+}
+
+/// GMM3 Mars areoid undulation above its reference ellipsoid, metres.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (lat, lon))]
+pub(crate) fn areoid_undulation(lat: f64, lon: f64) -> PyResult<f64> {
+    if !(-90.0..=90.0).contains(&lat) || !lon.is_finite() {
+        return Err(PyValueError::new_err(format!(
+            "invalid_argument: latitude must be in [-90, 90] and longitude finite, got ({lat}, {lon})"
+        )));
+    }
+    Ok(crate::geo::geoid::areoid_undulation_deg(lat, lon))
 }
 
 /// Convert an orthometric (EGM96) height to an ellipsoidal height:
@@ -720,17 +753,19 @@ pub(crate) fn ellipsoidal_to_orthometric(h_ellipsoidal: f64, lat: f64, lon: f64)
     .metres())
 }
 
-/// Karney inverse geodesic on WGS84: distance and azimuths between two
-/// points. Returns {"s12": m, "azi1": deg, "azi2": deg, "a12": deg}.
+/// Karney inverse geodesic on a registered planetary ellipsoid: distance and
+/// azimuths between two points. Returns
+/// {"s12": m, "azi1": deg, "azi2": deg, "a12": deg}.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (lat1, lon1, lat2, lon2))]
+#[pyo3(signature = (lat1, lon1, lat2, lon2, *, body = "earth"))]
 pub(crate) fn geodesic_inverse(
     py: Python<'_>,
     lat1: f64,
     lon1: f64,
     lat2: f64,
     lon2: f64,
+    body: &str,
 ) -> PyResult<PyObject> {
     for (name, lat) in [("lat1", lat1), ("lat2", lat2)] {
         if !(-90.0..=90.0).contains(&lat) {
@@ -744,7 +779,8 @@ pub(crate) fn geodesic_inverse(
             "invalid_argument: longitudes must be finite".to_string(),
         ));
     }
-    let g = crate::geo::geodesic::Geodesic::wgs84();
+    let body = crate::geo::body::body(body).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let g = crate::geo::geodesic::Geodesic::new(&body.ellipsoid);
     let r = g.inverse(lat1, lon1, lat2, lon2);
     let dict = PyDict::new_bound(py);
     dict.set_item("s12", r.s12)?;
@@ -754,17 +790,19 @@ pub(crate) fn geodesic_inverse(
     Ok(dict.into_py(py))
 }
 
-/// Karney direct geodesic on WGS84: destination from start point, azimuth,
-/// and distance. Returns {"lat2": deg, "lon2": deg, "azi2": deg, "a12": deg}.
+/// Karney direct geodesic on a registered planetary ellipsoid: destination
+/// from start point, azimuth, and distance. Returns
+/// {"lat2": deg, "lon2": deg, "azi2": deg, "a12": deg}.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (lat1, lon1, azi1, s12))]
+#[pyo3(signature = (lat1, lon1, azi1, s12, *, body = "earth"))]
 pub(crate) fn geodesic_direct(
     py: Python<'_>,
     lat1: f64,
     lon1: f64,
     azi1: f64,
     s12: f64,
+    body: &str,
 ) -> PyResult<PyObject> {
     if !(-90.0..=90.0).contains(&lat1) || !lon1.is_finite() || !azi1.is_finite() || !s12.is_finite()
     {
@@ -772,7 +810,8 @@ pub(crate) fn geodesic_direct(
             "invalid_argument: lat1 must be in [-90, 90]; lon1/azi1/s12 must be finite".to_string(),
         ));
     }
-    let g = crate::geo::geodesic::Geodesic::wgs84();
+    let body = crate::geo::body::body(body).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let g = crate::geo::geodesic::Geodesic::new(&body.ellipsoid);
     let r = g.direct(lat1, lon1, azi1, s12);
     let dict = PyDict::new_bound(py);
     dict.set_item("lat2", r.lat2)?;

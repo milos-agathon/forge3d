@@ -24,6 +24,9 @@ version = __version__
 
 import numpy as np
 
+from . import terrain
+from .terrain import VTStore, open_vt_store
+
 from ._png import load_png_rgba as _load_png_rgba
 from ._png import save_png as _save_png
 
@@ -107,6 +110,12 @@ _NATIVE_ONLY_EXPORTS = (
         "copc_read_node_points",  # P2.3: native COPC node decode
         "render_adjudication_pair",  # AEQUITAS: PT-vs-raster adjudication pair
         "hybrid_render_terrain_reference",  # PROMETHEUS: terrain PT reference
+        "hybrid_render_aether_spectral_reference",  # AETHER: stochastic PT acceptance reference
+        "AtmosphereLutHandle",  # AETHER: exact typed LUT payload handoff
+        "atmosphere_bake_luts",  # AETHER: shipped LUT resolver / offline bake
+        "atmosphere_spectral_to_linear_rgb",  # AETHER: spectral conversion
+        "atmosphere_generate_environment",  # AETHER: validation environment
+        "atmosphere_reference_aerial",  # AETHER: CPU transport diagnostic
         "render_brdf_tile",  # CENSOR: certified BRDF pixel render
         "render_brdf_tile_overrides",  # CENSOR: certified BRDF pixel render
         "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
@@ -115,6 +124,10 @@ _NATIVE_ONLY_EXPORTS = (
         "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
+        "terrain_culling_stats",  # TESSELLA: two-phase HZB counters
+        "terrain_visibility_stats",  # TESSELLA: visibility resolve counters
+        "terrain_vt_stats",  # TESSELLA: virtual-texture residency counters
+        "terrain_seam_stats",  # TESSELLA: clipmap seam analysis
         "capabilities",  # CENSOR: negotiated GPU capability report
         "render_execution_report",  # CENSOR: last-render execution certificate JSON
         "begin_render_execution_capture",  # CENSOR: Python-render capture begin
@@ -134,6 +147,10 @@ _NATIVE_ONLY_EXPORTS = (
         "compress_dem",  # COMPENDIUM: deterministic F3DZ encoder
         "decompress_dem",  # COMPENDIUM: fail-closed F3DZ decoder
         "verify_dem",  # COMPENDIUM: CRC/error-bound verifier
+        "encode_bc7_rgba8",  # TESSELLA: deterministic BC7 mode-6 encoder
+        "decode_bc7_rgba8",  # TESSELLA: deterministic BC7 mode-6 decoder
+        "encode_bc5_rg8",  # TESSELLA: deterministic BC5 encoder
+        "decode_bc5_rg8",  # TESSELLA: deterministic BC5 decoder
         "dd_selftest",  # DUPLA: GPU DD exactness canary
         "dd_harness",  # DUPLA: GPU DD bounds proof
         "dd_jitter_demo",  # DUPLA: Everest absolute-coordinate demo
@@ -251,6 +268,7 @@ from .terrain_params import (
     VTLayerFamily,
     TerrainVTSettings,
     validate_terrain_vt_support,
+    SkySettings,
 )
 from .offline import OfflineProgress, OfflineResult, render_offline
 from .denoise_oidn import oidn_available, oidn_denoise
@@ -285,7 +303,19 @@ from .viewer import (
     open_viewer,
     open_viewer_async,
 )
-from . import viewer_ipc, colors, interactive, datasets, widgets, smoke, verify
+from . import (
+    astro,
+    atmosphere,
+    viewer_ipc,
+    colors,
+    interactive,
+    datasets,
+    widgets,
+    sky,
+    smoke,
+    verify,
+)
+from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .datasets import (
     available as available_datasets,
     bundled as bundled_datasets,
@@ -514,6 +544,8 @@ from .crs import (
     crs_to_epsg,
     get_crs_from_rasterio,
     get_crs_from_geopandas,
+    body_info,
+    areoid_undulation,
     geoid_undulation,
     orthometric_to_ellipsoidal,
     ellipsoidal_to_orthometric,
@@ -657,6 +689,9 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
+    "terrain",
+    "VTStore",
+    "open_vt_store",
     # Version
     "__version__",
     "version",
@@ -664,6 +699,9 @@ __all__ = [
     "verify",
     "codec",
     "precision",
+    "atmosphere",
+    "AtmosphereSettings",
+    "SUN_ELEVATION_SWEEP_DEG",
     "dd_selftest",
     "dd_harness",
     "dd_jitter_demo",
@@ -697,6 +735,13 @@ __all__ = [
     "render_adjudication_pair",
     # PROMETHEUS: GPU terrain path-traced reference
     "hybrid_render_terrain_reference",
+    "hybrid_render_aether_spectral_reference",
+    # AETHER: spectral atmosphere bake/validation surface
+    "AtmosphereLutHandle",
+    "atmosphere_bake_luts",
+    "atmosphere_spectral_to_linear_rgb",
+    "atmosphere_generate_environment",
+    "atmosphere_reference_aerial",
     # CENSOR: certified BRDF pixel renders
     "render_brdf_tile",
     "render_brdf_tile_overrides",
@@ -709,6 +754,10 @@ __all__ = [
     # CENSOR: global degradation sink
     "native_degradations",
     "clear_native_degradations",
+    "terrain_culling_stats",
+    "terrain_visibility_stats",
+    "terrain_vt_stats",
+    "terrain_seam_stats",
     # CENSOR: negotiated GPU capability report
     "capabilities",
     # CENSOR: last-render execution certificate JSON
@@ -724,6 +773,10 @@ __all__ = [
     "compress_dem",
     "decompress_dem",
     "verify_dem",
+    "encode_bc7_rgba8",
+    "decode_bc7_rgba8",
+    "encode_bc5_rg8",
+    "decode_bc5_rg8",
     # CENSOR: typed GPU-error exceptions
     "MemoryBudgetExceeded",
     "DegradedCapability",
@@ -756,6 +809,7 @@ __all__ = [
     "VTLayerFamily",
     "TerrainVTSettings",
     "validate_terrain_vt_support",
+    "SkySettings",
     "OfflineProgress",
     "OfflineResult",
     "render_offline",
@@ -814,6 +868,8 @@ __all__ = [
     "camera_rigs",
     "datasets",
     "widgets",
+    "astro",
+    "sky",
     # Interactive viewer
     "open_viewer",
     "open_viewer_async",
@@ -961,6 +1017,8 @@ __all__ = [
     "transform_coords",
     "reproject_geom",
     "crs_to_epsg",
+    "body_info",
+    "areoid_undulation",
     "geoid_undulation",
     "orthometric_to_ellipsoidal",
     "ellipsoidal_to_orthometric",

@@ -116,6 +116,21 @@ pub fn register_buffer_explicit(size: u64, is_host_visible: bool) -> ResourceHan
     register_buffer_with_ledger(size, is_host_visible, call_site.clone(), call_site)
 }
 
+/// Register a scoped non-wgpu host allocation after enforcing the global
+/// host-visible budget. This is used for transient upload encodings whose
+/// backing `Vec` is otherwise invisible to the GPU resource wrappers.
+#[track_caller]
+pub fn tracked_host_allocation(size: u64, label: &str) -> Result<ResourceHandle, RenderError> {
+    global_tracker().check_budget_labeled(size, label)?;
+    let call_site = caller_label();
+    Ok(register_buffer_with_ledger(
+        size,
+        true,
+        label.to_owned(),
+        call_site,
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // CENSOR: total allocation ledger
 // ---------------------------------------------------------------------------

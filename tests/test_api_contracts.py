@@ -78,6 +78,7 @@ class TestNativeModuleSymbols:
         "ClipmapMesh",
         "CogDataset",
         "SunPosition",
+        "AtmosphereLutHandle",
         # P0.3: Previously-orphaned classes now registered
         "Frame",
         "SdfPrimitive",
@@ -127,6 +128,13 @@ class TestNativeModuleSymbols:
         "terrain_viewshed",
         "terrain_shadow_mask",
         "terrain_shadow_tip",
+        "astro_body_position",
+        "astro_moon_phase",
+        "astro_delta_t_seconds",
+        "astro_sidereal_time",
+        "astro_refraction_arcminutes",
+        "sky_set_observation",
+        "astro_validation_metrics",
         "clipmap_generate_py",
         "engine_info",
         "hybrid_render",
@@ -151,6 +159,12 @@ class TestNativeModuleSymbols:
         "render_adjudication_pair",
         # PROMETHEUS: GPU terrain path-traced reference
         "hybrid_render_terrain_reference",
+        "hybrid_render_aether_spectral_reference",
+        # AETHER: spectral atmosphere public surface
+        "atmosphere_bake_luts",
+        "atmosphere_spectral_to_linear_rgb",
+        "atmosphere_generate_environment",
+        "atmosphere_reference_aerial",
         # VERITAS: per-pixel cryptographic provenance
         "seal_provenance",
         "verify_provenance",
@@ -186,6 +200,8 @@ class TestNativeModuleSymbols:
         "geometry_measure",
         "measure_geometries",
         # MENSURA geodesy surface (src/py_functions/geodesy.rs)
+        "body_info",
+        "areoid_undulation",
         "geoid_undulation",
         "orthometric_to_ellipsoidal",
         "ellipsoidal_to_orthometric",
@@ -274,6 +290,14 @@ class TestNativeModuleSymbols:
         # CENSOR: global degradation sink
         "native_degradations",
         "clear_native_degradations",
+        "terrain_culling_stats",
+        "terrain_visibility_stats",
+        "terrain_vt_stats",
+        "terrain_seam_stats",
+        "encode_bc7_rgba8",
+        "decode_bc7_rgba8",
+        "encode_bc5_rg8",
+        "decode_bc5_rg8",
         # CENSOR: negotiated GPU capability report
         "capabilities",
         # CENSOR: last-render execution certificate JSON
@@ -351,6 +375,16 @@ class TestSceneMethodContracts:
         assert hasattr(f3d.Scene, "set_height_from_r32f"), (
             "Scene.set_height_from_r32f not found"
         )
+
+    # ---- AETHER spectral atmosphere ----
+
+    @pytest.mark.parametrize(
+        "method_name",
+        ("set_atmosphere", "clear_atmosphere", "get_atmosphere_settings"),
+    )
+    def test_aether_scene_method_exists(self, method_name: str):
+        assert hasattr(f3d.Scene, method_name), f"Scene.{method_name} not found"
+        assert callable(getattr(f3d.Scene, method_name))
 
     # ---- OIT methods ----
 

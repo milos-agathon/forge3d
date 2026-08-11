@@ -923,6 +923,7 @@ def hybrid_render_terrain_reference(
     refraction_k: float = 0.13,
     pressure_mbar: float | None = None,
     temperature_c: float | None = None,
+    atmosphere: "Mapping[str, Any] | Any | None" = None,
 ) -> dict:
     """Converged GPU path-traced reference of a real DEM under sun + IBL.
 
@@ -946,6 +947,14 @@ def hybrid_render_terrain_reference(
     ray distance (NaN on miss), plus ``frames``, ``variance``, ``converged``
     and memory diagnostics (``peak_host_visible_bytes``,
     ``minmax_pyramid_bytes``, ``gpu_resource_bytes``).
+
+    When ``atmosphere`` is provided, AETHER runs as a GPU post over the
+    converged linear accumulation and authoritative depth AOV. It accepts an
+    exact :class:`forge3d.AtmosphereLutHandle`, an
+    :class:`forge3d.atmosphere.AtmosphereSettings` instance for shipped LUTs,
+    or a mapping containing ``lut_handle``. Custom ozone, Mie, ground-albedo,
+    or scattering-order transport requires a baked handle; it is never
+    silently replaced with a shipped/default table.
     """
     _ = cache
     if _NATIVE is None or not hasattr(_NATIVE, "hybrid_render_terrain_reference"):
@@ -1073,6 +1082,7 @@ def hybrid_render_terrain_reference(
         refraction_k=float(refraction_k),
         pressure_mbar=float(pressure_mbar),
         temperature_c=float(temperature_c),
+        atmosphere=atmosphere,
     )
     result["sun_source"] = sun_source
     result["solar_azimuth_deg"] = float(sun_azimuth_deg)
