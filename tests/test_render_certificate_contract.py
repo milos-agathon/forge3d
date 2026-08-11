@@ -128,10 +128,10 @@ def test_public_render_entrypoints_expose_certificate_keyword() -> None:
 # cache. Each entry carries the reason, on the same terms as
 # DOCUMENTED_EXCLUSIONS above.
 CACHE_EXCLUSIONS = {
-    # LIMES analytic coverage is a self-contained bin/raster/resolve pipeline
-    # with no reusable native terrain graph, so `vector_render_analytic_py`
+    # LIMES owns a bounded internal compiled-scene cache rather than a
+    # caller-supplied ANAMNESIS render graph, so `vector_render_analytic_py`
     # takes certificate= but not cache=.
-    "vector_render_analytic_py": "analytic coverage path, no cacheable native graph",
+    "vector_render_analytic_py": "internal compiled-scene cache, no ANAMNESIS graph",
 }
 
 
