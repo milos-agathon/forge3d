@@ -120,7 +120,8 @@ _NATIVE_ONLY_EXPORTS = (
         "render_brdf_tile_overrides",  # CENSOR: certified BRDF pixel render
         "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
         "verify_provenance",  # VERITAS: native manifest verification
-        "declutter_optimal",  # CARTOGRAPHER-PRIME: bounded-optimal label solve
+        "declutter",  # CARTOGRAPHER-PRIME: generic typed label solve
+        "declutter_optimal",  # CARTOGRAPHER-PRIME: compatibility alias
         "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
@@ -740,6 +741,7 @@ __all__ = [
     "seal_provenance",
     "verify_provenance",
     # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
+    "declutter",
     "declutter_optimal",
     "LabelRationale",
     # CENSOR: global degradation sink

@@ -5613,20 +5613,60 @@ class MapScene:
         compiled_label_plans = {
             str(layer_id): plan.to_dict() for layer_id, plan in sorted(label_plans.items())
         }
-        depth_cull_layers = {
-            str(layer_id): {
+        depth_cull_layers: dict[str, Any] = {}
+        for layer_id, plan in sorted(label_plans.items()):
+            visibility: dict[str, Any] = {}
+            for visible, labels_for_state in (
+                (True, plan.accepted),
+                (False, plan.rejected),
+            ):
+                for label in labels_for_state:
+                    instance_id = "label-instance:" + _stable_hash(
+                        {
+                            "layer_id": str(layer_id),
+                            "label_id": str(label.label_id),
+                            "source_id": str(label.source_id),
+                            "ordering_key": str(label.ordering_key or ""),
+                        }
+                    )
+                    entry = {
+                        "instance_id": instance_id,
+                        "label_id": str(label.label_id),
+                        "source_id": str(label.source_id),
+                        "visible": visible,
+                    }
+                    if not visible:
+                        entry["reason"] = str(label.reason)
+                    visibility[instance_id] = entry
+            depth_cull_layers[str(layer_id)] = {
                 "accepted": [str(label.label_id) for label in plan.accepted],
                 "rejected": [
                     {"label_id": str(label.label_id), "reason": str(label.reason)}
                     for label in plan.rejected
                 ],
-                "visibility": {
-                    **{str(label.label_id): True for label in plan.accepted},
-                    **{str(label.label_id): False for label in plan.rejected},
-                },
+                # Public label ids are presentation metadata and need not be
+                # unique.  Stable instance/source identity prevents duplicate
+                # ids from overwriting each other's frozen visibility state.
+                "visibility": visibility,
             }
-            for layer_id, plan in sorted(label_plans.items())
-        }
+        depth_authorities = sorted(
+            {
+                str(sample["depth_authority"])
+                for plan in label_plans.values()
+                for sample in (
+                    *(
+                        dict(candidate.terrain_sample or {})
+                        for label in plan.accepted
+                        for candidate in label.candidates
+                    ),
+                    *(
+                        dict(label.details.get("terrain_sample") or {})
+                        for label in plan.rejected
+                    ),
+                )
+                if sample.get("depth_authority")
+            }
+        )
         manifest = RecipeManifest(
             recipe_family="mapscene_showcases",
             recipe_id=f"mapscene-compiled-{recipe_hash[:16]}",
@@ -5639,7 +5679,12 @@ class MapScene:
             compiled_label_plans=compiled_label_plans,
             depth_cull={
                 "source": "compile_phase",
-                "depth_proxy": "deterministic_camera_terrain_sampler",
+                "depth_inputs": depth_authorities,
+                "depth_proxy": (
+                    "pre_supplied_authoritative"
+                    if "pre_supplied_authoritative" in depth_authorities
+                    else "deterministic_terrain_proxy"
+                ),
                 "camera_terrain_key": camera_terrain_key,
                 "layers": depth_cull_layers,
             },
