@@ -12,11 +12,20 @@ EVIDENCE_SCHEMA = "forge3d.cartographer-prime.runner-evidence.v1"
 GOLDEN_SCHEMA = "forge3d.cartographer-prime.golden.v1"
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-PYTHON_RE = re.compile(r"^3\.11\.\d+$")
-LLVM_RE = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
+PYTHON_VERSION_RE = re.compile(
+    r"^(?P<major>0|[1-9][0-9]*)\."
+    r"(?P<minor>0|[1-9][0-9]*)\."
+    r"(?P<patch>0|[1-9][0-9]*)$"
+)
+LLVM_RE = re.compile(
+    r"^(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)$"
+)
 RUSTC_BANNER_RE = re.compile(
-    r"^rustc (?P<release>\d+\.\d+\.\d+) "
-    r"\((?P<short_hash>[0-9a-f]{7,40}) (?P<date>\d{4}-\d{2}-\d{2})\)$"
+    r"^rustc (?P<release>[0-9]+\.[0-9]+\.[0-9]+) "
+    r"\((?P<short_hash>[0-9a-f]{7,40}) "
+    r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})\)$"
 )
 EXPECTED_BUILD_PROFILE = "release-lto"
 MAX_GAP = 0.02  # Definition-of-done threshold in 07-cartographer-prime.md.
@@ -71,6 +80,16 @@ def _parse_rustc(value: str, config: str) -> dict[str, str]:
         "host": fields["host"],
         "llvm_version": llvm_version,
     }
+
+
+def _parse_python_version(value: str, config: str) -> tuple[int, int, int]:
+    match = PYTHON_VERSION_RE.fullmatch(value)
+    if not match:
+        raise EvidenceError(f"wrong Python runtime for {config}")
+    version = tuple(int(match.group(field)) for field in ("major", "minor", "patch"))
+    if version[:2] != (3, 11):
+        raise EvidenceError(f"wrong Python runtime for {config}")
+    return version
 
 
 def verify_evidence(artifacts: Path, golden_path: Path, expected_sha: str) -> dict:
@@ -157,10 +176,9 @@ def verify_evidence(artifacts: Path, golden_path: Path, expected_sha: str) -> di
         ):
             raise EvidenceError(f"missing runtime provenance for {config}")
         python_version = runtime["python"]
-        if runtime["python_implementation"] != "CPython" or not PYTHON_RE.fullmatch(
-            python_version
-        ):
+        if runtime["python_implementation"] != "CPython":
             raise EvidenceError(f"wrong Python runtime for {config}")
+        python_semver = _parse_python_version(python_version, config)
         if runtime["build_profile"] != EXPECTED_BUILD_PROFILE:
             raise EvidenceError(f"wrong build profile for {config}")
         rustc = _parse_rustc(runtime["rustc"], config)
@@ -168,6 +186,8 @@ def verify_evidence(artifacts: Path, golden_path: Path, expected_sha: str) -> di
             raise EvidenceError(f"wrong rustc host for {config}")
         runtime_identities[config] = {
             "python": python_version,
+            "python_implementation": runtime["python_implementation"],
+            "python_major_minor": python_semver[:2],
             "rust_release": rustc["release"],
             "rust_commit_hash": rustc["commit_hash"],
             "rust_commit_date": rustc["commit_date"],
@@ -235,7 +255,8 @@ def verify_evidence(artifacts: Path, golden_path: Path, expected_sha: str) -> di
     if len(instance_counts) != 1:
         raise EvidenceError("cross-runner tested instance counts disagree")
     for field in (
-        "python",
+        "python_implementation",
+        "python_major_minor",
         "rust_release",
         "rust_commit_hash",
         "rust_commit_date",
@@ -256,6 +277,9 @@ def verify_evidence(artifacts: Path, golden_path: Path, expected_sha: str) -> di
         "schema": "forge3d.cartographer-prime.verification.v1",
         "git_sha": expected_sha,
         "runner_configs": sorted(found),
+        "python_versions": {
+            config: runtime_identities[config]["python"] for config in sorted(found)
+        },
         "plan_hash": measured_hash,
         "maximum_optimality_gap": max(
             value["metrics"]["optimality_gap"] for value in found.values()

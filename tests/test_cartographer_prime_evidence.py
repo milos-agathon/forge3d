@@ -168,6 +168,11 @@ def test_verifier_accepts_exact_three_runner_evidence(tmp_path: Path) -> None:
         "schema": "forge3d.cartographer-prime.verification.v1",
         "git_sha": SHA,
         "runner_configs": ["macos-arm64", "ubuntu-x64", "windows-x64"],
+        "python_versions": {
+            "macos-arm64": "3.11.9",
+            "ubuntu-x64": "3.11.9",
+            "windows-x64": "3.11.9",
+        },
         "plan_hash": PLAN_HASH,
         "maximum_optimality_gap": 0.0,
         "occluded_placement_count": 0,
@@ -202,6 +207,10 @@ def test_verifier_rejects_schema_tamper(tmp_path: Path) -> None:
     ("field", "value", "message"),
     [
         ("python", "3.12.1", "wrong Python runtime"),
+        ("python", "3.11", "wrong Python runtime"),
+        ("python", "3.11.latest", "wrong Python runtime"),
+        ("python", "03.11.9", "wrong Python runtime"),
+        ("python", "3.11.1١", "wrong Python runtime"),
         ("python_implementation", "PyPy", "wrong Python runtime"),
         ("build_profile", "dev", "wrong build profile"),
         ("rustc", "rustc 1.90.0", "invalid rustc provenance"),
@@ -266,14 +275,16 @@ def test_verifier_rejects_cross_runner_rustc_drift(tmp_path: Path) -> None:
         verify_evidence(tmp_path, GOLDEN, SHA)
 
 
-def test_verifier_rejects_cross_runner_python_patch_drift(tmp_path: Path) -> None:
+def test_verifier_accepts_cross_runner_python_patch_drift(tmp_path: Path) -> None:
     payloads = {key: _evidence(key) for key in RUNNERS}
-    payloads["macos-arm64"]["runtime"]["python"] = "3.11.10"
+    payloads["ubuntu-x64"]["runtime"]["python"] = "3.11.15"
     _write_artifacts(tmp_path, payloads)
-    with pytest.raises(
-        EvidenceError, match="cross-runner python provenance disagrees"
-    ):
-        verify_evidence(tmp_path, GOLDEN, SHA)
+    result = verify_evidence(tmp_path, GOLDEN, SHA)
+    assert result["python_versions"] == {
+        "macos-arm64": "3.11.9",
+        "ubuntu-x64": "3.11.15",
+        "windows-x64": "3.11.9",
+    }
 
 
 def test_verifier_rejects_wrong_exact_test_count(tmp_path: Path) -> None:
