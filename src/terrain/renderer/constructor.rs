@@ -494,9 +494,9 @@ impl TerrainScene {
             Self::create_shadow_depth_pipeline(device.as_ref(), &shadow_depth_bind_group_layout);
 
         let tracker = crate::core::memory_tracker::global_tracker();
-        tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false);
-        tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false);
-        tracker.track_buffer_allocation(reflection_probe_grid_uniform_alloc_bytes, false);
+        tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false)?;
+        tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false)?;
+        tracker.track_buffer_allocation(reflection_probe_grid_uniform_alloc_bytes, false)?;
         let tracked_scene_textures = vec![
             crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::Rgba8Unorm),
             crate::core::resource_tracker::register_texture(256, 1, wgpu::TextureFormat::R32Float),
