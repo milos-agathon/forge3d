@@ -223,16 +223,21 @@ fn compute_visibility(
         },
     )?;
 
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("helios.viewshed.shader"),
-        source: wgpu::ShaderSource::Wgsl(shader_source().into()),
-    });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("helios.viewshed.pipeline"),
-        layout: None,
-        module: &shader,
-        entry_point: "main",
-    });
+    let shader_source = shader_source();
+    let module = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "helios.viewshed.shader",
+        &shader_source,
+    );
+    let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("helios.viewshed.pipeline"),
+            layout: None,
+            module: &module,
+            entry_point: "main",
+        },
+    );
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("helios.viewshed.bind_group"),
         layout: &pipeline.get_bind_group_layout(0),
@@ -404,16 +409,21 @@ pub fn compute_shadow_mask(
             mapped_at_creation: false,
         },
     )?;
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("helios.shadow_mask.shader"),
-        source: wgpu::ShaderSource::Wgsl(shader_source().into()),
-    });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("helios.shadow_mask.pipeline"),
-        layout: None,
-        module: &shader,
-        entry_point: "shadow_mask_main",
-    });
+    let shader_source = shader_source();
+    let module = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "helios.shadow_mask.shader",
+        &shader_source,
+    );
+    let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("helios.shadow_mask.pipeline"),
+            layout: None,
+            module: &module,
+            entry_point: "shadow_mask_main",
+        },
+    );
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("helios.shadow_mask.bind_group"),
         layout: &pipeline.get_bind_group_layout(0),
