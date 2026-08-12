@@ -5,8 +5,7 @@ use super::spectral::{
     mie_phase_cornette_shanks, rayleigh_phase, rayleigh_scattering_coefficient,
     spectral_to_linear_rgb, MieParameters, NUM_WAVELENGTHS, WAVELENGTHS_NM,
 };
-use crate::core::memory_tracker::global_tracker;
-use crate::core::resource_tracker::{register_buffer_explicit, ResourceHandle};
+use crate::core::resource_tracker::{tracked_host_allocation, ResourceHandle};
 use half::f16;
 use sha2::{Digest, Sha256};
 
@@ -668,10 +667,8 @@ fn tracker_handle(bytes: u64, label: &str) -> Result<ResourceHandle, AtmosphereE
             limit: HOST_VISIBLE_LIMIT_BYTES,
         });
     }
-    global_tracker()
-        .check_budget_labeled(bytes, label)
-        .map_err(|e| AtmosphereError::TrackerBudget(e.to_string()))?;
-    Ok(register_buffer_explicit(bytes, true))
+    tracked_host_allocation(bytes, label)
+        .map_err(|error| AtmosphereError::TrackerBudget(error.to_string()))
 }
 
 fn precomputed_bracket(t: f32) -> Result<(usize, usize, f32), AtmosphereError> {

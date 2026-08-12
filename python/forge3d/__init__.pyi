@@ -1445,7 +1445,17 @@ def declutter_optimal(
         Tuple[int, int, Tuple[float, float, float, float], float, bool]
     ],
     gap_tolerance: float = ...,
-    node_budget: int = ...,
+    node_budget: int | None = ...,
+    margin: float = ...,
+) -> Tuple[List[Tuple[int, int]], float, LabelRationale]: ...
+
+def declutter(
+    candidates: Sequence[
+        Tuple[int, int, Tuple[float, float, float, float], float, bool]
+    ],
+    algorithm: Literal["optimal"] = ...,
+    gap_tolerance: float = ...,
+    node_budget: int | None = ...,
     margin: float = ...,
 ) -> Tuple[List[Tuple[int, int]], float, LabelRationale]: ...
 

@@ -174,6 +174,8 @@ class TestNativeModuleSymbols:
         "mesh_generate_cube_tbn",
         "mesh_generate_plane_tbn",
         # CARTOGRAPHER-PRIME: bounded-optimal label declutter
+        "_reserve_label_depth_host_allocation",
+        "declutter",
         "declutter_optimal",
         "anamnesis_leaf_key",
         "anamnesis_pass_key",
@@ -814,6 +816,7 @@ class TestPackageLevelApiContracts:
         "MapSceneNativeUnavailable",
         "CompiledScenePlan",
         # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
+        "declutter",
         "declutter_optimal",
         "LabelRationale",
         # CENSOR: native Ed25519 certificate signer
@@ -869,6 +872,145 @@ class TestPackageLevelApiContracts:
             assert not hasattr(f3d, attr_name), (
                 f"forge3d.{attr_name} should not be exported"
             )
+
+
+class TestCartographerPrimeNativeContract:
+    """Generic/compatibility declutter surfaces share strict typed inputs."""
+
+    CANDIDATES = [
+        (1, 0, (0.0, 0.0, 10.0, 10.0), 6.0, True),
+        (2, 0, (5.0, 0.0, 15.0, 10.0), 10.0, True),
+        (3, 0, (12.0, 0.0, 22.0, 10.0), 6.0, True),
+    ]
+
+    def test_generic_optimal_dispatch_matches_compatibility_alias(self):
+        generic = _native.declutter(
+            self.CANDIDATES, algorithm="optimal", gap_tolerance=0.0, margin=0.0
+        )
+        compatibility = _native.declutter_optimal(
+            self.CANDIDATES, gap_tolerance=0.0, margin=0.0
+        )
+        assert generic[0] == compatibility[0] == [(1, 0), (3, 0)]
+        assert generic[1] == compatibility[1] == 0.0
+        assert generic[2].records() == compatibility[2].records()
+        assert isinstance(generic[2], _native.LabelRationale)
+
+    @pytest.mark.parametrize(
+        "candidate",
+        [
+            (1, 0, (0.0, float("nan"), 1.0, 1.0), 1.0, True),
+            (1, 0, (0.0, 0.0, 1.0, 1.0), float("inf"), True),
+            (1, 0, (0.0, 0.0, 1.0, 1.0), -1.0, True),
+        ],
+    )
+    def test_invalid_candidate_is_rejected(self, candidate):
+        with pytest.raises(ValueError, match=r"candidate \(1, 0\)"):
+            _native.declutter([candidate])
+
+    def test_duplicate_candidate_identity_is_rejected(self):
+        duplicate = (7, 3, (0.0, 0.0, 1.0, 1.0), 1.0, True)
+        with pytest.raises(ValueError, match="identity is duplicated"):
+            _native.declutter([duplicate, duplicate])
+
+    @pytest.mark.parametrize(
+        "bounds",
+        [
+            (0.0, 0.0, 0.0, 1.0),
+            (0.0, 0.0, 0.01, 1.0),
+        ],
+    )
+    def test_degenerate_or_quantization_collapsed_bounds_are_rejected(self, bounds):
+        with pytest.raises(ValueError, match="non-degenerate after quantization"):
+            _native.declutter([(1, 0, bounds, 1.0, True)])
+
+    def test_large_weight_aggregate_does_not_overflow(self):
+        candidates = [
+            (1, 0, (0.0, 0.0, 1.0, 1.0), 5.0e15, True),
+            (2, 0, (2.0, 0.0, 3.0, 1.0), 5.0e15, True),
+            (3, 0, (4.0, 0.0, 5.0, 1.0), 5.0e15, True),
+        ]
+        placements, gap, rationale = _native.declutter(
+            candidates, gap_tolerance=0.0, margin=0.0
+        )
+        assert placements == [(1, 0), (2, 0), (3, 0)]
+        assert gap == 0.0
+        solver = next(record for record in rationale.records() if record["kind"] == "solver")
+        assert solver["objective"] == pytest.approx(1.5e16)
+        assert solver["objective"] == solver["upper_bound"]
+
+    def test_raw_priority_is_primary_over_cardinality(self):
+        unit = 1.0 / 1024.0
+        placements, gap, rationale = _native.declutter(
+            [
+                (1, 0, (0.0, 0.0, 30.0, 10.0), 10.0 * unit, True),
+                (2, 0, (0.0, 0.0, 9.0, 10.0), 3.0 * unit, True),
+                (3, 0, (10.5, 0.0, 19.5, 10.0), 3.0 * unit, True),
+                (4, 0, (21.0, 0.0, 30.0, 10.0), 3.0 * unit, True),
+            ],
+            gap_tolerance=0.0,
+            margin=0.0,
+        )
+        assert placements == [(1, 0)]
+        assert gap == 0.0
+        solver = next(record for record in rationale.records() if record["kind"] == "solver")
+        assert solver["objective"] == pytest.approx(10.0 * unit)
+        assert solver["objective"] == solver["upper_bound"]
+
+    def test_large_box_overlap_area_does_not_overflow(self):
+        placements, _, rationale = _native.declutter(
+            [
+                (1, 0, (0.0, 0.0, 1.0e9, 1.0e9), 2.0, True),
+                (2, 0, (0.0, 0.0, 1.0e9, 1.0e9), 1.0, True),
+            ],
+            gap_tolerance=0.0,
+            margin=0.0,
+        )
+        assert placements == [(1, 0)]
+        placed = next(record for record in rationale.records() if record["kind"] == "placed")
+        assert placed["displaced"][0]["overlap_area_px"] == pytest.approx(1.0e18)
+
+    def test_visibility_gate_is_solver_only_evidence(self):
+        _, _, rationale = _native.declutter(
+            [(1, 0, (0.0, 0.0, 1.0, 1.0), 1.0, False)], margin=0.0
+        )
+        assert rationale.records()[0] == {
+            "kind": "visibility_filtered_candidate",
+            "label_id": 1,
+            "candidate_index": 0,
+        }
+        rendered = " ".join(rationale.render()).lower()
+        for unsupported_claim in ("depth", "silhouette", "occluded"):
+            assert unsupported_claim not in rendered
+
+    def test_unsupported_generic_algorithm_is_explicit(self):
+        with pytest.raises(ValueError, match="expected 'optimal'"):
+            _native.declutter(self.CANDIDATES, algorithm="greedy")
+
+    def test_internal_depth_host_reservation_lifetime_and_double_close(self):
+        before = _native.global_memory_metrics()["host_visible_bytes"]
+        reservation = _native._reserve_label_depth_host_allocation(
+            4096, "labels.depth.api-contract"
+        )
+        assert type(reservation).__name__ == "_LabelDepthHostAllocation"
+        assert reservation.bytes == 4096
+        assert reservation.active is True
+        assert _native.global_memory_metrics()["host_visible_bytes"] == before + 4096
+        assert reservation.close() is True
+        assert reservation.close() is False
+        assert reservation.active is False
+        assert _native.global_memory_metrics()["host_visible_bytes"] == before
+
+    def test_canonical_clippy_aliases_are_single_strings(self):
+        from pathlib import Path
+        import tomllib
+
+        config_path = Path(__file__).resolve().parents[1] / ".cargo" / "config.toml"
+        aliases = tomllib.loads(config_path.read_text(encoding="utf-8"))["alias"]
+        for name in ("forge3d-clippy", "forge3d-clippy-acceptance"):
+            alias = aliases[name]
+            assert isinstance(alias, str), f"{name} must use Cargo's string alias form"
+            assert alias.startswith("clippy --workspace --all-targets --features ")
+            assert alias.endswith(" -- -D warnings")
 
 
 # ===========================================================================
