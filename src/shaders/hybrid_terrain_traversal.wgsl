@@ -241,8 +241,10 @@ fn terrain_normal_at(p: vec3<f32>, cx: u32, cz: u32) -> vec3<f32> {
     return normalize(vec3<f32>(-dh_du / sx, 1.0, -dh_dv / sz));
 }
 
-// Min-max quadtree DDA. `any_hit` short-circuits for shadow rays.
-fn terrain_trace(ray: Ray, any_hit: bool) -> HybridHitResult {
+// Min-max quadtree DDA. `any_hit` controls early exit only; curvature is an
+// explicit sun-ray policy because arbitrary IBL directions must not reuse the
+// azimuth-specific effective radius uploaded for the Sun.
+fn terrain_trace(ray: Ray, any_hit: bool, apply_curvature: bool) -> HybridHitResult {
     var res: HybridHitResult;
     res.hit = 0u;
     res.t = ray.tmax;
@@ -291,11 +293,11 @@ fn terrain_trace(ray: Ray, any_hit: bool) -> HybridHitResult {
         // max or below min over this node's footprint.
         let mm = textureLoad(terrain_minmax_tex, vec2<i32>(i32(nx), i32(ny)), i32(level)).rg
             * terrain.h_params.z;
-        let ray_height = terrain_curved_height_range(ray, t_lo, t_hi, any_hit);
+        let ray_height = terrain_curved_height_range(ray, t_lo, t_hi, apply_curvature);
         if (ray_height.x > mm.y || ray_height.y < mm.x) { continue; }
 
         if (level == 0u) {
-            let leaf = terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, any_hit);
+            let leaf = terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, apply_curvature);
             if (leaf.hit && leaf.t < res.t) {
                 res.hit = 1u;
                 res.t = leaf.t;
@@ -363,13 +365,13 @@ fn terrain_trace(ray: Ray, any_hit: bool) -> HybridHitResult {
 }
 
 fn terrain_intersect(ray: Ray) -> HybridHitResult {
-    return terrain_trace(ray, false);
+    return terrain_trace(ray, false, false);
 }
 
 fn terrain_occluded(ray: Ray, max_distance: f32) -> bool {
     var r = ray;
     r.tmax = min(ray.tmax, max_distance);
-    let hit = terrain_trace(r, true);
+    let hit = terrain_trace(r, true, true);
     return hit.hit != 0u;
 }
 
@@ -530,7 +532,7 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         let ei = terrain_cosine_dir(n, u1, u2);
         let eray = Ray(hit.point + n * 1e-3, 1e-3, ei, 1e30);
         var env_vis = 1.0;
-        if (intersect_shadow_ray(eray, 1e30)) {
+        if (intersect_ibl_occlusion_ray(eray, 1e30)) {
             env_vis = 0.0;
         }
         let ibl = albedo * terrain_env_radiance(ei) * env_vis;

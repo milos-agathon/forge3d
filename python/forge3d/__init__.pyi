@@ -1459,6 +1459,8 @@ def render_adjudication_pair(
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
 
 # PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
+# ``earth_model="flat"`` requires ``refraction_model="none"``; unsupported
+# model names or pairs raise an exception and never silently fall back.
 def hybrid_render_terrain_reference(
     heightmap: np.ndarray,
     width: int,

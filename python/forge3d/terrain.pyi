@@ -6,6 +6,10 @@ import numpy as np
 from numpy.typing import NDArray
 from .geo import SolarTime
 
+# Model contract for every HELIOS function below: ``earth_model="flat"``
+# requires ``refraction_model="none"``; unsupported names or pairs raise
+# an exception and never silently fall back.
+
 @overload
 def viewshed(
     dem: NDArray[np.floating],

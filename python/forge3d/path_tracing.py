@@ -955,6 +955,11 @@ def hybrid_render_terrain_reference(
     or a mapping containing ``lut_handle``. Custom ozone, Mie, ground-albedo,
     or scattering-order transport requires a baked handle; it is never
     silently replaced with a shipped/default table.
+
+    ``earth_model`` controls terrain curvature and ``refraction_model`` its
+    effective-ray correction. ``earth_model='flat'`` requires
+    ``refraction_model='none'``. Unsupported model names or model pairs raise
+    an exception; they never fall back to flat or vacuum rendering.
     """
     _ = cache
     if _NATIVE is None or not hasattr(_NATIVE, "hybrid_render_terrain_reference"):

@@ -1,6 +1,7 @@
 use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 use crate::geo::refraction::{principal_radii_m, EarthModel, RefractionModel};
+use crate::path_tracing::hybrid_compute::terrain_heightfield::TerrainMinMaxPyramid;
 use bytemuck::{Pod, Zeroable};
 
 #[derive(Clone, Copy, Debug)]
@@ -51,6 +52,11 @@ struct ViewshedCell {
 }
 
 fn physics_terms(options: &ViewshedOptions) -> Result<[f32; 4], String> {
+    if matches!(options.earth_model, EarthModel::Flat)
+        && !matches!(options.refraction_model, RefractionModel::None)
+    {
+        return Err("flat earth only supports refraction_model='none'".into());
+    }
     let one_minus_k = 1.0 - options.refraction_model.k()?;
     let (inv_meridional, inv_prime_vertical) = match options.earth_model {
         EarthModel::Flat => (0.0, 0.0),
@@ -78,13 +84,18 @@ fn validate_common(
     options: &ViewshedOptions,
 ) -> Result<(), String> {
     let expected = options.width as usize * options.height as usize;
+    // terrain_pack_node reserves 13 bits per cell coordinate, matching the
+    // production PROMETHEUS traversal contract used by the shared shader.
+    const MAX_PACKED_CELL_COUNT: u32 = 1 << 13;
     if options.width < 2
         || options.height < 2
+        || options.width - 1 > MAX_PACKED_CELL_COUNT
+        || options.height - 1 > MAX_PACKED_CELL_COUNT
         || heights.len() != expected
         || position_count != expected
     {
         return Err(format!(
-            "DEM/position lengths do not match dimensions {}x{} (both dimensions must be at least 2)",
+            "DEM/position lengths do not match supported dimensions {}x{} (both dimensions must be at least 2 and packed traversal supports at most 8192 cells per axis)",
             options.width,
             options.height
         ));
@@ -179,14 +190,22 @@ fn compute_visibility(
             options.top_deg,
         ],
     };
-    let height_buffer = tracked_create_buffer_init(
+    // HELIOS reuses PROMETHEUS' tracked DEM/min-max textures. This is the only
+    // acceleration structure for the call; there is no flat shadow copy or
+    // curvature-specific pyramid.
+    let pyramid = TerrainMinMaxPyramid::from_heightfield(
         device,
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("helios.viewshed.heights"),
-            contents: bytemuck::cast_slice(heights),
-            usage: wgpu::BufferUsages::STORAGE,
-        },
+        queue,
+        heights,
+        options.width,
+        options.height,
     )?;
+    let height_view = pyramid
+        .height_texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    let minmax_view = pyramid
+        .minmax_texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
     let uniform_buffer = tracked_create_buffer_init(
         device,
         &wgpu::util::BufferInitDescriptor {
@@ -247,16 +266,20 @@ fn compute_visibility(
                 resource: uniform_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
-                binding: 1,
-                resource: height_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
                 binding: 2,
                 resource: position_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: output.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(&height_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&minmax_view),
             },
         ],
     });
@@ -365,14 +388,19 @@ pub fn compute_shadow_mask(
             options.top_deg,
         ],
     };
-    let height_buffer = tracked_create_buffer_init(
+    let pyramid = TerrainMinMaxPyramid::from_heightfield(
         device,
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("helios.shadow_mask.heights"),
-            contents: bytemuck::cast_slice(heights),
-            usage: wgpu::BufferUsages::STORAGE,
-        },
+        queue,
+        heights,
+        options.width,
+        options.height,
     )?;
+    let height_view = pyramid
+        .height_texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    let minmax_view = pyramid
+        .minmax_texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
     let uniform_buffer = tracked_create_buffer_init(
         device,
         &wgpu::util::BufferInitDescriptor {
@@ -433,16 +461,20 @@ pub fn compute_shadow_mask(
                 resource: uniform_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
-                binding: 1,
-                resource: height_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
                 binding: 4,
                 resource: input_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: output.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(&height_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&minmax_view),
             },
         ],
     });
@@ -484,6 +516,32 @@ pub fn compute_shadow_mask(
 mod tests {
     use super::*;
 
+    fn leaf_segment_occluded(
+        heights: [f32; 4],
+        origin: [f32; 2],
+        direction: [f32; 2],
+        height_limit: f32,
+    ) -> bool {
+        let mut deviation = [0.0; 3];
+        for (index, parameter) in [0.0_f32, 0.5, 1.0].into_iter().enumerate() {
+            let u = (origin[0] + parameter * direction[0]).clamp(0.0, 1.0);
+            let v = (origin[1] + parameter * direction[1]).clamp(0.0, 1.0);
+            let low = heights[0] + (heights[1] - heights[0]) * u;
+            let high = heights[2] + (heights[3] - heights[2]) * u;
+            deviation[index] = low + (high - low) * v - height_limit;
+        }
+        let quadratic = 2.0 * deviation[2] + 2.0 * deviation[0] - 4.0 * deviation[1];
+        let linear = deviation[2] - deviation[0] - quadratic;
+        let mut maximum = deviation[0].max(deviation[2]);
+        if quadratic.abs() > 1e-12 {
+            let vertex = -linear / (2.0 * quadratic);
+            if (0.0..1.0).contains(&vertex) {
+                maximum = maximum.max(quadratic * vertex * vertex + linear * vertex + deviation[0]);
+            }
+        }
+        maximum > 0.0
+    }
+
     #[test]
     fn viewshed_validation_rejects_bad_models_and_dimensions() {
         let mut options = ViewshedOptions {
@@ -510,5 +568,50 @@ mod tests {
         options.width = 2;
         options.refraction_model = RefractionModel::EffectiveRadius { k: 1.0 };
         assert!(validate(&[0.0; 4], &[[0.0; 2]; 4], &options).is_err());
+        options.refraction_model = RefractionModel::Bennett {
+            pressure_mbar: 1013.25,
+            temperature_c: 15.0,
+        };
+        assert_eq!(
+            physics_terms(&options).unwrap_err(),
+            "flat earth only supports refraction_model='none'"
+        );
+    }
+
+    #[test]
+    fn continuous_leaf_test_detects_between_endpoint_blocker() {
+        // Along the diagonal this bilinear saddle is zero at both endpoints
+        // and 50 m at the midpoint. Endpoint sampling misses the 25 m ray;
+        // the exact production leaf polynomial must report an occluder.
+        let heights = [0.0, 100.0, 100.0, 0.0];
+        assert!(heights[0] < 25.0 && heights[3] < 25.0);
+        assert!(leaf_segment_occluded(heights, [0.0, 0.0], [1.0, 1.0], 25.0));
+    }
+
+    #[test]
+    fn viewshed_shader_is_valid_wgsl() {
+        let source = shader_source();
+        for production_primitive in [
+            "const TERRAIN_STACK_SIZE: u32 = 64u",
+            "fn terrain_slab_xz(",
+            "fn terrain_leaf_occluded(",
+            "fn terrain_trace_segment(",
+            "textureNumLevels(minmax_texture)",
+        ] {
+            assert!(
+                source.contains(production_primitive),
+                "viewshed shader must retain production traversal primitive {production_primitive}"
+            );
+        }
+        assert!(!source.contains("fn minmax_may_exceed("));
+        assert_eq!(source.matches("terrain_trace_segment(").count(), 3);
+        let module = naga::front::wgsl::parse_str(&source)
+            .expect("assembled HELIOS viewshed WGSL must parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("assembled HELIOS viewshed WGSL must validate");
     }
 }

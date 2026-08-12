@@ -123,6 +123,9 @@ pub fn effective_radius_m(
     refraction: RefractionModel,
     azimuth_deg: f64,
 ) -> Result<f64, String> {
+    if matches!(earth, EarthModel::Flat) && !matches!(refraction, RefractionModel::None) {
+        return Err("flat earth only supports refraction_model='none'".into());
+    }
     Ok(earth.directional_radius_m(azimuth_deg)? / (1.0 - refraction.k()?))
 }
 
@@ -165,5 +168,19 @@ mod tests {
             0.0
         )
         .is_err());
+        assert!(effective_radius_m(
+            EarthModel::Flat,
+            RefractionModel::Bennett {
+                pressure_mbar: 1013.25,
+                temperature_c: 15.0,
+            },
+            0.0,
+        )
+        .is_err());
+        assert!(
+            effective_radius_m(EarthModel::Flat, RefractionModel::None, 0.0)
+                .unwrap()
+                .is_infinite()
+        );
     }
 }

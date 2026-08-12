@@ -63,6 +63,8 @@ def save_aovs(
 
 def iter_tiles(width: int, height: int, tile: int) -> Iterable[Tuple[int, int, int, int]]: ...
 
+# ``earth_model="flat"`` requires ``refraction_model="none"``; unsupported
+# model names or pairs raise an exception and never silently fall back.
 def hybrid_render_terrain_reference(
     heightmap: np.ndarray,
     width: int,

@@ -68,7 +68,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
     assert "types: [opened, synchronize, reopened, ready_for_review]" in trigger
     assert "labeled" not in trigger
     assert "unlabeled" not in trigger
-    scopes = ["core", "full", "determinism", "m06", "f3dz", "anamnesis"]
+    scopes = ["core", "full", "determinism", "m06", "f3dz", "anamnesis", "helios"]
     if tessella_enabled:
         scopes.append("tessella")
     for scope in scopes:
@@ -181,6 +181,16 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
     if tessella_enabled:
         physical_artifacts.append(
             ("test-tessella-gpu", "tessella-physical-gpu-evidence")
+        )
+    if "test-helios-gpu" in jobs:
+        physical_artifacts.extend(
+            [
+                (
+                    "test-helios-rust-conservative",
+                    "helios-rust-conservative-${{ github.run_id }}-${{ github.run_attempt }}",
+                ),
+                ("test-helios-gpu", "helios-physical-gpu-evidence"),
+            ]
         )
     for job, artifact in physical_artifacts:
         assert "retention-days: 90" in _artifact_step(_job(workflow, job), artifact)

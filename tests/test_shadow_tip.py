@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -26,6 +27,11 @@ TIME = SolarTime(
     delta_t_seconds=67.0,
     pressure_mbar=820.0,
     temperature_c=11.0,
+)
+
+gpu_required = pytest.mark.skipif(
+    not forge3d.has_gpu(),
+    reason="HELIOS shadow traversal requires a GPU adapter",
 )
 
 
@@ -67,10 +73,24 @@ def test_shadow_tip_bearing_and_curved_length_contract() -> None:
         tan_alpha + math.sqrt(tan_alpha * tan_alpha - 2.0 * peak_h / radius)
     )
     flat = peak_h / tan_alpha
+    relative_error = abs(result["length_m"] - prediction) / prediction
+    flat_delta_fraction = abs(result["length_m"] - flat) / result["length_m"]
+
+    print(
+        "HELIOS shadow-tip: "
+        f"bearing_deg={result['bearing_deg']:.12f}, "
+        f"expected_bearing_deg={expected_bearing:.12f}, "
+        f"bearing_error_deg={bearing_error:.12f}, "
+        f"length_m={result['length_m']:.12f}, "
+        f"curved_prediction_m={prediction:.12f}, "
+        f"relative_error={relative_error:.12f}, "
+        f"flat_length_m={flat:.12f}, "
+        f"flat_delta_fraction={flat_delta_fraction:.12f}"
+    )
 
     assert bearing_error <= 0.05
-    assert abs(result["length_m"] - prediction) / prediction <= 0.005
-    assert abs(result["length_m"] - flat) / result["length_m"] > 0.02
+    assert relative_error <= 0.005
+    assert flat_delta_fraction > 0.02
 
 
 def test_no_refraction_shadow_tip_uses_pressure_independent_true_elevation() -> None:
@@ -100,6 +120,21 @@ def test_no_refraction_shadow_tip_uses_pressure_independent_true_elevation() -> 
     )
 
 
+def test_flat_earth_rejects_non_none_refraction_instead_of_silently_no_opping() -> None:
+    with pytest.raises(ValueError, match="flat earth only supports"):
+        shadow_tip(
+            _peak_dem(),
+            39.75,
+            -105.175,
+            TIME,
+            bounds=BOUNDS,
+            height_system="ellipsoidal",
+            earth_model="flat",
+            refraction_model="bennett",
+        )
+
+
+@gpu_required
 def test_shadow_mask_is_boolean_and_bitwise_deterministic() -> None:
     kwargs = dict(
         bounds=BOUNDS,
@@ -205,65 +240,229 @@ print(json.dumps({"sha256": hashlib.sha256(mask.tobytes()).hexdigest(),
 def test_curved_shadow_memory_matches_flat_baseline() -> None:
     if not forge3d.has_gpu():
         pytest.skip("terrain path-tracer memory gate requires a GPU")
-    from forge3d.datasets import mini_dem
-    from forge3d.path_tracing import hybrid_render_terrain_reference
+    script = r'''
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
 
-    dem = mini_dem()[::4, ::4].astype(np.float32)
-    dem -= dem.min()
-    dem /= max(float(dem.max()), 1e-6)
-    spacing = 100.0 / (dem.shape[1] - 1)
-    common = dict(
-        width=64,
-        height=64,
-        camera={
-            "origin": (0.0, 35.0, 90.0),
-            "look_at": (0.0, 5.0, 0.0),
-            "up": (0.0, 1.0, 0.0),
-            "fov_y": 45.0,
-            "exposure": 1.0,
-        },
-        spacing=(spacing, spacing),
-        exaggeration=20.0,
-        albedo=(0.55, 0.52, 0.48),
-        sun_azimuth_deg=225.0,
-        sun_elevation_deg=35.0,
-        observer_latitude_deg=46.5,
-        observer_longitude_deg=7.5,
-        spp=1,
-        min_frames=32,
-        max_frames=32,
-        variance_threshold=1e9,
-        seed=7,
+import numpy as np
+import forge3d
+from forge3d.datasets import mini_dem
+from forge3d.path_tracing import hybrid_render_terrain_reference
+
+mode = sys.argv[1]
+expected_package_path = Path(sys.argv[2]).resolve()
+expected_native_path = Path(sys.argv[3]).resolve()
+expected_native_sha256 = sys.argv[4]
+package_path = Path(forge3d.__file__).resolve()
+native_path = Path(forge3d._forge3d.__file__).resolve()
+native_sha256 = hashlib.sha256(native_path.read_bytes()).hexdigest()
+if package_path != expected_package_path:
+    raise RuntimeError(
+        f"fresh memory process imported a different package: "
+        f"expected={expected_package_path}, actual={package_path}"
     )
-    baseline = hybrid_render_terrain_reference(
-        dem, earth_model="flat", refraction_model="none", **common
+if native_path != expected_native_path or native_sha256 != expected_native_sha256:
+    raise RuntimeError(
+        f"fresh memory process imported a different native binary: "
+        f"expected_path={expected_native_path}, actual_path={native_path}, "
+        f"expected_sha256={expected_native_sha256}, actual_sha256={native_sha256}"
     )
-    helios = hybrid_render_terrain_reference(
-        dem,
-        earth_model="ellipsoid",
-        refraction_model="effective_radius",
-        **common,
-    )
-    metrics = {
-        name: {
-            key: int(result[key])
-            for key in (
-                "peak_host_visible_bytes",
-                "gpu_resource_bytes",
-                "minmax_pyramid_bytes",
+dem = mini_dem()[::4, ::4].astype(np.float32)
+dem -= dem.min()
+dem /= max(float(dem.max()), 1e-6)
+spacing = 100.0 / (dem.shape[1] - 1)
+workload = {
+    "dem_shape": list(dem.shape),
+    "width": 64,
+    "height": 64,
+    "camera": {
+        "origin": (0.0, 35.0, 90.0),
+        "look_at": (0.0, 5.0, 0.0),
+        "up": (0.0, 1.0, 0.0),
+        "fov_y": 45.0,
+        "exposure": 1.0,
+    },
+    "spacing": (spacing, spacing),
+    "exaggeration": 20.0,
+    "albedo": (0.55, 0.52, 0.48),
+    "sun_azimuth_deg": 225.0,
+    "sun_elevation_deg": 35.0,
+    "observer_latitude_deg": 46.5,
+    "observer_longitude_deg": 7.5,
+    "spp": 1,
+    "min_frames": 32,
+    "max_frames": 32,
+    "variance_threshold": 1e9,
+    "seed": 7,
+}
+render_kwargs = dict(workload)
+render_kwargs.pop("dem_shape")
+models = {
+    "flat_baseline": ("flat", "none"),
+    "helios": ("ellipsoid", "effective_radius"),
+}
+earth_model, refraction_model = models[mode]
+result = hybrid_render_terrain_reference(
+    dem,
+    earth_model=earth_model,
+    refraction_model=refraction_model,
+    **render_kwargs,
+)
+print(json.dumps({
+    "mode": mode,
+    "returncode": 0,
+    "package_path": str(package_path),
+    "native_path": str(native_path),
+    "native_sha256": native_sha256,
+    "adapter": forge3d.device_probe(),
+    "workload": workload,
+    "metrics": {
+        key: int(result[key])
+        for key in (
+            "peak_host_visible_bytes",
+            "gpu_resource_bytes",
+            "minmax_pyramid_bytes",
+        )
+    },
+}, sort_keys=True))
+'''
+
+    def fresh_measurement(mode: str) -> dict[str, object]:
+        package_path = Path(forge3d.__file__).resolve()
+        native_path = Path(forge3d._forge3d.__file__).resolve()
+        native_sha256 = hashlib.sha256(native_path.read_bytes()).hexdigest()
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                script,
+                mode,
+                str(package_path),
+                str(native_path),
+                native_sha256,
+            ],
+            cwd=package_path.parent.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise AssertionError(
+                f"fresh {mode} memory process failed with {completed.returncode}: "
+                f"stdout={completed.stdout!r}, stderr={completed.stderr!r}"
             )
-        }
-        for name, result in (("flat_baseline", baseline), ("helios", helios))
+        try:
+            measurement = json.loads(completed.stdout.strip().splitlines()[-1])
+        except (IndexError, json.JSONDecodeError) as exc:
+            raise AssertionError(
+                f"fresh {mode} memory process emitted no valid JSON: "
+                f"stdout={completed.stdout!r}, stderr={completed.stderr!r}"
+            ) from exc
+        assert measurement["returncode"] == completed.returncode
+        assert Path(measurement["package_path"]).resolve() == package_path
+        assert Path(measurement["native_path"]).resolve() == native_path
+        assert measurement["native_sha256"] == native_sha256
+        return measurement
+
+    baseline = fresh_measurement("flat_baseline")
+    helios = fresh_measurement("helios")
+    assert helios["native_sha256"] == baseline["native_sha256"]
+    assert helios["adapter"] == baseline["adapter"]
+    assert helios["workload"] == baseline["workload"]
+    delta = {
+        key: int(helios["metrics"][key]) - int(baseline["metrics"][key])
+        for key in baseline["metrics"]
     }
-    print(f"HELIOS memory: {metrics}")
+    evidence = {
+        "schema": "forge3d.helios_memory_comparison/1",
+        "before": baseline,
+        "after": helios,
+        "delta": delta,
+    }
+    print("HELIOS memory: " + json.dumps(evidence, sort_keys=True))
     for key in ("peak_host_visible_bytes", "gpu_resource_bytes"):
-        assert metrics["helios"][key] <= math.ceil(
-            metrics["flat_baseline"][key] * 1.05
+        assert int(baseline["metrics"][key]) > 0
+        assert int(helios["metrics"][key]) <= math.ceil(
+            int(baseline["metrics"][key]) * 1.05
         )
     assert (
-        metrics["helios"]["minmax_pyramid_bytes"]
-        == metrics["flat_baseline"]["minmax_pyramid_bytes"]
+        helios["metrics"]["minmax_pyramid_bytes"]
+        == baseline["metrics"]["minmax_pyramid_bytes"]
     )
+
+
+def test_memory_subprocess_import_identity_is_parent_bound() -> None:
+    native_path = Path(forge3d._forge3d.__file__).resolve()
+    expected = {
+        "package_path": str(Path(forge3d.__file__).resolve()),
+        "native_path": str(native_path),
+        "native_sha256": hashlib.sha256(native_path.read_bytes()).hexdigest(),
+    }
+    probe = r'''
+import hashlib, json
+from pathlib import Path
+import forge3d
+native = Path(forge3d._forge3d.__file__).resolve()
+print(json.dumps({
+    "package_path": str(Path(forge3d.__file__).resolve()),
+    "native_path": str(native),
+    "native_sha256": hashlib.sha256(native.read_bytes()).hexdigest(),
+}, sort_keys=True))
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=Path(forge3d.__file__).resolve().parent.parent,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(completed.stdout.strip().splitlines()[-1]) == expected
+
+
+def test_memory_subprocess_rejects_parent_native_sha_mismatch() -> None:
+    native_path = Path(forge3d._forge3d.__file__).resolve()
+    actual_sha = hashlib.sha256(native_path.read_bytes()).hexdigest()
+    assert actual_sha != "0" * 64
+    probe = r'''
+import hashlib
+from pathlib import Path
+import sys
+import forge3d
+native = Path(forge3d._forge3d.__file__).resolve()
+actual = hashlib.sha256(native.read_bytes()).hexdigest()
+if actual != sys.argv[1]:
+    raise RuntimeError("fresh memory process imported a different native binary")
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", probe, "0" * 64],
+        cwd=Path(forge3d.__file__).resolve().parent.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode != 0
+    assert "different native binary" in completed.stderr
+
+
+def test_helios_public_docs_state_flat_refraction_contract() -> None:
+    from forge3d.path_tracing import hybrid_render_terrain_reference
+    from forge3d.terrain import viewshed
+
+    for api in (viewshed, shadow_mask, shadow_tip, hybrid_render_terrain_reference):
+        doc = api.__doc__ or ""
+        assert "earth_model='flat'" in doc
+        assert "refraction_model='none'" in doc
+        assert "raise" in doc.lower()
+
+    root = Path(__file__).parents[1] / "python" / "forge3d"
+    for stub in ("terrain.pyi", "path_tracing.pyi", "__init__.pyi"):
+        source = (root / stub).read_text(encoding="utf-8")
+        assert 'earth_model="flat"' in source
+        assert 'refraction_model="none"' in source
+        assert "raise" in source
 
 
 def test_shadow_mapping_uses_solar_time_defaults() -> None:
@@ -282,6 +481,7 @@ def test_shadow_mapping_uses_solar_time_defaults() -> None:
     assert result["length_m"] > 0.0
 
 
+@gpu_required
 def test_shadow_mask_custom_sphere_marches_to_its_own_footprint_edge() -> None:
     mask = shadow_mask(
         _peak_dem(),
@@ -302,6 +502,7 @@ def test_shadow_apis_require_explicit_height_datum() -> None:
         shadow_tip(_peak_dem(), 39.75, -105.175, TIME, bounds=BOUNDS)
 
 
+@gpu_required
 def test_shadow_mask_solves_solar_direction_per_dem_cell() -> None:
     equinox_noon = SolarTime(
         utc=(2024, 3, 20, 12, 0, 0),
@@ -371,6 +572,7 @@ def test_set_terrain_angles_reset_solar_time_provenance() -> None:
     assert 'terrain.sun_source = "manual_angles".to_string();' in source
 
 
+@gpu_required
 def test_native_shadow_symbols_are_registered() -> None:
     from forge3d import _forge3d
 

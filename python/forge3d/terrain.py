@@ -46,7 +46,13 @@ def viewshed(
     temperature_c: float = 15.0,
     return_diagnostics: bool = False,
 ) -> np.ndarray | dict[str, np.ndarray]:
-    """Compute a GPU visibility raster for an EPSG:4326 north-up DEM."""
+    """Compute a GPU visibility raster for an EPSG:4326 north-up DEM.
+
+    ``earth_model`` selects flat, spherical, or WGS84 ellipsoidal curvature;
+    ``refraction_model`` selects the atmospheric/effective-radius correction.
+    ``earth_model='flat'`` requires ``refraction_model='none'``. Unsupported
+    model names or model pairs raise an exception; they never fall back.
+    """
     native = _terrain_native("terrain_viewshed")
     if len(observer) == 3:
         observer_height = float(observer[2])
@@ -89,6 +95,8 @@ def shadow_mask(
 
     Terrain outside ``bounds`` is outside the analysis domain and therefore
     cannot occlude; the mask answers whether this DEM contains a blocker.
+    ``earth_model='flat'`` requires ``refraction_model='none'``. Unsupported
+    model names or model pairs raise an exception; they never fall back.
     """
     native = _terrain_native("terrain_shadow_mask")
     result = native.terrain_shadow_mask(
@@ -117,7 +125,11 @@ def shadow_tip(
     refraction_model: str = "bennett",
     refraction_k: float = 0.13,
 ) -> dict[str, float]:
-    """Return the curved-Earth terminus of a peak's direct solar shadow."""
+    """Return the curved-Earth terminus of a peak's direct solar shadow.
+
+    ``earth_model='flat'`` requires ``refraction_model='none'``. Unsupported
+    model names or model pairs raise an exception; they never fall back.
+    """
     native = _terrain_native("terrain_shadow_tip")
     result = native.terrain_shadow_tip(
         np.ascontiguousarray(dem, dtype=np.float32),

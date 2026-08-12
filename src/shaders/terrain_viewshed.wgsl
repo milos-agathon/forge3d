@@ -14,11 +14,12 @@ struct ViewshedCell {
 }
 
 @group(0) @binding(0) var<uniform> uniforms: ViewshedUniforms;
-@group(0) @binding(1) var<storage, read> heights: array<f32>;
 @group(0) @binding(2) var<storage, read> geodesic_positions_m: array<vec2<f32>>;
 @group(0) @binding(3) var<storage, read_write> result: array<ViewshedCell>;
 @group(0) @binding(4) var<storage, read> shadow_inputs: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read_write> shadow_result: array<atomic<u32>>;
+@group(0) @binding(6) var height_texture: texture_2d<f32>;
+@group(0) @binding(7) var minmax_texture: texture_2d<f32>;
 
 fn height_at(pixel: vec2<f32>) -> f32 {
     let limit = vec2<f32>(
@@ -29,16 +30,267 @@ fn height_at(pixel: vec2<f32>) -> f32 {
     let lo = vec2<u32>(floor(p));
     let hi = min(lo + vec2<u32>(1u), uniforms.dimensions.xy - vec2<u32>(1u));
     let fraction = p - vec2<f32>(lo);
-    let width = uniforms.dimensions.x;
-    let h00 = heights[lo.y * width + lo.x];
-    let h10 = heights[lo.y * width + hi.x];
-    let h01 = heights[hi.y * width + lo.x];
-    let h11 = heights[hi.y * width + hi.x];
+    let h00 = textureLoad(height_texture, vec2<i32>(lo), 0).x;
+    let h10 = textureLoad(height_texture, vec2<i32>(i32(hi.x), i32(lo.y)), 0).x;
+    let h01 = textureLoad(height_texture, vec2<i32>(i32(lo.x), i32(hi.y)), 0).x;
+    let h11 = textureLoad(height_texture, vec2<i32>(hi), 0).x;
     return det_mix(
         det_mix(h00, h10, fraction.x),
         det_mix(h01, h11, fraction.x),
         fraction.y,
     );
+}
+
+// HELIOS uses the same stack size, packed-node layout, slab descent, and exact
+// bilinear leaf polynomial as PROMETHEUS' production `terrain_trace`. The
+// input here is a geodesic chord in DEM-pixel coordinates rather than a 3-D
+// render ray; both viewshed and solar-shadow entry points call this one trace.
+const TERRAIN_STACK_SIZE: u32 = 64u;
+
+fn terrain_safe_inv(direction: f32) -> f32 {
+    let magnitude = max(abs(direction), 1e-12);
+    return select(1.0 / magnitude, -1.0 / magnitude, direction < 0.0);
+}
+
+fn terrain_slab_xz(
+    origin: vec2<f32>,
+    direction: vec2<f32>,
+    x0: f32,
+    x1: f32,
+    z0: f32,
+    z1: f32,
+) -> vec2<f32> {
+    let inverse_x = terrain_safe_inv(direction.x);
+    let inverse_z = terrain_safe_inv(direction.y);
+    var tx0 = (x0 - origin.x) * inverse_x;
+    var tx1 = (x1 - origin.x) * inverse_x;
+    if tx0 > tx1 { let temporary = tx0; tx0 = tx1; tx1 = temporary; }
+    var tz0 = (z0 - origin.y) * inverse_z;
+    var tz1 = (z1 - origin.y) * inverse_z;
+    if tz0 > tz1 { let temporary = tz0; tz0 = tz1; tz1 = temporary; }
+    return vec2<f32>(max(tx0, tz0), min(tx1, tz1));
+}
+
+fn terrain_pack_node(level: u32, x: u32, y: u32) -> u32 {
+    return (level << 26u) | (y << 13u) | x;
+}
+
+fn terrain_height_limit(distance_m: f32, coefficients: vec3<f32>) -> f32 {
+    return det_fma(
+        coefficients.z,
+        distance_m * distance_m,
+        det_fma(coefficients.y, distance_m, coefficients.x),
+    );
+}
+
+// The raw-height limit is a convex quadratic in camera-relative distance.
+// Endpoints give its maximum and the in-span vertex gives its exact minimum.
+fn terrain_height_limit_range(
+    distance0_m: f32,
+    distance1_m: f32,
+    coefficients: vec3<f32>,
+) -> vec2<f32> {
+    let height0 = terrain_height_limit(distance0_m, coefficients);
+    let height1 = terrain_height_limit(distance1_m, coefficients);
+    var minimum = min(height0, height1);
+    if coefficients.z > 0.0 {
+        let vertex = -coefficients.y / (2.0 * coefficients.z);
+        let distance_min = min(distance0_m, distance1_m);
+        let distance_max = max(distance0_m, distance1_m);
+        if vertex >= distance_min && vertex <= distance_max {
+            minimum = min(minimum, terrain_height_limit(vertex, coefficients));
+        }
+    }
+    return vec2<f32>(minimum, max(height0, height1));
+}
+
+fn terrain_cell_heights(cell_x: u32, cell_y: u32) -> vec4<f32> {
+    let h00 = textureLoad(height_texture, vec2<i32>(i32(cell_x), i32(cell_y)), 0).x;
+    let h10 = textureLoad(height_texture, vec2<i32>(i32(cell_x + 1u), i32(cell_y)), 0).x;
+    let h01 = textureLoad(height_texture, vec2<i32>(i32(cell_x), i32(cell_y + 1u)), 0).x;
+    let h11 = textureLoad(height_texture, vec2<i32>(i32(cell_x + 1u), i32(cell_y + 1u)), 0).x;
+    return vec4<f32>(h00, h10, h01, h11);
+}
+
+fn terrain_leaf_occluded(
+    origin: vec2<f32>,
+    direction: vec2<f32>,
+    cell_x: u32,
+    cell_y: u32,
+    segment_t0: f32,
+    segment_t1: f32,
+    distance0_m: f32,
+    distance1_m: f32,
+    height_coefficients: vec3<f32>,
+    tolerance_m: f32,
+) -> bool {
+    let heights = terrain_cell_heights(cell_x, cell_y);
+    let segment_mid = 0.5 * (segment_t0 + segment_t1);
+    var deviation: vec3<f32>;
+    for (var index = 0u; index < 3u; index += 1u) {
+        let segment_t = select(
+            select(segment_t1, segment_mid, index == 1u),
+            segment_t0,
+            index == 0u,
+        );
+        let pixel = origin + segment_t * direction;
+        let u = clamp(pixel.x - f32(cell_x), 0.0, 1.0);
+        let v = clamp(pixel.y - f32(cell_y), 0.0, 1.0);
+        let terrain_height = det_mix(
+            det_mix(heights.x, heights.y, u),
+            det_mix(heights.z, heights.w, u),
+            v,
+        );
+        let distance_m = det_mix(distance0_m, distance1_m, segment_t);
+        deviation[index] = terrain_height
+            - terrain_height_limit(distance_m, height_coefficients);
+    }
+
+    // Exact quadratic fit on q in [0,1], identical to the production leaf
+    // intersection. Here its maximum directly answers the any-hit query.
+    let quadratic = 2.0 * deviation.z + 2.0 * deviation.x - 4.0 * deviation.y;
+    let linear = deviation.z - deviation.x - quadratic;
+    var maximum = max(deviation.x, deviation.z);
+    if abs(quadratic) > 1e-12 {
+        let vertex = -linear / (2.0 * quadratic);
+        if vertex > 0.0 && vertex < 1.0 {
+            maximum = max(
+                maximum,
+                det_fma(quadratic, vertex * vertex, det_fma(linear, vertex, deviation.x)),
+            );
+        }
+    }
+    return maximum > tolerance_m;
+}
+
+// Continuous any-hit descent through every node overlapped by one geodesic
+// chord. Node pruning uses the exact height-limit range over the node slab;
+// leaf tests use the exact bilinear polynomial, so blockers between chord
+// endpoints cannot be missed by point sampling.
+fn terrain_trace_segment(
+    origin: vec2<f32>,
+    endpoint: vec2<f32>,
+    distance0_m: f32,
+    distance1_m: f32,
+    height_coefficients: vec3<f32>,
+    tolerance_m: f32,
+) -> bool {
+    let direction = endpoint - origin;
+    let cell_width = uniforms.dimensions.x - 1u;
+    let cell_height = uniforms.dimensions.y - 1u;
+    var stack: array<u32, TERRAIN_STACK_SIZE>;
+    var stack_size = 0u;
+    stack[stack_size] = terrain_pack_node(textureNumLevels(minmax_texture) - 1u, 0u, 0u);
+    stack_size += 1u;
+
+    loop {
+        if stack_size == 0u { break; }
+        stack_size -= 1u;
+        let node = stack[stack_size];
+        let level = node >> 26u;
+        let node_y = (node >> 13u) & 0x1FFFu;
+        let node_x = node & 0x1FFFu;
+        let cell_x0 = node_x << level;
+        let cell_y0 = node_y << level;
+        if cell_x0 >= cell_width || cell_y0 >= cell_height { continue; }
+        let cell_x1 = min((node_x + 1u) << level, cell_width);
+        let cell_y1 = min((node_y + 1u) << level, cell_height);
+        let span = terrain_slab_xz(
+            origin,
+            direction,
+            f32(cell_x0),
+            f32(cell_x1),
+            f32(cell_y0),
+            f32(cell_y1),
+        );
+        let segment_t0 = max(span.x, 0.0);
+        let segment_t1 = min(span.y, 1.0);
+        if segment_t0 > segment_t1 { continue; }
+
+        let node_distance0_m = det_mix(distance0_m, distance1_m, segment_t0);
+        let node_distance1_m = det_mix(distance0_m, distance1_m, segment_t1);
+        let height_range = terrain_height_limit_range(
+            node_distance0_m,
+            node_distance1_m,
+            height_coefficients,
+        );
+        let minmax = textureLoad(
+            minmax_texture,
+            vec2<i32>(i32(node_x), i32(node_y)),
+            i32(level),
+        ).xy;
+        if height_range.x + tolerance_m >= minmax.y { continue; }
+
+        if level == 0u {
+            if terrain_leaf_occluded(
+                origin,
+                direction,
+                cell_x0,
+                cell_y0,
+                segment_t0,
+                segment_t1,
+                distance0_m,
+                distance1_m,
+                height_coefficients,
+                tolerance_m,
+            ) {
+                return true;
+            }
+            continue;
+        }
+
+        let child_level = level - 1u;
+        var child_t: array<f32, 4u>;
+        var child_id: array<u32, 4u>;
+        var child_count = 0u;
+        for (var child_y = 0u; child_y < 2u; child_y += 1u) {
+            for (var child_x = 0u; child_x < 2u; child_x += 1u) {
+                let next_x = node_x * 2u + child_x;
+                let next_y = node_y * 2u + child_y;
+                let next_cell_x0 = next_x << child_level;
+                let next_cell_y0 = next_y << child_level;
+                if next_cell_x0 >= cell_width || next_cell_y0 >= cell_height { continue; }
+                let next_cell_x1 = min((next_x + 1u) << child_level, cell_width);
+                let next_cell_y1 = min((next_y + 1u) << child_level, cell_height);
+                let child_span = terrain_slab_xz(
+                    origin,
+                    direction,
+                    f32(next_cell_x0),
+                    f32(next_cell_x1),
+                    f32(next_cell_y0),
+                    f32(next_cell_y1),
+                );
+                let child_t0 = max(child_span.x, segment_t0);
+                let child_t1 = min(child_span.y, segment_t1);
+                if child_t0 > child_t1 { continue; }
+                child_t[child_count] = child_t0;
+                child_id[child_count] = terrain_pack_node(child_level, next_x, next_y);
+                child_count += 1u;
+            }
+        }
+        // Production far-to-near insertion order leaves the nearest child at
+        // the top of the stack and makes any-hit traversal deterministic.
+        for (var index = 1u; index < child_count; index += 1u) {
+            let key_t = child_t[index];
+            let key_id = child_id[index];
+            var insertion = index;
+            loop {
+                if insertion == 0u || child_t[insertion - 1u] >= key_t { break; }
+                child_t[insertion] = child_t[insertion - 1u];
+                child_id[insertion] = child_id[insertion - 1u];
+                insertion -= 1u;
+            }
+            child_t[insertion] = key_t;
+            child_id[insertion] = key_id;
+        }
+        for (var index = 0u; index < child_count; index += 1u) {
+            if stack_size < TERRAIN_STACK_SIZE {
+                stack[stack_size] = child_id[index];
+                stack_size += 1u;
+            }
+        }
+    }
+    return false;
 }
 
 fn inverse_radius(direction_m: vec2<f32>) -> f32 {
@@ -163,7 +415,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let effective_drop = vacuum_drop * uniforms.physics.z;
     let refraction_gain = vacuum_drop - effective_drop;
     let observer_elevation = height_at(uniforms.observer.xy) + uniforms.observer.z;
-    let target_absolute_elevation = heights[index] + uniforms.observer.w;
+    let target_absolute_elevation = textureLoad(height_texture, vec2<i32>(id.xy), 0).x
+        + uniforms.observer.w;
     var horizon_distance = uniforms.metric.x;
     if inv_radius > 0.0 {
         let effective_inv_radius = inv_radius * uniforms.physics.z;
@@ -181,34 +434,54 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 
     let target_elevation = target_absolute_elevation - effective_drop;
-    let half_cell_steps = u32(ceil(2.0 * max(abs(delta_pixel.x), abs(delta_pixel.y))));
-    let steps = max(half_cell_steps, 1u);
+    let height_coefficients = vec3<f32>(
+        observer_elevation,
+        det_div(target_elevation - observer_elevation, distance_m),
+        0.5 * inv_radius * uniforms.physics.z,
+    );
+    // Geodesics are curved in the geographic raster. Consecutive chords stay
+    // within half a cell, while terrain_trace_segment continuously traverses
+    // all bilinear cells crossed by each chord.
     var visible = 1u;
-    for (var step = 1u; step < steps; step += 1u) {
-        let fraction = det_div(f32(step), f32(steps));
-        let sample_distance = distance_m * fraction;
-        let sample_pixel = geodesic_sample_pixel(
+    var segment_start_distance_m = 0.0;
+    var segment_start_pixel = uniforms.observer.xy;
+    loop {
+        let segment_latitude = radians(det_fma(
+            -(segment_start_pixel.y + 0.5),
+            uniforms.metric.z,
+            uniforms.geodetic.w,
+        ));
+        let segment_length_m = shadow_step_m(segment_latitude, azimuth);
+        let segment_end_distance_m = min(
+            segment_start_distance_m + segment_length_m,
+            distance_m,
+        );
+        let segment_end_pixel = geodesic_sample_pixel(
             uniforms.geodetic.x,
             uniforms.geodetic.y,
             azimuth,
-            sample_distance,
+            segment_end_distance_m,
         );
         let outer_min = vec2<f32>(-0.5);
         let outer_max = vec2<f32>(uniforms.dimensions.xy) - vec2<f32>(0.5);
-        if any(sample_pixel < outer_min) || any(sample_pixel > outer_max) {
+        if any(segment_end_pixel < outer_min) || any(segment_end_pixel > outer_max) {
             visible = 2u;
             break;
         }
-        // Camera-relative distance avoids subtracting large geodetic coordinates;
-        // h_eff is evaluated directly so f32 retains sub-metre precision at 100 km.
-        let sample_drop = 0.5 * inv_radius * uniforms.physics.z
-            * sample_distance * sample_distance;
-        let terrain_effective = height_at(sample_pixel) - sample_drop;
-        let sightline = det_mix(observer_elevation, target_elevation, fraction);
-        if terrain_effective > sightline + 0.001 {
+        if terrain_trace_segment(
+            segment_start_pixel,
+            segment_end_pixel,
+            segment_start_distance_m,
+            segment_end_distance_m,
+            height_coefficients,
+            0.001,
+        ) {
             visible = 0u;
             break;
         }
+        if segment_end_distance_m >= distance_m { break; }
+        segment_start_distance_m = segment_end_distance_m;
+        segment_start_pixel = segment_end_pixel;
     }
     result[index] = ViewshedCell(
         visible,
@@ -275,7 +548,7 @@ fn shadow_mask_main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let origin_geodetic = geodetic_and_sun.xy;
-    let origin_height = heights[index];
+    let origin_height = textureLoad(height_texture, vec2<i32>(id.xy), 0).x;
     let azimuth = geodetic_and_sun.z;
     let ray_slope = det_div(
         det_sin(geodetic_and_sun.w),
@@ -285,45 +558,53 @@ fn shadow_mask_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let effective_inv_radius = inv_radius * uniforms.physics.z;
 
     var visible = 1u;
-    var distance_m = shadow_step_m(origin_geodetic.x, azimuth);
+    let height_coefficients = vec3<f32>(
+        origin_height,
+        ray_slope,
+        0.5 * effective_inv_radius,
+    );
+    var segment_start_distance_m = 0.0;
+    var segment_start_pixel = vec2<f32>(id.xy);
+    var segment_latitude = origin_geodetic.x;
     loop {
-        if distance_m > uniforms.metric.x {
-            break;
-        }
-        let sample_pixel = geodesic_sample_pixel(
+        let segment_end_distance_m = min(
+            segment_start_distance_m + shadow_step_m(segment_latitude, azimuth),
+            uniforms.metric.x,
+        );
+        let segment_end_pixel = geodesic_sample_pixel(
             origin_geodetic.x,
             origin_geodetic.y,
             azimuth,
-            distance_m,
+            segment_end_distance_m,
         );
         let outer_min = vec2<f32>(-0.5);
         let outer_max = vec2<f32>(uniforms.dimensions.xy) - vec2<f32>(0.5);
-        if any(sample_pixel < outer_min) || any(sample_pixel > outer_max) {
-            // The bool mask is DEM-local: leaving its declared bounds means
-            // this DEM contains no farther blocker, so the ray stays lit.
-            break;
-        }
-        // The camera-relative distance is squared directly; no subtraction of
-        // large world coordinates can erase the sub-metre curvature term.
-        let half_curvature = det_barrier(0.5 * effective_inv_radius);
-        let drop_per_metre = det_barrier(half_curvature * distance_m);
-        let effective_drop = det_barrier(drop_per_metre * distance_m);
-        let ray_height = det_fma(distance_m, ray_slope, origin_height)
-            + effective_drop;
         // A one-centimetre tie band is still well inside HELIOS' sub-metre
         // contract and absorbs backend-ULP noise exactly on a bilinear ridge.
-        if height_at(sample_pixel) > ray_height + 0.01 {
+        if terrain_trace_segment(
+            segment_start_pixel,
+            segment_end_pixel,
+            segment_start_distance_m,
+            segment_end_distance_m,
+            height_coefficients,
+            0.01,
+        ) {
             visible = 0u;
             break;
         }
-        let sample_latitude = radians(det_fma(
-            -(sample_pixel.y + 0.5),
+        if any(segment_end_pixel < outer_min) || any(segment_end_pixel > outer_max) {
+            // The segment tracer clips its slab to the DEM, so every in-bounds
+            // cell before this footprint exit was tested continuously.
+            break;
+        }
+        if segment_end_distance_m >= uniforms.metric.x { break; }
+        segment_latitude = radians(det_fma(
+            -(segment_end_pixel.y + 0.5),
             uniforms.metric.z,
             uniforms.geodetic.w,
         ));
-        distance_m = det_barrier(distance_m) + det_barrier(
-            shadow_step_m(sample_latitude, azimuth),
-        );
+        segment_start_distance_m = det_barrier(segment_end_distance_m);
+        segment_start_pixel = segment_end_pixel;
     }
     if visible != 0u {
         atomicOr(&shadow_result[index / 32u], 1u << (index % 32u));
