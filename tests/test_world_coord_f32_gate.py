@@ -31,7 +31,7 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1541
+EXPECTED_CONVERSION_COUNT = 1545
 # The previous 1438-site freeze already covered the reviewed ANAMNESIS,
 # TESSELLA, and first SIDERA transitions described below. The d8313007 base
 # source actually contained 1446 sites because SIDERA's later adversarial
@@ -53,15 +53,17 @@ EXPECTED_CONVERSION_COUNT = 1541
 # adds the curvature-aware GPU viewshed, terrain-to-sun shadow mask, and
 # closed-form shadow-tip analysis plus earth-curvature traversal in the hybrid
 # terrain reference; see REVIEWED_HELIOS_INVENTORY_TRANSITION for the exact
-# reviewed additions.
-EXPECTED_CONVERSION_SHA256 = "dd1cdc6a4375cc917b7f52ceef74df1e9277e4adb48de6009de1eb7d9ee7540a"
+# reviewed additions. CARTOGRAPHER-PRIME then adds four f64-to-f32 conversions
+# for a validated finite silhouette bounding box in labels/optimal.rs; these
+# remain bounded screen-space coordinates and do not cross the Anchor boundary.
+EXPECTED_CONVERSION_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132ba79d35ee065"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1541,
+    "current_count": 1545,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -85,7 +87,7 @@ REVIEWED_INVENTORY_TRANSITION = {
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
     # Re-based on main at the merge: the pre-transition tree is now main rather
     # than this branch's original base, so the count and digest are main's.
-    "base_count": 1541,
+    "base_count": 1545,
     "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",
@@ -115,7 +117,7 @@ REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
 REVIEWED_HELIOS_INVENTORY_TRANSITION = {
     # Re-based on main at the merge: the pre-transition tree is now main rather
     # than this branch's original base, so the count and digest are main's.
-    "base_count": 1541,
+    "base_count": 1545,
     "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "added_sites": (

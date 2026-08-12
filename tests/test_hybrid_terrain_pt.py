@@ -494,6 +494,7 @@ def test_sun_color_signature_stubs_and_native_order():
         ("refraction_k", ko, 0.13, "float"),
         ("pressure_mbar", ko, None, "float | None"),
         ("temperature_c", ko, None, "float | None"),
+        ("atmosphere", ko, None, "Mapping[str, Any] | Any | None"),
     ]
     wrapper_stub = [
         (name, kind, required if default == required else "...", ann)
@@ -502,8 +503,30 @@ def test_sun_color_signature_stubs_and_native_order():
     wrapper_stub[3] = ("camera", po, "...", "dict | None")
     wrapper_stub[4] = ("spacing", ko, "...", "Tuple[float, float]")
     wrapper_stub[6] = ("albedo", ko, "...", "Tuple[float, float, float]")
-    wrapper_stub = [
-        (name, kind, default, "bool | str | None" if name == "certificate" else ann)
+    path_stub = [
+        (
+            name,
+            kind,
+            default,
+            {
+                "certificate": "bool | str | PathLikeStr | None",
+                "cache": "str | PathLikeStr | None",
+                "atmosphere": "AtmosphereSettings | Mapping[str, object] | AtmosphereLutHandle | None",
+            }.get(name, ann),
+        )
+        for name, kind, default, ann in wrapper_stub
+    ]
+    init_stub = [
+        (
+            name,
+            kind,
+            default,
+            {
+                "certificate": "bool | str | PathLikeStr | None",
+                "cache": "str | PathLikeStr | None",
+                "atmosphere": "AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None",
+            }.get(name, ann),
+        )
         for name, kind, default, ann in wrapper_stub
     ]
 
@@ -538,6 +561,7 @@ def test_sun_color_signature_stubs_and_native_order():
         ("refraction_k", po, 0.13, ""),
         ("pressure_mbar", po, 1013.25, ""),
         ("temperature_c", po, 15.0, ""),
+        ("atmosphere", po, None, ""),
     ]
     psig = inspect.signature(hybrid_render_terrain_reference)
     assert _runtime_model(psig) == wrapper_runtime
@@ -547,8 +571,8 @@ def test_sun_color_signature_stubs_and_native_order():
     nsig = inspect.signature(_native.hybrid_render_terrain_reference)
     assert _runtime_model(nsig) == native_runtime
 
-    assert _stub_model(_stub_function("path_tracing.pyi", "hybrid_render_terrain_reference")) == wrapper_stub
-    assert _stub_model(_stub_function("__init__.pyi", "hybrid_render_terrain_reference")) == wrapper_stub
+    assert _stub_model(_stub_function("path_tracing.pyi", "hybrid_render_terrain_reference")) == path_stub
+    assert _stub_model(_stub_function("__init__.pyi", "hybrid_render_terrain_reference")) == init_stub
 
 
 def test_terrain_reference_bridge_uses_crate_root_pyo3_types():
@@ -560,7 +584,8 @@ def test_terrain_reference_bridge_uses_crate_root_pyo3_types():
         / "terrain_reference.rs"
     ).read_text(encoding="utf-8")
     assert "use super::super::super::*;" in source
-    assert "pyo3::types::" not in source
+    assert source.count("pyo3::types::") == 1
+    assert "use pyo3::types::PyMapping;" in source
 
 
 def test_sun_color_rejects_malformed_before_gpu_work():
