@@ -473,6 +473,9 @@ jobs:
               - 'src/py_functions/codec.rs'
               - 'python/forge3d/codec.py'
               - 'tools/f3dz_determinism_report.py'
+              - 'tests/test_f3dz_codec.py'
+              - 'tests/data/codec_corpus/**'
+              - '.github/workflows/determinism-matrix.yml'
             helios:
               - '.github/workflows/ci.yml'
               - '.github/workflows/build-wheel.yml'
@@ -514,10 +517,6 @@ jobs:
               - 'tests/data/spa_reference.PROVENANCE.md'
               - 'tests/golden/helios/**'
               - 'tests/golden/viewshed/**'
-            determinism_f3dz:
-              - 'tests/test_f3dz_codec.py'
-              - 'tests/data/codec_corpus/**'
-              - '.github/workflows/determinism-matrix.yml'
             determinism_anamnesis:
               - 'Cargo.toml'
               - 'Cargo.lock'

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import textwrap
 from pathlib import Path
 
 import yaml
@@ -16,6 +17,22 @@ UPLOAD_STEP = re.compile(
 )
 
 
+class _UniqueKeyLoader(yaml.BaseLoader):
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        mapping = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key ({key})",
+                    key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
+
 def _workflow(name: str) -> str:
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
@@ -25,6 +42,25 @@ def _workflow_data(name: str) -> dict:
     assert isinstance(data, dict), f"{name} is not a workflow mapping"
     assert isinstance(data.get("jobs"), dict), f"{name} has no jobs mapping"
     return data
+
+
+def test_paths_filter_literals_are_valid_yaml_without_duplicate_keys() -> None:
+    workflow = _workflow("ci.yml")
+    steps = re.findall(
+        r"(?ms)^      - .*?uses: dorny/paths-filter@v3.*?(?=^      - |^  \S|\Z)",
+        workflow,
+    )
+    assert steps, "ci.yml has no dorny/paths-filter steps"
+    for step in steps:
+        match = re.search(
+            r"(?ms)^          filters: \|\n(?P<body>(?:^ {12}.*(?:\n|\Z))*)",
+            step,
+        )
+        assert match, "dorny/paths-filter step has no literal filters mapping"
+        filters = yaml.load(
+            textwrap.dedent(match.group("body")), Loader=_UniqueKeyLoader
+        )
+        assert isinstance(filters, dict) and filters
 
 
 def _job(workflow: str, name: str) -> str:
