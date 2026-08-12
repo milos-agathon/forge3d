@@ -1714,12 +1714,15 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
             label: Some("helios-production-terrain-trace-proof"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("helios-production-terrain-trace-proof"),
-            layout: None,
-            module: &shader,
-            entry_point: "main_helios_production_terrain_trace_proof",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("helios-production-terrain-trace-proof"),
+                layout: None,
+                module: &shader,
+                entry_point: "main_helios_production_terrain_trace_proof",
+            },
+        );
         let empty0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("helios-production-proof-empty-0"),
             layout: &pipeline.get_bind_group_layout(0),
