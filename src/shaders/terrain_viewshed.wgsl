@@ -41,11 +41,16 @@ fn height_at(pixel: vec2<f32>) -> f32 {
     );
 }
 
-// HELIOS uses the same stack size, packed-node layout, slab descent, and exact
-// bilinear leaf polynomial as PROMETHEUS' production `terrain_trace`. The
+// HELIOS uses the same packed-node layout, slab descent, and exact bilinear
+// leaf polynomial as PROMETHEUS' production `terrain_trace`. The
 // input here is a geodesic chord in DEM-pixel coordinates rather than a 3-D
 // render ray; both viewshed and solar-shadow entry points call this one trace.
-const TERRAIN_STACK_SIZE: u32 = 64u;
+const TERRAIN_INVALID_NODE: u32 = 0xFFFFFFFFu;
+
+struct TerrainChild {
+    id: u32,
+    entry_t: f32,
+}
 
 fn terrain_safe_inv(direction: f32) -> f32 {
     let magnitude = max(abs(direction), 1e-12);
@@ -112,6 +117,29 @@ fn terrain_cell_heights(cell_x: u32, cell_y: u32) -> vec4<f32> {
     return vec4<f32>(h00, h10, h01, h11);
 }
 
+fn terrain_leaf_deviation(
+    origin: vec2<f32>,
+    direction: vec2<f32>,
+    heights: vec4<f32>,
+    cell_x: u32,
+    cell_y: u32,
+    segment_t: f32,
+    distance0_m: f32,
+    distance1_m: f32,
+    height_coefficients: vec3<f32>,
+) -> f32 {
+    let pixel = origin + segment_t * direction;
+    let u = clamp(pixel.x - f32(cell_x), 0.0, 1.0);
+    let v = clamp(pixel.y - f32(cell_y), 0.0, 1.0);
+    let terrain_height = det_mix(
+        det_mix(heights.x, heights.y, u),
+        det_mix(heights.z, heights.w, u),
+        v,
+    );
+    let distance_m = det_mix(distance0_m, distance1_m, segment_t);
+    return terrain_height - terrain_height_limit(distance_m, height_coefficients);
+}
+
 fn terrain_leaf_occluded(
     origin: vec2<f32>,
     direction: vec2<f32>,
@@ -126,25 +154,14 @@ fn terrain_leaf_occluded(
 ) -> bool {
     let heights = terrain_cell_heights(cell_x, cell_y);
     let segment_mid = 0.5 * (segment_t0 + segment_t1);
-    var deviation: vec3<f32>;
-    for (var index = 0u; index < 3u; index += 1u) {
-        let segment_t = select(
-            select(segment_t1, segment_mid, index == 1u),
-            segment_t0,
-            index == 0u,
-        );
-        let pixel = origin + segment_t * direction;
-        let u = clamp(pixel.x - f32(cell_x), 0.0, 1.0);
-        let v = clamp(pixel.y - f32(cell_y), 0.0, 1.0);
-        let terrain_height = det_mix(
-            det_mix(heights.x, heights.y, u),
-            det_mix(heights.z, heights.w, u),
-            v,
-        );
-        let distance_m = det_mix(distance0_m, distance1_m, segment_t);
-        deviation[index] = terrain_height
-            - terrain_height_limit(distance_m, height_coefficients);
-    }
+    let deviation = vec3<f32>(
+        terrain_leaf_deviation(origin, direction, heights, cell_x, cell_y,
+            segment_t0, distance0_m, distance1_m, height_coefficients),
+        terrain_leaf_deviation(origin, direction, heights, cell_x, cell_y,
+            segment_mid, distance0_m, distance1_m, height_coefficients),
+        terrain_leaf_deviation(origin, direction, heights, cell_x, cell_y,
+            segment_t1, distance0_m, distance1_m, height_coefficients),
+    );
 
     // Exact quadratic fit on q in [0,1], identical to the production leaf
     // intersection. Here its maximum directly answers the any-hit query.
@@ -163,6 +180,54 @@ fn terrain_leaf_occluded(
     return maximum > tolerance_m;
 }
 
+// FXC cannot address dynamically indexed function arrays without forcing the
+// containing loop to unroll. Select the next intersecting child in scalar
+// state so the same depth-first traversal remains representable on DX12.
+fn terrain_select_child(
+    origin: vec2<f32>,
+    direction: vec2<f32>,
+    parent_level: u32,
+    parent_x: u32,
+    parent_y: u32,
+    after_entry_t: f32,
+    after_id: u32,
+) -> TerrainChild {
+    let cell_width = uniforms.dimensions.x - 1u;
+    let cell_height = uniforms.dimensions.y - 1u;
+    let child_level = parent_level - 1u;
+    var best = TerrainChild(TERRAIN_INVALID_NODE, 2.0);
+    for (var child_index = 0u; child_index < 4u; child_index += 1u) {
+        let next_x = parent_x * 2u + (child_index & 1u);
+        let next_y = parent_y * 2u + (child_index >> 1u);
+        let cell_x0 = next_x << child_level;
+        let cell_y0 = next_y << child_level;
+        if cell_x0 >= cell_width || cell_y0 >= cell_height { continue; }
+        let cell_x1 = min((next_x + 1u) << child_level, cell_width);
+        let cell_y1 = min((next_y + 1u) << child_level, cell_height);
+        let span = terrain_slab_xz(
+            origin,
+            direction,
+            f32(cell_x0),
+            f32(cell_x1),
+            f32(cell_y0),
+            f32(cell_y1),
+        );
+        let entry_t = max(span.x, 0.0);
+        let exit_t = min(span.y, 1.0);
+        if entry_t > exit_t { continue; }
+        let id = terrain_pack_node(child_level, next_x, next_y);
+        let follows = after_id == TERRAIN_INVALID_NODE
+            || entry_t > after_entry_t
+            || (entry_t == after_entry_t && id > after_id);
+        if follows && (best.id == TERRAIN_INVALID_NODE
+            || entry_t < best.entry_t
+            || (entry_t == best.entry_t && id < best.id)) {
+            best = TerrainChild(id, entry_t);
+        }
+    }
+    return best;
+}
+
 // Continuous any-hit descent through every node overlapped by one geodesic
 // chord. Node pruning uses the exact height-limit range over the node slab;
 // leaf tests use the exact bilinear polynomial, so blockers between chord
@@ -178,117 +243,120 @@ fn terrain_trace_segment(
     let direction = endpoint - origin;
     let cell_width = uniforms.dimensions.x - 1u;
     let cell_height = uniforms.dimensions.y - 1u;
-    var stack: array<u32, TERRAIN_STACK_SIZE>;
-    var stack_size = 0u;
-    stack[stack_size] = terrain_pack_node(textureNumLevels(minmax_texture) - 1u, 0u, 0u);
-    stack_size += 1u;
+    let root_level = textureNumLevels(minmax_texture) - 1u;
+    var node = terrain_pack_node(root_level, 0u, 0u);
 
     loop {
-        if stack_size == 0u { break; }
-        stack_size -= 1u;
-        let node = stack[stack_size];
         let level = node >> 26u;
         let node_y = (node >> 13u) & 0x1FFFu;
         let node_x = node & 0x1FFFu;
         let cell_x0 = node_x << level;
         let cell_y0 = node_y << level;
-        if cell_x0 >= cell_width || cell_y0 >= cell_height { continue; }
-        let cell_x1 = min((node_x + 1u) << level, cell_width);
-        let cell_y1 = min((node_y + 1u) << level, cell_height);
-        let span = terrain_slab_xz(
-            origin,
-            direction,
-            f32(cell_x0),
-            f32(cell_x1),
-            f32(cell_y0),
-            f32(cell_y1),
-        );
-        let segment_t0 = max(span.x, 0.0);
-        let segment_t1 = min(span.y, 1.0);
-        if segment_t0 > segment_t1 { continue; }
-
-        let node_distance0_m = det_mix(distance0_m, distance1_m, segment_t0);
-        let node_distance1_m = det_mix(distance0_m, distance1_m, segment_t1);
-        let height_range = terrain_height_limit_range(
-            node_distance0_m,
-            node_distance1_m,
-            height_coefficients,
-        );
-        let minmax = textureLoad(
-            minmax_texture,
-            vec2<i32>(i32(node_x), i32(node_y)),
-            i32(level),
-        ).xy;
-        if height_range.x + tolerance_m >= minmax.y { continue; }
-
-        if level == 0u {
-            if terrain_leaf_occluded(
+        var descend = false;
+        if cell_x0 < cell_width && cell_y0 < cell_height {
+            let cell_x1 = min((node_x + 1u) << level, cell_width);
+            let cell_y1 = min((node_y + 1u) << level, cell_height);
+            let span = terrain_slab_xz(
                 origin,
                 direction,
-                cell_x0,
-                cell_y0,
-                segment_t0,
-                segment_t1,
-                distance0_m,
-                distance1_m,
-                height_coefficients,
-                tolerance_m,
-            ) {
-                return true;
-            }
-            continue;
-        }
-
-        let child_level = level - 1u;
-        var child_t: array<f32, 4u>;
-        var child_id: array<u32, 4u>;
-        var child_count = 0u;
-        for (var child_y = 0u; child_y < 2u; child_y += 1u) {
-            for (var child_x = 0u; child_x < 2u; child_x += 1u) {
-                let next_x = node_x * 2u + child_x;
-                let next_y = node_y * 2u + child_y;
-                let next_cell_x0 = next_x << child_level;
-                let next_cell_y0 = next_y << child_level;
-                if next_cell_x0 >= cell_width || next_cell_y0 >= cell_height { continue; }
-                let next_cell_x1 = min((next_x + 1u) << child_level, cell_width);
-                let next_cell_y1 = min((next_y + 1u) << child_level, cell_height);
-                let child_span = terrain_slab_xz(
-                    origin,
-                    direction,
-                    f32(next_cell_x0),
-                    f32(next_cell_x1),
-                    f32(next_cell_y0),
-                    f32(next_cell_y1),
+                f32(cell_x0),
+                f32(cell_x1),
+                f32(cell_y0),
+                f32(cell_y1),
+            );
+            let segment_t0 = max(span.x, 0.0);
+            let segment_t1 = min(span.y, 1.0);
+            if segment_t0 <= segment_t1 {
+                let node_distance0_m = det_mix(distance0_m, distance1_m, segment_t0);
+                let node_distance1_m = det_mix(distance0_m, distance1_m, segment_t1);
+                let height_range = terrain_height_limit_range(
+                    node_distance0_m,
+                    node_distance1_m,
+                    height_coefficients,
                 );
-                let child_t0 = max(child_span.x, segment_t0);
-                let child_t1 = min(child_span.y, segment_t1);
-                if child_t0 > child_t1 { continue; }
-                child_t[child_count] = child_t0;
-                child_id[child_count] = terrain_pack_node(child_level, next_x, next_y);
-                child_count += 1u;
+                let minmax = textureLoad(
+                    minmax_texture,
+                    vec2<i32>(i32(node_x), i32(node_y)),
+                    i32(level),
+                ).xy;
+                if height_range.x + tolerance_m < minmax.y {
+                    if level == 0u {
+                        if terrain_leaf_occluded(
+                            origin,
+                            direction,
+                            cell_x0,
+                            cell_y0,
+                            segment_t0,
+                            segment_t1,
+                            distance0_m,
+                            distance1_m,
+                            height_coefficients,
+                            tolerance_m,
+                        ) {
+                            return true;
+                        }
+                    } else {
+                        let child = terrain_select_child(
+                            origin,
+                            direction,
+                            level,
+                            node_x,
+                            node_y,
+                            0.0,
+                            TERRAIN_INVALID_NODE,
+                        );
+                        if child.id != TERRAIN_INVALID_NODE {
+                            node = child.id;
+                            descend = true;
+                        }
+                    }
+                }
             }
         }
-        // Production far-to-near insertion order leaves the nearest child at
-        // the top of the stack and makes any-hit traversal deterministic.
-        for (var index = 1u; index < child_count; index += 1u) {
-            let key_t = child_t[index];
-            let key_id = child_id[index];
-            var insertion = index;
-            loop {
-                if insertion == 0u || child_t[insertion - 1u] >= key_t { break; }
-                child_t[insertion] = child_t[insertion - 1u];
-                child_id[insertion] = child_id[insertion - 1u];
-                insertion -= 1u;
+        if descend { continue; }
+
+        // The current subtree is complete. Ascend until an intersecting sibling
+        // follows it in deterministic entry order, or until the root is done.
+        var completed_level = level;
+        var completed_x = node_x;
+        var completed_y = node_y;
+        var advanced = false;
+        loop {
+            if completed_level >= root_level { break; }
+            let parent_level = completed_level + 1u;
+            let parent_x = completed_x >> 1u;
+            let parent_y = completed_y >> 1u;
+            let completed_x0 = completed_x << completed_level;
+            let completed_y0 = completed_y << completed_level;
+            let completed_x1 = min((completed_x + 1u) << completed_level, cell_width);
+            let completed_y1 = min((completed_y + 1u) << completed_level, cell_height);
+            let completed_span = terrain_slab_xz(
+                origin,
+                direction,
+                f32(completed_x0),
+                f32(completed_x1),
+                f32(completed_y0),
+                f32(completed_y1),
+            );
+            let sibling = terrain_select_child(
+                origin,
+                direction,
+                parent_level,
+                parent_x,
+                parent_y,
+                max(completed_span.x, 0.0),
+                terrain_pack_node(completed_level, completed_x, completed_y),
+            );
+            if sibling.id != TERRAIN_INVALID_NODE {
+                node = sibling.id;
+                advanced = true;
+                break;
             }
-            child_t[insertion] = key_t;
-            child_id[insertion] = key_id;
+            completed_level = parent_level;
+            completed_x = parent_x;
+            completed_y = parent_y;
         }
-        for (var index = 0u; index < child_count; index += 1u) {
-            if stack_size < TERRAIN_STACK_SIZE {
-                stack[stack_size] = child_id[index];
-                stack_size += 1u;
-            }
-        }
+        if !advanced { break; }
     }
     return false;
 }

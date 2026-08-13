@@ -577,6 +577,22 @@ pub fn compute_shadow_mask(
 mod tests {
     use super::*;
 
+    fn assert_fxc_compatible_traversal(module: &naga::Module) {
+        for (_, function) in module.functions.iter().filter(|(_, function)| {
+            matches!(
+                function.name.as_deref(),
+                Some("terrain_leaf_occluded" | "terrain_select_child" | "terrain_trace_segment")
+            )
+        }) {
+            for (_, local) in function.local_variables.iter() {
+                assert!(
+                    !matches!(module.types[local.ty].inner, naga::TypeInner::Array { .. }),
+                    "FXC cannot compile dynamically indexed function arrays in HELIOS traversal"
+                );
+            }
+        }
+    }
+
     fn leaf_segment_occluded(
         heights: [f32; 4],
         origin: [f32; 2],
@@ -653,9 +669,10 @@ mod tests {
     fn viewshed_shader_is_valid_wgsl() {
         let source = shader_source();
         for production_primitive in [
-            "const TERRAIN_STACK_SIZE: u32 = 64u",
+            "const TERRAIN_INVALID_NODE: u32 = 0xFFFFFFFFu",
             "fn terrain_slab_xz(",
             "fn terrain_leaf_occluded(",
+            "fn terrain_select_child(",
             "fn terrain_trace_segment(",
             "textureNumLevels(minmax_texture)",
         ] {
@@ -668,12 +685,26 @@ mod tests {
         assert_eq!(source.matches("terrain_trace_segment(").count(), 3);
         let module = naga::front::wgsl::parse_str(&source)
             .expect("assembled HELIOS viewshed WGSL must parse");
+        assert_fxc_compatible_traversal(&module);
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
         )
         .validate(&module)
         .expect("assembled HELIOS viewshed WGSL must validate");
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "FXC cannot compile dynamically indexed function arrays in HELIOS traversal"
+    )]
+    fn fxc_traversal_shape_gate_rejects_child_selection_array_mutant() {
+        let source = shader_source().replace(
+            "let cell_width = uniforms.dimensions.x - 1u;\n    let cell_height = uniforms.dimensions.y - 1u;\n    let child_level = parent_level - 1u;",
+            "let cell_width = uniforms.dimensions.x - 1u;\n    let cell_height = uniforms.dimensions.y - 1u;\n    var fxc_mutant: array<u32, 4u>;\n    let child_level = parent_level - 1u;",
+        );
+        let module = naga::front::wgsl::parse_str(&source).expect("mutant must remain valid WGSL");
+        assert_fxc_compatible_traversal(&module);
     }
 
     #[test]
