@@ -248,18 +248,28 @@ fn compute_visibility(
         "helios.viewshed.shader",
         &shader_source,
     );
-    let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("helios.viewshed.bind_group_layout"),
+        entries: &analysis_bind_group_layout_entries(2, 3),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("helios.viewshed.pipeline_layout"),
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
+    });
+    let pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
         device,
         &wgpu::ComputePipelineDescriptor {
             label: Some("helios.viewshed.pipeline"),
-            layout: None,
+            layout: Some(&pipeline_layout),
             module: &module,
             entry_point: "main",
         },
-    );
+    )
+    .map_err(|error| RenderError::render(format!("viewshed pipeline creation failed: {error}")))?;
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("helios.viewshed.bind_group"),
-        layout: &pipeline.get_bind_group_layout(0),
+        layout: &bind_group_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -342,6 +352,45 @@ fn shader_source() -> String {
         include_str!("../../shaders/includes/determinism.wgsl"),
         include_str!("../../shaders/terrain_viewshed.wgsl")
     )
+}
+
+fn analysis_bind_group_layout_entries(
+    input_binding: u32,
+    output_binding: u32,
+) -> [wgpu::BindGroupLayoutEntry; 5] {
+    let buffer = |binding, ty| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+    let texture = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    };
+    [
+        buffer(0, wgpu::BufferBindingType::Uniform),
+        buffer(
+            input_binding,
+            wgpu::BufferBindingType::Storage { read_only: true },
+        ),
+        buffer(
+            output_binding,
+            wgpu::BufferBindingType::Storage { read_only: false },
+        ),
+        texture(6),
+        texture(7),
+    ]
 }
 
 pub fn compute_shadow_mask(
@@ -443,18 +492,30 @@ pub fn compute_shadow_mask(
         "helios.shadow_mask.shader",
         &shader_source,
     );
-    let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("helios.shadow_mask.bind_group_layout"),
+        entries: &analysis_bind_group_layout_entries(4, 5),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("helios.shadow_mask.pipeline_layout"),
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
+    });
+    let pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
         device,
         &wgpu::ComputePipelineDescriptor {
             label: Some("helios.shadow_mask.pipeline"),
-            layout: None,
+            layout: Some(&pipeline_layout),
             module: &module,
             entry_point: "shadow_mask_main",
         },
-    );
+    )
+    .map_err(|error| {
+        RenderError::render(format!("shadow-mask pipeline creation failed: {error}"))
+    })?;
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("helios.shadow_mask.bind_group"),
-        layout: &pipeline.get_bind_group_layout(0),
+        layout: &bind_group_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -613,5 +674,52 @@ mod tests {
         )
         .validate(&module)
         .expect("assembled HELIOS viewshed WGSL must validate");
+    }
+
+    #[test]
+    fn analysis_entry_points_use_explicit_resource_layouts() {
+        let viewshed_entries = analysis_bind_group_layout_entries(2, 3);
+        assert_eq!(
+            viewshed_entries.map(|entry| entry.binding),
+            [0, 2, 3, 6, 7],
+            "the viewshed layout must contain exactly the bindings used by main"
+        );
+        let entries = analysis_bind_group_layout_entries(4, 5);
+        assert_eq!(
+            entries.map(|entry| entry.binding),
+            [0, 4, 5, 6, 7],
+            "the shadow-mask layout must contain exactly the bindings used by shadow_mask_main"
+        );
+        assert!(matches!(
+            entries[0].ty,
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                ..
+            }
+        ));
+        assert!(matches!(
+            entries[1].ty,
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                ..
+            }
+        ));
+        assert!(matches!(
+            entries[2].ty,
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                ..
+            }
+        ));
+        for entry in &entries[3..] {
+            assert!(matches!(
+                entry.ty,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                }
+            ));
+        }
     }
 }

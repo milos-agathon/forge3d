@@ -194,6 +194,7 @@ def test_shadow_mask_golden_negative_control(monkeypatch) -> None:
     corrupted[0, 0, 0] ^= 255
     monkeypatch.setenv("FORGE3D_UPDATE_HELIOS_GOLDENS", "1")
     monkeypatch.delenv("FORGE3D_UPDATE_HELIOS_GOLDENS")
+    monkeypatch.delenv("FORGE3D_HELIOS_ARTIFACT_DIR", raising=False)
     with pytest.raises(AssertionError):
         _assert_shadow_mask_golden(corrupted)
     assert golden.read_bytes() == before
