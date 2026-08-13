@@ -171,6 +171,7 @@ fn terrain_leaf_intersect(
     t0: f32,
     t1: f32,
     apply_curvature: bool,
+    any_hit: bool,
 ) -> TerrainLeafHit {
     var out: TerrainLeafHit;
     out.hit = false;
@@ -198,8 +199,13 @@ fn terrain_leaf_intersect(
     let a = 2.0 * d3.z + 2.0 * d3.x - 4.0 * d3.y;
     let b = d3.z - d3.x - a;
 
+    // A rounded shared-cell boundary can place this leaf's entry infinitesimally
+    // below the continuous surface. That is already an any-hit intersection;
+    // requiring another crossing inside the leaf would create a numeric crack.
     var s_hit = 1e30;
-    if (abs(a) < 1e-12) {
+    if (any_hit && c <= 0.0) {
+        s_hit = 0.0;
+    } else if (abs(a) < 1e-12) {
         if (abs(b) > 1e-12) {
             let s = -c / b;
             if (s >= 0.0 && s <= 1.0) { s_hit = s; }
@@ -241,9 +247,10 @@ fn terrain_normal_at(p: vec3<f32>, cx: u32, cz: u32) -> vec3<f32> {
     return normalize(vec3<f32>(-dh_du / sx, 1.0, -dh_dv / sz));
 }
 
-// Min-max quadtree DDA. `any_hit` controls early exit only; curvature is an
-// explicit sun-ray policy because arbitrary IBL directions must not reuse the
-// azimuth-specific effective radius uploaded for the Sun.
+// Min-max quadtree DDA. `any_hit` controls early exit and conservatively closes
+// rounded shared-leaf entry cracks. Curvature is an explicit sun-ray policy
+// because arbitrary IBL directions must not reuse the azimuth-specific
+// effective radius uploaded for the Sun.
 fn terrain_trace(ray: Ray, any_hit: bool, apply_curvature: bool) -> HybridHitResult {
     var res: HybridHitResult;
     res.hit = 0u;
@@ -297,7 +304,7 @@ fn terrain_trace(ray: Ray, any_hit: bool, apply_curvature: bool) -> HybridHitRes
         if (ray_height.x > mm.y || ray_height.y < mm.x) { continue; }
 
         if (level == 0u) {
-            let leaf = terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, apply_curvature);
+            let leaf = terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, apply_curvature, any_hit);
             if (leaf.hit && leaf.t < res.t) {
                 res.hit = 1u;
                 res.t = leaf.t;

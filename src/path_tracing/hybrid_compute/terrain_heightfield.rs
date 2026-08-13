@@ -719,6 +719,15 @@ mod tests {
         )
     }
 
+    fn deviation_span_hit(d0: f32, dm: f32, d1: f32, any_hit: bool) -> bool {
+        if any_hit && d0 <= 0.0 {
+            return true;
+        }
+        let a = 2.0 * d1 + 2.0 * d0 - 4.0 * dm;
+        let b = d1 - d0 - a;
+        root_in_span(f64::from(a), f64::from(b), f64::from(d0), 0.0, 1.0)
+    }
+
     // f32 mirror of terrain_leaf_intersect() in the production WGSL.
     fn descent_cell_hit(
         heights: &[f32],
@@ -740,9 +749,7 @@ mod tests {
         let d0 = deviation(t0);
         let dm = deviation(0.5 * (t0 + t1));
         let d1 = deviation(t1);
-        let a = 2.0 * d1 + 2.0 * d0 - 4.0 * dm;
-        let b = d1 - d0 - a;
-        root_in_span(f64::from(a), f64::from(b), f64::from(d0), 0.0, 1.0)
+        deviation_span_hit(d0, dm, d1, true)
     }
 
     fn slab_axis(origin: f64, direction: f64, low: f64, high: f64) -> Option<(f64, f64)> {
@@ -1271,6 +1278,61 @@ mod tests {
         None
     }
 
+    fn block_stores_zero(
+        function: &naga::Function,
+        block: &naga::Block,
+        target: naga::Handle<naga::LocalVariable>,
+    ) -> bool {
+        block.iter().any(|statement| {
+            matches!(
+                statement,
+                naga::Statement::Store { pointer, value }
+                    if pointer_local(function, *pointer) == Some(target)
+                        && matches!(
+                            function.expressions[*value],
+                            naga::Expression::Literal(naga::Literal::F32(value)) if value == 0.0
+                        )
+            )
+        })
+    }
+
+    fn expression_is_any_hit_and_entry_nonpositive(
+        function: &naga::Function,
+        expression: naga::Handle<naga::Expression>,
+        entry_deviation: naga::Handle<naga::Expression>,
+    ) -> bool {
+        let naga::Expression::Binary {
+            op: naga::BinaryOperator::LogicalAnd,
+            left,
+            right,
+        } = function.expressions[expression]
+        else {
+            return false;
+        };
+        let is_any_hit = |operand| {
+            matches!(
+                function.expressions[operand],
+                naga::Expression::FunctionArgument(6)
+            )
+        };
+        let is_entry_nonpositive = |operand| {
+            matches!(
+                function.expressions[operand],
+                naga::Expression::Binary {
+                    op: naga::BinaryOperator::LessEqual,
+                    left,
+                    right,
+                } if left == entry_deviation
+                    && matches!(
+                        function.expressions[right],
+                        naga::Expression::Literal(naga::Literal::F32(value)) if value == 0.0
+                    )
+            )
+        };
+        (is_any_hit(left) && is_entry_nonpositive(right))
+            || (is_entry_nonpositive(left) && is_any_hit(right))
+    }
+
     fn local_reaches_global_store(
         module: &naga::Module,
         function: &naga::Function,
@@ -1476,6 +1538,8 @@ mod tests {
         }
         let leaf_result = call_contract(trace, leaf_handle, 5, 2)
             .ok_or("terrain_trace does not forward its explicit curvature policy to leaf tests")?;
+        call_contract(trace, leaf_handle, 6, 1)
+            .ok_or("terrain_trace does not forward its any-hit policy to leaf tests")?;
         if !result_feeds_control(trace, leaf_result) {
             return Err("curvature-aware leaf result no longer controls terrain hits".into());
         }
@@ -1488,6 +1552,30 @@ mod tests {
             .ok_or("leaf solve no longer evaluates the curved ray height")?;
         if !result_reaches_return(leaf, leaf_height) {
             return Err("curved leaf height no longer reaches TerrainLeafHit".into());
+        }
+        let leaf_entry_deviation = leaf
+            .named_expressions
+            .iter()
+            .find_map(|(handle, name)| (name == "c").then_some(handle))
+            .ok_or("leaf solve no longer names its entry deviation")?;
+        let leaf_hit_parameter = leaf
+            .local_variables
+            .iter()
+            .find_map(|(handle, variable)| {
+                (variable.name.as_deref() == Some("s_hit")).then_some(handle)
+            })
+            .ok_or("leaf solve no longer exposes its hit parameter")?;
+        let closes_boundary_crack = leaf.body.iter().any(|statement| {
+            matches!(statement, naga::Statement::If { condition, accept, .. }
+                if expression_is_any_hit_and_entry_nonpositive(
+                    leaf,
+                    *condition,
+                    *leaf_entry_deviation,
+                )
+                    && block_stores_zero(leaf, accept, leaf_hit_parameter))
+        });
+        if !closes_boundary_crack {
+            return Err("below-terrain leaf entry no longer closes shared-boundary cracks".into());
         }
 
         let optimized_result = call_contract(optimized, trace_handle, 2, 2)
@@ -1880,6 +1968,37 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
     }
 
     #[test]
+    fn captured_physical_mask_miss_survives_leaf_boundary_rounding() {
+        let heights = curvature_fixture();
+        let ray = ProofRay {
+            origin: [125_750.0, 870.546_14, 67_750.0],
+            direction: [0.798_591_73, 0.010_471_784, 0.601_781_96],
+            inv_two_r_prime: 6.825_938_2e-8,
+        };
+        assert!(brute_2d_hit(&heights, ray));
+
+        // The independent oracle crosses into leaf (254,137) within 0.061 mm
+        // of its shared boundary. NVIDIA Vulkan rounded the entry to the
+        // below-terrain side while the adjacent leaf remained above it.
+        assert!(deviation_span_hit(
+            -0.000_061_035,
+            -0.663_696_3,
+            -1.318_298_3,
+            true,
+        ));
+    }
+
+    #[test]
+    fn primary_below_entry_without_crossing_is_not_a_hit() {
+        assert!(!deviation_span_hit(-1.0, -2.0, -3.0, false));
+    }
+
+    #[test]
+    fn primary_below_entry_with_upward_exit_keeps_exact_root() {
+        assert!(deviation_span_hit(-1.0, 0.0, 1.0, false));
+    }
+
+    #[test]
     fn curvature_descent_is_conservative() {
         assert_eq!(std::mem::size_of::<EarthCurvatureUniforms>(), 24);
         let shader = crate::shader_sources::hybrid_kernel();
@@ -1901,8 +2020,12 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
                 "let ray_height = vec2<f32>(ray.origin.y + t_lo * ray.direction.y, ray.origin.y + t_hi * ray.direction.y);",
             ),
             shader.replace(
-                "terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, apply_curvature)",
-                "terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, false)",
+                "terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, apply_curvature, any_hit)",
+                "terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, false, any_hit)",
+            ),
+            shader.replace(
+                "terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, apply_curvature, any_hit)",
+                "terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, apply_curvature, false)",
             ),
             shader.replace(
                 "let hit = intersect_hybrid_optimized(ray, 0.01, false);",
@@ -1925,6 +2048,22 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
             shader.replace(
                 "let c = d3.x;\n    let a = 2.0 * d3.z + 2.0 * d3.x - 4.0 * d3.y;\n    let b = d3.z - d3.x - a;",
                 "let c = 1.0;\n    let a = 0.0;\n    let b = 1.0;",
+            ),
+            shader.replace(
+                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c >= 0.0) {\n        s_hit = 0.0;",
+            ),
+            shader.replace(
+                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && d3.y <= 0.0) {\n        s_hit = 0.0;",
+            ),
+            shader.replace(
+                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit || c <= 0.0) {\n        s_hit = 0.0;",
+            ),
+            shader.replace(
+                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
+                "if (!any_hit && c <= 0.0) {\n        s_hit = 0.0;",
             ),
         ] {
             assert_ne!(mutant, shader, "HELIOS mutation target drifted");
