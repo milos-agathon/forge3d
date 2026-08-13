@@ -172,6 +172,10 @@ def _assert_shadow_mask_golden(actual: np.ndarray) -> float:
         forge3d.numpy_to_png(golden, actual)
     expected = forge3d.png_to_numpy(golden)
     mae = float(np.mean(np.abs(actual.astype(np.int16) - expected.astype(np.int16))))
+    if not np.array_equal(actual, expected):
+        artifact_dir = os.environ.get("FORGE3D_HELIOS_ARTIFACT_DIR")
+        if artifact_dir:
+            forge3d.numpy_to_png(Path(artifact_dir) / "shadow-mask-actual.png", actual)
     assert np.array_equal(actual, expected)
     return mae
 
@@ -227,7 +231,10 @@ print(json.dumps({"sha256": hashlib.sha256(mask.tobytes()).hexdigest(),
             env=env,
             capture_output=True,
             text=True,
-            check=True,
+        )
+        assert completed.returncode == 0, (
+            f"{backend} shadow-mask subprocess failed with {completed.returncode}\n"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
         )
         results[backend] = json.loads(completed.stdout)
         assert not results[backend]["adapter"]["software_fallback"]
