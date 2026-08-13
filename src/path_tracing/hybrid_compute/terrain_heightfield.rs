@@ -2066,11 +2066,35 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
             .count();
         let mask = &gpu[10_000..];
         let mask_oracle = &oracle[10_000..];
-        let mask_false_misses = mask_oracle
+        let mask_false_miss_diagnostics: Vec<_> = mask_oracle
             .iter()
             .zip(mask)
-            .filter(|(expected, actual)| **expected && !**actual)
-            .count();
+            .enumerate()
+            .filter_map(|(index, (expected, actual))| {
+                if *expected && !*actual {
+                    let ray = rays[10_000 + index];
+                    Some(serde_json::json!({
+                        "index": index,
+                        "x": index % PROOF_CELL_COUNT,
+                        "z": index / PROOF_CELL_COUNT,
+                        "origin": ray.origin,
+                        "direction": ray.direction,
+                        "inv_two_r_prime": ray.inv_two_r_prime,
+                    }))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !mask_false_miss_diagnostics.is_empty() {
+            println!(
+                "HELIOS_PRODUCTION_TERRAIN_TRACE_GPU_MISSES_JSON {}",
+                serde_json::json!({
+                    "misses": mask_false_miss_diagnostics,
+                })
+            );
+        }
+        let mask_false_misses = mask_false_miss_diagnostics.len();
         let mask_false_hits = mask_oracle
             .iter()
             .zip(mask)
