@@ -16,10 +16,10 @@ pub(crate) use glam::Vec3;
 #[cfg(feature = "extension-module")]
 pub(crate) use numpy::{IntoPyArray, PyArray1, PyArray3, PyArrayMethods, PyReadonlyArrayDyn};
 #[cfg(feature = "extension-module")]
-pub(crate) use pyo3::types::{PyByteArray, PyBytes, PyDict, PyMemoryView, PyString};
+pub(crate) use pyo3::types::{PyByteArray, PyBytes, PyDict, PyMapping, PyMemoryView, PyString};
 #[cfg(feature = "extension-module")]
 pub(crate) use pyo3::{
-    exceptions::{PyRuntimeError, PyValueError},
+    exceptions::{PyAttributeError, PyKeyError, PyRuntimeError, PyTypeError, PyValueError},
     prelude::*,
     pyclass, pyfunction, pymethods, wrap_pyfunction,
 };

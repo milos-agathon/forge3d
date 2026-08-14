@@ -11,6 +11,22 @@ def test_repeated_line_labels_are_deterministic_with_repeat_distance():
             "geometry": {"type": "LineString", "coordinates": [[0, 0], [100, 0]]},
             "repeat_distance": 40,
             "priority_class": "roads",
+            "geometry_authority": {
+                "source": "compute_line_label_placement",
+                "positioned_glyphs": [
+                    {"font_index": 0, "glyph_id": 1, "origin": [0, 0], "rotation": 0}
+                ],
+                "candidates": [
+                    {
+                        "candidate_id": f"road-a:repeat-{index}",
+                        "candidate_type": "line_repeat",
+                        "anchor": [x, 0, 0],
+                        "bounds": [x, 0, x + 10, 10],
+                        "details": {"repeat_distance": 40},
+                    }
+                    for index, x in enumerate((0, 40, 80))
+                ],
+            },
         }
     ]
 
@@ -30,7 +46,7 @@ def test_repeated_line_labels_are_deterministic_with_repeat_distance():
     assert accepted.candidate.details["repeat_distance"] == 40.0
 
 
-def test_curved_line_labels_are_explicitly_experimental_not_silent_success():
+def test_curved_line_labels_require_authoritative_positioned_geometry():
     plan = f3d.LabelPlan.compile(
         labels=[
             {
@@ -45,7 +61,9 @@ def test_curved_line_labels_are_explicitly_experimental_not_silent_success():
     )
 
     assert not plan.accepted
-    assert plan.rejected[0].reason == "unsupported_geometry_type"
-    diagnostic = next(d for d in plan.diagnostics if d.code == "experimental_feature")
+    assert plan.rejected[0].reason == "missing_geometry_authority"
+    diagnostic = next(
+        d for d in plan.diagnostics if d.code == "label_geometry_authority_missing"
+    )
     assert diagnostic.object_id == "river-curve"
-    assert diagnostic.details["feature"] == "advanced curved labels"
+    assert diagnostic.details["required_authority"] == "layout_curved_text"

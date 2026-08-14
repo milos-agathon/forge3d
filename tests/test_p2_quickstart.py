@@ -63,6 +63,21 @@ def test_p2_quickstart_advanced_labels_compile_or_diagnose():
                 "text": "Road",
                 "geometry": {"type": "LineString", "coordinates": [[0, 0], [100, 0]]},
                 "repeat_distance": 50,
+                "geometry_authority": {
+                    "source": "compute_line_label_placement",
+                    "positioned_glyphs": [
+                        {"font_index": 0, "glyph_id": 1, "origin": [0, 0], "rotation": 0}
+                    ],
+                    "candidates": [
+                        {
+                            "candidate_id": "road:0",
+                            "candidate_type": "line_repeat",
+                            "anchor": [50, 0, 0],
+                            "bounds": [40, 0, 60, 10],
+                            "details": {"repeat_distance": 50},
+                        }
+                    ],
+                },
             },
             {
                 "id": "curved",
@@ -76,4 +91,7 @@ def test_p2_quickstart_advanced_labels_compile_or_diagnose():
     )
 
     assert [label.label_id for label in plan.accepted] == ["road"]
-    assert any(diagnostic.code == "experimental_feature" for diagnostic in plan.diagnostics)
+    assert any(
+        diagnostic.code == "label_geometry_authority_missing"
+        for diagnostic in plan.diagnostics
+    )

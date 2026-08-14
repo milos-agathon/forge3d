@@ -1,6 +1,8 @@
 //! MSDF font atlas loading and text layout.
 
-use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use crate::core::text_overlay::TextInstance;
 use crate::labels::positioned::{positioned_glyphs, PositionedGlyph};
 use crate::labels::shape::ShapedText;
@@ -65,6 +67,7 @@ fn path_glyph_center(
 pub struct MsdfAtlas {
     pub texture: Arc<TrackedTexture>,
     pub view: Arc<TextureView>,
+    pub buffer: Arc<TrackedBuffer>,
     pub width: u32,
     pub height: u32,
     /// Canonical glyph metrics indexed by shaped font/glyph identity.
@@ -181,10 +184,26 @@ impl MsdfAtlas {
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("msdf_atlas_buffer"),
+                size: upload_data.len() as u64,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: true,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        buffer
+            .slice(..)
+            .get_mapped_range_mut()
+            .copy_from_slice(&upload_data);
+        buffer.unmap();
 
         Ok(Self {
             texture: Arc::new(texture),
             view: Arc::new(view),
+            buffer: Arc::new(buffer),
             width: atlas_width,
             height: atlas_height,
             glyphs,
@@ -635,6 +654,7 @@ impl Clone for MsdfAtlas {
     fn clone(&self) -> Self {
         Self {
             texture: Arc::clone(&self.texture),
+            buffer: Arc::clone(&self.buffer),
             view: Arc::clone(&self.view),
             width: self.width,
             height: self.height,

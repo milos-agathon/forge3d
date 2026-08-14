@@ -31,33 +31,21 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1438
-# The previous 1433-site freeze already covered the reviewed ANAMNESIS,
-# TESSELLA, and first SIDERA transitions described below. The d8313007 base
-# source actually contained 1446 sites because SIDERA's later adversarial
-# closure added twelve u32 viewport-dimension/reciprocal casts and one
-# normalized celestial unit-direction conversion without refreshing this
-# constant. SUBSTRATIA adds one u32 feedback-origin telemetry counter converted
-# for Python float stats. It also moves four existing tile-index-to-normalized-
-# UV casts from finish_frame to ingest_shader_feedback; that changes their
-# occurrence ownership, but not the count. The physical TESSELLA picking audit
-# also moved two existing screen-coordinate conversions from pixel corners to
-# raster pixel centres; their count is unchanged. Its visibility CPU oracle
-# adds seven raster-only conversions: pixel centres (2), normalized coarse
-# texel steps (2), a bounded LUT index (1), and viewport projection (2). All
-# reviewed primitives are render dimensions, normalized directions/UVs,
-# bounded raster indices, or telemetry. None stores absolute world coordinates
-# or bypasses the camera Anchor. The subsequent physical-terrain closure
-# consolidated repeated clipmap ring coordinate construction, reducing the
-# reviewed inventory without weakening the Anchor boundary.
-EXPECTED_CONVERSION_SHA256 = "2ddfeed47f0ca486358e2e6bd597550fbbc6451046b2d2ff4a3945e3df2d65e2"
+EXPECTED_CONVERSION_COUNT = 1508
+# Relative to the b50a680a 1438-site freeze, the exact source delta is 77
+# additions and 7 removals: atmosphere bake +57; label bounds +4; AETHER post
+# +2; AETHER reference +6; terrain bind groups +3/-1; geometry normal helpers
+# +1/-2; adjudication +2/-2; and terrain PT +2/-2. The net is +70, yielding
+# 1508. These are bounded LUT/sample/raster conversions or moved existing
+# render-dimension conversions; none stores world coordinates or bypasses Anchor.
+EXPECTED_CONVERSION_SHA256 = "966e543a72fa6ce6c801f1ff7ffc18bad55ae99253c27924f4a8bf8230febf17"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1438,
+    "current_count": 1508,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -79,10 +67,10 @@ REVIEWED_INVENTORY_TRANSITION = {
 # transition records that function-only ownership change without relaxing the
 # occurrence count or any normalized conversion statement.
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
-    # Re-based on main at the merge: the pre-transition tree is now main rather
-    # than this branch's original base, so the count and digest are main's.
-    "base_count": 1438,
-    "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
+    # Reconstruct the equivalent pre-transition inventory from the current
+    # freeze by reversing only the five function-ownership moves below.
+    "base_count": 1508,
+    "base_digest": "4a2a56fbc0784ba5d67eab8a34480880507d23bdcf386dd3b53da73f3ca8b0fc",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",
     "removed_function": "render_raster_reference",
@@ -258,6 +246,7 @@ def test_reviewed_anamnesis_function_ownership_transition_is_exact():
     transition = REVIEWED_ANAMNESIS_INVENTORY_TRANSITION
     assert len(sites) == transition["base_count"] == EXPECTED_CONVERSION_COUNT
     assert _inventory_digest(sites) == transition["result_digest"]
+    reverse_transition = {}
     for ordinal, statement in enumerate(transition["statements"], start=1):
         removed = (
             transition["path"],
@@ -275,6 +264,10 @@ def test_reviewed_anamnesis_function_ownership_transition_is_exact():
         )
         assert removed not in sites
         assert added in sites
+        reverse_transition[added] = removed
+    reconstructed_base = [reverse_transition.get(site, site) for site in sites]
+    assert len(reconstructed_base) == transition["base_count"]
+    assert _inventory_digest(reconstructed_base) == transition["base_digest"]
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():

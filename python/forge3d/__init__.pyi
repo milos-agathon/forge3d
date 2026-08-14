@@ -742,6 +742,51 @@ class CameraAnimation:
     def get_frame_count(self, fps: int) -> int: ...
     def evaluate(self, time: float) -> Optional[CameraState]: ...
 
+class MaterialSet:
+    @staticmethod
+    def terrain_default(
+        triplanar_scale: float = ...,
+        normal_strength: float = ...,
+        blend_sharpness: float = ...,
+    ) -> MaterialSet: ...
+    @staticmethod
+    def custom(
+        base_color: Tuple[float, float, float],
+        metallic: float,
+        roughness: float,
+        triplanar_scale: float = ...,
+        normal_strength: float = ...,
+        blend_sharpness: float = ...,
+    ) -> MaterialSet: ...
+    @property
+    def material_count(self) -> int: ...
+    @property
+    def triplanar_scale(self) -> float: ...
+    @property
+    def normal_strength(self) -> float: ...
+    @property
+    def blend_sharpness(self) -> float: ...
+
+class SunPosition:
+    @property
+    def azimuth(self) -> float: ...
+    @property
+    def elevation(self) -> float: ...
+    def to_direction(self) -> Tuple[float, float, float]: ...
+    def is_daytime(self) -> bool: ...
+
+def sun_position(latitude: float, longitude: float, datetime_utc: str) -> SunPosition: ...
+def sun_position_utc(
+    latitude: float,
+    longitude: float,
+    year: int,
+    month: int,
+    day: int,
+    hour: int,
+    minute: int,
+    second: int = ...,
+) -> SunPosition: ...
+
 class TerrainRenderer:
     def __init__(self, session: "Session") -> None: ...
     @property

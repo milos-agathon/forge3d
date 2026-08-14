@@ -108,8 +108,6 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] }
-env_logger = "0.10"
-sha2 = "0.10"
 
 [build-dependencies]
 # Reuse the runtime hash implementation to embed a build-time fingerprint of

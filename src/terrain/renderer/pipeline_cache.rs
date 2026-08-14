@@ -536,8 +536,22 @@ impl TerrainScene {
         output_mask: u8,
         include_source_id: bool,
         clipmap_geometry: bool,
+        portable_color_formats: bool,
     ) -> wgpu::RenderPipeline {
-        let shader_source = Self::preprocess_terrain_shader(device, true);
+        let portable_color_outputs = portable_color_formats
+            && output_mask & (super::aov::AOV_ALBEDO_BIT | super::aov::AOV_NORMAL_BIT) != 0;
+        let mut shader_source = Self::preprocess_terrain_shader(device, true);
+        if portable_color_outputs {
+            const MARKER: &str = "// TERRAIN_AOV_PORTABLE_NORMAL_ENCODING";
+            assert!(
+                shader_source.contains(MARKER),
+                "terrain shader must contain the portable normal marker"
+            );
+            shader_source = shader_source.replace(
+                MARKER,
+                "out.aov_normal = vec4<f32>(out.aov_normal.xyz * 0.5 + 0.5, out.aov_normal.w);",
+            );
+        }
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "terrain_pbr_pom.aov.shader",
@@ -575,13 +589,21 @@ impl TerrainScene {
             }),
             // Target 1: Albedo
             (output_mask & super::aov::AOV_ALBEDO_BIT != 0).then_some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba16Float,
+                format: if portable_color_outputs {
+                    wgpu::TextureFormat::Rgba8Unorm
+                } else {
+                    wgpu::TextureFormat::Rgba16Float
+                },
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             }),
             // Target 2: Normal
             (output_mask & super::aov::AOV_NORMAL_BIT != 0).then_some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba16Float,
+                format: if portable_color_outputs {
+                    wgpu::TextureFormat::Rgba8Unorm
+                } else {
+                    wgpu::TextureFormat::Rgba16Float
+                },
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             }),

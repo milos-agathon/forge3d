@@ -48,9 +48,10 @@ fn shader_tree_hash(root: &Path) -> String {
 }
 
 fn main() {
-    let git_revision = |argument: &str| {
+    let git_revision = |arguments: &[&str]| {
         Command::new("git")
-            .args(["rev-parse", argument, "HEAD"])
+            .arg("rev-parse")
+            .args(arguments)
             .output()
             .ok()
             .filter(|out| out.status.success())
@@ -59,21 +60,11 @@ fn main() {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "unknown".to_string())
     };
-    let sha = git_revision("--short=12");
+    let sha = git_revision(&["--short=12", "HEAD"]);
     let full_sha = env::var("GITHUB_SHA")
         .ok()
         .filter(|value| value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .unwrap_or_else(|| {
-            Command::new("git")
-                .args(["rev-parse", "HEAD"])
-                .output()
-                .ok()
-                .filter(|out| out.status.success())
-                .and_then(|out| String::from_utf8(out.stdout).ok())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "unknown".to_string())
-        });
+        .unwrap_or_else(|| git_revision(&["HEAD"]));
 
     println!("cargo:rustc-env=FORGE3D_GIT_SHA={sha}");
     println!("cargo:rustc-env=FORGE3D_GIT_SHA_FULL={full_sha}");

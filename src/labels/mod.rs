@@ -1061,7 +1061,8 @@ impl LabelManager {
             // the internal allocations were infallible before the tracked-wrapper
             // migration, so a rare allocation failure is discarded rather than
             // aborting the frame (this fn returns a count, not a Result).
-            let _ = renderer.recreate_bind_group(device, Some(&atlas.view));
+            renderer.set_atlas_size(atlas.width, atlas.height);
+            renderer.recreate_bind_group(device, Some(atlas.buffer.as_ref()));
         }
 
         renderer.set_channels(

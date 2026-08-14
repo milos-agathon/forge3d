@@ -51,7 +51,9 @@ def test_terrain_public_docs_drop_stale_sky_and_shadow_claims() -> None:
     shadow_doc = ShadowSettings.validate_for_terrain.__doc__ or ""
 
     assert "Rayleigh" not in sky_doc
-    assert "Mie" not in sky_doc
+    assert (
+        "AETHER shipped spectral LUTs with explicit ozone and Mie anisotropy" in sky_doc
+    )
     assert "Hosek-Wilkie RGB coefficient-table" in sky_doc
     assert "NOT implemented" not in shadow_doc
     assert "moment_maps binding exists" not in shadow_doc
@@ -76,10 +78,17 @@ def test_terrain_sky_storage_format_matches_rust_texture_contract() -> None:
     output = rust.split('label: Some("terrain.sky.output")', 1)[1].split(
         "let sky_view", 1
     )[0]
-    assert "format: wgpu::TextureFormat::Rgba8Unorm" in layout
-    assert "format: wgpu::TextureFormat::Rgba8Unorm" in output
+    legacy_pipeline = rust.split('label: Some("terrain.sky.shader")', 1)[0]
+    aether_pipeline = rust.split("let aether_source", 1)[1].split(
+        "let aether_shader", 1
+    )[0]
+    assert "format: wgpu::TextureFormat::Rgba16Float" in layout
+    assert "format: wgpu::TextureFormat::Rgba16Float" in output
     assert "texture_storage_2d<rgba8unorm, write>" in shader
     assert "texture_storage_2d<rgba16float, write>" not in shader
+    assert "terrain_sky_shader_source(include_str!" in legacy_pipeline
+    assert "terrain_sky_shader_source(&crate::shader_sources::aether_sky())" in aether_pipeline
+    assert "declaration_count != 1" in rust
     assert "try_create_compute_pipeline_scoped" in rust
     assert "create_compute_pipeline_scoped(" not in rust.replace(
         "try_create_compute_pipeline_scoped(", ""

@@ -23,8 +23,8 @@ with f3d.open_viewer_async(terrain_path=dem_path) as viewer:
 ```
 
 When you need direct COG access rather than viewer loading, use
-`forge3d.cog.open_cog(...)` and read windows or tiles yourself. That is the
-workflow shown by `cog_streaming_demo.py`.
+`forge3d.cog.open_cog(...)` and read windows or tiles yourself. There is no
+dedicated tracked COG example currently; use the API reference for that path.
 
 ## Datasets And CRS Helpers
 
@@ -59,11 +59,11 @@ viewer.load_overlay(
 
 That is the main pattern in:
 
-- `swiss_terrain_landcover_viewer.py`
-- `bosnia_terrain_landcover_viewer.py`
-- `belgium_bivariate_climate_map.py`
-- `poland_population_spikes_height_shade.py`
-- `pnoa_river_showcase_video.py`
+- `examples/swiss_terrain_landcover_viewer.py`
+- `examples/bosnia_terrain_landcover_viewer.py`
+- `examples/forest_cover_copernicus/italy_forest_cover_3d.py`
+- `examples/population_ghsl/iberia_builtup_cover_3d.py`
+- `examples/population_ghsl/romania_builtup_cover_3d.py`
 
 Those examples also show the common real-world pattern of taking a raw viewer
 snapshot and then compositing final labels, shadows, or layout outside the
@@ -71,24 +71,28 @@ viewer with PIL, Matplotlib, or NumPy.
 
 ## Vector Overlays, Labels, And Styles
 
-There are two vector paths:
+There are three current vector and label paths:
 
-### 1. Viewer overlays and labels
+### 1. Public viewer labels
 
-Use the raw IPC helpers when the content belongs inside the 3D scene:
+Use `ViewerHandle` methods for high-level labels:
 
-- `forge3d.viewer_ipc.add_vector_overlay`
-- `forge3d.viewer_ipc.add_label`
-- `forge3d.viewer_ipc.set_labels_enabled`
-- `ViewerHandle.send_ipc(...)`
+- `ViewerHandle.add_label(...)`
+- `ViewerHandle.add_labels(...)`
+- `ViewerHandle.add_line_label(...)`
+- `ViewerHandle.add_callout(...)`
 
-Examples:
+`examples/label_api_truth_basic.py` is the deterministic public-API smoke
+example. `examples/luxembourg_rail_overlay.py` is a lower-level compatibility
+example that still uses raw `viewer_ipc` for vector-overlay commands.
 
-- `luxembourg_rail_overlay.py`
-- `fuji_labels_demo.py`
-- `picking_demo.py`
+### 2. Typed MapScene labels
 
-### 2. Style translation and 2D vector scenes
+`examples/fuji_labels_demo.py` constructs a public `MapScene` with a
+`LabelLayer`; it does not use `viewer_ipc` or `ViewerHandle`. The canonical
+typed vector-label companion is `examples/mapscene_vector_labels.py`.
+
+### 3. Style translation and 2D vector scenes
 
 Use `forge3d.style` when you need Mapbox-style parsing and translation into
 forge3d vector or label settings for local/provided feature styling. This is
@@ -113,9 +117,8 @@ bidi, positioned-outline, and analytic-coverage pipeline; unsupported Unicode co
 render through typed diagnostics such as `unicode_coverage_gap` or
 `missing_glyphs`.
 
-Example:
-
-- `style_viewer_interactive.py`
+The tracked `examples/sample_style.json` is an input asset, not a standalone
+style demo. There is currently no tracked runnable style-import example.
 
 ## Point Clouds
 
@@ -134,9 +137,7 @@ with f3d.open_viewer_async() as viewer:
 `forge3d.pointcloud` covers data-side helpers such as `PointBuffer`,
 `copc_laz_enabled()`, and `read_laz_points_info()`.
 
-Example:
-
-- `pointcloud_viewer_interactive.py`
+Example: `examples/pointcloud_viewer_interactive.py`.
 
 ## Buildings And 3D Tiles
 
@@ -147,9 +148,9 @@ Building-oriented workflows live in `forge3d.buildings`:
 - `add_buildings_3dtiles()` for 3D Tiles-backed metadata flows
 - material helpers such as `material_from_name()` and `material_from_tags()`
 
-`buildings_viewer_interactive.py` shows how those building meshes can be turned
-into viewer geometry. The GIS tutorial and gallery entries use the same basic
-pipeline.
+`examples/osm_city_demo.py` shows the legacy OSM building-extrusion workflow.
+The typed product-scene example is `examples/mapscene_buildings_labels.py`.
+The GIS tutorial and gallery entries use the same basic pipeline.
 
 `forge3d.tiles3d` is the lower-level module for 3D Tiles parsing and traversal.
 Use it when you need direct control rather than the building convenience layer.
@@ -185,17 +186,17 @@ This is the path for repeatable scene variants, saved bookmarks, and shipping a
 reviewable scene between machines. Missing external bundle assets remain
 diagnostic-bearing through `missing_external_asset`; bundle save/load must not
 turn missing, unsupported, `Pro-gated`, `placeholder/fallback`, or
-`experimental` asset state into successful renderability. See `terrain_demo.py`
-and Python tutorial 04.
+`experimental` asset state into successful renderability. See
+`examples/terrain_demo.py` and Python tutorial 04.
 
 ## Example Map
 
-- `terrain_single_tile.py`: minimal data-to-image sanity check
-- `cog_streaming_demo.py`: direct COG tile/window access
-- `swiss_terrain_landcover_viewer.py` and `bosnia_terrain_landcover_viewer.py`: terrain + raster overlay
-- `luxembourg_rail_overlay.py`: vector overlays
-- `fuji_labels_demo.py`: labels and decluttering
-- `pointcloud_viewer_interactive.py`: point-cloud loading
-- `buildings_viewer_interactive.py`: building geometry pipelines
-- `style_viewer_interactive.py`: style translation
-- `terrain_demo.py`: bundle-aware scene CLI
+- `examples/terrain_demo.py`: bundle-aware terrain CLI
+- `examples/mapscene_bundled_datasets_showcase.py`: bundled data in a typed scene
+- `examples/swiss_terrain_landcover_viewer.py` and
+  `examples/bosnia_terrain_landcover_viewer.py`: terrain plus raster overlays
+- `examples/luxembourg_rail_overlay.py`: raw-IPC vector-overlay compatibility
+- `examples/label_api_truth_basic.py`: public `ViewerHandle` label methods
+- `examples/fuji_labels_demo.py`: public `MapScene` and `LabelLayer`
+- `examples/pointcloud_viewer_interactive.py`: point-cloud loading
+- `examples/mapscene_buildings_labels.py`: typed building and label layers

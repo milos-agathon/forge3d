@@ -1,84 +1,93 @@
 # Examples Catalog
 
-This page covers every runnable example and notebook in the repo. Use it as the
-index for `examples/`.
+This page lists every tracked Python example with a `__main__` entry point and
+every tracked notebook in `examples/`. Catalog membership means that a runnable
+entry point exists; it does not mean that optional data, network access, native
+viewer support, a GPU, or video tools are available on every machine.
 
-General rule: start with `python examples/<name>.py --help` when the script
-exposes CLI flags.
+When a script exposes command-line flags, start with
+`python examples/<path>.py --help`.
 
-## Foundational Sanity Checks
+## MapScene And Public Labels
 
-| Example | What it demonstrates | Main APIs |
+| Example | What it demonstrates | Main interfaces and runtime notes |
 | --- | --- | --- |
-| `triangle_png.py` | Smallest end-to-end render check. Creates a PNG with the fallback `Renderer`. | `Renderer.render_triangle_png()` |
-| `png_numpy_roundtrip.py` | Round-trip image IO from NumPy to PNG and back. | `numpy_to_png()`, `png_to_numpy()` |
-| `terrain_single_tile.py` | Minimal terrain-data processing example that writes a grayscale image from the bundled DEM. | `mini_dem()`, `numpy_to_png()` |
-| `terrain_demo.py` | Thin CLI wrapper around the terrain demo module, including preset and bundle-aware workflows. | `forge3d.terrain_demo`, `bundle` |
+| `examples/fuji_labels_demo.py` | Mount Fuji terrain and decluttered labels through the public typed scene path. | `MapScene`, `LabelLayer`; native MapScene render backend required |
+| `examples/label_api_truth_basic.py` | Deterministic high-level viewer-label API smoke workflow. | `ViewerHandle` label methods; uses an in-process recording handle |
+| `examples/mapscene_terrain_raster.py` | Canonical terrain-plus-raster MapScene. | `MapScene`, `TerrainSource`, `RasterOverlay`; native MapScene render backend required |
+| `examples/mapscene_vector_labels.py` | Canonical vector-and-label MapScene. | `MapScene`, `VectorOverlay`, `LabelLayer`; native MapScene render backend required |
+| `examples/mapscene_buildings_labels.py` | Typed buildings and labels. | `MapSceneBuildingLayer`, `LabelLayer`; native MapScene render backend required |
+| `examples/mapscene_bundled_datasets_showcase.py` | MapScene with datasets shipped by forge3d. | `MapScene`, `forge3d.datasets`; native MapScene render backend required |
+| `examples/mapscene_offline_quality.py` | Offline accumulation, AOV, and bundle output. | `MapScene.render`, `MapScene.save_bundle`; native MapScene render backend required |
+| `examples/mapscene_p1_assets_bundle_showcase.py` | P1 asset adapters, bundles, and explicit unsupported-path diagnostics. | `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`; intentionally preserves diagnostic-bearing status |
+| `examples/moon_south_pole.py` | Typed lunar CRS, render, diagnostics, and certificate workflow. | `MapScene`, `forge3d.gis`, `forge3d.certificate`; local lunar DEM and native render support required |
 
-## Interactive Terrain And Cartography
+## Interactive Terrain, Overlays, And Camera
 
-| Example | What it demonstrates | Main APIs |
+| Example | What it demonstrates | Main interfaces and runtime notes |
 | --- | --- | --- |
-| `terrain_viewer_interactive.py` | Baseline interactive terrain viewer with camera, sun, AA, and PBR-oriented controls. | `open_viewer_async()`, `ViewerHandle`, terrain IPC |
-| `swiss_terrain_landcover_viewer.py` | Terrain plus raster land-cover drape, tuned for polished snapshot output. | `ViewerHandle.load_overlay()` |
-| `bosnia_terrain_landcover_viewer.py` | Raster-overlay terrain workflow with final image compositing outside the viewer. | `open_viewer_async()`, `load_overlay()`, PIL composition |
-| `belgium_bivariate_climate_map.py` | Climate rasters projected onto terrain and turned into a polished final map. | viewer path, raster overlays, xarray/rioxarray-side prep |
-| `poland_population_spikes_height_shade.py` | Terrain-plus-overlay composition for a height-shaded thematic map. | viewer path, overlay controls |
-| `pnoa_river_showcase.py` | Pure-Python companion composition example for terrain storytelling and post-processing. | downstream composition around terrain assets |
-| `pnoa_river_showcase_video.py` | High-resolution cinematic terrain sequence with overlay styling and final video/frame assembly. | viewer path, `terrain_scatter.viewer_orbit_radius()` |
-| `terrain_atmosphere_path_demo.py` | Lower-level terrain-native rendering path without the interactive viewer. | `Session`, `TerrainRenderer`, `TerrainRenderParams`, `MaterialSet`, `IBL` |
-| `uk_ireland_lighthouse_map.py` | British Isles terrain poster rendered through `TerrainRenderer`, with OSM lighthouses driving night-time glow and spotlight placement. | `Session`, `TerrainRenderer`, Overpass, Terrarium DEM tiles |
+| `examples/terrain_viewer_interactive.py` | Baseline interactive terrain viewer. | viewer IPC compatibility path; native viewer required |
+| `examples/terrain_demo.py` | Terrain presets and bundle-aware CLI workflow. | `forge3d.terrain_demo`; native viewer required for rendering |
+| `examples/terrain_camera_rigs_demo.py` | Orbit, rail, and target-follow terrain camera rigs. | `forge3d.camera_rigs`, `open_viewer_async`; native viewer required |
+| `examples/camera_animation_demo.py` | Keyframed viewer camera paths and frame export. | `CameraAnimation`, viewer IPC compatibility path; native viewer required |
+| `examples/swiss_terrain_landcover_viewer.py` | Swiss terrain with a raster land-cover overlay. | `open_viewer_async`, `ViewerHandle.load_overlay`; data/network and native viewer required |
+| `examples/bosnia_terrain_landcover_viewer.py` | Bosnia terrain with raster land-cover composition. | `open_viewer_async`, raster overlay workflow; data/network and native viewer required |
+| `examples/luxembourg_rail_overlay.py` | Rail vectors draped on terrain. | raw `viewer_ipc` compatibility commands; network and native viewer required |
+| `examples/pointcloud_viewer_interactive.py` | Interactive LAZ/LAS point-cloud loading. | point-cloud viewer IPC compatibility path; native viewer and input data required |
+| `examples/bryce_canyon_storm_timelapse.py` | Timed rain and projected cloud sheets over Bryce Canyon. | `open_viewer_async`, snapshots; native viewer and video tooling required |
+| `examples/khumbu_icefall_sentinel_timelapse.py` | Sentinel-2 time series over Copernicus terrain. | `open_viewer_async`, STAC data, `ffmpeg`; network, data, and native viewer required |
 
-## Overlays, Labels, Styles, And Picking
+## Regional Terrain And Cartography
 
-| Example | What it demonstrates | Main APIs |
+| Example | What it demonstrates | Main interfaces and runtime notes |
 | --- | --- | --- |
-| `luxembourg_rail_overlay.py` | Vector rail overlay draped onto terrain. | `viewer_ipc`, `add_vector_overlay`, terrain IPC |
-| `fuji_labels_demo.py` | Label placement, typography, priorities, zoom ranges, and decluttering. | `viewer_ipc.add_label`, label settings |
-| `style_viewer_interactive.py` | Mapbox-style import and style-driven vector overlay workflow. | `forge3d.style` |
-| `picking_demo.py` | Premium picking path including lasso selection, highlight styles, and rich pick events. | `viewer_ipc` picking helpers |
-| `picking_test_interactive.py` | Interactive/manual verification harness for picking behavior. | `viewer_ipc` picking helpers |
+| `examples/colorado_rem_forge3d.py` | Snake River relative-elevation-model map. | `open_viewer_async`, terrain scatter, cartographic furniture; network/data and native viewer required |
+| `examples/platte_rem_forge3d.py` | Yellowstone River relative-elevation-model plate. | `Session`, `TerrainRenderer`, `MaterialSet`; network/data and GPU-backed native build required |
+| `examples/forest_cover_copernicus/italy_forest_cover_3d.py` | Copernicus forest-cover terrain map of Italy. | `open_viewer_async`, raster overlays; network/data and native viewer required |
+| `examples/population_ghsl/iberia_builtup_cover_3d.py` | Iberian GHSL built-up coverage over terrain. | `open_viewer_async`, raster overlays; network/data and native viewer required |
+| `examples/population_ghsl/romania_builtup_cover_3d.py` | Romanian GHSL built-up coverage over terrain. | `open_viewer_async`, raster overlays; network/data and native viewer required |
+| `examples/population_spike_worldpop/poland_population_spikes.py` | WorldPop density as a 3D spike map. | raw viewer IPC compatibility path; local data and native viewer required |
+| `examples/population_spike_worldpop/poland_population_spikes_height_shade.py` | WorldPop density with height-shade styling. | shared Poland viewer pipeline; local data and native viewer required |
+| `examples/population_spike_worldpop/poland_population_contour_3d.py` | Stepped population contours over 3D terrain. | shared Poland viewer pipeline; local data and native viewer required |
+| `examples/population_spike_worldpop/germany_population_spikes_height_shade.py` | Germany WorldPop height-shade variant. | shared WorldPop viewer pipeline; local data, optional palette dependency, and native viewer required |
+| `examples/population_spike_worldpop/france_population_spikes_height_shade.py` | France WorldPop height-shade variant. | shared WorldPop viewer pipeline; local data and native viewer required |
+| `examples/rotterdam_solar_potential_shadow_study.py` | Rotterdam roof-solar suitability and selected-time shadows. | 3D BAG/PVGIS/OSM acquisition with deterministic preview; network required for uncached data |
+| `examples/osm_city_demo.py` | OSM building extrusion with a deterministic preview renderer. | `forge3d.io.import_osm_buildings_from_geojson`; network required for uncached data |
+| `examples/osm_city_daycycle.py` | Animated sunlight and shadows over the OSM city scene. | builds on `examples/osm_city_demo.py`; network/cache and `ffmpeg` required |
+| `examples/helsinki_transit_daycycle.py` | Helsinki transit and road-flow day cycle. | builds on the OSM city scripts; network/cache and `ffmpeg` required |
+| `examples/turkiye_river_basins_3d.py` | Deterministic poster helpers for a Turkiye river-basins composition. | helper-backed CLI entry point; current entry point reports the target poster dimensions |
+| `examples/uk_ireland_lighthouse_map.py` | Night terrain poster with OSM lighthouse placement. | `Session`, `TerrainRenderer`; network/data and GPU-backed native build required |
 
-## Point Clouds, Buildings, And Large Assets
+## Smoke, Atmosphere, And Video Composition
 
-| Example | What it demonstrates | Main APIs |
+| Example | What it demonstrates | Main interfaces and runtime notes |
 | --- | --- | --- |
-| `pointcloud_viewer_interactive.py` | LAZ/LAS point-cloud viewing with size and color controls. | `ViewerHandle.load_point_cloud()`, point-cloud IPC |
-| `cog_streaming_demo.py` | Direct COG access for tile/window reads, stats, and benchmarking. | `forge3d.cog.open_cog()` |
-| `buildings_viewer_interactive.py` | Building import flows from GeoJSON, CityJSON, and 3D Tiles-backed sources. | `forge3d.buildings` |
-| `osm_city_demo.py` | OSM-driven city scene around a center point, using forge3d extrusion helpers and a deterministic preview renderer. | `forge3d.io.import_osm_buildings_from_geojson()` |
-| `rotterdam_solar_potential_shadow_study.py` | Rotterdam 3D BAG LoD2.2 roof solar suitability with LoD1.2 fallback coverage, selected-time shadows, and optional day-cycle export. | 3D BAG WFS, PVGIS, OSM context, deterministic preview renderer |
-
-## Animation And Camera Automation
-
-| Example | What it demonstrates | Main APIs |
-| --- | --- | --- |
-| `camera_animation_demo.py` | Keyframe-based camera paths, interpolation preview, and frame export. | `forge3d.animation.CameraAnimation`, viewer IPC |
-| `terrain_camera_rigs_demo.py` | Higher-level terrain camera rigs such as orbit, rail, and follow shots. | `forge3d.camera_rigs`, viewer path |
-| `khumbu_icefall_sentinel_timelapse.py` | Multi-year Sentinel-2 time-series terrain animation over the Khumbu Icefall with a 5 m DEM render grid and MP4 output. | Microsoft Planetary Computer STAC, Copernicus DEM GLO-30, `open_viewer_async()`, `ffmpeg` |
-| `humanity_globe_video.py` | Offline rotating-globe recreation of the Humanity Globe GPW-v4 population-density video with stepped turbo colors and MP4 output. | GPW-v4 population density, `numpy_to_png()`, `ffmpeg` |
+| `examples/california_fire_smoke_effect.py` | Deterministic geospatial smoke transport overlays. | NumPy/Pillow composition; no live incident-data claim |
+| `examples/california_wildfire_smoke_video.py` | California terrain, wildfire, wind, and smoke-exposure video. | data acquisition and Python composition; network/cache and `ffmpeg` required |
+| `examples/california_cigar_smoke_demo.py` | August Complex hybrid volumetric-smoke demonstration. | `forge3d.smoke` when available plus cached assets and video tooling |
+| `examples/humanity_globe_video.py` | Offline population-density globe video. | `numpy_to_png`, GPW-v4 input, `ffmpeg` |
 
 ## Notebooks
 
 | Notebook | What it demonstrates |
 | --- | --- |
-| `examples/notebooks/quickstart.ipynb` | First terrain viewer workflow in notebook form. |
+| `examples/notebooks/quickstart.ipynb` | First terrain-viewer workflow in notebook form. |
 | `examples/notebooks/terrain_explorer.ipynb` | Notebook-centric terrain exploration. |
 | `examples/notebooks/map_plate.ipynb` | Map-plate composition and cartographic output. |
 
-## Support Files In `examples/`
+## Support Files
 
-These files are part of the examples directory but are support artifacts rather
-than standalone demos:
+These tracked files have no standalone Python entry point:
 
-- `sample_style.json`: sample input for style-driven overlay workflows
-- `presets/*.json`: reusable example presets
-- `_import_shim.py` and `_png.py`: internal helpers used by example scripts
+- `examples/_import_shim.py`: repository-import helper used by scripts
+- `examples/sample_style.json`: sample style input
+- `examples/presets/baseline_no_vector_overlays.json`: baseline viewer preset
+- `examples/presets/rainier_showcase.json`: Rainier showcase preset
 
 ## Where To Go Next
 
 - Use the [3D Map Project Ideas](3d-map-project-ideas.md) page for candidate
-  future examples that do not duplicate the current catalog.
+  future examples; it is not a list of current runnable files.
 - Use the [Feature Map](../guides/feature_map.md) to choose the right module family.
 - Use the [Tutorials](../tutorials/index.md) for guided onboarding.
-- Use the [API Reference](../api/api_reference.rst) when you already know the workflow and need the exact symbol.
+- Use the [API Reference](../api/api_reference.rst) for exact symbols.

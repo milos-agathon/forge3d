@@ -41,6 +41,7 @@ struct Sphere {
     emissive: vec3<f32>,
     ax: f32, // anisotropic alpha_x
     ay: f32, // anisotropic alpha_y
+    _pad1: array<f32, 3>,
 }
 
 // Bind Group 2: Queues (read/write storage buffers with atomic counters)

@@ -5116,6 +5116,7 @@ fn fs_aov_main(input : VertexOutput) -> FragmentOutput {
         input.clip_position.xy,
     );
     out.aov_depth = terrain_aov_depth(input);
+    // TERRAIN_AOV_PORTABLE_NORMAL_ENCODING
     return out;
 }
 // TERRAIN_AOV_ENTRY_END

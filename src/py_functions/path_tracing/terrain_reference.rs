@@ -7,7 +7,6 @@
 //                 python/forge3d/path_tracing.py
 
 use super::super::super::*;
-use pyo3::types::PyMapping;
 
 #[cfg(feature = "extension-module")]
 fn extract_sun_color(obj: &Bound<'_, PyAny>) -> PyResult<[f32; 3]> {
@@ -58,7 +57,7 @@ fn extract_atmosphere_lut_handle(
             .extract::<PyRef<'_, crate::py_types::PyAtmosphereLutHandle>>()
             .map(|handle| handle.core_handle().clone())
             .map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err(
+                PyTypeError::new_err(
                     "atmosphere.lut_handle must be an AtmosphereLutHandle returned by atmosphere_bake_luts()",
                 )
             })
@@ -81,9 +80,9 @@ fn extract_atmosphere_lut_handle(
         ];
         for key in mapping.keys()?.iter()? {
             let key = key?;
-            let key = key.extract::<String>().map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err("atmosphere mapping keys must be strings")
-            })?;
+            let key = key
+                .extract::<String>()
+                .map_err(|_| PyTypeError::new_err("atmosphere mapping keys must be strings"))?;
             if !ALLOWED_KEYS.contains(&key.as_str()) {
                 return Err(PyValueError::new_err(format!(
                     "unknown atmosphere setting {key:?}; expected one of {}",
@@ -96,19 +95,13 @@ fn extract_atmosphere_lut_handle(
         if let Ok(mapping) = obj.downcast::<PyMapping>() {
             match mapping.get_item(name) {
                 Ok(value) => Ok(Some(value)),
-                Err(error) if error.is_instance_of::<pyo3::exceptions::PyKeyError>(obj.py()) => {
-                    Ok(None)
-                }
+                Err(error) if error.is_instance_of::<PyKeyError>(obj.py()) => Ok(None),
                 Err(error) => Err(error),
             }
         } else {
             match obj.getattr(name) {
                 Ok(value) => Ok(Some(value)),
-                Err(error)
-                    if error.is_instance_of::<pyo3::exceptions::PyAttributeError>(obj.py()) =>
-                {
-                    Ok(None)
-                }
+                Err(error) if error.is_instance_of::<PyAttributeError>(obj.py()) => Ok(None),
                 Err(error) => Err(error),
             }
         }
@@ -133,7 +126,7 @@ fn extract_atmosphere_lut_handle(
         .iter()
         .all(|value| value.is_none())
     {
-        return Err(pyo3::exceptions::PyTypeError::new_err(
+        return Err(PyTypeError::new_err(
             "atmosphere must be an AtmosphereLutHandle, a mapping, or an object with recognized AETHER settings",
         ));
     }

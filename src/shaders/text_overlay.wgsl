@@ -7,11 +7,11 @@ struct TextOverlayUniforms {
   enabled: f32,
   channels: f32, // 1=SDF, 3=MSDF
   smoothing: f32, // px smoothing scale
+  atlas_size: vec2<u32>,
 };
 
 @group(0) @binding(0) var<uniform> U : TextOverlayUniforms;
-@group(0) @binding(1) var atlas_tex : texture_2d<f32>;
-@group(0) @binding(2) var atlas_samp : sampler;
+@group(0) @binding(1) var<storage, read> atlas : array<u32>;
 
 struct VsOut {
   @builtin(position) pos : vec4<f32>,
@@ -57,10 +57,33 @@ fn median3(v: vec3<f32>) -> f32 {
   return max(min(v.x, v.y), min(max(v.x, v.y), v.z));
 }
 
+fn atlas_texel(coord: vec2<i32>) -> vec4<f32> {
+  let size = vec2<i32>(U.atlas_size);
+  let p = clamp(coord, vec2<i32>(0), size - vec2<i32>(1));
+  let packed = atlas[u32(p.y) * U.atlas_size.x + u32(p.x)];
+  return vec4<f32>(
+    f32(packed & 255u),
+    f32((packed >> 8u) & 255u),
+    f32((packed >> 16u) & 255u),
+    f32((packed >> 24u) & 255u)) / 255.0;
+}
+
+fn sample_atlas(uv: vec2<f32>) -> vec4<f32> {
+  let texel = uv * vec2<f32>(U.atlas_size) - vec2<f32>(0.5);
+  let base = vec2<i32>(floor(texel));
+  let fraction = fract(texel);
+  let top = mix(atlas_texel(base), atlas_texel(base + vec2<i32>(1, 0)), fraction.x);
+  let bottom = mix(
+    atlas_texel(base + vec2<i32>(0, 1)),
+    atlas_texel(base + vec2<i32>(1, 1)),
+    fraction.x);
+  return mix(top, bottom, fraction.y);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   if (U.enabled < 0.5) { discard; }
-  let sample = textureSample(atlas_tex, atlas_samp, in.uv);
+  let sample = sample_atlas(in.uv);
   var sdf: f32;
   // Decode SDF/MSDF
   if (U.channels >= 2.5) {

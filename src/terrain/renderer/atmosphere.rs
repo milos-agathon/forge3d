@@ -9,6 +9,25 @@ pub(super) mod luts;
 
 use luts::{AtmosphereGpuLuts, AETHER_LUT_CACHE_CAPACITY};
 
+const SHARED_SKY_STORAGE_DECLARATION: &str =
+    "@group(0) @binding(1) var output_texture: texture_storage_2d<rgba8unorm, write>;";
+const TERRAIN_SKY_STORAGE_DECLARATION: &str =
+    "@group(0) @binding(1) var output_texture: texture_storage_2d<rgba16float, write>;";
+
+fn terrain_sky_shader_source(shared: &str) -> Result<String> {
+    let declaration_count = shared.matches(SHARED_SKY_STORAGE_DECLARATION).count();
+    if declaration_count != 1 || shared.contains(TERRAIN_SKY_STORAGE_DECLARATION) {
+        return Err(anyhow!(
+            "terrain sky specialization expected exactly one canonical RGBA8 storage declaration; found {declaration_count}"
+        ));
+    }
+    Ok(shared.replacen(
+        SHARED_SKY_STORAGE_DECLARATION,
+        TERRAIN_SKY_STORAGE_DECLARATION,
+        1,
+    ))
+}
+
 pub(super) struct AtmosphereInitResources {
     pub(super) sky_bind_group_layout0: wgpu::BindGroupLayout,
     pub(super) sky_bind_group_layout1: wgpu::BindGroupLayout,
@@ -111,10 +130,11 @@ pub(super) fn create_atmosphere_init_resources(
             }],
         });
 
+    let sky_source = terrain_sky_shader_source(include_str!("../../shaders/sky.wgsl"))?;
     let sky_shader = crate::core::shader_registry::create_labeled_shader_module(
         device,
         "terrain.sky.shader",
-        include_str!("../../shaders/sky.wgsl"),
+        &sky_source,
     );
 
     let sky_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -180,7 +200,7 @@ pub(super) fn create_atmosphere_init_resources(
                 },
             ],
         });
-    let aether_source = crate::shader_sources::aether_sky();
+    let aether_source = terrain_sky_shader_source(&crate::shader_sources::aether_sky())?;
     let aether_shader = crate::core::shader_registry::create_labeled_shader_module(
         device,
         "terrain.aether.sky.shader",
@@ -549,5 +569,37 @@ impl TerrainScene {
             scattering_view: material_scattering_view,
             linear_hdr: decoded.sky.model == 3,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        terrain_sky_shader_source, SHARED_SKY_STORAGE_DECLARATION, TERRAIN_SKY_STORAGE_DECLARATION,
+    };
+
+    #[test]
+    fn terrain_specialization_matches_legacy_and_aether_output_format() {
+        for shared in [
+            include_str!("../../shaders/sky.wgsl").to_string(),
+            crate::shader_sources::aether_sky(),
+        ] {
+            let terrain = terrain_sky_shader_source(&shared).expect("terrain sky specialization");
+            assert_eq!(terrain.matches(TERRAIN_SKY_STORAGE_DECLARATION).count(), 1);
+            assert!(!terrain.contains(SHARED_SKY_STORAGE_DECLARATION));
+        }
+    }
+
+    #[test]
+    fn terrain_specialization_rejects_storage_abi_drift() {
+        assert!(terrain_sky_shader_source("// missing declaration").is_err());
+        assert!(terrain_sky_shader_source(&format!(
+            "{SHARED_SKY_STORAGE_DECLARATION}\n{SHARED_SKY_STORAGE_DECLARATION}"
+        ))
+        .is_err());
+        assert!(terrain_sky_shader_source(&format!(
+            "{SHARED_SKY_STORAGE_DECLARATION}\n{TERRAIN_SKY_STORAGE_DECLARATION}"
+        ))
+        .is_err());
     }
 }

@@ -18,6 +18,10 @@ the current API surface, not just that imports succeed.
 
 from __future__ import annotations
 
+import ast
+import inspect
+from pathlib import Path
+
 import pytest
 
 import forge3d as f3d
@@ -2051,3 +2055,142 @@ def test_scene_stub_matches_runtime():
     assert not missing, (
         f"Stub declares methods not found on native Scene: {missing}"
     )
+
+
+# ---- W1B-01 ----
+
+def test_root_stub_declares_material_and_sun_contracts():
+    """The root stub mirrors the exact public MaterialSet and sun API shape."""
+    stub_path = Path(f3d.__file__).with_name("__init__.pyi")
+    module = ast.parse(stub_path.read_text(encoding="utf-8"), filename=str(stub_path))
+    classes = {node.name: node for node in module.body if isinstance(node, ast.ClassDef)}
+    declarations = {
+        node.name: node for node in module.body if isinstance(node, ast.FunctionDef)
+    }
+    for class_name in ("MaterialSet", "SunPosition"):
+        declarations.update(
+            {
+                f"{class_name}.{node.name}": node
+                for node in classes[class_name].body
+                if isinstance(node, ast.FunctionDef)
+            }
+        )
+
+    def model(node: ast.FunctionDef):
+        required = len(node.args.args) - len(node.args.defaults)
+        parameters = tuple(
+            (
+                argument.arg,
+                ast.unparse(argument.annotation) if argument.annotation else None,
+                index >= required,
+            )
+            for index, argument in enumerate(node.args.args)
+        )
+        return (
+            parameters,
+            ast.unparse(node.returns),
+            tuple(ast.unparse(decorator) for decorator in node.decorator_list),
+        )
+
+    f = ("float", False)
+    fd = ("float", True)
+    i = ("int", False)
+    expected = {
+        "MaterialSet.terrain_default": (
+            (("triplanar_scale", *fd), ("normal_strength", *fd), ("blend_sharpness", *fd)),
+            "MaterialSet",
+            ("staticmethod",),
+        ),
+        "MaterialSet.custom": (
+            (
+                ("base_color", "Tuple[float, float, float]", False),
+                ("metallic", *f),
+                ("roughness", *f),
+                ("triplanar_scale", *fd),
+                ("normal_strength", *fd),
+                ("blend_sharpness", *fd),
+            ),
+            "MaterialSet",
+            ("staticmethod",),
+        ),
+        "MaterialSet.material_count": ((("self", None, False),), "int", ("property",)),
+        "MaterialSet.triplanar_scale": ((("self", None, False),), "float", ("property",)),
+        "MaterialSet.normal_strength": ((("self", None, False),), "float", ("property",)),
+        "MaterialSet.blend_sharpness": ((("self", None, False),), "float", ("property",)),
+        "SunPosition.azimuth": ((("self", None, False),), "float", ("property",)),
+        "SunPosition.elevation": ((("self", None, False),), "float", ("property",)),
+        "SunPosition.to_direction": (
+            (("self", None, False),),
+            "Tuple[float, float, float]",
+            (),
+        ),
+        "SunPosition.is_daytime": ((("self", None, False),), "bool", ()),
+        "sun_position": (
+            (("latitude", *f), ("longitude", *f), ("datetime_utc", "str", False)),
+            "SunPosition",
+            (),
+        ),
+        "sun_position_utc": (
+            (
+                ("latitude", *f),
+                ("longitude", *f),
+                ("year", *i),
+                ("month", *i),
+                ("day", *i),
+                ("hour", *i),
+                ("minute", *i),
+                ("second", "int", True),
+            ),
+            "SunPosition",
+            (),
+        ),
+    }
+    assert {name: model(declarations[name]) for name in expected} == expected
+
+
+def test_root_material_and_sun_runtime_contracts():
+    """Root exports retain native identity, exact signatures, and read-only state."""
+    public_names = ("MaterialSet", "SunPosition", "sun_position", "sun_position_utc")
+    for name in public_names:
+        assert name in f3d.__all__
+        assert getattr(f3d, name) is getattr(_native, name)
+
+    expected_signatures = {
+        f3d.MaterialSet.terrain_default: (
+            "(triplanar_scale=6.0, normal_strength=1.0, blend_sharpness=4.0)"
+        ),
+        f3d.MaterialSet.custom: (
+            "(base_color, metallic, roughness, triplanar_scale=1.0, "
+            "normal_strength=0.0, blend_sharpness=1.0)"
+        ),
+        f3d.SunPosition.to_direction: "(self, /)",
+        f3d.SunPosition.is_daytime: "(self, /)",
+        f3d.sun_position: "(latitude, longitude, datetime_utc)",
+        f3d.sun_position_utc: (
+            "(latitude, longitude, year, month, day, hour, minute, second=0)"
+        ),
+    }
+    for callable_object, expected in expected_signatures.items():
+        assert str(inspect.signature(callable_object)) == expected
+
+    with pytest.raises(TypeError):
+        f3d.MaterialSet()
+    with pytest.raises(TypeError):
+        f3d.SunPosition()
+
+    material = f3d.MaterialSet.custom((0.2, 0.3, 0.4), 0.0, 0.5)
+    assert material.material_count == 1
+    assert material.triplanar_scale == pytest.approx(1.0)
+    assert material.normal_strength == pytest.approx(0.0)
+    assert material.blend_sharpness == pytest.approx(1.0)
+    with pytest.raises(AttributeError):
+        material.material_count = 2
+
+    position = f3d.sun_position_utc(0.0, 0.0, 2024, 1, 1, 12, 0)
+    assert isinstance(position, f3d.SunPosition)
+    assert isinstance(position.azimuth, float)
+    assert isinstance(position.elevation, float)
+    assert len(position.to_direction()) == 3
+    assert isinstance(position.is_daytime(), bool)
+    with pytest.raises(AttributeError):
+        position.azimuth = 0.0

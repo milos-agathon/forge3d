@@ -386,11 +386,16 @@ def test_terrain_segment_midpoint_columns_cover_vertical_and_curved_paths() -> N
     ozone_mean = float(
         np.mean(np.maximum(1.0 - np.abs((midpoint_heights - 25_000.0) / 15_000.0), 0.0))
     )
+    trapezoid = getattr(np, "trapezoid", None)
+    if trapezoid is None:
+        trapezoid = np.trapz
     heights = np.linspace(camera_height, surface_height, 200_001, dtype=np.float64)
-    numeric_rayleigh = float(np.trapz(np.exp(-heights / 8_000.0), heights) / height_delta)
-    numeric_mie = float(np.trapz(np.exp(-heights / 1_200.0), heights) / height_delta)
+    numeric_rayleigh = float(
+        trapezoid(np.exp(-heights / 8_000.0), heights) / height_delta
+    )
+    numeric_mie = float(trapezoid(np.exp(-heights / 1_200.0), heights) / height_delta)
     ozone = np.maximum(1.0 - np.abs((heights - 25_000.0) / 15_000.0), 0.0)
-    numeric_ozone = float(np.trapz(ozone, heights) / height_delta)
+    numeric_ozone = float(trapezoid(ozone, heights) / height_delta)
 
     assert exact_rayleigh_mean == pytest.approx(numeric_rayleigh, rel=1.0e-10)
     assert exact_mie_mean == pytest.approx(numeric_mie, rel=1.0e-9)

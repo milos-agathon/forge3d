@@ -8,7 +8,6 @@ include CHANGELOG.md
 include pyproject.toml
 include Cargo.toml
 include Cargo.lock
-include rust-toolchain.toml
 
 # Include source code
 recursive-include src *.rs *.wgsl *.md

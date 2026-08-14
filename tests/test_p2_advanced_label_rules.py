@@ -24,6 +24,20 @@ def test_cartographic_priority_preset_orders_multi_class_labels():
             "priority_class": "roads",
             "placement_preset": "road",
             "repeat_distance": 80,
+            "geometry_authority": {
+                "source": "compute_line_label_placement",
+                "positioned_glyphs": [
+                    {"font_index": 0, "glyph_id": 1, "origin": [0, 0], "rotation": 0}
+                ],
+                "candidates": [
+                    {
+                        "candidate_id": "road:repeat-0",
+                        "candidate_type": "line_repeat",
+                        "anchor": [40, 30, 0],
+                        "bounds": [30, 26, 50, 34],
+                    }
+                ],
+            },
         },
     ]
 

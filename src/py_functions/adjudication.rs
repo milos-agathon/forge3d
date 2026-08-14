@@ -37,19 +37,14 @@ pub(crate) fn render_adjudication_pair(
     let g = crate::core::gpu::try_ctx()?;
     let desc = crate::path_tracing::reference_scene::adjudication_scene();
 
-    // CENSOR F-04: one shared timing instance so the certificate records the
-    // PT scope first and the raster scope second (same order as the fallback);
-    // falls back to 0.0 pass records when TIMESTAMP_QUERY is not granted.
+    // CENSOR F-04: Metal timestamp queries interfere with the PT queue-header
+    // readbacks, so PT is explicitly untimed while raster retains live timing.
+    // Record PT first at 0.0 so certificate pass order stays backend-invariant.
     let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
     let pt_hdr = crate::path_tracing::adjudication::render_pt_reference(
-        &g.device,
-        &g.queue,
-        &desc,
-        width,
-        height,
-        spp,
-        Some(&mut timing),
+        &g.device, &g.queue, &desc, width, height, spp, None,
     )?;
+    crate::core::certificate::record_pass("adjudication.path_trace", 0.0, spp);
     let certificate_enabled = certificate
         .as_ref()
         .is_some_and(|value| !value.is_none() && !matches!(value.extract::<bool>(), Ok(false)));
@@ -155,7 +150,6 @@ pub(crate) fn render_adjudication_pair(
     meta.set_item("cache", cache_meta)?;
 
     if !timing.record_into_certificate() {
-        crate::core::certificate::record_pass("adjudication.path_trace", 0.0, spp);
         crate::core::certificate::record_pass("adjudication.raster", 0.0, 5);
     }
     certificate_capture.finish();

@@ -485,6 +485,7 @@ def test_sun_color_signature_stubs_and_native_order():
         ("seed", ko, 7, "int"),
         ("certificate", ko, False, "bool | str"),
         ("cache", ko, None, "str | None"),
+        ("atmosphere", ko, None, "Mapping[str, Any] | Any | None"),
     ]
     wrapper_stub = [
         (name, kind, required if default == required else "...", ann)
@@ -493,7 +494,13 @@ def test_sun_color_signature_stubs_and_native_order():
     wrapper_stub[3] = ("camera", po, "...", "dict | None")
     wrapper_stub[4] = ("spacing", ko, "...", "Tuple[float, float]")
     wrapper_stub[6] = ("albedo", ko, "...", "Tuple[float, float, float]")
-    wrapper_stub[-2] = ("certificate", ko, "...", "bool | str | None")
+    wrapper_stub[20] = ("certificate", ko, "...", "bool | str | None")
+    wrapper_stub[-1] = (
+        "atmosphere",
+        ko,
+        "...",
+        "AtmosphereSettings | Mapping[str, object] | AtmosphereLutHandle | None",
+    )
 
     native_runtime = [
         ("heightmap", po, required, ""),
@@ -518,6 +525,7 @@ def test_sun_color_signature_stubs_and_native_order():
         ("certificate", po, None, ""),
         ("sun_color", po, None, ""),
         ("cache", po, None, ""),
+        ("atmosphere", po, None, ""),
     ]
     native_stub = [
         (name, po, required if default == required else "...", ann)
@@ -544,6 +552,12 @@ def test_sun_color_signature_stubs_and_native_order():
             ("certificate", po, "...", "bool | str | PathLikeStr | None"),
             ("sun_color", po, "...", "Optional[Sequence[float] | np.ndarray]"),
             ("cache", po, "...", "str | PathLikeStr | None"),
+            (
+                "atmosphere",
+                po,
+                "...",
+                "AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None",
+            ),
         ]
     ]
 

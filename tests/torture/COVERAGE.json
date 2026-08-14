@@ -3810,12 +3810,12 @@
       "boundary": "safe_limit",
       "case_id": "labels-057",
       "distinguishing_feature": "north-pole anchor in a zero-size label frame",
-      "expected_outcome": "ok",
+      "expected_outcome": "structured_error",
       "family": "labels",
       "input_partition": "label_plan_compile|fields=anchor_count,height,width,x,y",
       "operation": "label_plan_compile",
-      "oracle_kind": "completion_classification",
-      "pathology": "none"
+      "oracle_kind": "typed_structured_error",
+      "pathology": "malformed"
     },
     {
       "boundary": "safe_limit",

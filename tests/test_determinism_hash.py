@@ -30,6 +30,17 @@ if not terrain_rendering_available():
 GOLDEN_PATH = Path(__file__).parent / "goldens" / "determinism" / f"{CANONICAL_SCENE}.sha256"
 
 
+def _assert_installed_wheel_child_paths(report: dict[str, object]) -> None:
+    if os.environ.get("FORGE3D_TEST_INSTALLED_WHEEL") != "1":
+        return
+    source_package = (Path(__file__).parents[1] / "python" / "forge3d").resolve()
+    for key in ("package", "native"):
+        resolved = Path(str(report[key])).resolve()
+        assert not resolved.is_relative_to(source_package), (
+            f"installed-wheel child resolved repo-local {key}: {resolved}"
+        )
+
+
 def _local_backend() -> str:
     """Single backend to pin for the local leg of the determinism proof."""
     explicit = os.environ.get("FORGE3D_DETERMINISM_TEST_BACKEND")
@@ -75,22 +86,28 @@ def test_dupla_dd_demo_is_backend_pinned_and_byte_identical():
     backend = _local_backend()
     env = dict(os.environ)
     env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=backend)
-    source_python = Path(__file__).parents[1] / "python"
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(source_python), env["PYTHONPATH"]]
-        if env.get("PYTHONPATH")
-        else [str(source_python)]
-    )
+    if os.environ.get("FORGE3D_TEST_INSTALLED_WHEEL") == "1":
+        env.pop("PYTHONPATH", None)
+    else:
+        source_python = Path(__file__).parents[1] / "python"
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_python), env["PYTHONPATH"]]
+            if env.get("PYTHONPATH")
+            else [str(source_python)]
+        )
     script = (
-        "import json; from forge3d import precision; "
+        "import json, os; import forge3d as f3d; from forge3d import precision; "
         "r=precision.dd_jitter_demo(1000); "
         "print(json.dumps({'a':r['dd_hash_a'],'b':r['dd_hash_b'],"
-        "'dd':r['dd_max_error_px'],'raw':r['raw_over_one_px']}))"
+        "'dd':r['dd_max_error_px'],'raw':r['raw_over_one_px'],"
+        "'package':os.path.realpath(f3d.__file__),"
+        "'native':os.path.realpath(f3d._forge3d.__file__)}))"
     )
     result = subprocess.run(
         [sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True
     )
     report = json.loads(result.stdout)
+    _assert_installed_wheel_child_paths(report)
     assert report["a"] == report["b"]
     assert report["dd"] < 0.01
     assert report["raw"] >= 100
@@ -228,17 +245,24 @@ def test_device_probe_reports_initialized_render_adapter(monkeypatch, tmp_path):
     """A post-render probe reports its process's active adapter, not its argument."""
     env = dict(os.environ)
     env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS="dx12")
-    source_python = Path(__file__).parents[1] / "python"
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(source_python), env["PYTHONPATH"]]
-        if env.get("PYTHONPATH")
-        else [str(source_python)]
-    )
+    if os.environ.get("FORGE3D_TEST_INSTALLED_WHEEL") == "1":
+        env.pop("PYTHONPATH", None)
+    else:
+        source_python = Path(__file__).parents[1] / "python"
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_python), env["PYTHONPATH"]]
+            if env.get("PYTHONPATH")
+            else [str(source_python)]
+        )
     script = (
-        "import json; import forge3d as f3d; "
+        "import json, os; import forge3d as f3d; "
         "from forge3d.determinism import CANONICAL_SCENE, _render_reference_inprocess; "
         f"_render_reference_inprocess(CANONICAL_SCENE, 64, 64, {str(tmp_path / 'active-adapter.png')!r}); "
-        "print(json.dumps(f3d.device_probe('vulkan')))"
+        "print(json.dumps({'probe':f3d.device_probe('vulkan'),"
+        "'package':os.path.realpath(f3d.__file__),"
+        "'native':os.path.realpath(f3d._forge3d.__file__)}))"
     )
     result = subprocess.run([sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True)
-    assert json.loads(result.stdout)["backend"] == "Dx12"
+    report = json.loads(result.stdout)
+    _assert_installed_wheel_child_paths(report)
+    assert report["probe"]["backend"] == "Dx12"

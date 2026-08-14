@@ -108,6 +108,45 @@ impl MeshBuffers {
     }
 }
 
+pub(super) fn recompute_normals(mesh: &mut MeshBuffers) {
+    mesh.normals.clear();
+    mesh.normals.resize(mesh.positions.len(), [0.0, 0.0, 0.0]);
+    let mut counts = vec![0u32; mesh.positions.len()];
+    for tri in mesh.indices.chunks_exact(3) {
+        let a = mesh.positions[tri[0] as usize];
+        let b = mesh.positions[tri[1] as usize];
+        let c = mesh.positions[tri[2] as usize];
+        let ux = b[0] - a[0];
+        let uy = b[1] - a[1];
+        let uz = b[2] - a[2];
+        let vx = c[0] - a[0];
+        let vy = c[1] - a[1];
+        let vz = c[2] - a[2];
+        let nx = uy * vz - uz * vy;
+        let ny = uz * vx - ux * vz;
+        let nz = ux * vy - uy * vx;
+        for &vid in tri {
+            let e = &mut mesh.normals[vid as usize];
+            e[0] += nx;
+            e[1] += ny;
+            e[2] += nz;
+            counts[vid as usize] += 1;
+        }
+    }
+    for (i, n) in mesh.normals.iter_mut().enumerate() {
+        let k = counts[i].max(1) as f32;
+        let nx = n[0] / k;
+        let ny = n[1] / k;
+        let nz = n[2] / k;
+        let len = (nx * nx + ny * ny + nz * nz).sqrt();
+        *n = if len > 0.0 {
+            [nx / len, ny / len, nz / len]
+        } else {
+            [0.0, 0.0, 1.0]
+        };
+    }
+}
+
 /// Error type returned by geometry helpers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeometryError {

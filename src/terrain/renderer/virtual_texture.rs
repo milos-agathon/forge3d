@@ -377,6 +377,12 @@ fn request_score(
 }
 
 #[cfg(feature = "extension-module")]
+fn lru_residency_upload_order(mut priority_order: Vec<TileKey>) -> Vec<TileKey> {
+    priority_order.reverse();
+    priority_order
+}
+
+#[cfg(feature = "extension-module")]
 pub(super) struct TerrainMaterialVT {
     pub sources: HashMap<(u32, String), VTSource>,
     runtime: Option<TerrainMaterialVTRuntime>,
@@ -1853,6 +1859,9 @@ impl TerrainMaterialVTRuntime {
             params.vt_upload_budget_bytes,
             self.admission_cursor,
         );
+        // Admission consumes the highest-priority requests first. Upload them
+        // last so the bounded LRU retains their coarse fallback ancestors.
+        let ordered = lru_residency_upload_order(ordered);
         self.admission_cursor = (self.admission_cursor + 1) % VT_FAMILY_COUNT;
         self.stats.upload_budget_bytes = params.vt_upload_budget_bytes;
         (ordered, feedback_admissions)
@@ -2892,6 +2901,21 @@ mod bounded_feedback_tests {
             4,
             8
         ));
+    }
+
+    #[test]
+    fn upload_order_keeps_high_priority_ancestors_in_bounded_lru() {
+        let key = |mip_level| TileKey {
+            family_slot: TERRAIN_VT_FAMILY_NORMAL,
+            material_index: 0,
+            mip_level,
+            x: 0,
+            y: 0,
+        };
+        // Admission order is highest priority first: coarse ancestors precede
+        // desired pages. A two-slot LRU must finish with those ancestors.
+        let upload_order = lru_residency_upload_order(vec![key(5), key(4), key(2), key(2)]);
+        assert_eq!(&upload_order[upload_order.len() - 2..], &[key(4), key(5)]);
     }
 
     /// Win 1's load-bearing claim: the host-visible feedback allocation does not

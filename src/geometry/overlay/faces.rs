@@ -37,18 +37,6 @@ pub(crate) enum Location {
     Boundary,
 }
 
-fn point_on_segment(point: Point, segment: Segment) -> bool {
-    sign_ordering(orient2d(
-        segment.start.as_array(),
-        segment.end.as_array(),
-        point.as_array(),
-    )) == Ordering::Equal
-        && point.x >= segment.start.x.min(segment.end.x)
-        && point.x <= segment.start.x.max(segment.end.x)
-        && point.y >= segment.start.y.min(segment.end.y)
-        && point.y <= segment.start.y.max(segment.end.y)
-}
-
 pub(crate) fn locate_in_ring(point: Point, ring: &Ring) -> Location {
     let mut winding = 0i32;
     for pair in ring.windows(2) {
@@ -56,7 +44,7 @@ pub(crate) fn locate_in_ring(point: Point, ring: &Ring) -> Location {
             start: pair[0],
             end: pair[1],
         };
-        if point_on_segment(point, segment) {
+        if super::point_on_segment(point, segment) {
             return Location::Boundary;
         }
         if pair[0].y <= point.y && pair[1].y > point.y {

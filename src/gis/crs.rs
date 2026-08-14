@@ -7,6 +7,43 @@ use crate::gis::types::{RasterBounds, RasterInfo, RasterWarning, WARNING_MISSING
 
 const WEB_MERCATOR_MAX_LAT: f64 = 85.051_128_78;
 
+pub(crate) fn looks_like_wkt(value: &str) -> bool {
+    let upper = value.trim_start().to_ascii_uppercase();
+    ["GEOGCRS[", "PROJCRS[", "GEOGCS[", "PROJCS["]
+        .iter()
+        .any(|prefix| upper.starts_with(prefix))
+}
+
+pub(crate) fn validate_wkt_structure(value: &str) -> GisResult<String> {
+    let trimmed = value.trim();
+    if !looks_like_wkt(trimmed) {
+        return Err(GisError::InvalidCrs(
+            "CRS WKT must start with a supported WKT CRS token".to_string(),
+        ));
+    }
+    let mut depth = 0i32;
+    for ch in trimmed.chars() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth < 0 {
+                    return Err(GisError::InvalidCrs(
+                        "CRS WKT has unbalanced brackets".to_string(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth != 0 {
+        return Err(GisError::InvalidCrs(
+            "CRS WKT has unbalanced brackets".to_string(),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
 #[derive(Debug, Clone)]
 pub struct CrsInspection {
     pub source_kind: String,
@@ -847,6 +884,30 @@ impl CrsTransform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_wkt_syntax_preserves_tokens_case_whitespace_and_errors() {
+        for token in ["GEOGCRS", "PROJCRS", "GEOGCS", "PROJCS"] {
+            let value = format!("  {}[\"name\"]  ", token.to_ascii_lowercase());
+            assert_eq!(
+                validate_wkt_structure(&value).unwrap(),
+                format!("{}[\"name\"]", token.to_ascii_lowercase())
+            );
+        }
+
+        assert!(matches!(
+            validate_wkt_structure("LOCAL_CS[\"name\"]"),
+            Err(GisError::InvalidCrs(message))
+                if message == "CRS WKT must start with a supported WKT CRS token"
+        ));
+        for value in ["GEOGCRS[\"name\"]]", "GEOGCRS[\"name\""] {
+            assert!(matches!(
+                validate_wkt_structure(value),
+                Err(GisError::InvalidCrs(message))
+                    if message == "CRS WKT has unbalanced brackets"
+            ));
+        }
+    }
 
     fn spec(code: &str) -> CrsSpec {
         CrsSpec::from_string(code.to_string()).expect("valid CRS code")

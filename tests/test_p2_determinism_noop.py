@@ -97,6 +97,21 @@ def test_advanced_label_diagnostics_are_deterministic_not_silent_success():
             "text": "Road",
             "geometry": {"type": "LineString", "coordinates": [[0, 20], [80, 20]]},
             "repeat_distance": 40,
+            "geometry_authority": {
+                "source": "compute_line_label_placement",
+                "positioned_glyphs": [
+                    {"font_index": 0, "glyph_id": 1, "origin": [0, 0], "rotation": 0}
+                ],
+                "candidates": [
+                    {
+                        "candidate_id": "repeat:0",
+                        "candidate_type": "line_repeat",
+                        "anchor": [40, 20, 0],
+                        "bounds": [30, 16, 50, 24],
+                        "details": {"repeat_distance": 40},
+                    }
+                ],
+            },
         },
     ]
 
@@ -105,4 +120,7 @@ def test_advanced_label_diagnostics_are_deterministic_not_silent_success():
 
     assert first.to_dict() == second.to_dict()
     assert [label.label_id for label in first.accepted] == ["repeat"]
-    assert any(diagnostic.code == "experimental_feature" for diagnostic in first.diagnostics)
+    assert any(
+        diagnostic.code == "label_geometry_authority_missing"
+        for diagnostic in first.diagnostics
+    )

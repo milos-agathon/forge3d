@@ -179,6 +179,25 @@ def test_brdf_tile_emits_a_live_certified_pass() -> None:
     assert set(certificate["engine"]["wgsl_module_hashes"]) == {"brdf_tile.shader"}
 
 
+def test_adjudication_certificate_keeps_untimed_pt_before_raster() -> None:
+    import pytest
+
+    if not f3d.has_gpu():
+        pytest.skip("Adjudication render requires a GPU adapter")
+
+    from forge3d.diagnostics import render_certificate
+
+    f3d.render_adjudication_pair(32, 32, 2, certificate=True)
+    passes = render_certificate(sign=False)["passes"]
+
+    assert [entry["label"] for entry in passes] == [
+        "adjudication.path_trace",
+        "adjudication.raster",
+    ]
+    assert passes[0]["gpu_ms"] == 0.0
+    assert passes[0]["draw_calls"] == 2
+
+
 def test_render_surface_sweep_has_no_uncertified_entrypoints() -> None:
     """Auto-discovery guard (CENSOR audit F-05): the hardcoded enumeration above
     cannot notice a NEWLY ADDED public render entrypoint. Sweep every public

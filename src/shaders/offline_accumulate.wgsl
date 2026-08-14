@@ -18,6 +18,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let coords = vec2<i32>(gid.xy);
     let sample_value = textureLoad(current_sample, coords, 0);
+    if (uniforms.sample_index == 0u) {
+        textureStore(next_accumulation, coords, sample_value);
+        return;
+    }
     let prev_value = textureLoad(prev_accumulation, coords, 0);
     textureStore(next_accumulation, coords, prev_value + sample_value);
 }

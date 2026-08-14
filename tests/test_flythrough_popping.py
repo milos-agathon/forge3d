@@ -669,8 +669,8 @@ def test_depth_aov_linearizes_the_actual_raster_depth():
         / "shaders"
         / "terrain_pbr_pom.wgsl"
     ).read_text(encoding="utf-8")
-    depth_block = shader.split("// AOV Depth:", 1)[1].split(
-        "out.aov_depth =", 1
+    depth_block = shader.split("// TERRAIN_AOV_DEPTH_BEGIN", 1)[1].split(
+        "// TERRAIN_AOV_DEPTH_END", 1
     )[0]
     assert "let ndc_depth = clamp(input.clip_position.z" in depth_block
     assert "if (u_terrain.camera_mode_params.x >= 0.5)" in depth_block

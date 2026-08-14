@@ -54,18 +54,6 @@ fn compare_points(left: Point, right: Point) -> Ordering {
         .then_with(|| left.y.total_cmp(&right.y))
 }
 
-fn point_on_segment(point: Point, segment: Segment) -> bool {
-    sign_ordering(orient2d(
-        segment.start.as_array(),
-        segment.end.as_array(),
-        point.as_array(),
-    )) == Ordering::Equal
-        && point.x >= segment.start.x.min(segment.end.x)
-        && point.x <= segment.start.x.max(segment.end.x)
-        && point.y >= segment.start.y.min(segment.end.y)
-        && point.y <= segment.start.y.max(segment.end.y)
-}
-
 fn exact_cross(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64]) -> Vec<f64> {
     expansion_diff(&expansion_product(ax, by), &expansion_product(ay, bx))
 }
@@ -132,8 +120,8 @@ fn intersections(left: Segment, right: Segment) -> Vec<Point> {
     }
     let mut points = Vec::new();
     for point in [left.start, left.end, right.start, right.end] {
-        if point_on_segment(point, left)
-            && point_on_segment(point, right)
+        if super::point_on_segment(point, left)
+            && super::point_on_segment(point, right)
             && !points.contains(&point)
         {
             points.push(point);

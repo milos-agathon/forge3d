@@ -1015,7 +1015,7 @@ mod py {
             let info = if let Some(info_value) = dict.get_item("info")? {
                 raster_info_from_py(&info_value)?
             } else {
-                synthetic_info(&array)
+                crate::gis::synthetic_raster_info(&array)
             };
             let height_system = dict
                 .get_item("height_system")?
@@ -1030,7 +1030,7 @@ mod py {
             });
         }
         let array = super::super::extract_raster_array(value)?;
-        let info = synthetic_info(&array);
+        let info = crate::gis::synthetic_raster_info(&array);
         Ok(RasterSource {
             array,
             info,
@@ -1100,19 +1100,6 @@ mod py {
             info.height_system = hs;
         }
         Ok(info)
-    }
-
-    fn synthetic_info(array: &RasterArray) -> RasterInfo {
-        let mut info = RasterInfo::new(
-            "".into(),
-            array.width as u32,
-            array.height as u32,
-            array.bands as u16,
-        );
-        info.driver = "memory".to_string();
-        info.dtype_per_band = vec![array.dtype().name().to_string(); array.bands];
-        info.nodata_per_band = vec![None; array.bands];
-        info
     }
 
     fn required_u32(dict: &Bound<'_, PyDict>, key: &'static str) -> PyResult<u32> {

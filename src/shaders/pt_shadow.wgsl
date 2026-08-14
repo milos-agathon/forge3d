@@ -76,7 +76,7 @@ struct Uniforms {
     cam_forward: vec3<f32>,
     seed_hi: u32,
     seed_lo: u32,
-    _pad: u32,
+    adjudication_mode: u32,
 }
 
 // Instance data (matches pt_intersect.wgsl)
@@ -99,6 +99,7 @@ struct Sphere {
     emissive: vec3<f32>,
     ax: f32,
     ay: f32,
+    _pad1: array<f32, 3>,
 }
 
 struct Vertex {
@@ -245,47 +246,71 @@ fn mesh_any_hit(ro: vec3<f32>, rd: vec3<f32>, tmin: f32, tmax: f32) -> bool {
     return false;
 }
 
-@compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    // Persistent threads loop: consume shadow rays
-    loop {
-        let idx = atomicAdd(&shadow_queue_header.out_count, 1u);
-        if (idx >= shadow_queue_header.in_count) { break; }
-        if (idx >= shadow_queue_header.capacity) { break; }
-        let sr = shadow_queue[idx];
+fn shadow_occluded(sr: ShadowRay) -> bool {
         let ro = sr.o;
         let rd = sr.d;
         let tmin = sr.tmin;
         let tmax = sr.tmax;
 
         // Test spheres
-        var occluded = false;
+        var blocked = false;
         let sphere_count = arrayLength(&scene_spheres);
         for (var i: u32 = 0u; i < sphere_count; i = i + 1u) {
             let s = scene_spheres[i];
             if (ray_sphere(ro, rd, s.center, s.radius, tmin, tmax)) {
-                occluded = true; break;
+                blocked = true; break;
             }
         }
 
         // If no instances are present, test non-instanced mesh BVH
         let inst_count = arrayLength(&instances);
-        if (!occluded && inst_count == 0u) {
-            if (mesh_any_hit(ro, rd, tmin, tmax)) { occluded = true; }
+        if (!blocked && inst_count == 0u) {
+            if (mesh_any_hit(ro, rd, tmin, tmax)) { blocked = true; }
         }
 
         // Test instanced meshes: transform ray into each instance's object space, using per-instance BLAS
-        if (!occluded && inst_count > 0u) {
+        if (!blocked && inst_count > 0u) {
             let count = arrayLength(&instances);
             for (var ii: u32 = 0u; ii < count; ii = ii + 1u) {
                 let inst = instances[ii];
                 let ro_obj = transform_pos(inst.world_to_object, ro);
                 let rd_obj = normalize(transform_dir(inst.world_to_object, rd));
-                if (mesh_any_hit_desc(ro_obj, rd_obj, tmin, tmax, inst.blas_index)) { occluded = true; break; }
+                if (mesh_any_hit_desc(ro_obj, rd_obj, tmin, tmax, inst.blas_index)) { blocked = true; break; }
             }
         }
+        return blocked;
+}
 
-        if (!occluded) {
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (uniforms.adjudication_mode != 0u) {
+        let pixel = gid.x;
+        let pixel_count = uniforms.width * uniforms.height;
+        if (pixel >= pixel_count) { return; }
+        var contribution = vec3<f32>(0.0);
+        for (var kind = 0u; kind < 4u; kind = kind + 1u) {
+            let idx = kind * pixel_count + pixel;
+            if (idx >= shadow_queue_header.capacity) { continue; }
+            let sr = shadow_queue[idx];
+            if (sr._pad1.x == 1u && sr.pixel == pixel) {
+                if (!shadow_occluded(sr)) { contribution = contribution + sr.contrib; }
+                var cleared = sr;
+                cleared._pad1 = vec3<u32>(0u);
+                shadow_queue[idx] = cleared;
+            }
+        }
+        accum_hdr[pixel] = accum_hdr[pixel] + vec4<f32>(contribution, 0.0);
+        return;
+    }
+
+    // Persistent threads loop: consume shadow rays
+    loop {
+        let idx = atomicAdd(&shadow_queue_header.out_count, 1u);
+        if (idx >= shadow_queue_header.in_count) { break; }
+        if (idx >= shadow_queue_header.capacity) { break; }
+        let sr = shadow_queue[idx];
+
+        if (!shadow_occluded(sr)) {
             // Accumulate contribution
             let p = sr.pixel;
             accum_hdr[p] = accum_hdr[p] + vec4<f32>(sr.contrib, 0.0);

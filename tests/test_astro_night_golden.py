@@ -296,7 +296,7 @@ def test_night_frame_custom_aspects_preserve_the_moon_disc():
         assert abs(disc_width - disc_height) <= 2, (width, height, disc_width, disc_height)
 
 
-@requires_hardware
+@requires_reference_hardware
 def test_night_golden_is_cross_process_repeatable_on_pinned_backend(tmp_path):
     """DoD 6: two processes on the selected backend produce identical bytes."""
     first = _render_in_subprocess(tmp_path / "process_a.png")

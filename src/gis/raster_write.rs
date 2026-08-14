@@ -7,6 +7,7 @@ use tiff::encoder::compression::{Compression, Deflate, Lzw, Packbits, Uncompress
 use tiff::encoder::{DirectoryEncoder, TiffEncoder, TiffKind, TiffValue};
 use tiff::tags::Tag;
 
+use crate::gis::crs::{looks_like_wkt, validate_wkt_structure};
 use crate::gis::error::{GisError, GisResult};
 use crate::gis::raster_info::read_raster_info;
 use crate::gis::types::{AffineTransform, RasterDType, RasterInfo};
@@ -1199,36 +1200,6 @@ fn validate_wkt_literal(value: &str) -> GisResult<String> {
     Ok(trimmed)
 }
 
-fn validate_wkt_structure(value: &str) -> GisResult<String> {
-    let trimmed = value.trim();
-    if !looks_like_wkt(trimmed) {
-        return Err(GisError::InvalidCrs(
-            "CRS WKT must start with a supported WKT CRS token".to_string(),
-        ));
-    }
-    let mut depth = 0i32;
-    for ch in trimmed.chars() {
-        match ch {
-            '[' => depth += 1,
-            ']' => {
-                depth -= 1;
-                if depth < 0 {
-                    return Err(GisError::InvalidCrs(
-                        "CRS WKT has unbalanced brackets".to_string(),
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-    if depth != 0 {
-        return Err(GisError::InvalidCrs(
-            "CRS WKT has unbalanced brackets".to_string(),
-        ));
-    }
-    Ok(trimmed.to_string())
-}
-
 fn validate_iau_wkt_body(authority: &(String, String), wkt: &str) -> GisResult<()> {
     let code = authority
         .1
@@ -1278,13 +1249,6 @@ fn validate_iau_wkt_body(authority: &(String, String), wkt: &str) -> GisResult<(
         }
     }
     Ok(())
-}
-
-fn looks_like_wkt(value: &str) -> bool {
-    let upper = value.trim_start().to_ascii_uppercase();
-    ["GEOGCRS[", "PROJCRS[", "GEOGCS[", "PROJCS["]
-        .iter()
-        .any(|prefix| upper.starts_with(prefix))
 }
 
 fn uniform_nodata(values: &[Option<f64>]) -> Option<f64> {

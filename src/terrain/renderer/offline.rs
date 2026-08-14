@@ -514,6 +514,7 @@ impl TerrainScene {
             1,
             super::aov::AOV_ALL_BITS,
             false,
+            false,
         )?;
         let beauty_accumulation = crate::terrain::AccumulationBuffer::new(
             self.device.as_ref(),
@@ -571,6 +572,7 @@ impl TerrainScene {
             // average ids, which is meaningless.
             false,
             is_clipmap_camera_mode(&offline_params.camera_mode),
+            false,
         );
         let hdr_background_blit_pipeline = Self::create_depth_blit_pipeline(
             self.device.as_ref(),
@@ -2044,6 +2046,10 @@ impl TerrainRenderer {
             None,
             out_width,
             out_height,
+            OFFLINE_HDR_FORMAT,
+            out_width,
+            out_height,
+            false,
         );
         Ok((Py::new(py, hdr_frame)?, Py::new(py, aov_frame)?))
     }

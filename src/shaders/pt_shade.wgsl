@@ -26,7 +26,7 @@ struct Uniforms {
     cam_forward: vec3<f32>,
     seed_hi: u32,
     seed_lo: u32,
-    _pad: u32,
+    adjudication_mode: u32,
 }
 
 // Participating media (single scatter HG) minimal parameters
@@ -220,6 +220,7 @@ struct Sphere {
     emissive: vec3<f32>,
     ax: f32, // anisotropic alpha_x
     ay: f32, // anisotropic alpha_y
+    _pad1: array<f32, 3>,
 }
 
 // Bind Group 2: Queues (read/write storage buffers with atomic counters)
@@ -313,6 +314,21 @@ struct ReferenceEnvironment {
 @group(2) @binding(4) var<storage, read_write> shadow_queue_header: QueueHeader;
 @group(2) @binding(5) var<storage, read_write> shadow_queue: array<ShadowRay>;
 @group(3) @binding(0) var<storage, read_write> accum_hdr: array<vec4<f32>>;
+
+fn push_shadow(sr_in: ShadowRay, kind: u32) {
+    var sr = sr_in;
+    if (uniforms.adjudication_mode != 0u) {
+        let pixel_count = uniforms.width * uniforms.height;
+        let q = kind * pixel_count + sr.pixel;
+        if (q < shadow_queue_header.capacity) {
+            sr._pad1.x = 1u;
+            shadow_queue[q] = sr;
+        }
+    } else {
+        let q = atomicAdd(&shadow_queue_header.in_count, 1u);
+        if (q < shadow_queue_header.capacity) { shadow_queue[q] = sr; }
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Utilities: RNG and sampling
@@ -568,8 +584,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     sr._pad0 = 0.0;
                     sr.pixel = h.pixel;
                     sr._pad1 = vec3<u32>(0u,0u,0u);
-                    let q = atomicAdd(&shadow_queue_header.in_count, 1u);
-                    if (q < shadow_queue_header.capacity) { shadow_queue[q] = sr; }
+                    push_shadow(sr, 0u);
 
                     // Debug AOV: visualize reused vs. original via alpha channel
                     // alpha += weight if spatially reused; else alpha += 0
@@ -611,8 +626,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 sr._pad0 = 0.0;
                 sr.pixel = h.pixel;
                 sr._pad1 = vec3<u32>(0u,0u,0u);
-                let q = atomicAdd(&shadow_queue_header.in_count, 1u);
-                if (q < shadow_queue_header.capacity) { shadow_queue[q] = sr; }
+                push_shadow(sr, 1u);
             }
         }
 
@@ -652,8 +666,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     sr._pad0 = 0.0;
                     sr.pixel = h.pixel;
                     sr._pad1 = vec3<u32>(0u,0u,0u);
-                    let q = atomicAdd(&shadow_queue_header.in_count, 1u);
-                    if (q < shadow_queue_header.capacity) { shadow_queue[q] = sr; }
+                    push_shadow(sr, 2u);
                 }
             }
         }
@@ -698,8 +711,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                         sr._pad0 = 0.0;
                         sr.pixel = h.pixel;
                         sr._pad1 = vec3<u32>(0u,0u,0u);
-                        let q = atomicAdd(&shadow_queue_header.in_count, 1u);
-                        if (q < shadow_queue_header.capacity) { shadow_queue[q] = sr; }
+                        push_shadow(sr, 3u);
                     }
                 }
             }
@@ -859,4 +871,3 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 }
-

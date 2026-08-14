@@ -1,5 +1,53 @@
 use super::super::*;
 
+fn decode_unorm_normal(pixel: &mut [f32]) {
+    let x = pixel[0] * 2.0 - 1.0;
+    let y = pixel[1] * 2.0 - 1.0;
+    let z = pixel[2] * 2.0 - 1.0;
+    let length = (x * x + y * y + z * z).sqrt().max(1e-8);
+    pixel[0] = x / length;
+    pixel[1] = y / length;
+    pixel[2] = z / length;
+}
+
+fn resize_f32(
+    source: &[f32],
+    source_width: u32,
+    source_height: u32,
+    width: u32,
+    height: u32,
+    channels: usize,
+) -> Vec<f32> {
+    if (source_width, source_height) == (width, height) {
+        return source.to_vec();
+    }
+    let mut output = vec![0.0; width as usize * height as usize * channels];
+    for y in 0..height {
+        let source_y = ((y as f32 + 0.5) * source_height as f32 / height as f32 - 0.5)
+            .clamp(0.0, source_height.saturating_sub(1) as f32);
+        let y0 = source_y.floor() as u32;
+        let y1 = (y0 + 1).min(source_height - 1);
+        let ty = source_y - y0 as f32;
+        for x in 0..width {
+            let source_x = ((x as f32 + 0.5) * source_width as f32 / width as f32 - 0.5)
+                .clamp(0.0, source_width.saturating_sub(1) as f32);
+            let x0 = source_x.floor() as u32;
+            let x1 = (x0 + 1).min(source_width - 1);
+            let tx = source_x - x0 as f32;
+            for channel in 0..channels {
+                let sample = |sx: u32, sy: u32| {
+                    source[((sy * source_width + sx) as usize * channels) + channel]
+                };
+                let top = sample(x0, y0) * (1.0 - tx) + sample(x1, y0) * tx;
+                let bottom = sample(x0, y1) * (1.0 - tx) + sample(x1, y1) * tx;
+                output[((y * width + x) as usize * channels) + channel] =
+                    top * (1.0 - ty) + bottom * ty;
+            }
+        }
+    }
+    output
+}
+
 #[cfg(feature = "extension-module")]
 #[pyclass(module = "forge3d._forge3d", name = "AovFrame")]
 pub struct AovFrame {
@@ -13,6 +61,10 @@ pub struct AovFrame {
     source_id_texture: Option<crate::core::resource_tracker::TrackedTexture>,
     width: u32,
     height: u32,
+    color_format: wgpu::TextureFormat,
+    texture_width: u32,
+    texture_height: u32,
+    normal_encoded_unorm: bool,
 }
 
 #[cfg(feature = "images")]
@@ -151,6 +203,10 @@ impl AovFrame {
         source_id_texture: Option<crate::core::resource_tracker::TrackedTexture>,
         width: u32,
         height: u32,
+        color_format: wgpu::TextureFormat,
+        texture_width: u32,
+        texture_height: u32,
+        normal_encoded_unorm: bool,
     ) -> Self {
         Self {
             device,
@@ -161,19 +217,52 @@ impl AovFrame {
             source_id_texture,
             width,
             height,
+            color_format,
+            texture_width,
+            texture_height,
+            normal_encoded_unorm,
         }
     }
 
-    fn read_texture_rgba_f32(&self, texture: &wgpu::Texture) -> anyhow::Result<Vec<f32>> {
-        crate::core::hdr::read_hdr_texture(
-            &self.device,
-            &self.queue,
-            texture,
+    fn read_texture_rgba_f32(
+        &self,
+        texture: &wgpu::Texture,
+        format: wgpu::TextureFormat,
+    ) -> anyhow::Result<Vec<f32>> {
+        let rgba = if format == wgpu::TextureFormat::Rgba8Unorm {
+            crate::core::hdr::read_ldr_texture(
+                &self.device,
+                &self.queue,
+                texture,
+                self.texture_width,
+                self.texture_height,
+            )
+            .map(|bytes| {
+                bytes
+                    .into_iter()
+                    .map(|value| value as f32 / 255.0)
+                    .collect()
+            })
+            .map_err(anyhow::Error::msg)?
+        } else {
+            crate::core::hdr::read_hdr_texture(
+                &self.device,
+                &self.queue,
+                texture,
+                self.texture_width,
+                self.texture_height,
+                format,
+            )
+            .map_err(anyhow::Error::msg)?
+        };
+        Ok(resize_f32(
+            &rgba,
+            self.texture_width,
+            self.texture_height,
             self.width,
             self.height,
-            wgpu::TextureFormat::Rgba16Float,
-        )
-        .map_err(anyhow::Error::msg)
+            4,
+        ))
     }
 
     fn read_albedo_data(&self) -> anyhow::Result<Vec<f32>> {
@@ -181,7 +270,7 @@ impl AovFrame {
             .albedo_texture
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Albedo AOV not available"))?;
-        self.read_texture_rgba_f32(texture)
+        self.read_texture_rgba_f32(texture, self.color_format)
     }
 
     fn read_normal_data(&self) -> anyhow::Result<Vec<f32>> {
@@ -189,7 +278,13 @@ impl AovFrame {
             .normal_texture
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Normal AOV not available"))?;
-        self.read_texture_rgba_f32(texture)
+        let mut rgba = self.read_texture_rgba_f32(texture, self.color_format)?;
+        if self.normal_encoded_unorm {
+            for pixel in rgba.chunks_exact_mut(4) {
+                decode_unorm_normal(pixel);
+            }
+        }
+        Ok(rgba)
     }
 
     fn read_depth_data(&self) -> anyhow::Result<Vec<f32>> {
@@ -197,7 +292,7 @@ impl AovFrame {
             .depth_texture
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Depth AOV not available"))?;
-        let rgba = self.read_texture_rgba_f32(texture)?;
+        let rgba = self.read_texture_rgba_f32(texture, wgpu::TextureFormat::Rgba16Float)?;
         Ok(rgba.chunks_exact(4).map(|px| px[0]).collect())
     }
 
@@ -386,8 +481,8 @@ impl AovFrame {
         let albedo = self
             .albedo_texture
             .as_ref()
-            .map(|texture| {
-                self.read_texture_rgba_f32(texture).map_err(|err| {
+            .map(|_| {
+                self.read_albedo_data().map_err(|err| {
                     PyRuntimeError::new_err(format!("albedo readback failed: {err:#}"))
                 })
             })
@@ -395,8 +490,8 @@ impl AovFrame {
         let normal = self
             .normal_texture
             .as_ref()
-            .map(|texture| {
-                self.read_texture_rgba_f32(texture).map_err(|err| {
+            .map(|_| {
+                self.read_normal_data().map_err(|err| {
                     PyRuntimeError::new_err(format!("normal readback failed: {err:#}"))
                 })
             })

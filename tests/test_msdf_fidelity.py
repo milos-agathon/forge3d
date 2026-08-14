@@ -275,6 +275,49 @@ def test_text_overlay_shader_keeps_msdf_decode_and_derivative_smoothing():
     assert "smoothstep(-edge_width, edge_width, sdf)" in shader
 
 
+def test_native_text_atlas_uses_buffer_bilinear_sampling_without_texture_upload():
+    shader = (ROOT / "src/shaders/text_overlay.wgsl").read_text(encoding="utf-8")
+    scene_api = (ROOT / "src/scene/py_api/native_text.rs").read_text(encoding="utf-8")
+    renderer = (ROOT / "src/core/text_overlay.rs").read_text(encoding="utf-8")
+
+    assert "var<storage, read> atlas" in shader
+    assert "uv * vec2<f32>(U.atlas_size) - vec2<f32>(0.5)" in shader
+    assert shader.count("atlas_texel(") == 5
+    assert shader.count("mix(") >= 4
+    assert "textureSample" not in shader
+    assert "write_texture" not in scene_api
+    assert "BindingType::Texture" not in renderer
+    assert "size_of::<TextOverlayUniforms>() == 32" in renderer
+
+
+def test_scene_timing_manager_is_process_shared():
+    timing = (ROOT / "src/scene/render_paths/timing.rs").read_text(encoding="utf-8")
+    scene = (ROOT / "src/scene/mod.rs").read_text(encoding="utf-8")
+    constructor = (ROOT / "src/scene/core/constructor.rs").read_text(encoding="utf-8")
+
+    assert "static TIMING: std::sync::OnceLock<" in timing
+    assert "std::sync::Arc<std::sync::Mutex<Option<" in timing
+    assert ".get_or_init(|| std::sync::Arc::new(std::sync::Mutex::new(None)))" in timing
+    assert "render_timing:\n        std::sync::Arc<std::sync::Mutex<Option<" in scene
+    assert "render_timing: Self::shared_render_timing()" in constructor
+    assert "static SCENE_RENDER_SERIAL: std::sync::Mutex<()>" in timing
+    assert "shared_render_timing_owner().id()" in timing
+    assert "shared_render_timing_owner().activate()" in timing
+    assert "poisoned.into_inner()" in timing
+
+
+def test_hud_atlas_rebind_propagates_buffer_dimensions():
+    labels = (ROOT / "src/labels/mod.rs").read_text(encoding="utf-8")
+    renderer = (ROOT / "src/core/text_overlay.rs").read_text(encoding="utf-8")
+
+    size_update = "renderer.set_atlas_size(atlas.width, atlas.height);"
+    buffer_rebind = "renderer.recreate_bind_group(device, Some(atlas.buffer.as_ref()));"
+    assert size_update in labels
+    assert buffer_rebind in labels
+    assert labels.index(size_update) < labels.index(buffer_rebind)
+    assert "self.uniforms.atlas_size = [width, height];" in renderer
+
+
 def test_single_channel_ablation_loses_the_sharp_corner():
     msdf_cell, sdf_cell, analytic = _render_upscaled_fields()
     msdf_coverage = _renderer_coverage(msdf_cell, channels=3)
@@ -390,3 +433,43 @@ def test_live_gpu_shader_readback_matches_independent_quad_oracle():
     assert np.mean(np.abs(gpu - expected)) <= 0.015
     assert np.max(np.abs(gpu - expected)) <= 0.50
     assert _hausdorff(gpu, expected) <= 0.5
+
+
+def test_live_gpu_native_text_is_exact_across_two_scenes():
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("FORGE3D_RUN_LIVE_TEXT_GPU") != "1"
+    ):
+        pytest.skip("live GPU text readback is opt-in on hosted CI")
+
+    width, height = 24, 28
+    atlas = np.full((1, 1, 3), 255, dtype=np.uint8)
+
+    def configured_scene() -> forge3d.Scene:
+        scene = forge3d.Scene(width + 24, height + 24)
+        scene.disable_terrain()
+        scene.set_native_text_atlas(atlas, 3, 1.0)
+        scene.enable_native_text()
+        scene.add_native_text_rect_uv(
+            12.0, 12.0, float(width), float(height),
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,
+        )
+        return scene
+
+    first_scene = configured_scene()
+    second_scene = configured_scene()
+    from forge3d.diagnostics import render_certificate
+
+    first = np.asarray(first_scene.render_rgba(), dtype=np.uint8)
+    first_certificate = render_certificate(sign=False)
+    second = np.asarray(second_scene.render_rgba(), dtype=np.uint8)
+    second_certificate = render_certificate(sign=False)
+    assert np.count_nonzero(first[..., 0] == 255) == width * height
+    assert np.array_equal(first, second)
+    assert first_certificate["allocations"] == second_certificate["allocations"]
+    for certificate in (first_certificate, second_certificate):
+        assert [(entry["label"], entry["draw_calls"]) for entry in certificate["passes"]] == [
+            ("scene.main", 1),
+            ("scene.readback_copy", 1),
+        ]

@@ -90,13 +90,13 @@ pub fn jitter_demo(frames: u32) -> RenderResult<DdJitterReport> {
         },
     )?;
     let result_size = frames as u64 * 8;
-    let output = tracked_create_buffer(
+    let zero_measurements = vec![[0.0_f32; 2]; frames as usize];
+    let output = tracked_create_buffer_init(
         device,
-        &wgpu::BufferDescriptor {
+        &wgpu::util::BufferInitDescriptor {
             label: Some("dupla.jitter.output"),
-            size: result_size,
+            contents: bytemuck::cast_slice(&zero_measurements),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
         },
     )?;
     let readback = tracked_create_buffer(

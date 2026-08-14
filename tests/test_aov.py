@@ -352,6 +352,9 @@ class TestAovRendering:
         assert np.isfinite(albedo).all()
         assert np.isfinite(normal).all()
         assert np.isfinite(depth).all()
+        assert np.any(normal != normal[0, 0]), (
+            "first TerrainRenderer normal AOV must not be spatially uniform"
+        )
 
         assert float(albedo.max() - albedo.min()) > 0.01
         assert float(depth.max() - depth.min()) > 1e-4

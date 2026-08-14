@@ -230,7 +230,7 @@ impl Scene {
             text3d_renderer: Some(text3d_renderer),
             text3d_enabled: false,
             text3d_instances: Vec::new(),
-            render_timing: std::sync::Mutex::new(None),
+            render_timing: Self::shared_render_timing(),
             allocation_owner,
             #[cfg(feature = "enable-gpu-instancing")]
             mesh_instanced_renderer: Some(

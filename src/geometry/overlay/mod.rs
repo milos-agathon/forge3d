@@ -21,9 +21,9 @@ mod verification;
 #[cfg(all(feature = "extension-module", feature = "geos-topology"))]
 mod verification_oracle;
 
-use std::fmt;
+use std::{cmp::Ordering, fmt};
 
-use crate::geometry::exact::predicates::signed_area2;
+use crate::geometry::exact::predicates::{orient2d, sign_ordering, signed_area2};
 
 pub use validity::{is_valid_polygonal, ValidityReport};
 #[cfg(feature = "extension-module")]
@@ -103,6 +103,18 @@ impl std::error::Error for OverlayError {}
 pub(crate) struct Segment {
     pub start: Point,
     pub end: Point,
+}
+
+pub(super) fn point_on_segment(point: Point, segment: Segment) -> bool {
+    sign_ordering(orient2d(
+        segment.start.as_array(),
+        segment.end.as_array(),
+        point.as_array(),
+    )) == Ordering::Equal
+        && point.x >= segment.start.x.min(segment.end.x)
+        && point.x <= segment.start.x.max(segment.end.x)
+        && point.y >= segment.start.y.min(segment.end.y)
+        && point.y <= segment.start.y.max(segment.end.y)
 }
 
 fn polygon_segments(polygonal: &MultiPolygon) -> Vec<Segment> {

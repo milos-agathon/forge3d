@@ -1,6 +1,8 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "structured_error",
+    "match": "LabelPlan.compile viewport must be finite and positive",
+    "type": "ValueError"
   },
   "family": "labels",
   "id": "labels-057",

@@ -21,10 +21,9 @@ const VIEWER_SKY_STORAGE_DECLARATION: &str =
 
 /// Specialize the canonical terrain sky shader for the viewer's HDR target.
 ///
-/// The terrain renderer consumes `sky.wgsl` directly with an RGBA8 storage
-/// texture. The viewer composites the SIDERA night overlay into an RGBA16F
-/// target, so it must compile an exact one-declaration specialization instead
-/// of changing the shared source and invalidating the terrain pipeline.
+/// The shared `sky.wgsl` declaration stays RGBA8. The viewer and terrain
+/// renderer each compile an exact one-declaration specialization for their
+/// independent RGBA16F targets.
 fn viewer_sky_shader_source() -> RenderResult<String> {
     specialize_viewer_sky_source(include_str!("../../shaders/sky.wgsl"))
 }

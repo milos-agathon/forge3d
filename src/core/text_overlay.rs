@@ -7,17 +7,19 @@ use wgpu::{
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferAddress, BufferBindingType,
     BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device, FragmentState,
     PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue, RenderPipeline,
-    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
-    TextureView, TextureViewDescriptor, VertexBufferLayout, VertexState, VertexStepMode,
+    RenderPipelineDescriptor, ShaderStages, TextureFormat, VertexBufferLayout, VertexState,
+    VertexStepMode,
 };
 
 use crate::core::error::RenderResult;
-use crate::core::resource_tracker::{
-    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
+
+const _: () = {
+    assert!(std::mem::size_of::<TextOverlayUniforms>() == 32);
+    assert!(std::mem::align_of::<TextOverlayUniforms>() == 8);
 };
 
-#[repr(C)]
+#[repr(C, align(8))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TextOverlayUniforms {
     pub resolution: [f32; 2], // (width, height)
@@ -25,6 +27,7 @@ pub struct TextOverlayUniforms {
     pub enabled: f32,
     pub channels: f32,  // 1.0 for SDF, 3.0 for MSDF
     pub smoothing: f32, // smoothing factor (pixels)
+    pub atlas_size: [u32; 2],
 }
 
 impl Default for TextOverlayUniforms {
@@ -35,6 +38,7 @@ impl Default for TextOverlayUniforms {
             enabled: 0.0,
             channels: 3.0,
             smoothing: 1.0,
+            atlas_size: [1, 1],
         }
     }
 }
@@ -90,9 +94,7 @@ pub struct TextOverlayRenderer {
     pub instance_buf: Option<TrackedBuffer>,
     pub instance_count: u32,
 
-    pub atlas_tex: Option<TrackedTexture>,
-    pub atlas_view: Option<TextureView>,
-    pub atlas_sampler: Sampler,
+    pub atlas_buf: TrackedBuffer,
 }
 
 impl TextOverlayRenderer {
@@ -122,53 +124,35 @@ impl TextOverlayRenderer {
                     },
                     count: None,
                 },
-                // atlas texture (optional)
+                // Packed RGBA8 atlas pixels. A buffer avoids the Metal Scene
+                // texture-upload path; the shader performs normalized bilinear sampling.
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: TextureSampleType::Float { filterable: true },
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    count: None,
-                },
-                // atlas sampler
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
         });
 
-        // Fallback 1x1 white atlas for empty text.
-        let dummy_tex = tracked_create_texture(
+        let atlas_buf = tracked_create_buffer(
             device,
-            &TextureDescriptor {
+            &BufferDescriptor {
                 label: Some("text_dummy_atlas"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                view_formats: &[],
+                size: std::mem::size_of::<u32>() as u64,
+                usage: BufferUsages::STORAGE,
+                mapped_at_creation: true,
             },
         )?;
-        let dummy_view = dummy_tex.create_view(&TextureViewDescriptor::default());
-        let atlas_sampler = device.create_sampler(&SamplerDescriptor {
-            label: Some("text_atlas_sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
+        atlas_buf
+            .slice(..)
+            .get_mapped_range_mut()
+            .copy_from_slice(&0u32.to_ne_bytes());
+        atlas_buf.unmap();
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("text_overlay_bg"),
@@ -180,11 +164,7 @@ impl TextOverlayRenderer {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&dummy_view),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                    resource: atlas_buf.as_entire_binding(),
                 },
             ],
         });
@@ -284,9 +264,7 @@ impl TextOverlayRenderer {
             quad_vbuf,
             instance_buf: None,
             instance_count: 0,
-            atlas_tex: None,
-            atlas_view: None,
-            atlas_sampler,
+            atlas_buf,
         })
     }
 
@@ -304,6 +282,9 @@ impl TextOverlayRenderer {
     }
     pub fn set_smoothing(&mut self, px: f32) {
         self.uniforms.smoothing = px.max(0.1);
+    }
+    pub fn set_atlas_size(&mut self, width: u32, height: u32) {
+        self.uniforms.atlas_size = [width, height];
     }
 
     pub fn upload_uniforms(&self, queue: &Queue) {
@@ -338,39 +319,8 @@ impl TextOverlayRenderer {
         Ok(())
     }
 
-    pub fn recreate_bind_group(
-        &mut self,
-        device: &Device,
-        atlas_view: Option<&TextureView>,
-    ) -> RenderResult<()> {
-        // Use 1x1 fallback atlas when no view is available.
-        let (dummy_tex, dummy_view) = if atlas_view.is_none() && self.atlas_view.is_none() {
-            let t = tracked_create_texture(
-                device,
-                &TextureDescriptor {
-                    label: Some("text_dummy_atlas_tmp"),
-                    size: wgpu::Extent3d {
-                        width: 1,
-                        height: 1,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: TextureDimension::D2,
-                    format: TextureFormat::Rgba8UnormSrgb,
-                    usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                    view_formats: &[],
-                },
-            )?;
-            let v = t.create_view(&TextureViewDescriptor::default());
-            (Some(t), Some(v))
-        } else {
-            (None, None)
-        };
-        let view = atlas_view
-            .or(self.atlas_view.as_ref())
-            .or(dummy_view.as_ref())
-            .unwrap();
+    pub fn recreate_bind_group(&mut self, device: &Device, atlas_buf: Option<&TrackedBuffer>) {
+        let atlas_buf = atlas_buf.unwrap_or(&self.atlas_buf);
         self.bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("text_overlay_bg"),
             layout: &self.bind_group_layout,
@@ -381,21 +331,15 @@ impl TextOverlayRenderer {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(view),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.atlas_sampler),
+                    resource: atlas_buf.as_entire_binding(),
                 },
             ],
         });
-        drop(dummy_tex);
-        Ok(())
     }
 
-    pub fn set_atlas(&mut self, atlas_tex: TrackedTexture, atlas_view: TextureView) {
-        self.atlas_tex = Some(atlas_tex);
-        self.atlas_view = Some(atlas_view);
+    pub fn set_atlas(&mut self, atlas_buf: TrackedBuffer, width: u32, height: u32) {
+        self.atlas_buf = atlas_buf;
+        self.set_atlas_size(width, height);
     }
 
     pub fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
@@ -408,6 +352,67 @@ impl TextOverlayRenderer {
         if let Some(inst) = &self.instance_buf {
             pass.set_vertex_buffer(1, inst.slice(..));
             pass.draw(0..6, 0..self.instance_count);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TextOverlayUniforms;
+    use naga::{ScalarKind, TypeInner, VectorSize};
+
+    #[test]
+    fn shader_storage_atlas_contract_parses_and_matches_host_uniform_layout() {
+        assert_eq!(std::mem::size_of::<TextOverlayUniforms>(), 32);
+        assert_eq!(std::mem::align_of::<TextOverlayUniforms>(), 8);
+        assert_eq!(std::mem::offset_of!(TextOverlayUniforms, resolution), 0);
+        assert_eq!(std::mem::offset_of!(TextOverlayUniforms, alpha), 8);
+        assert_eq!(std::mem::offset_of!(TextOverlayUniforms, enabled), 12);
+        assert_eq!(std::mem::offset_of!(TextOverlayUniforms, channels), 16);
+        assert_eq!(std::mem::offset_of!(TextOverlayUniforms, smoothing), 20);
+        assert_eq!(std::mem::offset_of!(TextOverlayUniforms, atlas_size), 24);
+        let source = include_str!("../shaders/text_overlay.wgsl");
+        let module = naga::front::wgsl::parse_str(source).expect("valid text overlay WGSL");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("valid text overlay module");
+
+        let uniforms = module
+            .types
+            .iter()
+            .find_map(|(_, ty)| (ty.name.as_deref() == Some("TextOverlayUniforms")).then_some(ty))
+            .expect("text overlay uniforms");
+        let TypeInner::Struct { members, span } = &uniforms.inner else {
+            panic!("TextOverlayUniforms must remain a WGSL struct");
+        };
+        assert_eq!(*span, std::mem::size_of::<TextOverlayUniforms>() as u32);
+        let expected = [
+            ("resolution", 0, ScalarKind::Float, true),
+            ("alpha", 8, ScalarKind::Float, false),
+            ("enabled", 12, ScalarKind::Float, false),
+            ("channels", 16, ScalarKind::Float, false),
+            ("smoothing", 20, ScalarKind::Float, false),
+            ("atlas_size", 24, ScalarKind::Uint, true),
+        ];
+        assert_eq!(members.len(), expected.len());
+        for (member, (name, offset, kind, vector)) in members.iter().zip(expected) {
+            assert_eq!(member.name.as_deref(), Some(name));
+            assert_eq!(member.offset, offset);
+            match (&module.types[member.ty].inner, vector) {
+                (TypeInner::Scalar(scalar), false) => {
+                    assert_eq!(scalar.kind, kind);
+                    assert_eq!(scalar.width, 4);
+                }
+                (TypeInner::Vector { size, scalar }, true) => {
+                    assert_eq!(*size, VectorSize::Bi);
+                    assert_eq!(scalar.kind, kind);
+                    assert_eq!(scalar.width, 4);
+                }
+                (actual, _) => panic!("unexpected WGSL type for {name}: {actual:?}"),
+            }
         }
     }
 }

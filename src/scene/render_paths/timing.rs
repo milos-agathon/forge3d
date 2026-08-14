@@ -1,14 +1,37 @@
 // CENSOR Task 9: Scene render-path GPU-pass timing.
 //
-// Mirrors the terrain renderer's timing plumbing (take/store/record around a
-// `Mutex<Option<GpuTimingManager>>`) so a `Scene.render_rgba` / `render_png`
-// produces its own RenderCertificate capture with live per-pass GPU timings.
-// One render = one capture: `render_*_impl` calls `begin_render_capture`,
-// records every timed pass, and `finish_render_capture`, replacing the last
-// completed capture regardless of which native path (terrain or scene)
-// produced it.
+// A process-shared manager preserves one Metal query-set lifetime across
+// distinct Scene instances. The process render lock covers both manager use
+// and the global certificate capture, so one render still equals one capture.
+
+fn shared_render_timing(
+) -> std::sync::Arc<std::sync::Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>> {
+    static TIMING: std::sync::OnceLock<
+        std::sync::Arc<std::sync::Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>>,
+    > = std::sync::OnceLock::new();
+    TIMING
+        .get_or_init(|| std::sync::Arc::new(std::sync::Mutex::new(None)))
+        .clone()
+}
+
+fn shared_render_timing_owner() -> &'static crate::core::resource_tracker::AllocationOwner {
+    static OWNER: std::sync::OnceLock<crate::core::resource_tracker::AllocationOwner> =
+        std::sync::OnceLock::new();
+    OWNER.get_or_init(crate::core::resource_tracker::AllocationOwner::new)
+}
+
+static SCENE_RENDER_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(super) struct SceneRenderScope {
+    _allocation_scope: crate::core::resource_tracker::AllocationOwnerGuard,
+    _render_guard: std::sync::MutexGuard<'static, ()>,
+}
 
 impl Scene {
+    pub(super) fn shared_render_timing(
+    ) -> std::sync::Arc<std::sync::Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>> {
+        shared_render_timing()
+    }
     pub(super) fn record_terrain_shader_use() {
         let label = if crate::core::gpu::ctx_if_initialized()
             .is_some_and(|ctx| ctx.device.limits().max_bind_groups >= 6)
@@ -25,14 +48,34 @@ impl Scene {
         entry_point: &str,
     ) -> (
         crate::core::certificate::RenderCaptureGuard,
-        crate::core::resource_tracker::AllocationOwnerGuard,
+        SceneRenderScope,
     ) {
+        let (render_guard, lock_poisoned) = match SCENE_RENDER_SERIAL.lock() {
+            Ok(guard) => (guard, false),
+            Err(poisoned) => (poisoned.into_inner(), true),
+        };
         let allocation_scope = self.allocation_owner.activate();
         let render_capture = crate::core::certificate::begin_render_capture_with_resources(
             entry_point,
-            &[self.allocation_owner.id()],
+            &[
+                self.allocation_owner.id(),
+                shared_render_timing_owner().id(),
+            ],
         );
-        (render_capture, allocation_scope)
+        if lock_poisoned {
+            crate::core::degradation::record_degradation(
+                "timing_unavailable",
+                "scene_render_serial_poisoned",
+                "the process render lock recovered from a prior panic; this render remains serialized",
+            );
+        }
+        (
+            render_capture,
+            SceneRenderScope {
+                _allocation_scope: allocation_scope,
+                _render_guard: render_guard,
+            },
+        )
     }
 
     pub(super) fn finish_certificate_capture(
@@ -47,14 +90,36 @@ impl Scene {
     /// when timestamps are unavailable (the certificate then reports the passes
     /// with `gpu_ms == 0`). Returned via [`Scene::store_render_timing`].
     pub(super) fn take_render_timing(&self) -> Option<crate::core::gpu_timing::GpuTimingManager> {
-        let mut guard = self.render_timing.lock().ok()?;
+        let mut guard = match self.render_timing.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                crate::core::degradation::record_degradation(
+                    "timing_unavailable",
+                    "scene_timing_manager_poisoned",
+                    "the shared timing manager lock recovered from a prior panic",
+                );
+                poisoned.into_inner()
+            }
+        };
         if guard.is_none() {
-            let g = crate::core::gpu::ctx_if_initialized()?;
+            let Some(g) = crate::core::gpu::ctx_if_initialized() else {
+                crate::core::degradation::record_degradation(
+                    "timing_unavailable",
+                    "scene_gpu_context",
+                    "GPU timing was unavailable because the process GPU context was not initialized",
+                );
+                return None;
+            };
             if !g
                 .device
                 .features()
                 .contains(wgpu::Features::TIMESTAMP_QUERY)
             {
+                crate::core::degradation::record_degradation(
+                    "capability_absent",
+                    "timestamp_query",
+                    "scene passes are reported with gpu_ms equal to 0",
+                );
                 return None;
             }
             // Timestamps only: this path never issues pipeline-statistics
@@ -68,6 +133,7 @@ impl Scene {
                 label_prefix: "forge3d".to_string(),
                 max_queries_per_frame: 32,
             };
+            let _timing_allocation_scope = shared_render_timing_owner().activate();
             match crate::core::gpu_timing::GpuTimingManager::new(
                 g.device.clone(),
                 g.queue.clone(),
@@ -76,6 +142,11 @@ impl Scene {
                 Ok(manager) => return Some(manager),
                 Err(e) => {
                     log::warn!("failed to create Scene GPU timing manager: {e}");
+                    crate::core::degradation::record_degradation(
+                        "timing_unavailable",
+                        "scene_timing_manager_create",
+                        &format!("Scene GPU timing manager creation failed: {e}"),
+                    );
                     return None;
                 }
             }
@@ -89,9 +160,18 @@ impl Scene {
         manager: Option<crate::core::gpu_timing::GpuTimingManager>,
     ) {
         if let Some(manager) = manager {
-            if let Ok(mut guard) = self.render_timing.lock() {
-                *guard = Some(manager);
-            }
+            let mut guard = match self.render_timing.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    crate::core::degradation::record_degradation(
+                        "timing_unavailable",
+                        "scene_timing_manager_poisoned",
+                        "the shared timing manager lock recovered from a prior panic",
+                    );
+                    poisoned.into_inner()
+                }
+            };
+            *guard = Some(manager);
         }
     }
 

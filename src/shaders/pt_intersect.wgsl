@@ -250,6 +250,7 @@ struct Sphere {
     emissive: vec3<f32>,
     ax: f32, // anisotropic alpha_x
     ay: f32, // anisotropic alpha_y
+    _pad1: array<f32, 3>,
 }
 
 struct Vertex {

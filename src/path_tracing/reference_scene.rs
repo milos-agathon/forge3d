@@ -262,6 +262,42 @@ mod tests {
         assert_eq!(memoffset_of_ay(), 64);
     }
 
+    #[test]
+    fn wavefront_sphere_wgsl_layout_matches_host() {
+        for source in [
+            include_str!("../shaders/pt_raygen.wgsl"),
+            include_str!("../shaders/pt_intersect.wgsl"),
+            include_str!("../shaders/pt_shade.wgsl"),
+            include_str!("../shaders/pt_shadow.wgsl"),
+        ] {
+            let module = naga::front::wgsl::parse_str(source).expect("valid wavefront WGSL");
+            let (_, ty) = module
+                .types
+                .iter()
+                .find(|(_, ty)| ty.name.as_deref() == Some("Sphere"))
+                .expect("Sphere struct");
+            let naga::TypeInner::Struct { members, span } = &ty.inner else {
+                panic!("Sphere must be a struct");
+            };
+            assert_eq!(*span as usize, std::mem::size_of::<WavefrontGpuSphere>());
+            let offsets = members
+                .iter()
+                .map(|member| (member.name.as_deref().unwrap_or(""), member.offset))
+                .collect::<Vec<_>>();
+            assert!(offsets.contains(&("roughness", 32)));
+            assert!(offsets.contains(&("emissive", 48)));
+            assert!(offsets.contains(&("ay", 64)));
+            let pad = members
+                .iter()
+                .find(|member| member.name.as_deref() == Some("_pad1"))
+                .expect("explicit Sphere tail padding");
+            assert_eq!(pad.offset, 68);
+            let pad_size = module.types[pad.ty].inner.size(module.to_ctx());
+            assert_eq!(pad_size, 12);
+            assert_eq!(pad.offset + pad_size, *span);
+        }
+    }
+
     fn memoffset_of_roughness() -> usize {
         let s = WavefrontGpuSphere::zeroed();
         (&s.roughness as *const f32 as usize) - (&s as *const _ as usize)

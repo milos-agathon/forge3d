@@ -4,8 +4,10 @@ use crate::core::resource_tracker::{
     tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
 };
 use crate::terrain::render_params;
+use anyhow::ensure;
 
 const TERRAIN_AOV_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const TERRAIN_AOV_COLOR_RASTER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub(super) const AOV_ALBEDO_BIT: u8 = 1 << 0;
 pub(super) const AOV_NORMAL_BIT: u8 = 1 << 1;
 pub(super) const AOV_DEPTH_BIT: u8 = 1 << 2;
@@ -106,7 +108,7 @@ impl TerrainScene {
         output_mask: u8,
         include_source_id: bool,
         clipmap_geometry: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let mut aov_pipeline = self
             .aov_pipeline
             .lock()
@@ -128,12 +130,12 @@ impl TerrainScene {
             .lock()
             .map_err(|_| anyhow!("TerrainRenderer AOV clipmap flag mutex poisoned"))?;
 
-        if aov_pipeline.is_none()
+        let rebuild = aov_pipeline.is_none()
             || *sample_count != effective_msaa
             || *cached_output_mask != output_mask
             || *source_id_flag != include_source_id
-            || *clipmap_flag != clipmap_geometry
-        {
+            || *clipmap_flag != clipmap_geometry;
+        if rebuild {
             let light_buffer = self
                 .light_buffer
                 .lock()
@@ -152,6 +154,7 @@ impl TerrainScene {
                 output_mask,
                 include_source_id,
                 clipmap_geometry,
+                true,
             ));
             *sample_count = effective_msaa;
             *cached_output_mask = output_mask;
@@ -159,7 +162,7 @@ impl TerrainScene {
             *clipmap_flag = clipmap_geometry;
         }
 
-        Ok(())
+        Ok(rebuild)
     }
 
     /// VERITAS: single-sample R32Uint source-id attachment. Registry/ledger
@@ -202,7 +205,20 @@ impl TerrainScene {
         width: u32,
         height: u32,
         sample_count: u32,
+        format: wgpu::TextureFormat,
     ) -> Result<AovAttachmentTarget> {
+        let features = self.adapter.get_texture_format_features(format);
+        let required_usages = wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::TEXTURE_BINDING;
+        ensure!(
+            features.allowed_usages.contains(required_usages),
+            "terrain AOV format {format:?} lacks required usages {required_usages:?}"
+        );
+        ensure!(
+            features.flags.sample_count_supported(sample_count),
+            "terrain AOV format {format:?} does not support sample_count={sample_count}"
+        );
         let internal_texture = tracked_create_texture(
             self.device.as_ref(),
             &wgpu::TextureDescriptor {
@@ -215,7 +231,7 @@ impl TerrainScene {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: TERRAIN_AOV_FORMAT,
+                format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::COPY_SRC
                     | wgpu::TextureUsages::TEXTURE_BINDING,
@@ -237,7 +253,7 @@ impl TerrainScene {
                     mip_level_count: 1,
                     sample_count,
                     dimension: wgpu::TextureDimension::D2,
-                    format: TERRAIN_AOV_FORMAT,
+                    format,
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     view_formats: &[],
                 },
@@ -264,7 +280,13 @@ impl TerrainScene {
         sample_count: u32,
         output_mask: u8,
         include_source_id: bool,
+        portable_color_formats: bool,
     ) -> Result<TerrainAovTargets> {
+        let color_format = if portable_color_formats {
+            TERRAIN_AOV_COLOR_RASTER_FORMAT
+        } else {
+            TERRAIN_AOV_FORMAT
+        };
         Ok(TerrainAovTargets {
             albedo: (output_mask & AOV_ALBEDO_BIT != 0)
                 .then(|| {
@@ -273,6 +295,7 @@ impl TerrainScene {
                         width,
                         height,
                         sample_count,
+                        color_format,
                     )
                 })
                 .transpose()?,
@@ -283,6 +306,7 @@ impl TerrainScene {
                         width,
                         height,
                         sample_count,
+                        color_format,
                     )
                 })
                 .transpose()?,
@@ -293,6 +317,7 @@ impl TerrainScene {
                         width,
                         height,
                         sample_count,
+                        TERRAIN_AOV_FORMAT,
                     )
                 })
                 .transpose()?,
@@ -530,9 +555,20 @@ impl TerrainScene {
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
         ensure_aov_shading_supported(&params.shading)?;
+        let decoded = params.decoded();
+        let aov_output_mask = requested_aov_output_mask(&decoded.aov);
+        let first_aov_pipeline = self
+            .aov_pipeline
+            .lock()
+            .map_err(|_| anyhow!("TerrainRenderer AOV pipeline mutex poisoned"))?
+            .is_none();
+        if first_aov_pipeline && aov_output_mask & (AOV_ALBEDO_BIT | AOV_NORMAL_BIT) != 0 {
+            let uploads = self.queue.submit(std::iter::empty());
+            self.device
+                .poll(wgpu::Maintain::WaitForSubmissionIndex(uploads));
+        }
         let (certificate_capture, _allocation_scope) =
             self.begin_certificate_capture("terrain.render_internal_with_aov");
-        let decoded = params.decoded();
         self.ensure_shadow_atlas(&decoded.shadow)?;
         let (height_height, height_width) = heightmap.as_array().dim();
         let mut declaration_uniforms = Vec::new();
@@ -669,7 +705,6 @@ impl TerrainScene {
         // VERITAS: the source-id map must describe exactly the emitted image —
         // R32Uint cannot be multisample-resolved and must not be rescaled, so
         // unsupported configurations are explicit errors, never silent skips.
-        let aov_output_mask = requested_aov_output_mask(&decoded.aov);
         let want_source_id = decoded.aov.enabled && decoded.aov.source_id;
         if want_source_id && effective_msaa > 1 {
             return Err(anyhow!(
@@ -679,12 +714,6 @@ impl TerrainScene {
 
         let needs_clipmap = is_clipmap_camera_mode(&params.camera_mode);
         self.ensure_pipeline_sample_count(effective_msaa, needs_clipmap)?;
-        self.ensure_aov_pipeline_sample_count(
-            effective_msaa,
-            aov_output_mask,
-            want_source_id,
-            needs_clipmap,
-        )?;
         let render_targets = self.create_render_targets(params, requested_msaa, effective_msaa)?;
         if want_source_id && render_targets.needs_scaling {
             return Err(anyhow!(
@@ -697,6 +726,7 @@ impl TerrainScene {
             effective_msaa,
             aov_output_mask,
             want_source_id,
+            true,
         )?;
 
         let mut encoder = self
@@ -845,6 +875,20 @@ impl TerrainScene {
             ts_end(&mut timing, &mut encoder, bg_scope, 1);
         }
 
+        let pipeline_created = self.ensure_aov_pipeline_sample_count(
+            effective_msaa,
+            aov_output_mask,
+            want_source_id,
+            needs_clipmap,
+        )?;
+        if pipeline_created {
+            // Complete real frame uploads and the newly-created Metal pipeline
+            // before their first draw; cached steady-state renders do not wait.
+            let uploads = self.queue.submit(std::iter::empty());
+            self.device
+                .poll(wgpu::Maintain::WaitForSubmissionIndex(uploads));
+        }
+
         graph.execute_with_barriers("terrain.forward_aov", |barriers| {
             if barriers.is_empty() {
                 return Err(anyhow::anyhow!(
@@ -890,7 +934,6 @@ impl TerrainScene {
             )?;
         }
 
-        let needs_scaling = render_targets.needs_scaling;
         let (
             final_texture,
             final_width,
@@ -898,6 +941,7 @@ impl TerrainScene {
             albedo_texture,
             normal_texture,
             depth_texture,
+            source_id_texture,
         ) = graph.execute_with_barriers("terrain.resolve_aov", |barriers| {
             if barriers.is_empty() {
                 return Err(anyhow::anyhow!(
@@ -908,60 +952,11 @@ impl TerrainScene {
             let (final_texture, final_width, final_height) =
                 self.resolve_output(&mut encoder, params, decoded, &render_targets)?;
 
-            let albedo_texture = aov_targets
-                .albedo
-                .map(|target| {
-                    self.resolve_aux_output(
-                        &mut encoder,
-                        decoded,
-                        target.internal_texture,
-                        target.internal_view,
-                        final_width,
-                        final_height,
-                        needs_scaling,
-                        false,
-                        "terrain.aov.albedo.resolved",
-                    )
-                })
-                .transpose()?;
-            let normal_texture = aov_targets
-                .normal
-                .map(|target| {
-                    self.resolve_aux_output(
-                        &mut encoder,
-                        decoded,
-                        target.internal_texture,
-                        target.internal_view,
-                        final_width,
-                        final_height,
-                        needs_scaling,
-                        true,
-                        "terrain.aov.normal.resolved",
-                    )
-                })
-                .transpose()?;
-            let depth_texture = aov_targets
-                .depth
-                .map(|target| {
-                    self.resolve_aux_output(
-                        &mut encoder,
-                        decoded,
-                        target.internal_texture,
-                        target.internal_view,
-                        final_width,
-                        final_height,
-                        needs_scaling,
-                        false,
-                        "terrain.aov.depth.resolved",
-                    )
-                })
-                .transpose()?;
-            ts_end(
-                &mut timing,
-                &mut encoder,
-                resolve_scope,
-                1 + aov_output_mask.count_ones(),
-            );
+            let albedo_texture = aov_targets.albedo.map(|target| target.internal_texture);
+            let normal_texture = aov_targets.normal.map(|target| target.internal_texture);
+            let depth_texture = aov_targets.depth.map(|target| target.internal_texture);
+            let source_id_texture = aov_targets.source_id.map(|target| target.internal_texture);
+            ts_end(&mut timing, &mut encoder, resolve_scope, 1);
             self.stage_material_vt_feedback_readback(&mut encoder)?;
             Ok::<_, anyhow::Error>((
                 final_texture,
@@ -970,6 +965,7 @@ impl TerrainScene {
                 albedo_texture,
                 normal_texture,
                 depth_texture,
+                source_id_texture,
             ))
         })?;
         if let Some(t) = timing.as_mut() {
@@ -989,11 +985,13 @@ impl TerrainScene {
             albedo_texture,
             normal_texture,
             depth_texture,
-            // VERITAS: needs_scaling is rejected above, so the internal
-            // texture is already at the final output dimensions.
-            aov_targets.source_id.map(|target| target.internal_texture),
+            source_id_texture,
             final_width,
             final_height,
+            TERRAIN_AOV_COLOR_RASTER_FORMAT,
+            render_targets.internal_width,
+            render_targets.internal_height,
+            true,
         );
 
         let beauty_frame = crate::Frame::new(

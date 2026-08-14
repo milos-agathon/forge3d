@@ -204,7 +204,7 @@ pub fn render_pt_reference(
         cam_forward: forward.into(),
         seed_hi: desc.seed_hi,
         seed_lo: desc.seed_lo,
-        _pad_end: [0; 3],
+        _pad_end: [1, 0, 0],
     };
     let uniforms_buffer = tracked_create_buffer_init(
         device,
@@ -310,6 +310,72 @@ pub fn render_pt_reference(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn adjudication_shadow_slots_have_one_accumulator_writer_per_pixel() {
+        let shade = include_str!("../shaders/pt_shade.wgsl");
+        let shadow = include_str!("../shaders/pt_shadow.wgsl");
+        for source in [shade, shadow] {
+            let module = naga::front::wgsl::parse_str(source).expect("valid wavefront WGSL");
+            naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .expect("valid wavefront module");
+        }
+        for kind in 0..4 {
+            assert!(shade.contains(&format!("push_shadow(sr, {kind}u)")));
+        }
+        assert!(shade.contains("kind * pixel_count + sr.pixel"));
+        assert!(shade.contains("sr._pad1.x = 1u"));
+        assert_eq!(
+            shade
+                .matches("atomicAdd(&shadow_queue_header.in_count")
+                .count(),
+            1
+        );
+        assert!(shadow.contains("if (pixel >= pixel_count) { return; }"));
+        assert!(shadow.contains("for (var kind = 0u; kind < 4u; kind = kind + 1u)"));
+        assert!(shadow.contains("kind * pixel_count + pixel"));
+        assert!(shadow.contains("cleared._pad1 = vec3<u32>(0u)"));
+        assert_eq!(
+            shadow
+                .matches("accum_hdr[pixel] = accum_hdr[pixel] +")
+                .count(),
+            1
+        );
+        assert!(
+            shadow
+                .find("return;\n    }\n\n    // Persistent threads")
+                .unwrap()
+                < shadow
+                    .find("atomicAdd(&shadow_queue_header.out_count")
+                    .unwrap()
+        );
+        assert_eq!(
+            std::mem::offset_of!(super::WavefrontUniforms, _pad_end),
+            84,
+            "adjudication_mode must map to Uniforms byte 84"
+        );
+        assert_eq!(std::mem::size_of::<super::WavefrontUniforms>(), 96);
+        for source in [shade, shadow] {
+            let module = naga::front::wgsl::parse_str(source).unwrap();
+            let (_, uniforms) = module
+                .types
+                .iter()
+                .find(|(_, ty)| ty.name.as_deref() == Some("Uniforms"))
+                .unwrap();
+            let naga::TypeInner::Struct { members, .. } = &uniforms.inner else {
+                panic!("Uniforms struct");
+            };
+            assert!(members.iter().any(|member| {
+                member.name.as_deref() == Some("adjudication_mode") && member.offset == 84
+            }));
+        }
+        assert!(include_str!("hybrid_compute/mod.rs").contains("_pad_end: [0, 0, 0]"));
+        assert!(include_str!("../py_functions/path_tracing/gpu.rs").contains("_pad_end: [0, 0, 0]"));
+    }
+
     #[test]
     fn adjudication_driver_uses_wavefront_active_count_loop_not_zero_stub() {
         let driver = include_str!("adjudication.rs");

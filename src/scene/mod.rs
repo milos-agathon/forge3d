@@ -173,10 +173,11 @@ pub struct Scene {
     text3d_enabled: bool,
     text3d_instances: Vec<Text3DInstance>,
 
-    // CENSOR Task 9: per-render GPU-pass timing for the RenderCertificate.
-    // Lazily constructed on first render when TIMESTAMP_QUERY is granted;
-    // take/store between renders so each render owns one certificate capture.
-    render_timing: std::sync::Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>,
+    // CENSOR Task 9: process-shared GPU-pass timing for RenderCertificates.
+    // Metal requires one query-set lifetime across distinct Scene instances;
+    // the render scope serializes take/store and each certificate capture.
+    render_timing:
+        std::sync::Arc<std::sync::Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>>,
     allocation_owner: crate::core::resource_tracker::AllocationOwner,
 
     // F16: GPU Instancing (feature-gated)

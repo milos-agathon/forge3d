@@ -84,6 +84,20 @@ pub use warp::{
 };
 
 #[cfg(feature = "extension-module")]
+pub(crate) fn synthetic_raster_info(array: &RasterArray) -> RasterInfo {
+    let mut info = RasterInfo::new(
+        "".into(),
+        array.width as u32,
+        array.height as u32,
+        array.bands as u16,
+    );
+    info.driver = "memory".to_string();
+    info.dtype_per_band = vec![array.dtype().name().to_string(); array.bands];
+    info.nodata_per_band = vec![None; array.bands];
+    info
+}
+
+#[cfg(feature = "extension-module")]
 use std::collections::HashMap;
 #[cfg(feature = "extension-module")]
 use std::path::Path;
