@@ -76,11 +76,22 @@ Established by reading the source, not assumed:
   not triangle meshes".
 - It returns `rgba`, plus `albedo`, `normal` and `depth` AOVs, and converges on
   a per-pixel luminance variance threshold.
-- **It takes a single global `albedo`.** There is no per-mesh, per-triangle or
-  per-vertex material. This constraint drives workstream B.
+- **Albedo is effectively two flat colours.** The `albedo` parameter applies to
+  the terrain; mesh hits use a hardcoded `vec3f(0.7, 0.7, 0.8)`
+  (`hybrid_traversal.wgsl:240`, `hybrid_kernel.wgsl:142`). There is no per-mesh,
+  per-triangle or per-vertex material. Two classes is far short of the thirteen
+  this scene needs, so this constraint still drives workstream B. Making the
+  mesh albedo a parameter would be cheap — it sits in a shader we are already
+  editing — but it would yield one colour for *all* meshes, not per-class
+  colour, so it does not change the architecture.
 
-No example and no test in the repository passes `mesh_vertices`. This work is
-the first caller of that path.
+The mesh path is exercised by exactly one test,
+`test_mixed_scene_mesh_and_terrain` in `tests/test_hybrid_terrain_pt.py:718`,
+which mixes a **two-triangle quad** into a heightfield and asserts it occludes
+the terrain and carries the mesh albedo. So the path demonstrably works. But two
+triangles is also why the brute-force sweep has gone unnoticed: at that size it
+is free. No example passes `mesh_vertices` at all, and nothing in the repository
+has ever driven this path at a scale where acceleration matters.
 
 ## Architecture
 
@@ -160,6 +171,11 @@ taken. Do not change that call without addressing this.
 A unit test asserting that BVH traversal and brute-force sweep return identical
 hits (t, normal, triangle) for a fixed ray set against a non-trivial mesh. This
 must exist and pass before the Paris scene is pointed at the mesh path.
+
+The existing `test_mixed_scene_mesh_and_terrain` is a regression net for the
+change but not a sufficient one: a two-triangle quad passes under any traversal,
+correct or not, and would not catch a permutation or stride error. The new test
+needs enough triangles that leaf ordering and node stride actually matter.
 
 ## Workstream B — colour
 
