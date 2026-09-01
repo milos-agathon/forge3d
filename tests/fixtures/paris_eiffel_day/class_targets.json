@@ -1,0 +1,152 @@
+{
+  "assigned_fraction": 0.0459,
+  "classes": {
+    "background": {
+      "assigned_px": 0,
+      "class_id": 0,
+      "reason": "reference is full-bleed ground; no sky is visible in the frame",
+      "status": "abstained"
+    },
+    "base": {
+      "assigned_px": 3395,
+      "class_id": 1,
+      "iqr_max": 10.0,
+      "status": "measured",
+      "target_rgb": [
+        203.0,
+        196.0,
+        190.0
+      ],
+      "tolerance": 10.0
+    },
+    "building_roof": {
+      "assigned_px": 958,
+      "class_id": 8,
+      "iqr_max": 7.0,
+      "status": "measured",
+      "target_rgb": [
+        211.0,
+        206.0,
+        202.0
+      ],
+      "tolerance": 7.0
+    },
+    "building_wall": {
+      "assigned_px": 1705,
+      "class_id": 9,
+      "iqr_max": 12.0,
+      "status": "measured",
+      "target_rgb": [
+        138.0,
+        134.0,
+        185.0
+      ],
+      "tolerance": 12.0
+    },
+    "car": {
+      "assigned_px": 0,
+      "class_id": 14,
+      "reason": "vehicles are 4-10 px specks at screen-recording compression; a colour/size detector cannot separate them from tower lattice and codec artefacts (a first attempt returned 4,007 px spread over the whole frame, concentrated on the tower, with a muddy violet median). Gated on reachability in the render's own raster instead",
+      "status": "abstained"
+    },
+    "footpath": {
+      "assigned_px": 0,
+      "class_id": 7,
+      "reason": "footpath is the same paved colour as road at 2-3 px width",
+      "status": "abstained"
+    },
+    "landuse": {
+      "assigned_px": 0,
+      "class_id": 2,
+      "reason": "landuse and park are one green family in the reference; no visible boundary",
+      "status": "abstained"
+    },
+    "park": {
+      "assigned_px": 3078,
+      "class_id": 3,
+      "iqr_max": 22.0,
+      "status": "measured",
+      "target_rgb": [
+        154.0,
+        175.0,
+        142.0
+      ],
+      "tolerance": 22.0
+    },
+    "pitch": {
+      "assigned_px": 3683,
+      "class_id": 13,
+      "iqr_max": 17.0,
+      "status": "measured",
+      "target_rgb": [
+        134.0,
+        159.0,
+        68.0
+      ],
+      "tolerance": 17.0
+    },
+    "road": {
+      "assigned_px": 1515,
+      "class_id": 5,
+      "iqr_max": 14.0,
+      "status": "measured",
+      "target_rgb": [
+        199.0,
+        191.0,
+        189.0
+      ],
+      "tolerance": 14.0
+    },
+    "road_hi": {
+      "assigned_px": 0,
+      "class_id": 6,
+      "reason": "road_hi is the same paved colour as road; the reference draws no distinction",
+      "status": "abstained"
+    },
+    "tower": {
+      "assigned_px": 287,
+      "class_id": 10,
+      "iqr_max": 21.0,
+      "status": "measured",
+      "target_rgb": [
+        222.0,
+        140.0,
+        132.0
+      ],
+      "tolerance": 21.0
+    },
+    "tower_deck": {
+      "assigned_px": 0,
+      "class_id": 11,
+      "reason": "no distinct deck band is visible; the teal in this frame is garden ponds (class 4), not tower structure -- see notes",
+      "status": "abstained"
+    },
+    "tree": {
+      "assigned_px": 911,
+      "class_id": 12,
+      "iqr_max": 29.0,
+      "status": "measured",
+      "target_rgb": [
+        101.0,
+        135.0,
+        109.0
+      ],
+      "tolerance": 29.0
+    },
+    "water": {
+      "assigned_px": 16190,
+      "class_id": 4,
+      "iqr_max": 15.0,
+      "status": "measured",
+      "target_rgb": [
+        37.0,
+        81.0,
+        195.0
+      ],
+      "tolerance": 15.0
+    }
+  },
+  "reference": "tests/fixtures/paris_eiffel_day/reference_day.png",
+  "reference_sha256": "CA13E48F90F8C3ACDA40BC086C76E3F1C0CF0D7B456228D7F3D2EA92ED22A067",
+  "schema_version": 1
+}

@@ -1,7 +1,7 @@
 # Paris Eiffel daylight still — path-traced look-match
 
 Date: 2026-09-01
-Revision: 3 (rev 1 and rev 2 failed contract review; see git history for the diff)
+Revision: 4 (revs 1-3 failed contract review; acceptance fixture now delivered)
 Target: `examples/paris_eiffel_day.py` + engine changes in `src/`
 Reference: `ZR8duX05LH6ajR-X.mp4`, daylight frame at t = 3.3 s
 
@@ -95,10 +95,17 @@ Design-time single-patch samples, superseding the current constants:
 | Tower, lit | (181, 97, 90) | (153, 89, 35) |
 | Pitch | (130, 156, 64) | (92, 176, 78) |
 
-These eight are **design-time estimates, not acceptance targets**. Section 12.2
-defines how all fifteen classes are re-derived as masked region medians. The
-seven classes without a measured value (landuse, park, road_hi, footpath,
-tower_deck, tree, car) are measured when the mask is authored.
+These eight were **design-time estimates**. They have since been superseded by
+the committed fixture (§12.2), which measures nine classes as masked region
+medians and abstains on six. Two of the estimates were materially wrong:
+
+- **Tower.** The estimate (181, 97, 90) averaged lit and shaded faces. The tower
+  is strongly bimodal, and a region spanning both yields an IQR of 65 — a
+  "tolerance" loose enough to accept almost any salmon. The fixture measures
+  **sunlit faces only, (222, 140, 132), tolerance 21**.
+- **Tower deck.** The existing constant `REFERENCE_TOWER_DECK_RGB` = (67,143,171)
+  does not correspond to tower structure at all. That teal is the **garden ponds**
+  beside the tower, which are class 4 water. See §9.
 
 Two properties define the look: a **cool violet ambient cast** (blue > green >
 red in the global mean; the violet shadow face at (150, 142, 179) is the most
@@ -316,29 +323,38 @@ multi-bounce indirect, and not a separate AO model.
 Fifteen classes. This table is the single source of truth; §12.2's mask uses
 these IDs.
 
-| ID | Class | Geometry | Source | Colour |
+| ID | Class | Geometry | Source | Colour (measured / abstained) |
 |---|---|---|---|---|
-| 0 | background | — | sky / no hit | n/a |
-| 1 | base | flat | OSM fallback ground | measured (202,196,185) |
-| 2 | landuse | flat | OSM landuse | **to measure** |
-| 3 | park | flat | OSM leisure=park | **to measure** |
-| 4 | water | flat | OSM natural=water | measured (39,56,175) |
-| 5 | road | flat | OSM highway | measured (203,191,186) |
-| 6 | road_hi | flat | OSM highway, major | **to measure** |
-| 7 | footpath | flat | OSM highway=footway/path | **to measure** |
-| 8 | building_roof | mesh | IGN LoD2.2 | measured (207,200,198) |
-| 9 | building_wall | mesh | IGN LoD2.2 | measured (150,142,179) |
-| 10 | tower | mesh | Eiffel STL | measured (181,97,90) |
-| 11 | tower_deck | mesh | `build_eiffel_deck_mesh()` | **to measure** |
-| 12 | tree | mesh | OSM `natural=tree` + park scatter | **to measure** |
-| 13 | pitch | flat | OSM leisure=pitch | measured (130,156,64) |
-| 14 | car | mesh | synthetic, seeded | **to measure** |
+| 0 | background | — | sky / no hit | abstained: reference is full-bleed, no sky |
+| 1 | base | flat | OSM fallback ground | (203.0, 196.0, 190.0) tol 10.0 |
+| 2 | landuse | flat | OSM landuse | abstained: one green family with park |
+| 3 | park | flat | OSM leisure=park | (154.0, 175.0, 142.0) tol 22.0 |
+| 4 | water | flat | OSM natural=water | (37.0, 81.0, 195.0) tol 15.0 |
+| 5 | road | flat | OSM highway | (199.0, 191.0, 189.0) tol 14.0 |
+| 6 | road_hi | flat | OSM highway, major | abstained: same paved colour as road |
+| 7 | footpath | flat | OSM highway=footway/path | abstained: same paved colour, 2–3 px |
+| 8 | building_roof | mesh | IGN LoD2.2 | (211.0, 206.0, 202.0) tol 7.0 |
+| 9 | building_wall | mesh | IGN LoD2.2 | (138.0, 134.0, 185.0) tol 12.0 |
+| 10 | tower | mesh | Eiffel STL | (222.0, 140.0, 132.0) tol 21.0, **lit faces only** |
+| 11 | tower_deck | mesh | `build_eiffel_deck_mesh()` | abstained: no distinct band visible |
+| 12 | tree | mesh | OSM `natural=tree` + park scatter | (101.0, 135.0, 109.0) tol 29.0 |
+| 13 | pitch | flat | OSM leisure=pitch | (134.0, 159.0, 68.0) tol 17.0 |
+| 14 | car | mesh | synthetic, seeded | abstained: 4–10 px specks, not separable |
+
+Nine classes carry colour targets; six abstain. An abstained class is **not**
+ungated — it is gated on reachability in the render's own class raster, where
+provenance is known, rather than on a colour the reference cannot resolve.
 
 Three decisions previously left open, now resolved:
 
 - **Tower deck.** `build_eiffel_deck_mesh()` exists (`paris_eiffel_day.py:401`)
-  but is never added to the scene (`paris_eiffel_day.py:1359`). **Wire it in.**
-  The reference clearly shows the teal second-floor band.
+  but is never added to the scene (`paris_eiffel_day.py:1359`). **Wire the
+  geometry in, but do not colour-gate it.** Rev 2 justified this by "the
+  reference clearly shows the teal second-floor band" — that was wrong.
+  Authoring the mask established that the teal in this frame is the **garden
+  ponds** (class 4 water), and the platform reads as a light salmon-grey band,
+  not teal. `REFERENCE_TOWER_DECK_RGB` = (67, 143, 171) is therefore a
+  mis-sampled constant and must not be used as a target.
 - **Trees.** `combined_osm_query()` (`paris_eiffel_day.py:920`) has **no
   `node["natural"="tree"]` selector**; the current 211 trees come entirely from
   polygon scatter. **Add the selector**, keep scatter as fill for parks with no
@@ -453,46 +469,93 @@ Scene data also counts against the gate: at ~450k triangles, BVH nodes alone are
 | 6 | Linear round-trip | Linear → forward Reinhard matches LDR output within 1/255 per channel on 99% of pixels |
 | 7 | PT smoke | Paris mesh at §3 count renders; hit fraction ≥ 0.95 of non-sky pixels; recorded |
 | 8 | Camera registration | ≤ 2.0 px RMS landmark residual |
-| 9 | Class reachability | All 15 IDs present in the raster |
-| 10 | Colour match | §12.2 |
-| 11 | Seam check | §11 tile-edge agreement |
-| 12 | Final render | 1920x1440, manifest complete, output SHA256 recorded |
+| 9 | Class reachability | All 15 IDs present in the render's class raster |
+| 10 | Colour match | §12.2 fixture; `colour_metric.py` exit 0 |
+| 11 | Fixture integrity | `tests/test_paris_eiffel_day_fixture.py` passes (11 tests) |
+| 12 | Seam check | §11 tile-edge agreement |
+| 13 | Final render | 1920x1440, manifest complete, output SHA256 recorded |
 
-### 12.2 Colour metric
+### 12.2 Colour metric — DELIVERED
 
-Deliverable **before tuning begins**, as committed fixtures:
+Committed and executable. No longer a description of work to do.
 
-- `tests/fixtures/paris_eiffel_day/reference_day.png` — committed (§0.2).
-- `tests/fixtures/paris_eiffel_day/class_mask.png` — hand-authored once,
-  assigning every reference pixel one of the §9 IDs or "unassigned".
-- `tools/paris_eiffel_day/colour_metric.py` — takes (render, reference, mask),
-  emits per-class median RGB, per-class delta, and the global statistics.
+| Artefact | Path | SHA256 |
+|---|---|---|
+| Reference frame | `tests/fixtures/paris_eiffel_day/reference_day.png` | `CA13E48F…A067` |
+| Class mask | `tests/fixtures/paris_eiffel_day/class_mask.png` | `BF970555…88C7` |
+| Derived targets | `tests/fixtures/paris_eiffel_day/class_targets.json` | — |
+| Mask author | `tools/paris_eiffel_day/author_class_mask.py` | — |
+| Metric | `tools/paris_eiffel_day/colour_metric.py` | — |
+| Fixture guards | `tests/test_paris_eiffel_day_fixture.py` | 11 tests, passing |
 
-**Targets** are masked region medians on the reference, replacing §1's
-single-patch estimates.
+```bash
+python tools/paris_eiffel_day/colour_metric.py RENDER.png
+```
 
-**Tolerances are derived, not asserted:** for each class, compute the
-within-region interquartile range on the reference itself and set that class's
-tolerance to `max(6, IQR)`. A class with genuinely variable colour is not held
-to a tolerance tighter than its own variance; the floor of 6 prevents a flat
-class from demanding impossible precision. Both the derived tolerance and the
-achieved delta are reported per class.
+Exit 0 on pass, 1 on fail.
 
-**Colour space:** all statistics computed in sRGB 8-bit, matching the reference's
-native encoding. The composite's linear→sRGB encode happens before comparison.
+**Authoring method: hand-placed regions, not a per-pixel classifier.** Several
+distinct classes share a colour in this reference — lit roof (211, 206, 202)
+against road (199, 191, 189) is a separation of ~12, below screen-recording
+noise, and lawn and landuse are one green family. A colour classifier would
+invent boundaries it cannot see and bake that invention into the targets. So
+regions are placed by hand, which decides *where* a class is; a per-class
+predicate then only **subtracts** contaminants inside a region (a car on the
+esplanade, a line marking on the pitch), returning them to unassigned rather
+than averaging them into the target. The predicate never assigns a class, so
+roof and road stay separated by placement, not colour. A region retaining under
+60% aborts the build as a placement error — which it did during authoring,
+catching wall and tree regions that had been placed on the wrong surface, and a
+roof region contaminated with shading.
 
-**Colour alone cannot pass a wrong image**, so three structural gates run
-alongside:
+**Coverage.** The mask assigns 4.59% of pixels. It is a *sampling* oracle:
+enough per class for a stable median and IQR, deliberately abstaining
+elsewhere. Frame coverage is therefore gated on the render's own class raster,
+not on the mask.
 
-- **Coverage** — background (class 0) fraction ≤ 2% of frame, catching the
-  current island-on-white failure, where background is ~50%.
-- **Landmark alignment** — gate 8's residual.
-- **Shadow presence** — the tower's cast shadow must be measurably present:
-  within the Champ de Mars mask region, the darkest decile must be at least 15%
-  below the region median. Without this, PT earns nothing over flat shading.
+**Tolerances are derived, not chosen:** `max(6, IQR)` per class, computed from
+the reference's own within-region spread, so a variable class is not held
+tighter than its own variance and a flat class is not asked for impossible
+precision. `test_tolerances_respect_the_derivation_rule` enforces this, and
+`test_measured_targets_reproduce_from_the_mask` catches a targets file edited by
+hand or a mask regenerated without refreshing targets.
+
+**Colour space:** sRGB 8-bit, the reference's native encoding. The composite's
+linear→sRGB encode happens before comparison.
+
+**The metric is proven to fail.** A gate that cannot fail is not a gate:
+
+- `--self-test` scores the reference against itself: all nine classes at delta
+  0.0, global mean delta 0.03, VERDICT PASS.
+- A flat grey frame fails every class, exit 1.
+- The current example render fails all nine — every mask region reads
+  (255, 255, 247), the empty background, which is precisely the island-on-white
+  defect this work exists to fix. Global mean delta 84.03 against a tolerance
+  of 8.
+- A mismatched resolution is refused outright, so no resampling can enter the
+  metric.
+
+**Structural gates**, since colour alone cannot pass a wrong image:
+
+- **Coverage** — background (class 0) fraction ≤ 2% of the render's class
+  raster. The current render is ~50%.
+- **Landmark alignment** — gate 8's ≤ 2.0 px RMS residual.
+- **Tower-occlusion ablation** — render twice at low resolution, with and
+  without the tower mesh; mean ground irradiance in the annulus around the
+  tower base must drop by ≥ 10% when the tower is present.
+
+  Rev 2 specified a different shadow gate: "within the Champ de Mars mask
+  region, the darkest decile must be at least 15% below the region median."
+  That gate was **tested against the reference and found non-discriminating** —
+  it passes at 25% on the Champ region, but also at 44.6% on the whole frame
+  and 26.3% on an arbitrary region, so it measures "tonal variation exists",
+  which tree canopy alone satisfies. The ablation replaces it because it is
+  reference-independent and tests the specific thing path tracing is being used
+  for: that the tower actually occludes light.
 
 Global mean and median are reported for continuity but are **not sufficient**: a
 uniformly wrong image can match a global mean.
+
 
 ## 13. Risks
 
