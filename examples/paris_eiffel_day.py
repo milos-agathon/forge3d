@@ -52,18 +52,19 @@ REFERENCE_CONTENT_ZOOM = 1.35
 # The daytime reference is intentionally bright and stylised, but the geometry
 # below remains sourced from OSM/IGN rather than painted as an illustration.
 REFERENCE_SURFACE_RGB = {
-    "base": (238, 240, 228, 255),
-    "landuse": (210, 226, 178, 255),
-    "park": (170, 220, 119, 255),
-    "water": (34, 112, 224, 255),
-    "road": (244, 232, 207, 255),
-    "road_hi": (252, 243, 220, 255),
+    "base": (226, 223, 211, 255),
+    "landuse": (198, 208, 176, 255),
+    "park": (156, 180, 132, 255),
+    "water": (46, 98, 190, 255),
+    "road": (232, 226, 211, 255),
+    "road_hi": (242, 238, 226, 255),
 }
-REFERENCE_BUILDING_RGB = (180, 188, 214, 255)
+REFERENCE_BUILDING_RGB = (228, 220, 204, 255)
+REFERENCE_ROOF_RGB = (104, 118, 142, 255)
 REFERENCE_TOWER_RGB = (153, 89, 35, 255)
 REFERENCE_TOWER_DECK_RGB = (67, 143, 171, 255)
-REFERENCE_TREE_RGB = (83, 153, 62, 255)
-REFERENCE_PITCH_RGB = (92, 176, 78, 255)
+REFERENCE_TREE_RGB = (78, 118, 74, 255)
+REFERENCE_PITCH_RGB = (128, 156, 82, 255)
 
 
 @dataclass(frozen=True)
@@ -612,70 +613,90 @@ def discover_official_glb_urls(
     cache_dir: Path | None = None,
     refresh: bool = False,
     root_url: str = IGN_TILESET_URL,
+    max_geometric_error: float | None = None,
 ) -> list[str]:
-    """Discover official IGN GLB tiles whose conservative bounds meet the AOI."""
+    """Discover the FINEST official IGN GLB tiles covering the AOI.
+
+    IGN publishes each area at several levels of detail. A node commonly
+    carries a coarse ``.glb`` at ``geometricError`` 100 *and* a sibling subtree
+    at ``geometricError`` ~2 holding the detailed LoD2.2 geometry, with
+    ``refine: "REPLACE"`` meaning the finer subtree supersedes the coarse
+    content rather than adding to it.
+
+    Taking the first ``.glb`` encountered therefore yields flat-topped
+    extrusions: measured on the Eiffel AOI, the coarse level puts only 1.3% of
+    building surface on pitched planes, so Paris loses its roofs. This walk
+    descends into every intersecting child first and accepts a node's own
+    content only when nothing finer covers the area (or when refinement is
+    ADD, where coarse and fine are both meant to be drawn).
+
+    ``max_geometric_error`` optionally caps how fine to go, for a cheaper
+    preview.
+    """
     cache_dir = (cache_dir or DEFAULT_DATA_ROOT / "cache" / "ign_tilesets").resolve()
     target = np.asarray(WGS84_TO_ECEF.transform(float(lon), float(lat), 0.0), dtype=np.float64)
     validate_remote_origin(root_url, {"batiment3d.ign.fr"})
-    visited: set[str] = set()
-    found: set[str] = set()
+    visited_tilesets: set[str] = set()
+    found: dict[str, float] = {}
 
-    def visit(url: str) -> None:
-        validate_remote_origin(url, {"batiment3d.ign.fr"})
-        if url in visited:
-            return
-        visited.add(url)
-        payload = _cached_json(url, cache_dir, refresh=refresh)
-        root = payload.get("root", payload)
-        children = root.get("children", []) or []
-        if not children:
-            uri = root.get("content", {}).get("uri")
-            if uri and str(uri).lower().endswith(".glb"):
-                resolved = urljoin(url, str(uri))
-                validate_remote_origin(resolved, {"batiment3d.ign.fr"})
-                found.add(resolved)
-            return
-        for child in children:
-            box = child.get("boundingVolume", {}).get("box")
-            if box is not None and not obb_intersects_sphere(box, target, radius_m):
-                continue
-            uri = child.get("content", {}).get("uri")
-            if uri:
-                resolved = urljoin(url, str(uri))
-                validate_remote_origin(resolved, {"batiment3d.ign.fr"})
-                if str(uri).lower().endswith(".json"):
-                    visit(resolved)
-                elif str(uri).lower().endswith(".glb"):
-                    found.add(resolved)
-            elif child.get("children"):
-                # Inline child nodes are legal in 3D Tiles. They inherit this
-                # tileset URL as their relative-resolution base.
-                inline = dict(child)
-                inline_children = inline.pop("children", []) or []
-                for inline_child in inline_children:
-                    inline_box = inline_child.get("boundingVolume", {}).get("box")
-                    if inline_box is not None and not obb_intersects_sphere(
-                        inline_box, target, radius_m
-                    ):
-                        continue
-                    inline_uri = inline_child.get("content", {}).get("uri")
-                    if not inline_uri:
-                        continue
-                    resolved = urljoin(url, str(inline_uri))
-                    validate_remote_origin(resolved, {"batiment3d.ign.fr"})
-                    if str(inline_uri).lower().endswith(".json"):
-                        visit(resolved)
-                    elif str(inline_uri).lower().endswith(".glb"):
-                        found.add(resolved)
+    def intersects(node: dict) -> bool:
+        box = (node.get("boundingVolume") or {}).get("box")
+        if box is None:
+            return True
+        return obb_intersects_sphere(box, target, radius_m)
 
-    visit(root_url)
+    def take(uri: str, base_url: str, error: float) -> None:
+        resolved = urljoin(base_url, str(uri))
+        validate_remote_origin(resolved, {"batiment3d.ign.fr"})
+        found[resolved] = min(error, found.get(resolved, error))
+
+    def visit_node(node: dict, base_url: str, inherited_error: float, depth: int) -> None:
+        if depth > 24 or not intersects(node):
+            return
+        error = float(node.get("geometricError", inherited_error) or 0.0)
+        content_uri = (node.get("content") or {}).get("uri")
+
+        # An external tileset stands in for this node's whole subtree.
+        if content_uri and str(content_uri).lower().endswith(".json"):
+            resolved = urljoin(base_url, str(content_uri))
+            validate_remote_origin(resolved, {"batiment3d.ign.fr"})
+            if resolved not in visited_tilesets:
+                visited_tilesets.add(resolved)
+                payload = _cached_json(resolved, cache_dir, refresh=refresh)
+                visit_node(payload.get("root", payload), resolved, error, depth + 1)
+            return
+
+        children = [c for c in (node.get("children") or []) if intersects(c)]
+        too_fine = max_geometric_error is not None and error < float(max_geometric_error)
+        if children and not too_fine:
+            for child in children:
+                visit_node(child, base_url, error, depth + 1)
+            # REPLACE means the finer children stand in for this content, so
+            # taking it too would double-draw the buildings.
+            if str(node.get("refine", "REPLACE")).upper() == "ADD":
+                if content_uri and str(content_uri).lower().endswith(".glb"):
+                    take(content_uri, base_url, error)
+            return
+
+        if content_uri and str(content_uri).lower().endswith(".glb"):
+            take(content_uri, base_url, error)
+
+    payload = _cached_json(root_url, cache_dir, refresh=refresh)
+    visited_tilesets.add(root_url)
+    visit_node(payload.get("root", payload), root_url, float("inf"), 0)
+
     urls = sorted(found)
     if not urls:
         raise RuntimeError(
             f"official IGN BATI 3D hierarchy returned no GLB tiles for "
             f"({lon:.6f}, {lat:.6f}) radius {radius_m:.0f} m"
         )
-    print(f"[IGN] discovered {len(urls)} official GLB tile(s) for the Eiffel AOI", flush=True)
+    errors = [found[u] for u in urls]
+    print(
+        f"[IGN] discovered {len(urls)} official GLB tile(s) for the Eiffel AOI; "
+        f"geometricError {min(errors):.2f}..{max(errors):.2f}",
+        flush=True,
+    )
     return urls
 
 
@@ -1294,6 +1315,141 @@ def build_tree_scatter_mesh(points: np.ndarray) -> MeshData | None:
     )
 
 
+def build_french_roofs(
+    mesh: MeshData,
+    *,
+    min_height_m: float = 6.0,
+    inset: float = 0.60,
+    rise_scale: float = 0.24,
+    rise_min_m: float = 2.5,
+    rise_max_m: float = 11.0,
+    rgba: tuple[int, int, int, int] = REFERENCE_ROOF_RGB,
+) -> MeshData | None:
+    """Derive Paris-style mansard caps from flat IGN roof planes.
+
+    PROVENANCE: this geometry is *derived*, not published by IGN. The BATI 3D
+    tiles covering this AOI top out at flat extrusions -- measured on the Eiffel
+    AOI, only 1.3% of building surface lies on pitched planes -- so the roofs
+    Paris is known for are simply absent from the source. Rather than claim a
+    detail level the data does not have, this builds a truncated pyramid on each
+    detected roof plane: the footprint is inset about its own centroid and
+    lifted, which is the mansard silhouette, and rendered in zinc grey-blue as a
+    separate layer so it is visually distinguishable from IGN geometry.
+
+    Returns None when no roof planes are found.
+    """
+    positions = np.asarray(mesh.positions, dtype=np.float64)
+    indices = np.asarray(mesh.indices, dtype=np.int64)
+    if positions.size == 0 or indices.size == 0:
+        return None
+
+    v0, v1, v2 = positions[indices[:, 0]], positions[indices[:, 1]], positions[indices[:, 2]]
+    normals = np.cross(v1 - v0, v2 - v0)
+    lengths = np.linalg.norm(normals, axis=1)
+    ok = lengths > 1e-9
+    up = np.zeros(len(indices))
+    up[ok] = normals[ok, 1] / lengths[ok]
+    mean_y = (v0[:, 1] + v1[:, 1] + v2[:, 1]) / 3.0
+    is_roof = ok & (up > 0.90) & (mean_y > float(min_height_m))
+    roof_tris = indices[is_roof]
+    if roof_tris.shape[0] == 0:
+        return None
+
+    # Weld coincident vertices so a roof plane is one connected component even
+    # when the source duplicates vertices per triangle.
+    quantised = np.round(positions * 100.0).astype(np.int64)
+    _, weld = np.unique(quantised, axis=0, return_inverse=True)
+    welded = weld[roof_tris]
+
+    parent = np.arange(int(weld.max()) + 1)
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        rx, ry = find(int(x)), find(int(y))
+        if rx != ry:
+            parent[ry] = rx
+
+    for tri in welded:
+        union(tri[0], tri[1])
+        union(tri[1], tri[2])
+
+    roots = np.array([find(int(t)) for t in welded[:, 0]])
+
+    out_pos: list[np.ndarray] = []
+    out_idx: list[tuple[int, int, int]] = []
+
+    def emit(point) -> int:
+        out_pos.append(np.asarray(point, dtype=np.float64))
+        return len(out_pos) - 1
+
+    for root in np.unique(roots):
+        sel = roots == root
+        tris = roof_tris[sel]
+        welded_tris = welded[sel]
+        pts = positions[np.unique(tris)]
+        centroid = pts.mean(axis=0)
+
+        edges = v1[is_roof][sel] - v0[is_roof][sel]
+        other = v2[is_roof][sel] - v0[is_roof][sel]
+        area = float(0.5 * np.linalg.norm(np.cross(edges, other), axis=1).sum())
+        if area < 25.0:  # skip slivers and chimney caps
+            continue
+        rise = float(np.clip(math.sqrt(area) * float(rise_scale), rise_min_m, rise_max_m))
+
+        def lift(point: np.ndarray) -> np.ndarray:
+            moved = centroid + (point - centroid) * float(inset)
+            moved[1] = point[1] + rise
+            return moved
+
+        # Cap: the inset, lifted copy of every roof triangle.
+        local: dict[int, int] = {}
+        for tri, wtri in zip(tris, welded_tris):
+            ids = []
+            for vid, wid in zip(tri, wtri):
+                if int(wid) not in local:
+                    local[int(wid)] = emit(lift(positions[vid]))
+                ids.append(local[int(wid)])
+            out_idx.append((ids[0], ids[1], ids[2]))
+
+        # Skirt: connect each boundary edge of the plane to its lifted copy.
+        counts: dict[tuple[int, int], int] = {}
+        for wtri in welded_tris:
+            for i in range(3):
+                key = (int(wtri[i]), int(wtri[(i + 1) % 3]))
+                counts[tuple(sorted(key))] = counts.get(tuple(sorted(key)), 0) + 1
+        base: dict[int, int] = {}
+        for wtri, tri in zip(welded_tris, tris):
+            for i in range(3):
+                wa, wb = int(wtri[i]), int(wtri[(i + 1) % 3])
+                if counts[tuple(sorted((wa, wb)))] != 1:
+                    continue
+                va, vb = positions[tri[i]], positions[tri[(i + 1) % 3]]
+                for wid, point in ((wa, va), (wb, vb)):
+                    if wid not in base:
+                        base[wid] = emit(point)
+                if wa not in local:
+                    local[wa] = emit(lift(va))
+                if wb not in local:
+                    local[wb] = emit(lift(vb))
+                out_idx.append((base[wa], base[wb], local[wb]))
+                out_idx.append((base[wa], local[wb], local[wa]))
+
+    if not out_idx:
+        return None
+    return MeshData(
+        positions=np.asarray(out_pos, dtype=np.float32),
+        indices=np.asarray(out_idx, dtype=np.uint32),
+        rgba=rgba,
+        shadow_alpha=mesh.shadow_alpha,
+        specular=0.10,
+    )
+
+
 def rotate_render_mesh(mesh: MeshData, degrees: float) -> MeshData:
     """Rotate local east/south render coordinates around the AOI origin."""
     angle = math.radians(float(degrees))
@@ -1323,6 +1479,7 @@ def build_reference_scene(
     meshopt_root: str | Path | None = None,
     tree_spacing_m: float = 27.0,
     no_trees: bool = False,
+    no_roofs: bool = False,
 ):
     """Fetch, decode, and assemble the complete reference scene."""
     validate_eiffel_center(lon, lat)
@@ -1350,8 +1507,18 @@ def build_reference_scene(
     official, ground_up = merge_official_tiles(decoded, lon, lat, radius_m)
     ordinary, official_tower, official_tower_present = separate_official_landmark(official)
     meshes = []
+    roof_count = 0
     if ordinary is not None:
         meshes.append(rotate_render_mesh(ordinary, REFERENCE_ROTATION_DEG))
+        if not no_roofs:
+            roofs = build_french_roofs(ordinary)
+            if roofs is not None:
+                roof_count = int(roofs.indices.shape[0])
+                meshes.append(rotate_render_mesh(roofs, REFERENCE_ROTATION_DEG))
+                print(
+                    f"[Roofs] derived {roof_count:,} mansard triangles from IGN roof planes",
+                    flush=True,
+                )
     # The IGN tile contains the authoritative tower location/height but its
     # streamed representation is a thin slab. Use the attributed high-detail
     # landmark mesh for the visible tower while retaining IGN LoD2.2 for every
@@ -1391,6 +1558,11 @@ def build_reference_scene(
         "official_tower_detected": official_tower_present,
         "eiffel_landmark_source": f"{EIFFEL_STL_URL} ({EIFFEL_STL_LICENSE})",
         "tree_count": tree_count,
+        "derived_roof_triangles": roof_count,
+        "derived_roof_note": (
+            "mansard caps are DERIVED from IGN flat roof planes, not published "
+            "by IGN; see build_french_roofs()"
+        ),
     }
 
 
@@ -1429,6 +1601,13 @@ def render_day_still(
     *,
     supersample: int = 1,
     frame_index: int = 120,
+    eye_scale: tuple[float, float, float] | None = None,
+    fov_deg: float | None = None,
+    margin_ratio: float | None = None,
+    content_zoom: float | None = None,
+    target_height_ratio: float = 0.045,
+    fit_radius_m: float | None = None,
+    fit_apex_m: float = 300.0,
 ):
     """Render a fixed, bright daytime frame with the existing city renderer."""
     from _import_shim import ensure_repo_import
@@ -1437,16 +1616,66 @@ def render_day_still(
     ensure_repo_import()
     import osm_city_daycycle as day
 
-    prepared = day.prepare_scene(
-        scene,
-        width=int(width),
-        height=int(height),
-        supersample=max(1, int(supersample)),
-        eye_scale=REFERENCE_EYE_SCALE,
-        target_height_ratio=0.045,
-        fov_deg=REFERENCE_FOV_DEG,
-        margin_ratio=REFERENCE_MARGIN_RATIO,
+    # Framing is decoupled from data extent. The AOI is a disc, so fitting the
+    # view to all content always leaves white corners outside the circle. When
+    # fit_radius_m is given, the view is fitted to a ground ring of that radius
+    # instead: choose it smaller than --radius and the disc edge falls outside
+    # the frame, which is what makes the render read as a city rather than an
+    # island. The scene keeps every triangle; only the framing changes.
+    old_fit = day.city.compute_fit_transform
+
+    def ring_fit(point_sets, *, width, height, margin_ratio):
+        if fit_radius_m is None:
+            return old_fit(point_sets, width=width, height=height, margin_ratio=margin_ratio)
+        angles = np.linspace(0.0, 2.0 * math.pi, 256, endpoint=False)
+        ring = np.stack(
+            [
+                float(fit_radius_m) * np.cos(angles),
+                np.zeros_like(angles),
+                float(fit_radius_m) * np.sin(angles),
+            ],
+            axis=1,
+        ).astype(np.float32)
+        # The apex is part of the fit, not just the ground: framing on the ring
+        # alone crops the tower, which is the one thing that must be visible.
+        apex = np.asarray([[0.0, float(fit_apex_m), 0.0]], dtype=np.float32)
+        projected = day.project_points_quiet(
+            np.vstack([ring, apex]),
+            eye=eye_vec,
+            target=target_vec,
+            up=up_vec,
+            width=width,
+            height=height,
+            fov_deg=fov_value,
+        )
+        return old_fit([projected[:, :2]], width=width, height=height, margin_ratio=margin_ratio)
+
+    scene_radius = float(scene.radius)
+    eye_tuple = tuple(eye_scale) if eye_scale is not None else REFERENCE_EYE_SCALE
+    fov_value = float(fov_deg) if fov_deg is not None else REFERENCE_FOV_DEG
+    eye_vec = np.asarray(
+        [scene_radius * eye_tuple[0], scene_radius * eye_tuple[1], scene_radius * eye_tuple[2]],
+        dtype=np.float32,
     )
+    target_vec = np.asarray([0.0, scene_radius * float(target_height_ratio), 0.0], dtype=np.float32)
+    up_vec = np.asarray([0.0, 1.0, 0.0], dtype=np.float32)
+
+    day.city.compute_fit_transform = ring_fit
+    try:
+        prepared = day.prepare_scene(
+            scene,
+            width=int(width),
+            height=int(height),
+            supersample=max(1, int(supersample)),
+            eye_scale=tuple(eye_scale) if eye_scale is not None else REFERENCE_EYE_SCALE,
+            target_height_ratio=float(target_height_ratio),
+            fov_deg=float(fov_deg) if fov_deg is not None else REFERENCE_FOV_DEG,
+            margin_ratio=(
+                float(margin_ratio) if margin_ratio is not None else REFERENCE_MARGIN_RATIO
+            ),
+        )
+    finally:
+        day.city.compute_fit_transform = old_fit
     sun = day.sun_state_for_frame(int(frame_index), 240)
     old_background = day.make_background
 
@@ -1475,7 +1704,8 @@ def render_day_still(
     finally:
         day.make_background = old_background
     graded = apply_reference_day_grade(image)
-    return zoom_reference_frame(graded), prepared
+    zoom = REFERENCE_CONTENT_ZOOM if content_zoom is None else float(content_zoom)
+    return zoom_reference_frame(graded, zoom), prepared
 
 
 def write_source_manifest(path: Path, *, lon: float, lat: float, radius_m: float, metadata: dict) -> None:
@@ -1520,11 +1750,36 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--refresh-landmark", action="store_true")
     parser.add_argument("--tree-spacing", type=float, default=27.0)
     parser.add_argument("--no-trees", action="store_true")
+    parser.add_argument("--no-roofs", action="store_true", help="skip derived mansard roof caps")
+    # Framing knobs. A negative --margin fills the frame edge to edge, which is
+    # what makes the scene read as a city rather than an island on a white page.
+    parser.add_argument("--eye-scale", type=float, nargs=3, default=None, metavar=("EX", "EY", "EZ"))
+    parser.add_argument("--fov", type=float, default=None)
+    parser.add_argument("--margin", type=float, default=None)
+    parser.add_argument("--content-zoom", type=float, default=None)
+    parser.add_argument("--target-height", type=float, default=0.045)
+    parser.add_argument(
+        "--fit-radius",
+        type=float,
+        default=None,
+        help="frame the view on a ground ring of this radius (m); keep it well "
+        "below --radius so the AOI disc edge stays off-frame",
+    )
+    parser.add_argument(
+        "--fit-apex",
+        type=float,
+        default=300.0,
+        help="height (m) included in the framing fit so the tower is not cropped",
+    )
+    parser.add_argument("--rotation", type=float, default=None)
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+    if args.rotation is not None:
+        global REFERENCE_ROTATION_DEG
+        REFERENCE_ROTATION_DEG = float(args.rotation)
     data_root = args.data_root.resolve()
     output = args.output.resolve()
     print(
@@ -1544,12 +1799,20 @@ def main() -> int:
         meshopt_root=args.meshopt_root,
         tree_spacing_m=float(args.tree_spacing),
         no_trees=bool(args.no_trees),
+        no_roofs=bool(args.no_roofs),
     )
     image, prepared = render_day_still(
-        scene,
+            scene,
         int(args.size[0]),
         int(args.size[1]),
         supersample=max(1, int(args.supersample)),
+        eye_scale=args.eye_scale,
+        fov_deg=args.fov,
+        margin_ratio=args.margin,
+        content_zoom=args.content_zoom,
+        target_height_ratio=float(args.target_height),
+        fit_radius_m=args.fit_radius,
+        fit_apex_m=float(args.fit_apex),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     from PIL.PngImagePlugin import PngInfo
@@ -1568,6 +1831,8 @@ def main() -> int:
     pnginfo.add_text("eiffel_landmark_source", metadata["eiffel_landmark_source"])
     pnginfo.add_text("eiffel_landmark_license", EIFFEL_STL_LICENSE)
     pnginfo.add_text("eiffel_landmark_sha256", EIFFEL_STL_SHA256)
+    pnginfo.add_text("derived_roof_triangles", str(metadata.get("derived_roof_triangles", 0)))
+    pnginfo.add_text("derived_roof_note", str(metadata.get("derived_roof_note", "")))
     image.save(output, format="PNG", pnginfo=pnginfo)
     write_source_manifest(
         data_root / "paris_eiffel_day_manifest.json",
