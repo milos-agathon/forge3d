@@ -126,10 +126,14 @@ fn cs_irradiance_convolve(@builtin(global_invocation_id) gid: vec3<u32>) {
             normal * sample_dir_local.z
         );
 
-        irradiance += sample_environment(sample_dir) * sample_dir_local.z;
+        irradiance += sample_environment(sample_dir);
     }
 
-    irradiance = PI * irradiance / f32(sample_count);
+    // Cosine-weighted sampling (pdf = cos/pi) already integrates the n dot wi
+    // factor: mean(L_i) estimates (1/pi) * integral(L * cos) — the normalized
+    // irradiance convention shared with fs_irradiance_convolution and the
+    // albedo * irradiance IBL consumers.
+    irradiance = irradiance / f32(sample_count);
     // Clamp to prevent NaNs/inf and ensure no pixel > 1.0 for unit-intensity HDR (spec requirement)
     irradiance = saturate(irradiance);
     textureStore(

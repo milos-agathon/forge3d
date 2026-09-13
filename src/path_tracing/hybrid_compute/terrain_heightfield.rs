@@ -24,8 +24,8 @@ use wgpu::{Device, Queue, TextureFormat};
 ///   row 3 dims:           width_texels, height_texels, cell_w, cell_h
 ///   row 4 mips:           mip_count, flags (bit0 = terrain enabled),
 ///                         env_width, env_height (0 = constant env fallback)
-///   row 5 extra:          spp (camera samples per frame), Welford window
-///                         (frames per convergence window), unused, unused
+///   row 5 extra:          spp (camera samples per frame), statistics
+///                         readback cadence in frames, unused, unused
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct TerrainPtUniforms {
@@ -274,7 +274,7 @@ impl TerrainMinMaxPyramid {
         env_intensity: f32,
         env_dims: (u32, u32),
         spp: u32,
-        welford_window: u32,
+        stats_readback_cadence: u32,
     ) -> TerrainPtUniforms {
         let origin_x = -0.5 * (self.width as f32 - 1.0) * spacing_x;
         let origin_z = -0.5 * (self.height as f32 - 1.0) * spacing_z;
@@ -284,7 +284,7 @@ impl TerrainMinMaxPyramid {
             albedo_pad: [albedo[0], albedo[1], albedo[2], 0.0],
             dims: [self.width, self.height, self.cell_w, self.cell_h],
             mips: [self.mip_count, 1, env_dims.0, env_dims.1],
-            extra: [spp.max(1), welford_window.max(2), 0, 0],
+            extra: [spp.max(1), stats_readback_cadence.max(2), 0, 0],
         }
     }
 }
@@ -419,7 +419,7 @@ impl TerrainPtScene {
         self.pyramid.byte_size + (ew as u64) * (eh as u64) * 16
     }
 
-    pub fn uniforms(&self, spp: u32, welford_window: u32) -> TerrainPtUniforms {
+    pub fn uniforms(&self, spp: u32, stats_readback_cadence: u32) -> TerrainPtUniforms {
         self.pyramid.uniforms(
             self.spacing.0,
             self.spacing.1,
@@ -428,7 +428,7 @@ impl TerrainPtScene {
             self.env_intensity,
             self.env_dims,
             spp,
-            welford_window,
+            stats_readback_cadence,
         )
     }
 }

@@ -3,6 +3,19 @@ use super::*;
 impl WavefrontScheduler {
     pub fn set_restir_enabled(&mut self, enabled: bool) {
         self.restir_enabled = enabled;
+        self.queue.write_buffer(
+            &self.restir_settings,
+            12,
+            bytemuck::bytes_of(&u32::from(enabled)),
+        );
+    }
+
+    pub fn set_restir_temporal_enabled(&mut self, enabled: bool) {
+        self.restir_temporal_enabled = enabled;
+    }
+
+    pub fn restir_spatial_dispatches(&self) -> u32 {
+        self.restir_spatial_dispatches
     }
 
     pub fn set_restir_spatial_enabled(&mut self, enabled: bool) {
@@ -32,6 +45,7 @@ impl WavefrontScheduler {
             create_restir_gbuffer(&self.device, (width as usize) * (height as usize))?;
         self.restir_gbuffer_pos =
             create_restir_gbuffer_pos(&self.device, (width as usize) * (height as usize))?;
+        self.restir_scene_spatial_bind_group = None;
         let mat_zero: Vec<u32> = vec![0u32; (width as usize) * (height as usize)];
         self.restir_gbuffer_mat = tracked_create_buffer_init(
             &self.device,
@@ -130,7 +144,12 @@ impl WavefrontScheduler {
     }
 
     pub fn set_restir_debug_aov_mode(&self, enabled: bool) {
-        let val: [u32; 4] = [if enabled { 1 } else { 0 }, 0, 0, 0];
+        let val: [u32; 4] = [
+            if enabled { 1 } else { 0 },
+            0,
+            0,
+            u32::from(self.restir_enabled),
+        ];
         self.queue
             .write_buffer(&self.restir_settings, 0, bytemuck::cast_slice(&val));
     }

@@ -34,8 +34,8 @@ enable-pbr = []
 enable-tbn = []
 enable-normal-mapping = ["enable-tbn"]
 enable-hdr-offscreen = []
-# GPU instancing experimental flag (no-op stub for now)
-enable-gpu-instancing = []
+# GPU mesh instancing includes the opt-in solid-material PBR pipeline.
+enable-gpu-instancing = ["enable-pbr", "enable-tbn"]
 # P0-03: Renderer config plumbing (no shader/pipeline changes)
 enable-renderer-config = []
 # Workstream O: Resource & Memory Management

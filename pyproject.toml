@@ -85,6 +85,15 @@ datasets = [
     "pooch>=1.6",
 ]
 
+# CDP browser harness for the wind-dashboard startup regressions
+# (tests/_wind_dashboard.py). Deliberately NOT folded into `all`: it is a test
+# driver, not a feature extra, and nothing a user installs needs it. Without
+# it those tests skip, which protects nothing — CI lanes that are meant to
+# cover the dashboard shell must install this group.
+browsertests = [
+    "websocket-client>=1.5",
+]
+
 # All optional dependencies combined
 all = [
     "rasterio>=1.3.0",
@@ -106,7 +115,7 @@ module-name = "forge3d._forge3d"
 # Optimize for size and performance in release builds
 cargo-extra-args = "--profile release-lto"
 # Generate abi3 wheels for Python 3.10+ compatibility
-features = ["extension-module", "weighted-oit", "enable-tbn", "enable-gpu-instancing", "enable-staging-rings", "copc_laz", "cog_streaming", "gis-remote", "geos-topology"]
+features = ["extension-module", "weighted-oit", "enable-pbr", "enable-tbn", "enable-gpu-instancing", "enable-staging-rings", "copc_laz", "cog_streaming", "gis-remote", "geos-topology", "shader-contract-asserts"]
 include = [
     { path = "assets/fonts/*.ttf", format = "sdist" },
     { path = "assets/fonts/*-OFL.txt", format = "sdist" },

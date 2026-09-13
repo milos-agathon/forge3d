@@ -18,7 +18,7 @@ pub fn create_reservoir_buffer(
         &wgpu::util::BufferInitDescriptor {
             label: Some("restir-reservoir-buffer"),
             contents: bytes,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
         },
     )
 }

@@ -6,7 +6,7 @@
 use crate::core::error::RenderResult;
 use crate::core::material::{texture_flags, PbrLighting, PbrMaterial};
 use crate::core::resource_tracker::{
-    tracked_create_buffer, tracked_create_buffer_init, tracked_create_texture, TrackedBuffer,
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer,
     TrackedTexture,
 };
 use crate::lighting::types::{MaterialShading, ShadowTechnique};
@@ -18,7 +18,7 @@ use glam::Mat4;
 use std::collections::HashMap;
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource,
-    BufferDescriptor, BufferUsages, Device, Extent3d, FilterMode, ImageCopyTexture,
+    BufferUsages, Device, Extent3d, FilterMode, ImageCopyTexture,
     ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor, TextureDescriptor,
     TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
@@ -46,6 +46,7 @@ pub use tone_mapping::{
 };
 
 use ibl::{create_fallback_ibl_resources, PbrIblResources};
+
 use textures::{create_default_texture, create_texture_from_data};
 
 /// Enhanced PBR pipeline with integrated Cascaded Shadow Maps support
@@ -86,10 +87,31 @@ pub struct PbrPipelineWithShadows {
     pub ibl_bind_group_layout: BindGroupLayout,
     /// Cached render pipeline built from combined PBR + shadow shader
     pub render_pipeline: Option<wgpu::RenderPipeline>,
+    pub(crate) instanced_pipeline: Option<wgpu::RenderPipeline>,
     /// Surface format associated with the cached pipeline
     pub pipeline_format: Option<TextureFormat>,
     /// Tone mapping configuration
     pub tone_mapping: ToneMappingConfig,
     /// P1-06: Light buffer for multi-light support with triple-buffering
     pub light_buffer: LightBuffer,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pbr_pipeline_initializes_real_ibl_and_shader() {
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            return;
+        };
+        crate::core::degradation::begin_degradation_capture();
+        let mut pipeline =
+            PbrPipelineWithShadows::new(&device, &queue, PbrMaterial::default(), true).unwrap();
+        pipeline.ensure_pipeline(&device, TextureFormat::Rgba16Float);
+        pipeline.ensure_instanced_pipeline(&device, TextureFormat::Rgba16Float);
+        device.poll(wgpu::Maintain::Wait);
+        let degradations = crate::core::degradation::finish_degradation_capture();
+        assert!(degradations.is_empty(), "{degradations:?}");
+    }
 }

@@ -68,6 +68,14 @@ struct PbrLighting {
     ibl_rotation: f32,
     exposure: f32,
     gamma: f32,
+    ground_bounce: vec3<f32>,
+    _padding3: f32,
+    // Ground-GI occluders for the instanced path: the scene spheres
+    // (center.xyz, radius) a down-hemisphere ray can hit before the plane,
+    // and their approximate dark-side exit radiance. Zero-radius entries are
+    // inert (no hit). Unused for the general path.
+    gi_sph: array<vec4<f32>, 3>,
+    gi_sph_exit: array<vec4<f32>, 3>,
 }
 
 // Note: ShadingParamsGPU and BRDF constants are defined in lighting.wgsl
@@ -118,6 +126,7 @@ const FLAG_METALLIC_ROUGHNESS: u32 = 2u;
 const FLAG_NORMAL: u32 = 4u;
 const FLAG_OCCLUSION: u32 = 8u;
 const FLAG_EMISSIVE: u32 = 16u;
+const FLAG_GROUND_RADIANCE: u32 = 32u;
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
@@ -145,6 +154,37 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return output;
 }
 
+struct InstancedVertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) model0: vec4<f32>,
+    @location(3) model1: vec4<f32>,
+    @location(4) model2: vec4<f32>,
+    @location(5) model3: vec4<f32>,
+}
+
+@vertex
+fn vs_instanced(input: InstancedVertexInput) -> VertexOutput {
+    let model = mat4x4<f32>(input.model0, input.model1, input.model2, input.model3);
+    let a = input.model0.xyz;
+    let b = input.model1.xyz;
+    let c = input.model2.xyz;
+    let normal_matrix = mat3x3<f32>(cross(b, c), cross(c, a), cross(a, b)) * (1.0 / dot(a, cross(b, c)));
+    let world = model * vec4<f32>(input.position, 1.0);
+    let normal = normalize(normal_matrix * input.normal);
+    let basis = build_orthonormal_basis(normal);
+    var output: VertexOutput;
+    output.clip_position = uniforms.projection_matrix * uniforms.view_matrix * world;
+    output.world_position = world.xyz;
+    output.world_normal = normal;
+    output.world_tangent = basis[0];
+    output.world_bitangent = basis[1];
+    // Instanced meshes carry no UV attribute; surface-mapped material
+    // textures (occlusion/emissive) sample the mesh-local planar coords.
+    output.uv = input.position.xz;
+    return output;
+}
+
 // Sample normal map and transform to world space
 fn sample_normal_map(uv: vec2<f32>, tbn: mat3x3<f32>) -> vec3<f32> {
     if (material.texture_flags & FLAG_NORMAL) != 0u {
@@ -154,7 +194,7 @@ fn sample_normal_map(uv: vec2<f32>, tbn: mat3x3<f32>) -> vec3<f32> {
         var tangent_normal = normal_sample.xyz * 2.0 - 1.0;
         
         // Apply normal scale
-        tangent_normal.xy = tangent_normal.xy * material.normal_scale;
+        tangent_normal = vec3<f32>(tangent_normal.xy * material.normal_scale, tangent_normal.z);
         
         // Normalize to ensure unit length
         tangent_normal = normalize(tangent_normal);
@@ -174,8 +214,7 @@ fn sample_normal_map(uv: vec2<f32>, tbn: mat3x3<f32>) -> vec3<f32> {
 // IBL sampling functions removed - now using eval_ibl from lighting_ibl.wgsl
 // Old 2D equirectangular sampling replaced with cubemap + LUT (P4 spec requirement)
 
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+fn shade_pbr(input: VertexOutput) -> vec4<f32> {
     // Construct TBN matrix
     let T = normalize(input.world_tangent);
     let B = normalize(input.world_bitangent);
@@ -241,7 +280,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         var shading_params: ShadingParamsGPU;
         shading_params.brdf = shading.brdf;
         shading_params.metallic = metallic;
-        shading_params.roughness = roughness;
+        shading_params.roughness = select(roughness, roughness * roughness,
+            shading.brdf == BRDF_COOK_TORRANCE_GGX || shading.brdf == BRDF_COOK_TORRANCE_BECKMANN);
         shading_params.sheen = shading.sheen;
         shading_params.clearcoat = shading.clearcoat;
         shading_params.subsurface = shading.subsurface;
@@ -257,7 +297,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let view_depth = -view_pos.z; // Positive depth in view space
         
         // Sample shadows (returns 0.0 = full shadow, 1.0 = no shadow)
-        let shadow_visibility = calculate_shadow(input.world_position, world_normal, view_depth);
+        let shadow_visibility = calculate_shadow(input.world_position, view_depth, world_normal);
         
         // Apply shadow to direct lighting only (IBL unaffected)
         direct_lighting = brdf_color * radiance * n_dot_l * shadow_visibility;
@@ -277,6 +317,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // eval_ibl returns diffuse + specular IBL in linear HDR units
         indirect_lighting = eval_ibl(world_normal, view_dir, base_color.rgb, metallic, roughness, f0);
         indirect_lighting = indirect_lighting * lighting.ibl_intensity;
+        if (material.texture_flags & FLAG_GROUND_RADIANCE) != 0u {
+            // The sphere's diffuse GI is supplied by the ground-bounce term;
+            // drop the flat env's constant specular, which the PT reference
+            // does not add to a diffuse-dominated dark side.
+            let irradiance = textureSampleLevel(envIrradiance, envSampler, world_normal, 0.0).rgb;
+            let f_ibl = fresnel_schlick_roughness(saturate(dot(world_normal, view_dir)), f0, saturate(roughness));
+            indirect_lighting = (vec3<f32>(1.0) - f_ibl) * (1.0 - metallic) * base_color.rgb * irradiance * lighting.ibl_intensity;
+        }
     } else {
         // Simple ambient lighting fallback (treated as part of L_diffuse_base)
         let ambient = vec3<f32>(0.03) * base_color.rgb;
@@ -287,17 +335,88 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // future GI composition pass must ensure AO only modulates the diffuse component.
     indirect_lighting = indirect_lighting * occlusion;
     
+    // Ground-plane bounce. With FLAG_GROUND_RADIANCE the emissive texture
+    // carries the ground plane's exit radiance field (bake domain xz in
+    // [-16,16]); a surface samples it at the point its down-facing normal
+    // projects to and takes the delta over the flat ambient baseline
+    // (lighting.ground_bounce = ambient radiance). The (0.5 - 0.5·n.y) weight
+    // is the plane's solid-angle fill of the lower hemisphere.
+    var ground_gi = vec3<f32>(0.0);
+    if (material.texture_flags & FLAG_GROUND_RADIANCE) != 0u {
+        // The surface's lower hemisphere sees the ground plane over a region,
+        // not a point. Integrate the plane's exit-radiance field over the
+        // down-facing directions the fragment actually sees: sample golden-
+        // spiral rays in the hemisphere about n, project the down-hemisphere
+        // ones to the plane, and take the cosine-weighted irradiance. This is
+        // the same ambient transport the path tracer integrates.
+        var e_plane = vec3<f32>(0.0);
+        var n_up = vec3<f32>(0.0, 1.0, 0.0);
+        if (abs(world_normal.y) > 0.95) { n_up = vec3<f32>(1.0, 0.0, 0.0); }
+        let tangent = normalize(cross(n_up, world_normal));
+        let bitan = cross(world_normal, tangent);
+        let N: u32 = 128u;
+        for (var k: u32 = 0u; k < N; k = k + 1u) {
+            let ct = 1.0 - (f32(k) + 0.5) / f32(N);
+            let phi = f32(k) * 2.3999632;
+            let st = sqrt(max(0.0, 1.0 - ct * ct));
+            // local dir in hemisphere about n (z up)
+            let dl = vec3<f32>(st * cos(phi), st * sin(phi), ct);
+            let d = tangent * dl.x + bitan * dl.y + world_normal * dl.z;
+            if (d.y < -1e-4) {
+                let t_plane = input.world_position.y / -d.y;
+                // Nearest occluder along the ray: the plane or one of the
+                // scene spheres (a neighbor's dark side). Whichever is hit
+                // first supplies the exit radiance for that direction.
+                var t_hit = t_plane;
+                var exit_r = vec3<f32>(-1.0);
+                for (var s: u32 = 0u; s < 3u; s = s + 1u) {
+                    let rad = lighting.gi_sph[s].w;
+                    if (rad <= 0.0) { continue; }
+                    let oc = input.world_position - lighting.gi_sph[s].xyz;
+                    let b = dot(oc, d);
+                    let disc = b * b - (dot(oc, oc) - rad * rad);
+                    if (disc > 0.0) {
+                        let th = -b - sqrt(disc);
+                        if (th > 1e-3 && th < t_hit) {
+                            t_hit = th;
+                            exit_r = lighting.gi_sph_exit[s].rgb;
+                        }
+                    }
+                }
+                if (exit_r.x < 0.0) {
+                    let gp = input.world_position.xz + d.xz * t_plane;
+                    let guv = (gp + vec2<f32>(16.0)) / 32.0;
+                    exit_r = textureSampleLevel(emissive_texture, material_sampler, guv, 0.0).rgb;
+                }
+                e_plane += exit_r * ct;
+            }
+        }
+        // delta = a·E_plane/π - a·amb·(0.5-0.5·n.y) : replace the flat ambient's
+        // lower-hemisphere share with the real plane irradiance.
+        ground_gi = base_color.rgb
+            * (e_plane * (2.0 / f32(N))
+               - lighting.ground_bounce * (0.5 - 0.5 * world_normal.y) * 0.85);
+    }
+
     // At this stage the fragment output color can be viewed as:
     //   color = L_diffuse_base + L_spec_base + emissive
     // where direct_lighting contains the BRDF-evaluated direct diffuse+spec, and
     // indirect_lighting contains the diffuse+spec IBL contribution.
-    var color = direct_lighting + indirect_lighting + emissive;
-    
-    // Tone mapping. The Rgba8UnormSrgb target applies final sRGB encoding.
-    color = color * lighting.exposure;
-    color = tonemap_reinhard(color);
-    
+    var color = direct_lighting + indirect_lighting + emissive + ground_gi;
+
     return vec4<f32>(color, base_color.a);
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    // Tone mapping. The Rgba8UnormSrgb target applies final sRGB encoding.
+    let color = shade_pbr(input);
+    return vec4<f32>(tonemap_reinhard(color.rgb * lighting.exposure), color.a);
+}
+
+@fragment
+fn fs_hdr(input: VertexOutput) -> @location(0) vec4<f32> {
+    return shade_pbr(input);
 }
 
 // Simplified PBR fragment shader without IBL (for fallback)
@@ -358,7 +477,8 @@ fn fs_pbr_simple(input: VertexOutput) -> @location(0) vec4<f32> {
         var shading_params: ShadingParamsGPU;
         shading_params.brdf = shading.brdf;
         shading_params.metallic = metallic;
-        shading_params.roughness = roughness;
+        shading_params.roughness = select(roughness, roughness * roughness,
+            shading.brdf == BRDF_COOK_TORRANCE_GGX || shading.brdf == BRDF_COOK_TORRANCE_BECKMANN);
         shading_params.sheen = shading.sheen;
         shading_params.clearcoat = shading.clearcoat;
         shading_params.subsurface = shading.subsurface;
@@ -370,7 +490,7 @@ fn fs_pbr_simple(input: VertexOutput) -> @location(0) vec4<f32> {
         // P3-08: Apply shadow visibility
         let view_pos = uniforms.view_matrix * vec4<f32>(input.world_position, 1.0);
         let view_depth = -view_pos.z;
-        let shadow_visibility = calculate_shadow(input.world_position, world_normal, view_depth);
+        let shadow_visibility = calculate_shadow(input.world_position, view_depth, world_normal);
         
         color = brdf_color * radiance * n_dot_l * shadow_visibility;
     }
