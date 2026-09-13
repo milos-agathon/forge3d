@@ -60,6 +60,19 @@ struct CsmUniforms {
 @group(2) @binding(3) var moment_maps: texture_2d_array<f32>;
 @group(2) @binding(4) var moment_sampler: sampler;
 
+fn sample_moments(uv: vec2<f32>, layer: u32) -> vec4<f32> {
+    let dimensions = vec2<i32>(textureDimensions(moment_maps));
+    let position = uv * vec2<f32>(dimensions) - vec2<f32>(0.5);
+    let base = vec2<i32>(floor(position));
+    let fraction = fract(position);
+    let maximum = dimensions - vec2<i32>(1);
+    let a = textureLoad(moment_maps, clamp(base, vec2<i32>(0), maximum), layer, 0);
+    let b = textureLoad(moment_maps, clamp(base + vec2<i32>(1, 0), vec2<i32>(0), maximum), layer, 0);
+    let c = textureLoad(moment_maps, clamp(base + vec2<i32>(0, 1), vec2<i32>(0), maximum), layer, 0);
+    let d = textureLoad(moment_maps, clamp(base + vec2<i32>(1), vec2<i32>(0), maximum), layer, 0);
+    return mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
+}
+
 // Convert world position to light space for cascade
 fn world_to_light_space(world_pos: vec3<f32>, cascade_idx: u32) -> vec4<f32> {
     let light_space_pos = csm_uniforms.cascades[cascade_idx].light_view_proj * vec4<f32>(world_pos, 1.0);
@@ -84,7 +97,12 @@ fn select_cascade(view_depth: f32) -> u32 {
 fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32) -> f32 {
     // Perspective divide and convert to texture coordinates
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
     
     // Check if position is within shadow map bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || 
@@ -109,7 +127,12 @@ fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32) -> f32 {
 fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world_normal: vec3<f32>) -> f32 {
     // Perspective divide and convert to texture coordinates
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
     
     // Check if position is within shadow map bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || 
@@ -165,7 +188,12 @@ fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world_normal:
 fn sample_shadow_poisson_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world_normal: vec3<f32>) -> f32 {
     // Perspective divide and convert to texture coordinates
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
     
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || 
@@ -323,7 +351,12 @@ fn sample_shadow_pcss(
 ) -> f32 {
     // Perspective divide and convert to texture coordinates
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
     
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
@@ -436,7 +469,12 @@ fn sample_shadow_vsm(
 ) -> f32 {
     // Perspective divide and convert to texture coordinates
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
     
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
@@ -456,7 +494,7 @@ fn sample_shadow_vsm(
     let receiver_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
     
     // Sample moment map (RG channels contain E[x] and E[x^2])
-    let moments = textureSample(moment_maps, moment_sampler, shadow_coords.xy, cascade_idx);
+    let moments = sample_moments(shadow_coords.xy, cascade_idx);
     let mean = moments.r;      // E[x]
     let mean_sq = moments.g;   // E[x^2]
     
@@ -488,7 +526,12 @@ fn sample_shadow_evsm(
 ) -> f32 {
     // Perspective divide and convert to texture coordinates
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
     
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
@@ -508,7 +551,7 @@ fn sample_shadow_evsm(
     let receiver_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
     
     // Sample moment map (RGBA channels)
-    let moments = textureSample(moment_maps, moment_sampler, shadow_coords.xy, cascade_idx);
+    let moments = sample_moments(shadow_coords.xy, cascade_idx);
     
     // EVSM uses exponential warp to reduce light leaking
     let c_pos = csm_uniforms.evsm_positive_exp;
@@ -557,7 +600,12 @@ fn sample_shadow_msm(
 ) -> f32 {
     // Perspective divide and convert to texture coordinates
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
     
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
@@ -577,7 +625,7 @@ fn sample_shadow_msm(
     let receiver_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
     
     // Sample moment map (4 moments in RGBA)
-    let moments = textureSample(moment_maps, moment_sampler, shadow_coords.xy, cascade_idx);
+    let moments = sample_moments(shadow_coords.xy, cascade_idx);
     
     let moment_bias = csm_uniforms.technique_params.z;
     return msm_visibility_from_moments(moments, receiver_depth, moment_bias);

@@ -163,6 +163,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pixel_count = W * H;
     if (idx >= pixel_count) { return; }
 
+    if (gbuffer_pos[idx].w == 0.0) {
+        out_reservoirs[idx] = in_reservoirs[idx];
+        return;
+    }
+
     let x = idx % W;
     let y = idx / W;
 
@@ -203,6 +208,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let ny = u32(clamp(i32(y) + ry, 0, i32(H) - 1));
         let ni = ny * W + nx;
         let rn = in_reservoirs[ni];
+        if (rn.target_pdf <= 0.0 || rn.weight <= 0.0 || gbuffer_pos[ni].w == 0.0) { continue; }
         consider_candidate(rn, idx, false, &Wsum, &chosen_sample, &chosen_pdf, &reused, &seed, sum_imp_area, AREA_COUNT, sum_imp_dir, DIR_COUNT);
         m_total = m_total + rn.m;
     }

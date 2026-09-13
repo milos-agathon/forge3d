@@ -63,6 +63,9 @@ pub mod texture_flags {
     pub const NORMAL: u32 = 1 << 2;
     pub const OCCLUSION: u32 = 1 << 3;
     pub const EMISSIVE: u32 = 1 << 4;
+    /// Emissive slot carries a ground-plane exit-radiance field, sampled at
+    /// the fragment's ground-projected point (not the mesh uv).
+    pub const GROUND_RADIANCE: u32 = 1 << 5;
 }
 
 /// PBR lighting environment
@@ -89,6 +92,18 @@ pub struct PbrLighting {
     pub ibl_rotation: f32,
     pub exposure: f32,
     pub gamma: f32,
+
+    /// Ground-plane bounce radiance for the instanced path — the exit
+    /// radiance a down-facing hemisphere receives from the ground plane.
+    /// Zero for the general path (no ground GI contribution).
+    pub ground_bounce: [f32; 3],
+    pub _padding3: f32,
+    /// Scene spheres (center.xyz, radius) a down-hemisphere ray can occlude
+    /// before the ground plane, for ground-GI self/neighbor shadowing in the
+    /// instanced path. Zero-radius entries are inert.
+    pub gi_sph: [[f32; 4]; 3],
+    /// Approximate dark-side exit radiance of each `gi_sph` occluder.
+    pub gi_sph_exit: [[f32; 4]; 3],
 }
 
 impl Default for PbrLighting {
@@ -104,6 +119,10 @@ impl Default for PbrLighting {
             ibl_rotation: 0.0,
             exposure: 1.0,
             gamma: 2.2,
+            ground_bounce: [0.0; 3],
+            _padding3: 0.0,
+            gi_sph: [[0.0; 4]; 3],
+            gi_sph_exit: [[0.0; 4]; 3],
         }
     }
 }

@@ -225,7 +225,9 @@ impl HybridPathTracer {
             device,
             &wgpu::BufferDescriptor {
                 label: Some("hybrid-pt-dummy-welford"),
-                size: 16,
+                // One full TerrainStatistics element (binding 4's declared
+                // array element type).
+                size: std::mem::size_of::<super::render_terrain::TerrainStatistics>() as u64,
                 usage: wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
             },

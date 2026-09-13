@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "9dad0295bd571495b8d047e4586a6c1c8556ca02ceb67b3ce4a33f393d99c96c",
+  "provenance_sha256": "d62efdd9ae77ae65ba0b8487b0aa850f8e78ea9fd5cd268dabe63a8df0e7b4e0",
+  "scene": {
+    "width": 256,
+    "height": 256,
+    "camera": {
+      "origin": [
+        0.0,
+        35.0,
+        90.0
+      ],
+      "look_at": [
+        0.0,
+        5.0,
+        0.0
+      ],
+      "up": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "fov_y": 45.0,
+      "exposure": 1.0
+    },
+    "span_world_units": 100.0,
+    "relief_world_units": 20.0,
+    "elevation_transform": "subtract minimum, divide by range, multiply by relief",
+    "parameters": {
+      "spacing": [
+        0.8064516129032258,
+        0.8064516129032258
+      ],
+      "exaggeration": 20.0,
+      "albedo": [
+        0.55,
+        0.52,
+        0.48
+      ],
+      "sun_azimuth_deg": 225.0,
+      "sun_elevation_deg": 35.0,
+      "sun_intensity": 2.5,
+      "env_intensity": 0.35,
+      "max_frames": 512,
+      "min_frames": 32,
+      "variance_threshold": 0.001,
+      "seed": 7
+    },
+    "environment": "constant white IBL, cosine-weighted visibility sampling"
+  },
+  "convergence_metric": "frame_mean_estimator_variance",
+  "frames": 224,
+  "variance": 0.0009526369976811111,
+  "gpu_resource_bytes": 25927836,
+  "peak_host_visible_bytes": 5243904,
+  "minmax_pyramid_bytes": 237260,
+  "traversal": {
+    "frame_index": 223,
+    "mip_count": 8,
+    "primary": {
+      "node_visits": 801812,
+      "minmax_loads": 664932,
+      "height_loads": 301892,
+      "rays": 65536
+    },
+    "shadow": {
+      "node_visits": 981697,
+      "minmax_loads": 976628,
+      "height_loads": 375116,
+      "rays": 56947
+    }
+  },
+  "adapter": {
+    "status": "ok",
+    "name": "NVIDIA GeForce RTX 3070",
+    "vendor": 4318,
+    "device": 9348,
+    "device_type": "DiscreteGpu",
+    "backend": "Vulkan",
+    "driver": "NVIDIA",
+    "driver_info": "595.95",
+    "software_fallback": false
+  },
+  "forge3d_version": "1.34.0",
+  "native_extension_sha256": "96d870a626dee638ac6e40199e7823dae42fe5659647012306adda1d763e60a7",
+  "independent_reference": {
+    "first_seed": 7,
+    "second_seed": 19,
+    "first_spp": 1,
+    "second_spp": 8,
+    "luminance_mse": 1.57425358977391e-05,
+    "first_variance": 0.0009526369976811111,
+    "second_variance": 0.0009293296025134623,
+    "second_frames": 32
+  },
+  "raster_parity": {
+    "iou": 0.9999650043744532,
+    "median_depth_err": 0.018832400671687566,
+    "median_normal_err": 0.8147614612370799,
+    "albedo_err": 0.004839767052305203,
+    "cam_dist": 96.56603957913983,
+    "normal_contract": "Geometric raster normals (debug mode 25), outward hemisphere, rotated from Z-up to Y-up; not stylized shading normals.",
+    "camera_contract": "Identical eye/target via mesh:zup and (x,-z,y); raster height centering and normalized near/far depth undone.",
+    "sampling_contract": "The same bilinear DEM surface is evaluated on the rasterizer's fixed 512-vertex mesh grid (upload.rs build_uniforms_with_matrices); nearest texture sampling then selects those vertex heights. Rows are reversed by coordinate rotation."
+  },
+  "artifact_sha256": {
+    "gore_range_reference.png": "5ffce013b2f528ddc10ac6bfe1ad04311d7056db8d4c07cb9fe7d3e508a872a9",
+    "gore_range_aovs.npz": "e6609ff71b8e92fb265f9e2228ea4ca1022d958d6dba2e4c06f7ee168ab23cd8"
+  },
+  "limitations": [
+    "Estimated sampling variance is not a confidence bound or a proof of transport accuracy.",
+    "Direct sun and environment visibility only; not unrestricted multiple-bounce transport.",
+    "Physical render evidence applies to the recorded adapter/backend only."
+  ]
+}

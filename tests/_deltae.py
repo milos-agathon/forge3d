@@ -32,8 +32,10 @@ _LUMA_WEIGHTS = _SRGB_TO_XYZ[1]
 
 def srgb_to_linear(rgb: np.ndarray) -> np.ndarray:
     """Decode sRGB-encoded values (uint8 0..255 or float 0..1) to linear 0..1."""
-    rgb = np.asarray(rgb, dtype=np.float64)
-    if rgb.max(initial=0.0) > 1.0:
+    rgb = np.asarray(rgb)
+    is_uint8 = rgb.dtype == np.uint8
+    rgb = rgb.astype(np.float64)
+    if is_uint8 or rgb.max(initial=0.0) > 1.0:
         rgb = rgb / 255.0
     rgb = np.clip(rgb, 0.0, 1.0)
     return np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)

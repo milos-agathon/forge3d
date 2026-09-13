@@ -21,7 +21,7 @@ struct TerrainPtUniforms {
     albedo_pad: vec4<f32>,     // terrain albedo rgb, unused
     dims: vec4<u32>,           // width_texels, height_texels, cell_w, cell_h
     mips: vec4<u32>,           // mip_count, flags(bit0 enabled), env_w, env_h
-    extra: vec4<u32>,          // spp, welford_window, unused, unused
+    extra: vec4<u32>,          // spp, stats readback cadence, unused, unused
 }
 
 struct EarthCurvatureUniforms {
@@ -56,7 +56,22 @@ struct RestirReservoir {
 @group(2) @binding(1) var terrain_height_tex: texture_2d<f32>;
 @group(2) @binding(2) var terrain_minmax_tex: texture_2d<f32>;
 @group(2) @binding(3) var<uniform> terrain: TerrainPtUniforms;
-@group(2) @binding(4) var<storage, read_write> terrain_welford: array<vec2<f32>>;
+// Per-pixel statistics record (48 bytes, matches `TerrainStatistics` in
+// render_terrain.rs): x/y are the all-frames Welford mean and M2 of the
+// per-frame mean luminance — the host converts M2/(N*(N-1)) into the
+// estimated variance of the mean. `overflow` flags a u32 counter wrap;
+// primary/shadow carry the LAST beauty frame's measured traversal counts in
+// lanes (node_visits, minmax_loads, height_loads, rays), split by whether
+// the trace ran under a shadow-ray query (`intersect_shadow_ray`).
+struct TerrainStatistics {
+    x: f32,
+    y: f32,
+    overflow: u32,
+    trace_error: u32,
+    primary: vec4<u32>,
+    shadow: vec4<u32>,
+}
+@group(2) @binding(4) var<storage, read_write> terrain_welford: array<TerrainStatistics>;
 // Fresh per-frame light candidates (input to the temporal reuse pass).
 @group(2) @binding(5) var<storage, read_write> terrain_reservoirs_curr: array<RestirReservoir>;
 @group(2) @binding(6) var terrain_env_tex: texture_2d<f32>;
@@ -76,8 +91,47 @@ const TERRAIN_PI: f32 = 3.14159265358979323846;
 // each temporal merge so w_sum/M cannot blow up across hundreds of frames.
 const TERRAIN_RESTIR_M_CAP: u32 = 512u;
 
+// --- Measured traversal counters -----------------------------------------
+// Private (per-invocation, zero-initialized per WGSL) counters accumulated
+// by terrain_trace / terrain_cell_heights. `main_terrain` snapshots them
+// into terrain_welford[pix] BEFORE the AOV center ray, so the published
+// counts cover only this invocation's beauty-frame rays — the unjittered
+// G-buffer/center rays are traced by other dispatches or after the snapshot
+// and are never published. Other entry points that call into the terrain
+// descent (e.g. `main`, `main_terrain_gbuffer`) also tick these counters
+// but never publish them.
+var<private> terrain_primary_counts: vec4<u32>;
+var<private> terrain_shadow_counts: vec4<u32>;
+var<private> terrain_is_shadow: bool;
+var<private> terrain_count_overflow: u32;
+
+fn terrain_count(delta: vec4<u32>) {
+    var before = terrain_primary_counts;
+    if (terrain_is_shadow) { before = terrain_shadow_counts; }
+    let after = before + delta;
+    if (any(after < before)) { terrain_count_overflow = 1u; }
+    if (terrain_is_shadow) { terrain_shadow_counts = after; }
+    else { terrain_primary_counts = after; }
+}
+
 fn terrain_reservoir_weight(w_sum: f32, m: u32, target_pdf: f32) -> f32 {
     return w_sum / (f32(m) * target_pdf);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main_terrain_publish(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= uniforms.width || gid.y >= uniforms.height) { return; }
+    let pix = gid.y * uniforms.width + gid.x;
+    var r = terrain_reservoirs_prev[pix];
+    if (r.m > TERRAIN_RESTIR_M_CAP) {
+        let scale = f32(TERRAIN_RESTIR_M_CAP) / f32(r.m);
+        r.w_sum = r.w_sum * scale;
+        r.m = TERRAIN_RESTIR_M_CAP;
+        if (r.target_pdf > 0.0) {
+            r.weight = terrain_reservoir_weight(r.w_sum, r.m, r.target_pdf);
+        }
+        terrain_reservoirs_prev[pix] = r;
+    }
 }
 
 fn terrain_enabled() -> bool {
@@ -148,6 +202,7 @@ fn terrain_pack_node(level: u32, x: u32, y: u32) -> u32 {
 // Exaggerated corner heights of DEM cell (cx, cz): h00, h10, h01, h11.
 fn terrain_cell_heights(cx: u32, cz: u32) -> vec4<f32> {
     let ex = terrain.h_params.z;
+    terrain_count(vec4<u32>(0u, 0u, 4u, 0u)); // the four height-texel loads below
     let h00 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx), i32(cz)), 0).r;
     let h10 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx + 1u), i32(cz)), 0).r;
     let h01 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx), i32(cz + 1u)), 0).r;
@@ -257,6 +312,7 @@ fn terrain_trace(ray: Ray, any_hit: bool, apply_curvature: bool) -> HybridHitRes
     res.t = ray.tmax;
     res.hit_type = 3u; // terrain
     if (!terrain_enabled()) { return res; }
+    terrain_count(vec4<u32>(0u, 0u, 0u, 1u));
 
     let cell_w = terrain.dims.z;
     let cell_h = terrain.dims.w;
@@ -274,6 +330,7 @@ fn terrain_trace(ray: Ray, any_hit: bool, apply_curvature: bool) -> HybridHitRes
         if (sp == 0u) { break; }
         sp = sp - 1u;
         let node = stack[sp];
+        terrain_count(vec4<u32>(1u, 0u, 0u, 0u)); // one visit per popped node
         let level = node >> 26u;
         let ny = (node >> 13u) & 0x1FFFu;
         let nx = node & 0x1FFFu;
@@ -298,6 +355,7 @@ fn terrain_trace(ray: Ray, any_hit: bool, apply_curvature: bool) -> HybridHitRes
 
         // Height band test: skip when the ray segment stays entirely above
         // max or below min over this node's footprint.
+        terrain_count(vec4<u32>(0u, 1u, 0u, 0u));
         let mm = textureLoad(terrain_minmax_tex, vec2<i32>(i32(nx), i32(ny)), i32(level)).rg
             * terrain.h_params.z;
         let ray_height = terrain_curved_height_range(ray, t_lo, t_hi, apply_curvature);
@@ -430,6 +488,15 @@ fn terrain_cosine_dir(n: vec3<f32>, u1: f32, u2: f32) -> vec3<f32> {
     return normalize(local.x * t + local.y * bt + local.z * n);
 }
 
+// Strong avalanche mixer for the per-(seed, pixel, frame) stream seed: the
+// raw xor mix let weak xorshift top bits correlate across seeds/pixels.
+fn terrain_seed_hash(value: u32) -> u32 {
+    var x = value;
+    x = (x ^ (x >> 16u)) * 0x7feb352du;
+    x = (x ^ (x >> 15u)) * 0x846ca68bu;
+    return x ^ (x >> 16u);
+}
+
 // ---------------------------------------------------------------------------
 // Accumulating terrain-reference kernel entry
 // ---------------------------------------------------------------------------
@@ -437,11 +504,14 @@ fn terrain_cosine_dir(n: vec3<f32>, u1: f32, u2: f32) -> vec3<f32> {
 // ReSTIR candidate generation into terrain_reservoirs_curr (merged afterwards
 // by the pt_restir_temporal + pt_restir_spatial passes the driver dispatches),
 // sun shading gated through the merged reservoir from the previous frame's
-// reuse chain, a windowed Welford update of the running-mean luminance for
-// the "variance across the last N frames" convergence gate, and the
-// tonemapped running mean written to out_tex. AOVs are written from an
-// UNJITTERED center ray when aov_flags is set (the driver sets it on frame 0
-// only) so geometric AOVs match rasterizer pixel-center sampling.
+// reuse chain, an all-frames Welford update over the per-frame mean
+// luminance (the host converts M2/(N*(N-1)) into the estimated variance of
+// the mean — the convergence metric — and reads this buffer every
+// `terrain.extra.y` frames as its cadence), a snapshot of this frame's
+// measured traversal counters, and the tonemapped running mean written to
+// out_tex. AOVs are written from an UNJITTERED center ray when aov_flags is
+// set (the driver sets it on frame 0 only) so geometric AOVs match
+// rasterizer pixel-center sampling.
 @compute @workgroup_size(8, 8, 1)
 fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
     let W = uniforms.width;
@@ -464,8 +534,11 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         && prev_r.weight > 0.0 && prev_r.target_pdf > 0.0
         && prev_r.sample.light_type == 1u;
 
-    var st: u32 = uniforms.seed_hi ^ (gid.x * 1664525u) ^ (gid.y * 1013904223u)
-        ^ (uniforms.frame_index * 92837111u) ^ uniforms.seed_lo;
+    // Independently seeded pseudorandom camera/env estimates: avalanche-hash
+    // the (seed, pixel, frame) tuple so distinct seeds/pixels decorrelate.
+    var st = terrain_seed_hash(uniforms.seed_hi ^ uniforms.seed_lo
+        ^ terrain_seed_hash(pix) ^ terrain_seed_hash(uniforms.frame_index + 1u));
+    st = select(st, 0x6d2b79f5u, st == 0u);
     let half_h = tan(0.5 * uniforms.cam_fov_y);
     let half_w = uniforms.cam_aspect * half_h;
     let spp = max(terrain.extra.x, 1u);
@@ -499,7 +572,7 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         // a primitive-area term. ---
         let wi = normalize(lighting.light_dir);
         let ndotl = max(dot(n, wi), 0.0);
-        let target_pdf = terrain_luminance(albedo * lighting.light_color * ndotl);
+        let target_pdf = select(0.0, 1.0, terrain_luminance(albedo * lighting.light_color * ndotl) > 0.0);
         if (target_pdf > 0.0) {
             cand.sample.position = hit.point;
             cand.sample.light_index = 0u;
@@ -559,19 +632,29 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
     let acc = vec4<f32>(prev.rgb + frame_radiance, prev.a + 1.0);
     accum_hdr[pix] = acc;
 
-    // --- Windowed Welford over the RUNNING-MEAN luminance: variance of the
-    // accumulated mean across the last `welford_window` frames, the
-    // "converged-when" metric from the Prometheus DoD. Resets at each window
-    // boundary so the gate always measures the most recent N frames. ---
-    let window = max(terrain.extra.y, 2u);
+    // --- All-frames Welford over the PER-FRAME mean luminance: wf.x/wf.y
+    // are the running mean and M2 of `frame_radiance` luminance across every
+    // accumulated frame, so the host's M2/(N*(N-1)) is the estimated
+    // variance of the mean estimator (scalar convergence metric, not a
+    // confidence bound on transport accuracy). With the current single
+    // directional ReSTIR chain (target pdf 1, W = 1, no stochastic
+    // light-identity reuse) each frame is an independently seeded
+    // pseudorandom camera/env estimate; this does NOT promise provable
+    // independence under any future multi-light reuse. The counter snapshot
+    // is taken BEFORE the AOV center-ray block below, so published counts
+    // cover only this invocation's beauty-frame rays. ---
     var wf = terrain_welford[pix];
-    if (uniforms.frame_index % window == 0u) { wf = vec2<f32>(0.0, 0.0); }
-    let mean_lum = terrain_luminance(acc.rgb / acc.a);
-    let k = f32(uniforms.frame_index % window) + 1.0;
-    let delta = mean_lum - wf.x;
+    let sample_lum = terrain_luminance(frame_radiance);
+    let k = f32(uniforms.frame_index) + 1.0;
+    let delta = sample_lum - wf.x;
     let mean = wf.x + delta / k;
-    let m2 = wf.y + delta * (mean_lum - mean);
-    terrain_welford[pix] = vec2<f32>(mean, m2);
+    wf.y = wf.y + delta * (sample_lum - mean);
+    wf.x = mean;
+    wf.overflow = terrain_count_overflow;
+    wf.trace_error = wf.trace_error | hybrid_sdf_error;
+    wf.primary = terrain_primary_counts;
+    wf.shadow = terrain_shadow_counts;
+    terrain_welford[pix] = wf;
 
     // --- Resolve running mean to the output image ---
     let mean_rgb = acc.rgb / acc.a;
@@ -607,6 +690,9 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
             textureStore(aov_visibility, coord, vec4<f32>(select(0.0, 1.0, is_hit), 0.0, 0.0, 1.0));
         }
     }
+    // The AOV center ray also marches the compiled SDF; accumulate so a
+    // failure on any earlier frame survives until the host polls.
+    terrain_welford[pix].trace_error = terrain_welford[pix].trace_error | hybrid_sdf_error;
 }
 
 // ---------------------------------------------------------------------------
@@ -640,5 +726,11 @@ fn main_terrain_gbuffer(@builtin(global_invocation_id) gid: vec3<u32>) {
         // record finite for the spatial pass's normalize().
         terrain_gbuffer_nr[pix] = vec4<f32>(0.0, 0.0, 1.0, 1.0);
         terrain_gbuffer_pos[pix] = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
+    // This pipeline's bind group cannot reach terrain_welford, so an SDF
+    // march failure on the center ray is signalled through gbuffer_pos.w and
+    // rejected by the host readback.
+    if (hybrid_sdf_error != 0u) {
+        terrain_gbuffer_pos[pix].w = -1.0;
     }
 }

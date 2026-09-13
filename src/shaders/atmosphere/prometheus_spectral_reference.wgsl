@@ -406,7 +406,7 @@ fn main_aether_spectral_reference(@builtin(global_invocation_id) gid: vec3<u32>)
     let enabled = uniforms.aov_flags != 0u;
     if (!enabled) {
         accum_hdr[pixel] = vec4<f32>(0.0);
-        terrain_welford[pixel] = vec2<f32>(0.0);
+        terrain_welford[pixel] = TerrainStatistics(0.0, 0.0, 0u, 0u, vec4<u32>(0u), vec4<u32>(0u));
         return;
     }
 
@@ -466,5 +466,5 @@ fn main_aether_spectral_reference(@builtin(global_invocation_id) gid: vec3<u32>)
     }
 
     accum_hdr[pixel] = vec4<f32>(sum_xyz, f32(terrain_primary_hits));
-    terrain_welford[pixel] = vec2<f32>(mean_y, m2_y);
+    terrain_welford[pixel] = TerrainStatistics(mean_y, m2_y, 0u, 0u, vec4<u32>(0u), vec4<u32>(0u));
 }

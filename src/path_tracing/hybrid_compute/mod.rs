@@ -21,6 +21,7 @@ mod aether_reference;
 mod layouts;
 mod render;
 mod render_terrain;
+mod sdf_scene;
 mod setup;
 pub mod terrain_heightfield;
 
@@ -137,6 +138,7 @@ pub struct HybridPathTracer {
     pipeline_terrain: wgpu::ComputePipeline,
     /// Acceptance-only stochastic spectral atmosphere reference.
     pipeline_aether_reference: wgpu::ComputePipeline,
+    pipeline_terrain_publish: wgpu::ComputePipeline,
     /// One-shot ReSTIR G-buffer entry (`main_terrain_gbuffer`).
     pipeline_terrain_gbuffer: wgpu::ComputePipeline,
     /// Canonical ReSTIR reuse passes (pt_restir_temporal/spatial.wgsl)

@@ -924,6 +924,7 @@ def hybrid_render_terrain_reference(
     pressure_mbar: float | None = None,
     temperature_c: float | None = None,
     atmosphere: "Mapping[str, Any] | Any | None" = None,
+    sdf_scene: "object | None" = None,
 ) -> dict:
     """Converged GPU path-traced reference of a real DEM under sun + IBL.
 
@@ -936,17 +937,35 @@ def hybrid_render_terrain_reference(
     ``mesh_vertices`` (N,3 float32) + ``mesh_indices`` (M,3 uint32) mix
     triangle geometry into the scene through the shared hybrid traversal, so
     terrain renders alongside existing primitives. ``spp`` sets the camera
-    samples per accumulation frame; the min-max pyramid keeps per-sample
-    texture reads O(log mips), so cost scales ~linearly from 1 to 8 spp.
+    samples per accumulation frame. Traversal cost depends on visited
+    hierarchy nodes; returned counters measure the last beauty frame, while
+    throughput is checked separately from 1 to 8 spp.
 
-    Accumulates frames until the per-pixel luminance variance of the running
-    mean across the last convergence window drops below
-    ``variance_threshold`` (or raises after ``max_frames`` — no silent fake
-    convergence). Returns a dict with ``rgba`` (H,W,4) uint8,
-    ``albedo``/``normal`` (H,W,3) float32, ``depth`` (H,W) float32 world-unit
-    ray distance (NaN on miss), plus ``frames``, ``variance``, ``converged``
-    and memory diagnostics (``peak_host_visible_bytes``,
-    ``minmax_pyramid_bytes``, ``gpu_resource_bytes``).
+    ``sdf_scene`` mixes a native signed-distance-field scene into the same
+    traversal (primary and shadow rays share one compiled ``intersect_sdf``).
+    It must be a native ``forge3d._forge3d.SdfScene`` built by
+    ``SdfSceneBuilder`` — NOT the pure-Python SDF wrapper — and is compiled
+    into the shader's constants before the pipelines are created::
+
+        from forge3d import _forge3d as native
+        builder = native.SdfSceneBuilder()
+        builder.add_sphere((0.0, 8.0, 0.0), 3.0, 1)
+        out = hybrid_render_terrain_reference(
+            dem, 64, 64, cam, sdf_scene=builder.build())
+
+    Accumulates frames until the maximum per-pixel estimated variance of the
+    mean frame luminance — Welford M2/(N*(N-1)) over all accumulated frames,
+    checked every 32 frames — drops below ``variance_threshold`` (or raises
+    after ``max_frames`` — no silent fake convergence). Returns a dict with
+    ``rgba`` (H,W,4) uint8, ``albedo``/``normal`` (H,W,3) float32, ``depth``
+    (H,W) float32 world-unit ray distance (NaN on miss), ``radiance`` (H,W,3)
+    float32 linear mean radiance, ``luminance_variance`` (H,W) float32,
+    ``convergence_metric`` ("frame_mean_estimator_variance"), ``traversal``
+    (measured last-frame descent counters: frame_index, mip_count, and
+    primary/shadow lanes node_visits/minmax_loads/height_loads/rays), plus
+    ``frames``, ``variance``, ``converged`` and memory diagnostics
+    (``peak_host_visible_bytes``, ``minmax_pyramid_bytes``,
+    ``gpu_resource_bytes``).
 
     When ``atmosphere`` is provided, AETHER runs as a GPU post over the
     converged linear accumulation and authoritative depth AOV. It accepts an
@@ -1088,6 +1107,7 @@ def hybrid_render_terrain_reference(
         pressure_mbar=float(pressure_mbar),
         temperature_c=float(temperature_c),
         atmosphere=atmosphere,
+        sdf_scene=sdf_scene,
     )
     result["sun_source"] = sun_source
     result["solar_azimuth_deg"] = float(sun_azimuth_deg)

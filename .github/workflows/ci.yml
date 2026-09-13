@@ -295,7 +295,11 @@ jobs:
               - 'tests/test_recipe_goldens.py'
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
+              - 'tests/test_prometheus_dem_reference.py'
+              - 'tests/data/prometheus/**'
+              - 'tools/prometheus_reference.py'
               - 'tests/_deltae.py'
+              - 'tests/_ssim.py'
               - 'tests/golden/terrain/**'
               - 'tests/golden/recipes/**'
               - 'tests/golden/adjudication/**'
@@ -1225,6 +1229,29 @@ jobs:
           python -m pytest tests/test_astro_night_golden.py -v --tb=short --junitxml="$junit"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
+      - name: Run AEQUITAS adjudication gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_ADJUDICATION_ARTIFACT_DIR: tests/artifacts/adjudication
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:FORGE3D_ADJUDICATION_ARTIFACT_DIR | Out-Null
+          python -m pytest tests/test_adjudication_gate.py -v --tb=short --junitxml="$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/junit.xml"
+          exit $LASTEXITCODE
+
+      - name: Run PROMETHEUS terrain reference gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          New-Item -ItemType Directory -Force -Path tests/artifacts/prometheus | Out-Null
+          python -m pytest tests/test_hybrid_terrain_pt.py tests/test_prometheus_dem_reference.py -v --tb=short --junitxml="tests/artifacts/prometheus/junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "tests/artifacts/prometheus/junit.xml"
           exit $LASTEXITCODE
 
       - name: Record visual golden lane RAN

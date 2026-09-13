@@ -7,7 +7,7 @@ use std::collections::HashMap;
 const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xf664_b696_d596_de84;
-pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x0cdc_ecf8_b639_5530;
+pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x868d_6d3b_8287_3ae3;
 pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xf968_57bd_7131_08df;
 
 #[derive(Clone, Copy)]
@@ -1542,13 +1542,15 @@ impl Evaluator<'_> {
                             .splat(naga::VectorSize::Tri);
                     let normal = Value::Float(crate::verify::domain::Interval::new(-1.0, 1.0))
                         .splat(naga::VectorSize::Tri);
-                    let ray_tmax = match arguments.first()? {
-                        Value::Composite(fields) => fields.get(3)?.clone(),
+                    let hit_distance = match arguments.first()? {
+                        Value::Composite(fields) => fields.get(3)?.join(&Value::Float(
+                            crate::verify::domain::Interval::constant(0.0),
+                        )),
                         _ => return None,
                     };
                     return Some((
                         Value::Composite(vec![
-                            ray_tmax,
+                            hit_distance,
                             finite_position,
                             normal,
                             Value::Int { lo: 0, hi: 0 },

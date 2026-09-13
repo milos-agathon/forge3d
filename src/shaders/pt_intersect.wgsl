@@ -325,6 +325,8 @@ struct QueueHeader {
 @group(1) @binding(1) var<storage, read> mesh_vertices: array<Vertex>;
 @group(1) @binding(2) var<storage, read> mesh_indices: array<u32>;
 @group(1) @binding(3) var<storage, read> mesh_bvh_nodes: array<BvhNode>;
+@group(1) @binding(10) var<storage, read_write> restir_gbuffer: array<vec4<f32>>;
+@group(1) @binding(11) var<storage, read_write> restir_gbuffer_pos: array<vec4<f32>>;
 @group(1) @binding(14) var<storage, read> instances: array<Instance>;
 @group(1) @binding(15) var<storage, read> blas_descs: array<BlasDesc>;
 @group(1) @binding(20) var<storage, read> hair_segments: array<HairSegment>;
@@ -543,12 +545,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 hit.flags = 0u;
             }
             
+            if (ray.depth == 0u) {
+                let mat = min(material_idx, arrayLength(&scene_spheres) - 1u);
+                restir_gbuffer[ray.pixel] = vec4<f32>(normalize(hit.n), scene_spheres[mat].roughness);
+                restir_gbuffer_pos[ray.pixel] = vec4<f32>(hit.p, 1.0);
+            }
+
             // Push to hit queue
             let hit_queue_idx = atomicAdd(&hit_queue_header.in_count, 1u);
             if hit_queue_idx < hit_queue_header.capacity {
                 hit_queue[hit_queue_idx] = hit;
             }
         } else {
+            if (ray.depth == 0u) {
+                restir_gbuffer[ray.pixel] = vec4<f32>(0.0);
+                restir_gbuffer_pos[ray.pixel] = vec4<f32>(0.0);
+            }
             // Miss: push to miss queue for background evaluation
             let miss_queue_idx = atomicAdd(&miss_queue_header.in_count, 1u);
             if miss_queue_idx < miss_queue_header.capacity {
