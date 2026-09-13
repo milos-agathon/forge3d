@@ -104,7 +104,9 @@ def test_reference_consistency_rejects_lowered_scores(key):
         "lit_pass_fraction": 1.0, "shadow_band_ssim": 1.0,
     }
     measured = dict(reference)
-    reference[key] = np.nextafter(1.0, 0.0).item()
+    # A committed value 1e-6 below the PNG-recomputed score is a real
+    # mismatch; platform recompute noise is ~1e-14 and the tolerance is 1e-9.
+    reference[key] = 1.0 - 1e-6
     with pytest.raises(AssertionError, match="reference does not describe PNG"):
         _assert_reference_consistency(measured, reference)
 
@@ -233,7 +235,13 @@ def _assert_score_reference(scores, reference):
 def _assert_reference_consistency(scores, reference):
     _assert_score_reference(scores, reference)
     for key in ("lit_pass_fraction", "shadow_band_ssim"):
-        assert scores[key] == reference[key], f"reference does not describe PNG: {key}"
+        # Recomputed float64 metrics differ across platforms in the last bits;
+        # a 1e-9 absolute tolerance still catches a stale scores.json, whose
+        # drift is orders of magnitude larger.
+        assert abs(scores[key] - reference[key]) <= 1e-9, (
+            f"reference does not describe PNG: {key} "
+            f"({scores[key]} vs committed {reference[key]})"
+        )
 
 
 def _load_score_reference():
@@ -372,8 +380,12 @@ def test_adjudication_gate():
                     "height": GATE_HEIGHT,
                     "spp": GATE_SPP,
                     "ssim_region": "shadow_boundary_pixels",
-                    "lit_pass_fraction": lit_pass_fraction,
-                    "shadow_band_ssim": band_ssim,
+                    # Truncate to 9 decimals: the committed reference must stay
+                    # at or below the true score so a recompute on another
+                    # platform (float64 reduction noise ~1e-14) still satisfies
+                    # the drift check's `>=`.
+                    "lit_pass_fraction": int(lit_pass_fraction * 1e9) / 1e9,
+                    "shadow_band_ssim": int(band_ssim * 1e9) / 1e9,
                 },
                 indent=2,
             )

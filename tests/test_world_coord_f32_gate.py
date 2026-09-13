@@ -31,23 +31,21 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1327
-# Re-frozen when ANAMNESIS merged with main. The site COUNT is unchanged, and a
-# site-by-site diff against main shows exactly five added and five removed --
-# the same five `as_f32` statements in src/offscreen/adjudication_raster.rs,
-# moved from `render_raster_reference` to `render_raster_reference_incremental`
-# by the incremental-render rename. A site record is
-# (file, function, operation, nth, statement) with no line numbers, so the
-# digest moved only because the enclosing function was renamed. No new
-# narrowing conversion was introduced by this merge.
-EXPECTED_CONVERSION_SHA256 = "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817"
+# Re-frozen at the paris-eiffel-day-pt tip (9a0a7d0f) after merging it into
+# this branch: the merged prometheus line carries the +46 sites over the
+# AEQUITAS-era 1345 freeze, and this branch adds zero conversion sites on top
+# -- inventory and digest are identical at the merge base tip and HEAD. The
+# earlier AEQUITAS raster-twin transition (+22/-7 in
+# src/offscreen/adjudication_raster.rs) remains recorded below.
+EXPECTED_CONVERSION_COUNT = 1391
+EXPECTED_CONVERSION_SHA256 = "ae37f4b7a2fe587dab04f13a6a45dc53c058874c76d87e5a1f3bcc0cea8e29cc"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1327,
+    "current_count": EXPECTED_CONVERSION_COUNT,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -64,25 +62,52 @@ REVIEWED_INVENTORY_TRANSITION = {
     ),
 }
 
-# ANAMNESIS retained the exact five adjudication conversions and moved them
-# into the incremental implementation beneath the compatibility wrapper. This
-# transition records that function-only ownership change without relaxing the
-# occurrence count or any normalized conversion statement.
-REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
-    # Re-based on main at the merge: the pre-transition tree is now main rather
-    # than this branch's original base, so the count and digest are main's.
+# AEQUITAS replaced the adjudication raster twin's CPU supersampler
+# (render_raster_reference_incremental, base_uniforms) with the production
+# instanced-PBR path plus an analytic ground-GI bake. Every added site is an
+# integer-index-to-f32 normalization cast in adjudication_raster.rs; the full
+# removed/added site lists are frozen here so the digest bump is auditable.
+REVIEWED_AEQUITAS_RASTER_TRANSITION = {
     "base_count": 1327,
-    "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
-    "result_digest": EXPECTED_CONVERSION_SHA256,
+    "base_digest": "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817",
+    "result_count": 1345,
+    "result_digest": "5ba005a550bdbb994b5a8dbfb36fd691d08bd05cecce6bd58919ed59ac5596c2",
     "path": "src/offscreen/adjudication_raster.rs",
-    "removed_function": "render_raster_reference",
-    "added_function": "render_raster_reference_incremental",
-    "statements": (
-        "let aspect = width as f32 / height as f32",
-        "let aspect = width as f32 / height as f32",
-        "u.misc = [desc.plane_half_extent, i as f32, 1.0, 0.0]",
-        "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5",
-        "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5",
+    "removed": (
+        ("base_uniforms", 1, "cam_origin_fovy: [origin.x, origin.y, origin.z, desc.fov_y_rad()], cam_right_aspect: [right.x, right.y, right.z, aspect], cam_up_w: [up.x, up.y, up.z, rw as f32], cam_forward_h: [forward.x, forward.y, forward.z, rh as f32], sun_dir_intensity: [sun.x, sun.y, sun.z, desc.sun_intensity], sun_color_pad: [desc.sun_color[0], desc.sun_color[1], desc.sun_color[2], 0.0], environment: { let e = desc.environment_raw()"),
+        ("base_uniforms", 2, "cam_origin_fovy: [origin.x, origin.y, origin.z, desc.fov_y_rad()], cam_right_aspect: [right.x, right.y, right.z, aspect], cam_up_w: [up.x, up.y, up.z, rw as f32], cam_forward_h: [forward.x, forward.y, forward.z, rh as f32], sun_dir_intensity: [sun.x, sun.y, sun.z, desc.sun_intensity], sun_color_pad: [desc.sun_color[0], desc.sun_color[1], desc.sun_color[2], 0.0], environment: { let e = desc.environment_raw()"),
+        ("render_raster_reference_incremental", 1, "let aspect = width as f32 / height as f32"),
+        ("render_raster_reference_incremental", 2, "let aspect = width as f32 / height as f32"),
+        ("render_raster_reference_incremental", 3, "u.misc = [desc.plane_half_extent, i as f32, 1.0, 0.0]"),
+        ("render_raster_reference_incremental", 4, "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5"),
+        ("render_raster_reference_incremental", 5, "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5"),
+    ),
+    "added": (
+        ("bake_plane_indirect", 1, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 2, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 3, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 4, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 5, "let ct = 1.0 - (k as f32 + 0.5) / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 6, "let ct = 1.0 - (k as f32 + 0.5) / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 7, "let phi = k as f32 * 2.399_963_2"),
+        ("bake_plane_indirect", 8, "let occ = 2.0 * w_sky / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 9, "let v_sun = ray_hit_sphere(desc, p + Vec3::Y * 1e-3, light, None).is_none() as i32 as f32"),
+        ("bake_plane_indirect", 10, "let u = ((p.x - PLANE_UV_MIN) / PLANE_UV_EXTENT * BAKE_RES as f32) .clamp(0.0, BAKE_RES as f32 - 1.0) as usize"),
+        ("bake_plane_indirect", 11, "let u = ((p.x - PLANE_UV_MIN) / PLANE_UV_EXTENT * BAKE_RES as f32) .clamp(0.0, BAKE_RES as f32 - 1.0) as usize"),
+        ("bake_plane_indirect", 12, "let v = ((p.z - PLANE_UV_MIN) / PLANE_UV_EXTENT * BAKE_RES as f32) .clamp(0.0, BAKE_RES as f32 - 1.0) as usize"),
+        ("bake_plane_indirect", 13, "let v = ((p.z - PLANE_UV_MIN) / PLANE_UV_EXTENT * BAKE_RES as f32) .clamp(0.0, BAKE_RES as f32 - 1.0) as usize"),
+        ("bake_plane_indirect", 14, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 15, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 16, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 17, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 18, "let ct = 1.0 - (k as f32 + 0.5) / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 19, "let ct = 1.0 - (k as f32 + 0.5) / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 20, "let phi = k as f32 * 2.399_963_2"),
+        ("bake_plane_indirect", 21, "} } let em = a_plane * e_bounce * (2.0 / BAKE_RAYS as f32)"),
+        ("render", 1, "let projection = Mat4::perspective_rh(desc.fov_y_rad(), width as f32 / height as f32, near, far)"),
+        ("render", 2, "let projection = Mat4::perspective_rh(desc.fov_y_rad(), width as f32 / height as f32, near, far)"),
+        ("render", 3, "let weights: Vec<f32> = (0..SSAA) .map(|k| 1.0 - (((k as f32 + 0.5) / SSAA as f32 - 0.5).abs() / 0.5)) .collect()"),
+        ("render", 4, "let weights: Vec<f32> = (0..SSAA) .map(|k| 1.0 - (((k as f32 + 0.5) / SSAA as f32 - 0.5).abs() / 0.5)) .collect()"),
     ),
 }
 
@@ -243,28 +268,24 @@ def test_reviewed_checked_reader_inventory_transition_is_exact():
     assert transition["removed"] not in sites
 
 
-def test_reviewed_anamnesis_function_ownership_transition_is_exact():
+def test_reviewed_aequitas_raster_transition_is_exact():
     sites = conversion_inventory()
-    transition = REVIEWED_ANAMNESIS_INVENTORY_TRANSITION
-    assert len(sites) == transition["base_count"] == EXPECTED_CONVERSION_COUNT
-    assert _inventory_digest(sites) == transition["result_digest"]
-    for ordinal, statement in enumerate(transition["statements"], start=1):
-        removed = (
-            transition["path"],
-            transition["removed_function"],
-            "as_f32",
-            ordinal,
-            statement,
-        )
-        added = (
-            transition["path"],
-            transition["added_function"],
-            "as_f32",
-            ordinal,
-            statement,
-        )
-        assert removed not in sites
-        assert added in sites
+    transition = REVIEWED_AEQUITAS_RASTER_TRANSITION
+    assert len(sites) == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
+    path = transition["path"]
+    for function, ordinal, statement in transition["removed"]:
+        assert (path, function, "as_f32", ordinal, statement) not in sites
+    for function, ordinal, statement in transition["added"]:
+        assert (path, function, "as_f32", ordinal, statement) in sites
+    # The transition bridges its own base/result counts; the current
+    # EXPECTED_CONVERSION_COUNT additionally includes the +46 as_f32 sites the
+    # paris-eiffel-day-pt merge carries in
+    # src/path_tracing/hybrid_compute/render_terrain.rs (same sanctioned
+    # integer-to-f32 class; identical inventory at the base tip and HEAD).
+    assert len(transition["added"]) - len(transition["removed"]) == (
+        transition["result_count"] - transition["base_count"]
+    )
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():
