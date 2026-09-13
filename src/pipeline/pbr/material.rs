@@ -23,13 +23,12 @@ impl PbrMaterialGpu {
     /// Create PBR material GPU resources
     pub fn new(device: &Device, material: PbrMaterial) -> RenderResult<Self> {
         // Create uniform buffer
-        let uniform_buffer = tracked_create_buffer(
+        let uniform_buffer = tracked_create_buffer_init(
             device,
-            &BufferDescriptor {
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("pbr_material_uniforms"),
-                size: std::mem::size_of::<PbrMaterial>() as u64,
+                contents: bytemuck::bytes_of(&material),
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
             },
         )?;
 

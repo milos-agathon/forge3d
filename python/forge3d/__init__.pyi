@@ -1505,6 +1505,7 @@ def hybrid_render_terrain_reference(
     pressure_mbar: float | None = ...,
     temperature_c: float | None = ...,
     atmosphere: AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None = ...,
+    sdf_scene: object | None = ...,
 ) -> Dict[str, Any]: ...
 
 # AETHER: independent stochastic spectral atmosphere acceptance reference.
@@ -1528,6 +1529,7 @@ def hybrid_render_aether_spectral_reference(
     variance_threshold: float = ...,
     certificate: bool | str | PathLikeStr | None = ...,
     cache: str | PathLikeStr | None = ...,
+    sdf_scene: Optional[object] = ...,
 ) -> Dict[str, Any]: ...
 
 # AETHER: spectral atmosphere public/native surface

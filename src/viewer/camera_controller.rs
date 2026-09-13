@@ -54,11 +54,15 @@ impl std::fmt::Display for CameraFrameError {
 
 impl std::error::Error for CameraFrameError {}
 
-/// Validate one absolute f64 world point against a copied prospective anchor.
-pub fn validate_world_point(
+/// Validate one absolute f64 world point against a copied prospective anchor,
+/// allowing an explicit residual bound. Used where a legitimate *relative*
+/// camera distance (e.g. the synthetic default terrain eye at ~1.5x the
+/// terrain span) would otherwise exceed the absolute-coordinate M-06 bound.
+pub fn validate_world_point_with_bound(
     role: CoordRole,
     v: DVec3,
     anchor: &Anchor,
+    max: f64,
 ) -> Result<(), CameraFrameError> {
     for c in [v.x, v.y, v.z] {
         if !c.is_finite() {
@@ -66,14 +70,23 @@ pub fn validate_world_point(
         }
     }
     let residual = (v - anchor.origin()).abs().max_element();
-    if residual > VIEWER_RENDER_FRAME_MAX_COORD {
+    if residual > max {
         return Err(CameraFrameError::OutOfRenderFrame {
             role,
             residual,
-            max: VIEWER_RENDER_FRAME_MAX_COORD,
+            max,
         });
     }
     Ok(())
+}
+
+/// Validate one absolute f64 world point against a copied prospective anchor.
+pub fn validate_world_point(
+    role: CoordRole,
+    v: DVec3,
+    anchor: &Anchor,
+) -> Result<(), CameraFrameError> {
+    validate_world_point_with_bound(role, v, anchor, VIEWER_RENDER_FRAME_MAX_COORD)
 }
 
 /// Copy and prospectively rebase an anchor without mutating the live frame.

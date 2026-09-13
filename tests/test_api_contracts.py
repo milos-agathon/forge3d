@@ -1037,6 +1037,10 @@ class TestCartographerPrimeNativeContract:
 class TestGeometryFunctionContracts:
     """Verify geometry-related native functions are registered."""
 
+    def test_instanced_pbr_keyword_is_exposed(self):
+        function = _native.geometry_instance_mesh_gpu_render_py
+        assert "pbr=None" in function.__text_signature__
+
     GEOMETRY_FUNCTIONS = [
         "geometry_generate_primitive_py",
         "geometry_generate_tangents_py",

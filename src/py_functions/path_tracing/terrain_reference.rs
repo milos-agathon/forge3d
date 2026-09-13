@@ -213,11 +213,17 @@ fn extract_atmosphere_lut_handle(
 /// of the shared hybrid traversal).
 ///
 /// Returns a dict:
-///   rgba (H,W,4) u8, albedo (H,W,3) f32, normal (H,W,3) f32, depth (H,W) f32
-///   frames: int, variance: float (max per-pixel variance of the running-mean
-///   luminance across the last convergence window), converged: bool (always
-///   True — non-convergence raises), and peak_host_visible_bytes /
-///   minmax_pyramid_bytes / gpu_resource_bytes memory diagnostics.
+///   rgba (H,W,4) u8, albedo (H,W,3) f32, normal (H,W,3) f32, depth (H,W) f32,
+///   radiance (H,W,3) f32 linear mean radiance, luminance_variance (H,W) f32
+///   per-pixel estimated variance of the mean frame luminance
+///   (Welford M2/(N*(N-1)) over all accumulated frames),
+///   frames: int, variance: float (max of luminance_variance — the scalar
+///   convergence metric named by `convergence_metric`), converged: bool
+///   (always True — non-convergence raises), traversal: dict of measured
+///   last-frame descent counters (frame_index, mip_count, primary/shadow
+///   lanes node_visits/minmax_loads/height_loads/rays), and
+///   peak_host_visible_bytes / minmax_pyramid_bytes / gpu_resource_bytes
+///   memory diagnostics.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
@@ -253,6 +259,7 @@ fn extract_atmosphere_lut_handle(
     pressure_mbar = 1013.25,
     temperature_c = 15.0,
     atmosphere = None,
+    sdf_scene = None,
 ))]
 pub(crate) fn hybrid_render_terrain_reference(
     py: Python<'_>,
@@ -287,6 +294,7 @@ pub(crate) fn hybrid_render_terrain_reference(
     pressure_mbar: f64,
     temperature_c: f64,
     atmosphere: Option<Bound<'_, PyAny>>,
+    sdf_scene: Option<PyRef<'_, crate::sdf::py::PySdfScene>>,
 ) -> PyResult<Py<PyAny>> {
     let _ = cache;
     use crate::path_tracing::hybrid_compute::{HybridPathTracer, TerrainReferenceDesc};
@@ -404,6 +412,7 @@ pub(crate) fn hybrid_render_terrain_reference(
         env_intensity,
         atmosphere,
         mesh,
+        sdf_scene: sdf_scene.map(|scene| scene.0.clone()),
         width,
         height,
         seed,
@@ -434,10 +443,35 @@ pub(crate) fn hybrid_render_terrain_reference(
     ])?;
     let depth_arr = PyArray1::<f32>::from_vec_bound(py, out.depth)
         .reshape([height as usize, width as usize])?;
+    let radiance_arr = PyArray1::<f32>::from_vec_bound(py, out.radiance).reshape([
+        height as usize,
+        width as usize,
+        3,
+    ])?;
+    let luminance_variance_arr = PyArray1::<f32>::from_vec_bound(py, out.luminance_variance)
+        .reshape([height as usize, width as usize])?;
     d.set_item("rgba", rgba)?;
     d.set_item("albedo", albedo_arr)?;
     d.set_item("normal", normal_arr)?;
     d.set_item("depth", depth_arr)?;
+    d.set_item("radiance", radiance_arr)?;
+    d.set_item("luminance_variance", luminance_variance_arr)?;
+    d.set_item("convergence_metric", "frame_mean_estimator_variance")?;
+    let traversal = PyDict::new_bound(py);
+    traversal.set_item("frame_index", out.frames.saturating_sub(1))?;
+    traversal.set_item("mip_count", out.traversal_mip_count)?;
+    for (name, counts) in [
+        ("primary", out.traversal_primary),
+        ("shadow", out.traversal_shadow),
+    ] {
+        let lane = PyDict::new_bound(py);
+        lane.set_item("node_visits", counts[0])?;
+        lane.set_item("minmax_loads", counts[1])?;
+        lane.set_item("height_loads", counts[2])?;
+        lane.set_item("rays", counts[3])?;
+        traversal.set_item(name, lane)?;
+    }
+    d.set_item("traversal", traversal)?;
     d.set_item("frames", out.frames)?;
     d.set_item("variance", out.variance)?;
     d.set_item("converged", out.converged)?;

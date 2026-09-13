@@ -99,4 +99,5 @@ def hybrid_render_terrain_reference(
     pressure_mbar: float | None = ...,
     temperature_c: float | None = ...,
     atmosphere: AtmosphereSettings | Mapping[str, object] | AtmosphereLutHandle | None = ...,
+    sdf_scene: object | None = ...,
 ) -> Dict[str, object]: ...

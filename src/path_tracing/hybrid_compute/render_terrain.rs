@@ -5,9 +5,10 @@
 // Each frame dispatches the terrain kernel (spp jittered samples + canonical
 // ReSTIR candidate generation), then the pt_restir_temporal and
 // pt_restir_spatial reuse passes over the canonical 80-byte Reservoir layout.
-// Convergence gates on the per-pixel luminance variance of the running mean
-// across the last WELFORD_WINDOW frames (hard error on cap miss — no silent
-// fake convergence). Every GPU allocation is registered with the global
+// Convergence gates on the maximum per-pixel estimated variance of the mean
+// frame luminance (Welford M2/(N*(N-1)) over ALL accumulated frames, read
+// back every WELFORD_WINDOW frames — hard error on cap miss, no silent fake
+// convergence). Every GPU allocation is registered with the global
 // memory tracker through a drop-guard so error paths cannot leak metrics.
 // RELEVANT FILES: src/shaders/hybrid_terrain_traversal.wgsl,
 //                 src/path_tracing/hybrid_compute/terrain_heightfield.rs
@@ -16,19 +17,80 @@ use super::terrain_heightfield::TerrainPtScene;
 use super::*;
 use crate::core::atmosphere::AETHER_RADIOMETRIC_SCALE_MAX;
 use crate::core::memory_tracker::global_tracker;
+use crate::core::shader_contract_runtime::RuntimeContractObservation;
 use crate::path_tracing::lighting::{GpuAreaLight, GpuDirectionalLight};
 use crate::path_tracing::restir::{
     create_reservoir_buffer, create_restir_gbuffer, create_restir_gbuffer_pos, Reservoir,
 };
 
+/// GPU layout of the per-pixel statistics record `main_terrain` writes into
+/// the `terrain_welford` storage buffer (binding 4): running Welford moments
+/// of the per-frame mean luminance (`x` = mean, `y` = M2 over all frames),
+/// a counter-overflow flag, and the last beauty frame's measured traversal
+/// counts split into primary/shadow lanes
+/// (node_visits, minmax_loads, height_loads, rays).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub(super) struct TerrainStatistics {
+    pub x: f32,
+    pub y: f32,
+    pub overflow: u32,
+    /// Set by the kernel when the compiled SDF march failed (non-finite
+    /// value, stagnation, or exhausted step budget); mirrors
+    /// hybrid_sdf_error in hybrid_traversal.wgsl.
+    pub trace_error: u32,
+    pub primary: [u32; 4],
+    pub shadow: [u32; 4],
+}
+
+/// Estimated variance of the mean estimator: M2 / (N * (N - 1)) where N is
+/// the accumulated frame count. Errors on degenerate counts or invalid
+/// moments — callers must never synthesize a zero variance.
+fn estimator_variance(m2: f32, frames: u32) -> Result<f32, RenderError> {
+    if frames < 2 || !m2.is_finite() || m2 < 0.0 {
+        return Err(RenderError::render(
+            "terrain PT produced invalid frame-radiance moments",
+        ));
+    }
+    Ok((m2 as f64 / (frames as f64 * (frames - 1) as f64)) as f32)
+}
+
+/// Parse the statistics readback; any counter overflow or invalid moment is
+/// a hard error before stats are reported.
+fn parse_terrain_statistics(bytes: &[u8]) -> Result<&[TerrainStatistics], RenderError> {
+    let stats: &[TerrainStatistics] = bytemuck::cast_slice(bytes);
+    for s in stats {
+        if s.overflow != 0 {
+            return Err(RenderError::render(
+                "terrain PT traversal counters overflowed u32",
+            ));
+        }
+        if s.trace_error != 0 {
+            return Err(RenderError::render(
+                "terrain PT SDF traversal did not converge or produced invalid geometry",
+            ));
+        }
+        if !s.x.is_finite() || s.x < 0.0 || !s.y.is_finite() || s.y < 0.0 {
+            return Err(RenderError::render(
+                "terrain PT produced invalid frame-radiance moments",
+            ));
+        }
+    }
+    Ok(stats)
+}
+
 fn finite_min_max(values: impl Iterator<Item = f32>) -> (f32, f32) {
     values.fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), value| {
-        (lo.min(value), hi.max(value))
+        if !value.is_finite() || lo.is_nan() {
+            (f32::NAN, f32::NAN)
+        } else {
+            (lo.min(value), hi.max(value))
+        }
     })
 }
 
 #[allow(clippy::too_many_arguments)]
-fn record_runtime_contract(
+fn observe_runtime_contract(
     desc: &TerrainReferenceDesc,
     base: &Uniforms,
     hybrid: &HybridUniforms,
@@ -40,19 +102,21 @@ fn record_runtime_contract(
     accum: &[f32],
     welford: &[f32],
     beauty: &[u8],
-) -> Result<(), RenderError> {
-    if !crate::core::shader_contract_runtime::capture_active() {
-        return Ok(());
-    }
-    let mut observed = crate::core::shader_contract_runtime::RuntimeContractObservation::new(
+    canonical: bool,
+) -> RuntimeContractObservation {
+    let mut observed = RuntimeContractObservation::new(
         &format!("hybrid-terrain-{}x{}-{frames}f", desc.width, desc.height),
         "hybrid_pt.terrain",
         "hybrid_terrain_traversal",
         "src/shaders/hybrid_terrain_traversal.wgsl",
         "main_terrain",
-        "shaders/contracts/hybrid_terrain_traversal.toml",
+        if canonical {
+            "shaders/contracts/hybrid_terrain_traversal.toml"
+        } else {
+            "runtime-safety:hybrid-terrain"
+        },
     );
-    {
+    if canonical {
         let mut check = |name: &str, values: &[f32], lo: f32, hi: f32| {
             let (actual_lo, actual_hi) = finite_min_max(values.iter().copied());
             observed.check_range("uniform", name, None, actual_lo, actual_hi, lo, hi);
@@ -149,7 +213,171 @@ fn record_runtime_contract(
             1.0,
         );
         check("terrain_height_tex.samples", &desc.heights, 0.0, 0.0);
+    } else {
+        let mut exact = |name: &str, values: &[f32], expected: &[f32]| {
+            for (axis, (&value, &target)) in values.iter().zip(expected).enumerate() {
+                let name = if values.len() == 1 {
+                    name.to_string()
+                } else {
+                    format!("{name}.{axis}")
+                };
+                observed.check_range("uniform", &name, None, value, value, target, target);
+            }
+        };
+        exact("uniforms.width", &[base.width as f32], &[desc.width as f32]);
+        exact(
+            "uniforms.height",
+            &[base.height as f32],
+            &[desc.height as f32],
+        );
+        exact("uniforms.cam_origin", &base.cam_origin, &desc.cam_origin);
+        let forward =
+            (glam::Vec3::from(desc.cam_look_at) - glam::Vec3::from(desc.cam_origin)).normalize();
+        let right = forward.cross(glam::Vec3::from(desc.cam_up)).normalize();
+        let up = right.cross(forward).normalize();
+        exact(
+            "uniforms.cam_forward",
+            &base.cam_forward,
+            &forward.to_array(),
+        );
+        exact("uniforms.cam_right", &base.cam_right, &right.to_array());
+        exact("uniforms.cam_up", &base.cam_up, &up.to_array());
+        exact(
+            "uniforms.cam_aspect",
+            &[base.cam_aspect],
+            &[desc.width as f32 / desc.height as f32],
+        );
+        exact(
+            "uniforms.cam_fov_y",
+            &[base.cam_fov_y],
+            &[desc.fov_y_deg.to_radians()],
+        );
+        exact(
+            "uniforms.cam_exposure",
+            &[base.cam_exposure],
+            &[desc.exposure],
+        );
+        exact(
+            "uniforms.frame_index",
+            &[base.frame_index as f32],
+            &[frames.saturating_sub(1) as f32],
+        );
+        let (vertices, indices) = desc
+            .mesh
+            .as_ref()
+            .map_or((0, 0), |(v, i)| (v.len() / 3, i.len()));
+        exact(
+            "hybrid_uniforms.mesh_vertex_count",
+            &[hybrid.mesh_vertex_count as f32],
+            &[vertices as f32],
+        );
+        exact(
+            "hybrid_uniforms.mesh_index_count",
+            &[hybrid.mesh_index_count as f32],
+            &[indices as f32],
+        );
+        exact(
+            "hybrid_uniforms.traversal_mode",
+            &[hybrid.traversal_mode as f32],
+            &[if desc.mesh.is_some() || desc.sdf_scene.is_some() {
+                TraversalMode::Hybrid
+            } else {
+                TraversalMode::TerrainOnly
+            } as u32 as f32],
+        );
+        // The specialized kernel reads the SDF scene from compiled constants,
+        // so the uniform count fields stay 0; the validated native counts are
+        // diagnostics only, not observed GPU buffer contents.
+        let (sdf_prims, sdf_nodes) = desc
+            .sdf_scene
+            .as_ref()
+            .map_or((0usize, 0usize), |s| (s.primitive_count(), s.node_count()));
+        exact(
+            "sdf_scene.primitive_count",
+            &[sdf_prims as f32],
+            &[sdf_prims as f32],
+        );
+        exact(
+            "sdf_scene.node_count",
+            &[sdf_nodes as f32],
+            &[sdf_nodes as f32],
+        );
+        let az = desc.sun_azimuth_deg.to_radians();
+        let el = desc.sun_elevation_deg.to_radians();
+        exact(
+            "lighting.light_dir",
+            &lighting.light_dir,
+            &[az.cos() * el.cos(), el.sin(), az.sin() * el.cos()],
+        );
+        exact(
+            "lighting.light_color",
+            &lighting.light_color,
+            &desc.sun_color.map(|c| c * desc.sun_intensity),
+        );
+        exact(
+            "lighting.shadows_enabled",
+            &[lighting.shadows_enabled as f32],
+            &[1.0],
+        );
+        exact(
+            "terrain.origin_spacing",
+            &terrain.origin_spacing,
+            &[
+                -0.5 * (desc.dem_width as f32 - 1.0) * desc.spacing.0,
+                -0.5 * (desc.dem_height as f32 - 1.0) * desc.spacing.1,
+                desc.spacing.0,
+                desc.spacing.1,
+            ],
+        );
+        let (h_min, h_max) = finite_min_max(desc.heights.iter().copied());
+        exact(
+            "terrain.h_params",
+            &terrain.h_params,
+            &[h_min, h_max, desc.exaggeration, desc.env_intensity],
+        );
+        exact(
+            "terrain.albedo_pad",
+            &terrain.albedo_pad,
+            &[desc.albedo[0], desc.albedo[1], desc.albedo[2], 0.0],
+        );
+        let cw = desc.dem_width.saturating_sub(1);
+        let ch = desc.dem_height.saturating_sub(1);
+        exact(
+            "terrain.dims",
+            &terrain.dims.map(|v| v as f32),
+            &[
+                desc.dem_width as f32,
+                desc.dem_height as f32,
+                cw as f32,
+                ch as f32,
+            ],
+        );
+        let mip_count = cw.max(ch).max(1).next_power_of_two().ilog2() + 1;
+        let (env_w, env_h) = desc.env_map.as_ref().map_or((0, 0), |(_, w, h)| (*w, *h));
+        exact(
+            "terrain.mips",
+            &terrain.mips.map(|v| v as f32),
+            &[mip_count as f32, 1.0, env_w as f32, env_h as f32],
+        );
+        exact(
+            "terrain.extra",
+            &terrain.extra.map(|v| v as f32),
+            &[desc.spp as f32, WELFORD_WINDOW as f32, 0.0, 0.0],
+        );
+    }
+    {
+        let mut check = |name: &str, values: &[f32], lo: f32, hi: f32| {
+            let (actual_lo, actual_hi) = finite_min_max(values.iter().copied());
+            observed.check_range("buffer", name, None, actual_lo, actual_hi, lo, hi);
+        };
         check("accum_hdr.samples", accum, 0.0, 131_026.0);
+        let accum_frames = accum.iter().skip(3).step_by(4).copied().collect::<Vec<_>>();
+        check(
+            "accum_hdr.frames",
+            &accum_frames,
+            frames as f32,
+            frames as f32,
+        );
         let welford_mean = welford.iter().step_by(2).copied().collect::<Vec<_>>();
         let welford_m2 = welford
             .iter()
@@ -161,6 +389,123 @@ fn record_runtime_contract(
         check("terrain_welford.m2", &welford_m2, 0.0, 8_581_615_000.0);
     }
 
+    let pixels = (desc.width as u64) * (desc.height as u64);
+    for (name, actual, required) in [
+        ("accum_hdr", accum.len() as u64, pixels * 4),
+        ("terrain_welford", welford.len() as u64, pixels * 2),
+        ("out_tex.bytes", beauty.len() as u64, pixels * 8),
+        (
+            "terrain_height_tex",
+            desc.heights.len() as u64,
+            desc.dem_width as u64 * desc.dem_height as u64,
+        ),
+    ] {
+        observed.check_length("buffer", name, None, actual, required);
+    }
+    observed.check_range(
+        "runtime",
+        "frames",
+        None,
+        frames as f32,
+        frames as f32,
+        desc.min_frames.max(2) as f32,
+        desc.max_frames as f32,
+    );
+    // Same convergence metric as the host gate: maximum estimated variance
+    // of the mean frame luminance over ALL `frames` frames. Invalid moments
+    // must propagate as NaN — f32::max would silently erase a stored NaN.
+    let variance = welford
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .copied()
+        .try_fold(0.0f32, |vmax, m2| {
+            estimator_variance(m2, frames).map(|v| vmax.max(v))
+        })
+        .unwrap_or(f32::NAN);
+    let convergence_valid =
+        variance.is_finite() && variance >= 0.0 && variance < desc.variance_threshold;
+    observed.check_range(
+        "runtime",
+        "convergence",
+        None,
+        u32::from(convergence_valid) as f32,
+        u32::from(convergence_valid) as f32,
+        1.0,
+        1.0,
+    );
+    let finite_samples = reservoirs.iter().all(|r| {
+        r.sample
+            .position
+            .iter()
+            .chain(&r.sample.direction)
+            .chain(&r.sample.params)
+            .chain(std::iter::once(&r.sample.intensity))
+            .all(|v| v.is_finite())
+    });
+    observed.check_range(
+        "buffer",
+        "terrain_reservoirs_prev.sample_finite",
+        None,
+        u32::from(finite_samples) as f32,
+        u32::from(finite_samples) as f32,
+        1.0,
+        1.0,
+    );
+    let valid = reservoirs
+        .iter()
+        .filter(|r| r.m > 0 && r.weight > 0.0 && r.target_pdf > 0.0)
+        .collect::<Vec<_>>();
+    observed.check_length(
+        "buffer",
+        "terrain_reservoirs_prev.valid",
+        None,
+        valid.len() as u64,
+        u64::from(should_require_valid_sun_reservoirs(
+            desc.sun_elevation_deg,
+            desc.sun_intensity,
+            desc.sun_color,
+        )),
+    );
+    for (name, values, lo, hi) in [
+        (
+            "light_type",
+            valid
+                .iter()
+                .map(|r| r.sample.light_type as f32)
+                .collect::<Vec<_>>(),
+            1.0,
+            1.0,
+        ),
+        (
+            "light_index",
+            valid
+                .iter()
+                .map(|r| r.sample.light_index as f32)
+                .collect::<Vec<_>>(),
+            0.0,
+            0.0,
+        ),
+        (
+            "target_pdf",
+            valid.iter().map(|r| r.target_pdf).collect::<Vec<_>>(),
+            1.0,
+            1.0,
+        ),
+    ] {
+        if !values.is_empty() {
+            let (actual_lo, actual_hi) = finite_min_max(values.into_iter());
+            observed.check_range(
+                "buffer",
+                &format!("terrain_reservoirs_prev.{name}"),
+                None,
+                actual_lo,
+                actual_hi,
+                lo,
+                hi,
+            );
+        }
+    }
     observed.check_length(
         "buffer",
         "terrain_reservoirs_prev",
@@ -195,15 +540,23 @@ fn record_runtime_contract(
         65_536.0,
     );
     for axis in 0..3 {
-        let directions = reservoirs
-            .iter()
-            .filter(|value| value.m > 0 && value.weight > 0.0 && value.target_pdf > 0.0)
-            .map(|value| value.sample.direction[axis]);
+        if valid.is_empty() && !canonical {
+            break;
+        }
+        let directions = valid.iter().map(|value| value.sample.direction[axis]);
         let (lo, hi) = finite_min_max(directions);
-        let (expected_lo, expected_hi) = match axis {
-            0 => (0.49, 0.51),
-            1 => (0.70, 0.72),
-            _ => (-0.51, -0.49),
+        let (expected_lo, expected_hi) = if canonical {
+            match axis {
+                0 => (0.49, 0.51),
+                1 => (0.70, 0.72),
+                _ => (-0.51, -0.49),
+            }
+        } else {
+            let az = desc.sun_azimuth_deg.to_radians();
+            let el = desc.sun_elevation_deg.to_radians();
+            let direction =
+                glam::Vec3::new(az.cos() * el.cos(), el.sin(), az.sin() * el.cos()).normalize();
+            (direction[axis] - 0.01, direction[axis] + 0.01)
         };
         observed.check_range(
             "buffer",
@@ -228,11 +581,91 @@ fn record_runtime_contract(
         0.0,
         1.0,
     );
-    crate::core::shader_contract_runtime::record_observation(observed).map_err(RenderError::render)
+    observed
 }
 
-/// Frames per convergence window: the gate measures the variance of the
-/// accumulated mean luminance across the last N frames (02-prometheus DoD).
+fn is_canonical_proof_fixture(desc: &TerrainReferenceDesc) -> bool {
+    desc.width == 8
+        && desc.height == 8
+        && desc.dem_width == 4
+        && desc.dem_height == 4
+        && desc.heights.len() == 16
+        && desc.heights.iter().all(|h| *h == 0.0)
+        && desc.cam_origin == [0.0, 3.0, 8.0]
+        && desc.cam_look_at == [0.0; 3]
+        && desc.cam_up == [0.0, 1.0, 0.0]
+        && desc.fov_y_deg == 45.0
+        && desc.exposure == 1.0
+        && desc.spacing == (1.0, 1.0)
+        && desc.exaggeration == 1.0
+        && desc.albedo == [0.6; 3]
+        && desc.sun_azimuth_deg == 315.0
+        && desc.sun_elevation_deg == 45.0
+        && desc.sun_intensity == 2.5
+        && desc.sun_color == [1.0, 0.97, 0.92]
+        && desc.env_map.is_none()
+        && desc.env_intensity == 0.35
+        && desc.mesh.is_none()
+        && desc.sdf_scene.is_none()
+        && desc.spp == 1
+        && desc.max_frames == 4
+        && desc.min_frames == 2
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_runtime_contract(
+    desc: &TerrainReferenceDesc,
+    base: &Uniforms,
+    hybrid: &HybridUniforms,
+    lighting: &LightingUniforms,
+    terrain: &super::terrain_heightfield::TerrainPtUniforms,
+    earth_curvature: &super::terrain_heightfield::EarthCurvatureUniforms,
+    frames: u32,
+    reservoirs: &[Reservoir],
+    accum: &[f32],
+    welford: &[f32],
+    beauty: &[u8],
+) -> Result<(), RenderError> {
+    for canonical in [false, true] {
+        if canonical
+            && (!crate::core::shader_contract_runtime::capture_active()
+                || !is_canonical_proof_fixture(desc))
+        {
+            continue;
+        }
+        let observed = observe_runtime_contract(
+            desc,
+            base,
+            hybrid,
+            lighting,
+            terrain,
+            earth_curvature,
+            frames,
+            reservoirs,
+            accum,
+            welford,
+            beauty,
+            canonical,
+        );
+        let errors = observed
+            .checked_bindings
+            .iter()
+            .filter_map(|binding| binding.alarm.as_deref())
+            .collect::<Vec<_>>()
+            .join("; ");
+        crate::core::shader_contract_runtime::record_observation(observed)
+            .map_err(RenderError::render)?;
+        if !errors.is_empty() {
+            return Err(RenderError::render(errors));
+        }
+    }
+    Ok(())
+}
+
+/// Convergence readback cadence in frames: the estimator variance is
+/// evaluated on the GPU statistics buffer every N frames (and at the frame
+/// cap). It is only a polling interval — the Welford moments themselves
+/// accumulate over ALL frames and are never windowed or reset.
 pub const WELFORD_WINDOW: u32 = 32;
 
 /// Full scene description for the terrain reference render.
@@ -266,18 +699,24 @@ pub struct TerrainReferenceDesc {
     /// Optional mesh mixed into the scene: flat [x,y,z] vertices + triangle
     /// indices, traversed alongside the heightfield (TraversalMode::Hybrid).
     pub mesh: Option<(Vec<f32>, Vec<u32>)>,
+    /// Optional native SDF scene compiled into the hybrid kernel's constant
+    /// declarations by `sdf_scene::specialize` before pipeline creation. Not
+    /// a storage upload: validation, bounds, and code generation run on the
+    /// CPU and the shader executes straight-line CSG expressions.
+    pub sdf_scene: Option<crate::sdf::SdfScene>,
     pub width: u32,
     pub height: u32,
     pub seed: u32,
-    /// Camera samples per accumulation frame (min-max descent keeps the
-    /// per-sample texture reads O(log mips), so cost scales ~linearly).
+    /// Camera samples per accumulation frame. Traversal cost depends on
+    /// visited hierarchy nodes; returned counters measure the last beauty
+    /// frame, while throughput is checked separately from 1 to 8 spp.
     pub spp: u32,
     /// Hard frame cap; convergence earlier is allowed.
     pub max_frames: u32,
     /// Frames rendered before the first convergence check.
     pub min_frames: u32,
-    /// Converged when the max per-pixel luminance variance of the running
-    /// mean across the last WELFORD_WINDOW frames < this.
+    /// Converged when the maximum per-pixel estimated variance of the mean
+    /// frame luminance (Welford M2/(N*(N-1)) over all frames) < this.
     pub variance_threshold: f32,
 }
 
@@ -287,8 +726,20 @@ pub struct TerrainReferenceOutput {
     pub albedo: Vec<f32>,
     pub normal: Vec<f32>,
     pub depth: Vec<f32>,
+    /// Mean linear radiance per pixel (accumulated RGB / frames), len = 3*W*H.
+    pub radiance: Vec<f32>,
+    /// Per-pixel estimated variance of the mean frame luminance
+    /// (M2/(N*(N-1)) over all frames), len = W*H.
+    pub luminance_variance: Vec<f32>,
     pub frames: u32,
+    /// Maximum of `luminance_variance` — the scalar convergence metric.
     pub variance: f32,
+    /// Measured traversal counters from the last beauty frame, summed over
+    /// pixels; lanes = (node_visits, minmax_loads, height_loads, rays).
+    pub traversal_primary: [u64; 4],
+    pub traversal_shadow: [u64; 4],
+    /// Min-max pyramid depth used by the heightfield descent.
+    pub traversal_mip_count: u32,
     pub converged: bool,
     pub peak_host_visible_bytes: u64,
     pub minmax_pyramid_bytes: u64,
@@ -409,6 +860,11 @@ fn read_buffer(
     buffer: &wgpu::Buffer,
     size: u64,
 ) -> Result<Vec<u8>, RenderError> {
+    if !buffer.usage().contains(wgpu::BufferUsages::COPY_SRC) {
+        return Err(RenderError::render(
+            "terrain PT readback source buffer requires COPY_SRC usage",
+        ));
+    }
     let staging = tracked_create_buffer(
         device,
         &wgpu::BufferDescriptor {
@@ -560,7 +1016,25 @@ impl HybridPathTracer {
     /// Render the converged terrain reference. Errors (rather than returning
     /// a fake image) when inputs are degenerate, the frame cap is hit
     /// without convergence, or the memory budget is exceeded.
+    /// Thin public entry: validates the description, and when a native
+    /// `sdf_scene` is present compiles it into the shared hybrid kernel's
+    /// constant declarations and builds the pipelines from that specialized
+    /// source (one new module/pipeline set for this render — the `self`
+    /// pipelines keep the default empty-SDF source). With no SDF the
+    /// existing pipelines render unchanged.
     pub fn render_terrain_reference(
+        &self,
+        desc: &TerrainReferenceDesc,
+    ) -> Result<TerrainReferenceOutput, RenderError> {
+        validate_desc(desc)?;
+        if let Some(scene) = &desc.sdf_scene {
+            let source = super::sdf_scene::specialize(scene)?;
+            return Self::new_with_source(source)?.render_terrain_reference_inner(desc);
+        }
+        self.render_terrain_reference_inner(desc)
+    }
+
+    fn render_terrain_reference_inner(
         &self,
         desc: &TerrainReferenceDesc,
     ) -> Result<TerrainReferenceOutput, RenderError> {
@@ -656,7 +1130,12 @@ impl HybridPathTracer {
             cam_exposure: exposure,
             cam_forward: forward.into(),
             seed_hi: desc.seed,
-            seed_lo: desc.seed ^ 0x85EB_CA6B,
+            // decorrelate seed_hi ^ seed_lo in the kernel's xor mixing so
+            // distinct seeds produce distinct streams (seed ^ C cancels).
+            seed_lo: desc
+                .seed
+                .wrapping_mul(0x9E37_79B9)
+                .wrapping_add(0x85EB_CA6B),
             _pad_end: [0; 3],
         };
         let base_ubo = tracked_create_buffer_init(
@@ -668,6 +1147,10 @@ impl HybridPathTracer {
             },
         )?;
         tracked.buffer(&base_ubo);
+        // The SDF scene lives entirely in the specialized shader's constants;
+        // the count fields keep the static ABI at 0 while the shader branches
+        // on HYBRID_SDF_ENABLED rather than these uniforms. The observer below
+        // records the validated counts for runtime evidence.
         let hybrid_uniforms = HybridUniforms {
             sdf_primitive_count: 0,
             sdf_node_count: 0,
@@ -678,7 +1161,7 @@ impl HybridPathTracer {
                 .as_ref()
                 .map(|m| m.bvh_node_count)
                 .unwrap_or(0),
-            traversal_mode: if desc.mesh.is_some() {
+            traversal_mode: if desc.mesh.is_some() || desc.sdf_scene.is_some() {
                 TraversalMode::Hybrid as u32
             } else {
                 TraversalMode::TerrainOnly as u32
@@ -781,15 +1264,19 @@ impl HybridPathTracer {
         tracked.buffer(&area_lights_buf);
 
         // --- Accumulation (same shape as render.rs "hybrid-pt-accum"),
-        // Welford variance, canonical ReSTIR reservoirs and G-buffer ---
+        // per-pixel terrain statistics (Welford moments + traversal
+        // counters), canonical ReSTIR reservoirs and G-buffer ---
         let px_count = (width as u64) * (height as u64);
         let px_usize = px_count as usize;
+        let stats_size = std::mem::size_of::<TerrainStatistics>() as u64;
         let accum_buf = tracked_create_buffer(
             device,
             &wgpu::BufferDescriptor {
                 label: Some("hybrid-pt-accum"),
                 size: px_count * 16,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             },
         )?;
@@ -798,7 +1285,7 @@ impl HybridPathTracer {
             device,
             &wgpu::BufferDescriptor {
                 label: Some("hybrid-pt-terrain-welford"),
-                size: px_count * 8,
+                size: px_count * stats_size,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             },
@@ -1119,8 +1606,25 @@ impl HybridPathTracer {
             timing.end(&mut enc, gbuffer_scope, 1);
             queue.submit([enc.finish()]);
         }
+        if desc.sdf_scene.is_some() {
+            // The gbuffer pipeline's layout cannot reach terrain_welford, so
+            // the kernel signals a compiled-SDF march failure on the center
+            // ray through terrain_gbuffer_pos[pix].w = -1. Reject it here
+            // before the accumulation loop consumes the record.
+            let pos_bytes = read_buffer(device, queue, &gbuffer_pos, px_count * 16)?;
+            let pos: &[f32] = bytemuck::cast_slice(&pos_bytes);
+            for px in pos.chunks_exact(4) {
+                if !px[3].is_finite() || px[3] < 0.0 {
+                    return Err(RenderError::render(
+                        "terrain PT SDF traversal did not converge or produced invalid geometry",
+                    ));
+                }
+            }
+        }
 
-        // --- Accumulate until converged (windowed variance) or capped ---
+        // --- Accumulate until converged (estimated variance of the mean
+        // frame luminance over all frames, polled every WELFORD_WINDOW
+        // frames and at the cap) or capped ---
         let mut frames = 0u32;
         let mut variance = f32::INFINITY;
         let mut converged = false;
@@ -1195,6 +1699,27 @@ impl HybridPathTracer {
             }
             if time_this_frame {
                 timing.end(&mut enc, spatial_scope, 1);
+            }
+            let publish_scope = if time_this_frame {
+                timing.begin(&mut enc, "hybrid_pt.terrain_publish")
+            } else {
+                None
+            };
+            {
+                let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("hybrid-pt-terrain-publish-cpass"),
+                    ..Default::default()
+                });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-kernel");
+                cpass.set_pipeline(&self.pipeline_terrain_publish);
+                cpass.set_bind_group(0, &bg0, &[]);
+                cpass.set_bind_group(1, &bg1, &[]);
+                cpass.set_bind_group(2, &bg2, &[]);
+                cpass.set_bind_group(3, &bg3, &[]);
+                cpass.dispatch_workgroups(wg_x, wg_y, 1);
+            }
+            if time_this_frame {
+                timing.end(&mut enc, publish_scope, 1);
                 // Resolve on frame 0's encoder: the gbuffer scope's stamps
                 // were written on the already-submitted gbuffer encoder, so
                 // the resolved range is complete once this submit lands.
@@ -1204,41 +1729,30 @@ impl HybridPathTracer {
             frames += 1;
 
             let window_full = frames.is_multiple_of(WELFORD_WINDOW);
-            if window_full || frames == desc.max_frames {
-                let n_window = ((frames - 1) % WELFORD_WINDOW) + 1;
-                if n_window >= 2 {
-                    device.poll(wgpu::Maintain::Wait);
-                    let wf = read_buffer(device, queue, &welford_buf, px_count * 8)?;
-                    let wf: &[f32] = bytemuck::cast_slice(&wf);
-                    let n = n_window as f32;
-                    let mut vmax = 0.0f32;
-                    for px in wf.chunks_exact(2) {
-                        let m2 = px[1];
-                        if !m2.is_finite() {
-                            return Err(RenderError::Render(
-                                "terrain PT produced non-finite variance (NaN in accumulation)"
-                                    .into(),
-                            ));
-                        }
-                        // Sample variance of the running-mean luminance across
-                        // the last n frames.
-                        vmax = vmax.max(m2 / (n - 1.0));
-                    }
-                    variance = vmax;
-                    if frames >= desc.min_frames && variance < desc.variance_threshold {
-                        converged = true;
-                        break;
-                    }
+            if (window_full || frames == desc.max_frames) && frames >= 2 {
+                device.poll(wgpu::Maintain::Wait);
+                let stats_bytes = read_buffer(device, queue, &welford_buf, px_count * stats_size)?;
+                let stats = parse_terrain_statistics(&stats_bytes)?;
+                let mut vmax = 0.0f32;
+                for s in stats {
+                    // Estimated variance of the mean frame luminance over all
+                    // `frames` frames.
+                    vmax = vmax.max(estimator_variance(s.y, frames)?);
+                }
+                variance = vmax;
+                if frames >= desc.min_frames && variance < desc.variance_threshold {
+                    converged = true;
+                    break;
                 }
             }
         }
         device.poll(wgpu::Maintain::Wait);
         if !converged {
             return Err(RenderError::Render(format!(
-                "terrain PT did not converge: per-pixel luminance variance {variance:.3e} \
-                 over the last {WELFORD_WINDOW}-frame window after {frames} frames \
-                 (threshold {:.1e}); raise max_frames or simplify the scene — refusing \
-                 to return a fake reference",
+                "terrain PT did not converge: estimated variance of the mean frame \
+                 luminance {variance:.3e} after {frames} frames (threshold {:.1e}); \
+                 raise max_frames or simplify the scene — refusing to return a \
+                 fake reference",
                 desc.variance_threshold
             )));
         }
@@ -1340,8 +1854,35 @@ impl HybridPathTracer {
         let beauty = read_texture_pixels(device, queue, &out_tex, width, height, 8)?;
         let accum_bytes = read_buffer(device, queue, &accum_buf, px_count * 16)?;
         let accum: &[f32] = bytemuck::cast_slice(&accum_bytes);
-        let welford_bytes = read_buffer(device, queue, &welford_buf, px_count * 8)?;
-        let welford: &[f32] = bytemuck::cast_slice(&welford_bytes);
+        let welford_bytes = read_buffer(device, queue, &welford_buf, px_count * stats_size)?;
+        let stats = parse_terrain_statistics(&welford_bytes)?;
+        // Interleaved mean/M2 view keeps the runtime-observer contract
+        // (`terrain_welford.mean` / `.m2` ranges, length 2*pixels) unchanged.
+        let welford: Vec<f32> = stats.iter().flat_map(|s| [s.x, s.y]).collect();
+        let mut luminance_variance = Vec::with_capacity(px_usize);
+        let mut traversal_primary = [0u64; 4];
+        let mut traversal_shadow = [0u64; 4];
+        for s in stats {
+            luminance_variance.push(estimator_variance(s.y, frames)?);
+            for lane in 0..4 {
+                traversal_primary[lane] += s.primary[lane] as u64;
+                traversal_shadow[lane] += s.shadow[lane] as u64;
+            }
+        }
+        // Mean linear radiance per pixel; the same data the observer range-
+        // checks as accum_hdr.samples.
+        let mut radiance = Vec::with_capacity(px_usize * 3);
+        for px in accum.chunks_exact(4) {
+            for c in 0..3 {
+                let v = px[c] / frames as f32;
+                if !v.is_finite() {
+                    return Err(RenderError::render(
+                        "terrain PT produced non-finite accumulated radiance",
+                    ));
+                }
+                radiance.push(v);
+            }
+        }
         record_runtime_contract(
             desc,
             &base,
@@ -1352,7 +1893,7 @@ impl HybridPathTracer {
             frames,
             reservoirs,
             accum,
-            welford,
+            &welford,
             &beauty,
         )?;
         let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
@@ -1412,6 +1953,7 @@ impl HybridPathTracer {
             crate::core::certificate::record_pass("hybrid_pt.terrain", 0.0, frames);
             crate::core::certificate::record_pass("hybrid_pt.restir_temporal", 0.0, frames);
             crate::core::certificate::record_pass("hybrid_pt.restir_spatial", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.terrain_publish", 0.0, frames);
         }
         if let Some(post_timing) = aether_post_timing {
             if !post_timing.record_into_certificate() {
@@ -1419,13 +1961,20 @@ impl HybridPathTracer {
             }
         }
 
+        let variance = luminance_variance.iter().copied().fold(0.0f32, f32::max);
+
         Ok(TerrainReferenceOutput {
             rgba,
             albedo,
             normal,
             depth,
+            radiance,
+            luminance_variance,
             frames,
             variance,
+            traversal_primary,
+            traversal_shadow,
+            traversal_mip_count: terrain_scene.pyramid.mip_count,
             converged,
             peak_host_visible_bytes: peak,
             minmax_pyramid_bytes: terrain_scene.pyramid.byte_size,
@@ -1436,7 +1985,319 @@ impl HybridPathTracer {
 
 #[cfg(test)]
 mod tests {
-    use super::{factor_sun_lighting, should_require_valid_sun_reservoirs};
+    use super::*;
+
+    fn contract_fixture(
+        dawn: bool,
+    ) -> (
+        TerrainReferenceDesc,
+        Uniforms,
+        HybridUniforms,
+        LightingUniforms,
+        super::super::terrain_heightfield::TerrainPtUniforms,
+        super::super::terrain_heightfield::EarthCurvatureUniforms,
+    ) {
+        let desc = TerrainReferenceDesc {
+            heights: vec![if dawn { 0.5 } else { 0.0 }; 16],
+            dem_width: 4,
+            dem_height: 4,
+            spacing: (1.0, 1.0),
+            exaggeration: 1.0,
+            albedo: [0.6; 3],
+            cam_origin: if dawn {
+                [0.0, 35.0, 90.0]
+            } else {
+                [0.0, 3.0, 8.0]
+            },
+            cam_look_at: [0.0; 3],
+            cam_up: [0.0, 1.0, 0.0],
+            fov_y_deg: 45.0,
+            exposure: 1.0,
+            sun_azimuth_deg: if dawn {
+                1.28047261849929_f64 as f32
+            } else {
+                315.0
+            },
+            sun_elevation_deg: if dawn {
+                0.8056487084063235_f64 as f32
+            } else {
+                45.0
+            },
+            sun_intensity: 2.5,
+            sun_color: [1.0, 0.97, 0.92],
+            observer_geodetic_deg: [0.0, 0.0],
+            earth_model: crate::geo::refraction::EarthModel::Ellipsoid { latitude_deg: 0.0 },
+            refraction_model: crate::geo::refraction::RefractionModel::Bennett {
+                pressure_mbar: 1013.25,
+                temperature_c: 15.0,
+            },
+            env_map: None,
+            env_intensity: 0.35,
+            atmosphere: None,
+            mesh: None,
+            sdf_scene: None,
+            width: if dawn { 256 } else { 8 },
+            height: 8,
+            seed: 7,
+            spp: 1,
+            max_frames: if dawn { 256 } else { 4 },
+            min_frames: 2,
+            variance_threshold: 1e-3,
+        };
+        let forward =
+            (glam::Vec3::from(desc.cam_look_at) - glam::Vec3::from(desc.cam_origin)).normalize();
+        let right = forward.cross(glam::Vec3::from(desc.cam_up)).normalize();
+        let base = Uniforms {
+            width: desc.width,
+            height: desc.height,
+            frame_index: desc.max_frames - 1,
+            aov_flags: 0,
+            cam_origin: desc.cam_origin,
+            cam_fov_y: desc.fov_y_deg.to_radians(),
+            cam_right: right.to_array(),
+            cam_aspect: desc.width as f32 / desc.height as f32,
+            cam_up: right.cross(forward).normalize().to_array(),
+            cam_exposure: desc.exposure,
+            cam_forward: forward.to_array(),
+            seed_hi: 7,
+            seed_lo: 7u32.wrapping_mul(0x9E37_79B9).wrapping_add(0x85EB_CA6B),
+            _pad_end: [0; 3],
+        };
+        let hybrid = HybridUniforms {
+            traversal_mode: 3,
+            ..Zeroable::zeroed()
+        };
+        let az = desc.sun_azimuth_deg.to_radians();
+        let el = desc.sun_elevation_deg.to_radians();
+        let lighting = LightingUniforms {
+            light_dir: [az.cos() * el.cos(), el.sin(), az.sin() * el.cos()],
+            light_color: desc.sun_color.map(|c| c * desc.sun_intensity),
+            shadows_enabled: 1,
+            ..Zeroable::zeroed()
+        };
+        let terrain = super::super::terrain_heightfield::TerrainPtUniforms {
+            origin_spacing: [-1.5, -1.5, 1.0, 1.0],
+            h_params: [desc.heights[0], desc.heights[0], 1.0, 0.35],
+            albedo_pad: [0.6, 0.6, 0.6, 0.0],
+            dims: [4, 4, 3, 3],
+            mips: [3, 1, 0, 0],
+            extra: [1, WELFORD_WINDOW, 0, 0],
+        };
+        let earth_curvature = super::super::terrain_heightfield::EarthCurvatureUniforms::new(
+            desc.earth_model,
+            desc.refraction_model,
+            desc.observer_geodetic_deg,
+            f64::from(desc.sun_azimuth_deg),
+        )
+        .expect("fixture earth-curvature uniforms");
+        (desc, base, hybrid, lighting, terrain, earth_curvature)
+    }
+
+    fn sample_reservoir(lighting: &LightingUniforms) -> Reservoir {
+        let mut r = Reservoir {
+            m: 512,
+            w_sum: 512.0,
+            weight: 1.0,
+            target_pdf: 1.0,
+            ..Reservoir::default()
+        };
+        r.sample.light_type = 1;
+        r.sample.direction = glam::Vec3::from(lighting.light_dir).normalize().to_array();
+        r
+    }
+
+    #[test]
+    fn canonical_proof_and_scene_runtime_are_distinct_scopes() {
+        for dawn in [false, true] {
+            let (desc, base, hybrid, lighting, terrain, earth_curvature) = contract_fixture(dawn);
+            let pixels = (desc.width * desc.height) as usize;
+            let reservoirs = vec![sample_reservoir(&lighting); pixels];
+            let mut accum = vec![0.0; pixels * 4];
+            for alpha in accum.iter_mut().skip(3).step_by(4) {
+                *alpha = desc.max_frames as f32;
+            }
+            let welford = vec![0.0; pixels * 2];
+            let beauty = vec![0; pixels * 8];
+            assert_eq!(is_canonical_proof_fixture(&desc), !dawn);
+            let runtime = observe_runtime_contract(
+                &desc,
+                &base,
+                &hybrid,
+                &lighting,
+                &terrain,
+                &earth_curvature,
+                desc.max_frames,
+                &reservoirs,
+                &accum,
+                &welford,
+                &beauty,
+                false,
+            );
+            assert_eq!(runtime.status, "passed", "{:?}", runtime.checked_bindings);
+            assert_eq!(runtime.contract, "runtime-safety:hybrid-terrain");
+            let proof = observe_runtime_contract(
+                &desc,
+                &base,
+                &hybrid,
+                &lighting,
+                &terrain,
+                &earth_curvature,
+                desc.max_frames,
+                &reservoirs,
+                &accum,
+                &welford,
+                &beauty,
+                true,
+            );
+            assert_eq!(proof.status, if dawn { "failed" } else { "passed" });
+            assert_eq!(
+                proof.contract,
+                "shaders/contracts/hybrid_terrain_traversal.toml"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_safety_rejects_invalid_readbacks_without_capture() {
+        let (desc, base, hybrid, lighting, terrain, earth_curvature) = contract_fixture(true);
+        let pixels = (desc.width * desc.height) as usize;
+        let reservoirs = vec![sample_reservoir(&lighting); pixels];
+        let mut accum = vec![0.0; pixels * 4];
+        for alpha in accum.iter_mut().skip(3).step_by(4) {
+            *alpha = desc.max_frames as f32;
+        }
+        let welford = vec![0.0; pixels * 2];
+        let beauty = vec![0; pixels * 8];
+        let validate = |base: &Uniforms,
+                        reservoirs: &[Reservoir],
+                        accum: &[f32],
+                        welford: &[f32],
+                        beauty: &[u8]| {
+            record_runtime_contract(
+                &desc,
+                base,
+                &hybrid,
+                &lighting,
+                &terrain,
+                &earth_curvature,
+                desc.max_frames,
+                reservoirs,
+                accum,
+                welford,
+                beauty,
+            )
+        };
+        assert!(validate(&base, &reservoirs, &accum, &welford, &beauty).is_ok());
+        let mut wrong_base = base;
+        wrong_base.width = 8;
+        assert!(validate(&wrong_base, &reservoirs, &accum, &welford, &beauty).is_err());
+        for invalid in [f32::NAN, f32::INFINITY, -1.0, 65_537.0] {
+            let mut bad = reservoirs.clone();
+            bad[1].w_sum = invalid;
+            assert!(validate(&base, &bad, &accum, &welford, &beauty).is_err());
+        }
+        let mut bad = reservoirs.clone();
+        bad[1].m = 513;
+        assert!(validate(&base, &bad, &accum, &welford, &beauty).is_err());
+        bad[1] = sample_reservoir(&lighting);
+        bad[1].sample.direction = [0.5, std::f32::consts::FRAC_1_SQRT_2, -0.5];
+        assert!(validate(&base, &bad, &accum, &welford, &beauty).is_err());
+        bad[1].sample.direction[0] = f32::NAN;
+        assert!(validate(&base, &bad, &accum, &welford, &beauty).is_err());
+        bad[1] = sample_reservoir(&lighting);
+        bad[1].target_pdf = 0.001;
+        assert!(validate(&base, &bad, &accum, &welford, &beauty).is_err());
+        for (a, w, b) in [
+            (&accum[1..], &welford[..], &beauty[..]),
+            (&accum[..], &welford[1..], &beauty[..]),
+            (&accum[..], &welford[..], &beauty[1..]),
+        ] {
+            assert!(validate(&base, &reservoirs, a, w, b).is_err());
+        }
+        assert!(validate(&base, &reservoirs[1..], &accum, &welford, &beauty).is_err());
+        let mut missing_frames = accum.clone();
+        missing_frames[3] = 0.0;
+        assert!(validate(&base, &reservoirs, &missing_frames, &welford, &beauty).is_err());
+        for invalid in [f32::NAN, f32::INFINITY, -1.0, 131_027.0] {
+            let mut bad_accum = accum.clone();
+            bad_accum[1] = invalid;
+            assert!(validate(&base, &reservoirs, &bad_accum, &welford, &beauty).is_err());
+        }
+        for invalid in [
+            f32::NAN,
+            -1.0,
+            // M2 whose estimator variance M2/(N*(N-1)) equals the threshold.
+            desc.variance_threshold * desc.max_frames as f32 * (desc.max_frames - 1) as f32,
+        ] {
+            let mut bad_welford = welford.clone();
+            bad_welford[1] = invalid;
+            assert!(validate(&base, &reservoirs, &accum, &bad_welford, &beauty).is_err());
+        }
+        let mut bad_beauty = beauty.clone();
+        bad_beauty[2..4].copy_from_slice(&f16::NAN.to_bits().to_le_bytes());
+        assert!(validate(&base, &reservoirs, &accum, &welford, &bad_beauty).is_err());
+    }
+
+    #[test]
+    fn terrain_statistics_layout_is_48_bytes() {
+        assert_eq!(std::mem::size_of::<TerrainStatistics>(), 48);
+    }
+
+    #[test]
+    fn parse_terrain_statistics_rejects_trace_error() {
+        let mut stats = vec![TerrainStatistics::default(); 2];
+        stats[1].x = 1.0;
+        stats[1].y = 1.0;
+        stats[1].trace_error = 1;
+        let msg = parse_terrain_statistics(bytemuck::cast_slice(&stats))
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("did not converge"), "got: {msg}");
+    }
+
+    #[test]
+    fn parse_terrain_statistics_rejects_overflow() {
+        let mut stats = vec![TerrainStatistics::default(); 2];
+        stats[0].overflow = 1;
+        let msg = parse_terrain_statistics(bytemuck::cast_slice(&stats))
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("overflow"), "got: {msg}");
+    }
+
+    #[test]
+    fn sdf_error_accumulates_across_frames_in_shader() {
+        // trace_error must OR-accumulate so a failure on an earlier frame
+        // survives until the host polls the buffer.
+        let source = crate::shader_sources::hybrid_kernel();
+        assert!(
+            source.contains("wf.trace_error = wf.trace_error | hybrid_sdf_error;"),
+            "per-frame write must OR-accumulate"
+        );
+        assert!(
+            source.contains(
+                "terrain_welford[pix].trace_error = terrain_welford[pix].trace_error | hybrid_sdf_error;"
+            ),
+            "post-AOV write must OR-accumulate"
+        );
+    }
+
+    #[test]
+    fn estimator_variance_exact_value() {
+        // M2 = 2, N = 4 -> 2 / (4 * 3) = 1/6.
+        let v = estimator_variance(2.0, 4).unwrap();
+        assert!((v - 1.0 / 6.0).abs() < 1e-7, "{v}");
+    }
+
+    #[test]
+    fn estimator_variance_rejects_invalid_moments() {
+        assert!(estimator_variance(1.0, 1).is_err());
+        assert!(estimator_variance(1.0, 0).is_err());
+        assert!(estimator_variance(-1.0, 4).is_err());
+        assert!(estimator_variance(f32::NAN, 4).is_err());
+        assert!(estimator_variance(f32::INFINITY, 4).is_err());
+        assert!(estimator_variance(f32::NEG_INFINITY, 4).is_err());
+    }
 
     #[test]
     fn direct_bakes_intensity_restir_keeps_it_separate() {
