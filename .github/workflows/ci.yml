@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, paris-eiffel-day-pt]
   workflow_dispatch:
     inputs:
       update_recipe_certificates:
