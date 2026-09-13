@@ -634,8 +634,18 @@ fn record_runtime_contract(
             continue;
         }
         let observed = observe_runtime_contract(
-            desc, base, hybrid, lighting, terrain, earth_curvature, frames, reservoirs, accum,
-            welford, beauty, canonical,
+            desc,
+            base,
+            hybrid,
+            lighting,
+            terrain,
+            earth_curvature,
+            frames,
+            reservoirs,
+            accum,
+            welford,
+            beauty,
+            canonical,
         );
         let errors = observed
             .checked_bindings
@@ -2073,14 +2083,13 @@ mod tests {
             mips: [3, 1, 0, 0],
             extra: [1, WELFORD_WINDOW, 0, 0],
         };
-        let earth_curvature =
-            super::super::terrain_heightfield::EarthCurvatureUniforms::new(
-                desc.earth_model,
-                desc.refraction_model,
-                desc.observer_geodetic_deg,
-                f64::from(desc.sun_azimuth_deg),
-            )
-            .expect("fixture earth-curvature uniforms");
+        let earth_curvature = super::super::terrain_heightfield::EarthCurvatureUniforms::new(
+            desc.earth_model,
+            desc.refraction_model,
+            desc.observer_geodetic_deg,
+            f64::from(desc.sun_azimuth_deg),
+        )
+        .expect("fixture earth-curvature uniforms");
         (desc, base, hybrid, lighting, terrain, earth_curvature)
     }
 
@@ -2100,8 +2109,7 @@ mod tests {
     #[test]
     fn canonical_proof_and_scene_runtime_are_distinct_scopes() {
         for dawn in [false, true] {
-            let (desc, base, hybrid, lighting, terrain, earth_curvature) =
-                contract_fixture(dawn);
+            let (desc, base, hybrid, lighting, terrain, earth_curvature) = contract_fixture(dawn);
             let pixels = (desc.width * desc.height) as usize;
             let reservoirs = vec![sample_reservoir(&lighting); pixels];
             let mut accum = vec![0.0; pixels * 4];
@@ -2151,8 +2159,7 @@ mod tests {
 
     #[test]
     fn runtime_safety_rejects_invalid_readbacks_without_capture() {
-        let (desc, base, hybrid, lighting, terrain, earth_curvature) =
-            contract_fixture(true);
+        let (desc, base, hybrid, lighting, terrain, earth_curvature) = contract_fixture(true);
         let pixels = (desc.width * desc.height) as usize;
         let reservoirs = vec![sample_reservoir(&lighting); pixels];
         let mut accum = vec![0.0; pixels * 4];
