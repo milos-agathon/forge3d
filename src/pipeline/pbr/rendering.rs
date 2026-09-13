@@ -24,13 +24,38 @@ impl PbrPipelineWithShadows {
         }
 
         if self.render_pipeline.is_none() {
-            let pipeline = self.build_render_pipeline(device, surface_format);
+            let pipeline = self.build_render_pipeline(device, surface_format, false);
             self.render_pipeline = Some(pipeline);
         }
 
         self.render_pipeline
             .as_ref()
             .expect("PBR render pipeline should be initialized")
+    }
+
+    pub fn ensure_instanced_pipeline(&mut self, device: &Device, surface_format: TextureFormat) {
+        let dirty = self.render_pipeline.is_none() || self.pipeline_format != Some(surface_format);
+        self.ensure_pipeline(device, surface_format);
+        if dirty || self.instanced_pipeline.is_none() {
+            self.instanced_pipeline =
+                Some(self.build_render_pipeline(device, surface_format, true));
+        }
+        self.ensure_globals_bind_group(device);
+        self.ensure_ibl_bind_group(device);
+        self.get_or_create_shadow_bind_group(device);
+    }
+
+    pub fn bind_instanced<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        crate::core::shader_registry::record_shader_use("pbr_shader_module");
+        pass.set_pipeline(
+            self.instanced_pipeline
+                .as_ref()
+                .expect("instanced PBR pipeline must be prepared"),
+        );
+        pass.set_bind_group(0, self.globals_bind_group.as_ref().unwrap(), &[]);
+        pass.set_bind_group(1, self.material.bind_group.as_ref().unwrap(), &[]);
+        pass.set_bind_group(2, self.ibl_bind_group.as_ref().unwrap(), &[]);
+        pass.set_bind_group(3, self.shadow_bind_group.as_ref().unwrap(), &[]);
     }
 
     pub fn bind_shadow_resources<'a>(
@@ -174,7 +199,23 @@ impl PbrPipelineWithShadows {
         &mut self,
         device: &Device,
         surface_format: TextureFormat,
+        instanced: bool,
     ) -> wgpu::RenderPipeline {
+        let vertex_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+        let instance_attributes = wgpu::vertex_attr_array![2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4];
+        let instanced_layouts = [
+            wgpu::VertexBufferLayout {
+                array_stride: 24,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &vertex_attributes,
+            },
+            wgpu::VertexBufferLayout {
+                array_stride: 64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &instance_attributes,
+            },
+        ];
+        let tbn_layouts = [TbnVertex::buffer_layout()];
         let shadow_layout = self
             .shadow_bind_group_layout
             .as_ref()
@@ -194,16 +235,7 @@ impl PbrPipelineWithShadows {
         });
 
         // Remap shadows from group(2) to group(3) to allow IBL at group(2) per P4 spec
-        let shadows_source =
-            include_str!("../../shaders/shadows.wgsl").replace("@group(2)", "@group(3)");
-
-        let shader_source = format!(
-            "{}\n{}\n{}\n{}",
-            include_str!("../../shaders/includes/determinism.wgsl"),
-            shadows_source,
-            include_str!("../../shaders/includes/tonemap_common.wgsl"),
-            include_str!("../../shaders/pbr.wgsl")
-        );
+        let shader_source = crate::shader_sources::pbr();
 
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
@@ -218,15 +250,27 @@ impl PbrPipelineWithShadows {
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[TbnVertex::buffer_layout()],
+                    entry_point: if instanced { "vs_instanced" } else { "vs_main" },
+                    buffers: if instanced {
+                        &instanced_layouts
+                    } else {
+                        &tbn_layouts
+                    },
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: "fs_main",
+                    entry_point: if instanced
+                        && matches!(
+                            surface_format,
+                            TextureFormat::Rgba16Float | TextureFormat::Rgba32Float
+                        ) {
+                        "fs_hdr"
+                    } else {
+                        "fs_main"
+                    },
                     targets: &[Some(wgpu::ColorTargetState {
                         format: surface_format,
-                        blend: Some(wgpu::BlendState::REPLACE),
+                        blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),

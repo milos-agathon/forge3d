@@ -1,0 +1,8 @@
+{
+  "width": 512,
+  "height": 512,
+  "spp": 4096,
+  "ssim_region": "shadow_boundary_pixels",
+  "lit_pass_fraction": 0.9678198446258236,
+  "shadow_band_ssim": 0.9625463292693602
+}

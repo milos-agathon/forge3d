@@ -101,7 +101,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let n_lights = arrayLength(&light_samples);
 
     var r: Reservoir;
-    if (n_alias > 0u && n_lights > 0u) {
+    if (n_alias > 0u && n_lights > 0u && restir_gbuffer_pos[idx].w > 0.0) {
         // Reservoir sampling over K candidates using alias table
         let K: u32 = 4u;
         r.w_sum = 0.0;
@@ -115,7 +115,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         r.sample.intensity = 0.0;
         r.sample.light_type = 0u;
         r.sample.params = vec3<f32>(0.0, 0.0, 0.0);
-        // Fetch per-pixel shading context from last frame's G-buffer
+        // Fetch current-frame primary geometry written by intersection
         let P = restir_gbuffer_pos[idx].xyz;
         let N = normalize(restir_gbuffer[idx].xyz);
 

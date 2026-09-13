@@ -82,8 +82,15 @@ fn cs_brdf_lut(@builtin(global_invocation_id) gid: vec3<u32>) {
         let v_dot_h = max(dot(view, half_vector), 0.0);
 
         if n_dot_l > 0.0 {
-            let g = (2.0 * n_dot_h * n_dot_v) / max(v_dot_h, 1e-5);
-            let g_vis = g / max(n_dot_l, 1e-5);
+            // Karis split-sum visibility: importance-sampling h ~ D * n·h gives
+            // the per-sample weight G * v·h / (n·h * n·v), with G the Smith
+            // separable term k = (alpha + 1)^2 / 8 (same convention as
+            // geometry_smith_ggx / pt_shade smith_G), alpha = roughness^2.
+            let alpha = roughness * roughness;
+            let k = pow(alpha + 1.0, 2.0) / 8.0;
+            let g1_v = n_dot_v / (n_dot_v * (1.0 - k) + k);
+            let g1_l = n_dot_l / (n_dot_l * (1.0 - k) + k);
+            let g_vis = g1_v * g1_l * v_dot_h / max(n_dot_h * n_dot_v, 1e-5);
             let fresnel = pow(1.0 - v_dot_h, 5.0);
 
             a += (1.0 - fresnel) * g_vis;

@@ -113,6 +113,7 @@ jobs:
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
               - 'tests/_deltae.py'
+              - 'tests/_ssim.py'
               - 'tests/golden/terrain/**'
               - 'tests/golden/recipes/**'
               - 'tests/golden/adjudication/**'
@@ -565,6 +566,15 @@ jobs:
           # recipe catalog remains exercised by the normal GPU suite.
           FORGE3D_RECIPE_GOLDEN_VARIANT: metal
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression 'tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]' -v --tb=short
+
+      - name: Run AEQUITAS adjudication gate
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_ADJUDICATION_ARTIFACT_DIR: tests/artifacts/adjudication
+        run: |
+          python -m pytest tests/test_adjudication_gate.py -v --tb=short --junitxml=tests/artifacts/adjudication/junit.xml
+          python scripts/assert_junit_zero_skips.py tests/artifacts/adjudication/junit.xml
 
       - name: Record golden lane RAN
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
