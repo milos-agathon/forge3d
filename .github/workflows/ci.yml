@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop, paris-eiffel-day-pt]
+    branches: [main, develop]
   workflow_dispatch:
     inputs:
       update_recipe_certificates:
@@ -112,6 +112,9 @@ jobs:
               - 'tests/test_recipe_goldens.py'
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
+              - 'tests/test_prometheus_dem_reference.py'
+              - 'tests/data/prometheus/**'
+              - 'tools/prometheus_reference.py'
               - 'tests/_deltae.py'
               - 'tests/_ssim.py'
               - 'tests/golden/terrain/**'
@@ -575,6 +578,14 @@ jobs:
         run: |
           python -m pytest tests/test_adjudication_gate.py -v --tb=short --junitxml=tests/artifacts/adjudication/junit.xml
           python scripts/assert_junit_zero_skips.py tests/artifacts/adjudication/junit.xml
+
+      - name: Run PROMETHEUS terrain reference gate
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          python -m pytest tests/test_hybrid_terrain_pt.py tests/test_prometheus_dem_reference.py -v --tb=short --junitxml=tests/artifacts/prometheus/junit.xml
+          python scripts/assert_junit_zero_skips.py tests/artifacts/prometheus/junit.xml
 
       - name: Record golden lane RAN
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'

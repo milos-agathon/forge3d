@@ -19,6 +19,7 @@ use crate::sdf::HybridScene;
 mod layouts;
 mod render;
 mod render_terrain;
+mod sdf_scene;
 mod setup;
 pub mod terrain_heightfield;
 
@@ -132,6 +133,7 @@ pub struct HybridPathTracer {
     pipeline: wgpu::ComputePipeline,
     /// Accumulating terrain-reference entry (`main_terrain`).
     pipeline_terrain: wgpu::ComputePipeline,
+    pipeline_terrain_publish: wgpu::ComputePipeline,
     /// One-shot ReSTIR G-buffer entry (`main_terrain_gbuffer`).
     pipeline_terrain_gbuffer: wgpu::ComputePipeline,
     /// Canonical ReSTIR reuse passes (pt_restir_temporal/spatial.wgsl)

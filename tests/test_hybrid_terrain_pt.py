@@ -287,6 +287,44 @@ def test_converged_variance_under_threshold(reference):
     assert magenta.mean() < 0.01, "magenta miss-marker leaked into terrain mode"
 
 
+def test_amsterdam_dawn_restir_runtime_safety():
+    _require_gpu()
+    dem = _dem()
+    kwargs = _scene_kwargs(dem)
+    kwargs.update(
+        sun_azimuth_deg=1.28047261849929,
+        sun_elevation_deg=0.8056487084063235,
+        certificate=True,
+    )
+    out = hybrid_render_terrain_reference(dem, SIZE, SIZE, CAM, **kwargs)
+    assert out["converged"] is True
+    assert np.isfinite(out["variance"])
+    assert out["variance"] < VARIANCE_THRESHOLD
+    assert out["rgba"].shape == (SIZE, SIZE, 4)
+    assert np.isfinite(out["normal"]).all()
+    assert np.isfinite(out["albedo"]).all()
+    from forge3d import verify
+
+    report = verify.shader_report()["runtime_assert"]
+    if report["feature_enabled"]:
+        assert report["status"] == "passed"
+        terrain_entries = [
+            entry for entry in report["checked_entries"]
+            if entry["module"] == "hybrid_terrain_traversal"
+        ]
+        assert len(terrain_entries) == 1
+        entry = terrain_entries[0]
+        assert entry["contract"] == "runtime-safety:hybrid-terrain"
+        checks = {binding["name"]: binding for binding in entry["checked_bindings"]}
+        assert checks["uniforms.width"]["allowed_max"] == SIZE
+        assert checks["terrain_reservoirs_prev.m"]["observed_max"] <= 512
+        assert checks["terrain_reservoirs_prev.weights"]["observed_max"] <= 65_536
+        assert checks["terrain_reservoirs_prev.target_pdf"]["observed_min"] == 1.0
+        assert checks["terrain_reservoirs_prev.target_pdf"]["observed_max"] == 1.0
+        assert checks["terrain_reservoirs_prev.valid"]["length"] > 0
+        assert all(binding["status"] == "passed" for binding in entry["checked_bindings"])
+
+
 def test_terrain_hits_and_aov_consistency(reference):
     """PT AOVs are internally consistent: unit normals, world-unit depth,
     uniform albedo on hits, NaN depth on sky misses."""
@@ -485,6 +523,7 @@ def test_sun_color_signature_stubs_and_native_order():
         ("seed", ko, 7, "int"),
         ("certificate", ko, False, "bool | str"),
         ("cache", ko, None, "str | None"),
+        ("sdf_scene", ko, None, "object | None"),
     ]
     wrapper_stub = [
         (name, kind, required if default == required else "...", ann)
@@ -493,7 +532,10 @@ def test_sun_color_signature_stubs_and_native_order():
     wrapper_stub[3] = ("camera", po, "...", "dict | None")
     wrapper_stub[4] = ("spacing", ko, "...", "Tuple[float, float]")
     wrapper_stub[6] = ("albedo", ko, "...", "Tuple[float, float, float]")
-    wrapper_stub[-2] = ("certificate", ko, "...", "bool | str | None")
+    # Address `certificate` by name — appending params at the tail (sdf_scene)
+    # would silently retarget a fixed -2 index to `cache`.
+    cert_index = next(i for i, row in enumerate(wrapper_stub) if row[0] == "certificate")
+    wrapper_stub[cert_index] = ("certificate", ko, "...", "bool | str | None")
 
     native_runtime = [
         ("heightmap", po, required, ""),
@@ -518,6 +560,7 @@ def test_sun_color_signature_stubs_and_native_order():
         ("certificate", po, None, ""),
         ("sun_color", po, None, ""),
         ("cache", po, None, ""),
+        ("sdf_scene", po, None, ""),
     ]
     native_stub = [
         (name, po, required if default == required else "...", ann)
@@ -544,6 +587,7 @@ def test_sun_color_signature_stubs_and_native_order():
             ("certificate", po, "...", "bool | str | PathLikeStr | None"),
             ("sun_color", po, "...", "Optional[Sequence[float] | np.ndarray]"),
             ("cache", po, "...", "str | PathLikeStr | None"),
+            ("sdf_scene", po, "...", "Optional[object]"),
         ]
     ]
 
@@ -753,13 +797,17 @@ def test_mixed_scene_mesh_and_terrain():
 
 
 def test_scaling_no_per_spp_blowup():
-    """O(log mips) traversal gate from the Prometheus DoD: per-frame cost
-    scales ~linearly (never superlinearly) from 1 to 8 spp — a linear
-    heightfield march would blow up texture reads per extra sample."""
+    """Wall-time throughput check: per-frame render cost must not blow up
+    superlinearly from 1 to 8 spp or with accumulation depth. This is a
+    timing smoke check, not a measured traversal-work guarantee — the
+    measured per-ray mip-descent counts live in
+    test_traversal_counts_measure_mip_descent."""
     _require_gpu()
     import time
 
-    dem = _dem()
+    from test_prometheus_dem_reference import real_dem
+
+    dem = real_dem()
     kw = _scene_kwargs(dem)
     frames = 32
 
@@ -779,7 +827,7 @@ def test_scaling_no_per_spp_blowup():
         f"ratio {ratio:.1f}x (linear = 8x)"
     )
     assert ratio < 12.0, (
-        f"1->8 spp cost grew superlinearly ({ratio:.1f}x): per-sample texture reads blow up"
+        f"1->8 spp wall time grew superlinearly ({ratio:.1f}x)"
     )
 
     # Accumulation depth stays linear too (no per-frame blowup).
@@ -793,7 +841,250 @@ def test_scaling_no_per_spp_blowup():
     tf8 = run_frames(128)
     fratio = tf8 / max(tf1, 1e-6)
     print(f"TERRAIN PT frame scaling: 16 frames {tf1:.2f}s, 128 frames {tf8:.2f}s, ratio {fratio:.1f}x (linear = 8x)")
-    assert fratio < 16.0, "per-frame cost grew superlinearly with accumulation depth"
+    assert fratio < 16.0, "per-frame wall time grew superlinearly with accumulation depth"
+
+def test_frame_radiance_estimator_and_independent_seeds():
+    _require_gpu()
+    dem = np.zeros((4, 4), dtype=np.float32)
+    env = np.zeros((2, 4, 3), dtype=np.float32)
+    env[:, 2:] = 2.0
+    cam = {"origin": (0.0, 10.0, 0.0), "look_at": (0.0, 0.0, 0.0),
+           "up": (0.0, 0.0, -1.0), "fov_y": 30.0}
+    kwargs = dict(spacing=(100.0, 100.0), albedo=(1.0, 1.0, 1.0),
+                  sun_intensity=0.0, env_map=env, env_intensity=1.0,
+                  spp=1, min_frames=64, max_frames=64, variance_threshold=1e30)
+    outputs = [hybrid_render_terrain_reference(dem, 8, 8, cam, seed=seed, **kwargs)
+               for seed in (7, 19)]
+    for out in outputs:
+        assert out["convergence_metric"] == "frame_mean_estimator_variance"
+        assert np.isfinite(out["depth"]).all()
+        mean = out["radiance"][..., 0].astype(np.float64)
+        expected = mean * (2.0 - mean) / (out["frames"] - 1)
+        np.testing.assert_allclose(out["luminance_variance"], expected, rtol=1e-5, atol=1e-7)
+        assert out["variance"] == float(out["luminance_variance"].max())
+        assert out["variance"] > VARIANCE_THRESHOLD
+        assert out["traversal"]["primary"]["rays"] == 8 * 8
+        # Sun visibility executes even with zero intensity: one sun-shadow
+        # plus one env-IBL visibility query per pixel land in the shadow lane.
+        assert out["traversal"]["shadow"]["rays"] == 2 * 8 * 8
+    assert not np.array_equal(outputs[0]["radiance"], outputs[1]["radiance"])
+
+
+def test_traversal_counts_measure_mip_descent():
+    _require_gpu()
+    cam = {"origin": (3.0, 10.0, 7.0), "look_at": (3.0, 0.0, 7.0),
+           "up": (0.0, 0.0, -1.0), "fov_y": 0.001}
+    records = []
+    for cells in (16, 32, 64, 128):
+        dem = np.zeros((cells + 1, cells + 1), dtype=np.float32)
+        for spp in (1, 8):
+            out = hybrid_render_terrain_reference(
+                dem, 1, 1, cam, spacing=(100.0 / cells, 100.0 / cells),
+                sun_intensity=0.0, env_intensity=0.0, spp=spp,
+                min_frames=2, max_frames=2, variance_threshold=1e30)
+            stats = out["traversal"]
+            primary = stats["primary"]
+            mips = cells.bit_length()
+            assert stats["mip_count"] == mips
+            assert stats["frame_index"] == 1
+            assert primary["rays"] == spp
+            # Popped-node bound for this one-hit-path controlled scene: one
+            # root plus at most four popped children per expanded ancestor.
+            # Pushed-but-discarded siblings legitimately count — not a
+            # measurement error.
+            assert spp * mips <= primary["node_visits"] <= spp * (1 + 4 * (mips - 1))
+            assert primary["minmax_loads"] == spp * mips
+            assert primary["height_loads"] == spp * 8
+            records.append({"cells": cells, "spp": spp, **stats})
+    print("PROMETHEUS_TRAVERSAL=" + json.dumps(records, sort_keys=True))
+
+
+def _sdf_camera_dirs(width=64, height=64):
+    """Pixel-center normalized world ray directions for the SDF test camera
+    (origin (0,30,0) looking straight down): right=+X, up=-Z, forward=-Y."""
+    half = np.tan(np.radians(45.0) / 2.0)
+    ys, xs = np.mgrid[0:height, 0:width]
+    ndc_x = (xs + 0.5) / width * 2.0 - 1.0
+    ndc_y = 1.0 - (ys + 0.5) / height * 2.0
+    dirs = np.stack([ndc_x * half, -np.ones_like(ndc_x), -ndc_y * half], axis=-1)
+    return dirs / np.linalg.norm(dirs, axis=-1, keepdims=True)
+
+
+def test_gpu_sdf_primary_and_mixed_mesh():
+    _require_gpu()
+    from forge3d import _forge3d as native
+
+    builder = native.SdfSceneBuilder()
+    builder.add_sphere((0.0, 8.0, 0.0), 3.0, 1)
+    sdf = builder.build()
+
+    dem = np.zeros((16, 16), dtype=np.float32)
+    cam = {"origin": (0.0, 30.0, 0.0), "look_at": (0.0, 0.0, 0.0),
+           "up": (0.0, 0.0, -1.0), "fov_y": 45.0}
+    kw = dict(spacing=(100.0 / 15, 100.0 / 15), sun_intensity=0.0,
+              env_intensity=0.0, min_frames=2, max_frames=2,
+              variance_threshold=1e30)
+    out = hybrid_render_terrain_reference(dem, 64, 64, cam, sdf_scene=sdf, **kw)
+
+    dirs = _sdf_camera_dirs()
+    # Analytic ray/sphere for r=3 at (0,8,0): oc = origin - center,
+    # t = -b - sqrt(b*b - (|oc|^2 - r^2)) with b = dot(dir, oc).
+    oc = np.array([0.0, 22.0, 0.0])
+    b = (dirs * oc).sum(-1)
+    disc = b * b - (np.dot(oc, oc) - 9.0)
+    interior = disc > 1.0  # safe inner disc; grazing silhouette excluded
+    expected = -b - np.sqrt(np.clip(disc, 0.0, None))
+    assert interior.any()
+    assert np.isfinite(out["depth"]).all()
+    # 0.01 is 10x the shader's 0.001 SDF surface epsilon: the march reports t
+    # within EPS of the true root and normals via central differences at the
+    # same EPS.
+    assert np.abs(out["depth"][interior] - expected[interior]).max() < 0.01
+    n_len = np.linalg.norm(out["normal"][interior], axis=-1)
+    assert np.abs(n_len - 1.0).max() < 1e-2
+    # Rays missing the sphere fall through to the flat DEM plane at y=0.
+    # Exclude the EPS surface shell: disc > -(2*r*EPS + EPS^2) can still hit
+    # the marched r+EPS surface, so only rays missing the expanded sphere
+    # are guaranteed ground hits.
+    miss = disc < -(2.0 * 3.0 * 0.001 + 0.001**2)
+    ground_t = -30.0 / dirs[..., 1]
+    assert np.abs(out["depth"][miss] - ground_t[miss]).max() < 0.01
+
+    # A quad hovering beside the sphere mixes through the same traversal.
+    quad_v = np.array([[6.0, 10.0, -2.0], [10.0, 10.0, -2.0],
+                       [10.0, 10.0, 2.0], [6.0, 10.0, 2.0]], dtype=np.float32)
+    quad_i = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.uint32)
+    mixed = hybrid_render_terrain_reference(
+        dem, 64, 64, cam, sdf_scene=sdf,
+        mesh_vertices=quad_v, mesh_indices=quad_i, **kw)
+    closer = np.isfinite(mixed["depth"]) & (
+        ~np.isfinite(out["depth"]) | (mixed["depth"] < out["depth"] - 1.0))
+    print(f"\nSDF+mesh mixing: {int(closer.sum())} pixels closer via mesh quad")
+    assert closer.any(), "mesh quad produced no closer pixels in the mixed scene"
+    # The quad is disjoint from the sphere disc: those depths are unchanged.
+    assert np.array_equal(mixed["depth"][interior], out["depth"][interior]), (
+        "SDF sphere center depths changed when a disjoint mesh was added"
+    )
+    # Finite terrain hits remain outside the mesh coverage.
+    terrain_rest = np.isfinite(mixed["depth"]) & ~closer & ~interior
+    assert terrain_rest.any()
+
+
+def test_gpu_sdf_shadow_and_csg():
+    _require_gpu()
+    from forge3d import _forge3d as native
+
+    cam = {"origin": (0.0, 30.0, 0.0), "look_at": (0.0, 0.0, 0.0),
+           "up": (0.0, 0.0, -1.0), "fov_y": 45.0}
+    dem = np.zeros((16, 16), dtype=np.float32)
+    kw = dict(spacing=(100.0 / 15, 100.0 / 15), sun_azimuth_deg=0.0,
+              sun_elevation_deg=45.0, sun_intensity=1.0, env_intensity=0.0,
+              min_frames=32, max_frames=32, variance_threshold=1e30)
+
+    builder = native.SdfSceneBuilder()
+    builder.add_sphere((8.0, 8.0, 0.0), 2.0, 1)
+    sphere_scene = builder.build()
+
+    builder = native.SdfSceneBuilder()
+    s = builder.add_sphere((8.0, 8.0, 0.0), 2.0, 1)
+    x = builder.add_box((8.0, 8.0, 0.0), (0.75, 4.0, 4.0), 1)
+    builder.subtract(s, x, 1)
+    csg_scene = builder.build()
+
+    ground = hybrid_render_terrain_reference(dem, 64, 64, cam, **kw)
+    sphere = hybrid_render_terrain_reference(dem, 64, 64, cam,
+                                             sdf_scene=sphere_scene, **kw)
+    csg = hybrid_render_terrain_reference(dem, 64, 64, cam,
+                                          sdf_scene=csg_scene, **kw)
+
+    # Same analytic sphere check as the primary test (r=2 at (8,8,0)).
+    dirs = _sdf_camera_dirs()
+    oc = np.array([-8.0, 22.0, 0.0])
+    b = (dirs * oc).sum(-1)
+    disc = b * b - (np.dot(oc, oc) - 4.0)
+    interior = disc > 1.0
+    expected = -b - np.sqrt(np.clip(disc, 0.0, None))
+    assert interior.any()
+    assert np.abs(sphere["depth"][interior] - expected[interior]).max() < 0.01
+
+    # Ground points under the safe center region: the sphere at (8,8,0)
+    # occludes the az=0, el=45 sun for rays from x0^2+z0^2 < 0.25.
+    ground_pt = np.array([0.0, 30.0, 0.0]) + dirs * ground["depth"][..., None]
+    lum_w = np.array([0.2126, 0.7152, 0.0722])
+    center = np.isfinite(ground["depth"]) & (
+        ground_pt[..., 0] ** 2 + ground_pt[..., 2] ** 2 < 0.25)
+    assert center.any()
+    base_lum = (ground["radiance"][center] * lum_w).sum(-1)
+    sphere_lum = (sphere["radiance"][center] * lum_w).sum(-1)
+    assert (base_lum > 0.0).all()
+    assert (sphere_lum <= 1e-3).all(), (
+        "sphere should fully shadow the center ground strip"
+    )
+
+    # CSG sphere-minus-slab re-opens a band through the occluder.
+    csg_lum = (csg["radiance"] * lum_w).sum(-1)
+    sphere_lum_all = (sphere["radiance"] * lum_w).sum(-1)
+    reopened = (csg_lum > 1e-3) & (sphere_lum_all <= 1e-3)
+    depth_diff = (np.isfinite(csg["depth"]) & np.isfinite(sphere["depth"])
+                  & (np.abs(csg["depth"] - sphere["depth"]) > 0.01))
+    print(
+        f"\nSDF CSG: reopened-light pixels {int(reopened.sum())}, "
+        f"primary depth differs at {int(depth_diff.sum())} pixels, "
+        f"center-region sphere lum {float(sphere_lum.max()):.3e}"
+    )
+    assert reopened.any(), "CSG subtraction did not reopen any shadowed region"
+    assert depth_diff.any(), "CSG subtraction produced no different primary depth"
+
+
+def test_gpu_sdf_scene_validation():
+    """Invalid native SDF scenes are rejected by specialize() before the SDF
+    pipeline executes; a non-SdfScene object is a native type error, never a
+    CPU fallback."""
+    _require_gpu()
+    from forge3d import _forge3d as native
+
+    dem = np.zeros((4, 4), dtype=np.float32)
+    cam = {"origin": (0.0, 10.0, 0.0), "look_at": (0.0, 0.0, 0.0),
+           "up": (0.0, 0.0, -1.0), "fov_y": 30.0}
+    kw = dict(spacing=(100.0, 100.0), sun_intensity=0.0, env_intensity=0.0,
+              min_frames=2, max_frames=2, variance_threshold=1e30)
+
+    def render(scene):
+        return hybrid_render_terrain_reference(
+            dem, 8, 8, cam, sdf_scene=scene, **kw)
+
+    with pytest.raises(Exception, match="empty"):
+        render(native.SdfSceneBuilder().build())
+
+    b = native.SdfSceneBuilder()
+    b.add_sphere((0.0, 8.0, 0.0), -1.0, 1)
+    with pytest.raises(Exception, match="radius"):
+        render(b.build())
+
+    b = native.SdfSceneBuilder()
+    b.add_sphere((0.0, 8.0, 0.0), float("nan"), 1)
+    with pytest.raises(Exception, match="finite"):
+        render(b.build())
+
+    b = native.SdfSceneBuilder()
+    b.add_capsule((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0, 1)
+    with pytest.raises(Exception, match="capsule"):
+        render(b.build())
+
+    b = native.SdfSceneBuilder()
+    s = b.add_sphere((0.0, 8.0, 0.0), 1.0, 1)
+    b.union(99, s, 1)  # forward/invalid child reference
+    with pytest.raises(Exception, match="child"):
+        render(b.build())
+
+    b = native.SdfSceneBuilder()
+    b.add_plane((0.0, 1.0, 0.0), 0.0, 1)
+    with pytest.raises(Exception, match="bounded"):
+        render(b.build())
+
+    with pytest.raises(TypeError):
+        render(object())
+
 
 # ---------------------------------------------------------------------------
 # Golden: committed converged reference, drift-checked like the other goldens

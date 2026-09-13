@@ -85,4 +85,5 @@ def hybrid_render_terrain_reference(
     seed: int = ...,
     certificate: bool | str | None = ...,
     cache: str | None = ...,
+    sdf_scene: object | None = ...,
 ) -> Dict[str, object]: ...

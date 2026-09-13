@@ -1,9 +1,10 @@
 // src/shaders/hybrid_traversal.wgsl
 // Hybrid traversal combining mesh BVH traversal with legacy hooks for SDF.
 
-// GPU hybrid traversal currently focuses on mesh geometry; SDF support is CPU-only.
-
-// Hybrid traversal configuration (GPU path currently supports mesh traversal only)
+// GPU hybrid traversal covers mesh BVH, terrain heightfield, and SDF scenes.
+// An SDF scene is compiled to constant WGSL by hybrid_compute/sdf_scene.rs and
+// specialized into the declarations below before pipeline creation; the
+// assembled default is an empty, disabled SDF.
 
 // Hybrid scene data structures
 struct HybridUniforms {
@@ -21,7 +22,7 @@ struct HybridHitResult {
     point: vec3f,
     normal: vec3f,
     material_id: u32,
-    hit_type: u32, // 0 = mesh, retained for compatibility
+    hit_type: u32, // 0 = mesh, 1 = SDF, 3 = terrain
     hit: u32, // 0 = false, 1 = true
     _pad: vec2u,
 }
@@ -32,6 +33,32 @@ struct Ray {
     direction: vec3f,
     tmax: f32,
 }
+
+// --- Compiled-constant SDF scene --------------------------------------------
+// The default assembled kernel ships an empty SDF: HYBRID_SDF_ENABLED=false
+// and hybrid_sdf_evaluate always misses. hybrid_compute/sdf_scene.rs replaces
+// these exact declarations (and only these) with validated scene constants
+// before pipeline creation.
+const HYBRID_SDF_ENABLED: bool = false;
+const HYBRID_SDF_MIN: vec3<f32> = vec3<f32>(0.0);
+const HYBRID_SDF_MAX: vec3<f32> = vec3<f32>(0.0);
+fn hybrid_sdf_evaluate(point: vec3<f32>) -> CsgResult {
+    return CsgResult(1e30, 0u);
+}
+// Set when the SDF march produces a non-finite value, stagnates, or exhausts
+// its step budget inside the slab. Surfaced to the host through
+// TerrainStatistics.trace_error (and terrain_gbuffer_pos.w in the G-buffer
+// pipeline, which cannot reach binding 4); never a silent miss.
+var<private> hybrid_sdf_error: u32;
+fn hybrid_sdf_finite(value: f32) -> bool {
+    return (bitcast<u32>(value) & 0x7f800000u) != 0x7f800000u;
+}
+// March epsilon inherited from raymarch_sdf in src/sdf/hybrid.rs. The step
+// budget is geometric per ray, not a fixed count: a non-hit advances by
+// |d| > EPS, and for finite round-to-nearest f32 addition that makes
+// progress the actual increment is at least half the requested increment,
+// so 2 * clipped_length / EPS + 2 bounds the iterations.
+const SDF_MARCH_EPS: f32 = 0.001;
 
 // BVH structures (matching existing pt_kernel.wgsl)
 struct BvhNode {
@@ -171,6 +198,112 @@ fn intersect_mesh(ray: Ray) -> HybridHitResult {
     return result;
 }
 
+// SDF raymarch against the compiled-constant scene. Ported from
+// raymarch_sdf in src/sdf/hybrid.rs: MAX_STEPS=128, surface epsilon 0.001,
+// abs-distance stepping, central-difference normal at the same epsilon.
+// Unlike the CPU version the march is clipped to the validated scene bound
+// [HYBRID_SDF_MIN, HYBRID_SDF_MAX] instead of a fixed 100-unit cap. Every
+// numerical failure sets hybrid_sdf_error so the host can reject the frame;
+// a true miss is reported honestly.
+fn intersect_sdf(ray: Ray) -> HybridHitResult {
+    var result: HybridHitResult;
+    result.hit = 0u;
+    result.t = ray.tmax;
+    result.hit_type = 1u;
+    if (!HYBRID_SDF_ENABLED) {
+        return result;
+    }
+
+    // Slab clip of [tmin, tmax] against the scene bound. A zero direction
+    // component means the ray is parallel to that slab: the origin must
+    // already lie inside the axis extent or there is no interval at all.
+    var t_enter = ray.tmin;
+    var t_exit = ray.tmax;
+    for (var axis = 0u; axis < 3u; axis = axis + 1u) {
+        let d = ray.direction[axis];
+        let o = ray.origin[axis];
+        if (d == 0.0) {
+            if (o < HYBRID_SDF_MIN[axis] || o > HYBRID_SDF_MAX[axis]) {
+                return result;
+            }
+        } else {
+            let t0 = (HYBRID_SDF_MIN[axis] - o) / d;
+            let t1 = (HYBRID_SDF_MAX[axis] - o) / d;
+            t_enter = max(t_enter, min(t0, t1));
+            t_exit = min(t_exit, max(t0, t1));
+        }
+    }
+    if (t_exit < t_enter) {
+        return result;
+    }
+
+    // Geometric iteration bound for the clipped interval (see SDF_MARCH_EPS
+    // comment). The u32 representability check is machine counter capacity,
+    // not a chosen workload budget.
+    let step_bound = ceil((t_exit - t_enter) / (0.5 * SDF_MARCH_EPS)) + 2.0;
+    if (!hybrid_sdf_finite(step_bound) || step_bound < 2.0 || step_bound >= 4294967296.0) {
+        hybrid_sdf_error = 1u;
+        return result;
+    }
+    let max_steps = u32(step_bound);
+
+    var t = t_enter;
+    for (var step = 0u; step < max_steps; step = step + 1u) {
+        if (t > t_exit) {
+            return result;
+        }
+        let point = ray.origin + ray.direction * t;
+        if (!(hybrid_sdf_finite(point.x) && hybrid_sdf_finite(point.y)
+            && hybrid_sdf_finite(point.z))) {
+            hybrid_sdf_error = 1u;
+            return result;
+        }
+        let d = hybrid_sdf_evaluate(point);
+        if (!hybrid_sdf_finite(d.distance)) {
+            hybrid_sdf_error = 1u;
+            return result;
+        }
+        if (abs(d.distance) <= SDF_MARCH_EPS) {
+            // Central-difference gradient at the march epsilon.
+            let gx = hybrid_sdf_evaluate(point + vec3f(SDF_MARCH_EPS, 0.0, 0.0)).distance
+                - hybrid_sdf_evaluate(point - vec3f(SDF_MARCH_EPS, 0.0, 0.0)).distance;
+            let gy = hybrid_sdf_evaluate(point + vec3f(0.0, SDF_MARCH_EPS, 0.0)).distance
+                - hybrid_sdf_evaluate(point - vec3f(0.0, SDF_MARCH_EPS, 0.0)).distance;
+            let gz = hybrid_sdf_evaluate(point + vec3f(0.0, 0.0, SDF_MARCH_EPS)).distance
+                - hybrid_sdf_evaluate(point - vec3f(0.0, 0.0, SDF_MARCH_EPS)).distance;
+            if (!(hybrid_sdf_finite(gx) && hybrid_sdf_finite(gy)
+                && hybrid_sdf_finite(gz))) {
+                hybrid_sdf_error = 1u;
+                return result;
+            }
+            let grad = vec3f(gx, gy, gz);
+            let glen = length(grad);
+            if (!hybrid_sdf_finite(glen) || glen <= 0.0) {
+                hybrid_sdf_error = 1u;
+                return result;
+            }
+            result.hit = 1u;
+            result.t = t;
+            result.point = point;
+            result.normal = grad / glen;
+            result.material_id = d.material_id;
+            return result;
+        }
+        let next_t = t + abs(d.distance);
+        if (!hybrid_sdf_finite(next_t) || next_t <= t) {
+            hybrid_sdf_error = 1u;
+            return result;
+        }
+        if (next_t > t_exit) {
+            return result;
+        }
+        t = next_t;
+    }
+    // Step budget exhausted while still inside the slab.
+    hybrid_sdf_error = 1u;
+    return result;
+}
+
 // Main hybrid intersection function
 fn intersect_hybrid(ray: Ray) -> HybridHitResult {
     var best_hit: HybridHitResult;
@@ -182,6 +315,17 @@ fn intersect_hybrid(ray: Ray) -> HybridHitResult {
         let mesh_hit = intersect_mesh(ray);
         if (mesh_hit.hit != 0u && mesh_hit.t < best_hit.t) {
             best_hit = mesh_hit;
+        }
+    }
+
+    // Compiled-constant SDF scene (modes 0 and 1). Shares the one
+    // intersect_sdf implementation with the shadow path below.
+    if (hybrid_uniforms.traversal_mode == 0u || hybrid_uniforms.traversal_mode == 1u) {
+        var sray = ray;
+        sray.tmax = best_hit.t;
+        let sdf_hit = intersect_sdf(sray);
+        if (sdf_hit.hit != 0u && sdf_hit.t < best_hit.t) {
+            best_hit = sdf_hit;
         }
     }
 
@@ -216,6 +360,19 @@ fn intersect_hybrid_optimized(ray: Ray, early_exit_distance: f32) -> HybridHitRe
         }
     }
 
+    // Same compiled SDF scene; early-out like the mesh lane above.
+    if (hybrid_uniforms.traversal_mode == 0u || hybrid_uniforms.traversal_mode == 1u) {
+        var sray = ray;
+        sray.tmax = best_hit.t;
+        let sdf_hit = intersect_sdf(sray);
+        if (sdf_hit.hit != 0u && sdf_hit.t < early_exit_distance) {
+            return sdf_hit;
+        }
+        if (sdf_hit.hit != 0u && sdf_hit.t < best_hit.t) {
+            best_hit = sdf_hit;
+        }
+    }
+
     // Terrain heightfield shadow/any-hit path shares the min-max descent.
     if ((hybrid_uniforms.traversal_mode == 0u || hybrid_uniforms.traversal_mode == 3u)
         && terrain_enabled()) {
@@ -240,9 +397,14 @@ fn get_surface_properties(hit: HybridHitResult) -> vec3f {
     return vec3f(0.7, 0.7, 0.8);
 }
 
-// Shadow ray testing for both SDF and mesh geometry
+// Shadow ray testing for both SDF and mesh geometry. The terrain descent
+// counters (hybrid_terrain_traversal.wgsl) attribute any trace issued from
+// here to the shadow lane; private state is per-invocation, so the flag is
+// always reset before return.
 fn intersect_shadow_ray(ray: Ray, max_distance: f32) -> bool {
+    terrain_is_shadow = true;
     let hit = intersect_hybrid_optimized(ray, 0.01);
+    terrain_is_shadow = false;
     return hit.hit != 0u && hit.t < max_distance;
 }
 

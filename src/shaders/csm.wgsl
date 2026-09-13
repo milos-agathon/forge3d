@@ -105,8 +105,12 @@ fn calculate_depth_bias(world_normal: vec3<f32>, cascade_idx: u32) -> f32 {
 fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) -> f32 {
     // Perspective divide and convert to texture coordinates [0,1]
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let scaled = proj_coords * 0.5;
-    let shadow_coords = scaled + vec3<f32>(0.5);
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
 
     // Check bounds - return unshadowed if outside
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
@@ -133,8 +137,12 @@ fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) 
 // one tap's value, never which taps are summed.
 fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) -> f32 {
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let scaled = proj_coords * 0.5;
-    let shadow_coords = scaled + vec3<f32>(0.5);
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
 
     // Bounds check
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
@@ -179,8 +187,12 @@ fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) ->
 // accumulator; out-of-bounds taps contribute 1.0 so the tap set is invariant.
 fn sample_shadow_poisson(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) -> f32 {
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let scaled = proj_coords * 0.5;
-    let shadow_coords = scaled + vec3<f32>(0.5);
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
 
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
@@ -225,8 +237,12 @@ fn sample_shadow_poisson(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32
 // EVSM (Exponential Variance Shadow Maps) implementation
 fn sample_shadow_evsm(light_space_pos: vec4<f32>, cascade_idx: u32) -> f32 {
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let scaled = proj_coords * 0.5;
-    let shadow_coords = scaled + vec3<f32>(0.5);
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        proj_coords.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
 
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||

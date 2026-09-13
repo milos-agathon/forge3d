@@ -646,3 +646,46 @@ fn inspect_deterministic_kernel_ir_shape() {
     }
     panic!("{}", summaries.join("\n"));
 }
+
+#[test]
+fn nested_array_field_writes_preserve_types_and_reject_unsafe_values() {
+    let parsed = parse_contract(
+        r#"
+[module]
+path = "tests/data/shader_proofs/fixture.wgsl"
+owner = "test"
+expiry = "2027-01-17"
+[[entry]]
+name = "main"
+proof_status = "proven"
+inputs = ["value:gid:0:1", "buffer:stats:0:1:2"]
+outputs = ["stats:0:1"]
+"#,
+    )
+    .unwrap();
+    for index in ["0u", "gid.x"] {
+        let source = format!(
+            r#"
+struct Stats {{ mean: f32, error: u32, }}
+@group(0) @binding(0) var<storage, read_write> stats: array<Stats>;
+@compute @workgroup_size(1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    if (gid.x >= arrayLength(&stats)) {{ return; }}
+    stats[{index}].error = 1u;
+}}
+"#
+        );
+        let safe = prove_wgsl(&source, "main", &parsed.entries[0]).unwrap();
+        assert!(safe.alarms.is_empty(), "{index}: {:?}", safe.alarms);
+        for replacement in ["error = 2u", "mean = bitcast<f32>(0x7fc00000u)"] {
+            let mutant = source.replace("error = 1u", replacement);
+            assert_ne!(mutant, source);
+            let unsafe_proof = prove_wgsl(&mutant, "main", &parsed.entries[0]).unwrap();
+            assert!(
+                unsafe_proof.alarms.iter().any(|a| a.kind == "output_range"),
+                "{index} / {replacement}: {:?}",
+                unsafe_proof.alarms
+            );
+        }
+    }
+}

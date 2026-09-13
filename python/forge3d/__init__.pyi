@@ -1444,6 +1444,7 @@ def hybrid_render_terrain_reference(
     certificate: bool | str | PathLikeStr | None = ...,
     sun_color: Optional[Sequence[float] | np.ndarray] = ...,
     cache: str | PathLikeStr | None = ...,
+    sdf_scene: Optional[object] = ...,
 ) -> Dict[str, Any]: ...
 
 def render_offscreen_rgba(

@@ -2,6 +2,7 @@ use glam::{DVec3, Vec3};
 
 use super::command_preflight_helpers::{
     distinct_value, point_repack_failpoint_blocks_publish, validate_points,
+    validate_points_with_bound,
 };
 use crate::viewer::camera_controller::CoordRole;
 use crate::viewer::pointcloud::preflight_laz_bounds;
@@ -172,9 +173,15 @@ impl Viewer {
 
         if terrain_present {
             let target = terrain_focus.unwrap();
-            let radius = terrain_span.unwrap_or(100.0).max(100.0) * 1.5;
+            let span = terrain_span.unwrap_or(100.0).max(100.0);
+            let radius = span * 1.5;
             let offset = DVec3::new(radius * 0.5, radius * 0.707, radius * 0.5);
-            validate_points(&anchor, CoordRole::Eye, [target + offset])?;
+            // The synthetic default terrain eye sits at ~1.5x the terrain span
+            // from the rebased anchor — a legitimate *relative* camera
+            // distance, not an unsafe absolute residual. Allow it up to the
+            // span scale while keeping the M-06 absolute floor for the target.
+            let eye_bound = radius.max(crate::viewer::camera_controller::VIEWER_RENDER_FRAME_MAX_COORD);
+            validate_points_with_bound(&anchor, CoordRole::Eye, eye_bound, [target + offset])?;
             validate_points(&anchor, CoordRole::Target, [target])?;
         } else if point_present {
             let center = point_center.unwrap();

@@ -85,6 +85,15 @@ datasets = [
     "pooch>=1.6",
 ]
 
+# CDP browser harness for the wind-dashboard startup regressions
+# (tests/_wind_dashboard.py). Deliberately NOT folded into `all`: it is a test
+# driver, not a feature extra, and nothing a user installs needs it. Without
+# it those tests skip, which protects nothing — CI lanes that are meant to
+# cover the dashboard shell must install this group.
+browsertests = [
+    "websocket-client>=1.5",
+]
+
 # All optional dependencies combined
 all = [
     "rasterio>=1.3.0",

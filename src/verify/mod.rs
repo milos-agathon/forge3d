@@ -111,6 +111,13 @@ const PROVEN_TARGETS: &[Target] = &[
         kind: "entry",
     },
     Target {
+        module: "hybrid_terrain_traversal",
+        path: "src/shaders/hybrid_terrain_traversal.wgsl",
+        entry: "main_terrain_publish",
+        contract: "shaders/contracts/hybrid_terrain_traversal.toml",
+        kind: "entry",
+    },
+    Target {
         module: "gi_composite",
         path: "src/shaders/gi/composite.wgsl",
         entry: "cs_gi_composite",
@@ -968,14 +975,19 @@ mod tests {
     fn hybrid_body_mutation_invalidates_summaries() {
         let target = PROVEN_TARGETS
             .iter()
-            .find(|target| target.module == "hybrid_terrain_traversal")
+            .find(|target| {
+                target.module == "hybrid_terrain_traversal" && target.entry == "main_terrain"
+            })
             .copied()
             .unwrap();
-        assert_eq!(verify_target(target, None).unwrap().proof_status, "proven");
-        let source = crate::shader_sources::hybrid_kernel().replace(
-            "return w_sum / (f32(m) * target_pdf);",
-            "return w_sum / (target_pdf - target_pdf);",
+        let baseline = verify_target(target, None).unwrap();
+        assert_eq!(baseline.proof_status, "proven", "{:#?}", baseline.alarms);
+        let original = crate::shader_sources::hybrid_kernel();
+        let source = original.replace(
+            "w_sum / (f32(m) * target_pdf)",
+            "w_sum / (target_pdf - target_pdf)",
         );
+        assert_ne!(source, original);
         let mutant = verify_source(
             target.module,
             target.path,
@@ -984,6 +996,64 @@ mod tests {
             target.contract,
         );
         assert_eq!(mutant.proof_status, "unproven");
+        assert!(mutant
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "possible_nan_or_inf"));
+    }
+
+    #[test]
+    fn terrain_publish_proves_unit_and_zero_targets_and_rejects_missing_m_guard() {
+        let target = PROVEN_TARGETS
+            .iter()
+            .find(|target| target.entry == "main_terrain_publish")
+            .copied()
+            .unwrap();
+        let baseline = verify_target(target, None).unwrap();
+        assert_eq!(baseline.proof_status, "proven", "{:#?}", baseline.alarms);
+        assert!(baseline.parsed_by_naga);
+        assert!(baseline
+            .claims
+            .iter()
+            .any(|claim| claim == "declared_output_ranges"));
+
+        let source = load_target_source(target).unwrap();
+        let module = naga::front::wgsl::parse_str(&source).unwrap();
+        let parsed = contract::parse_contract(embedded_contract(target.contract).unwrap()).unwrap();
+        let mut empty_target = parsed
+            .entries
+            .into_iter()
+            .find(|entry| entry.name == target.entry)
+            .unwrap();
+        let pdf = empty_target
+            .inputs
+            .iter_mut()
+            .find_map(|input| match input {
+                contract::InputContract::BufferField(range)
+                    if range.name == "terrain_reservoirs_prev[].target_pdf" =>
+                {
+                    Some(range)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((pdf.min, pdf.max), (1.0, 1.0));
+        pdf.min = 0.0;
+        pdf.max = 0.0;
+        contract::validate_contract_semantics(&module, target.entry, &empty_target).unwrap();
+        let empty_proof = ir::prove_wgsl(&source, target.entry, &empty_target).unwrap();
+        assert!(empty_proof.alarms.is_empty(), "{:#?}", empty_proof.alarms);
+
+        let mutant_source = source.replace("if (r.m > TERRAIN_RESTIR_M_CAP) {", "if (r.m >= 0u) {");
+        assert_ne!(source, mutant_source);
+        let mutant = verify_source(
+            target.module,
+            target.path,
+            target.entry,
+            &mutant_source,
+            target.contract,
+        );
+        assert_eq!(mutant.proof_status, "unproven", "{:#?}", mutant.alarms);
         assert!(mutant
             .alarms
             .iter()
