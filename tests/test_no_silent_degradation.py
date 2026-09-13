@@ -196,7 +196,14 @@ def test_c_every_feature_referenced_and_ci_list_curated():
     # Clippy covers the portable surface plus extension-module without PROJ's
     # system dependency.
     alias_text = (ROOT / ".cargo" / "config.toml").read_text(encoding="utf-8")
-    m = re.search(r'"([A-Za-z0-9_\-]*extension-module[A-Za-z0-9_,\-]*)"', alias_text)
+    entry = re.search(
+        r'forge3d-clippy\s*=\s*(\[[^\]]*\]|"[^"\n]*")', alias_text
+    )
+    assert entry, "could not locate forge3d-clippy alias in .cargo/config.toml"
+    m = re.search(
+        r"--features[,\s\"\n]*([A-Za-z0-9_\-,]*extension-module[A-Za-z0-9_\-,]*)",
+        entry.group(1),
+    )
     assert m, "could not locate forge3d-clippy feature list in .cargo/config.toml"
     alias_features = set(m.group(1).split(","))
     assert alias_features == PORTABLE_CI_CARGO_FEATURES | {"extension-module"}, (

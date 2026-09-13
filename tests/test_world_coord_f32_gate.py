@@ -31,15 +31,14 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-# Re-frozen for the AEQUITAS raster-twin rewrite: the CPU supersampler
-# (render_raster_reference_incremental) and base_uniforms were replaced by the
-# instanced-PBR production path plus the analytic ground-GI bake. The site
-# delta is exactly the recorded transition below (+22 in bake_plane_indirect
-# and render, -7 in the removed functions); every added site is an
-# integer-index-to-f32 normalization cast of the same class already sanctioned
-# in this file.
-EXPECTED_CONVERSION_COUNT = 1345
-EXPECTED_CONVERSION_SHA256 = "5ba005a550bdbb994b5a8dbfb36fd691d08bd05cecce6bd58919ed59ac5596c2"
+# Re-frozen at the paris-eiffel-day-pt tip (9a0a7d0f) after merging it into
+# this branch: the merged prometheus line carries the +46 sites over the
+# AEQUITAS-era 1345 freeze, and this branch adds zero conversion sites on top
+# -- inventory and digest are identical at the merge base tip and HEAD. The
+# earlier AEQUITAS raster-twin transition (+22/-7 in
+# src/offscreen/adjudication_raster.rs) remains recorded below.
+EXPECTED_CONVERSION_COUNT = 1391
+EXPECTED_CONVERSION_SHA256 = "ae37f4b7a2fe587dab04f13a6a45dc53c058874c76d87e5a1f3bcc0cea8e29cc"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
@@ -71,7 +70,8 @@ REVIEWED_INVENTORY_TRANSITION = {
 REVIEWED_AEQUITAS_RASTER_TRANSITION = {
     "base_count": 1327,
     "base_digest": "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817",
-    "result_digest": EXPECTED_CONVERSION_SHA256,
+    "result_count": 1345,
+    "result_digest": "5ba005a550bdbb994b5a8dbfb36fd691d08bd05cecce6bd58919ed59ac5596c2",
     "path": "src/offscreen/adjudication_raster.rs",
     "removed": (
         ("base_uniforms", 1, "cam_origin_fovy: [origin.x, origin.y, origin.z, desc.fov_y_rad()], cam_right_aspect: [right.x, right.y, right.z, aspect], cam_up_w: [up.x, up.y, up.z, rw as f32], cam_forward_h: [forward.x, forward.y, forward.z, rh as f32], sun_dir_intensity: [sun.x, sun.y, sun.z, desc.sun_intensity], sun_color_pad: [desc.sun_color[0], desc.sun_color[1], desc.sun_color[2], 0.0], environment: { let e = desc.environment_raw()"),
@@ -272,14 +272,19 @@ def test_reviewed_aequitas_raster_transition_is_exact():
     sites = conversion_inventory()
     transition = REVIEWED_AEQUITAS_RASTER_TRANSITION
     assert len(sites) == EXPECTED_CONVERSION_COUNT
-    assert _inventory_digest(sites) == transition["result_digest"]
+    assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
     path = transition["path"]
     for function, ordinal, statement in transition["removed"]:
         assert (path, function, "as_f32", ordinal, statement) not in sites
     for function, ordinal, statement in transition["added"]:
         assert (path, function, "as_f32", ordinal, statement) in sites
+    # The transition bridges its own base/result counts; the current
+    # EXPECTED_CONVERSION_COUNT additionally includes the +46 as_f32 sites the
+    # paris-eiffel-day-pt merge carries in
+    # src/path_tracing/hybrid_compute/render_terrain.rs (same sanctioned
+    # integer-to-f32 class; identical inventory at the base tip and HEAD).
     assert len(transition["added"]) - len(transition["removed"]) == (
-        EXPECTED_CONVERSION_COUNT - transition["base_count"]
+        transition["result_count"] - transition["base_count"]
     )
 
 
