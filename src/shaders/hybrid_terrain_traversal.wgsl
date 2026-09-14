@@ -90,6 +90,26 @@ const TERRAIN_PI: f32 = 3.14159265358979323846;
 // ReSTIR history cap: prev reservoirs are rescaled to at most this M before
 // each temporal merge so w_sum/M cannot blow up across hundreds of frames.
 const TERRAIN_RESTIR_M_CAP: u32 = 512u;
+// Upper bound on the finalized reservoir weight W.
+//
+// W = w_sum / (M * target_pdf), and target_pdf is proportional to N.L, so a
+// GRAZING surface drives target_pdf to 0+ while w_sum still carries the value
+// accumulated when the sample was bright. A fresh candidate always finalizes to
+// exactly W = 1 (one directional light => stream weight w = target_pdf), so the
+// blow-up only ever arrives down the TEMPORAL REUSE path.
+//
+// Measured: a Paris plate containing the Eiffel Tower - a near-vertical lattice
+// under a 60 deg sun - produced W = 4.4e6, far outside the
+// terrain_reservoirs_prev.weights buffer contract of [0, 65536], and the render
+// aborted. Reliefs 3.0/4.0/6.0 tripped it while 5.0 happened not to, i.e. it
+// presents as erratic rather than as a clean threshold.
+//
+// Clamping here is SHADING-NEUTRAL: the only two consumers of .weight are a
+// `> 0.0` validity test and `clamp(prev_r.weight, 0.0, TERRAIN_RESTIR_W_CAP)`
+// at the shading site, so no value above the cap could ever have reached the
+// image. It only stops an unbounded number being written to a buffer whose
+// declared range forbids it.
+const TERRAIN_RESTIR_W_CAP: f32 = 4.0;
 
 // --- Measured traversal counters -----------------------------------------
 // Private (per-invocation, zero-initialized per WGSL) counters accumulated
@@ -115,7 +135,7 @@ fn terrain_count(delta: vec4<u32>) {
 }
 
 fn terrain_reservoir_weight(w_sum: f32, m: u32, target_pdf: f32) -> f32 {
-    return w_sum / (f32(m) * target_pdf);
+    return clamp(w_sum / (f32(m) * target_pdf), 0.0, TERRAIN_RESTIR_W_CAP);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -591,7 +611,7 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         var reuse_w = 1.0;
         if (prev_valid) {
             sun_dir = normalize(prev_r.sample.direction);
-            reuse_w = clamp(prev_r.weight, 0.0, 4.0);
+            reuse_w = clamp(prev_r.weight, 0.0, TERRAIN_RESTIR_W_CAP);
         }
         var sun = vec3<f32>(0.0);
         let nd = max(dot(n, sun_dir), 0.0);
