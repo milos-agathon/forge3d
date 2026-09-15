@@ -154,6 +154,36 @@ def test_terrain_renderer_exposes_height_streaming_api():
 
 
 @requires_terrain
+def test_legacy_cog_streaming_stays_flat_when_globe_support_is_compiled(tmp_path):
+    assert hasattr(native.TerrainRenderer, "enable_height_streaming_cog_globe"), (
+        "this compatibility test must run in the enable-globe build"
+    )
+    dataset = native.CogDataset(
+        _write_quadrant_cog(tmp_path / "legacy-flat-cog.tif").as_uri(),
+        cache_size_mb=1,
+    )
+    renderer = native.TerrainRenderer(native.Session(window=False))
+    renderer.enable_height_streaming_cog(
+        dataset,
+        terrain_extent_m=10_000.0,
+        ring_count=1,
+        ring_resolution=8,
+        lod=1,
+        tile_resolution=8,
+        max_in_flight=2,
+        pool_size=1,
+        coarse_prefill=False,
+        max_resident_bytes=1024 * 1024,
+    )
+
+    stats = renderer.stream_height_tiles((250.0, 500.0, -125.0), max_uploads=0)
+    assert stats["effective_target_lod"] == 1
+    assert stats["center"] == pytest.approx((312.5, -156.25))
+    with pytest.raises(RuntimeError, match="flat height streaming requires"):
+        renderer.stream_height_tiles_globe((6_372_000.0, 0.0, 0.0), max_uploads=0)
+
+
+@requires_terrain
 class TestClipmapGeometryProvider:
     def test_clipmap_render_uses_gpu_lod_indirect_draws(self, terrain_ibl):
         renderer = f3d.TerrainRenderer(f3d.Session(window=False))
@@ -401,7 +431,7 @@ class TestHeightStreamingFlyThrough:
             enabled=True, adaptive=False, batch_size=1
         )
 
-        renderer.enable_height_streaming_cog(
+        renderer.enable_height_streaming_cog_globe(
             dataset,
             terrain_extent_m=1_200_000.0,
             ring_count=1,

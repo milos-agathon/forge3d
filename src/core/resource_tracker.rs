@@ -237,6 +237,7 @@ struct LedgerCapture {
     current_device_local: u64,
     peak_host_visible: u64,
     peak_device_local: u64,
+    peak_total: u64,
     current_by_label: BTreeMap<String, u64>,
     peak_by_label: BTreeMap<String, u64>,
 }
@@ -250,6 +251,7 @@ impl LedgerCapture {
             current_device_local: 0,
             peak_host_visible: 0,
             peak_device_local: 0,
+            peak_total: 0,
             current_by_label: BTreeMap::new(),
             peak_by_label: BTreeMap::new(),
         };
@@ -279,6 +281,10 @@ impl LedgerCapture {
             self.current_device_local += entry.bytes;
             self.peak_device_local = self.peak_device_local.max(self.current_device_local);
         }
+        self.peak_total = self.peak_total.max(
+            self.current_host_visible
+                .saturating_add(self.current_device_local),
+        );
     }
 
     fn remove(&mut self, id: u64, entry: &LedgerEntry) {
@@ -302,6 +308,7 @@ impl LedgerCapture {
         LedgerReport {
             peak_host_visible_bytes: self.peak_host_visible,
             peak_device_local_bytes: self.peak_device_local,
+            peak_total_bytes: self.peak_total,
             current_host_visible_bytes: self.current_host_visible,
             current_device_local_bytes: self.current_device_local,
             by_label: self.peak_by_label,
@@ -321,7 +328,9 @@ pub struct AllocationLedger {
     current_device_local: AtomicU64,
     peak_host_visible: AtomicU64,
     peak_device_local: AtomicU64,
+    peak_total: AtomicU64,
     capture: Mutex<Option<LedgerCapture>>,
+    owner_captures: Mutex<HashMap<u64, LedgerCapture>>,
     owner_groups: Mutex<HashMap<(u64, String), OwnerGroupState>>,
 }
 
@@ -334,7 +343,9 @@ impl AllocationLedger {
             current_device_local: AtomicU64::new(0),
             peak_host_visible: AtomicU64::new(0),
             peak_device_local: AtomicU64::new(0),
+            peak_total: AtomicU64::new(0),
             capture: Mutex::new(None),
+            owner_captures: Mutex::new(HashMap::new()),
             owner_groups: Mutex::new(HashMap::new()),
         }
     }
@@ -387,6 +398,12 @@ impl AllocationLedger {
                 + bytes;
             self.peak_device_local.fetch_max(cur, Ordering::Relaxed);
         }
+        self.peak_total.fetch_max(
+            self.current_host_visible
+                .load(Ordering::Relaxed)
+                .saturating_add(self.current_device_local.load(Ordering::Relaxed)),
+            Ordering::Relaxed,
+        );
         if let Some(capture) = self
             .capture
             .lock()
@@ -395,7 +412,41 @@ impl AllocationLedger {
         {
             capture.add(id, &entry);
         }
+        if let Some(owner_id) = entry.owner_id {
+            if let Some(capture) = self
+                .owner_captures
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get_mut(&owner_id)
+            {
+                capture.add(id, &entry);
+            }
+        }
         id
+    }
+
+    fn begin_owner_capture(&self, owner_id: u64) {
+        let entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        self.owner_captures
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(owner_id, LedgerCapture::new(&entries, &[owner_id]));
+    }
+
+    fn finish_owner_capture(&self, owner_id: u64) -> LedgerReport {
+        self.owner_captures
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&owner_id)
+            .map(LedgerCapture::report)
+            .unwrap_or_default()
+    }
+
+    fn abort_owner_capture(&self, owner_id: u64) {
+        self.owner_captures
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&owner_id);
     }
 
     fn begin_capture(&self, owner_ids: &[u64]) {
@@ -481,6 +532,16 @@ impl AllocationLedger {
             {
                 capture.remove(id, &entry);
             }
+            if let Some(owner_id) = entry.owner_id {
+                if let Some(capture) = self
+                    .owner_captures
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .get_mut(&owner_id)
+                {
+                    capture.remove(id, &entry);
+                }
+            }
         }
     }
 
@@ -514,6 +575,7 @@ impl AllocationLedger {
         LedgerReport {
             peak_host_visible_bytes: self.peak_host_visible.load(Ordering::Relaxed),
             peak_device_local_bytes: self.peak_device_local.load(Ordering::Relaxed),
+            peak_total_bytes: self.peak_total.load(Ordering::Relaxed),
             current_host_visible_bytes,
             current_device_local_bytes,
             by_label,
@@ -540,6 +602,7 @@ impl AllocationLedger {
 pub struct LedgerReport {
     pub peak_host_visible_bytes: u64,
     pub peak_device_local_bytes: u64,
+    pub peak_total_bytes: u64,
     pub current_host_visible_bytes: u64,
     pub current_device_local_bytes: u64,
     /// Sum of live allocation bytes per label.
@@ -547,6 +610,11 @@ pub struct LedgerReport {
 }
 
 impl LedgerReport {
+    pub fn current_total_bytes(&self) -> u64 {
+        self.current_host_visible_bytes
+            .saturating_add(self.current_device_local_bytes)
+    }
+
     /// The `n` labels consuming the most bytes, largest first (ties broken by label).
     pub fn top_consumers(&self, n: usize) -> Vec<(String, u64)> {
         let mut ranked: Vec<(String, u64)> = self
@@ -579,6 +647,20 @@ pub fn owner_group_report(owner: &AllocationOwner, group: &str) -> OwnerGroupRep
 /// Start render-local peak accounting from the allocations currently alive.
 pub fn begin_ledger_capture(owner_ids: &[u64]) {
     ledger().begin_capture(owner_ids);
+}
+
+/// Begin a renderer-owner capture that remains active across nested render
+/// certificate captures. Existing live allocations seed the bracket.
+pub fn begin_owner_ledger_capture(owner: &AllocationOwner) {
+    ledger().begin_owner_capture(owner.id());
+}
+
+pub fn finish_owner_ledger_capture(owner: &AllocationOwner) -> LedgerReport {
+    ledger().finish_owner_capture(owner.id())
+}
+
+pub fn abort_owner_ledger_capture(owner: &AllocationOwner) {
+    ledger().abort_owner_capture(owner.id());
 }
 
 /// Add renderer owners discovered by a nested render to the active capture.
@@ -848,6 +930,39 @@ mod tests {
         assert_eq!(released.current_total_bytes(), 0);
         assert_eq!(released.peak_total_bytes, 5120);
         assert!(released.by_label.is_empty());
+    }
+
+    #[test]
+    fn owner_capture_brackets_simultaneous_host_and_device_peak() {
+        let owner = AllocationOwner::new();
+        begin_owner_ledger_capture(&owner);
+        let host = {
+            let _scope = owner.activate();
+            ledger().insert(
+                "orbis.capture.host".into(),
+                64,
+                true,
+                LedgerCategory::Buffer,
+                "test".into(),
+            )
+        };
+        let device = {
+            let _scope = owner.activate();
+            ledger().insert(
+                "orbis.capture.device".into(),
+                128,
+                false,
+                LedgerCategory::Texture,
+                "test".into(),
+            )
+        };
+        ledger().remove(host);
+        let report = finish_owner_ledger_capture(&owner);
+        assert_eq!(report.peak_total_bytes, 192);
+        assert_eq!(report.current_total_bytes(), 128);
+        assert_eq!(report.by_label["orbis.capture.host"], 64);
+        assert_eq!(report.by_label["orbis.capture.device"], 128);
+        ledger().remove(device);
     }
 
     #[test]

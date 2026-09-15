@@ -27,12 +27,6 @@ pub(crate) struct SelectionReadbackTicket {
     pub(super) provenance: LodSelectionProvenance,
 }
 
-impl SelectionReadbackTicket {
-    pub(crate) fn provenance(self) -> LodSelectionProvenance {
-        self.provenance
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SelectionReadbackTicketState {
     Staged,

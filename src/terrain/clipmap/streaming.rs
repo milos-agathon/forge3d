@@ -19,6 +19,7 @@ pub struct ClipmapStreamer {
     pending_tiles: Vec<TileId>,
     loaded_tiles: Vec<TileId>,
     required_tiles: Vec<TileId>,
+    globe_ring_footprints: Vec<Vec<TileId>>,
 }
 
 impl ClipmapStreamer {
@@ -29,6 +30,7 @@ impl ClipmapStreamer {
             pending_tiles: Vec::new(),
             loaded_tiles: Vec::new(),
             required_tiles: Vec::new(),
+            globe_ring_footprints: Vec::new(),
         }
     }
 
@@ -44,6 +46,7 @@ impl ClipmapStreamer {
             pending_tiles: Vec::new(),
             loaded_tiles: Vec::new(),
             required_tiles: Vec::new(),
+            globe_ring_footprints: Vec::new(),
         })
     }
 
@@ -69,20 +72,56 @@ impl ClipmapStreamer {
 
     /// Follow a planetary camera's surface subpoint in f64 ECEF.
     #[cfg(feature = "enable-globe")]
-    pub fn update_globe(&mut self, camera_anchor: DVec3) -> Vec<TileId> {
+    pub fn update_globe(
+        &mut self,
+        camera_anchor: DVec3,
+        target_lod: u32,
+        max_leaf_tiles: usize,
+    ) -> Result<Vec<TileId>, String> {
         if !camera_anchor.is_finite() || camera_anchor.length_squared() == 0.0 {
-            return Vec::new();
+            return Err("globe streaming camera anchor must be finite and non-zero".to_string());
         }
         let surface_radius = self.clipmap.center_ecef().length();
         let surface_center = camera_anchor.normalize() * surface_radius;
-        self.clipmap.recenter(camera_anchor);
-        let required_tiles = self.clipmap.update_globe_center(surface_center);
-        let required_tiles = if required_tiles.is_empty() {
-            self.clipmap.calculate_required_tiles()
-        } else {
-            required_tiles
-        };
-        self.queue_required(required_tiles)
+        // Build and validate the complete candidate demand before touching the
+        // live camera frame, center, mesh cache, or residency bookkeeping. A
+        // capacity error is therefore a rejected transaction, not a partial
+        // camera update.
+        let candidate_frame = self
+            .clipmap
+            .globe_frame()
+            .ok_or_else(|| "globe streaming requires a valid globe frame".to_string())?;
+        let candidate = super::level::ClipmapLevel::new_globe(
+            self.clipmap.config.clone(),
+            surface_center,
+            candidate_frame,
+            self.clipmap.terrain_extent,
+        )
+        .ok_or_else(|| "globe streaming candidate center is invalid".to_string())?;
+        let globe_ring_footprints = candidate.globe_target_lod_footprints(target_lod)?;
+        let mut seen = HashSet::new();
+        let required_tiles: Vec<_> = globe_ring_footprints
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|tile| seen.insert(*tile))
+            .collect();
+        if required_tiles.is_empty() {
+            return Err(format!(
+                "globe target-LOD {target_lod} footprint is empty"
+            ));
+        }
+        if required_tiles.len() > max_leaf_tiles {
+            return Err(format!(
+                "complete globe target-LOD {target_lod} footprint needs {} leaf slots, but only {max_leaf_tiles} remain after reserving local ancestors",
+                required_tiles.len()
+            ));
+        }
+
+        self.clipmap.recenter(camera_anchor)?;
+        let _ = self.clipmap.update_globe_center(surface_center);
+        self.globe_ring_footprints = globe_ring_footprints;
+        Ok(self.queue_required(required_tiles))
     }
 
     fn queue_required(&mut self, required_tiles: Vec<TileId>) -> Vec<TileId> {
@@ -148,7 +187,7 @@ impl ClipmapStreamer {
     }
 
     /// Get the clipmap mesh, generating if needed.
-    pub fn mesh(&mut self) -> &super::level::ClipmapMesh {
+    pub fn mesh(&mut self) -> Result<&super::level::ClipmapMesh, String> {
         self.clipmap.mesh()
     }
 
@@ -158,7 +197,7 @@ impl ClipmapStreamer {
     }
 
     /// Get current clipmap center.
-    pub fn center(&self) -> Vec2 {
+    pub fn center(&self) -> Result<Vec2, String> {
         self.clipmap.render_center()
     }
 
@@ -181,6 +220,23 @@ impl ClipmapStreamer {
     /// resident for safe boundary morphing. Pending keys are explicitly not
     /// resident, even when an older tile at the same LOD is loaded.
     pub fn ring_readiness(&self, ring_index: u32) -> TileReadiness {
+        if !self.globe_ring_footprints.is_empty() {
+            let loaded = |region: usize| {
+                let required = &self.globe_ring_footprints
+                    [region.min(self.globe_ring_footprints.len() - 1)];
+                !required.is_empty()
+                    && required.iter().all(|tile| self.loaded_tiles.contains(tile))
+                    && required.iter().all(|tile| !self.pending_tiles.contains(tile))
+            };
+            let fine_region = (ring_index as usize + 1)
+                .min(self.globe_ring_footprints.len() - 1);
+            let coarse_region = (fine_region + 1)
+                .min(self.globe_ring_footprints.len() - 1);
+            return TileReadiness {
+                fine_resident: loaded(fine_region),
+                coarse_resident: loaded(coarse_region),
+            };
+        }
         let loaded_for_lod = |lod: u32| {
             let required: Vec<_> = self
                 .required_tiles
@@ -238,7 +294,7 @@ mod tests {
     fn test_streamer_creation() {
         let config = ClipmapConfig::new(4, 64);
         let streamer = ClipmapStreamer::new(config, Vec2::ZERO, 1000.0);
-        assert_eq!(streamer.center(), Vec2::ZERO);
+        assert_eq!(streamer.center().unwrap(), Vec2::ZERO);
         assert_eq!(streamer.terrain_extent(), 1000.0);
     }
 
@@ -575,10 +631,104 @@ mod tests {
         )
         .unwrap();
         let next_camera = frame.lonlat_alt_to_ecef(1.0, 0.0, 1_000.0).unwrap();
-        let requested = streamer.update_globe(next_camera);
+        let requested = streamer.update_globe(next_camera, 14, 256).unwrap();
 
         assert!(!requested.is_empty());
         assert!((streamer.clipmap.center_ecef().length() - radius).abs() < 1.0e-6);
         assert_eq!(streamer.clipmap.camera_anchor(), Some(next_camera));
+    }
+
+    #[cfg(feature = "enable-globe")]
+    #[test]
+    fn rainier_lod14_full_footprint_converges_within_reserved_capacity() {
+        use super::super::globe::GlobeFrame;
+
+        let radius = GlobeFrame::WGS84_MEAN_RADIUS_M;
+        let seed = GlobeFrame::globe(radius, DVec3::X * radius).unwrap();
+        let center = seed.lonlat_alt_to_ecef(-121.7603, 46.8523, 0.0).unwrap();
+        let camera = center + center.normalize() * 1_000.0;
+        let frame = GlobeFrame::globe(radius, camera).unwrap();
+        let mut streamer = ClipmapStreamer::new_globe(
+            ClipmapConfig::new(4, 32),
+            center,
+            frame,
+            1_250.0,
+        )
+        .unwrap();
+
+        let requested = streamer.update_globe(camera, 14, 242).unwrap();
+        assert!(!requested.is_empty());
+        assert!(requested.len() <= 242);
+        assert!(requested.iter().all(|tile| tile.lod == 14));
+
+        let before_rejection = streamer.required_tiles().to_vec();
+        let error = streamer.update_globe(camera, 14, requested.len() - 1).unwrap_err();
+        assert!(error.contains("complete globe target-LOD 14 footprint needs"));
+        assert_eq!(streamer.required_tiles(), before_rejection);
+
+        streamer.mark_loaded(&requested);
+        assert_eq!(streamer.pending_count(), 0);
+        for ring in 0..4 {
+            let readiness = streamer.ring_readiness(ring);
+            assert!(readiness.fine_resident, "ring {ring} fine footprint did not converge");
+            assert!(
+                readiness.coarse_resident,
+                "ring {ring} coarse footprint did not converge"
+            );
+        }
+    }
+
+    #[cfg(feature = "enable-globe")]
+    #[test]
+    fn globe_capacity_rejection_is_transactional_across_camera_motion() {
+        use super::super::globe::GlobeFrame;
+
+        let radius = GlobeFrame::WGS84_MEAN_RADIUS_M;
+        let seed = GlobeFrame::globe(radius, DVec3::X * radius).unwrap();
+        let center = seed.lonlat_alt_to_ecef(-121.7603, 46.8523, 0.0).unwrap();
+        let camera = center + center.normalize() * 1_000.0;
+        let frame = GlobeFrame::globe(radius, camera).unwrap();
+        let mut streamer = ClipmapStreamer::new_globe(
+            ClipmapConfig::new(4, 32),
+            center,
+            frame,
+            1_250.0,
+        )
+        .unwrap();
+
+        let requested = streamer.update_globe(camera, 14, 242).unwrap();
+        streamer.mark_loaded(&requested[..requested.len() / 2]);
+        let before_center = streamer.clipmap.center_ecef();
+        let before_anchor = streamer.clipmap.camera_anchor();
+        let before_required = streamer.required_tiles.clone();
+        let before_pending = streamer.pending_tiles.clone();
+        let before_loaded = streamer.loaded_tiles.clone();
+        let (before_vertex_ptr, before_index_ptr, before_vertices, before_indices) = {
+            let mesh = streamer.mesh().unwrap();
+            (
+                mesh.vertices.as_ptr() as usize,
+                mesh.indices.as_ptr() as usize,
+                bytemuck::cast_slice::<_, u8>(&mesh.vertices).to_vec(),
+                bytemuck::cast_slice::<_, u8>(&mesh.indices).to_vec(),
+            )
+        };
+
+        let moved_camera = seed
+            .lonlat_alt_to_ecef(-121.60, 46.90, 1_000.0)
+            .unwrap();
+        let error = streamer
+            .update_globe(moved_camera, 14, requested.len() - 1)
+            .unwrap_err();
+        assert!(error.contains("complete globe target-LOD 14 footprint needs"));
+        assert_eq!(streamer.clipmap.center_ecef(), before_center);
+        assert_eq!(streamer.clipmap.camera_anchor(), before_anchor);
+        assert_eq!(streamer.required_tiles, before_required);
+        assert_eq!(streamer.pending_tiles, before_pending);
+        assert_eq!(streamer.loaded_tiles, before_loaded);
+        let mesh = streamer.mesh().unwrap();
+        assert_eq!(mesh.vertices.as_ptr() as usize, before_vertex_ptr);
+        assert_eq!(mesh.indices.as_ptr() as usize, before_index_ptr);
+        assert_eq!(bytemuck::cast_slice::<_, u8>(&mesh.vertices), before_vertices);
+        assert_eq!(bytemuck::cast_slice::<_, u8>(&mesh.indices), before_indices);
     }
 }

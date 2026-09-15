@@ -15,10 +15,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use anyhow::ensure;
 use super::*;
 use crate::core::resource_tracker::{
-    owner_group_report, tracked_create_buffer, AllocationOwner, TrackedBuffer,
+    owner_group_report, tracked_create_buffer, AllocationOwner, TrackedBuffer, TrackedTexture,
 };
+#[cfg(feature = "enable-globe")]
+use crate::core::resource_tracker::tracked_create_texture;
 use crate::terrain::clipmap::{ClipmapConfig, ClipmapStreamer};
 use crate::terrain::lod::LodConfig;
 use crate::terrain::page_table::{
@@ -36,7 +39,38 @@ use glam::{Mat4, Vec2, Vec3};
 /// remaining byte makes the public limit strict even after integer rounding.
 const ORBIS_GPU_VISIBLE_CAP_BYTES: u64 = 512 * 1024 * 1024 - 1;
 const ORBIS_UPLOAD_RING_COUNT: usize = 3;
+const ORBIS_OVERVIEW_SIZE: u64 = 96;
+const ORBIS_OVERVIEW_TEXTURE_BYTES: u64 = ORBIS_OVERVIEW_SIZE * ORBIS_OVERVIEW_SIZE * 4;
+const ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES: u64 = ORBIS_OVERVIEW_TEXTURE_BYTES * 2;
 const ORBIS_MAX_IN_FLIGHT: usize = 1024;
+/// Flat clipmap demand can include a coarse root which must be expanded over
+/// the complete fixed-LOD mosaic. Keep that public operation bounded to at
+/// most 64 x 64 descendants. Globe demand is camera-local and is deliberately
+/// validated separately without this flat-path cap.
+pub(super) const MAX_FLAT_HEIGHT_STREAMING_LOD: u32 = 6;
+
+pub(super) fn validate_flat_height_streaming_lod(lod: u32) -> Result<()> {
+    if lod > MAX_FLAT_HEIGHT_STREAMING_LOD {
+        return Err(anyhow!(
+            "flat height streaming lod must be in 0..={MAX_FLAT_HEIGHT_STREAMING_LOD}; got {lod}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_overview_double_residency_budget(
+    existing_bytes: u64,
+    budget_bytes: u64,
+) -> Result<()> {
+    let required = existing_bytes
+        .checked_add(ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES)
+        .ok_or_else(|| anyhow!("overview double-residency budget overflow"))?;
+    ensure!(
+        required <= budget_bytes,
+        "GPU-visible budget {budget_bytes} cannot reserve two ORBIS overview textures ({ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES} bytes) above existing {existing_bytes} bytes"
+    );
+    Ok(())
+}
 
 fn validate_max_in_flight(max_in_flight: usize) -> Result<usize> {
     if max_in_flight == 0 || max_in_flight > ORBIS_MAX_IN_FLIGHT {
@@ -70,6 +104,7 @@ struct HeightUploadRing {
     owner: AllocationOwner,
     buffer_size: u64,
     flights: Vec<Option<HeightUploadFlight>>,
+    reserved_overview_rollback_slot: Option<usize>,
 }
 
 struct HeightUploadLayout {
@@ -148,6 +183,7 @@ impl HeightUploadRing {
             owner,
             buffer_size,
             flights: (0..ORBIS_UPLOAD_RING_COUNT).map(|_| None).collect(),
+            reserved_overview_rollback_slot: None,
         }
     }
 
@@ -169,7 +205,37 @@ impl HeightUploadRing {
 
     fn has_capacity(&mut self) -> bool {
         self.reclaim();
-        self.flights.iter().any(Option::is_none)
+        self.flights.iter().enumerate().any(|(index, flight)| {
+            flight.is_none() && Some(index) != self.reserved_overview_rollback_slot
+        })
+    }
+
+    #[cfg(feature = "enable-globe")]
+    fn reserve_overview_rollback(&mut self) -> Result<()> {
+        self.reclaim();
+        ensure!(
+            self.reserved_overview_rollback_slot.is_none(),
+            "an overview rollback slot is already reserved"
+        );
+        let free = self
+            .flights
+            .iter()
+            .enumerate()
+            .filter_map(|(index, flight)| flight.is_none().then_some(index))
+            .collect::<Vec<_>>();
+        ensure!(
+            free.len() >= 2,
+            "overview activation requires two free staging flights (candidate plus guaranteed rollback); found {}",
+            free.len(),
+        );
+        self.reserved_overview_rollback_slot = free.last().copied();
+        Ok(())
+    }
+
+    #[cfg(feature = "enable-globe")]
+    fn release_overview_rollback(&mut self) {
+        debug_assert!(self.reserved_overview_rollback_slot.is_some());
+        self.reserved_overview_rollback_slot = None;
     }
 
     fn submit(
@@ -180,7 +246,14 @@ impl HeightUploadRing {
         page_bytes: &[u8],
     ) -> Result<bool> {
         self.reclaim();
-        let Some(slot) = self.flights.iter().position(Option::is_none) else {
+        let Some(slot) = self
+            .flights
+            .iter()
+            .enumerate()
+            .position(|(index, flight)| {
+                flight.is_none() && Some(index) != self.reserved_overview_rollback_slot
+            })
+        else {
             return Ok(false);
         };
         let tile_lengths: Vec<_> = tiles
@@ -258,6 +331,193 @@ impl HeightUploadRing {
             complete,
         });
         Ok(true)
+    }
+
+    #[cfg(feature = "enable-globe")]
+    fn submit_overview(
+        &mut self,
+        page_table: &PageTable,
+        width: u32,
+        height: u32,
+        heights: &[f32],
+        page_bytes: &[u8],
+    ) -> Result<Option<Arc<TrackedTexture>>> {
+        ensure!(
+            width > 0
+                && height > 0
+                && heights.len() == width as usize * height as usize,
+            "regional overview dimensions/data are inconsistent"
+        );
+        self.reclaim();
+        let Some(slot) = self
+            .flights
+            .iter()
+            .enumerate()
+            .position(|(index, flight)| {
+                flight.is_none() && Some(index) != self.reserved_overview_rollback_slot
+            })
+        else {
+            return Ok(None);
+        };
+        let bytes_per_row = (width * 4).div_ceil(256) * 256;
+        let texture_bytes = u64::from(bytes_per_row) * u64::from(height);
+        let page_offset = Self::align_up(texture_bytes, 4)?;
+        let required_bytes = page_offset
+            .checked_add(page_bytes.len() as u64)
+            .ok_or_else(|| anyhow!("height overview upload layout overflow"))?;
+        ensure!(
+            required_bytes <= self.buffer_size,
+            "height overview activation requires {required_bytes} bytes, ring buffer holds {}",
+            self.buffer_size
+        );
+        let (buffer, texture) = {
+            let _scope = self.owner.activate_group("orbis.height");
+            let buffer = tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("orbis.height.overview-staging"),
+                    size: self.buffer_size,
+                    usage: wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: true,
+                },
+            )?;
+            let texture = Arc::new(tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("orbis.height.regional-overview"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                },
+            )?);
+            (buffer, texture)
+        };
+        {
+            let mut mapped = buffer.slice(..).get_mapped_range_mut();
+            let source = bytemuck::cast_slice::<f32, u8>(heights);
+            let source_row = width as usize * 4;
+            for row in 0..height as usize {
+                let source_start = row * source_row;
+                let target_start = row * bytes_per_row as usize;
+                mapped[target_start..target_start + source_row]
+                    .copy_from_slice(&source[source_start..source_start + source_row]);
+            }
+            let page_offset = page_offset as usize;
+            mapped[page_offset..page_offset + page_bytes.len()].copy_from_slice(page_bytes);
+        }
+        buffer.unmap();
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("orbis.height.overview-activation"),
+            });
+        encoder.copy_buffer_to_texture(
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        encoder.copy_buffer_to_buffer(
+            &buffer,
+            page_offset,
+            &page_table.buffer,
+            0,
+            page_bytes.len() as u64,
+        );
+        self.queue.submit([encoder.finish()]);
+        let complete = Arc::new(AtomicBool::new(false));
+        let callback_complete = complete.clone();
+        self.queue.on_submitted_work_done(move || {
+            callback_complete.store(true, Ordering::Release);
+        });
+        self.flights[slot] = Some(HeightUploadFlight {
+            _buffer: buffer,
+            complete,
+        });
+        Ok(Some(texture))
+    }
+
+
+    #[cfg(feature = "enable-globe")]
+    fn prepare_overview_rollback(&self, patch: &[u8; 20]) -> Result<TrackedBuffer> {
+        let buffer = {
+            let _scope = self.owner.activate_group("orbis.height");
+            tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("orbis.height.overview-rollback-staging"),
+                    size: patch.len() as u64,
+                    usage: wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: true,
+                },
+            )?
+        };
+        {
+            let mut mapped = buffer.slice(..).get_mapped_range_mut();
+            mapped.copy_from_slice(patch);
+        }
+        buffer.unmap();
+        Ok(buffer)
+    }
+
+    #[cfg(feature = "enable-globe")]
+    fn submit_prepared_overview_rollback(
+        &mut self,
+        page_table: &PageTable,
+        buffer: TrackedBuffer,
+    ) {
+        let slot = self
+            .reserved_overview_rollback_slot
+            .take()
+            .expect("overview rollback must retain its reserved staging flight");
+        debug_assert!(self.flights[slot].is_none());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("orbis.height.overview-rollback"),
+            });
+        encoder.copy_buffer_to_buffer(
+            &buffer,
+            0,
+            &page_table.buffer,
+            std::mem::offset_of!(crate::terrain::page_table::PageTableHeader, overview_u_min)
+                as u64,
+            20,
+        );
+        self.queue.submit([encoder.finish()]);
+        let complete = Arc::new(AtomicBool::new(false));
+        let callback_complete = complete.clone();
+        self.queue.on_submitted_work_done(move || {
+            callback_complete.store(true, Ordering::Release);
+        });
+        self.flights[slot] = Some(HeightUploadFlight {
+            _buffer: buffer,
+            complete,
+        });
     }
 }
 
@@ -375,11 +635,36 @@ fn map_tile_to_fixed_lod(tile: TileId, fixed_lod: u32, tiles_axis: u32, out: &mu
     }
 }
 
+fn local_ancestor_chain(tile: TileId) -> Vec<TileId> {
+    (0..tile.lod)
+        .map(|lod| {
+            let shift = tile.lod - lod;
+            TileId::new(lod, tile.x >> shift, tile.y >> shift)
+        })
+        .collect()
+}
+
+#[cfg(feature = "enable-globe")]
+fn globe_leaf_capacity(physical_capacity: usize, target_lod: u32) -> Result<usize> {
+    let ancestor_slots = usize::try_from(target_lod)
+        .map_err(|_| anyhow!("target LOD {target_lod} cannot fit this platform"))?;
+    physical_capacity.checked_sub(ancestor_slots).filter(|count| *count > 0).ok_or_else(|| {
+        anyhow!(
+            "height atlas capacity {physical_capacity} cannot hold the {ancestor_slots} local ancestors plus one target-LOD leaf"
+        )
+    })
+}
+
+fn coarse_prefill_tile(enabled: bool) -> Option<TileId> {
+    enabled.then(|| TileId::new(0, 0, 0))
+}
+
 pub(in crate::terrain::renderer) struct HeightStreamingStats {
     pub center: Vec2,
     pub pending_ring_tiles: usize,
     pub loaded_ring_tiles: usize,
     pub resident_fine_tiles: usize,
+    pub resident_ancestor_tiles: usize,
     pub total_tiles: usize,
     pub tiles_requested: usize,
     pub tiles_uploaded: usize,
@@ -391,6 +676,11 @@ pub(in crate::terrain::renderer) struct HeightStreamingStats {
     pub converged: bool,
     pub loader_pending: usize,
     pub loader_completed: usize,
+    pub bounded_steps: u64,
+    pub effective_target_lod: u32,
+    pub coarse_prefill_enabled: bool,
+    pub required_leaf_tiles: usize,
+    pub page_table_updates: u64,
 }
 
 /// Fourth-family VT runtime. Height uses an R32Float physical mosaic, but its
@@ -409,6 +699,7 @@ pub(in crate::terrain::renderer) struct HeightVtFamilyRuntime {
     tile_resolution: u32,
     gpu_visible_budget_bytes: u64,
     resident_fine: HashSet<TileId>,
+    resident_ancestors: HashSet<TileId>,
     feedback_requests: crate::terrain::vt::requests::RetainedRequestSet,
     family_residency: FamilyResidencyTracker,
     /// ring tile -> fine tiles still missing before it counts as loaded
@@ -416,10 +707,23 @@ pub(in crate::terrain::renderer) struct HeightVtFamilyRuntime {
     tiles_requested: usize,
     tiles_uploaded: usize,
     coarse_prefilled: usize,
+    bounded_steps: u64,
+    page_table_updates: u64,
     ancestor_fallbacks: usize,
+    _active_overview_texture: Option<Arc<TrackedTexture>>,
+    active_overview_view: Option<wgpu::TextureView>,
     stream_epoch: u64,
     retry: HashMap<TileId, RetryState>,
     globe_mode: bool,
+    coarse_prefill_enabled: bool,
+}
+
+#[cfg(feature = "enable-globe")]
+pub(crate) struct HeightOverviewActivation {
+    previous_overview: OverviewUvTransform,
+    previous_texture: Option<Arc<TrackedTexture>>,
+    previous_view: Option<wgpu::TextureView>,
+    rollback_patch: TrackedBuffer,
 }
 
 pub(in crate::terrain::renderer) enum HeightStreamingCamera {
@@ -469,7 +773,12 @@ impl HeightVtFamilyRuntime {
         globe_mode: bool,
         overview: OverviewUvTransform,
     ) -> Result<Self> {
-        let tiles_axis = 1u32 << lod;
+        if !globe_mode {
+            validate_flat_height_streaming_lod(lod)?;
+        }
+        let tiles_axis = 1u32
+            .checked_shl(lod)
+            .ok_or_else(|| anyhow!("height streaming lod {lod} exceeds the u32 tile address space"))?;
         let virtual_tiles = u64::from(tiles_axis) * u64::from(tiles_axis);
         let tile_bytes = u64::from(tile_resolution)
             * u64::from(tile_resolution)
@@ -486,6 +795,10 @@ impl HeightVtFamilyRuntime {
             padded_coverage_row.saturating_mul(u64::from(tile_resolution));
         let existing_group_bytes = owner_group_report(&allocation_owner, "orbis.height")
             .current_total_bytes();
+        validate_overview_double_residency_budget(
+            existing_group_bytes,
+            gpu_visible_budget_bytes,
+        )?;
         // The pinned root is fallback coverage, not one of the target-LOD
         // leaves. Budget a distinct slot so a comfortably sized cache can
         // converge all leaves without ever evicting that root.
@@ -520,7 +833,11 @@ impl HeightVtFamilyRuntime {
                         .saturating_mul(tile_bytes),
                 )
                 .saturating_add(page_bytes)
-                .saturating_add(HeightUploadRing::prebudget_bytes(upload_buffer_size));
+                .saturating_add(HeightUploadRing::prebudget_bytes(upload_buffer_size))
+                // An activation keeps the old overview alive until the
+                // candidate render commits, so strict peak budgeting must
+                // reserve both 96x96 R32 textures.
+                .saturating_add(ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES);
             if actual_bytes <= gpu_visible_budget_bytes {
                 break (tiles_x, tiles_y, upload_buffer_size, actual_bytes);
             }
@@ -577,7 +894,11 @@ impl HeightVtFamilyRuntime {
             max_in_flight,
             pool_size,
             reader,
-            CoalescePolicy::PreferFine,
+            if globe_mode {
+                CoalescePolicy::PreferCoarse
+            } else {
+                CoalescePolicy::PreferFine
+            },
         );
         let clipmap_config =
             ClipmapConfig::new(ring_count.clamp(1, 8), ring_resolution.clamp(4, 256));
@@ -625,6 +946,7 @@ impl HeightVtFamilyRuntime {
             tile_resolution,
             gpu_visible_budget_bytes,
             resident_fine: HashSet::new(),
+            resident_ancestors: HashSet::new(),
             feedback_requests: Default::default(),
             family_residency: FamilyResidencyTracker::new(
                 gpu_visible_budget_bytes,
@@ -635,16 +957,20 @@ impl HeightVtFamilyRuntime {
             tiles_requested: 0,
             tiles_uploaded: 0,
             coarse_prefilled: 0,
+            bounded_steps: 0,
+            page_table_updates: 0,
             ancestor_fallbacks: 0,
+            _active_overview_texture: None,
+            active_overview_view: None,
             stream_epoch: 0,
             retry: HashMap::new(),
             globe_mode,
+            coarse_prefill_enabled: coarse_prefill,
         };
-        // Compatibility accepts the old flag, but startup is always
-        // asynchronous. Until this request completes, all render paths keep
+        // Coarse prefill controls only when root demand begins; startup I/O is
+        // always asynchronous. Until the root completes, all render paths keep
         // using the caller-provided overview texture and the disabled table.
-        let _ = coarse_prefill;
-        if state.loader.request(TileId::new(0, 0, 0)) {
+        if coarse_prefill_tile(coarse_prefill).is_some_and(|tile| state.loader.request(tile)) {
             state.tiles_requested = 1;
         }
         Ok(state)
@@ -681,9 +1007,100 @@ impl HeightVtFamilyRuntime {
         }
     }
 
+    #[cfg(feature = "enable-globe")]
+    pub(in crate::terrain::renderer) fn begin_overview_activation(
+        &mut self,
+        overview: OverviewUvTransform,
+        width: u32,
+        height: u32,
+        heights: &[f32],
+    ) -> Result<HeightOverviewActivation> {
+        ensure!(self.globe_mode, "regional overview switching requires globe streaming");
+        self.upload_ring.reserve_overview_rollback()?;
+        let previous_overview = self.page_table.overview();
+        // Prepare the only resource rollback needs before the candidate is
+        // submitted. The reserved upload flight is already included in the
+        // ring's conservative prebudget, even though this patch is only 20
+        // bytes rather than a full height-upload buffer.
+        let rollback_patch = match self
+            .upload_ring
+            .prepare_overview_rollback(&previous_overview.header_patch_bytes())
+        {
+            Ok(buffer) => buffer,
+            Err(error) => {
+                self.upload_ring.release_overview_rollback();
+                return Err(anyhow!(
+                    "height overview rollback preparation failed: {error}"
+                ));
+            }
+        };
+        let bytes = self
+            .page_table
+            .serialize_with_overview(&self.mosaic, overview)
+            .map(|table| table.bytes())
+            .map_err(|error| anyhow!("height page-table overview serialization failed: {error}"));
+        let texture = bytes.and_then(|bytes| {
+            self.upload_ring
+                .submit_overview(&self.page_table, width, height, heights, &bytes)
+                .map_err(|error| anyhow!("height overview submission failed: {error}"))?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "height overview staging ring is busy; refusing an untracked or blocking fallback"
+                    )
+                })
+        });
+        let texture = match texture {
+            Ok(texture) => texture,
+            Err(error) => {
+                self.upload_ring.release_overview_rollback();
+                return Err(error);
+            }
+        };
+        let activation = HeightOverviewActivation {
+            previous_overview,
+            previous_texture: self._active_overview_texture.take(),
+            previous_view: self.active_overview_view.take(),
+            rollback_patch,
+        };
+        // The queue submission above contains the complete header plus all
+        // existing buckets. Only after it succeeds does the CPU-side table
+        // adopt the transform used by subsequent resident-page serializations.
+        self.page_table.commit_overview(overview);
+        self.active_overview_view = Some(
+            texture.create_view(&wgpu::TextureViewDescriptor::default()),
+        );
+        self._active_overview_texture = Some(texture);
+        self.page_table_updates = self.page_table_updates.saturating_add(1);
+        Ok(activation)
+    }
+
+    #[cfg(feature = "enable-globe")]
+    fn commit_overview_activation(&mut self, _activation: HeightOverviewActivation) {
+        self.upload_ring.release_overview_rollback();
+    }
+
+    #[cfg(feature = "enable-globe")]
+    fn rollback_overview_activation(&mut self, activation: HeightOverviewActivation) {
+        self.upload_ring
+            .submit_prepared_overview_rollback(&self.page_table, activation.rollback_patch);
+        self.page_table.commit_overview(activation.previous_overview);
+        self._active_overview_texture = activation.previous_texture;
+        self.active_overview_view = activation.previous_view;
+        self.page_table_updates = self.page_table_updates.saturating_add(1);
+    }
+
     /// Map a tile at an arbitrary LOD onto the mosaic's fixed LOD.
     fn tiles_at_fixed_lod(&self, tile: TileId, out: &mut HashSet<TileId>) {
         map_tile_to_fixed_lod(tile, self.lod, self.tiles_axis, out);
+    }
+
+    fn request_local_ancestors(&mut self, tile: TileId) {
+        for ancestor in local_ancestor_chain(tile) {
+            self.touch_resident_or_ancestor(ancestor);
+            if self.loader.request(ancestor) {
+                self.tiles_requested += 1;
+            }
+        }
     }
 
     fn touch_resident_or_ancestor(&mut self, requested: TileId) {
@@ -737,6 +1154,7 @@ impl HeightVtFamilyRuntime {
                 return false;
             };
             self.resident_fine.remove(&victim);
+            self.resident_ancestors.remove(&victim);
             self.invalidate_evicted_leaf(victim);
             self.family_residency.on_evict(&VtTileKey {
                 family_slot: crate::terrain::vt::HEIGHT_FAMILY as u32,
@@ -759,6 +1177,33 @@ impl HeightVtFamilyRuntime {
         max_uploads: usize,
     ) -> Result<HeightStreamingStats> {
         self.stream_epoch = self.stream_epoch.saturating_add(1);
+        let _new_ring_tiles = match camera {
+            HeightStreamingCamera::Flat(camera_pos) if !self.globe_mode => {
+                let lod_config = LodConfig::new(2.0, 1024, 768, 45.0f32.to_radians());
+                self.streamer.update(
+                    camera_pos,
+                    Mat4::IDENTITY,
+                    Mat4::IDENTITY,
+                    &lod_config,
+                )
+            }
+            #[cfg(feature = "enable-globe")]
+            HeightStreamingCamera::Globe(camera_anchor) if self.globe_mode => {
+                let max_leaf_tiles = globe_leaf_capacity(self.page_table.capacity, self.lod)?;
+                self.streamer
+                    .update_globe(camera_anchor, self.lod, max_leaf_tiles)
+                    .map_err(|error| anyhow!(error))?
+            }
+            _ => Vec::new(),
+        };
+
+        let required_ring_tiles = self.streamer.required_tiles().to_vec();
+        if self.globe_mode {
+            if let Some(center) = required_ring_tiles.first().copied() {
+                self.request_local_ancestors(center);
+            }
+        }
+
         let mut active_fine_demand = HashSet::new();
         for uv in feedback_uvs {
             let x = (uv[0].clamp(0.0, 1.0 - f32::EPSILON) * self.tiles_axis as f32) as u32;
@@ -782,24 +1227,6 @@ impl HeightVtFamilyRuntime {
             }
         }
 
-        let _new_ring_tiles = match camera {
-            HeightStreamingCamera::Flat(camera_pos) if !self.globe_mode => {
-                let lod_config = LodConfig::new(2.0, 1024, 768, 45.0f32.to_radians());
-                self.streamer.update(
-                    camera_pos,
-                    Mat4::IDENTITY,
-                    Mat4::IDENTITY,
-                    &lod_config,
-                )
-            }
-            #[cfg(feature = "enable-globe")]
-            HeightStreamingCamera::Globe(camera_anchor) if self.globe_mode => {
-                self.streamer.update_globe(camera_anchor)
-            }
-            _ => Vec::new(),
-        };
-
-        let required_ring_tiles = self.streamer.required_tiles().to_vec();
         let resident_ring_tiles: HashSet<_> = required_ring_tiles
             .iter()
             .copied()
@@ -812,8 +1239,15 @@ impl HeightVtFamilyRuntime {
         for ring_tile in &required_ring_tiles {
             self.tiles_at_fixed_lod(*ring_tile, &mut active_fine_demand);
         }
+        let active_ancestors = required_ring_tiles
+            .first()
+            .map_or_else(HashSet::new, |center| {
+                local_ancestor_chain(*center).into_iter().collect()
+            });
         self.retry.retain(|tile, _| {
-            *tile == TileId::new(0, 0, 0) || active_fine_demand.contains(tile)
+            *tile == TileId::new(0, 0, 0)
+                || active_fine_demand.contains(tile)
+                || (self.globe_mode && active_ancestors.contains(tile))
         });
         self.request_due_retries();
 
@@ -865,8 +1299,8 @@ impl HeightVtFamilyRuntime {
             }
         }
 
-        let terminals = if self.upload_ring.has_capacity() {
-            self.loader.drain_terminals(max_uploads.max(1))
+        let terminals = if max_uploads > 0 && self.upload_ring.has_capacity() {
+            self.loader.drain_terminals(max_uploads)
         } else {
             Vec::new()
         };
@@ -929,11 +1363,18 @@ impl HeightVtFamilyRuntime {
                 }
             };
             if submitted {
+                self.page_table_updates = self.page_table_updates.saturating_add(1);
                 for upload in &prepared {
                     let tile_id = upload.id;
                     if tile_id == TileId::new(0, 0, 0) {
                         self.retry.remove(&tile_id);
                         self.coarse_prefilled = 1;
+                        self.tiles_uploaded += 1;
+                        continue;
+                    }
+                    if tile_id.lod < self.lod {
+                        self.resident_ancestors.insert(tile_id);
+                        self.retry.remove(&tile_id);
                         self.tiles_uploaded += 1;
                         continue;
                     }
@@ -972,7 +1413,8 @@ impl HeightVtFamilyRuntime {
             self.streamer.mark_loaded(&satisfied);
         }
 
-        let stats = self.stats();
+        self.bounded_steps = self.bounded_steps.saturating_add(1);
+        let stats = self.stats()?;
         let height = self
             .family_residency
             .family(crate::terrain::vt::HEIGHT_FAMILY as u32);
@@ -989,16 +1431,23 @@ impl HeightVtFamilyRuntime {
         Ok(stats)
     }
 
-    pub(in crate::terrain::renderer) fn stats(&self) -> HeightStreamingStats {
-        let total_tiles = (self.tiles_axis * self.tiles_axis) as usize;
+    pub(in crate::terrain::renderer) fn stats(&self) -> Result<HeightStreamingStats> {
+        let total_tiles = usize::try_from(
+            u64::from(self.tiles_axis).saturating_mul(u64::from(self.tiles_axis)),
+        )
+        .unwrap_or(usize::MAX);
         let (loader_pending, _, _) = self.loader.stats();
         let (_, _, _, _, _, loader_completed) = self.loader.counters();
         let group_report = owner_group_report(&self.allocation_owner, "orbis.height");
-        HeightStreamingStats {
-            center: self.streamer.center(),
+        Ok(HeightStreamingStats {
+            center: self
+                .streamer
+                .center()
+                .map_err(|error| anyhow::anyhow!("clipmap center projection failed: {error}"))?,
             pending_ring_tiles: self.streamer.pending_count(),
             loaded_ring_tiles: self.streamer.loaded_count(),
             resident_fine_tiles: self.resident_fine.len(),
+            resident_ancestor_tiles: self.resident_ancestors.len(),
             total_tiles,
             tiles_requested: self.tiles_requested,
             tiles_uploaded: self.tiles_uploaded,
@@ -1012,10 +1461,17 @@ impl HeightVtFamilyRuntime {
             gpu_visible_current_bytes: group_report.current_total_bytes(),
             gpu_visible_high_water_bytes: group_report.peak_total_bytes,
             ancestor_fallbacks: self.ancestor_fallbacks,
-            converged: loader_pending == 0 && self.ring_waiting.is_empty(),
+            converged: loader_pending == 0
+                && self.ring_waiting.is_empty()
+                && self.retry.is_empty(),
             loader_pending,
             loader_completed,
-        }
+            bounded_steps: self.bounded_steps,
+            effective_target_lod: self.lod,
+            coarse_prefill_enabled: self.coarse_prefill_enabled,
+            required_leaf_tiles: self.streamer.required_tiles().len(),
+            page_table_updates: self.page_table_updates,
+        })
     }
 
     pub(in crate::terrain::renderer) fn is_globe(&self) -> bool {
@@ -1029,14 +1485,100 @@ impl Drop for HeightVtFamilyRuntime {
     }
 }
 
+impl TerrainRenderer {
+    #[cfg(feature = "enable-globe")]
+    pub(crate) fn begin_height_streaming_overview_activation(
+        &mut self,
+        bounds: (f64, f64, f64, f64),
+        width: u32,
+        height: u32,
+        heights: &[f32],
+    ) -> Result<HeightOverviewActivation> {
+        let overview = OverviewUvTransform::from_lonlat_bounds(bounds)
+            .map_err(|error| anyhow!("invalid regional overview: {error}"))?;
+        let runtime = self
+            .scene
+            .height_streaming
+            .as_mut()
+            .ok_or_else(|| anyhow!("height streaming is not enabled"))?;
+        runtime.begin_overview_activation(overview, width, height, heights)
+    }
+
+    #[cfg(feature = "enable-globe")]
+    pub(crate) fn commit_height_streaming_overview_activation(
+        &mut self,
+        activation: HeightOverviewActivation,
+    ) {
+        let runtime = self
+            .scene
+            .height_streaming
+            .as_mut()
+            .expect("height streaming cannot disappear during an overview activation");
+        runtime.commit_overview_activation(activation);
+    }
+
+    #[cfg(feature = "enable-globe")]
+    pub(crate) fn rollback_height_streaming_overview_activation(
+        &mut self,
+        activation: HeightOverviewActivation,
+    ) {
+        let runtime = self
+            .scene
+            .height_streaming
+            .as_mut()
+            .expect("height streaming cannot disappear during an overview activation");
+        runtime.rollback_overview_activation(activation);
+    }
+
+    #[cfg(feature = "enable-globe")]
+    pub(crate) fn activate_height_streaming_overview(
+        &mut self,
+        bounds: (f64, f64, f64, f64),
+        width: u32,
+        height: u32,
+        heights: &[f32],
+    ) -> Result<()> {
+        let activation = self.begin_height_streaming_overview_activation(
+            bounds, width, height, heights,
+        )?;
+        self.commit_height_streaming_overview_activation(activation);
+        Ok(())
+    }
+}
+
 impl TerrainScene {
     /// Clipmap mesh center: follows the streaming center when height
     /// streaming is active, otherwise stays at the region origin.
-    pub(in crate::terrain::renderer) fn height_streaming_center(&self) -> Vec2 {
-        self.height_streaming
-            .as_ref()
-            .map(|s| s.streamer.center())
-            .unwrap_or(Vec2::ZERO)
+    pub(in crate::terrain::renderer) fn height_streaming_center(&self) -> Result<Vec2> {
+        match self.height_streaming.as_ref() {
+            Some(streaming) => streaming
+                .streamer
+                .center()
+                .map_err(|error| anyhow::anyhow!("clipmap center projection failed: {error}")),
+            None => Ok(Vec2::ZERO),
+        }
+    }
+
+    #[cfg(feature = "enable-globe")]
+    pub(in crate::terrain::renderer) fn height_streaming_globe_identity(
+        &self,
+    ) -> Option<(glam::DVec3, glam::DVec3)> {
+        let runtime = self.height_streaming.as_ref().filter(|runtime| runtime.is_globe())?;
+        Some((
+            runtime.streamer.clipmap.center_ecef(),
+            runtime.streamer.clipmap.camera_anchor()?,
+        ))
+    }
+
+    #[cfg(feature = "enable-globe")]
+    pub(in crate::terrain::renderer) fn orbis_reanchor_state(
+        &self,
+    ) -> Option<(glam::DVec3, f64)> {
+        let runtime = self.height_streaming.as_ref().filter(|runtime| runtime.is_globe())?;
+        Some((
+            runtime.streamer.clipmap.camera_anchor()?,
+            f64::from(runtime.streamer.clipmap.base_cell_size) * 0.5,
+        ))
     }
 
     /// The caller-provided overview stays bound in every render path. Dynamic
@@ -1046,7 +1588,11 @@ impl TerrainScene {
         &'a self,
         uploaded: &'a wgpu::TextureView,
     ) -> &'a wgpu::TextureView {
-        uploaded
+        self.height_streaming
+            .as_ref()
+            .filter(|runtime| runtime.is_globe())
+            .and_then(|runtime| runtime.active_overview_view.as_ref())
+            .unwrap_or(uploaded)
     }
 
     pub(in crate::terrain::renderer) fn main_pass_height_atlas_view<'a>(
@@ -1086,6 +1632,25 @@ impl TerrainScene {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overview_switch_budget_reserves_old_and_candidate_textures() {
+        assert_eq!(ORBIS_OVERVIEW_TEXTURE_BYTES, 96 * 96 * 4);
+        assert_eq!(
+            ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES,
+            ORBIS_OVERVIEW_TEXTURE_BYTES * 2
+        );
+        assert!(validate_overview_double_residency_budget(
+            0,
+            ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES - 1,
+        )
+        .is_err());
+        validate_overview_double_residency_budget(
+            0,
+            ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn height_upload_capacity_admits_configured_max_batch_exactly() {
@@ -1218,5 +1783,66 @@ mod tests {
         out.clear();
         map_tile_to_fixed_lod(TileId::new(2, 9, 0), 2, 4, &mut out);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn flat_lod_safe_maximum_maps_the_live_root_footprint() {
+        validate_flat_height_streaming_lod(6).unwrap();
+
+        let mut out = HashSet::new();
+        map_tile_to_fixed_lod(TileId::new(0, 0, 0), 6, 64, &mut out);
+
+        assert_eq!(out.len(), 4_096);
+        assert!(out.contains(&TileId::new(6, 0, 0)));
+        assert!(out.contains(&TileId::new(6, 63, 63)));
+    }
+
+    #[test]
+    fn flat_lod_above_safe_maximum_is_rejected_before_mapping() {
+        for lod in [7, u32::MAX] {
+            let error = validate_flat_height_streaming_lod(lod).unwrap_err();
+            assert!(error.to_string().contains("flat height streaming lod"));
+            assert!(error.to_string().contains("0..=6"));
+        }
+    }
+
+    #[cfg(feature = "enable-globe")]
+    #[test]
+    fn globe_capacity_reserves_exact_local_ancestor_chain_without_lod_clamp() {
+        let leaf = TileId::new(14, 2_649, 5_986);
+        let ancestors = local_ancestor_chain(leaf);
+        assert_eq!(ancestors.len(), 14);
+        assert_eq!(ancestors.first(), Some(&TileId::new(0, 0, 0)));
+        assert_eq!(ancestors.last(), Some(&TileId::new(13, 1_324, 2_993)));
+
+        assert_eq!(globe_leaf_capacity(256, 14).unwrap(), 242);
+        assert!(globe_leaf_capacity(14, 14).is_err());
+        assert!(globe_leaf_capacity(0, 14).is_err());
+    }
+
+    #[test]
+    fn coarse_prefill_flag_has_observable_async_root_demand() {
+        assert_eq!(coarse_prefill_tile(true), Some(TileId::new(0, 0, 0)));
+        assert_eq!(coarse_prefill_tile(false), None);
+    }
+
+    #[test]
+    fn rainier_leaf_resolves_to_nearest_loaded_local_ancestor() {
+        let leaf = TileId::new(14, 2_649, 5_986);
+        let chain = local_ancestor_chain(leaf);
+        let local = chain[10];
+        let mut pages = crate::terrain::stream::HeightPageResidency::new(4, 4, None).unwrap();
+        pages
+            .place(
+                TileId::new(0, 0, 0),
+                crate::terrain::stream::EvictionPolicy::PreserveRoot,
+            )
+            .unwrap();
+        pages
+            .place(local, crate::terrain::stream::EvictionPolicy::PreserveRoot)
+            .unwrap();
+
+        assert_eq!(pages.resolve(leaf).map(|entry| entry.0), Some(local));
+        assert_eq!(pages.touch_resolved(leaf), Some(local));
     }
 }

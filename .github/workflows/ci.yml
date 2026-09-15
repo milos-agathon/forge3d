@@ -1026,7 +1026,7 @@ jobs:
     # Candidate acceptance proves physical pixels without exposing production
     # signing material to branch code. Signed certificate rotation remains the
     # protected main-only responsibility of certificate-refresh.yml.
-    needs: [build-wheel-windows, terrain-golden-paths]
+    needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths]
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     if: >-
       github.event_name == 'schedule' ||
@@ -1035,6 +1035,7 @@ jobs:
     outputs:
       lane: ${{ steps.golden-pass.outputs.golden_lane || 'unknown' }}
       sidera_lane: ${{ steps.sidera-pass.outputs.sidera_lane || 'unknown' }}
+      orbis_lane: ${{ steps.orbis-pass.outputs.orbis_lane || 'unknown' }}
     env:
       WGPU_BACKEND: vulkan
       FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
@@ -1061,6 +1062,7 @@ jobs:
           "FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR=$(Join-Path $root 'recipe-goldens')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_SUBSTRATIA_ARTIFACT_DIR=$(Join-Path $root 'substratia')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_SIDERA_ARTIFACT_DIR=$(Join-Path $root 'sidera')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_ORBIS_ARTIFACT_DIR=$(Join-Path $root 'orbis')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_EXPECTED_ADAPTER_PROBE=$(Join-Path $root 'adapter-probe.json')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Set up Python
@@ -1073,6 +1075,16 @@ jobs:
         with:
           name: wheels-windows
           path: dist/
+
+      - name: Download shared LFS fixture artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: lfs-fixture-bundles
+
+      - name: Restore verified Rainier COG fixture
+        shell: pwsh
+        run: Expand-Archive lfs-fixture-bundles/python-tiffs.zip -DestinationPath . -Force
 
       - name: Install wheel and test dependencies
         shell: pwsh
@@ -1120,6 +1132,30 @@ jobs:
           python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE
 
+      - name: Run ORBIS NVIDIA Vulkan descent acceptance
+        shell: pwsh
+        env:
+          FORGE3D_RUN_ORBIS_GPU: '1'
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:FORGE3D_ORBIS_ARTIFACT_DIR | Out-Null
+          $junit = Join-Path $env:FORGE3D_ORBIS_ARTIFACT_DIR "junit.xml"
+          python scripts/run_nvidia_visual_acceptance.py --suite orbis --junit "$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/write_orbis_evidence.py `
+            --repository . `
+            --metrics (Join-Path $env:FORGE3D_ORBIS_ARTIFACT_DIR "orbis-metrics.json") `
+            --adapter-probe $env:FORGE3D_EXPECTED_ADAPTER_PROBE `
+            --golden tests/golden/terrain/orbis_rainier_ground.nvidia-vulkan.png `
+            --actual-image (Join-Path $env:FORGE3D_ORBIS_ARTIFACT_DIR "orbis-rainier-ground.actual.png") `
+            --candidate-sha $env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA `
+            --require-clean `
+            --command "python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json `"$env:FORGE3D_EXPECTED_ADAPTER_PROBE`"" `
+            --command "python scripts/run_nvidia_visual_acceptance.py --suite orbis --junit `"$junit`"" `
+            --output (Join-Path $env:FORGE3D_ORBIS_ARTIFACT_DIR "orbis-evidence.json")
+          exit $LASTEXITCODE
+
       - name: Record visual golden lane RAN
         id: golden-pass
         shell: pwsh
@@ -1129,6 +1165,11 @@ jobs:
         id: sidera-pass
         shell: pwsh
         run: '"sidera_lane=ran" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
+
+      - name: Record ORBIS lane RAN
+        id: orbis-pass
+        shell: pwsh
+        run: '"orbis_lane=ran" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
 
       - name: Upload SHA- and adapter-bound visual evidence
         if: always()
@@ -2232,6 +2273,10 @@ jobs:
             fi
             if [ '${{ needs.test-substratia-gpu-nvidia.outputs.verifier }}' != 'pass' ]; then
               echo "::error::SUBSTRATIA evidence verifier did not record PASS"
+              failed=1
+            fi
+            if [ '${{ needs.test-golden-images-nvidia.outputs.orbis_lane }}' != 'ran' ]; then
+              echo "::error::ORBIS physical NVIDIA Vulkan lane did not record RAN"
               failed=1
             fi
           fi

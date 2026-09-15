@@ -297,7 +297,7 @@ fn sample_clipmap_height(
     fine + (coarse - fine) * morph
 }
 
-fn apply_height_curve(
+pub(crate) fn apply_height_curve(
     raw: f32,
     height_range: (f32, f32),
     params: &crate::terrain::render_params::TerrainRenderParams,
@@ -976,6 +976,17 @@ impl TerrainVisibilityBuffer {
 
 #[cfg(feature = "extension-module")]
 impl super::TerrainScene {
+    /// ORBIS descent frames must remain submission-only. Visibility counters
+    /// are diagnostic data that the descent does not consume, so staging them
+    /// would only force the blocking `finish_frame` readback below.
+    pub(super) fn runtime_visibility_stats_enabled(&self) -> bool {
+        #[cfg(feature = "enable-globe")]
+        if self.orbis_descent_active {
+            return false;
+        }
+        true
+    }
+
     pub(super) fn create_visibility_resolve_bind_group_layout(
         device: &wgpu::Device,
     ) -> wgpu::BindGroupLayout {

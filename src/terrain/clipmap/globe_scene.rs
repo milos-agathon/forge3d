@@ -10,10 +10,10 @@ use pyo3::prelude::*;
 mod metrics;
 mod source;
 
-use metrics::GlobeMetrics;
+use metrics::{GlobeMetrics, StreamingEvidence, StreamingProgressSnapshot};
 use source::{
     coverage_error, default_render_params, extract_source_path, load_covered_overview,
-    normalize_source, overview_coverage_error, source_error, tile_extent_m,
+    normalize_source, source_error, tile_extent_m, OverviewSeed, OverviewSeedCache,
 };
 
 const DEFAULT_START_ALTITUDE_M: f64 = 408_000.0;
@@ -21,6 +21,8 @@ const MAX_SUPPORTED_ALTITUDE_M: f64 = DEFAULT_START_ALTITUDE_M;
 const DEFAULT_WAYPOINT_COUNT: usize = 25;
 const OVERVIEW_SIZE: u32 = source::OVERVIEW_SIZE;
 const GPU_VISIBLE_BUDGET: u64 = 64 * 1024 * 1024;
+const MICRO_STEP_M: f64 = 0.002;
+const ORBIS_PROBE_BASE_ALTITUDE_M: f64 = 6_000.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Waypoint {
@@ -46,20 +48,22 @@ pub struct GlobeScene {
     target: Waypoint,
     target_name: String,
     renderer: TerrainRenderer,
-    _dataset: PyCogDataset,
+    dataset: PyCogDataset,
     material_set: Py<crate::render::material_set::MaterialSet>,
     env_maps: Py<crate::lighting::ibl_wrapper::IBL>,
     params: Py<crate::terrain::render_params::TerrainRenderParams>,
-    overview: Vec<f32>,
+    overview_seeds: OverviewSeedCache,
+    active_overview_tile: crate::terrain::tiling::TileId,
+    source_lod: u32,
     overview_size: u32,
     terrain_extent_m: f32,
     source_bounds: (f64, f64, f64, f64),
-    overview_bounds: (f64, f64, f64, f64),
     current: Option<Waypoint>,
     last_frame: Option<Py<crate::Frame>>,
     rendered_waypoints: usize,
     descent_complete: bool,
-    metrics: GlobeMetrics,
+    metrics: Option<GlobeMetrics>,
+    streaming_evidence: StreamingEvidence,
 }
 
 #[pymethods]
@@ -108,7 +112,7 @@ impl GlobeScene {
                 bounds,
             ));
         }
-        let (overview, _source_lod, tile) =
+        let (overview, source_lod, tile) =
             load_covered_overview(&dataset, target_lon, target_lat).map_err(|error| {
                 source_error(&cog_source, target_name, target_lon, target_lat, error)
             })?;
@@ -135,16 +139,16 @@ impl GlobeScene {
                 format!("terrain renderer unavailable: {error}"),
             )
         })?;
-        renderer.enable_height_streaming_cog(
+        renderer.enable_height_streaming_cog_globe(
             &dataset,
             terrain_extent_m,
             4,
             32,
-            6,
+            source_lod,
             64,
             8,
             2,
-            false,
+            true,
             Some(GPU_VISIBLE_BUDGET),
             Some(tile_bounds),
         )
@@ -157,6 +161,22 @@ impl GlobeScene {
                 format!("globe streaming unavailable: {error}"),
             )
         })?;
+        renderer
+            .activate_height_streaming_overview(
+                tile_bounds,
+                OVERVIEW_SIZE,
+                OVERVIEW_SIZE,
+                &overview,
+            )
+            .map_err(|error| {
+                source_error(
+                    &cog_source,
+                    target_name,
+                    target_lon,
+                    target_lat,
+                    format!("initial overview activation failed: {error:#}"),
+                )
+            })?;
 
         let material_set = match material_set {
             Some(value) => value,
@@ -174,6 +194,11 @@ impl GlobeScene {
             None => Py::new(py, default_render_params(py, terrain_extent_m)?)?,
         };
 
+        let initial_seed = OverviewSeed {
+            tile,
+            heights: overview,
+            bounds: tile_bounds,
+        };
         Ok(Self {
             source: cog_source,
             target: Waypoint {
@@ -183,20 +208,22 @@ impl GlobeScene {
             },
             target_name: target_name.trim().to_string(),
             renderer,
-            _dataset: dataset,
+            dataset,
             material_set,
             env_maps,
             params,
-            overview,
+            overview_seeds: OverviewSeedCache::new(initial_seed),
+            active_overview_tile: tile,
+            source_lod,
             overview_size: OVERVIEW_SIZE,
             terrain_extent_m,
             source_bounds: bounds,
-            overview_bounds: tile_bounds,
             current: None,
             last_frame: None,
             rendered_waypoints: 0,
             descent_complete: false,
-            metrics: GlobeMetrics::unmeasured(),
+            metrics: None,
+            streaming_evidence: StreamingEvidence::default(),
         })
     }
 
@@ -218,10 +245,8 @@ impl GlobeScene {
         self.validate_waypoint_coverage(waypoint).map_err(|error| {
             self.waypoint_validation_error(lon, lat, altitude, "coverage validation", error)
         })?;
-        self.validate_waypoint_overview(waypoint).map_err(|error| {
-            self.waypoint_validation_error(lon, lat, altitude, "overview validation", error)
-        })?;
-        self.render_waypoint(py, waypoint)
+        let tile = self.prepare_overview_seed(waypoint)?;
+        self.render_waypoint_with_overview(py, waypoint, tile)
     }
 
     #[pyo3(signature = (waypoints=None))]
@@ -229,7 +254,7 @@ impl GlobeScene {
         &mut self,
         py: Python<'_>,
         waypoints: Option<Vec<(f64, f64, f64)>>,
-    ) -> PyResult<()> {
+    ) -> PyResult<GlobeMetrics> {
         let path = match waypoints {
             Some(values) => {
                 if values.is_empty() {
@@ -259,9 +284,9 @@ impl GlobeScene {
                 })
                 .collect(),
         };
-        // Validate the entire default or custom path before issuing streaming
-        // or GPU work, so one bad late waypoint cannot leave a half-applied
-        // descent and every frame uses the seeded overview honestly.
+        // Validate and synchronously preload every distinct CPU overview seed
+        // before descent state, metrics, or GPU work is mutated. The frame
+        // loop below performs only cached activation plus bounded GPU work.
         for waypoint in &path {
             self.validate_waypoint_coverage(*waypoint).map_err(|error| {
                 self.waypoint_validation_error(
@@ -272,21 +297,57 @@ impl GlobeScene {
                     error,
                 )
             })?;
-            self.validate_waypoint_overview(*waypoint).map_err(|error| {
-                self.waypoint_validation_error(
-                    waypoint.lon,
-                    waypoint.lat,
-                    waypoint.altitude,
-                    "overview validation",
-                    error,
-                )
-            })?;
         }
-        for waypoint in path {
-            self.render_waypoint(py, waypoint)?;
-        }
+        let prepared_path = path
+            .iter()
+            .copied()
+            .map(|waypoint| self.prepare_overview_seed(waypoint).map(|tile| (waypoint, tile)))
+            .collect::<PyResult<Vec<_>>>()?;
+        let owner = self.renderer.allocation_owner();
+        let (adapter, software_fallback) = self
+            .renderer
+            .adapter_evidence()
+            .map_err(|error| PyRuntimeError::new_err(format!("ORBIS adapter evidence failed: {error:#}")))?;
+        validate_selected_acceptance_adapter(&adapter, software_fallback)?;
+        self.streaming_evidence = StreamingEvidence::default();
+        let baseline_stats = self.renderer.height_streaming_stats(py)?;
+        let baseline = self.streaming_snapshot(py, &baseline_stats)?;
+        self.streaming_evidence.seed(baseline);
+        self.metrics = None;
+        self.descent_complete = false;
+        self.renderer.begin_orbis_descent();
+        crate::core::resource_tracker::begin_owner_ledger_capture(&owner);
+        let frame_result = (|| {
+            for (waypoint, tile) in prepared_path {
+                self.render_waypoint_with_overview(py, waypoint, tile)?;
+            }
+            self.run_orbis_physical_probe(py)?;
+            let physical = self
+                .renderer
+                .finish_orbis_physical_capture()
+                .map_err(|error| PyRuntimeError::new_err(format!("ORBIS physical metric readback failed: {error:#}")))?;
+            Ok::<_, PyErr>(physical)
+        })();
+        let allocation = crate::core::resource_tracker::finish_owner_ledger_capture(&owner);
+        self.renderer.end_orbis_descent();
+        let physical = match frame_result {
+            Ok(value) => value,
+            Err(error) => {
+                self.renderer.abort_orbis_physical_capture();
+                return Err(error);
+            }
+        };
+        let metrics = GlobeMetrics::measured(
+            physical,
+            allocation.peak_total_bytes,
+            &self.streaming_evidence,
+            adapter,
+            software_fallback,
+        )
+        .map_err(|error| PyRuntimeError::new_err(format!("ORBIS metrics incomplete: {error}")))?;
         self.descent_complete = true;
-        Ok(())
+        self.metrics = Some(metrics.clone());
+        Ok(metrics)
     }
 
     fn snapshot(&self, py: Python<'_>) -> PyResult<Py<crate::Frame>> {
@@ -302,10 +363,9 @@ impl GlobeScene {
                 "metrics unavailable before scripted descent is complete",
             ));
         }
-        let _ = &self.metrics;
-        Err(PyRuntimeError::new_err(
-            "metrics unmeasured: Task 8 physical GPU probes have not completed",
-        ))
+        self.metrics.clone().ok_or_else(|| {
+            PyRuntimeError::new_err("metrics unavailable: physical GPU evidence is incomplete")
+        })
     }
 
     #[getter]
@@ -336,7 +396,91 @@ impl GlobeScene {
     }
 }
 
+fn validate_selected_acceptance_adapter(
+    adapter: &wgpu::AdapterInfo,
+    software_fallback: bool,
+) -> PyResult<()> {
+    let selected = std::env::var("FORGE3D_RUN_ORBIS_GPU").as_deref() == Ok("1");
+    if !selected {
+        return Ok(());
+    }
+    let valid = adapter.vendor == 0x10de
+        && adapter.name.to_ascii_lowercase().contains("nvidia")
+        && adapter.backend == wgpu::Backend::Vulkan
+        && adapter.device_type == wgpu::DeviceType::DiscreteGpu
+        && !software_fallback;
+    if valid {
+        Ok(())
+    } else {
+        Err(PyRuntimeError::new_err(format!(
+            "FORGE3D_RUN_ORBIS_GPU=1 requires a physical NVIDIA Vulkan discrete adapter with software_fallback=false; got name={:?} vendor={:#06x} backend={:?} type={:?} software_fallback={software_fallback}",
+            adapter.name, adapter.vendor, adapter.backend, adapter.device_type,
+        )))
+    }
+}
+
 impl GlobeScene {
+    fn streaming_snapshot(
+        &self,
+        py: Python<'_>,
+        stats: &PyObject,
+    ) -> PyResult<StreamingProgressSnapshot> {
+        let dict = stats.bind(py).downcast::<pyo3::types::PyDict>().map_err(|_| {
+            PyRuntimeError::new_err("ORBIS streaming stats were not a native dict")
+        })?;
+        let get_u64 = |name: &str| -> PyResult<u64> {
+            dict.get_item(name)?
+                .ok_or_else(|| {
+                    PyRuntimeError::new_err(format!(
+                        "ORBIS streaming stat {name:?} missing"
+                    ))
+                })?
+                .extract::<u64>()
+        };
+        Ok(StreamingProgressSnapshot {
+            bounded_step: get_u64("bounded_steps")?,
+            tiles_requested: get_u64("tiles_requested")?,
+            loader_completed: get_u64("loader_completed")?,
+            tiles_uploaded: get_u64("tiles_uploaded")?,
+            pending_ring_tiles: get_u64("pending_ring_tiles")?,
+            loader_pending: get_u64("loader_pending")?,
+            resident_fine_tiles: get_u64("resident_fine_tiles")?,
+            resident_ancestor_tiles: get_u64("resident_ancestor_tiles")?,
+            loaded_ring_tiles: get_u64("loaded_ring_tiles")?,
+            page_table_updates: get_u64("page_table_updates")?,
+            coarse_prefilled: get_u64("coarse_prefilled")?,
+            ancestor_fallbacks: get_u64("ancestor_fallbacks")?,
+            required_leaf_tiles: get_u64("required_leaf_tiles")?,
+        })
+    }
+
+    fn record_streaming_evidence(&mut self, py: Python<'_>, stats: &PyObject) -> PyResult<()> {
+        let dict = stats.bind(py).downcast::<pyo3::types::PyDict>().map_err(|_| {
+            PyRuntimeError::new_err("ORBIS streaming stats were not a native dict")
+        })?;
+        let get_u64 = |name: &str| -> PyResult<u64> {
+            dict.get_item(name)?
+                .ok_or_else(|| PyRuntimeError::new_err(format!("ORBIS streaming stat {name:?} missing")))?
+                .extract::<u64>()
+        };
+        let snapshot = self.streaming_snapshot(py, stats)?;
+        let pending = snapshot.pending_ring_tiles + snapshot.loader_pending;
+        let effective_target_lod = get_u64("effective_target_lod")?;
+        if effective_target_lod != u64::from(self.source_lod) {
+            return Err(PyRuntimeError::new_err(format!(
+                "ORBIS streaming target LOD changed from validated source LOD {} to {effective_target_lod}",
+                self.source_lod
+            )));
+        }
+        let coarse_valid = get_u64("coarse_prefilled")? > 0 && get_u64("ancestor_fallbacks")? > 0;
+        self.streaming_evidence
+            .observe(snapshot)
+            .map_err(PyRuntimeError::new_err)?;
+        self.streaming_evidence.pending_frames += u64::from(pending > 0);
+        self.streaming_evidence.coarse_fallback_frames += u64::from(coarse_valid);
+        Ok(())
+    }
+
     fn waypoint_context(&self, waypoint: Waypoint, stage: &str, error: impl std::fmt::Display) -> String {
         waypoint_context_message(&self.source, &self.target_name, waypoint, stage, error)
     }
@@ -374,22 +518,109 @@ impl GlobeScene {
         Ok(())
     }
 
-    fn validate_waypoint_overview(&self, waypoint: Waypoint) -> PyResult<()> {
-        let bounds = self.overview_bounds;
-        if waypoint.lon < bounds.0
-            || waypoint.lon > bounds.2
-            || waypoint.lat < bounds.1
-            || waypoint.lat > bounds.3
+    fn prepare_overview_seed(
+        &mut self,
+        waypoint: Waypoint,
+    ) -> PyResult<crate::terrain::tiling::TileId> {
+        if let Some(tile) = self
+            .overview_seeds
+            .find_covering(waypoint.lon, waypoint.lat)
         {
-            return Err(overview_coverage_error(
-                &self.source,
-                &self.target_name,
-                waypoint.lon,
-                waypoint.lat,
-                bounds,
-            ));
+            return Ok(tile);
         }
-        Ok(())
+        let dataset = &self.dataset;
+        let (heights, _seed_lod, tile) = load_covered_overview(
+            dataset,
+            waypoint.lon,
+            waypoint.lat,
+        )
+        .map_err(|error| {
+            PyValueError::new_err(self.waypoint_context(
+                waypoint,
+                "overview seed preparation",
+                error,
+            ))
+        })?;
+        let bounds = global_tile_lonlat_bounds(tile).map_err(|error| {
+            PyValueError::new_err(self.waypoint_context(
+                waypoint,
+                "overview seed bounds",
+                error,
+            ))
+        })?;
+        self.overview_seeds
+            .prepare_with(tile, || {
+                Ok(OverviewSeed {
+                    tile,
+                    heights,
+                    bounds,
+                })
+            })
+            .map_err(|error| {
+                PyValueError::new_err(self.waypoint_context(
+                    waypoint,
+                    "overview seed preparation",
+                    error,
+                ))
+            })?;
+        Ok(tile)
+    }
+
+    fn render_waypoint_with_overview(
+        &mut self,
+        py: Python<'_>,
+        waypoint: Waypoint,
+        tile: crate::terrain::tiling::TileId,
+    ) -> PyResult<Py<crate::Frame>> {
+        if tile == self.active_overview_tile {
+            return self.render_waypoint(py, waypoint);
+        }
+        let previous_tile = self.active_overview_tile;
+        let seed = self
+            .overview_seeds
+            .get(tile)
+            .ok_or_else(|| {
+                PyRuntimeError::new_err(self.waypoint_context(
+                    waypoint,
+                    "overview activation",
+                    "prepared overview seed is missing from the cache",
+                ))
+            })?;
+        let activation = self
+            .renderer
+            .begin_height_streaming_overview_activation(
+                seed.bounds,
+                self.overview_size,
+                self.overview_size,
+                &seed.heights,
+            )
+            .map_err(|error| {
+                PyRuntimeError::new_err(self.waypoint_context(
+                    waypoint,
+                    "overview activation",
+                    format!("{error:#}"),
+                ))
+            })?;
+        self.active_overview_tile = tile;
+        match self.render_waypoint(py, waypoint) {
+            Ok(frame) => {
+                self.renderer
+                    .commit_height_streaming_overview_activation(activation);
+                Ok(frame)
+            }
+            Err(render_error) => {
+                self.renderer
+                    .rollback_height_streaming_overview_activation(activation);
+                self.active_overview_tile = previous_tile;
+                Err(render_error)
+            }
+        }
+    }
+
+    fn active_overview(&self) -> PyResult<&OverviewSeed> {
+        self.overview_seeds
+            .get(self.active_overview_tile)
+            .ok_or_else(|| PyRuntimeError::new_err("active ORBIS overview seed is missing"))
     }
 
     fn render_waypoint(
@@ -404,20 +635,47 @@ impl GlobeScene {
         .map_err(|error| {
             PyValueError::new_err(self.waypoint_context(waypoint, "ECEF validation", error))
         })?;
-        let camera_ecef = seed
-            .lonlat_alt_to_ecef(waypoint.lon, waypoint.lat, waypoint.altitude)
-            .filter(|ecef| ecef.is_finite())
-            .ok_or_else(|| {
-                PyValueError::new_err(self.waypoint_context(
-                    waypoint,
-                    "ECEF validation",
-                    "waypoint cannot be represented as finite ECEF",
-                ))
-            })?;
-
         let mut params = self.params.borrow(py).clone();
         params.camera_mode = "clipmap:4:32:32:10:0.3:zup".to_string();
         params.terrain_span = self.terrain_extent_m;
+        let target_height = self
+            .active_overview()?
+            .sample_height(waypoint.lon, waypoint.lat)
+            .map_err(|error| {
+                PyValueError::new_err(self.waypoint_context(
+                    waypoint,
+                    "ground reference sampling",
+                    error,
+                ))
+            })?;
+        let height_range = params.decoded().clamp.height_range;
+        let rendered_target_height = crate::terrain::renderer::visibility_buffer::apply_height_curve(
+            target_height,
+            height_range,
+            &params,
+        );
+        let anchor_altitude = camera_anchor_altitude(
+            waypoint.altitude,
+            rendered_target_height,
+            height_range,
+            params.z_scale,
+        )
+        .map_err(|error| {
+            PyValueError::new_err(self.waypoint_context(
+                waypoint,
+                "ground reference validation",
+                error,
+            ))
+        })?;
+        let camera_ecef = seed
+            .lonlat_alt_to_ecef(waypoint.lon, waypoint.lat, anchor_altitude)
+            .map_err(|error| {
+                PyValueError::new_err(self.waypoint_context(
+                    waypoint,
+                    "ECEF validation",
+                    error,
+                ))
+            })?;
         let pose = camera_pose(waypoint);
         params.cam_phi_deg = pose.phi_deg;
         params.cam_theta_deg = pose.theta_deg;
@@ -448,16 +706,16 @@ impl GlobeScene {
             (camera_ecef.x, camera_ecef.y, camera_ecef.z),
             8,
         );
-        contextualize_waypoint_runtime(
+        let stream_stats = contextualize_waypoint_runtime(
             &self.source,
             &self.target_name,
             waypoint,
             "streaming",
             stream_result,
         )?;
-
         let rows = self
-            .overview
+            .active_overview()?
+            .heights
             .chunks_exact(self.overview_size as usize)
             .map(|row| row.to_vec())
             .collect::<Vec<_>>();
@@ -482,11 +740,147 @@ impl GlobeScene {
             "render",
             render_result,
         )?;
+        // Count progress only after both the one bounded stream step and the
+        // corresponding render submission have completed successfully.
+        if self.renderer.orbis_descent_active() {
+            self.record_streaming_evidence(py, &stream_stats)?;
+        }
         self.current = Some(waypoint);
         self.rendered_waypoints += 1;
         self.last_frame = Some(frame.clone_ref(py));
         Ok(frame)
     }
+
+    fn run_orbis_physical_probe(&mut self, py: Python<'_>) -> PyResult<()> {
+        let waypoint = self.current.unwrap_or(self.target);
+        let radius = crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
+        let seed = super::globe::GlobeFrame::globe(radius, glam::DVec3::X * radius)
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("ORBIS probe base frame failed: {error}"))
+            })?;
+        let surface = seed
+            .lonlat_alt_to_ecef(waypoint.lon, waypoint.lat, 0.0)
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("ORBIS probe base coordinate failed: {error}"))
+            })?;
+        let probe_base = safe_orbis_probe_base(surface).map_err(PyRuntimeError::new_err)?;
+        let base_stream = self.renderer.stream_height_tiles_globe(
+            py,
+            (probe_base.x, probe_base.y, probe_base.z),
+            0,
+        );
+        contextualize_waypoint_runtime(
+            &self.source,
+            &self.target_name,
+            waypoint,
+            "physical probe base streaming",
+            base_stream,
+        )?;
+
+        let (anchor, threshold) = self.renderer.orbis_reanchor_state().map_err(|error| {
+            PyRuntimeError::new_err(format!("ORBIS reanchor probe state failed: {error:#}"))
+        })?;
+        if anchor != probe_base {
+            return Err(PyRuntimeError::new_err(
+                "ORBIS globe streamer did not reanchor at the requested elevated probe base",
+            ));
+        }
+        let [camera_0, camera_1] =
+            orbis_probe_cameras(anchor, threshold).map_err(PyRuntimeError::new_err)?;
+        let anchor_altitude = anchor.length() - radius;
+        for (frame_index, camera) in [camera_0, camera_1].into_iter().enumerate() {
+            let stream = self.renderer.stream_height_tiles_globe(
+                py,
+                (camera.x, camera.y, camera.z),
+                0,
+            );
+            contextualize_waypoint_runtime(
+                &self.source,
+                &self.target_name,
+                waypoint,
+                "physical probe streaming",
+                stream,
+            )?;
+            let camera_altitude = camera.length() - radius;
+            let actual_anchor_altitude = if frame_index == 0 {
+                anchor_altitude
+            } else {
+                camera_altitude
+            };
+            let mut params = self.params.borrow(py).clone();
+            params.camera_mode = "clipmap:4:32:32:10:0.3:zup".to_string();
+            params.terrain_span = self.terrain_extent_m;
+            params.cam_phi_deg = 0.0;
+            params.cam_theta_deg = 0.0;
+            params.cam_radius = camera_altitude as f32;
+            params.cam_target = [0.0, 0.0, -(actual_anchor_altitude as f32)];
+            params.clip = (
+                0.1,
+                (camera_altitude as f32 + self.terrain_extent_m * 4.0).max(10_000.0),
+            );
+            self.renderer
+                .begin_orbis_physical_capture(camera)
+                .map_err(|error| PyRuntimeError::new_err(format!(
+                    "ORBIS physical frame {frame_index} setup failed: {error:#}"
+                )))?;
+            let rows = self
+                .active_overview()?
+                .heights
+                .chunks_exact(self.overview_size as usize)
+                .map(|row| row.to_vec())
+                .collect::<Vec<_>>();
+            let heights = PyArray2::from_vec2_bound(py, &rows)
+                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+            let rendered = self.renderer.render_terrain_pbr_pom(
+                py,
+                &self.material_set.borrow(py),
+                &self.env_maps.borrow(py),
+                &params,
+                heights.readonly(),
+                None,
+                None,
+                self.rendered_waypoints as f32 + frame_index as f32,
+                None,
+                None,
+            );
+            contextualize_waypoint_runtime(
+                &self.source,
+                &self.target_name,
+                waypoint,
+                "physical probe render",
+                rendered,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn safe_orbis_probe_base(surface_ecef: glam::DVec3) -> Result<glam::DVec3, String> {
+    let radius = crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
+    let surface_radius = surface_ecef.length();
+    if !surface_ecef.is_finite() || !surface_radius.is_finite() || surface_radius <= 0.0 {
+        return Err("ORBIS probe surface coordinate must be finite and non-zero".to_string());
+    }
+    Ok(surface_ecef / surface_radius * (radius + ORBIS_PROBE_BASE_ALTITUDE_M))
+}
+
+fn orbis_probe_cameras(
+    anchor: glam::DVec3,
+    threshold: f64,
+) -> Result<[glam::DVec3; 2], String> {
+    if !anchor.is_finite() || anchor.length_squared() == 0.0 {
+        return Err("ORBIS elevated probe anchor must be finite and non-zero".to_string());
+    }
+    if !threshold.is_finite() || threshold <= MICRO_STEP_M {
+        return Err("ORBIS clipmap reanchor threshold is too small for the 2 mm probe".to_string());
+    }
+    let up = anchor.normalize();
+    let camera_0 = anchor + up * (threshold - MICRO_STEP_M * 0.5);
+    let camera_1 = anchor + up * (threshold + MICRO_STEP_M * 0.5);
+    if ((camera_1 - camera_0).length() - MICRO_STEP_M).abs() > 1.0e-9 {
+        return Err("ORBIS physical probe cameras are not separated by exactly 2 mm".to_string());
+    }
+    Ok([camera_0, camera_1])
 }
 
 fn waypoint_context_message(
@@ -573,6 +967,29 @@ fn camera_pose(waypoint: Waypoint) -> CameraPose {
     }
 }
 
+fn camera_anchor_altitude(
+    requested_altitude: f64,
+    rendered_target_height: f32,
+    height_range: (f32, f32),
+    z_scale: f32,
+) -> Result<f64, String> {
+    if !requested_altitude.is_finite()
+        || !rendered_target_height.is_finite()
+        || !height_range.0.is_finite()
+        || !height_range.1.is_finite()
+        || height_range.0 > height_range.1
+        || !z_scale.is_finite()
+        || z_scale <= 0.0
+    {
+        return Err("ground-relative camera inputs must be finite and ordered".to_string());
+    }
+    let altitude = requested_altitude + f64::from(rendered_target_height * z_scale);
+    if !altitude.is_finite() {
+        return Err("ground-relative camera altitude is not finite".to_string());
+    }
+    Ok(altitude)
+}
+
 fn default_descent_altitudes() -> Vec<f64> {
     let log_start = (DEFAULT_START_ALTITUDE_M + 1.0).ln();
     (0..DEFAULT_WAYPOINT_COUNT)
@@ -616,6 +1033,19 @@ mod tests {
     }
 
     #[test]
+    fn waypoint_altitude_is_measured_above_the_rendered_target_surface() {
+        assert_eq!(
+            camera_anchor_altitude(1_000.0, 4_380.0, (0.0, 5_000.0), 1.0).unwrap(),
+            5_380.0
+        );
+        assert_eq!(
+            camera_anchor_altitude(0.0, 2_500.0, (0.0, 5_000.0), 1.0).unwrap(),
+            2_500.0
+        );
+        assert!(camera_anchor_altitude(0.0, f32::NAN, (0.0, 5_000.0), 1.0).is_err());
+    }
+
+    #[test]
     fn target_tile_contains_cardinal_and_rainier_points() {
         source::assert_test_points_in_tiles();
     }
@@ -636,6 +1066,25 @@ mod tests {
         assert_eq!(eye, glam::Vec3::ZERO, "ground eye must equal anchor bit-exactly");
         assert!((target - eye).length() > 0.5);
         assert!(glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y).is_finite());
+    }
+
+    #[test]
+    fn physical_probe_uses_safe_elevated_base_and_exact_threshold_crossing() {
+        let radius = crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
+        let surface = glam::DVec3::new(1.0, 2.0, 3.0).normalize() * radius;
+        let base = safe_orbis_probe_base(surface).unwrap();
+        assert!((base.length() - radius - ORBIS_PROBE_BASE_ALTITUDE_M).abs() < 1.0e-9);
+        assert!((base.normalize() - surface.normalize()).length() < 1.0e-15);
+
+        let threshold = 32.0;
+        let [camera_0, camera_1] = orbis_probe_cameras(base, threshold).unwrap();
+        assert!(((camera_1 - camera_0).length() - MICRO_STEP_M).abs() < 1.0e-9);
+        assert!((camera_0 - base).length() < threshold);
+        assert!((camera_1 - base).length() > threshold);
+
+        let operand_scale = camera_1.length() - radius;
+        let quantization_bound = f64::from(f32::EPSILON) * operand_scale + 1.0e-6;
+        assert!(quantization_bound < MICRO_STEP_M * 0.5);
     }
 
     #[test]

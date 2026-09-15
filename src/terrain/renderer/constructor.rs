@@ -636,6 +636,8 @@ impl TerrainScene {
             aov_pipeline_output_mask: Mutex::new(0),
             aov_pipeline_source_id: Mutex::new(false),
             aov_pipeline_clipmap: Mutex::new(false),
+            #[cfg(feature = "enable-globe")]
+            orbis_coverage_pipeline: Mutex::new(None),
             _dof_renderer: Mutex::new(None),
             offline_state: Mutex::new(None),
             #[cfg(feature = "enable-gpu-instancing")]
@@ -655,6 +657,12 @@ impl TerrainScene {
             terrain_minmax_pyramid: None,
             culling_stats: crate::terrain::culling::two_phase::CullingStats::default(),
             height_streaming: None,
+            #[cfg(feature = "enable-globe")]
+            orbis_capture_request: None,
+            #[cfg(feature = "enable-globe")]
+            orbis_pending_capture: None,
+            #[cfg(feature = "enable-globe")]
+            orbis_descent_active: false,
             gpu_timing: Mutex::new(None),
             _tracked_scene_textures: tracked_scene_textures,
         })

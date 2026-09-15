@@ -8,11 +8,37 @@ fn planetary_altitude_and_up_come_from_globe_frame() {
     let frame =
         crate::terrain::clipmap::globe::GlobeFrame::globe(10_000.0, DVec3::X * 12_500.0).unwrap();
 
-    let planet = PlanetLodParams::from_globe(&frame);
+    let planet = PlanetLodParams::from_globe(&frame).unwrap();
 
     assert_eq!(planet.radius, 10_000.0);
     assert_eq!(planet.altitude, 2_500.0);
     assert!((planet.camera_up - Vec3::Z).length() < 1.0e-6);
+}
+
+#[cfg(feature = "enable-globe")]
+#[test]
+fn planetary_tile_builder_uses_full_camera_relative_volume() {
+    use glam::DVec3;
+
+    let radius = 6_371_000.0;
+    let frame = crate::terrain::clipmap::globe::GlobeFrame::globe(
+        radius,
+        DVec3::X * (radius + 1_000.0),
+    )
+    .unwrap();
+    let tile = TileInfo::new(0, 0, 0, Vec2::ZERO, Vec2::ZERO)
+        .with_globe_bounds(
+            &frame,
+            Vec3::new(-500.0, -400.0, -1_200.0),
+            Vec3::new(700.0, 600.0, -800.0),
+        )
+        .unwrap();
+
+    assert_eq!(tile.camera_relative_center, [100.0, 100.0, -1_000.0]);
+    assert_eq!(tile.bounds_min, [-500.0, -400.0]);
+    assert_eq!(tile.bounds_max, [700.0, 600.0]);
+    assert_eq!((tile.height_min, tile.height_max), (-1_200.0, -800.0));
+    assert!(tile.angular_radius > 0.0);
 }
 
 #[test]
@@ -63,7 +89,8 @@ fn planetary_aabb_uses_camera_relative_bounds() {
             .unwrap();
     let tile = TileInfo::new(0, 0, 0, Vec2::new(-100.0, -100.0), Vec2::new(100.0, 100.0))
         .with_height_bounds(-1_100.0, -900.0)
-        .with_globe_center(&frame, DVec3::X * radius, 0.001);
+        .with_globe_center(&frame, DVec3::X * radius, 0.001)
+        .unwrap();
     let view = Mat4::look_at_rh(Vec3::ZERO, Vec3::NEG_Z, Vec3::Y);
     let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 1.0, 5_000.0);
 
@@ -73,10 +100,162 @@ fn planetary_aabb_uses_camera_relative_bounds() {
         &GpuLodConfig::default(),
         (-1_100.0, -900.0),
         &frame,
-    );
+    )
+    .unwrap();
 
     assert_eq!(result.visible_tiles.len(), 1);
     assert!((result.visible_tiles[0].distance - 1_000.0).abs() < 0.25);
+}
+
+#[cfg(feature = "enable-globe")]
+#[test]
+fn tracked_planetary_encode_propagates_invalid_frame_error() {
+    use crate::terrain::clipmap::globe::GlobeFrame;
+    use glam::DVec3;
+
+    let context = match crate::core::gpu::try_ctx() {
+        Ok(context) => context,
+        Err(error) if is_adapter_unavailable(&error) => {
+            eprintln!("planetary LOD error propagation skipped: {error}");
+            return;
+        }
+        Err(error) => panic!("planetary LOD adapter setup failed: {error}"),
+    };
+    let config = GpuLodConfig {
+        max_lod: 0,
+        ..Default::default()
+    };
+    let selector = GpuLodSelector::new(&context.device, config);
+    let tiles = [TileInfo::new(
+        0,
+        0,
+        0,
+        Vec2::splat(-1.0),
+        Vec2::splat(1.0),
+    )];
+    let templates = [IndirectDrawTemplate {
+        index_count: 3,
+        first_index: 0,
+        base_vertex: 0,
+        tile_id: tiles[0].tile_id,
+    }];
+    let resources = selector
+        .create_draw_resources(&context.device, &tiles, &templates)
+        .unwrap();
+    let mut encoder = context
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("planetary_lod_invalid_frame"),
+        });
+    // A flat zero-anchor frame is valid for the flat path, but cannot define
+    // the planetary up vector required by the globe LOD shader.
+    let invalid_planet = GlobeFrame::flat(DVec3::ZERO).unwrap();
+    let error = selector
+        .encode_indirect_globe_tracked(
+            &context.queue,
+            &mut encoder,
+            &resources,
+            &tiles,
+            Mat4::IDENTITY,
+            &invalid_planet,
+            false,
+            (0.0, 0.0),
+            true,
+            LodSelectionProvenance(99),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        GpuLodEncodeError::GlobeFrame(
+            crate::terrain::clipmap::globe::GlobeFrameError::NonFiniteEcef
+        )
+    );
+}
+
+#[cfg(feature = "enable-globe")]
+#[test]
+fn tracked_planetary_encode_rejects_tile_count_without_consuming_a_ticket() {
+    use glam::DVec3;
+
+    let context = match crate::core::gpu::try_ctx() {
+        Ok(context) => context,
+        Err(error) if is_adapter_unavailable(&error) => {
+            eprintln!("planetary LOD mismatch propagation skipped: {error}");
+            return;
+        }
+        Err(error) => panic!("planetary LOD adapter setup failed: {error}"),
+    };
+    let selector = GpuLodSelector::new(
+        &context.device,
+        GpuLodConfig {
+            max_lod: 0,
+            ..Default::default()
+        },
+    );
+    let tiles = [TileInfo::new(
+        0,
+        0,
+        0,
+        Vec2::splat(-1.0),
+        Vec2::splat(1.0),
+    )];
+    let templates = [IndirectDrawTemplate {
+        index_count: 3,
+        first_index: 0,
+        base_vertex: 0,
+        tile_id: tiles[0].tile_id,
+    }];
+    let resources = selector
+        .create_draw_resources(&context.device, &tiles, &templates)
+        .unwrap();
+    let frame = crate::terrain::clipmap::globe::GlobeFrame::globe(
+        10_000.0,
+        DVec3::X * 11_000.0,
+    )
+    .unwrap();
+    let mut encoder = context
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("planetary_lod_tile_count_mismatch"),
+        });
+    let error = selector
+        .encode_indirect_globe_tracked(
+            &context.queue,
+            &mut encoder,
+            &resources,
+            &[],
+            Mat4::IDENTITY,
+            &frame,
+            false,
+            (0.0, 0.0),
+            true,
+            LodSelectionProvenance(100),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        GpuLodEncodeError::TileCountMismatch {
+            expected: 1,
+            actual: 0,
+        }
+    );
+
+    let ticket = selector
+        .encode_indirect_globe_tracked(
+            &context.queue,
+            &mut encoder,
+            &resources,
+            &tiles,
+            Mat4::IDENTITY,
+            &frame,
+            false,
+            (0.0, 0.0),
+            true,
+            LodSelectionProvenance(101),
+        )
+        .unwrap()
+        .expect("mismatch must not consume or stage a stale readback ticket");
+    assert!(resources.cancel_selection(ticket));
 }
 
 #[test]
@@ -466,7 +645,7 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
             .iter()
             .map(|&(x, y, lon, lat)| {
                 let center_ecef = frame.lonlat_alt_to_ecef(lon, lat, 0.0).unwrap();
-                let center_relative = frame.camera_relative(center_ecef).position;
+                let center_relative = frame.camera_relative(center_ecef).unwrap().position;
                 let half_extent = radius as f32 * 8.0_f32.to_radians();
                 TileInfo::new(
                     0,
@@ -480,13 +659,15 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
                     center_relative.z + half_extent,
                 )
                 .with_globe_center(frame, center_ecef, 8.0_f32.to_radians())
+                .unwrap()
             })
             .collect::<Vec<_>>();
         let antipodal_ecef = -frame.camera_anchor().normalize() * radius;
         tiles.push(
             TileInfo::new(0, 31, 31, Vec2::splat(-40_000.0), Vec2::splat(40_000.0))
                 .with_height_bounds(-40_000.0, 40_000.0)
-                .with_globe_center(frame, antipodal_ecef, std::f32::consts::PI),
+                .with_globe_center(frame, antipodal_ecef, std::f32::consts::PI)
+                .unwrap(),
         );
         tiles
     };
@@ -540,6 +721,7 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
                 true,
                 provenance,
             )
+            .expect("valid globe frame must produce planetary LOD parameters")
             .expect("a readback slot must be available after the prior result completes");
         context.queue.submit(Some(encoder.finish()));
         assert!(resources.mark_selection_submitted(ticket));
@@ -561,7 +743,8 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
             .into_selection_for(provenance)
             .expect("completed selection must retain its originating camera provenance");
         let cpu_result =
-            cpu_lod_select_globe(&tiles, view_proj, &config, (-40_000.0, 40_000.0), &frame);
+            cpu_lod_select_globe(&tiles, view_proj, &config, (-40_000.0, 40_000.0), &frame)
+                .unwrap();
         let mut cpu_ids: Vec<_> = cpu_result
             .visible_tiles
             .iter()
@@ -593,4 +776,51 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
         selected_lods.len() > 1,
         "camera sweep must exercise multiple selected LODs"
     );
+}
+
+#[cfg(feature = "enable-globe")]
+#[test]
+fn planetary_frustum_visible_count_survives_a_b_a_reanchor() {
+    use glam::DVec3;
+
+    let radius = 6_371_000.0;
+    let frame = crate::terrain::clipmap::globe::GlobeFrame::globe(
+        radius,
+        DVec3::X * (radius + 1_000.0),
+    )
+    .unwrap();
+    // The planar bounds deliberately retain a previous anchor's translation.
+    // The current camera-relative center is directly in front of the camera.
+    let config = GpuLodConfig::default();
+    let view = Mat4::look_at_rh(Vec3::ZERO, Vec3::NEG_Z, Vec3::Y);
+    let projection = Mat4::perspective_rh(config.fov_y, 16.0 / 9.0, 0.1, 10_000.0);
+    let visible_counts = [
+        ([0.0, 0.0, -1_000.0], 50_000.0),
+        ([100.0, 0.0, -1_000.0], -50_000.0),
+        ([0.0, 0.0, -1_000.0], 50_000.0),
+    ]
+    .map(|(center, stale_translation)| {
+        let mut tile = TileInfo::new(
+            0,
+            0,
+            0,
+            Vec2::splat(stale_translation),
+            Vec2::splat(stale_translation + 100.0),
+        )
+        .with_height_bounds(-1_050.0, -950.0);
+        tile.camera_relative_center = center;
+        tile.angular_radius = 0.01;
+        cpu_lod_select_globe(
+            &[tile],
+            projection * view,
+            &config,
+            (-2_000.0, 0.0),
+            &frame,
+        )
+        .unwrap()
+        .visible_tiles
+        .len()
+    });
+
+    assert_eq!(visible_counts, [1, 1, 1]);
 }

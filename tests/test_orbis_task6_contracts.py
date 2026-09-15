@@ -267,7 +267,7 @@ def test_throttled_remote_cog_runtime_keeps_io_driven(tmp_path: Path) -> None:
         dataset = native.CogDataset(url, cache_size_mb=1)
         covered = np.asarray(dataset.read_height_tile(1, 0, 0, 4, 4))
         renderer = native.TerrainRenderer(native.Session(window=False))
-        renderer.enable_height_streaming_cog(
+        renderer.enable_height_streaming_cog_globe(
             dataset,
             terrain_extent_m=10_000.0,
             ring_count=1,
@@ -300,3 +300,34 @@ def test_missing_geotiff_crs_is_an_explicit_open_error(tmp_path: Path) -> None:
     source = _write_quadrant_cog(tmp_path / "no-crs.tif", georeferenced=False)
     with pytest.raises(Exception, match="GeoTIFF|CRS|georeference"):
         native.CogDataset(source.as_uri(), cache_size_mb=1)
+
+
+def test_cog_streaming_flat_and_globe_apis_are_explicit_and_unclamped() -> None:
+    root = Path(__file__).parents[1]
+    source = (root / "src/terrain/renderer/py_api.rs").read_text(encoding="utf-8")
+    stub = (root / "python/forge3d/__init__.pyi").read_text(encoding="utf-8")
+    scene = (root / "src/terrain/clipmap/globe_scene.rs").read_text(encoding="utf-8")
+    assert "pub fn enable_height_streaming_cog(" in source
+    assert "pub fn enable_height_streaming_cog_globe(" in source
+    assert "lod.min(6)" not in source
+    assert "enable_height_streaming_cog_globe(" in scene
+    assert "let (overview, source_lod, tile)" in scene
+    assert "effective_target_lod != u64::from(self.source_lod)" in scene
+    assert "\n            source_lod,\n" in scene
+    flat_impl = source.split("pub fn enable_height_streaming_cog(", 1)[1].split(
+        "pub fn enable_height_streaming_cog_globe(", 1
+    )[0]
+    globe_impl = source.split("pub fn enable_height_streaming_cog_globe(", 1)[1].split(
+        "pub fn disable_height_streaming", 1
+    )[0]
+    assert "\n            false,\n" in flat_impl
+    assert "\n            true,\n" in globe_impl
+    assert 'dict.set_item("effective_target_lod", stats.effective_target_lod)' in source
+    assert 'dict.set_item("coarse_prefill_enabled", stats.coarse_prefill_enabled)' in source
+    assert 'dict.set_item("required_leaf_tiles", stats.required_leaf_tiles)' in source
+    for method in (
+        "enable_height_streaming_cog",
+        "enable_height_streaming_cog_globe",
+        "stream_height_tiles_globe",
+    ):
+        assert f"def {method}(" in stub

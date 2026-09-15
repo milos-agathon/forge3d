@@ -18,6 +18,10 @@ pub mod core {
         pub struct RenderError(pub String);
 
         impl RenderError {
+            pub fn device(message: impl Into<String>) -> Self {
+                Self(message.into())
+            }
+
             pub fn upload(message: impl Into<String>) -> Self {
                 Self(message.into())
             }

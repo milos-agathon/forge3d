@@ -1095,8 +1095,11 @@ impl TerrainRenderer {
     /// loader, and camera-driven clipmap demand. Until the asynchronously
     /// requested root tile is resident, all terrain passes keep using the
     /// overview supplied to the render call; afterwards page misses walk to
-    /// the pinned root. `coarse_prefill` is retained for API compatibility but
-    /// no longer performs synchronous eager reads.
+    /// the pinned root. `coarse_prefill=true` requests that root asynchronously
+    /// at construction; false defers it until camera demand requests the local
+    /// ancestor chain. The option never performs synchronous I/O. Flat
+    /// streaming accepts `lod` in `0..=6`, bounding complete-root expansion
+    /// to at most 64 x 64 live mosaic tiles.
     #[pyo3(signature = (terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, dem=None, coarse_prefill=true, max_resident_bytes=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn enable_height_streaming(
@@ -1119,7 +1122,8 @@ impl TerrainRenderer {
                 "terrain_extent_m must be a positive finite value",
             ));
         }
-        let lod = lod.min(6);
+        super::streaming::validate_flat_height_streaming_lod(lod)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         let tile_resolution = tile_resolution.clamp(8, 1024);
         let reader: Arc<dyn crate::terrain::page_table::HeightReader> = match dem {
             Some(arr) => {
@@ -1166,14 +1170,73 @@ impl TerrainRenderer {
         Ok(())
     }
 
-    /// Enable the same height-mosaic path from a COG-backed
-    /// `VirtualTextureStore`. The COG reader and the packed material store
-    /// therefore share the page contract instead of maintaining a third
-    /// render-time streamer.
+    /// Enable legacy flat COG height streaming. Enabling globe support at
+    /// compile time does not alter this method's coordinate or mesh semantics;
+    /// planetary callers must use `enable_height_streaming_cog_globe`. Flat
+    /// streaming accepts `lod` in `0..=6` so root expansion remains bounded.
     #[cfg(feature = "cog_streaming")]
     #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None, overview_lonlat_bounds=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn enable_height_streaming_cog(
+        &mut self,
+        dataset: &crate::terrain::cog::py_bindings::PyCogDataset,
+        terrain_extent_m: f32,
+        ring_count: u32,
+        ring_resolution: u32,
+        lod: u32,
+        tile_resolution: u32,
+        max_in_flight: usize,
+        pool_size: usize,
+        coarse_prefill: bool,
+        max_resident_bytes: Option<u64>,
+        overview_lonlat_bounds: Option<(f64, f64, f64, f64)>,
+    ) -> PyResult<()> {
+        if !(terrain_extent_m.is_finite() && terrain_extent_m > 0.0) {
+            return Err(PyRuntimeError::new_err(
+                "terrain_extent_m must be a positive finite value",
+            ));
+        }
+        super::streaming::validate_flat_height_streaming_lod(lod)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        let tile_resolution = tile_resolution.clamp(8, 1024);
+        let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> =
+            dataset.reader();
+        let overview = overview_lonlat_bounds
+            .map(crate::terrain::page_table::OverviewUvTransform::from_lonlat_bounds)
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?
+            .unwrap_or_else(crate::terrain::page_table::OverviewUvTransform::identity);
+        let state = super::streaming::HeightVtFamilyRuntime::new(
+            self.scene.device.clone(),
+            self.scene.queue.clone(),
+            self.scene.allocation_owner.clone(),
+            terrain_extent_m,
+            ring_count,
+            ring_resolution,
+            lod,
+            tile_resolution,
+            max_in_flight,
+            pool_size,
+            reader,
+            coarse_prefill,
+            max_resident_bytes,
+            false,
+            overview,
+        )
+        .map_err(|error| {
+            PyRuntimeError::new_err(format!("enable_height_streaming_cog failed: {error:#}"))
+        })?;
+        self.scene.height_streaming = Some(state);
+        self.scene.geometry_provider = None;
+        Ok(())
+    }
+
+    /// Enable camera-relative planetary COG height streaming with f64 ECEF
+    /// camera updates and bounded target-LOD footprints.
+    #[cfg(all(feature = "cog_streaming", feature = "enable-globe"))]
+    #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None, overview_lonlat_bounds=None))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn enable_height_streaming_cog_globe(
         &mut self,
         dataset: &crate::terrain::cog::py_bindings::PyCogDataset,
         terrain_extent_m: f32,
@@ -1207,7 +1270,7 @@ impl TerrainRenderer {
             terrain_extent_m,
             ring_count,
             ring_resolution,
-            lod.min(6),
+            lod,
             tile_resolution,
             max_in_flight,
             pool_size,
@@ -1218,7 +1281,7 @@ impl TerrainRenderer {
             overview,
         )
         .map_err(|error| {
-            PyRuntimeError::new_err(format!("enable_height_streaming_cog failed: {error:#}"))
+            PyRuntimeError::new_err(format!("enable_height_streaming_cog_globe failed: {error:#}"))
         })?;
         self.scene.height_streaming = Some(state);
         self.scene.geometry_provider = None;
@@ -1293,7 +1356,7 @@ impl TerrainRenderer {
             .latest_feedback_uvs();
         let state = self.scene.height_streaming.as_mut().ok_or_else(|| {
             PyRuntimeError::new_err(
-                "height streaming not enabled; call enable_height_streaming_cog() first",
+                "height streaming not enabled; call enable_height_streaming_cog_globe() first",
             )
         })?;
         if !state.is_globe() {
@@ -1325,7 +1388,10 @@ impl TerrainRenderer {
                 "height streaming not enabled; call enable_height_streaming() first",
             )
         })?;
-        height_streaming_stats_to_py(py, &state.stats())
+        let stats = state
+            .stats()
+            .map_err(|error| PyRuntimeError::new_err(format!("height streaming failed: {error:#}")))?;
+        height_streaming_stats_to_py(py, &stats)
     }
 }
 
@@ -1338,6 +1404,7 @@ fn height_streaming_stats_to_py(
     dict.set_item("pending_ring_tiles", stats.pending_ring_tiles)?;
     dict.set_item("loaded_ring_tiles", stats.loaded_ring_tiles)?;
     dict.set_item("resident_fine_tiles", stats.resident_fine_tiles)?;
+    dict.set_item("resident_ancestor_tiles", stats.resident_ancestor_tiles)?;
     dict.set_item("total_tiles", stats.total_tiles)?;
     dict.set_item("tiles_requested", stats.tiles_requested)?;
     dict.set_item("tiles_uploaded", stats.tiles_uploaded)?;
@@ -1355,5 +1422,10 @@ fn height_streaming_stats_to_py(
     dict.set_item("converged", stats.converged)?;
     dict.set_item("loader_pending", stats.loader_pending)?;
     dict.set_item("loader_completed", stats.loader_completed)?;
+    dict.set_item("bounded_steps", stats.bounded_steps)?;
+    dict.set_item("effective_target_lod", stats.effective_target_lod)?;
+    dict.set_item("coarse_prefill_enabled", stats.coarse_prefill_enabled)?;
+    dict.set_item("required_leaf_tiles", stats.required_leaf_tiles)?;
+    dict.set_item("page_table_updates", stats.page_table_updates)?;
     Ok(dict.into())
 }

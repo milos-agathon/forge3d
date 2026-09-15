@@ -31,7 +31,7 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1465
+EXPECTED_CONVERSION_COUNT = 1492
 # The previous 1433-site freeze already covered the reviewed ANAMNESIS,
 # TESSELLA, and first SIDERA transitions described below. The d8313007 base
 # source actually contained 1446 sites because SIDERA's later adversarial
@@ -55,14 +55,32 @@ EXPECTED_CONVERSION_COUNT = 1465
 # native globe scene. Those inputs are bounded render dimensions, normalized
 # overview UVs, telemetry, or the validated 0..408 km camera altitude. ECEF
 # world positions remain f64 until conversion through the active Anchor.
-EXPECTED_CONVERSION_SHA256 = "a34cbe0867080e5cd93704e488a71b78459e6967c613df3a3aa72d935849440c"
+# Task 8 adds the reviewed physical GPU probe boundary: bounded viewport/sample
+# counts and pixel coordinates narrow to f32, while three explicit ECEF-f32
+# conversions exist only in the deliberately naive precision control. The
+# production expected motion and camera anchor remain f64.
+# The final ORBIS closure replaces those three scalar naive-control casts with
+# one equivalent `as_vec3` occurrence (-2), moves two existing snapshot casts
+# into five checked multi-frame render parameters (+3), and adds six casts for
+# normalized crack-sampling ratios and an already-camera-relative vertex-radius
+# mean (+6). All eleven additions are bounded render parameters, normalized
+# ratios, telemetry, or local f32 mesh analysis; none narrows an absolute world
+# position outside the deliberately naive control. Anchor remains the sole
+# production world-position narrowing owner.
+# The final checked-coordinate and planetary-visibility audit leaves 1,491
+# reviewed sites. Its new values are finite camera-relative render parameters,
+# normalized sampling ratios, local mesh analysis, or the deliberately naive
+# metric control; production ECEF positions still narrow only after rebasing.
+# The wasm portability correction adds one reviewed DVec4-to-Vec4 conversion of
+# finite normalized lon/lat UV bounds, bringing the frozen inventory to 1,492.
+EXPECTED_CONVERSION_SHA256 = "f071d77d28990c26a053d6156a31f494b6957a464c4ff3995dc8f2e7baa0de50"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1465,
+    "current_count": 1492,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -86,7 +104,7 @@ REVIEWED_INVENTORY_TRANSITION = {
 REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
     # Re-based on main at the merge: the pre-transition tree is now main rather
     # than this branch's original base, so the count and digest are main's.
-    "base_count": 1465,
+    "base_count": 1492,
     "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
     "result_digest": EXPECTED_CONVERSION_SHA256,
     "path": "src/offscreen/adjudication_raster.rs",

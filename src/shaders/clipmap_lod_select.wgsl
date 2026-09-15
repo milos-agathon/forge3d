@@ -185,11 +185,23 @@ fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let has_local_heights = tile.height_min <= tile.height_max;
     let height_min = select(params.height_params.x, tile.height_min, has_local_heights);
     let height_max = select(params.height_params.y, tile.height_max, has_local_heights);
+    var frustum_min = tile.bounds_min;
+    var frustum_max = tile.bounds_max;
+    var frustum_height_min = height_min;
+    var frustum_height_max = height_max;
+    if params.planet_params.z > 0.5 {
+        let half_xy = abs(tile.bounds_max - tile.bounds_min) * 0.5;
+        let half_z = abs(height_max - height_min) * 0.5;
+        frustum_min = tile_center.xy - half_xy;
+        frustum_max = tile_center.xy + half_xy;
+        frustum_height_min = tile_center.z - half_z;
+        frustum_height_max = tile_center.z + half_z;
+    }
     let frustum_visible = params.height_params.z < 0.5 || frustum_cull_aabb(
-            tile.bounds_min,
-            tile.bounds_max,
-            height_min,
-            height_max,
+            frustum_min,
+            frustum_max,
+            frustum_height_min,
+            frustum_height_max,
         );
     let visible = frustum_visible && horizon_visible(tile);
     tile.visible = select(0u, 1u, visible);

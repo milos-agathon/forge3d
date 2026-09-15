@@ -251,7 +251,7 @@ impl TerrainScene {
         let mut timing_needs_resolve = false;
         let mut hzb_frame_staged = false;
         let mut visibility_frame_staged = false;
-        let mut staged_lod_ticket = None;
+        let mut staged_lod_selection = None;
         let mut submitted_lod_provenance = None;
 
         scheduler
@@ -462,31 +462,37 @@ impl TerrainScene {
                                 sun_vis,
                                 time_seconds,
                                 &mut timing,
-                                &mut staged_lod_ticket,
+                                &mut staged_lod_selection,
                             )?;
                             hzb_frame_staged = params.culling == "hzb_two_phase"
                                 && render_targets.sample_count == 1
                                 && self.two_phase_culler.is_some();
                             visibility_frame_staged = is_clipmap_camera_mode(&params.camera_mode)
-                                && render_targets.sample_count == 1;
+                                && render_targets.sample_count == 1
+                                && self.runtime_visibility_stats_enabled();
                             Ok::<_, anyhow::Error>(())
                         });
                         match forward_submission {
                             Ok(()) => {
-                                if let Some(ticket) = staged_lod_ticket.take() {
-                                    if !self
-                                        .geometry_provider()?
-                                        .mark_lod_selection_submitted(ticket)
-                                    {
-                                        return Err(anyhow!(
-                                            "submitted terrain LOD command buffer lost its exact readback ticket"
-                                        ));
+                                if let Some(selection) = staged_lod_selection.take() {
+                                    submitted_lod_provenance = Some(selection.provenance);
+                                    if let Some(ticket) = selection.ticket {
+                                        if !self
+                                            .geometry_provider()?
+                                            .mark_lod_selection_submitted(ticket)
+                                        {
+                                            return Err(anyhow!(
+                                                "submitted terrain LOD command buffer lost its exact readback ticket"
+                                            ));
+                                        }
                                     }
-                                    submitted_lod_provenance = Some(ticket.provenance());
                                 }
                             }
                             Err(error) => {
-                                if let Some(ticket) = staged_lod_ticket.take() {
+                                if let Some(ticket) = staged_lod_selection
+                                    .take()
+                                    .and_then(|selection| selection.ticket)
+                                {
                                     self.geometry_provider()?.cancel_lod_selection(ticket);
                                 }
                                 return Err(error);
@@ -624,6 +630,8 @@ impl TerrainScene {
             })
             .map_err(io_error)?;
         let submitted = execution.finish()?;
+        #[cfg(feature = "enable-globe")]
+        self.mark_orbis_capture_submitted();
         debug_assert!(
             cache.is_none() || !scheduler.report().hits.is_empty() || submitted > 0,
             "cold native terrain graph must submit production work"

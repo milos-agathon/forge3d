@@ -57,18 +57,15 @@ impl OverviewUvTransform {
         {
             return Err(format!("invalid overview lon/lat bounds {bounds:?}"));
         }
-        let uv = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+        let uv = glam::DVec4::new(
             (west + 180.0) / 360.0,
             (90.0 - north) / 180.0,
-            0.0,
-        ));
-        let uv_max = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
             (east + 180.0) / 360.0,
             (90.0 - south) / 180.0,
-            0.0,
-        ));
+        )
+        .as_vec4();
         Ok(Self {
-            bounds: [uv.x, uv.y, uv_max.x, uv_max.y],
+            bounds: [uv.x, uv.y, uv.z, uv.w],
             valid: true,
         })
     }
@@ -85,6 +82,13 @@ impl OverviewUvTransform {
             (uv[0] - u_min) / (u_max - u_min),
             (uv[1] - v_min) / (v_max - v_min),
         ])
+    }
+
+    pub fn header_patch_bytes(self) -> [u8; 20] {
+        let mut bytes = [0_u8; 20];
+        bytes[..16].copy_from_slice(bytemuck::cast_slice(&self.bounds));
+        bytes[16..].copy_from_slice(&u32::from(self.valid).to_le_bytes());
+        bytes
     }
 }
 
@@ -341,7 +345,7 @@ impl PageTable {
             1,
             overview,
         )
-        .map_err(crate::core::error::RenderError::Device)?;
+        .map_err(crate::core::error::RenderError::device)?;
         {
             let mut mapped = table.buffer.slice(..).get_mapped_range_mut();
             mapped.copy_from_slice(&initial.bytes());
@@ -369,6 +373,14 @@ impl PageTable {
     }
 
     pub fn serialize(&self, mosaic: &HeightMosaic) -> Result<SerializedPageTable, String> {
+        self.serialize_with_overview(mosaic, self.overview)
+    }
+
+    pub fn serialize_with_overview(
+        &self,
+        mosaic: &HeightMosaic,
+        overview: OverviewUvTransform,
+    ) -> Result<SerializedPageTable, String> {
         let entries = mosaic.entries();
         SerializedPageTable::from_entries_with_overview(
             &entries,
@@ -377,8 +389,16 @@ impl PageTable {
             self.tile_resolution,
             self.atlas_dimensions,
             mosaic.config.tiles_x,
-            self.overview,
+            overview,
         )
+    }
+
+    pub fn commit_overview(&mut self, overview: OverviewUvTransform) {
+        self.overview = overview;
+    }
+
+    pub fn overview(&self) -> OverviewUvTransform {
+        self.overview
     }
 
     pub fn resolve_nearest_resident_ancestor(
@@ -544,6 +564,7 @@ mod tests {
         assert_eq!(overview.map_global_uv([0.0, 0.0]), None);
         let bytes = table.bytes();
         assert_eq!(&bytes[..64], bytemuck::bytes_of(&table.header));
+        assert_eq!(&bytes[32..52], &overview.header_patch_bytes());
         let populated = SerializedPageTable::from_entries_with_overview(
             &[(TileId::new(0, 0, 0), (0, 0))],
             4,
@@ -557,6 +578,45 @@ mod tests {
         assert_eq!(
             &bytemuck::bytes_of(&populated.header)[32..52],
             &bytemuck::bytes_of(&table.header)[32..52]
+        );
+    }
+
+    #[test]
+    fn overview_switch_reheaders_without_dropping_resident_page_mappings() {
+        let entries = [
+            (TileId::new(0, 0, 0), (0, 0)),
+            (TileId::new(10, 165, 361), (1, 0)),
+        ];
+        let first = OverviewUvTransform::from_lonlat_bounds((-122.0, 46.0, -121.5, 46.5)).unwrap();
+        let adjacent =
+            OverviewUvTransform::from_lonlat_bounds((-122.5, 46.0, -122.0, 46.5)).unwrap();
+        let before = SerializedPageTable::from_entries_with_overview(
+            &entries,
+            8,
+            10,
+            64,
+            (256, 128),
+            2,
+            first,
+        )
+        .unwrap();
+        let after = SerializedPageTable::from_entries_with_overview(
+            &entries,
+            8,
+            10,
+            64,
+            (256, 128),
+            2,
+            adjacent,
+        )
+        .unwrap();
+        assert_eq!(before.buckets, after.buckets);
+        assert_eq!(before.header.enabled, after.header.enabled);
+        assert_eq!(before.header.root_ready, after.header.root_ready);
+        assert_ne!(before.header.overview_u_min, after.header.overview_u_min);
+        assert_eq!(
+            before.lookup_exact(entries[1].0),
+            after.lookup_exact(entries[1].0)
         );
     }
 }

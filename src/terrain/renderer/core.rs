@@ -132,6 +132,8 @@ pub struct TerrainScene {
     /// BOP-P2-02: whether the cached AOV pipeline consumes the indexed
     /// clipmap vertex stream (rebuilt when this toggles, like sample count).
     pub(super) aov_pipeline_clipmap: Mutex<bool>,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_coverage_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
     pub(super) _dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
     pub(super) offline_state: Mutex<Option<OfflineAccumulationState>>,
     #[cfg(feature = "enable-gpu-instancing")]
@@ -154,6 +156,12 @@ pub struct TerrainScene {
         Option<crate::path_tracing::hybrid_compute::terrain_heightfield::TerrainMinMaxPyramid>,
     pub(super) culling_stats: crate::terrain::culling::two_phase::CullingStats,
     pub(super) height_streaming: Option<super::streaming::HeightVtFamilyRuntime>,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_capture_request: Option<super::orbis_capture::OrbisCaptureRequest>,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_pending_capture: Option<super::orbis_capture::OrbisPendingCapture>,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_descent_active: bool,
     /// CENSOR Task 9: owned per-render GPU timing manager, lazily constructed on
     /// the first render when the device granted `TIMESTAMP_QUERY`. Stored behind
     /// a `Mutex<Option<..>>` because the draw methods borrow `&self`; a render
@@ -416,6 +424,10 @@ impl TerrainScene {
     /// when timestamps are unavailable (the certificate then reports the passes
     /// with `gpu_ms == 0`). The caller returns it via [`store_render_timing`].
     pub(super) fn take_render_timing(&self) -> Option<crate::core::gpu_timing::GpuTimingManager> {
+        #[cfg(feature = "enable-globe")]
+        if self.orbis_descent_active {
+            return None;
+        }
         let mut guard = self.gpu_timing.lock().ok()?;
         if guard.is_none() {
             if !self

@@ -8,6 +8,15 @@ use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 
+#[cfg(feature = "enable-globe")]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum GpuLodEncodeError {
+    #[error(transparent)]
+    GlobeFrame(#[from] crate::terrain::clipmap::globe::GlobeFrameError),
+    #[error("planetary LOD tile count mismatch: expected {expected}, got {actual}")]
+    TileCountMismatch { expected: usize, actual: usize },
+}
+
 /// Configuration for GPU LOD selection.
 #[derive(Debug, Clone)]
 pub struct GpuLodConfig {
@@ -50,18 +59,21 @@ struct PlanetLodParams {
 
 impl PlanetLodParams {
     #[cfg(feature = "enable-globe")]
-    fn from_globe(frame: &crate::terrain::clipmap::globe::GlobeFrame) -> Self {
+    fn from_globe(
+        frame: &crate::terrain::clipmap::globe::GlobeFrame,
+    ) -> Result<Self, crate::terrain::clipmap::globe::GlobeFrameError> {
         let camera_anchor = frame.camera_anchor();
         let radius = frame.radius();
         let camera_up = frame
             .ecef_to_local_vector(camera_anchor.normalize())
+            ?
             .as_vec3()
             .normalize();
-        Self {
+        Ok(Self {
             radius: radius as f32,
             altitude: (camera_anchor.length() - radius).max(0.0) as f32,
             camera_up,
-        }
+        })
     }
 }
 
@@ -198,16 +210,55 @@ impl TileInfo {
     }
 
     #[cfg(feature = "enable-globe")]
+    pub(crate) fn with_globe_bounds(
+        mut self,
+        frame: &crate::terrain::clipmap::globe::GlobeFrame,
+        bounds_min: Vec3,
+        bounds_max: Vec3,
+    ) -> Result<Self, crate::terrain::clipmap::globe::GlobeFrameError> {
+        let center = (bounds_min + bounds_max) * 0.5;
+        self.bounds_min = bounds_min.truncate().to_array();
+        self.bounds_max = bounds_max.truncate().to_array();
+        self.height_min = bounds_min.z;
+        self.height_max = bounds_max.z;
+        self.camera_relative_center = center.to_array();
+
+        let anchor = frame.camera_anchor();
+        let local_to_ecef = crate::terrain::clipmap::globe::GlobeFrame::tangent_to_ecef(anchor)
+            .ok_or(crate::terrain::clipmap::globe::GlobeFrameError::EcefOutOfRange)?;
+        let center_world = anchor + local_to_ecef.transform_vector3(center.as_dvec3());
+        let center_direction = center_world.normalize();
+        let mut angular_radius = 0.0_f64;
+        for x in [bounds_min.x, bounds_max.x] {
+            for y in [bounds_min.y, bounds_max.y] {
+                for z in [bounds_min.z, bounds_max.z] {
+                    let world = anchor
+                        + local_to_ecef
+                            .transform_vector3(glam::DVec3::new(x as f64, y as f64, z as f64));
+                    angular_radius = angular_radius.max(
+                        center_direction
+                            .dot(world.normalize())
+                            .clamp(-1.0, 1.0)
+                            .acos(),
+                    );
+                }
+            }
+        }
+        self.angular_radius = angular_radius.min(std::f64::consts::PI) as f32;
+        Ok(self)
+    }
+
+    #[cfg(feature = "enable-globe")]
     pub fn with_globe_center(
         mut self,
         frame: &crate::terrain::clipmap::globe::GlobeFrame,
         center_ecef: glam::DVec3,
         angular_radius: f32,
-    ) -> Self {
-        let relative = frame.camera_relative(center_ecef).position;
+    ) -> Result<Self, crate::terrain::clipmap::globe::GlobeFrameError> {
+        let relative = frame.camera_relative(center_ecef)?.position;
         self.camera_relative_center = relative.to_array();
         self.angular_radius = angular_radius.max(0.0);
-        self
+        Ok(self)
     }
 
     pub fn pack_id(lod: u32, x: u32, y: u32) -> u32 {
@@ -705,10 +756,15 @@ impl GpuLodSelector {
         first_instance: bool,
         height_bounds: (f32, f32),
         frustum_culling: bool,
-    ) -> bool {
-        if camera_relative_tiles.len() != resources.max_draw_count as usize {
-            return false;
+    ) -> Result<bool, GpuLodEncodeError> {
+        let expected = resources.max_draw_count as usize;
+        if camera_relative_tiles.len() != expected {
+            return Err(GpuLodEncodeError::TileCountMismatch {
+                expected,
+                actual: camera_relative_tiles.len(),
+            });
         }
+        let planet = PlanetLodParams::from_globe(frame)?;
         let _ = self.encode_indirect_in_space(
             queue,
             encoder,
@@ -719,14 +775,13 @@ impl GpuLodSelector {
             first_instance,
             height_bounds,
             frustum_culling,
-            Some(PlanetLodParams::from_globe(frame)),
+            Some(planet),
             None,
         );
-        true
+        Ok(true)
     }
 
     #[cfg(feature = "enable-globe")]
-    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn encode_indirect_globe_tracked(
         &self,
@@ -740,11 +795,19 @@ impl GpuLodSelector {
         height_bounds: (f32, f32),
         frustum_culling: bool,
         provenance: LodSelectionProvenance,
-    ) -> Option<SelectionReadbackTicket> {
-        if camera_relative_tiles.len() != resources.max_draw_count as usize {
-            return None;
+    ) -> Result<
+        Option<SelectionReadbackTicket>,
+        GpuLodEncodeError,
+    > {
+        let expected = resources.max_draw_count as usize;
+        if camera_relative_tiles.len() != expected {
+            return Err(GpuLodEncodeError::TileCountMismatch {
+                expected,
+                actual: camera_relative_tiles.len(),
+            });
         }
-        self.encode_indirect_in_space(
+        let planet = PlanetLodParams::from_globe(frame)?;
+        Ok(self.encode_indirect_in_space(
             queue,
             encoder,
             resources,
@@ -754,9 +817,9 @@ impl GpuLodSelector {
             first_instance,
             height_bounds,
             frustum_culling,
-            Some(PlanetLodParams::from_globe(frame)),
+            Some(planet),
             Some(provenance),
-        )
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -861,15 +924,15 @@ pub fn cpu_lod_select_globe(
     config: &GpuLodConfig,
     height_bounds: (f32, f32),
     frame: &crate::terrain::clipmap::globe::GlobeFrame,
-) -> LodSelectionResult {
-    cpu_lod_select_in_space(
+) -> Result<LodSelectionResult, crate::terrain::clipmap::globe::GlobeFrameError> {
+    Ok(cpu_lod_select_in_space(
         tiles,
         view_proj,
         Vec3::ZERO,
         config,
         height_bounds,
-        Some(PlanetLodParams::from_globe(frame)),
-    )
+        Some(PlanetLodParams::from_globe(frame)?),
+    ))
 }
 
 fn cpu_lod_select_in_space(
@@ -898,7 +961,26 @@ fn cpu_lod_select_in_space(
             height_bounds
         };
         let center_relative = Vec3::from(tile.camera_relative_center);
-        let visible = frustum_test_aabb(bounds_min, bounds_max, height_min, height_max, &frustum)
+        let (frustum_min, frustum_max, frustum_height_min, frustum_height_max) =
+            if planet.is_some() {
+                let half_xy = (bounds_max - bounds_min).abs() * 0.5;
+                let half_z = ((height_max - height_min).abs() * 0.5).max(0.0);
+                (
+                    center_relative.truncate() - half_xy,
+                    center_relative.truncate() + half_xy,
+                    center_relative.z - half_z,
+                    center_relative.z + half_z,
+                )
+            } else {
+                (bounds_min, bounds_max, height_min, height_max)
+            };
+        let visible = frustum_test_aabb(
+            frustum_min,
+            frustum_max,
+            frustum_height_min,
+            frustum_height_max,
+            &frustum,
+        )
             && planet.map_or(true, |planet| {
                 horizon_visible(center_relative, tile.angular_radius, planet)
             });

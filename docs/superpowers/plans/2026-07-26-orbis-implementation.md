@@ -51,17 +51,41 @@ pub struct CameraRelative {
     pub up: Vec3,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlobeFrameError {
+    InvalidRadius,
+    NonFiniteCameraAnchor,
+    ZeroCameraAnchor,
+    CameraAnchorOutOfRange,
+    AnchorUnrepresentable,
+    NonFiniteLongitude,
+    NonFiniteLatitude,
+    LatitudeOutOfRange,
+    NonFiniteAltitude,
+    AltitudeAtOrBelowCenter,
+    NonFiniteEcef,
+    ZeroEcef,
+    EcefOutOfRange,
+}
+
 impl GlobeFrame {
     pub const WGS84_MEAN_RADIUS_M: f64 = 6_371_000.0;
-    pub fn globe(radius: f64, camera_anchor: DVec3) -> Result<Self, String>;
-    pub fn flat(camera_anchor: DVec3) -> Self;
-    pub fn lonlat_alt_to_ecef(&self, lon_deg: f64, lat_deg: f64, altitude_m: f64) -> DVec3;
-    pub fn ecef_to_lonlat_alt(&self, ecef: DVec3) -> DVec3;
-    pub fn camera_relative(&self, ecef: DVec3) -> CameraRelative;
+    pub fn globe(radius: f64, camera_anchor: DVec3) -> Result<Self, GlobeFrameError>;
+    pub fn flat(camera_anchor: DVec3) -> Result<Self, GlobeFrameError>;
+    pub fn reanchored(&self, camera_anchor: DVec3) -> Result<Self, GlobeFrameError>;
+    pub fn lonlat_alt_to_ecef(
+        &self,
+        lon_deg: f64,
+        lat_deg: f64,
+        altitude_m: f64,
+    ) -> Result<DVec3, GlobeFrameError>;
+    pub fn ecef_to_lonlat_alt(&self, ecef: DVec3) -> Result<DVec3, GlobeFrameError>;
+    pub fn ecef_to_local_vector(&self, vector: DVec3) -> Result<DVec3, GlobeFrameError>;
+    pub fn camera_relative(&self, ecef: DVec3) -> Result<CameraRelative, GlobeFrameError>;
 }
 ```
 
-- Validate radius and finite inputs. Compute longitude/latitude in radians, use a spherical mean-radius model, and round-trip longitude canonically.
+- Implement `Display` and `std::error::Error` for `GlobeFrameError`. Reject non-finite inputs, zero globe ECEF positions, latitude outside `-90..=90`, and altitude at or below the planet centre through typed `Result` errors; no public checked path may panic. Compute longitude/latitude in radians, use a spherical mean-radius model, and round-trip longitude canonically.
 - Build the tangent transform from the camera anchor. Subtract ECEF positions in f64, rotate the delta in f64, and route the final narrowing through `Anchor::to_render_vec3`; do not add another raw `as f32`.
 - Add Rust tests for cardinal ECEF points, lon/lat/alt round trip, invalid inputs, flat compatibility, and planetary-scale subtraction error.
 - Update the two fail-closed precision inventories with the new intentional `Anchor` owner and no new conversion sites.

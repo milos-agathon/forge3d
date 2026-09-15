@@ -96,6 +96,8 @@ def test_python_and_m06_restore_only_their_fixture_bundles() -> None:
     golden_job = workflow.split("  test-golden-images:", 1)[1].split(
         "  test-m06-full-geospatial-viewer:", 1
     )[0]
+    metal_job = golden_job.split("  test-golden-images-nvidia:", 1)[0]
+    nvidia_job = golden_job.split("  test-golden-images-nvidia:", 1)[1]
     m06_job = workflow.split("  test-m06-full-geospatial-viewer:", 1)[1].split(
         "\n  # ============================================================================\n  # COMPENDIUM F3DZ", 1
     )[0]
@@ -124,7 +126,13 @@ def test_python_and_m06_restore_only_their_fixture_bundles() -> None:
         assert "restore_lfs:" not in workflow.split(f"  {smoke_job}:", 1)[1].split(
             "\n\n", 1
         )[0]
-    assert "lfs-fixture-bundles" not in golden_job
+    assert "lfs-fixture-bundles" not in metal_job
+    assert (
+        "needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths]"
+        in nvidia_job
+    )
+    assert nvidia_job.count("name: lfs-fixture-bundles") == 1
+    assert nvidia_job.count("python-tiffs.zip") == 1
     assert "needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths]" in m06_job
     assert "m06-dem.zip" in m06_job
     assert "python-tiffs.zip" not in m06_job

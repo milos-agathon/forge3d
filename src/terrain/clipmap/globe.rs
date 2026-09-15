@@ -1,5 +1,25 @@
 use crate::camera::Anchor;
 use glam::{DMat4, DVec3, DVec4, Vec3};
+use std::error::Error;
+use std::fmt;
+
+/// Checked failures at the geodetic/ECEF trust boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlobeFrameError {
+    InvalidRadius,
+    NonFiniteCameraAnchor,
+    ZeroCameraAnchor,
+    CameraAnchorOutOfRange,
+    AnchorUnrepresentable,
+    NonFiniteLongitude,
+    NonFiniteLatitude,
+    LatitudeOutOfRange,
+    NonFiniteAltitude,
+    AltitudeAtOrBelowCenter,
+    NonFiniteEcef,
+    ZeroEcef,
+    EcefOutOfRange,
+}
 
 /// Coordinate mode used by a clipmap frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,31 +48,42 @@ impl GlobeFrame {
     pub const WGS84_MEAN_RADIUS_M: f64 = 6_371_000.0;
 
     /// Create a spherical planetary frame with a caller-supplied radius.
-    pub fn globe(radius: f64, camera_anchor: DVec3) -> Result<Self, String> {
-        let camera_distance = camera_anchor.length();
+    pub fn globe(radius: f64, camera_anchor: DVec3) -> Result<Self, GlobeFrameError> {
         if !radius.is_finite() || radius <= 0.0 {
-            return Err("globe radius must be finite and positive".to_string());
+            return Err(GlobeFrameError::InvalidRadius);
         }
-        if !camera_anchor.is_finite() || !camera_distance.is_finite() || camera_distance == 0.0 {
-            return Err("camera anchor must be a finite non-zero ECEF position".to_string());
+        if !camera_anchor.is_finite() {
+            return Err(GlobeFrameError::NonFiniteCameraAnchor);
+        }
+        let camera_distance = camera_anchor.length();
+        if camera_distance == 0.0 {
+            return Err(GlobeFrameError::ZeroCameraAnchor);
+        }
+        if !camera_distance.is_finite() {
+            return Err(GlobeFrameError::CameraAnchorOutOfRange);
         }
         Ok(Self {
             radius,
-            anchor: anchor_at(camera_anchor)
-                .ok_or_else(|| "camera anchor could not be represented".to_string())?,
+            anchor: anchor_at(camera_anchor)?,
             ecef_to_local: tangent_transform(camera_anchor),
             mode: GlobeMode::Globe,
         })
     }
 
     /// Create an identity local frame for the existing flat clipmap path.
-    pub fn flat(camera_anchor: DVec3) -> Self {
-        Self {
+    pub fn flat(camera_anchor: DVec3) -> Result<Self, GlobeFrameError> {
+        if !camera_anchor.is_finite() {
+            return Err(GlobeFrameError::NonFiniteCameraAnchor);
+        }
+        if !camera_anchor.length().is_finite() {
+            return Err(GlobeFrameError::CameraAnchorOutOfRange);
+        }
+        Ok(Self {
             radius: Self::WGS84_MEAN_RADIUS_M,
-            anchor: anchor_at(camera_anchor).expect("flat camera anchor must be finite"),
+            anchor: anchor_at(camera_anchor)?,
             ecef_to_local: DMat4::IDENTITY,
             mode: GlobeMode::Flat,
-        }
+        })
     }
 
     pub fn radius(&self) -> f64 {
@@ -68,47 +99,65 @@ impl GlobeFrame {
     }
 
     /// Return the same frame mode and radius anchored at a new camera.
-    pub fn reanchored(&self, camera_anchor: DVec3) -> Option<Self> {
+    pub fn reanchored(&self, camera_anchor: DVec3) -> Result<Self, GlobeFrameError> {
         if !camera_anchor.is_finite() {
-            return None;
+            return Err(GlobeFrameError::NonFiniteCameraAnchor);
         }
         match self.mode {
-            GlobeMode::Flat => Some(Self::flat(camera_anchor)),
-            GlobeMode::Globe => Self::globe(self.radius, camera_anchor).ok(),
+            GlobeMode::Flat => Self::flat(camera_anchor),
+            GlobeMode::Globe => Self::globe(self.radius, camera_anchor),
         }
     }
 
     /// Convert longitude/latitude in degrees and altitude in metres to ECEF.
-    pub fn lonlat_alt_to_ecef(&self, lon_deg: f64, lat_deg: f64, altitude_m: f64) -> Option<DVec3> {
-        if !lon_deg.is_finite()
-            || !lat_deg.is_finite()
-            || !altitude_m.is_finite()
-            || !(-90.0..=90.0).contains(&lat_deg)
-            || altitude_m <= -self.radius
-        {
-            return None;
+    pub fn lonlat_alt_to_ecef(
+        &self,
+        lon_deg: f64,
+        lat_deg: f64,
+        altitude_m: f64,
+    ) -> Result<DVec3, GlobeFrameError> {
+        if !lon_deg.is_finite() {
+            return Err(GlobeFrameError::NonFiniteLongitude);
+        }
+        if !lat_deg.is_finite() {
+            return Err(GlobeFrameError::NonFiniteLatitude);
+        }
+        if !(-90.0..=90.0).contains(&lat_deg) {
+            return Err(GlobeFrameError::LatitudeOutOfRange);
+        }
+        if !altitude_m.is_finite() {
+            return Err(GlobeFrameError::NonFiniteAltitude);
+        }
+        if altitude_m <= -self.radius {
+            return Err(GlobeFrameError::AltitudeAtOrBelowCenter);
         }
         let lon = lon_deg.to_radians();
         let lat = lat_deg.to_radians();
         let radius = self.radius + altitude_m;
         let cos_lat = lat.cos();
-        Some(DVec3::new(
+        let ecef = DVec3::new(
             radius * cos_lat * lon.cos(),
             radius * cos_lat * lon.sin(),
             radius * lat.sin(),
-        ))
+        );
+        ecef.is_finite()
+            .then_some(ecef)
+            .ok_or(GlobeFrameError::EcefOutOfRange)
     }
 
     /// Convert ECEF to `(longitude degrees, latitude degrees, altitude metres)`.
-    pub fn ecef_to_lonlat_alt(&self, ecef: DVec3) -> Option<DVec3> {
+    pub fn ecef_to_lonlat_alt(&self, ecef: DVec3) -> Result<DVec3, GlobeFrameError> {
         if !ecef.is_finite() {
-            return None;
+            return Err(GlobeFrameError::NonFiniteEcef);
         }
         let distance = ecef.length();
         if distance == 0.0 {
-            return None;
+            return Err(GlobeFrameError::ZeroEcef);
         }
-        Some(DVec3::new(
+        if !distance.is_finite() {
+            return Err(GlobeFrameError::EcefOutOfRange);
+        }
+        Ok(DVec3::new(
             ecef.y.atan2(ecef.x).to_degrees(),
             (ecef.z / distance).clamp(-1.0, 1.0).asin().to_degrees(),
             distance - self.radius,
@@ -116,8 +165,18 @@ impl GlobeFrame {
     }
 
     /// Rotate an ECEF vector into the camera's local east/north/up frame.
-    pub fn ecef_to_local_vector(&self, vector: DVec3) -> DVec3 {
-        self.ecef_to_local.transform_vector3(vector)
+    pub fn ecef_to_local_vector(&self, vector: DVec3) -> Result<DVec3, GlobeFrameError> {
+        if !vector.is_finite() {
+            return Err(GlobeFrameError::NonFiniteEcef);
+        }
+        if !vector.length().is_finite() {
+            return Err(GlobeFrameError::EcefOutOfRange);
+        }
+        let local = self.ecef_to_local.transform_vector3(vector);
+        local
+            .is_finite()
+            .then_some(local)
+            .ok_or(GlobeFrameError::EcefOutOfRange)
     }
 
     /// Build a stable local-east/north/up to ECEF transform at a world point.
@@ -128,32 +187,68 @@ impl GlobeFrame {
     }
 
     /// Subtract the f64 camera anchor before the sole f32 render conversion.
-    pub fn camera_relative(&self, ecef: DVec3) -> CameraRelative {
-        assert!(ecef.is_finite(), "ECEF position must be finite");
-        assert!(
-            self.mode != GlobeMode::Globe || ecef.length_squared() > 0.0,
-            "globe ECEF position must be non-zero"
-        );
-        let local = self.ecef_to_local_vector(ecef - self.anchor.origin());
+    pub fn camera_relative(&self, ecef: DVec3) -> Result<CameraRelative, GlobeFrameError> {
+        if !ecef.is_finite() {
+            return Err(GlobeFrameError::NonFiniteEcef);
+        }
+        if self.mode == GlobeMode::Globe {
+            let distance = ecef.length();
+            if distance == 0.0 {
+                return Err(GlobeFrameError::ZeroEcef);
+            }
+            if !distance.is_finite() {
+                return Err(GlobeFrameError::EcefOutOfRange);
+            }
+        }
+        let local = self.ecef_to_local_vector(ecef - self.anchor.origin())?;
         let position = self.anchor.to_render_vec3(self.anchor.origin() + local);
+        if !local.is_finite() || !position.is_finite() {
+            return Err(GlobeFrameError::EcefOutOfRange);
+        }
         let up = match self.mode {
             GlobeMode::Flat => Vec3::Z,
             GlobeMode::Globe => {
-                let local_up = self.ecef_to_local_vector(ecef.normalize());
+                let local_up = self.ecef_to_local_vector(ecef.normalize())?;
                 Anchor::direction_to_render(local_up).normalize()
             }
         };
-        CameraRelative { position, up }
+        if !up.is_finite() {
+            return Err(GlobeFrameError::EcefOutOfRange);
+        }
+        Ok(CameraRelative { position, up })
     }
 }
 
-fn anchor_at(origin: DVec3) -> Option<Anchor> {
-    if !origin.is_finite() {
-        return None;
+impl fmt::Display for GlobeFrameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::InvalidRadius => "globe radius must be finite and positive",
+            Self::NonFiniteCameraAnchor => "camera anchor must contain only finite ECEF values",
+            Self::ZeroCameraAnchor => "globe camera anchor must be non-zero",
+            Self::CameraAnchorOutOfRange => "camera anchor magnitude is out of range",
+            Self::AnchorUnrepresentable => "camera anchor could not be represented",
+            Self::NonFiniteLongitude => "longitude must be finite",
+            Self::NonFiniteLatitude => "latitude must be finite",
+            Self::LatitudeOutOfRange => "latitude must be in -90..=90 degrees",
+            Self::NonFiniteAltitude => "altitude must be finite",
+            Self::AltitudeAtOrBelowCenter => "altitude must be greater than negative globe radius",
+            Self::NonFiniteEcef => "ECEF position must contain only finite values",
+            Self::ZeroEcef => "globe ECEF position must be non-zero",
+            Self::EcefOutOfRange => "ECEF position magnitude is out of range",
+        };
+        formatter.write_str(message)
     }
-    let mut anchor = Anchor::try_with_epsilon(f64::MIN_POSITIVE)?;
+}
+
+impl Error for GlobeFrameError {}
+
+fn anchor_at(origin: DVec3) -> Result<Anchor, GlobeFrameError> {
+    let mut anchor = Anchor::try_with_epsilon(f64::MIN_POSITIVE)
+        .ok_or(GlobeFrameError::AnchorUnrepresentable)?;
     let _ = anchor.rebase_if_needed(origin);
-    Some(anchor)
+    (anchor.origin() == origin)
+        .then_some(anchor)
+        .ok_or(GlobeFrameError::AnchorUnrepresentable)
 }
 
 fn tangent_transform(camera_anchor: DVec3) -> DMat4 {
@@ -173,10 +268,130 @@ fn tangent_transform(camera_anchor: DVec3) -> DMat4 {
 
 #[cfg(test)]
 mod tests {
-    use super::{GlobeFrame, GlobeMode};
+    use super::{GlobeFrame, GlobeFrameError, GlobeMode};
     use glam::DVec3;
+    use std::fmt::Debug;
+    use std::panic::{catch_unwind, UnwindSafe};
 
     const EPSILON: f64 = 1.0e-9;
+
+    fn assert_non_panicking_error<T: Debug>(
+        expected: GlobeFrameError,
+        operation: impl FnOnce() -> Result<T, GlobeFrameError> + UnwindSafe,
+    ) {
+        match catch_unwind(operation) {
+            Ok(Err(actual)) => assert_eq!(actual, expected),
+            Ok(Ok(value)) => panic!("invalid globe input unexpectedly succeeded: {value:?}"),
+            Err(_) => panic!("invalid globe input panicked instead of returning {expected}"),
+        }
+    }
+
+    #[test]
+    fn every_public_invalid_input_returns_a_specific_error_without_panicking() {
+        assert_non_panicking_error(GlobeFrameError::InvalidRadius, || {
+            GlobeFrame::globe(f64::NAN, DVec3::X)
+        });
+        assert_non_panicking_error(GlobeFrameError::InvalidRadius, || {
+            GlobeFrame::globe(f64::INFINITY, DVec3::X)
+        });
+        assert_non_panicking_error(GlobeFrameError::InvalidRadius, || {
+            GlobeFrame::globe(0.0, DVec3::X)
+        });
+        assert_non_panicking_error(GlobeFrameError::InvalidRadius, || {
+            GlobeFrame::globe(-1.0, DVec3::X)
+        });
+        assert_non_panicking_error(GlobeFrameError::NonFiniteCameraAnchor, || {
+            GlobeFrame::flat(DVec3::new(f64::NAN, 0.0, 0.0))
+        });
+        assert_non_panicking_error(GlobeFrameError::NonFiniteCameraAnchor, || {
+            GlobeFrame::flat(DVec3::new(f64::NEG_INFINITY, 0.0, 0.0))
+        });
+        assert_non_panicking_error(GlobeFrameError::CameraAnchorOutOfRange, || {
+            GlobeFrame::flat(DVec3::splat(f64::MAX))
+        });
+        assert_non_panicking_error(GlobeFrameError::ZeroCameraAnchor, || {
+            GlobeFrame::globe(1.0, DVec3::ZERO)
+        });
+        assert_non_panicking_error(GlobeFrameError::ZeroCameraAnchor, || {
+            GlobeFrame::globe(1.0, DVec3::splat(f64::MIN_POSITIVE))
+        });
+        assert_non_panicking_error(GlobeFrameError::CameraAnchorOutOfRange, || {
+            GlobeFrame::globe(1.0, DVec3::splat(f64::MAX))
+        });
+
+        let frame = GlobeFrame::globe(GlobeFrame::WGS84_MEAN_RADIUS_M, DVec3::X).unwrap();
+        assert_non_panicking_error(GlobeFrameError::NonFiniteCameraAnchor, || {
+            frame.reanchored(DVec3::splat(f64::INFINITY))
+        });
+        assert_non_panicking_error(GlobeFrameError::ZeroCameraAnchor, || {
+            frame.reanchored(DVec3::ZERO)
+        });
+        assert_non_panicking_error(GlobeFrameError::CameraAnchorOutOfRange, || {
+            frame.reanchored(DVec3::splat(f64::MAX))
+        });
+        assert_non_panicking_error(GlobeFrameError::NonFiniteLongitude, || {
+            frame.lonlat_alt_to_ecef(f64::NAN, 0.0, 0.0)
+        });
+        assert_non_panicking_error(GlobeFrameError::NonFiniteLatitude, || {
+            frame.lonlat_alt_to_ecef(0.0, f64::INFINITY, 0.0)
+        });
+        assert_non_panicking_error(GlobeFrameError::LatitudeOutOfRange, || {
+            frame.lonlat_alt_to_ecef(0.0, 90.000_001, 0.0)
+        });
+        assert_non_panicking_error(GlobeFrameError::LatitudeOutOfRange, || {
+            frame.lonlat_alt_to_ecef(0.0, -90.000_001, 0.0)
+        });
+        assert_non_panicking_error(GlobeFrameError::NonFiniteAltitude, || {
+            frame.lonlat_alt_to_ecef(0.0, 0.0, f64::NEG_INFINITY)
+        });
+        assert_non_panicking_error(GlobeFrameError::AltitudeAtOrBelowCenter, || {
+            frame.lonlat_alt_to_ecef(0.0, 0.0, -GlobeFrame::WGS84_MEAN_RADIUS_M)
+        });
+        assert_non_panicking_error(GlobeFrameError::AltitudeAtOrBelowCenter, || {
+            frame.lonlat_alt_to_ecef(0.0, 0.0, -GlobeFrame::WGS84_MEAN_RADIUS_M - 1.0)
+        });
+        assert_non_panicking_error(GlobeFrameError::NonFiniteEcef, || {
+            frame.ecef_to_lonlat_alt(DVec3::splat(f64::NAN))
+        });
+        assert_non_panicking_error(GlobeFrameError::ZeroEcef, || {
+            frame.ecef_to_lonlat_alt(DVec3::ZERO)
+        });
+        assert_non_panicking_error(GlobeFrameError::ZeroEcef, || {
+            frame.ecef_to_lonlat_alt(DVec3::splat(f64::MIN_POSITIVE))
+        });
+        assert_non_panicking_error(GlobeFrameError::EcefOutOfRange, || {
+            frame.ecef_to_lonlat_alt(DVec3::splat(f64::MAX))
+        });
+        assert_non_panicking_error(GlobeFrameError::NonFiniteEcef, || {
+            frame.ecef_to_local_vector(DVec3::splat(f64::NAN))
+        });
+        assert_non_panicking_error(GlobeFrameError::EcefOutOfRange, || {
+            frame.ecef_to_local_vector(DVec3::splat(f64::MAX))
+        });
+        assert_non_panicking_error(GlobeFrameError::NonFiniteEcef, || {
+            frame.camera_relative(DVec3::splat(f64::INFINITY))
+        });
+        assert_non_panicking_error(GlobeFrameError::ZeroEcef, || {
+            frame.camera_relative(DVec3::ZERO)
+        });
+        assert_non_panicking_error(GlobeFrameError::ZeroEcef, || {
+            frame.camera_relative(DVec3::splat(f64::MIN_POSITIVE))
+        });
+        assert_non_panicking_error(GlobeFrameError::EcefOutOfRange, || {
+            frame.camera_relative(DVec3::splat(f64::MAX))
+        });
+
+        let flat = GlobeFrame::flat(DVec3::ZERO).unwrap();
+        assert_non_panicking_error(GlobeFrameError::NonFiniteCameraAnchor, || {
+            flat.reanchored(DVec3::splat(f64::NAN))
+        });
+        assert_non_panicking_error(GlobeFrameError::CameraAnchorOutOfRange, || {
+            flat.reanchored(DVec3::splat(f64::MAX))
+        });
+        assert_non_panicking_error(GlobeFrameError::EcefOutOfRange, || {
+            flat.camera_relative(DVec3::splat(f64::MAX))
+        });
+    }
 
     #[test]
     fn default_radius_and_cardinal_ecef_points_are_exact() {
@@ -231,8 +446,8 @@ mod tests {
         let camera = DVec3::new(6_371_000.0 + 408_000.0, 25.0, -10.0);
         let frame = GlobeFrame::globe(GlobeFrame::WGS84_MEAN_RADIUS_M, camera).unwrap();
         let point = camera + DVec3::new(0.000_25, 2.0, -1.0);
-        let relative = frame.camera_relative(point);
-        let truth = frame.ecef_to_local_vector(point - camera);
+        let relative = frame.camera_relative(point).unwrap();
+        let truth = frame.ecef_to_local_vector(point - camera).unwrap();
         assert!((relative.position.as_dvec3() - truth).length() < 1.0e-6);
         assert!((relative.up.length() - 1.0).abs() < 1.0e-6);
     }
@@ -240,9 +455,9 @@ mod tests {
     #[test]
     fn flat_mode_is_identity_camera_relative_space() {
         let camera = DVec3::new(125.0, -75.0, 12.0);
-        let frame = GlobeFrame::flat(camera);
+        let frame = GlobeFrame::flat(camera).unwrap();
         let point = camera + DVec3::new(3.5, -2.0, 9.0);
-        let relative = frame.camera_relative(point);
+        let relative = frame.camera_relative(point).unwrap();
         assert_eq!(frame.mode(), GlobeMode::Flat);
         assert!((relative.position.as_dvec3() - (point - camera)).length() < 1.0e-6);
         assert_eq!(relative.up, glam::Vec3::Z);
@@ -261,8 +476,8 @@ mod tests {
             DVec3::new(6_371_000.0, 0.0, 0.0),
         )
         .unwrap();
-        assert!(frame.lonlat_alt_to_ecef(f64::NAN, 0.0, 0.0).is_none());
-        assert!(frame.lonlat_alt_to_ecef(0.0, 91.0, 0.0).is_none());
-        assert!(frame.ecef_to_lonlat_alt(DVec3::ZERO).is_none());
+        assert!(frame.lonlat_alt_to_ecef(f64::NAN, 0.0, 0.0).is_err());
+        assert!(frame.lonlat_alt_to_ecef(0.0, 91.0, 0.0).is_err());
+        assert!(frame.ecef_to_lonlat_alt(DVec3::ZERO).is_err());
     }
 }

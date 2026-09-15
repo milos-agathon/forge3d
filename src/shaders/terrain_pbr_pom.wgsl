@@ -800,6 +800,43 @@ struct TerrainFrameCounters {
 
 @group(6) @binding(16)
 var<storage, read_write> terrain_frame_counters: TerrainFrameCounters;
+
+// ORBIS acceptance bindings are reachable only from the compute entry below;
+// ordinary terrain render entry points therefore retain their seven groups.
+struct OrbisProbeUniforms {
+    absolute_view_proj: mat4x4<f32>,
+    local_to_ecef: mat4x4<f32>,
+    anchor_abs: vec4<f32>,
+    viewport_and_count: vec4<f32>,
+};
+
+struct OrbisProjectionSample {
+    production: vec4<f32>,
+    naive: vec4<f32>,
+    resolved_local: vec4<f32>,
+};
+
+struct OrbisOutputHeader {
+    visible_count: u32,
+    total_triangles: u32,
+    _pad0: u32,
+    _pad1: u32,
+};
+
+struct OrbisDrawIndexedIndirectArgs {
+    index_count: u32,
+    instance_count: u32,
+    first_index: u32,
+    base_vertex: i32,
+    first_instance: u32,
+};
+
+@group(7) @binding(0) var<storage, read> orbis_vertex_words: array<u32>;
+@group(7) @binding(1) var<storage, read_write> orbis_projection_samples: array<OrbisProjectionSample>;
+@group(7) @binding(2) var<uniform> orbis_probe: OrbisProbeUniforms;
+@group(7) @binding(3) var<storage, read> orbis_selection_header: OrbisOutputHeader;
+@group(7) @binding(4) var<storage, read> orbis_selected_draws: array<OrbisDrawIndexedIndirectArgs>;
+@group(7) @binding(5) var<storage, read> orbis_mesh_indices: array<u32>;
 struct TerrainMaterialNoise {
     snow_macro: f32,
     snow_detail: f32,
@@ -1703,6 +1740,11 @@ struct FragmentOutput {
     // VERITAS: albedo-family VT source id of the dominant material layer's
     // dominant triplanar projection (R32Uint target; 0 == SOURCE_ID_NONE)
     @location(4) source_id : u32,
+};
+
+struct OrbisCoverageOutput {
+    @location(0) color : vec4<f32>,
+    @location(5) terrain_coverage : vec4<f32>,
 };
 
 // VERITAS: resolved in the material splat loop (where layer weights and
@@ -5108,12 +5150,10 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // VERITAS: co-emitted with the color at composite time so the source map
     // and the image always describe the same frame.
     out.source_id = terrain_vt_albedo_source_id;
-
     return out;
 }
 
-@fragment
-fn fs_main(input : VertexOutput) -> FragmentOutput {
+fn forward_shade_with_feedback(input : VertexOutput) -> FragmentOutput {
     // Capture the quad gradients while every fragment lane is still active.
     // The feedback helper is intentionally derivative-free so later selector
     // branches cannot make mip demand backend-dependent.
@@ -5189,35 +5229,48 @@ fn clipmap_decode_octahedral(encoded: vec2<f32>) -> vec3<f32> {
     return det_normalize3(normal);
 }
 
-@vertex
-fn vs_clipmap_main(
-    @location(0) clip_position : vec3<f32>,
-    @location(1) clip_uv : vec2<f32>,
-    @location(2) clip_morph : vec2<f32>,
-    @location(3) instance_col0 : vec4<f32>,
-    @location(4) instance_col1 : vec4<f32>,
-    @location(5) instance_col2 : vec4<f32>,
-    @location(6) instance_col3 : vec4<f32>,
-    @location(7) _tile_id_lod : vec2<u32>,
-    @location(8) clip_normal_oct : vec2<f32>
-) -> VertexOutput {
-    var out : VertexOutput;
+struct ClipmapResolvedVertex {
+    world_position: vec3<f32>,
+    centered_position: vec3<f32>,
+    geodetic_up: vec3<f32>,
+    uv: vec2<f32>,
+};
 
+fn clipmap_sample_height_level(
+    uv: vec2<f32>,
+    level: f32,
+    height_dims: vec2<f32>,
+) -> f32 {
+    let bounded_level = min(max(level, 0.0), 16.0);
+    if bounded_level == 0.0 {
+        return sample_height_bilinear(uv);
+    }
+    let level_texels = exp2(bounded_level);
+    let level_step = vec2<f32>(level_texels)
+        / max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0));
+    let level_cell = uv / level_step;
+    let level_base = floor(level_cell) * level_step;
+    let level_t = fract(level_cell);
+    let h00 = sample_height_bilinear(level_base);
+    let h10 = sample_height_bilinear(level_base + vec2<f32>(level_step.x, 0.0));
+    let h01 = sample_height_bilinear(level_base + vec2<f32>(0.0, level_step.y));
+    let h11 = sample_height_bilinear(level_base + level_step);
+    return mix(mix(h00, h10, level_t.x), mix(h01, h11, level_t.x), level_t.y);
+}
+
+fn clipmap_resolve_vertex(
+    clip_position: vec3<f32>,
+    clip_uv: vec2<f32>,
+    clip_morph: vec2<f32>,
+    instance_transform: mat4x4<f32>,
+    clip_normal_oct: vec2<f32>,
+) -> ClipmapResolvedVertex {
     let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_fine = sample_height_bilinear(uv);
     let height_dims = logical_height_dimensions();
     let clip_ring_index = select(clip_morph.y, -clip_morph.y - 1.0, clip_morph.y < 0.0);
-    let coarse_texels = exp2(min(max(clip_ring_index, 0.0) + 1.0, 16.0));
-    let coarse_step = vec2<f32>(coarse_texels)
-        / max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0));
-    let coarse_cell = uv / coarse_step;
-    let coarse_base = floor(coarse_cell) * coarse_step;
-    let coarse_t = fract(coarse_cell);
-    let h00 = sample_height_bilinear(coarse_base);
-    let h10 = sample_height_bilinear(coarse_base + vec2<f32>(coarse_step.x, 0.0));
-    let h01 = sample_height_bilinear(coarse_base + vec2<f32>(0.0, coarse_step.y));
-    let h11 = sample_height_bilinear(coarse_base + coarse_step);
-    let h_coarse = mix(mix(h00, h10, coarse_t.x), mix(h01, h11, coarse_t.x), coarse_t.y);
+    let fine_level = select(0.0, clip_ring_index, clip_morph.y < 0.0);
+    let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);
+    let h_coarse = clipmap_sample_height_level(uv, clip_ring_index + 1.0, height_dims);
     let h_raw = mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
@@ -5233,22 +5286,74 @@ fn vs_clipmap_main(
     let skirt_offset = select(0.0, skirt_depth, clip_morph.x < 0.0);
     let world_z_centered = (h_disp - h_center - skirt_offset) * h_exag;
     let world_z_original = (h_disp - skirt_offset) * h_exag;
+    let instance_base = instance_transform * vec4<f32>(clip_position, 1.0);
+    let geodetic_up = det_normalize3(
+        (instance_transform * vec4<f32>(clipmap_decode_octahedral(clip_normal_oct), 0.0)).xyz,
+    );
+    var out: ClipmapResolvedVertex;
+    out.world_position = instance_base.xyz + geodetic_up * world_z_original;
+    out.centered_position = instance_base.xyz + geodetic_up * world_z_centered;
+    out.geodetic_up = geodetic_up;
+    out.uv = uv;
+    return out;
+}
+
+fn clipmap_raster_position(
+    resolved: ClipmapResolvedVertex,
+    clip_morph: vec2<f32>,
+) -> vec3<f32> {
+    // Flat clipmaps retain the historical height-centered raster contract.
+    // Planetary vertices use their physical height above the reference sphere
+    // so a ground-relative camera anchor remains outside the globe.
+    return select(resolved.centered_position, resolved.world_position, clip_morph.y < 0.0);
+}
+
+@fragment
+fn fs_main(input : VertexOutput) -> FragmentOutput {
+    return forward_shade_with_feedback(input);
+}
+
+@fragment
+fn fs_orbis_coverage(input : VertexOutput) -> OrbisCoverageOutput {
+    let shaded = forward_shade_with_feedback(input);
+    var out: OrbisCoverageOutput;
+    out.color = shaded.color;
+    out.terrain_coverage = vec4<f32>(1.0);
+    return out;
+}
+
+@vertex
+fn vs_clipmap_main(
+    @location(0) clip_position : vec3<f32>,
+    @location(1) clip_uv : vec2<f32>,
+    @location(2) clip_morph : vec2<f32>,
+    @location(3) instance_col0 : vec4<f32>,
+    @location(4) instance_col1 : vec4<f32>,
+    @location(5) instance_col2 : vec4<f32>,
+    @location(6) instance_col3 : vec4<f32>,
+    @location(7) _tile_id_lod : vec2<u32>,
+    @location(8) clip_normal_oct : vec2<f32>
+) -> VertexOutput {
+    var out : VertexOutput;
+
     let instance_transform = mat4x4<f32>(
         instance_col0,
         instance_col1,
         instance_col2,
         instance_col3,
     );
-    let instance_base = instance_transform * vec4<f32>(clip_position, 1.0);
-    let geodetic_up = det_normalize3(
-        (instance_transform * vec4<f32>(clipmap_decode_octahedral(clip_normal_oct), 0.0)).xyz,
+    let resolved = clipmap_resolve_vertex(
+        clip_position,
+        clip_uv,
+        clip_morph,
+        instance_transform,
+        clip_normal_oct,
     );
-    let world_position = instance_base.xyz + geodetic_up * world_z_original;
-    let centered_position = instance_base.xyz + geodetic_up * world_z_centered;
+    let raster_position = clipmap_raster_position(resolved, clip_morph);
 
-    out.world_position = world_position;
-    out.world_normal = geodetic_up;
-    out.tex_coord = uv;
+    out.world_position = resolved.world_position;
+    out.world_normal = resolved.geodetic_up;
+    out.tex_coord = resolved.uv;
     // TESSELLA: the clipmap vertex stage always emits the packed tile/LOD
     // identity terrain_visbuffer_write.wgsl consumes. No forward shading path
     // reads tile_id, so both pipelines share this one vertex stage.
@@ -5257,8 +5362,102 @@ fn vs_clipmap_main(
         u_terrain.proj,
         det_mat4_mul_vec4(
             u_terrain.view,
-            vec4<f32>(centered_position, 1.0),
+            vec4<f32>(raster_position, 1.0),
         ),
     );
     return out;
+}
+
+fn orbis_project(matrix: mat4x4<f32>, position: vec3<f32>) -> vec4<f32> {
+    let clip = det_mat4_mul_vec4(matrix, vec4<f32>(position, 1.0));
+    return vec4<f32>(clip.xy / clip.w, clip.w, 0.0);
+}
+
+// The indirect index stream can reference a vertex many times.  Give each
+// output slot exactly one invocation/writer, and test membership against the
+// exact GPU-selected spans instead of dispatching one writer per index.
+fn orbis_vertex_is_selected(vertex_index: u32) -> bool {
+    var draw_index = 0u;
+    loop {
+        if (draw_index >= orbis_selection_header.visible_count) {
+            break;
+        }
+        let draw = orbis_selected_draws[draw_index];
+        var template_index = 0u;
+        loop {
+            if (template_index >= draw.index_count) {
+                break;
+            }
+            let raw_index = orbis_mesh_indices[draw.first_index + template_index];
+            let signed_index = i32(raw_index) + draw.base_vertex;
+            if (signed_index >= 0 && u32(signed_index) == vertex_index) {
+                return true;
+            }
+            template_index += 1u;
+        }
+        draw_index += 1u;
+    }
+    return false;
+}
+
+@compute @workgroup_size(64)
+fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let index = invocation.x;
+    if (index >= arrayLength(&orbis_projection_samples)) {
+        return;
+    }
+    if (!orbis_vertex_is_selected(index)) {
+        return;
+    }
+    let word = index * 9u;
+    let clip_position = vec3<f32>(
+        bitcast<f32>(orbis_vertex_words[word]),
+        bitcast<f32>(orbis_vertex_words[word + 1u]),
+        bitcast<f32>(orbis_vertex_words[word + 2u]),
+    );
+    let clip_uv = vec2<f32>(
+        bitcast<f32>(orbis_vertex_words[word + 3u]),
+        bitcast<f32>(orbis_vertex_words[word + 4u]),
+    );
+    let clip_morph = vec2<f32>(
+        bitcast<f32>(orbis_vertex_words[word + 5u]),
+        bitcast<f32>(orbis_vertex_words[word + 6u]),
+    );
+    let clip_normal_oct = vec2<f32>(
+        bitcast<f32>(orbis_vertex_words[word + 7u]),
+        bitcast<f32>(orbis_vertex_words[word + 8u]),
+    );
+    let resolved = clipmap_resolve_vertex(
+        clip_position,
+        clip_uv,
+        clip_morph,
+        mat4x4<f32>(
+            vec4<f32>(1.0, 0.0, 0.0, 0.0),
+            vec4<f32>(0.0, 1.0, 0.0, 0.0),
+            vec4<f32>(0.0, 0.0, 1.0, 0.0),
+            vec4<f32>(0.0, 0.0, 0.0, 1.0),
+        ),
+        clip_normal_oct,
+    );
+    let raster_position = clipmap_raster_position(resolved, clip_morph);
+    // Deliberate control: transform the exact resolved ENU vertex into ECEF,
+    // but narrow the planet-scale anchor and matrix to f32 before projection.
+    // This is the naive implementation the production camera-relative path
+    // must materially outperform.
+    let absolute = orbis_probe.anchor_abs.xyz
+        + (orbis_probe.local_to_ecef * vec4<f32>(raster_position, 0.0)).xyz;
+    let production_clip = det_mat4_mul_vec4(
+        u_terrain.proj,
+        det_mat4_mul_vec4(
+            u_terrain.view,
+            vec4<f32>(raster_position, 1.0),
+        ),
+    );
+    var sample: OrbisProjectionSample;
+    sample.production = orbis_project(u_terrain.proj * u_terrain.view, raster_position);
+    sample.naive = orbis_project(orbis_probe.absolute_view_proj, absolute);
+    sample.naive.w = production_clip.z / production_clip.w;
+    sample.resolved_local = vec4<f32>(raster_position, 1.0);
+    sample.production.w = select(0.0, 1.0, clip_morph.x < 0.0);
+    orbis_projection_samples[index] = sample;
 }

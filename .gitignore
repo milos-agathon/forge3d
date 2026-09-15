@@ -91,6 +91,8 @@ specs/001-diagnostics-support-matrices/*
 output/
 logs/
 tests/artifacts/
+orbis-artifacts-*/
+wheel-extract-*/
 docs/*audit*.md
 docs/*prompt*.md
 docs/**/*audit*.md
@@ -404,6 +406,7 @@ scripts/*
 !scripts/tessella_evidence_provenance.py
 !scripts/tessella_evidence_thresholds.py
 !scripts/substratia_evidence_report.py
+!scripts/write_orbis_evidence.py
 !scripts/run_nvidia_visual_acceptance.py
 !scripts/run_nvidia_determinism_acceptance.py
 

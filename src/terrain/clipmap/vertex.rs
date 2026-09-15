@@ -176,6 +176,8 @@ mod tests {
     fn test_center_vertex() {
         let vertex = ClipmapVertex::center(10.0, 20.0, 0.5, 0.5);
         assert_eq!(vertex.position, [10.0, 20.0, 0.0]);
+        assert_eq!(vertex.position[2].to_bits(), 0.0f32.to_bits());
+        assert_eq!(vertex.normal_oct.map(f32::to_bits), [0, 0]);
         assert_eq!(vertex.geodetic_up(), Vec3::Z);
         assert_eq!(vertex.uv, [0.5, 0.5]);
         assert_eq!(vertex.morph_weight(), 0.0);
@@ -196,6 +198,7 @@ mod tests {
     fn test_skirt_vertex() {
         let vertex = ClipmapVertex::skirt(50.0, 50.0, 0.25, 0.75, 1);
         assert!(vertex.is_skirt());
+        assert_eq!(vertex.morph_data[0].to_bits(), (-1.0f32).to_bits());
         assert_eq!(vertex.morph_weight(), 0.0);
         assert_eq!(vertex.ring_index(), 1);
     }
@@ -217,18 +220,39 @@ mod tests {
     fn test_vertex_layout() {
         let layout = ClipmapVertex::desc();
         assert_eq!(layout.array_stride, 36);
+        assert_eq!(layout.step_mode, wgpu::VertexStepMode::Vertex);
         assert_eq!(layout.attributes.len(), 4);
-        assert_eq!(layout.attributes[3].shader_location, 8);
+        let expected = [
+            (0, 0, wgpu::VertexFormat::Float32x3),
+            (12, 1, wgpu::VertexFormat::Float32x2),
+            (20, 2, wgpu::VertexFormat::Float32x2),
+            (28, 8, wgpu::VertexFormat::Float32x2),
+        ];
+        for (attribute, (offset, shader_location, format)) in
+            layout.attributes.iter().zip(expected)
+        {
+            assert_eq!(attribute.offset, offset);
+            assert_eq!(attribute.shader_location, shader_location);
+            assert_eq!(attribute.format, format);
+        }
     }
 
     #[test]
-    fn shader_decodes_globe_ring_before_selecting_coarse_height_lod() {
+    fn shader_preserves_flat_fine_height_and_decodes_globe_ring_lod() {
         let shader = include_str!("../../shaders/terrain_pbr_pom.wgsl");
         assert!(shader.contains(
             "let clip_ring_index = select(clip_morph.y, -clip_morph.y - 1.0, clip_morph.y < 0.0);"
         ));
-        assert!(shader
-            .contains("let coarse_texels = exp2(min(max(clip_ring_index, 0.0) + 1.0, 16.0));"));
+        assert!(shader.contains("fn clipmap_sample_height_level("));
+        assert!(shader.contains(
+            "let fine_level = select(0.0, clip_ring_index, clip_morph.y < 0.0);"
+        ));
+        assert!(shader.contains(
+            "let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"
+        ));
+        assert!(shader.contains(
+            "let h_coarse = clipmap_sample_height_level(uv, clip_ring_index + 1.0, height_dims);"
+        ));
         assert!(shader.contains("u_terrain.camera_mode_params.y * 0.001"));
     }
 

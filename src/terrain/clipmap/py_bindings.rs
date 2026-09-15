@@ -188,7 +188,8 @@ pub fn clipmap_generate_py(
         ));
     }
     let center_vec = Vec2::new(center.0, center.1);
-    let mesh = clipmap_generate(&config.inner, center_vec, terrain_extent);
+    let mesh = clipmap_generate(&config.inner, center_vec, terrain_extent)
+        .map_err(|error| PyValueError::new_err(format!("clipmap generation failed: {error}")))?;
 
     // Calculate full-res triangle count for comparison
     let full_res_triangles = super::level::full_resolution_triangle_count(&config.inner);

@@ -22,14 +22,21 @@ VISUAL_TESTS = (
     "tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression",
     "tests/test_recipe_goldens.py::test_nvidia_vulkan_recipe_pixel_golden_render_and_match",
 )
+ORBIS_TESTS = ("tests/test_globe_floating_origin.py",)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("visual", "substratia"), required=True)
+    parser.add_argument(
+        "--suite", choices=("visual", "substratia", "orbis"), required=True
+    )
     parser.add_argument("--junit", type=Path, required=True)
     args = parser.parse_args()
-    selected = VISUAL_TESTS if args.suite == "visual" else SUBSTRATIA_TESTS
+    selected = {
+        "visual": VISUAL_TESTS,
+        "substratia": SUBSTRATIA_TESTS,
+        "orbis": ORBIS_TESTS,
+    }[args.suite]
     return int(pytest.main([*selected, f"--junitxml={args.junit}", "-v", "--tb=short"]))
 
 

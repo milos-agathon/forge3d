@@ -28,7 +28,7 @@ impl TerrainScene {
         sun_vis_computed: bool,
         time_seconds: f32,
         timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
-        staged_lod_ticket: &mut Option<crate::terrain::clipmap::gpu_lod::SelectionReadbackTicket>,
+        staged_lod_selection: &mut Option<super::super::geometry::StagedLodSelection>,
     ) -> Result<()> {
         let shadow_bind_group = shadow_setup
             .shadow_bind_group
@@ -117,9 +117,36 @@ impl TerrainScene {
             &water_reflection_bind_group,
             &pass_bind_groups.material_layer,
             sky_texture.is_some(),
-            staged_lod_ticket,
+            staged_lod_selection,
         )?;
         ts_end(timing, encoder, main_scope, terrain_draw_calls);
+
+        #[cfg(feature = "enable-globe")]
+        if let Some(request) = self.orbis_capture_request.take() {
+            if render_targets.sample_count != 1 {
+                return Err(anyhow!(
+                    "ORBIS physical depth capture requires msaa_samples=1"
+                ));
+            }
+            let pending = self.encode_orbis_capture(
+                encoder,
+                &render_targets._depth_texture,
+                render_targets
+                    .orbis_coverage_texture
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("ORBIS coverage texture was not allocated"))?,
+                render_targets.internal_width,
+                render_targets.internal_height,
+                params,
+                request,
+                &pass_bind_groups.main,
+                staged_lod_selection
+                    .as_ref()
+                    .copied()
+                    .ok_or_else(|| anyhow!("ORBIS capture requires an exact submitted indirect LOD selection"))?,
+            )?;
+            self.orbis_pending_capture = Some(pending);
+        }
 
         #[cfg(feature = "enable-gpu-instancing")]
         {
@@ -246,7 +273,7 @@ impl TerrainScene {
         water_reflection_bind_group: &wgpu::BindGroup,
         material_layer_bind_group: &wgpu::BindGroup,
         preserve_background: bool,
-        staged_lod_ticket: &mut Option<crate::terrain::clipmap::gpu_lod::SelectionReadbackTicket>,
+        staged_lod_selection: &mut Option<super::super::geometry::StagedLodSelection>,
     ) -> Result<u32> {
         let geometry = self.geometry_provider()?;
         // TESSELLA: the indirect-draw capability decision lives in
@@ -286,10 +313,10 @@ impl TerrainScene {
                 params,
                 (-half_height - skirt, half_height),
                 first_instance,
-            )
+            )?
         };
-        if let Some(ticket) = encoded_lod.and_then(|encoded| encoded.ticket) {
-            *staged_lod_ticket = Some(ticket);
+        if let Some(encoded) = encoded_lod {
+            *staged_lod_selection = Some(encoded.selection);
         }
         let indirect = encoded_lod.map(|encoded| encoded.resources);
         // Only a frame that actually issues indirect draws may claim the CPU
@@ -459,7 +486,9 @@ impl TerrainScene {
                     first_instance,
                 )?;
             }
-            self.stage_visibility_stats(encoder)?;
+            if self.runtime_visibility_stats_enabled() {
+                self.stage_visibility_stats(encoder)?;
+            }
             // No second pyramid build here: `build_phase2_hzb` above already
             // produced the max-reduced pyramid, and `finish_frame`'s index flip
             // hands that same pyramid to the next frame's phase 1. See
@@ -519,9 +548,13 @@ impl TerrainScene {
                 multi_draw_count,
                 first_instance,
             )?;
-            self.stage_visibility_stats(encoder)?;
+            if self.runtime_visibility_stats_enabled() {
+                self.stage_visibility_stats(encoder)?;
+            }
         } else if geometry.is_clipmap() && render_targets.sample_count == 1 {
-            self.stage_visibility_stats(encoder)?;
+            if self.runtime_visibility_stats_enabled() {
+                self.stage_visibility_stats(encoder)?;
+            }
         }
         Ok(draw_calls)
     }
@@ -736,26 +769,52 @@ impl TerrainScene {
             .bind_group()
             .expect("LightBuffer should always provide a bind group");
 
+        #[cfg(feature = "enable-globe")]
+        let orbis_pipeline_guard = self
+            .orbis_coverage_pipeline
+            .lock()
+            .map_err(|_| anyhow!("ORBIS coverage pipeline mutex poisoned"))?;
+        #[cfg(feature = "enable-globe")]
+        let orbis_capture = geometry.is_clipmap()
+            && render_targets.orbis_coverage_view.is_some()
+            && self.orbis_capture_request.is_some();
+
+        let color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
+            view: color_view,
+            resolve_target,
+            ops: wgpu::Operations {
+                load: if preserve_color {
+                    wgpu::LoadOp::Load
+                } else {
+                    wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.1,
+                        g: 0.1,
+                        b: 0.15,
+                        a: 1.0,
+                    })
+                },
+                store: wgpu::StoreOp::Store,
+            },
+        })];
+        #[cfg(feature = "enable-globe")]
+        let mut color_attachments = color_attachments;
+        #[cfg(feature = "enable-globe")]
+        if orbis_capture {
+            color_attachments.extend([None, None, None, None]);
+            color_attachments.push(Some(wgpu::RenderPassColorAttachment {
+                view: render_targets.orbis_coverage_view.as_ref().unwrap(),
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: if load_depth { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) },
+                    store: wgpu::StoreOp::Store,
+                },
+            }));
+        }
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain.render_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: color_view,
-                    resolve_target,
-                    ops: wgpu::Operations {
-                        load: if preserve_color {
-                            wgpu::LoadOp::Load
-                        } else {
-                            wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.1,
-                                g: 0.1,
-                                b: 0.15,
-                                a: 1.0,
-                            })
-                        },
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                color_attachments: &color_attachments,
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &render_targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
@@ -780,6 +839,22 @@ impl TerrainScene {
                 "terrain_pbr_pom.shader"
             });
             pass.set_pipeline(if geometry.is_clipmap() {
+                #[cfg(feature = "enable-globe")]
+                if orbis_capture {
+                    orbis_pipeline_guard
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("ORBIS coverage pipeline not initialized"))?
+                } else if visibility_resolve {
+                    pipeline_cache
+                        .visibility_resolve_pipeline
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("visibility resolve pipeline not initialized"))?
+                } else {
+                    pipeline_cache.clipmap_pipeline.as_ref().ok_or_else(|| {
+                        anyhow!("clipmap pipeline not initialized for clipmap geometry")
+                    })?
+                }
+                #[cfg(not(feature = "enable-globe"))]
                 if visibility_resolve {
                     pipeline_cache
                         .visibility_resolve_pipeline

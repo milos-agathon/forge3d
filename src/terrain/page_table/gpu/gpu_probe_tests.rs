@@ -84,7 +84,7 @@ fn production_globe_center_uv(lon: f64, lat: f64) -> [f32; 2] {
         ..ClipmapConfig::default()
     };
     let mut level = ClipmapLevel::new_globe(config, center, frame, 0.004).unwrap();
-    level.generate().vertices[4].uv
+    level.generate().unwrap().vertices[4].uv
 }
 
 #[test]

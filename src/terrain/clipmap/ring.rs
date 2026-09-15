@@ -75,6 +75,83 @@ pub fn make_ring(
     let ring_width = outer_extent - inner_extent;
     // Ring vertices are intentionally one LOD coarser than the region inside.
     let cell_size = 2.0 * ring_width / resolution as f32;
+    make_ring_impl(
+        ring_index,
+        inner_extent,
+        outer_extent,
+        resolution,
+        center,
+        terrain_extent,
+        morph_range,
+        cell_size,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn make_ring_with_cell_size(
+    ring_index: u32,
+    inner_extent: f32,
+    outer_extent: f32,
+    resolution: u32,
+    center: Vec2,
+    terrain_extent: f32,
+    morph_range: f32,
+    cell_size: f32,
+) -> (Vec<ClipmapVertex>, Vec<u32>) {
+    make_ring_impl(
+        ring_index,
+        inner_extent,
+        outer_extent,
+        resolution,
+        center,
+        terrain_extent,
+        morph_range,
+        cell_size,
+        true,
+    )
+}
+
+/// Closed-form globe ring bounds. Adjacent regions call this with the same
+/// boundary level, so an outer edge and its mating inner edge are bit-identical
+/// instead of depending on separate f32 accumulation histories.
+#[cfg(feature = "enable-globe")]
+pub(crate) fn globe_ring_bounds(
+    ring_index: u32,
+    base_cell_size: f32,
+    center_resolution: u32,
+    ring_resolution: u32,
+) -> Result<(f32, f32), String> {
+    let boundary = |level: u32| -> Result<f32, String> {
+        let scale = 1_u32
+            .checked_shl(level)
+            .ok_or_else(|| "globe ring boundary scale overflow".to_string())?;
+        let units = center_resolution as f32 * 0.5
+            + ring_resolution as f32 * scale.saturating_sub(1) as f32;
+        let extent = base_cell_size * units;
+        if !extent.is_finite() || extent <= 0.0 {
+            return Err("globe ring boundary extent is invalid".to_string());
+        }
+        Ok(extent)
+    };
+    Ok((boundary(ring_index)?, boundary(ring_index + 1)?))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make_ring_impl(
+    ring_index: u32,
+    inner_extent: f32,
+    outer_extent: f32,
+    resolution: u32,
+    center: Vec2,
+    terrain_extent: f32,
+    morph_range: f32,
+    cell_size: f32,
+    preserve_boundaries: bool,
+) -> (Vec<ClipmapVertex>, Vec<u32>) {
+    assert!(outer_extent > inner_extent);
+    assert!(resolution > 0);
+    let ring_width = outer_extent - inner_extent;
     assert!(cell_size.is_finite() && cell_size > 0.0);
 
     // Never derive the lattice from `center - outer_extent`: that changes its
@@ -86,6 +163,7 @@ pub fn make_ring(
         center.x - inner_extent,
         center.x + inner_extent,
         cell_size,
+        preserve_boundaries,
     );
     let y_coords = anchored_coordinates(
         center.y - outer_extent,
@@ -93,6 +171,7 @@ pub fn make_ring(
         center.y - inner_extent,
         center.y + inner_extent,
         cell_size,
+        preserve_boundaries,
     );
     let mut vertices = Vec::with_capacity(x_coords.len() * y_coords.len());
     let mut indices = Vec::new();
@@ -165,6 +244,7 @@ fn anchored_coordinates(
     inner_min: f32,
     inner_max: f32,
     spacing: f32,
+    preserve_boundaries: bool,
 ) -> Vec<f32> {
     debug_assert!(min < max);
     debug_assert!(spacing.is_finite() && spacing > 0.0);
@@ -172,9 +252,18 @@ fn anchored_coordinates(
     let first = (min / spacing).ceil() as i64;
     let last = (max / spacing).floor() as i64;
     let mut coordinates = Vec::with_capacity((last - first + 5).max(5) as usize);
-    coordinates.extend([min, inner_min, inner_max, max]);
+    let boundaries = [min, inner_min, inner_max, max];
+    coordinates.extend(boundaries);
     for index in first..=last {
-        coordinates.push(index as f32 * spacing);
+        let coordinate = index as f32 * spacing;
+        if preserve_boundaries
+            && boundaries
+                .iter()
+                .any(|boundary| (coordinate - boundary).abs() <= spacing.abs() * 1e-6)
+        {
+            continue;
+        }
+        coordinates.push(coordinate);
     }
     coordinates.sort_by(|a, b| a.total_cmp(b));
     coordinates.dedup_by(|a, b| (*a - *b).abs() <= spacing.abs() * 1e-6);
