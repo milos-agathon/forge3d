@@ -296,6 +296,7 @@ jobs:
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
               - 'tests/test_prometheus_dem_reference.py'
+              - 'tests/test_inverse_pt.py'
               - 'tests/data/prometheus/**'
               - 'tools/prometheus_reference.py'
               - 'tests/_deltae.py'
@@ -612,14 +613,14 @@ jobs:
           sudo apt-get install -y libvulkan-dev libproj-dev libsqlite3-dev sqlite3 pkg-config
 
       - name: Run cargo check
-        run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts
+        run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts
 
       - name: Run cargo check (system PROJ feature)
         if: matrix.os == 'ubuntu-latest'
         run: cargo check --workspace --features proj
 
       - name: Run cargo test (skip GPU-dependent tests)
-        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
+        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
         env:
           RUST_TEST_THREADS: 1
 
@@ -633,7 +634,7 @@ jobs:
         # Executes rustdoc examples, including the five `compile_fail` proofs in
         # src/geo/units.rs that make unit/height/CRS/epoch mismatches and the raw
         # f64->f32 world-coordinate narrowing genuinely fail to compile.
-        run: cargo test --doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts
+        run: cargo test --doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts
 
       - name: Run cargo clippy
         run: cargo forge3d-clippy-acceptance
@@ -1252,6 +1253,18 @@ jobs:
           python -m pytest tests/test_hybrid_terrain_pt.py tests/test_prometheus_dem_reference.py -v --tb=short --junitxml="tests/artifacts/prometheus/junit.xml"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "tests/artifacts/prometheus/junit.xml"
+          exit $LASTEXITCODE
+
+      - name: Run DIFFERENTIA inverse solver gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_INVERSE_ARTIFACT_DIR: tests/artifacts/inverse
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:FORGE3D_INVERSE_ARTIFACT_DIR | Out-Null
+          python -m pytest tests/test_inverse_pt.py -v --tb=short --junitxml="$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
           exit $LASTEXITCODE
 
       - name: Record visual golden lane RAN
@@ -2456,7 +2469,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust docs
-        run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts --no-deps
+        run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts --no-deps
 
   # ============================================================================
   # Stable hosted gate for every existing and future PR. Configure branch

@@ -338,7 +338,12 @@ fn observe_runtime_contract(
         exact(
             "terrain.albedo_pad",
             &terrain.albedo_pad,
-            &[desc.albedo[0], desc.albedo[1], desc.albedo[2], 0.0],
+            &[
+                desc.albedo[0],
+                desc.albedo[1],
+                desc.albedo[2],
+                (desc.turbidity - 1.0).max(0.0),
+            ],
         );
         let cw = desc.dem_width.saturating_sub(1);
         let ch = desc.dem_height.saturating_sub(1);
@@ -354,10 +359,16 @@ fn observe_runtime_contract(
         );
         let mip_count = cw.max(ch).max(1).next_power_of_two().ilog2() + 1;
         let (env_w, env_h) = desc.env_map.as_ref().map_or((0, 0), |(_, w, h)| (*w, *h));
+        let terrain_flags = 1.0
+            + if desc.albedo_map.is_some() {
+                2.0 + 4.0
+            } else {
+                0.0
+            };
         exact(
             "terrain.mips",
             &terrain.mips.map(|v| v as f32),
-            &[mip_count as f32, 1.0, env_w as f32, env_h as f32],
+            &[mip_count as f32, terrain_flags, env_w as f32, env_h as f32],
         );
         exact(
             "terrain.extra",
@@ -467,6 +478,13 @@ fn observe_runtime_contract(
             desc.sun_color,
         )),
     );
+    let spectral_reservoir = desc.albedo_map.is_some();
+    let light_index_hi = if spectral_reservoir { 2.0 } else { 0.0 };
+    let target_pdf_bounds = if spectral_reservoir {
+        (1.0 / 4.0, 1.0 / 2.0)
+    } else {
+        (1.0, 1.0)
+    };
     for (name, values, lo, hi) in [
         (
             "light_type",
@@ -484,13 +502,13 @@ fn observe_runtime_contract(
                 .map(|r| r.sample.light_index as f32)
                 .collect::<Vec<_>>(),
             0.0,
-            0.0,
+            light_index_hi,
         ),
         (
             "target_pdf",
             valid.iter().map(|r| r.target_pdf).collect::<Vec<_>>(),
-            1.0,
-            1.0,
+            target_pdf_bounds.0,
+            target_pdf_bounds.1,
         ),
     ] {
         if !values.is_empty() {
@@ -599,6 +617,8 @@ fn is_canonical_proof_fixture(desc: &TerrainReferenceDesc) -> bool {
         && desc.spacing == (1.0, 1.0)
         && desc.exaggeration == 1.0
         && desc.albedo == [0.6; 3]
+        && desc.albedo_map.is_none()
+        && desc.turbidity == 1.0
         && desc.sun_azimuth_deg == 315.0
         && desc.sun_elevation_deg == 45.0
         && desc.sun_intensity == 2.5
@@ -676,6 +696,15 @@ pub struct TerrainReferenceDesc {
     pub spacing: (f32, f32),
     pub exaggeration: f32,
     pub albedo: [f32; 3],
+    /// Optional per-texel linear-RGB albedo at DEM texel resolution
+    /// ((w*h*3) f32, dims must equal dem_width x dem_height). When present it
+    /// overrides `albedo` through the shared `terrain_albedo_at` fetch
+    /// (group 2 binding 16).
+    pub albedo_map: Option<(Vec<f32>, u32, u32)>,
+    /// Linke-style aerosol turbidity (>= 1; 1 = clean-air reference). Drives
+    /// the shared spectral sun extinction + diffuse env in-scatter terms in
+    /// hybrid_terrain_traversal.wgsl (TERRAIN_ATMOS_BETA / TERRAIN_ATMOS_HAZE).
+    pub turbidity: f32,
     pub cam_origin: [f32; 3],
     pub cam_look_at: [f32; 3],
     pub cam_up: [f32; 3],
@@ -981,6 +1010,26 @@ fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
     if !(desc.env_intensity.is_finite() && desc.env_intensity >= 0.0) {
         return err("env intensity must be finite and >= 0".into());
     }
+    if !(desc.turbidity.is_finite() && desc.turbidity >= 1.0) {
+        return err(format!(
+            "turbidity must be finite and >= 1, got {}",
+            desc.turbidity
+        ));
+    }
+    if let Some((data, w, h)) = &desc.albedo_map {
+        if *w != desc.dem_width || *h != desc.dem_height {
+            return err(format!(
+                "albedo_map dims {w}x{h} must equal the DEM texel dims {}x{}",
+                desc.dem_width, desc.dem_height
+            ));
+        }
+        if data.len() != (*w as usize) * (*h as usize) * 3 {
+            return err("albedo_map length does not match dims * 3".into());
+        }
+        if data.iter().any(|v| !v.is_finite() || *v < 0.0) {
+            return err("albedo_map contains non-finite or negative samples".into());
+        }
+    }
     if !(desc.variance_threshold.is_finite() && desc.variance_threshold > 0.0) {
         return err("variance threshold must be finite and > 0".into());
     }
@@ -1065,6 +1114,10 @@ impl HybridPathTracer {
                 .as_ref()
                 .map(|(data, w, h)| (data.as_slice(), *w, *h)),
             env_intensity,
+            desc.albedo_map
+                .as_ref()
+                .map(|(data, w, h)| (data.as_slice(), *w, *h)),
+            desc.turbidity,
         )?;
 
         // --- Optional mesh mixed through the shared HybridScene seam ---
@@ -1425,6 +1478,9 @@ impl HybridPathTracer {
         let env_view = terrain_scene
             .env_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let albedo_view = terrain_scene
+            .albedo_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-terrain-bg2"),
             layout: &self.layouts.accum,
@@ -1464,6 +1520,10 @@ impl HybridPathTracer {
                 wgpu::BindGroupEntry {
                     binding: 10,
                     resource: earth_curvature_ubo.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: wgpu::BindingResource::TextureView(&albedo_view),
                 },
             ],
         });
@@ -1578,7 +1638,11 @@ impl HybridPathTracer {
         // --- One-shot ReSTIR G-buffer pass (static scene + camera) ---
         let wg_x = width.div_ceil(8);
         let wg_y = height.div_ceil(8);
+        // 1-D dispatches fold overflow workgroups into the y axis: the
+        // kernels compute their flat index as gid.y*(65535*256)+gid.x.
         let px_workgroups = ((px_count as u32) + 255) / 256;
+        let px_wg_x = px_workgroups.min(65_535);
+        let px_wg_y = px_workgroups.div_ceil(65_535);
         // CENSOR F-04: live per-pass timing for the certificate. The gbuffer
         // pass and frame 0's terrain/temporal/spatial dispatches are each
         // bracketed on the encoder that executes them (one scope per label —
@@ -1675,7 +1739,7 @@ impl HybridPathTracer {
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg_empty, &[]);
                 cpass.set_bind_group(2, &bg_temporal, &[]);
-                cpass.dispatch_workgroups(px_workgroups, 1, 1);
+                cpass.dispatch_workgroups(px_wg_x, px_wg_y, 1);
             }
             if time_this_frame {
                 timing.end(&mut enc, temporal_scope, 1);
@@ -1695,7 +1759,7 @@ impl HybridPathTracer {
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg_spatial_scene, &[]);
                 cpass.set_bind_group(2, &bg_spatial_reuse, &[]);
-                cpass.dispatch_workgroups(px_workgroups, 1, 1);
+                cpass.dispatch_workgroups(px_wg_x, px_wg_y, 1);
             }
             if time_this_frame {
                 timing.end(&mut enc, spatial_scope, 1);
@@ -2004,6 +2068,8 @@ mod tests {
             spacing: (1.0, 1.0),
             exaggeration: 1.0,
             albedo: [0.6; 3],
+            albedo_map: None,
+            turbidity: 1.0,
             cam_origin: if dawn {
                 [0.0, 35.0, 90.0]
             } else {

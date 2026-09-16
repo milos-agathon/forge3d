@@ -186,6 +186,9 @@ class TestNativeModuleSymbols:
         "atmosphere_spectral_to_linear_rgb",
         "atmosphere_generate_environment",
         "atmosphere_reference_aerial",
+        # DIFFERENTIA: differentiable inverse solver + primal
+        "inverse_solve",
+        "inverse_render_primal",
         # VERITAS: per-pixel cryptographic provenance
         "seal_provenance",
         "verify_provenance",
@@ -827,6 +830,10 @@ class TestPackageLevelApiContracts:
         "oidn_available",
         # AEQUITAS: PT-vs-raster adjudication pair
         "render_adjudication_pair",
+        # DIFFERENTIA: scene-parameter recovery surface
+        "recover_scene",
+        "RecoveredScene",
+        "InverseSolveUnavailable",
         # VERITAS: per-pixel cryptographic provenance
         "seal_provenance",
         "verify_provenance",

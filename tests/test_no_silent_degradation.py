@@ -105,6 +105,9 @@ PORTABLE_CI_CARGO_FEATURES = {
     "enable-hdr-offscreen",
     "enable-renderer-config",
     "enable-staging-rings",
+    # DIFFERENTIA: the differentiable inverse solver is compiled into every
+    # portable CI check/test/doc lane.
+    "enable-inverse-pt",
     "shader-contract-asserts",
 }
 DEDICATED_SYSTEM_FEATURES = {"proj"}
@@ -282,6 +285,8 @@ WHEEL_REQUIRED_FEATURES = {
     # AETHER exposes an explicit offline bake API in the shipped wheel while
     # normal rendering still consumes its shipped LUT bank.
     "atmosphere-bake",
+    # DIFFERENTIA: `inverse_solve`/`inverse_render_primal` are public API.
+    "enable-inverse-pt",
 }
 
 

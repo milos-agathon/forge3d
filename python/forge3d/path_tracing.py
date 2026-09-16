@@ -899,6 +899,8 @@ def hybrid_render_terrain_reference(
     spacing: "tuple[float, float]" = (1.0, 1.0),
     exaggeration: float = 1.0,
     albedo: "tuple[float, float, float]" = (0.6, 0.6, 0.6),
+    albedo_map: "np.ndarray | None" = None,
+    turbidity: float = 1.0,
     sun_azimuth_deg: float | None = None,
     sun_elevation_deg: float | None = None,
     solar_time: "object | None" = None,
@@ -940,6 +942,14 @@ def hybrid_render_terrain_reference(
     samples per accumulation frame. Traversal cost depends on visited
     hierarchy nodes; returned counters measure the last beauty frame, while
     throughput is checked separately from 1 to 8 spp.
+
+    ``albedo_map`` (H,W,3 float32, dims must equal the DEM texel dims)
+    replaces the uniform ``albedo`` with a per-texel map fetched through the
+    shared ``terrain_albedo_at`` bilinear path. ``turbidity`` (>= 1, default
+    1 = clean air) drives the shared atmosphere model: spectral Beer
+    extinction on the direct sun (blue attenuated strongest, so higher
+    turbidity warms the beam) and a diffuse in-scatter gain on the
+    environment.
 
     ``sdf_scene`` mixes a native signed-distance-field scene into the same
     traversal (primary and shadow rays share one compiled ``intersect_sdf``).
@@ -1061,6 +1071,22 @@ def hybrid_render_terrain_reference(
         pressure_mbar = 1013.25 if pressure_mbar is None else pressure_mbar
         temperature_c = 15.0 if temperature_c is None else temperature_c
     cam = dict(camera or {})
+    if not (float(turbidity) >= 1.0 and np.isfinite(float(turbidity))):
+        raise ValueError(f"turbidity must be finite and >= 1, got {turbidity}")
+    alb_map = None
+    if albedo_map is not None:
+        alb_map = np.ascontiguousarray(albedo_map, dtype=np.float32)
+        if alb_map.ndim != 3 or alb_map.shape[2] != 3:
+            raise ValueError(
+                f"albedo_map must be (H, W, 3) float32, got {alb_map.shape}"
+            )
+        if alb_map.shape[0] != dem.shape[0] or alb_map.shape[1] != dem.shape[1]:
+            raise ValueError(
+                f"albedo_map dims {alb_map.shape[1]}x{alb_map.shape[0]} must equal "
+                f"the DEM texel dims {dem.shape[1]}x{dem.shape[0]}"
+            )
+        if not np.isfinite(alb_map).all() or (alb_map < 0.0).any():
+            raise ValueError("albedo_map contains non-finite or negative samples")
     env = None
     if env_map is not None:
         env = np.ascontiguousarray(env_map, dtype=np.float32)
@@ -1084,6 +1110,8 @@ def hybrid_render_terrain_reference(
         spacing=(float(spacing[0]), float(spacing[1])),
         exaggeration=float(exaggeration),
         albedo=(float(albedo[0]), float(albedo[1]), float(albedo[2])),
+        albedo_map=alb_map,
+        turbidity=float(turbidity),
         sun_azimuth_deg=float(sun_azimuth_deg),
         sun_elevation_deg=float(sun_elevation_deg),
         sun_intensity=float(sun_intensity),

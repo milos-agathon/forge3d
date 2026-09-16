@@ -6,4 +6,4 @@ forge3d-clippy = "clippy --workspace --all-targets --features extension-module,d
 
 # Explicit acceptance/release lint gate. This mirrors the supported portable
 # feature matrix without requiring system-PROJ from `--all-features`.
-forge3d-clippy-acceptance = "clippy --workspace --all-targets --features extension-module,default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts,atmosphere-bake -- -D warnings"
+forge3d-clippy-acceptance = "clippy --workspace --all-targets --features extension-module,default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,atmosphere-bake -- -D warnings"

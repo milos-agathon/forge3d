@@ -289,6 +289,22 @@ pub(crate) fn terrain_parts() -> &'static [SourcePart] {
     ]
 }
 
+/// DIFFERENTIA inverse module: the forward hybrid kernel plus the three
+/// reverse-mode files (loss adjoint, reverse shading, edge sampling). The
+/// inverse entry points share every forward declaration and add their own
+/// bindings at group 0 binding 2, group 2 bindings 11-12 and group 3
+/// bindings 8-10.
+#[cfg(feature = "enable-inverse-pt")]
+pub(crate) fn inverse_kernel() -> String {
+    [
+        hybrid_kernel(),
+        include_str!("shaders/pt_inverse_loss.wgsl").to_string(),
+        include_str!("shaders/pt_inverse_shade.wgsl").to_string(),
+        include_str!("shaders/pt_edge_sample.wgsl").to_string(),
+    ]
+    .join("\n")
+}
+
 pub(crate) fn terrain() -> String {
     assemble_parts(terrain_parts())
 }
@@ -1045,5 +1061,17 @@ mod tests {
             .contains("terrain_vt_atlas[terrain_vt_atlas_layer(family_slot)], terrain_vt_sampler"));
         assert!(bindless.contains("fn terrain_vt_atlas_layer(family_slot: u32) -> u32"));
         assert_ne!(fixed, bindless);
+    }
+
+    #[test]
+    #[cfg(feature = "enable-inverse-pt")]
+    fn inverse_kernel_is_valid_wgsl() {
+        let module = naga::front::wgsl::parse_str(&inverse_kernel()).unwrap();
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
     }
 }

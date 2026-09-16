@@ -74,6 +74,8 @@ def hybrid_render_terrain_reference(
     spacing: Tuple[float, float] = ...,
     exaggeration: float = ...,
     albedo: Tuple[float, float, float] = ...,
+    albedo_map: np.ndarray | None = ...,
+    turbidity: float = ...,
     sun_azimuth_deg: float | None = ...,
     sun_elevation_deg: float | None = ...,
     solar_time: object | None = ...,
