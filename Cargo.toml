@@ -43,6 +43,8 @@ enable-gpu-instancing = ["enable-pbr", "enable-tbn"]
 enable-renderer-config = []
 # Workstream O: Resource & Memory Management
 enable-staging-rings = []
+# DIFFERENTIA: differentiable inverse path tracing (scene-parameter recovery)
+enable-inverse-pt = []
 # A14: AOV image format support
 images = ["dep:exr"]
 # P2.2: LAZ decompression in COPC reader

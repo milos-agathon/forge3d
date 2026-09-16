@@ -202,6 +202,8 @@ impl HybridPathTracer {
             [desc.ground_albedo; 3],
             None,
             0.0,
+            None,
+            1.0,
         )?;
         let hybrid_scene = HybridScene::new();
         let origin = glam::Vec3::from(desc.cam_origin);
@@ -406,6 +408,9 @@ impl HybridPathTracer {
         let env_view = terrain_scene
             .env_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let albedo_view = terrain_scene
+            .albedo_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("aether-spectral-reference-bg2"),
             layout: &self.layouts.accum,
@@ -441,6 +446,10 @@ impl HybridPathTracer {
                 wgpu::BindGroupEntry {
                     binding: 7,
                     resource: reservoir_prev.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: wgpu::BindingResource::TextureView(&albedo_view),
                 },
             ],
         });

@@ -1,8 +1,11 @@
 // src/shaders/pt_restir_spatial.wgsl
-// ReSTIR DI: Spatial reuse (MVP stub)
-// For each pixel, compare its reservoir to 4-neighborhood (up, down, left, right)
-// and keep the reservoir with the highest weight. Writes a diagnostic flag if
-// a neighbor was adopted (bit 0 = adopted neighbor, 0 = kept self).
+// ReSTIR DI: spatial reuse — stochastic reservoir merge over K random
+// neighbours in an R-window plus the pixel's own reservoir. Each candidate
+// is re-evaluated against the receiving pixel's G-buffer record (target pdf
+// at the receiver), contributes reuse weight w = w_sum * p_curr / target_pdf,
+// and replaces the running sample with probability w / Wsum (the canonical
+// reservoir update). Spectral residual reservoirs carry one global proposal;
+// merging identical proposals collapses exactly to one fresh categorical draw.
 
 struct Uniforms {
     width: u32,
@@ -63,16 +66,22 @@ fn consider_candidate(
     let P = gbuffer_pos[pix_idx].xyz;
     var p_curr: f32 = 0.0;
     if (r.sample.light_type == 1u) {
-        // Directional (delta): selection probability only
+        // Directional (delta): selection probability only. Spectral ReSTIR
+        // stores its three-channel proposal in sample.params; legacy light
+        // samples keep params=0 and use the scene-light importance table.
         if (dir_count == 0u) { return; }
-        let idx = min(r.sample.light_index, dir_count - 1u);
-        let imp = max(directional_lights[idx].importance, 0.0);
-        let p_sel = select(1.0 / f32(dir_count), imp / max(sum_imp_dir, 1e-8), sum_imp_dir > 0.0);
+        let spectral_sum = r.sample.params.x + r.sample.params.y + r.sample.params.z;
+        if (r.sample.light_index < 3u && spectral_sum > 0.0) {
+            p_curr = r.sample.params[r.sample.light_index] / spectral_sum;
+        } else {
+            let idx = min(r.sample.light_index, dir_count - 1u);
+            let imp = max(directional_lights[idx].importance, 0.0);
+            p_curr = select(1.0 / f32(dir_count), imp / max(sum_imp_dir, 1e-8), sum_imp_dir > 0.0);
+        }
         // Require surface-facing to avoid zero-contribution picks
         let wi = normalize(r.sample.direction);
         let cosTheta = max(dot(N, wi), 0.0);
         if (cosTheta <= 0.0) { return; }
-        p_curr = p_sel;
     } else if (r.sample.light_type == 2u) {
         // Area disc: selection probability times area->solid-angle
         if (area_count == 0u) { return; }
@@ -155,9 +164,13 @@ fn xorshift32(state: ptr<function, u32>) -> f32 {
 
 const PI: f32 = 3.141592653589793;
 
+// gid.y folds 1-D dispatches wider than the 65535-workgroup x limit: the
+// host dispatches x = min(wg, 65535), y = ceil(wg/65535).
+const DISPATCH_X_WG: u32 = 16776960u; // 65535 * 256
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
+    let idx = gid.y * DISPATCH_X_WG + gid.x;
     let W = uniforms.width;
     let H = uniforms.height;
     let pixel_count = W * H;
@@ -178,6 +191,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var seed = (uniforms.seed_hi ^ uniforms.frame_index) + idx * 1664525u + 1013904223u;
 
     let r_self = in_reservoirs[idx];
+    let spectral_sum = r_self.sample.params.x + r_self.sample.params.y + r_self.sample.params.z;
+    if (r_self.sample.light_type == 1u && spectral_sum > 0.0) {
+        let probabilities = r_self.sample.params / spectral_sum;
+        let u = xorshift32(&seed);
+        var channel = 2u;
+        if (u < probabilities.x) {
+            channel = 0u;
+        } else if (u < probabilities.x + probabilities.y) {
+            channel = 1u;
+        }
+        var spectral = r_self;
+        spectral.sample.light_index = channel;
+        spectral.sample.params = probabilities;
+        spectral.w_sum = 1.0;
+        spectral.m = 1u;
+        spectral.target_pdf = probabilities[channel];
+        spectral.weight = 1.0 / probabilities[channel];
+        out_reservoirs[idx] = spectral;
+        return;
+    }
     var out_r: Reservoir;
     var chosen_sample: LightSample = r_self.sample;
     var chosen_pdf: f32 = r_self.target_pdf;

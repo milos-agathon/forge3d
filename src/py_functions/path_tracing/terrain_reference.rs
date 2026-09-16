@@ -235,6 +235,8 @@ fn extract_atmosphere_lut_handle(
     spacing = (1.0, 1.0),
     exaggeration = 1.0,
     albedo = (0.6, 0.6, 0.6),
+    albedo_map = None,
+    turbidity = 1.0,
     sun_azimuth_deg = 315.0,
     sun_elevation_deg = 45.0,
     sun_intensity = 2.5,
@@ -270,6 +272,8 @@ pub(crate) fn hybrid_render_terrain_reference(
     spacing: (f32, f32),
     exaggeration: f32,
     albedo: (f32, f32, f32),
+    albedo_map: Option<numpy::PyReadonlyArray3<'_, f32>>,
+    turbidity: f32,
     sun_azimuth_deg: f32,
     sun_elevation_deg: f32,
     sun_intensity: f32,
@@ -389,6 +393,23 @@ pub(crate) fn hybrid_render_terrain_reference(
         }
     };
 
+    let albedo_map = match &albedo_map {
+        Some(arr) => {
+            let a = arr.as_array();
+            if a.shape()[2] != 3 {
+                return Err(PyValueError::new_err(
+                    "albedo_map must have shape (H, W, 3)",
+                ));
+            }
+            Some((
+                a.iter().copied().collect::<Vec<f32>>(),
+                a.shape()[1] as u32,
+                a.shape()[0] as u32,
+            ))
+        }
+        None => None,
+    };
+
     let desc = TerrainReferenceDesc {
         heights,
         dem_width: dem_w,
@@ -396,6 +417,8 @@ pub(crate) fn hybrid_render_terrain_reference(
         spacing,
         exaggeration,
         albedo: [albedo.0, albedo.1, albedo.2],
+        albedo_map,
+        turbidity,
         cam_origin,
         cam_look_at,
         cam_up,

@@ -451,9 +451,27 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
+path = "src/shaders/pt_edge_sample.wgsl"
+reason = "pt_edge_sample.wgsl: DIFFERENTIA silhouette edge-sampling adjoint over sampled AOV neighbourhoods; host-computed storage offsets and atomic CAS gradient accumulation are not yet modeled; FD gradient tests in path_tracing::inverse exercise the shipped path"
+owner = "path-tracing"
+expiry = "2027-01-17"
+
+[[unproven]]
 path = "src/shaders/pt_intersect.wgsl"
 reason = "pt_intersect.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/pt_inverse_loss.wgsl"
+reason = "pt_inverse_loss.wgsl: DIFFERENTIA loss adjoint over the replicate-mean image; tiled K*px storage offsets and atomic<u32> bitcast CAS accumulation are not yet modeled; FD gradient and checkpointed-replay tests exercise the shipped path"
+owner = "path-tracing"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/pt_inverse_shade.wgsl"
+reason = "pt_inverse_shade.wgsl: DIFFERENTIA reverse-mode spectral ReSTIR shading; per-slot reservoir-history indexing and atomic CAS gradient accumulation are not yet modeled; FD gradient, primal-parity, and synthetic-recovery tests exercise the shipped path"
+owner = "path-tracing"
 expiry = "2027-01-17"
 
 [[unproven]]
