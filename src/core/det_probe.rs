@@ -87,12 +87,20 @@ pub(crate) fn run_det_probe_on(
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("det_probe.pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("det_probe.pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        },
+    )
+    .map_err(|error| {
+        RenderError::render(format!(
+            "det_probe compute pipeline creation failed: {error}"
+        ))
+    })?;
 
     let output_buffer = crate::core::resource_tracker::tracked_create_buffer(
         device,
@@ -214,28 +222,31 @@ pub(crate) fn run_det_raster_on(
         bind_group_layouts: &[],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("det_raster.pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_main",
-            buffers: &[],
+    let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("det_raster.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba32Float,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
         },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_main",
-            targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba32Float,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-    });
+    );
 
     let readback_buffer = crate::core::resource_tracker::tracked_create_buffer(
         device,
