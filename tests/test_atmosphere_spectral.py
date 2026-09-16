@@ -13,6 +13,10 @@ from forge3d import atmosphere
 from forge3d._native import NATIVE_AVAILABLE
 from forge3d.terrain_params import SkySettings
 
+# NumPy 2.0 renamed trapz to trapezoid and 2.4 removed trapz; pyproject still
+# allows numpy>=1.21, so resolve whichever the installed NumPy provides.
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -387,10 +391,10 @@ def test_terrain_segment_midpoint_columns_cover_vertical_and_curved_paths() -> N
         np.mean(np.maximum(1.0 - np.abs((midpoint_heights - 25_000.0) / 15_000.0), 0.0))
     )
     heights = np.linspace(camera_height, surface_height, 200_001, dtype=np.float64)
-    numeric_rayleigh = float(np.trapz(np.exp(-heights / 8_000.0), heights) / height_delta)
-    numeric_mie = float(np.trapz(np.exp(-heights / 1_200.0), heights) / height_delta)
+    numeric_rayleigh = float(_trapezoid(np.exp(-heights / 8_000.0), heights) / height_delta)
+    numeric_mie = float(_trapezoid(np.exp(-heights / 1_200.0), heights) / height_delta)
     ozone = np.maximum(1.0 - np.abs((heights - 25_000.0) / 15_000.0), 0.0)
-    numeric_ozone = float(np.trapz(ozone, heights) / height_delta)
+    numeric_ozone = float(_trapezoid(ozone, heights) / height_delta)
 
     assert exact_rayleigh_mean == pytest.approx(numeric_rayleigh, rel=1.0e-10)
     assert exact_mie_mean == pytest.approx(numeric_mie, rel=1.0e-9)
