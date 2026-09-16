@@ -669,12 +669,19 @@ def test_depth_aov_linearizes_the_actual_raster_depth():
         / "shaders"
         / "terrain_pbr_pom.wgsl"
     ).read_text(encoding="utf-8")
-    depth_block = shader.split("// AOV Depth:", 1)[1].split(
-        "out.aov_depth =", 1
+    # bda8bff7 isolated the AOV depth into terrain_aov_depth(); the MRT entry
+    # overwrites shade_main's legacy (deliberately retained) beauty dataflow.
+    depth_block = shader.split("fn terrain_aov_depth(input : VertexOutput)", 1)[1].split(
+        "\n}\n", 1
     )[0]
+    aov_entry = shader.split("fn fs_aov_main(input : VertexOutput)", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    assert "out.aov_depth = terrain_aov_depth(input);" in aov_entry
     assert "let ndc_depth = clamp(input.clip_position.z" in depth_block
     assert "if (u_terrain.camera_mode_params.x >= 0.5)" in depth_block
-    assert "clip_far - ndc_depth * (clip_far - clip_near)" in depth_block
+    # TERRA v2 barriers the product; the reverse-Z inverse is unchanged.
+    assert "clip_far - det_barrier(ndc_depth * (clip_far - clip_near))" in depth_block
     assert "view_pos_for_depth" not in depth_block
 
 
