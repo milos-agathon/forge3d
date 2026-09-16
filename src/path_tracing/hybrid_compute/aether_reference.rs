@@ -307,8 +307,15 @@ impl HybridPathTracer {
                 usage: wgpu::BufferUsages::UNIFORM,
             },
         )?;
-        let earth_curvature =
-            <super::terrain_heightfield::EarthCurvatureUniforms as bytemuck::Zeroable>::zeroed();
+        // The shared accum layout carries HELIOS earth curvature at binding
+        // 10. This reference has no earth/refraction model (local terrain), so
+        // it binds the disabled flat-Earth uniform rather than omitting it.
+        let earth_curvature = super::terrain_heightfield::EarthCurvatureUniforms::new(
+            crate::geo::refraction::EarthModel::Flat,
+            crate::geo::refraction::RefractionModel::None,
+            [0.0, 0.0],
+            0.0,
+        )?;
         let earth_curvature_ubo = tracked_create_buffer_init(
             device,
             &wgpu::util::BufferInitDescriptor {
@@ -336,11 +343,15 @@ impl HybridPathTracer {
                 mapped_at_creation: false,
             },
         )?;
+        // One canonical 48-byte TerrainStatistics record per pixel: the shared
+        // kernel declares terrain_welford as array<TerrainStatistics>.
+        let statistics_stride =
+            std::mem::size_of::<super::render_terrain::TerrainStatistics>() as u64;
         let welford_buffer = tracked_create_buffer(
             device,
             &wgpu::BufferDescriptor {
                 label: Some("aether-spectral-reference-welford"),
-                size: pixel_count * 8,
+                size: pixel_count * statistics_stride,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             },
@@ -375,6 +386,9 @@ impl HybridPathTracer {
                 )));
         }
 
+        // Fail closed: an invalid bind group or dispatch must not read back the
+        // zero-initialized accumulation as if transport had run.
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
         let group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("aether-spectral-reference-bg0"),
             layout: &self.layouts.uniforms,
@@ -507,6 +521,11 @@ impl HybridPathTracer {
         }
         queue.submit([encoder.finish()]);
         device.poll(wgpu::Maintain::Wait);
+        if let Some(error) = pollster::block_on(device.pop_error_scope()) {
+            return Err(RenderError::Render(format!(
+                "AETHER spectral reference dispatch failed GPU validation: {error}"
+            )));
+        }
         if let Some(timing) = timing {
             if !timing.record_into_certificate() {
                 crate::core::certificate::record_pass(
@@ -529,12 +548,19 @@ impl HybridPathTracer {
         }
 
         let accum_bytes = read_buffer(device, queue, &accum_buffer, pixel_count * 16)?;
-        let welford_bytes = read_buffer(device, queue, &welford_buffer, pixel_count * 8)?;
+        let welford_bytes = read_buffer(
+            device,
+            queue,
+            &welford_buffer,
+            pixel_count * statistics_stride,
+        )?;
         let accum: &[f32] = bytemuck::cast_slice(&accum_bytes);
-        let welford: &[f32] = bytemuck::cast_slice(&welford_bytes);
+        let welford: Vec<super::render_terrain::TerrainStatistics> =
+            bytemuck::pod_collect_to_vec(&welford_bytes);
         if accum
             .iter()
-            .chain(welford.iter())
+            .copied()
+            .chain(welford.iter().flat_map(|stats| [stats.x, stats.y]))
             .any(|value| !value.is_finite())
         {
             return Err(RenderError::Render(
@@ -555,8 +581,8 @@ impl HybridPathTracer {
         let variance = if desc.enabled && desc.spp > 1 {
             let denominator = desc.spp as f32 * (desc.spp - 1) as f32;
             welford
-                .chunks_exact(2)
-                .map(|pixel| pixel[1] / denominator)
+                .iter()
+                .map(|stats| stats.y / denominator)
                 .fold(0.0f32, f32::max)
         } else {
             0.0
@@ -566,6 +592,7 @@ impl HybridPathTracer {
             + lighting_ubo.size()
             + hybrid_ubo.size()
             + terrain_ubo.size()
+            + earth_curvature_ubo.size()
             + scene_buffer.size()
             + accum_buffer.size()
             + welford_buffer.size()
