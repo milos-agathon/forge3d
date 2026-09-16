@@ -17,16 +17,16 @@ const TONEMAP_OPERATOR_FILMIC_TERRAIN: u32 = 5u;
 
 fn tonemap_reinhard(color: vec3<f32>) -> vec3<f32> {
     let denom = vec3<f32>(1.0) + color;
-    return color / denom;
+    return det_div3(color, denom);
 }
 
 fn tonemap_reinhard_extended(color: vec3<f32>, white_point: f32) -> vec3<f32> {
     let white_sq = max(white_point * white_point, 1.0e-6);
-    let ratio = color / white_sq;
+    let ratio = det_div3(color, vec3<f32>(white_sq));
     let num_inner = vec3<f32>(1.0) + ratio;
     let num = color * num_inner;
     let denom = vec3<f32>(1.0) + color;
-    return num / denom;
+    return det_div3(num, denom);
 }
 
 fn tonemap_aces(color: vec3<f32>) -> vec3<f32> {
@@ -41,7 +41,7 @@ fn tonemap_aces(color: vec3<f32>) -> vec3<f32> {
     let num = clipped * num_inner;
     let den_inner = det_fma3(clipped, vec3<f32>(c), vec3<f32>(d));
     let den = det_fma3(clipped, den_inner, vec3<f32>(e));
-    return clamp(num / den, vec3<f32>(0.0), vec3<f32>(1.0));
+    return clamp(det_div3(num, den), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn tonemap_uncharted2_partial(x: vec3<f32>) -> vec3<f32> {
@@ -52,21 +52,21 @@ fn tonemap_uncharted2_partial(x: vec3<f32>) -> vec3<f32> {
     let e = 0.02;
     let f = 0.30;
     // Pinned: ((x*(a*x + c*b) + d*e) / (x*(a*x + b) + d*f)) - e/f
-    let ax = x * a;
-    let num_inner = ax + vec3<f32>(c * b);
+    let ax = det_barrier3(x * a);
+    let num_inner = ax + det_barrier3(vec3<f32>(c * b));
     let num = det_fma3(x, num_inner, vec3<f32>(d * e));
     let den_inner = ax + vec3<f32>(b);
     let den = det_fma3(x, den_inner, vec3<f32>(d * f));
-    let ratio = num / den;
-    return ratio - vec3<f32>(e / f);
+    let ratio = det_div3(num, den);
+    return ratio - vec3<f32>(det_div(e, f));
 }
 
 fn tonemap_uncharted2(color: vec3<f32>, white_point: f32) -> vec3<f32> {
     let curr = tonemap_uncharted2_partial(max(color, vec3<f32>(0.0)));
-    let white_scale = vec3<f32>(1.0) / max(
+    let white_scale = det_div3(vec3<f32>(1.0), max(
         tonemap_uncharted2_partial(vec3<f32>(max(white_point, 1.0e-3))),
         vec3<f32>(1.0e-6)
-    );
+    ));
     return clamp(curr * white_scale, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
@@ -89,24 +89,24 @@ fn tonemap_filmic_terrain(color: vec3<f32>) -> vec3<f32> {
     let W = 11.2;
     let x = max(color, vec3<f32>(0.0));
     // curve = ((x*(A*x + C*B) + D*E) / (x*(A*x + B) + D*F)) - E/F
-    let ax = x * A;
-    let num_inner = ax + vec3<f32>(C * B);
+    let ax = det_barrier3(x * A);
+    let num_inner = ax + det_barrier3(vec3<f32>(C * B));
     let num = det_fma3(x, num_inner, vec3<f32>(D * E));
     let den_inner = ax + vec3<f32>(B);
     let den = det_fma3(x, den_inner, vec3<f32>(D * F));
-    let ratio = num / den;
-    let curve = ratio - vec3<f32>(E / F);
+    let ratio = det_div3(num, den);
+    let curve = ratio - vec3<f32>(det_div(E, F));
     // white_curve = ((W*(A*W + C*B) + D*E) / (W*(A*W + B) + D*F)) - E/F
-    let aw = A * W;
-    let wnum_inner = aw + C * B;
-    let wnum_prod = W * wnum_inner;
-    let wnum = wnum_prod + D * E;
+    let aw = det_barrier(A * W);
+    let wnum_inner = aw + det_barrier(C * B);
+    let wnum_prod = det_barrier(W * wnum_inner);
+    let wnum = wnum_prod + det_barrier(D * E);
     let wden_inner = aw + B;
-    let wden_prod = W * wden_inner;
-    let wden = wden_prod + D * F;
-    let wratio = wnum / wden;
-    let white_curve = wratio - E / F;
-    return clamp(curve / max(white_curve, 1.0e-6), vec3<f32>(0.0), vec3<f32>(1.0));
+    let wden_prod = det_barrier(W * wden_inner);
+    let wden = wden_prod + det_barrier(D * F);
+    let wratio = det_div(wnum, wden);
+    let white_curve = wratio - det_div(E, F);
+    return clamp(det_div3(curve, vec3<f32>(max(white_curve, 1.0e-6))), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn tonemap_apply_operator(color: vec3<f32>, operator_index: u32, white_point: f32) -> vec3<f32> {
@@ -137,7 +137,7 @@ fn tonemap_apply_operator(color: vec3<f32>, operator_index: u32, white_point: f3
 
 fn gamma_correct(color: vec3<f32>, gamma: f32) -> vec3<f32> {
     let clamped = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
-    let inv_gamma = 1.0 / max(gamma, 0.1);
+    let inv_gamma = det_div(1.0, max(gamma, 0.1));
     return det_pow3(clamped, vec3<f32>(inv_gamma));
 }
 
@@ -147,7 +147,7 @@ fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
     let lo = clamped * 12.92;
     // hi = (1 + a) * pow(clamped, 1/2.4) - a, pinned step by step
     let powed = det_pow3(clamped, vec3<f32>(1.0 / 2.4));
-    let scaled = (vec3<f32>(1.0) + a) * powed;
+    let scaled = det_barrier3((vec3<f32>(1.0) + a) * powed);
     let hi = scaled - a;
     return select(hi, lo, clamped <= vec3<f32>(0.0031308));
 }

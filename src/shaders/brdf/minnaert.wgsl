@@ -16,12 +16,12 @@
 // Not physically-based: Empirical model for artistic effects
 
 fn brdf_minnaert(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color: vec3<f32>, params: ShadingParamsGPU) -> vec3<f32> {
-    let n_dot_l = saturate(dot(normal, light));
-    let n_dot_v = saturate(dot(normal, view));
+    let n_dot_l = saturate(det_dot3(normal, light));
+    let n_dot_v = saturate(det_dot3(normal, view));
     if (n_dot_l <= 0.0 || n_dot_v <= 0.0) {
         return vec3<f32>(0.0);
     }
-    let k = mix(0.0, 2.0, saturate(params.subsurface));
-    let minnaert = pow(n_dot_l * n_dot_v, k * 0.5);
-    return base_color * minnaert * INV_PI;
+    let k = det_mix(0.0, 2.0, saturate(params.subsurface));
+    let minnaert = det_pow(n_dot_l * n_dot_v, k * 0.5);
+    return det_barrier3(base_color * minnaert) * INV_PI;
 }

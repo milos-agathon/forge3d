@@ -464,10 +464,20 @@ impl TerrainScene {
             address_mode_u: Self::map_address_mode(sampling.address_u),
             address_mode_v: Self::map_address_mode(sampling.address_v),
             address_mode_w: Self::map_address_mode(sampling.address_w),
-            mag_filter: Self::map_filter_mode(sampling.mag_filter),
-            min_filter: Self::map_filter_mode(sampling.min_filter),
-            mipmap_filter: Self::map_filter_mode(sampling.mip_filter),
-            anisotropy_clamp: sampling.anisotropy as u16,
+            mag_filter: crate::core::gpu::deterministic_filter_mode(Self::map_filter_mode(
+                sampling.mag_filter,
+            )),
+            min_filter: crate::core::gpu::deterministic_filter_mode(Self::map_filter_mode(
+                sampling.min_filter,
+            )),
+            mipmap_filter: crate::core::gpu::deterministic_filter_mode(Self::map_filter_mode(
+                sampling.mip_filter,
+            )),
+            anisotropy_clamp: if crate::core::gpu::deterministic_mode() {
+                1
+            } else {
+                sampling.anisotropy as u16
+            },
             ..Default::default()
         });
         let blit_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {

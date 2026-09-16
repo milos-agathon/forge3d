@@ -74,19 +74,19 @@ fn evaluate_sh_l2(n: vec3<f32>, probe: GpuProbeData) -> vec3<f32> {
     let Y1m1 = 0.488603 * n.y;
     let Y10 = 0.488603 * n.z;
     let Y11 = 0.488603 * n.x;
-    let Y2m2 = 1.092548 * n.x * n.y;
-    let Y2m1 = 1.092548 * n.y * n.z;
-    let Y20 = 0.315392 * (3.0 * n.z * n.z - 1.0);
-    let Y21 = 1.092548 * n.x * n.z;
-    let Y22 = 0.546274 * (n.x * n.x - n.y * n.y);
+    let Y2m2 = det_barrier(1.092548 * n.x) * n.y;
+    let Y2m1 = det_barrier(1.092548 * n.y) * n.z;
+    let Y20 = 0.315392 * (det_barrier(det_barrier(3.0 * n.z) * n.z) - 1.0);
+    let Y21 = det_barrier(1.092548 * n.x) * n.z;
+    let Y22 = det_barrier(0.546274 * (det_barrier(n.x * n.x) - det_barrier(n.y * n.y)));
 
     let basis_01 = vec4<f32>(Y00, Y1m1, Y10, Y11);
     let basis_23 = vec4<f32>(Y2m2, Y2m1, Y20, Y21);
 
     var result: vec3<f32>;
-    result.r = dot(probe.sh_r_01, basis_01) + dot(probe.sh_r_23, basis_23) + probe.sh_r_4.x * Y22;
-    result.g = dot(probe.sh_g_01, basis_01) + dot(probe.sh_g_23, basis_23) + probe.sh_g_4.x * Y22;
-    result.b = dot(probe.sh_b_01, basis_01) + dot(probe.sh_b_23, basis_23) + probe.sh_b_4.x * Y22;
+    result.r = det_barrier(det_barrier(det_dot4(probe.sh_r_01, basis_01)) + det_barrier(det_dot4(probe.sh_r_23, basis_23))) + det_barrier(probe.sh_r_4.x * Y22);
+    result.g = det_barrier(det_barrier(det_dot4(probe.sh_g_01, basis_01)) + det_barrier(det_dot4(probe.sh_g_23, basis_23))) + det_barrier(probe.sh_g_4.x * Y22);
+    result.b = det_barrier(det_barrier(det_dot4(probe.sh_b_01, basis_01)) + det_barrier(det_dot4(probe.sh_b_23, basis_23))) + det_barrier(probe.sh_b_4.x * Y22);
     return max(result, vec3<f32>(0.0));
 }
 
@@ -115,7 +115,7 @@ fn compute_probe_grid_blend(
     }
 
     let spacing = max(grid_params.xy, vec2<f32>(1e-6));
-    let grid_uv = (world_pos.xy - grid_origin.xy) / spacing;
+    let grid_uv = det_div2(world_pos.xy - grid_origin.xy, spacing);
     let grid_extent = vec2<f32>(f32(dims.x - 1u), f32(dims.y - 1u));
 
     var i0 = vec2<u32>(0u);
@@ -147,11 +147,11 @@ fn compute_probe_grid_blend(
     var weight_y = 1.0;
     if (dims.x > 1u) {
         let dist_x = min(grid_uv.x, grid_extent.x - grid_uv.x) * spacing.x;
-        weight_x = clamp(dist_x / blend_dist.x, 0.0, 1.0);
+        weight_x = clamp(det_div(dist_x, blend_dist.x), 0.0, 1.0);
     }
     if (dims.y > 1u) {
         let dist_y = min(grid_uv.y, grid_extent.y - grid_uv.y) * spacing.y;
-        weight_y = clamp(dist_y / blend_dist.y, 0.0, 1.0);
+        weight_y = clamp(det_div(dist_y, blend_dist.y), 0.0, 1.0);
     }
 
     blend.weight = min(weight_x, weight_y);
@@ -178,9 +178,9 @@ fn sample_probe_irradiance(world_pos: vec3<f32>, normal: vec3<f32>) -> ProbeIrra
     let sh10 = evaluate_sh_l2(normal, probe_data[blend.idx10]);
     let sh01 = evaluate_sh_l2(normal, probe_data[blend.idx01]);
     let sh11 = evaluate_sh_l2(normal, probe_data[blend.idx11]);
-    result.irradiance = mix(
-        mix(sh00, sh10, blend.frac.x),
-        mix(sh01, sh11, blend.frac.x),
+    result.irradiance = det_mix3(
+        det_mix3(sh00, sh10, blend.frac.x),
+        det_mix3(sh01, sh11, blend.frac.x),
         blend.frac.y,
     );
     result.weight = clamp(blend.weight * probe_grid.blend_params.z, 0.0, 1.0);
@@ -196,10 +196,10 @@ fn reflection_probe_center(index: u32) -> vec3<f32> {
     let probe_y = index / dims.x;
     let center_xy =
         reflection_probe_grid.grid_origin.xy +
-        vec2<f32>(f32(probe_x), f32(probe_y)) * reflection_probe_grid.grid_params.xy;
+        det_barrier2(vec2<f32>(f32(probe_x), f32(probe_y)) * reflection_probe_grid.grid_params.xy);
     let terrain_span = max(u_terrain.spacing_h_exag.x, 1e-6);
-    let terrain_uv = clamp(center_xy / terrain_span + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
-    let center_z = sample_height_geom(terrain_uv) * u_terrain.spacing_h_exag.z + reflection_probe_grid.grid_origin.z;
+    let terrain_uv = clamp(det_div2(center_xy, vec2<f32>(terrain_span)) + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
+    let center_z = det_barrier(sample_height_geom(terrain_uv) * u_terrain.spacing_h_exag.z) + reflection_probe_grid.grid_origin.z;
     return vec3<f32>(center_xy, center_z);
 }
 
@@ -223,7 +223,7 @@ fn reflection_probe_box_project(
     reflection_dir: vec3<f32>,
     probe_center: vec3<f32>,
 ) -> vec3<f32> {
-    let dir = normalize(reflection_dir);
+    let dir = det_normalize3(reflection_dir);
     let half_extents = reflection_probe_cell_extents();
     let box_min = vec3<f32>(
         probe_center.xy - half_extents.xy,
@@ -235,27 +235,27 @@ fn reflection_probe_box_project(
     );
 
     let tx = select(
-        select(1.0e9, (box_min.x - world_pos.x) / dir.x, dir.x < -1.0e-4),
-        (box_max.x - world_pos.x) / dir.x,
+        select(1.0e9, det_div(det_barrier(box_min.x) - world_pos.x, dir.x), dir.x < -1.0e-4),
+        det_div(det_barrier(box_max.x) - world_pos.x, dir.x),
         dir.x > 1.0e-4,
     );
     let ty = select(
-        select(1.0e9, (box_min.y - world_pos.y) / dir.y, dir.y < -1.0e-4),
-        (box_max.y - world_pos.y) / dir.y,
+        select(1.0e9, det_div(det_barrier(box_min.y) - world_pos.y, dir.y), dir.y < -1.0e-4),
+        det_div(det_barrier(box_max.y) - world_pos.y, dir.y),
         dir.y > 1.0e-4,
     );
     let tz = select(
-        select(1.0e9, (box_min.z - world_pos.z) / dir.z, dir.z < -1.0e-4),
-        (box_max.z - world_pos.z) / dir.z,
+        select(1.0e9, det_div(det_barrier(box_min.z) - world_pos.z, dir.z), dir.z < -1.0e-4),
+        det_div(det_barrier(box_max.z) - world_pos.z, dir.z),
         dir.z > 1.0e-4,
     );
 
     let travel = max(min(tx, min(ty, tz)), 0.0);
-    let hit_pos = world_pos + dir * travel;
+    let hit_pos = det_barrier3(world_pos + det_barrier3(dir * travel));
     let corrected = hit_pos - probe_center;
-    let corrected_len2 = dot(corrected, corrected);
+    let corrected_len2 = det_dot3(corrected, corrected);
     if (corrected_len2 > 1.0e-8) {
-        return normalize(corrected);
+        return det_normalize3(corrected);
     }
     return dir;
 }
@@ -265,7 +265,7 @@ fn sample_reflection_probe_array(
     direction: vec3<f32>,
     roughness: f32,
 ) -> vec3<f32> {
-    let dir = normalize(direction);
+    let dir = det_normalize3(direction);
     let abs_dir = abs(dir);
     var face = 0u;
     var uv = vec2<f32>(0.5, 0.5);
@@ -274,34 +274,34 @@ fn sample_reflection_probe_array(
         let ma = max(abs_dir.x, 1.0e-6);
         if (dir.x > 0.0) {
             face = 0u;
-            uv = 0.5 * (vec2<f32>(-dir.z, -dir.y) / ma + vec2<f32>(1.0));
+            uv = 0.5 * (det_div2(vec2<f32>(-dir.z, -dir.y), vec2<f32>(ma)) + vec2<f32>(1.0));
         } else {
             face = 1u;
-            uv = 0.5 * (vec2<f32>(dir.z, -dir.y) / ma + vec2<f32>(1.0));
+            uv = 0.5 * (det_div2(vec2<f32>(dir.z, -dir.y), vec2<f32>(ma)) + vec2<f32>(1.0));
         }
     } else if (abs_dir.y >= abs_dir.x && abs_dir.y >= abs_dir.z) {
         let ma = max(abs_dir.y, 1.0e-6);
         if (dir.y > 0.0) {
             face = 2u;
-            uv = 0.5 * (vec2<f32>(dir.x, dir.z) / ma + vec2<f32>(1.0));
+            uv = 0.5 * (det_div2(vec2<f32>(dir.x, dir.z), vec2<f32>(ma)) + vec2<f32>(1.0));
         } else {
             face = 3u;
-            uv = 0.5 * (vec2<f32>(dir.x, -dir.z) / ma + vec2<f32>(1.0));
+            uv = 0.5 * (det_div2(vec2<f32>(dir.x, -dir.z), vec2<f32>(ma)) + vec2<f32>(1.0));
         }
     } else {
         let ma = max(abs_dir.z, 1.0e-6);
         if (dir.z > 0.0) {
             face = 4u;
-            uv = 0.5 * (vec2<f32>(dir.x, -dir.y) / ma + vec2<f32>(1.0));
+            uv = 0.5 * (det_div2(vec2<f32>(dir.x, -dir.y), vec2<f32>(ma)) + vec2<f32>(1.0));
         } else {
             face = 5u;
-            uv = 0.5 * (vec2<f32>(-dir.x, -dir.y) / ma + vec2<f32>(1.0));
+            uv = 0.5 * (det_div2(vec2<f32>(-dir.x, -dir.y), vec2<f32>(ma)) + vec2<f32>(1.0));
         }
     }
 
     let mip_count = max(reflection_probe_grid.scene_bounds_max.w, 1.0);
     let max_mip = max(mip_count - 1.0, 0.0);
-    let mip_level = clamp(roughness * roughness * max_mip, 0.0, max_mip);
+    let mip_level = clamp(det_barrier(roughness * roughness) * max_mip, 0.0, max_mip);
     let layer_index = i32(probe_index * 6u + face);
     return textureSampleLevel(
         reflection_probe_tex,
@@ -350,9 +350,9 @@ fn sample_reflection_probe(
     let s10 = sample_reflection_probe_at_index(blend.idx10, world_pos, reflection_dir, roughness);
     let s01 = sample_reflection_probe_at_index(blend.idx01, world_pos, reflection_dir, roughness);
     let s11 = sample_reflection_probe_at_index(blend.idx11, world_pos, reflection_dir, roughness);
-    result.prefiltered_color = mix(
-        mix(s00, s10, blend.frac.x),
-        mix(s01, s11, blend.frac.x),
+    result.prefiltered_color = det_mix3(
+        det_mix3(s00, s10, blend.frac.x),
+        det_mix3(s01, s11, blend.frac.x),
         blend.frac.y,
     );
     return result;

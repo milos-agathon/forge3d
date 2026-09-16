@@ -41,6 +41,7 @@ from ._gpu import (
     enumerate_adapters,
     device_probe,
     has_gpu,
+    determinism_probe,
     get_device,
 )
 from .mem import (
@@ -823,6 +824,7 @@ __all__ = [
     "available_colormaps",
     # GPU utilities
     "has_gpu",
+    "determinism_probe",
     "get_device",
     "enumerate_adapters",
     "device_probe",

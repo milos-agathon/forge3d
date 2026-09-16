@@ -6,9 +6,9 @@ use std::collections::HashMap;
 
 const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
-pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xf664_b696_d596_de84;
-pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x868d_6d3b_8287_3ae3;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xf968_57bd_7131_08df;
+pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xd904_56ee_98b5_6d96;
+pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0xcbcc_d585_9475_3534;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xd6da_1716_2141_7c6b;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {
@@ -1415,19 +1415,142 @@ impl Evaluator<'_> {
         if let Some(minimum) = frame.expr_abs_min.get(&handle) {
             return Some(*minimum);
         }
+        // A `x - y` expression whose operands name places carries a Difference
+        // relation; the contract can then bound |x - y| from below with a
+        // `difference_ge` invariant in either direction.
+        if let Some(Relation::Difference(left, right)) = frame.relations.get(&handle) {
+            let left = self.place_name(function_ref, left);
+            let right = self.place_name(function_ref, right);
+            if let (Some(left), Some(right)) = (left, right) {
+                if let Some(minimum) =
+                    self.contract
+                        .invariants
+                        .iter()
+                        .find_map(|invariant| match invariant {
+                            InvariantContract::DifferenceGreaterEqual {
+                                left: lo,
+                                right: hi,
+                                minimum,
+                            } if (lo == &left && hi == &right) || (lo == &right && hi == &left) => {
+                                Some(*minimum)
+                            }
+                            _ => None,
+                        })
+                {
+                    return Some(minimum);
+                }
+            }
+        }
         let place = self.place_of_expr(function_ref, handle)?;
-        frame.abs_min.get(&place).copied().or_else(|| {
-            let name = self.place_name(function_ref, &place)?;
-            self.contract
-                .invariants
-                .iter()
-                .find_map(|invariant| match invariant {
-                    InvariantContract::AbsGreaterEqual { value, minimum } if value == &name => {
-                        Some(*minimum)
-                    }
-                    _ => None,
-                })
-        })
+        frame
+            .abs_min
+            .get(&place)
+            .copied()
+            .or_else(|| {
+                // An `abs_ge` bound declared on a whole value applies to every
+                // scalar leaf: a lane or member place inherits the root bound.
+                (!place.path.is_empty())
+                    .then(|| {
+                        frame
+                            .abs_min
+                            .get(&Place {
+                                root: place.root.clone(),
+                                path: Vec::new(),
+                            })
+                            .copied()
+                    })
+                    .flatten()
+            })
+            .or_else(|| {
+                let name = self.place_name(function_ref, &place)?;
+                self.contract
+                    .invariants
+                    .iter()
+                    .find_map(|invariant| match invariant {
+                        InvariantContract::AbsGreaterEqual { value, minimum } if value == &name => {
+                            Some(*minimum)
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| self.lane_abs_min(function_ref, &place, &name))
+            })
+    }
+
+    /// Aggregate per-lane `abs_ge:<name>.<lane>` invariants into a single bound
+    /// for a whole vector place. Every lane of the place's vector width must be
+    /// declared for the bound to hold for every element.
+    fn lane_abs_min(&self, function_ref: FunctionRef, place: &Place, name: &str) -> Option<f32> {
+        let ty = self.place_type(function_ref, place)?;
+        let width = match self.module.types[ty].inner {
+            naga::TypeInner::Vector { size, .. } => match size {
+                naga::VectorSize::Bi => 2,
+                naga::VectorSize::Tri => 3,
+                naga::VectorSize::Quad => 4,
+            },
+            _ => return None,
+        };
+        let mut bound = f32::INFINITY;
+        for lane in ["x", "y", "z", "w"].iter().take(width) {
+            let lane_name = format!("{name}.{lane}");
+            let minimum =
+                self.contract
+                    .invariants
+                    .iter()
+                    .find_map(|invariant| match invariant {
+                        InvariantContract::AbsGreaterEqual { value, minimum }
+                            if value == &lane_name =>
+                        {
+                            Some(*minimum)
+                        }
+                        _ => None,
+                    })?;
+            bound = bound.min(minimum);
+        }
+        Some(bound)
+    }
+
+    /// The naga type handle a place refers to, walking struct members and
+    /// vector lanes through the place path.
+    fn place_type(&self, function_ref: FunctionRef, place: &Place) -> Option<Handle<naga::Type>> {
+        let function = function_ref.function(self.module);
+        let mut ty = match place.root {
+            Root::Argument(index) => function.arguments.get(index)?.ty,
+            Root::Global(index) => {
+                let (_, global) = self
+                    .module
+                    .global_variables
+                    .iter()
+                    .find(|(handle, _)| handle.index() == index)?;
+                global.ty
+            }
+            Root::Local(_) | Root::Alias(_) => return None,
+        };
+        for &index in &place.path {
+            ty = match &self.module.types[ty].inner {
+                naga::TypeInner::Struct { members, .. } => members.get(index)?.ty,
+                naga::TypeInner::Vector { .. } => {
+                    // A lane access yields the scalar element type; there is no
+                    // dedicated handle, so report the scalar by finding the
+                    // first f32 scalar type already registered in the module.
+                    return self
+                        .module
+                        .types
+                        .iter()
+                        .find(|(_, ty)| {
+                            matches!(
+                                ty.inner,
+                                naga::TypeInner::Scalar(naga::Scalar {
+                                    kind: naga::ScalarKind::Float,
+                                    width: 4
+                                })
+                            )
+                        })
+                        .map(|(handle, _)| handle);
+                }
+                _ => return None,
+            };
+        }
+        Some(ty)
     }
 
     pub(super) fn norm_min_for_expr(
@@ -1486,8 +1609,32 @@ impl Evaluator<'_> {
     ) -> Option<(Value, Option<Relation>)> {
         let callee = &self.module.functions[function];
         if self.has_pinned_determinism_source() {
-            if let Some(value) = self.summarize_determinism_value(callee, arguments, abs_min) {
-                return Some((value, None));
+            // det_div* is a barriered reciprocal-multiply; recover the same
+            // x/(x+c) correlation the native divide path proves.
+            let correlated = match callee.name.as_deref() {
+                Some("det_div" | "det_div2" | "det_div3" | "det_div4") => self.correlated_divide(
+                    caller,
+                    frame,
+                    *argument_handles.first()?,
+                    *argument_handles.get(1)?,
+                    arguments.first()?,
+                    arguments.get(1)?,
+                ),
+                _ => None,
+            };
+            if let Some(value) =
+                correlated.or_else(|| self.summarize_determinism_value(callee, arguments, abs_min))
+            {
+                // det_barrier* is the identity on values; the argument's
+                // relation (e.g. Difference places) carries through so the
+                // result keeps its invariant-derived bounds.
+                let relation = match callee.name.as_deref() {
+                    Some(name) if name.starts_with("det_barrier") => argument_handles
+                        .first()
+                        .and_then(|handle| frame.relations.get(handle).cloned()),
+                    _ => None,
+                };
+                return Some((value, relation));
             }
         }
         if self.has_pinned_hybrid_terrain_source() {
@@ -1581,79 +1728,101 @@ impl Evaluator<'_> {
             }
         }
         if self.has_pinned_terrain_source() {
-            let range = match callee.name.as_deref()? {
-                // These summaries describe the renderer's feature-off golden
-                // profile. They are bound to the byte-exact assembled source;
-                // any helper-body edit disables every summary and is analyzed
-                // through IR instead.
-                "calculate_normal_lod_aware"
-                | "calculate_normal"
-                | "calculate_normal_ddxddy"
-                | "apply_encoded_tangent_normal"
-                | "apply_material_normal_map"
-                | "apply_detail_normal"
-                | "blend_rnm" => (-1.01, 1.01),
-                "build_tbn" | "rotate_y" => (-1.01, 1.01),
-                "calculate_texel_size" | "compute_height_lod" => (0.0, 65_536.0),
-                "sample_height"
-                | "sample_height_level"
-                | "sample_height_geom"
-                | "sample_height_geom_level" => (-65_536.0, 65_536.0),
-                "sample_triplanar"
-                | "sample_triplanar_checker"
-                | "sample_triplanar_vt_family"
-                | "apply_slope_hue_variation"
-                | "apply_snow_layer"
-                | "apply_rock_layer"
-                | "apply_wetness_layer"
-                | "compute_terrain_attributes"
-                | "default_material_noise"
-                | "sample_material_noise"
-                | "resolve_terrain_layer_weights"
-                | "resolve_terrain_subsurface"
-                | "terrain_to_shading_params"
-                | "calculate_water_fresnel"
-                | "calculate_shadow_terrain"
-                | "sample_reflection_probe_weight"
-                | "material_map_mask"
-                | "apply_material_roughness_map"
-                | "calculate_detail_fade"
-                | "procedural_albedo_noise"
-                | "fresnel_schlick_roughness"
-                | "compute_triplanar_weights"
-                | "normalize_for_shadow"
-                | "select_cascade_terrain"
-                | "chebyshev_upper_bound_visibility"
-                | "reduce_light_leak_terrain"
-                | "sample_shadow_evsm_terrain"
-                | "sample_shadow_pcf_terrain"
-                | "debug_shadow_with_vis"
-                | "normalize_aov_depth"
-                | "saturate" => (0.0, 1.0),
-                "calculate_pbr_brdf_split_roughness"
-                | "eval_brdf"
-                | "eval_ibl"
-                | "eval_ibl_split"
-                | "evaluate_terrain_subsurface"
-                | "sample_probe_irradiance"
-                | "sample_reflection_probe"
-                | "sample_water_reflection"
-                | "blend_water_reflection"
-                | "apply_atmospheric_fog" => (0.0, 65_504.0),
-                "tonemap_aces" | "tonemap_filmic_terrain" | "gamma_correct" | "linear_to_srgb" => {
-                    (0.0, 1.0)
-                }
-                "det_mix" | "det_mix3" | "det_fma" | "det_fma3" => (-65_504.0, 65_504.0),
-                "det_dot2" | "det_dot3" | "det_dot4" => (-1.0e20, 1.0e20),
-                "det_sqrt" | "det_rcp" | "det_div" | "det_pow" | "det_exp" | "det_log2" => {
-                    (0.0, 65_504.0)
-                }
-                "det_normalize2" | "det_normalize3" => (-1.01, 1.01),
-                "det_reflect3" | "det_cross3" | "det_mat3_mul_vec3" | "det_mat4_mul_vec4" => {
-                    (-65_504.0, 65_504.0)
-                }
-                _ => return None,
-            };
+            let range =
+                match callee.name.as_deref()? {
+                    // These summaries describe the renderer's feature-off golden
+                    // profile. They are bound to the byte-exact assembled source;
+                    // any helper-body edit disables every summary and is analyzed
+                    // through IR instead.
+                    "calculate_normal_lod_aware"
+                    | "calculate_normal"
+                    | "calculate_normal_ddxddy"
+                    | "apply_encoded_tangent_normal"
+                    | "apply_material_normal_map"
+                    | "apply_detail_normal"
+                    | "blend_rnm" => (-1.01, 1.01),
+                    "build_tbn" | "rotate_y" => (-1.01, 1.01),
+                    "calculate_texel_size" | "compute_height_lod" => (0.0, 65_536.0),
+                    "sample_height"
+                    | "sample_height_level"
+                    | "sample_height_geom"
+                    | "sample_height_geom_level" => (-65_536.0, 65_536.0),
+                    "sample_triplanar"
+                    | "sample_triplanar_checker"
+                    | "sample_triplanar_vt_family"
+                    | "apply_slope_hue_variation"
+                    | "apply_snow_layer"
+                    | "apply_rock_layer"
+                    | "apply_wetness_layer"
+                    | "compute_terrain_attributes"
+                    | "default_material_noise"
+                    | "sample_material_noise"
+                    | "resolve_terrain_layer_weights"
+                    | "resolve_terrain_subsurface"
+                    | "terrain_to_shading_params"
+                    | "calculate_water_fresnel"
+                    | "calculate_shadow_terrain"
+                    | "sample_reflection_probe_weight"
+                    | "material_map_mask"
+                    | "apply_material_roughness_map"
+                    | "calculate_detail_fade"
+                    | "procedural_albedo_noise"
+                    | "fresnel_schlick_roughness"
+                    | "compute_triplanar_weights"
+                    | "normalize_for_shadow"
+                    | "select_cascade_terrain"
+                    | "chebyshev_upper_bound_visibility"
+                    | "reduce_light_leak_terrain"
+                    | "sample_shadow_evsm_terrain"
+                    | "sample_shadow_pcf_terrain"
+                    | "debug_shadow_with_vis"
+                    | "normalize_aov_depth"
+                    | "saturate" => (0.0, 1.0),
+                    "calculate_pbr_brdf_split_roughness"
+                    | "eval_brdf"
+                    | "eval_ibl"
+                    | "eval_ibl_split"
+                    | "evaluate_terrain_subsurface"
+                    | "sample_probe_irradiance"
+                    | "sample_reflection_probe"
+                    | "sample_water_reflection"
+                    | "blend_water_reflection"
+                    | "apply_atmospheric_fog" => (0.0, 65_504.0),
+                    "tonemap_aces"
+                    | "tonemap_filmic_terrain"
+                    | "gamma_correct"
+                    | "linear_to_srgb" => (0.0, 1.0),
+                    "det_mix" | "det_mix3" | "det_mix2" | "det_mix4" | "det_mix2v"
+                    | "det_mix3v" | "det_mix4v" | "det_fma" | "det_fma2" | "det_fma3"
+                    | "det_fma4" => (-65_504.0, 65_504.0),
+                    "det_dot2" | "det_dot3" | "det_dot4" | "det_mul3" | "det_mul4" | "det_mul5"
+                    | "det_mul3_2" | "det_mul3_3" | "det_mul4_3" => (-1.0e20, 1.0e20),
+                    "det_sqrt" | "det_rcp" | "det_div" | "det_pow" | "det_pow2" | "det_pow4"
+                    | "det_exp" | "det_exp_2" | "det_exp4" | "det_exp2" | "det_exp2_2"
+                    | "det_exp2_3" | "det_exp2_4" | "det_log2" | "det_log2_2" | "det_log2_3"
+                    | "det_log2_4" | "det_sqrt2" | "det_sqrt3" | "det_sqrt4"
+                    | "det_inverse_sqrt2" | "det_inverse_sqrt3" | "det_inverse_sqrt4"
+                    | "det_length2" | "det_length3" | "det_length4" | "det_distance2"
+                    | "det_distance3" | "det_distance4" => (0.0, 65_504.0),
+                    "det_smoothstep" | "det_smoothstep2" | "det_smoothstep3"
+                    | "det_smoothstep4" => (0.0, 1.0),
+                    "det_normalize2" | "det_normalize3" | "det_normalize4" => (-1.01, 1.01),
+                    "det_reflect3" | "det_reflect4" | "det_cross3" | "det_mat2_mul_vec2"
+                    | "det_mat3_mul_vec3" | "det_mat4_mul_vec4" | "det_vec2_mul_mat2"
+                    | "det_vec3_mul_mat3" | "det_vec4_mul_mat4" | "det_mat2_mul_mat2"
+                    | "det_mat3_mul_mat3" | "det_mat4_mul_mat4" | "det_rcp2" | "det_rcp3"
+                    | "det_rcp4" | "det_div2" | "det_div3" | "det_div4" | "det_tan"
+                    | "det_tan2" | "det_tan3" | "det_tan4" | "det_log" | "det_log_2"
+                    | "det_log3" | "det_log4" => (-65_504.0, 65_504.0),
+                    "det_sin2" | "det_sin3" | "det_sin4" | "det_cos2" | "det_cos3" | "det_cos4" => {
+                        (-1.1, 1.1)
+                    }
+                    "det_asin" | "det_asin2" | "det_asin3" | "det_asin4" | "det_atan"
+                    | "det_atan_2" | "det_atan3" | "det_atan4" => (-1.58, 1.58),
+                    "det_acos2" | "det_acos3" | "det_acos4" => (0.0, 3.15),
+                    "det_atan2_2" | "det_atan2_3" | "det_atan2_4" => (-3.15, 3.15),
+                    _ => return None,
+                };
             let result = callee.result.as_ref()?;
             return Some((
                 Value::from_range(self.module, result.ty, range.0, range.1),
@@ -1764,9 +1933,178 @@ impl Evaluator<'_> {
             }
         }
         match function.name.as_deref()? {
-            "det_barrier" | "det_barrier3" | "det_barrier4" => arguments.first().cloned(),
-            "det_fma" | "det_fma3" => fma_value(arguments),
+            "det_barrier" | "det_barrier2" | "det_barrier3" | "det_barrier4" => {
+                arguments.first().cloned()
+            }
+            "det_fma" | "det_fma2" | "det_fma3" | "det_fma4" => fma_value(arguments),
             "det_mix" | "det_mix3" => mix_value(arguments),
+            "det_mul3" | "det_mul4" | "det_mul5" | "det_mul3_2" | "det_mul3_3" | "det_mul4_3" => {
+                mul_chain_value(arguments)
+            }
+            "det_length2" | "det_length3" | "det_length4" => {
+                squared_norm(arguments.first()?).and_then(|norm| sqrt_like_value(&norm))
+            }
+            "det_distance2" | "det_distance3" => distance_value(arguments),
+            "det_smoothstep" => {
+                // t = clamp((x - lo)/(hi - lo), 0, 1); t*t*(3 - 2t) on
+                // [0, 1] lies in [0, 1]. Requires hi > lo provably or the
+                // pinned divide is a 0/0.
+                let ordered = match (arguments.first()?, arguments.get(1)?) {
+                    (Value::Float(lo), Value::Float(hi)) => lo.hi < hi.lo,
+                    _ => false,
+                };
+                (ordered
+                    && finite_value(arguments.first()?)
+                    && finite_value(arguments.get(1)?)
+                    && finite_value(arguments.get(2)?))
+                .then(|| Value::Float(crate::verify::domain::Interval::new(0.0, 1.0)))
+            }
+            "det_rcp2" | "det_rcp3" | "det_rcp4" => vector_rcp_value(arguments),
+            "det_div2" | "det_div3" | "det_div4" => vector_div_value(arguments, abs_min),
+            "det_asin" | "det_asin2" | "det_asin3" | "det_asin4" => {
+                lanes_within(arguments.first()?, -1.0, 1.0).then(|| {
+                    super::ops::shape_like_float(
+                        arguments.first().unwrap(),
+                        crate::verify::domain::Interval::new(
+                            -std::f32::consts::FRAC_PI_2 - 0.01,
+                            std::f32::consts::FRAC_PI_2 + 0.01,
+                        ),
+                    )
+                })
+            }
+            "det_acos2" | "det_acos3" | "det_acos4" => lanes_within(arguments.first()?, -1.0, 1.0)
+                .then(|| {
+                    super::ops::shape_like_float(
+                        arguments.first().unwrap(),
+                        crate::verify::domain::Interval::new(0.0, std::f32::consts::PI + 0.01),
+                    )
+                }),
+            "det_atan" | "det_atan_2" | "det_atan3" | "det_atan4" => {
+                finite_value(arguments.first()?).then(|| {
+                    super::ops::shape_like_float(
+                        arguments.first().unwrap(),
+                        crate::verify::domain::Interval::new(
+                            -std::f32::consts::FRAC_PI_2 - 0.01,
+                            std::f32::consts::FRAC_PI_2 + 0.01,
+                        ),
+                    )
+                })
+            }
+            "det_atan2_2" | "det_atan2_3" | "det_atan2_4" => {
+                (finite_value(arguments.first()?) && finite_value(arguments.get(1)?)).then(|| {
+                    super::ops::shape_like_float(
+                        arguments.first().unwrap(),
+                        crate::verify::domain::Interval::new(
+                            -std::f32::consts::PI,
+                            std::f32::consts::PI,
+                        ),
+                    )
+                })
+            }
+            "det_tan" | "det_tan2" | "det_tan3" | "det_tan4" => {
+                lanes_within(arguments.first()?, -1.4, 1.4).then(|| {
+                    super::ops::shape_like_float(
+                        arguments.first().unwrap(),
+                        crate::verify::domain::Interval::new(-16.0, 16.0),
+                    )
+                })
+            }
+            "det_sin2" | "det_sin3" | "det_sin4" | "det_cos2" | "det_cos3" | "det_cos4" => {
+                finite_value(arguments.first()?).then(|| {
+                    super::ops::shape_like_float(
+                        arguments.first().unwrap(),
+                        crate::verify::domain::Interval::new(-1.1, 1.1),
+                    )
+                })
+            }
+            "det_exp_2" | "det_exp4" => super::ops::eval_math(
+                naga::MathFunction::Exp,
+                arguments.first()?.clone(),
+                None,
+                None,
+            ),
+            "det_exp2_2" | "det_exp2_3" | "det_exp2_4" => super::ops::eval_math(
+                naga::MathFunction::Exp2,
+                arguments.first()?.clone(),
+                None,
+                None,
+            ),
+            "det_log" | "det_log_2" | "det_log3" | "det_log4" => super::ops::eval_math(
+                naga::MathFunction::Log,
+                arguments.first()?.clone(),
+                None,
+                None,
+            ),
+            "det_log2_2" | "det_log2_3" | "det_log2_4" => super::ops::eval_math(
+                naga::MathFunction::Log2,
+                arguments.first()?.clone(),
+                None,
+                None,
+            ),
+            "det_pow2" | "det_pow4" => super::ops::eval_math(
+                naga::MathFunction::Pow,
+                arguments.first()?.clone(),
+                Some(arguments.get(1)?.clone()),
+                None,
+            ),
+            "det_mix2" | "det_mix4" | "det_mix2v" | "det_mix3v" | "det_mix4v" => {
+                mix_value(arguments)
+            }
+            "det_smoothstep2" | "det_smoothstep3" | "det_smoothstep4" => {
+                let ordered = match (
+                    super::ops::float_lanes(arguments.first()?.clone()),
+                    super::ops::float_lanes(arguments.get(1)?.clone()),
+                ) {
+                    (Some(lo), Some(hi)) => {
+                        lo.iter().zip(hi.iter()).all(|(low, high)| low.hi < high.lo)
+                    }
+                    _ => false,
+                };
+                (ordered && finite_value(arguments.get(2)?)).then(|| {
+                    super::ops::shape_like_float(
+                        arguments.get(2).unwrap(),
+                        crate::verify::domain::Interval::new(0.0, 1.0),
+                    )
+                })
+            }
+            "det_sqrt2" | "det_sqrt3" | "det_sqrt4" => {
+                let lanes = super::ops::float_lanes(arguments.first()?.clone())?;
+                lanes
+                    .iter()
+                    .map(|lane| sqrt_like_value(&Value::Float(*lane)))
+                    .collect::<Option<Vec<_>>>()
+                    .map(Value::Composite)
+            }
+            "det_inverse_sqrt2" | "det_inverse_sqrt3" | "det_inverse_sqrt4" => {
+                let lanes = super::ops::float_lanes(arguments.first()?.clone())?;
+                lanes
+                    .iter()
+                    .map(|lane| {
+                        deterministic_inverse_sqrt_interval(&Value::Float(*lane)).map(Value::Float)
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(Value::Composite)
+            }
+            "det_normalize4" => finite_value(arguments.first()?).then(|| {
+                super::ops::shape_like_float(
+                    arguments.first().unwrap(),
+                    crate::verify::domain::Interval::new(-1.01, 1.01),
+                )
+            }),
+            "det_reflect4" => (arguments.first()?.within(-1.0, 1.0)
+                && arguments.get(1)?.within(-1.0, 1.0))
+            .then(|| {
+                super::ops::shape_like_float(
+                    arguments.first().unwrap(),
+                    crate::verify::domain::Interval::new(-9.0, 9.0),
+                )
+            }),
+            "det_distance4" => distance_value(arguments),
+            "det_mat2_mul_vec2" | "det_vec2_mul_mat2" | "det_vec3_mul_mat3"
+            | "det_vec4_mul_mat4" | "det_mat2_mul_mat2" | "det_mat3_mul_mat3"
+            | "det_mat4_mul_mat4" => {
+                super::ops::multiply_values(arguments.first()?.clone(), arguments.get(1)?.clone())
+            }
             "det_div" => {
                 let reciprocal = Value::Float(deterministic_rcp_interval(
                     arguments.get(1)?,
@@ -1816,19 +2154,46 @@ impl Evaluator<'_> {
                 None,
                 None,
             ),
-            "det_sin" | "det_cos" => finite_value(arguments.first()?)
+            "det_sin" => finite_value(arguments.first()?)
                 .then(|| Value::Float(crate::verify::domain::Interval::new(-1.1, 1.1))),
+            "det_cos" => finite_value(arguments.first()?).then(|| {
+                match arguments.first() {
+                    // cos(x) > 0 on (-pi/2, pi/2); the det_sin polynomial keeps
+                    // the same sign with ~1e-4 absolute error, so 0.1 is a
+                    // sound floor for |x| <= 1.4 < 1.57.
+                    Some(value) if value.within(-1.4, 1.4) => {
+                        Value::Float(crate::verify::domain::Interval::new(0.1, 1.1))
+                    }
+                    _ => Value::Float(crate::verify::domain::Interval::new(-1.1, 1.1)),
+                }
+            }),
             "det_atan01" => arguments
                 .first()?
                 .within(0.0, 1.0)
                 .then(|| Value::Float(crate::verify::domain::Interval::new(0.0, 1.0))),
-            "det_atan2" => (finite_value(arguments.first()?) && finite_value(arguments.get(1)?))
-                .then(|| {
-                    Value::Float(crate::verify::domain::Interval::new(
+            "det_atan2" => {
+                // det_atan2(y, x): x >= 0 keeps the result in [-pi/2, pi/2];
+                // y >= 0 keeps it in [0, pi]. det_asin/det_acos/det_atan rely
+                // on these refinements to stay inside their declared outputs.
+                let (y, x) = (arguments.first()?, arguments.get(1)?);
+                if !finite_value(y) || !finite_value(x) {
+                    return None;
+                }
+                let range = if x.within(0.0, f32::MAX) {
+                    crate::verify::domain::Interval::new(
+                        -std::f32::consts::FRAC_PI_2 - 0.01,
+                        std::f32::consts::FRAC_PI_2 + 0.01,
+                    )
+                } else if y.within(0.0, f32::MAX) {
+                    crate::verify::domain::Interval::new(0.0, std::f32::consts::PI + 0.01)
+                } else {
+                    crate::verify::domain::Interval::new(
                         -std::f32::consts::PI,
                         std::f32::consts::PI,
-                    ))
-                }),
+                    )
+                };
+                Some(Value::Float(range))
+            }
             "det_acos" => arguments.first()?.within(-1.0, 1.0).then(|| {
                 Value::Float(crate::verify::domain::Interval::new(
                     0.0,
@@ -2009,7 +2374,7 @@ fn deterministic_kernel_kind(
     };
     let calls_are_barriers = calls
         .iter()
-        .all(|handle| is_bitcast_barrier(&module.functions[*handle]));
+        .all(|handle| is_bitcast_barrier(module, &module.functions[*handle]));
     if bitcast == 2
         && math == 1
         && binary == 11
@@ -2021,7 +2386,7 @@ fn deterministic_kernel_kind(
     } else if bitcast == 2
         && math == 1
         && binary == 15
-        && calls.len() == 6
+        && calls.len() == 7
         && calls_are_barriers
         && literal(0x5f37_59df)
     {
@@ -2031,25 +2396,78 @@ fn deterministic_kernel_kind(
     }
 }
 
-fn is_bitcast_barrier(function: &naga::Function) -> bool {
-    function.arguments.len() == 1
-        && function.result.is_some()
-        && function
-            .expressions
-            .iter()
-            .filter(|(_, expression)| matches!(expression, Expression::As { convert: None, .. }))
-            .count()
-            == 2
-        && !function.expressions.iter().any(|(_, expression)| {
-            matches!(
-                expression,
-                Expression::Binary { .. } | Expression::Math { .. }
-            )
-        })
-        && function
+/// Is `function` one of the opaque det_barrier* identities? Two accepted
+/// shapes: the original pure bitcast pair (no arithmetic at all), and the
+/// current `bitcast(bitcast(x) | det_zu)` form — exactly one Binary{Or}
+/// whose mask operand loads the private `det_zu` global (possibly through
+/// a vector splat/compose), two bitcasts, no math. det_zu is modeled as 0
+/// (see the Load arm in expr.rs), so both forms evaluate to identity.
+fn is_bitcast_barrier(module: &naga::Module, function: &naga::Function) -> bool {
+    if function.arguments.len() != 1
+        || function.result.is_none()
+        || !function
             .body
             .iter()
             .all(|statement| matches!(statement, Statement::Emit(_) | Statement::Return { .. }))
+    {
+        return false;
+    }
+    let bitcasts = function
+        .expressions
+        .iter()
+        .filter(|(_, expression)| matches!(expression, Expression::As { convert: None, .. }))
+        .count();
+    let mut or_mask_ok = true;
+    let mut ors = 0;
+    for (_, expression) in function.expressions.iter() {
+        match expression {
+            Expression::Binary {
+                op: BinaryOperator::InclusiveOr,
+                left,
+                right,
+            } => {
+                ors += 1;
+                or_mask_ok &= references_det_zu_global(module, function, *left)
+                    || references_det_zu_global(module, function, *right);
+            }
+            Expression::Binary { .. } | Expression::Math { .. } => return false,
+            _ => {}
+        }
+    }
+    bitcasts == 2 && or_mask_ok && ors <= 1
+}
+
+/// Does this expression subtree load the private `det_zu` global? Free
+/// function mirror of `Engine::references_det_zu` for the structural
+/// kernel recognizers, which run without an engine instance.
+fn references_det_zu_global(
+    module: &naga::Module,
+    function: &naga::Function,
+    handle: Handle<Expression>,
+) -> bool {
+    match &function.expressions[handle] {
+        Expression::Load { pointer } => match &function.expressions[*pointer] {
+            Expression::GlobalVariable(global) => {
+                module.global_variables[*global].name.as_deref() == Some("det_zu")
+            }
+            Expression::Access { base, .. } | Expression::AccessIndex { base, .. } => {
+                references_det_zu_global(module, function, *base)
+            }
+            _ => false,
+        },
+        Expression::GlobalVariable(global) => {
+            module.global_variables[*global].name.as_deref() == Some("det_zu")
+        }
+        Expression::Splat { value, .. } => references_det_zu_global(module, function, *value),
+        Expression::Compose { components, .. } => components
+            .iter()
+            .any(|component| references_det_zu_global(module, function, *component)),
+        Expression::Access { base, .. } | Expression::AccessIndex { base, .. } => {
+            references_det_zu_global(module, function, *base)
+        }
+        Expression::Unary { expr, .. } => references_det_zu_global(module, function, *expr),
+        _ => false,
+    }
 }
 
 fn dot_kernel_kind(module: &naga::Module, function: &naga::Function) -> Option<KernelKind> {
@@ -2089,10 +2507,10 @@ fn dot_kernel_kind(module: &naga::Module, function: &naga::Function) -> Option<K
     (!other_binary
         && multiplies == lanes
         && adds == lanes - 1
-        && calls.len() == lanes
+        && calls.len() == 2 * lanes
         && calls
             .iter()
-            .all(|handle| is_bitcast_barrier(&module.functions[*handle])))
+            .all(|handle| is_bitcast_barrier(module, &module.functions[*handle])))
     .then_some(KernelKind::Dot)
 }
 
@@ -2108,6 +2526,14 @@ fn squared_norm(value: &Value) -> Option<Value> {
         },
     )?;
     Some(Value::Float(interval))
+}
+
+/// Every float lane of `value` lies inside [lo, hi]. Scalars count as one lane.
+fn lanes_within(value: &Value, lo: f32, hi: f32) -> bool {
+    match super::ops::float_lanes(value.clone()) {
+        Some(lanes) => lanes.iter().all(|lane| lane.lo >= lo && lane.hi <= hi),
+        None => false,
+    }
 }
 
 fn finite_value(value: &Value) -> bool {
@@ -2168,6 +2594,68 @@ fn sqrt_like_value(value: &Value) -> Option<Value> {
     ))
 }
 
+/// Left-associative product chain for det_mul3/4/5 and their vector forms:
+/// fold the argument values with interval multiply, lane-wise through
+/// `multiply_values` so vector operands compose per lane.
+fn mul_chain_value(arguments: &[Value]) -> Option<Value> {
+    let mut acc = arguments.first()?.clone();
+    for value in &arguments[1..] {
+        acc = super::ops::multiply_values(acc, value.clone())?;
+    }
+    Some(acc)
+}
+
+/// distance(a, b) = length(a - b): per-lane difference, squared norm, sqrt.
+fn distance_value(arguments: &[Value]) -> Option<Value> {
+    let (left, right) = (
+        super::ops::float_lanes(arguments.first()?.clone())?,
+        super::ops::float_lanes(arguments.get(1)?.clone())?,
+    );
+    if left.len() != right.len() {
+        return None;
+    }
+    let norm = left.iter().zip(right.iter()).try_fold(
+        crate::verify::domain::Interval::constant(0.0),
+        |sum, (a, b)| Some(sum.add(a.sub(*b).square())),
+    )?;
+    sqrt_like_value(&Value::Float(norm))
+}
+
+/// Per-lane reciprocal for det_rcp2/3/4: map each lane through the pinned
+/// Newton-Raphson interval used for scalar det_rcp.
+fn vector_rcp_value(arguments: &[Value]) -> Option<Value> {
+    let lanes = super::ops::float_lanes(arguments.first()?.clone())?;
+    Some(Value::Composite(
+        lanes
+            .iter()
+            .map(|lane| deterministic_rcp_interval(&Value::Float(*lane), None).map(Value::Float))
+            .collect::<Option<Vec<_>>>()?,
+    ))
+}
+
+/// Per-lane a * det_rcp(b) for det_div2/3/4.
+fn vector_div_value(arguments: &[Value], abs_min: &[Option<f32>]) -> Option<Value> {
+    let dividend = arguments.first()?.clone();
+    let divisor = arguments.get(1)?.clone();
+    let reciprocal = match divisor {
+        Value::Float(_) => Value::Float(deterministic_rcp_interval(&divisor, *abs_min.get(1)?)?),
+        Value::Composite(_) => {
+            let lanes = super::ops::float_lanes(divisor)?;
+            Value::Composite(
+                lanes
+                    .iter()
+                    .map(|lane| {
+                        deterministic_rcp_interval(&Value::Float(*lane), *abs_min.get(1)?)
+                            .map(Value::Float)
+                    })
+                    .collect::<Option<Vec<_>>>()?,
+            )
+        }
+        _ => return None,
+    };
+    super::ops::multiply_values(dividend, reciprocal)
+}
+
 fn deterministic_rcp_interval(
     value: &Value,
     abs_min: Option<f32>,
@@ -2197,6 +2685,13 @@ fn deterministic_rcp_interval(
         candidates.push(deterministic_rcp_positive(value.hi.max(minimum)));
         candidates.push(deterministic_rcp_positive(value.lo.max(minimum)));
     }
+    // The bit-trick seed wraps past the magic constant for huge |x| and the
+    // Newton steps can overflow to inf/NaN — no finite bound exists there, so
+    // the summary abstains (unproven) rather than manufacturing an interval.
+    candidates.retain(|candidate| candidate.is_finite());
+    if candidates.is_empty() {
+        return None;
+    }
     Some(crate::verify::domain::Interval::new(
         candidates.iter().copied().fold(f32::INFINITY, f32::min),
         candidates.iter().copied().fold(f32::NEG_INFINITY, f32::max),
@@ -2212,14 +2707,21 @@ fn deterministic_inverse_sqrt_interval(value: &Value) -> Option<crate::verify::d
     }
     let lo = value.lo.max(f32::MIN_POSITIVE);
     let hi = value.hi.max(f32::MIN_POSITIVE);
-    Some(crate::verify::domain::Interval::new(
-        deterministic_inverse_sqrt_positive(hi),
-        deterministic_inverse_sqrt_positive(lo),
-    ))
+    // Same abstention as the reciprocal: huge inputs wrap the bit-trick seed
+    // and the Newton steps can overflow, in which case no finite bound exists.
+    let hi_inv = deterministic_inverse_sqrt_positive(hi);
+    let lo_inv = deterministic_inverse_sqrt_positive(lo);
+    if !hi_inv.is_finite() || !lo_inv.is_finite() {
+        return None;
+    }
+    Some(crate::verify::domain::Interval::new(hi_inv, lo_inv))
 }
 
 fn deterministic_rcp_positive(x: f32) -> f32 {
-    let mut y = f32::from_bits(0x7ef3_11c3_u32 - x.to_bits());
+    // wrapping_sub mirrors the WGSL `0x7ef311c3u - bitcast<u32>(x)`: for x whose
+    // bit pattern exceeds the magic constant the shader result wraps too, so
+    // the model stays faithful instead of panicking on debug arithmetic checks.
+    let mut y = f32::from_bits(0x7ef3_11c3_u32.wrapping_sub(x.to_bits()));
     for _ in 0..3 {
         let product = x * y;
         let correction = 2.0_f32 - product;

@@ -252,9 +252,5 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 }
 
 pub(super) fn resolve_shader_source() -> String {
-    format!(
-        "{}\n{}",
-        include_str!("../../shaders/includes/determinism.wgsl"),
-        include_str!("../../shaders/vector_coverage_resolve.wgsl")
-    )
+    crate::shader_sources::vector_coverage_resolve()
 }

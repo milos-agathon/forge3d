@@ -108,42 +108,42 @@ fn get_light_contribution(light: LightGPU, world_pos: vec3<f32>) -> LightResult 
 
     if (light.type_ == LIGHT_DIRECTIONAL) {
         // Directional light - constant direction, no falloff
-        result.direction = normalize(-light.dir_ws);
+        result.direction = det_normalize3(-light.dir_ws);
         result.attenuation = 1.0;
     } else if (light.type_ == LIGHT_POINT || light.type_ == LIGHT_AREA_SPHERE) {
         // Point light - inverse square falloff with range
         let to_light = light.pos_ws - world_pos;
-        let distance = length(to_light);
-        result.direction = to_light / max(distance, 0.0001);
+        let distance = det_length3(to_light);
+        result.direction = det_div3(to_light, vec3<f32>(max(distance, 0.0001)));
 
         // Inverse square attenuation with smooth range cutoff
         let range = max(light.range, 0.0001);
-        let dist_ratio = clamp(distance / range, 0.0, 1.0);
-        let range_attenuation = 1.0 - (dist_ratio * dist_ratio);
-        result.attenuation = range_attenuation / max(distance * distance, 0.0001);
+        let dist_ratio = clamp(det_div(distance, range), 0.0, 1.0);
+        let range_attenuation = 1.0 - (det_barrier(dist_ratio * dist_ratio));
+        result.attenuation = det_div(range_attenuation, max(distance * distance, 0.0001));
     } else if (light.type_ == LIGHT_SPOT) {
         // Spot light - point light with cone attenuation
         let to_light = light.pos_ws - world_pos;
-        let distance = length(to_light);
-        result.direction = to_light / max(distance, 0.0001);
+        let distance = det_length3(to_light);
+        result.direction = det_div3(to_light, vec3<f32>(max(distance, 0.0001)));
 
         // Distance attenuation (same as point light)
         let range = max(light.range, 0.0001);
-        let dist_ratio = clamp(distance / range, 0.0, 1.0);
-        let range_attenuation = 1.0 - (dist_ratio * dist_ratio);
-        result.attenuation = range_attenuation / max(distance * distance, 0.0001);
+        let dist_ratio = clamp(det_div(distance, range), 0.0, 1.0);
+        let range_attenuation = 1.0 - (det_barrier(dist_ratio * dist_ratio));
+        result.attenuation = det_div(range_attenuation, max(distance * distance, 0.0001));
 
         // Cone attenuation (smoothstep between inner and outer angles)
-        let spot_dir = normalize(light.dir_ws);
-        let cos_angle = dot(spot_dir, -result.direction);
+        let spot_dir = det_normalize3(light.dir_ws);
+        let cos_angle = det_dot3(spot_dir, -result.direction);
         let inner_cos = light.cone_cos.x;
         let outer_cos = light.cone_cos.y;
 
         // Smooth transition between inner and outer cone
-        let cone_attenuation = smoothstep(outer_cos, inner_cos, cos_angle);
+        let cone_attenuation = det_smoothstep(outer_cos, inner_cos, cos_angle);
         result.attenuation *= cone_attenuation;
     } else if (light.type_ == LIGHT_AREA_RECT || light.type_ == LIGHT_AREA_DISK) {
-        result.direction = normalize(-light.dir_ws);
+        result.direction = det_normalize3(-light.dir_ws);
         result.attenuation = 1.0;
     } else {
         // Environment light - no direct lighting
@@ -180,19 +180,19 @@ fn eval_direct_light(
     }
 
     // Calculate N·L
-    let n_dot_l = max(dot(normal, light_dir), 0.0);
+    let n_dot_l = max(det_dot3(normal, light_dir), 0.0);
 
     if (n_dot_l <= 0.0) {
         return vec3<f32>(0.0);
     }
 
     // Evaluate BRDF
-    let brdf = eval_brdf(normal, view_dir, light_dir, albedo, mat);
+    let brdf = det_barrier3(eval_brdf(normal, view_dir, light_dir, albedo, mat));
 
     // Combine: light_color * intensity * attenuation * brdf * n_dot_l * shadow
-    let radiance = light.color * light.intensity * attenuation * shadow;
+    let radiance = det_barrier3(det_barrier3(det_barrier3(light.color * light.intensity) * attenuation) * shadow);
 
-    return brdf * radiance * n_dot_l;
+    return det_barrier3(brdf * radiance) * n_dot_l;
 }
 
 // ===================
@@ -213,17 +213,17 @@ fn world_to_shadow_space(
     normal_bias: f32,
 ) -> vec3<f32> {
     // Apply normal bias by offsetting position along normal
-    let biased_pos = world_pos + normal * normal_bias;
+    let biased_pos = world_pos + det_barrier3(normal * normal_bias);
 
     // Transform to light clip space
-    let light_clip = shadow_matrix * vec4<f32>(biased_pos, 1.0);
+    let light_clip = det_mat4_mul_vec4(shadow_matrix, vec4<f32>(biased_pos, 1.0));
 
     // Perspective divide
-    var light_ndc = light_clip.xyz / light_clip.w;
+    var light_ndc = det_div3(light_clip.xyz, vec3<f32>(light_clip.w));
 
     // Transform from NDC [-1,1] to texture coords [0,1]
-    light_ndc.x = light_ndc.x * 0.5 + 0.5;
-    light_ndc.y = -light_ndc.y * 0.5 + 0.5;  // Flip Y for texture coords
+    light_ndc.x = det_barrier(light_ndc.x * 0.5) + 0.5;
+    light_ndc.y = det_barrier(-light_ndc.y * 0.5) + 0.5;  // Flip Y for texture coords
 
     // Apply depth bias
     light_ndc.z = light_ndc.z - bias;
@@ -276,7 +276,7 @@ fn pcf_shadow(
 
     // Get shadow map dimensions
     let shadow_map_size = vec2<f32>(textureDimensions(shadow_map));
-    let texel_size = 1.0 / shadow_map_size;
+    let texel_size = det_div2(vec2<f32>(1.0), shadow_map_size);
 
     // PCF kernel size based on softness (1.0 = 3x3, 2.0 = 5x5)
     let kernel_radius = i32(softness);
@@ -288,7 +288,7 @@ fn pcf_shadow(
     // Sample in a grid pattern
     for (var y = -kernel_radius; y <= kernel_radius; y = y + 1) {
         for (var x = -kernel_radius; x <= kernel_radius; x = x + 1) {
-            let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+            let offset = det_barrier2(vec2<f32>(f32(x), f32(y)) * texel_size);
             let sample_coord = shadow_coord.xy + offset;
 
             // Sample depth from shadow map
@@ -296,14 +296,14 @@ fn pcf_shadow(
 
             // Compare with current depth
             if (shadow_coord.z <= shadow_depth) {
-                shadow_sum = shadow_sum + 1.0;
+                shadow_sum = det_barrier(shadow_sum + 1.0);
             }
 
-            sample_count = sample_count + 1.0;
+            sample_count = det_barrier(sample_count + 1.0);
         }
     }
 
-    return shadow_sum / sample_count;
+    return det_div(shadow_sum, sample_count);
 }
 
 /// Main shadow visibility function (dispatches to hard or PCF)
@@ -361,24 +361,24 @@ fn calculate_lighting(
     );
 
     // Direct lighting
-    let direct = eval_direct_light(light, mat, world_pos, normal, view_dir, albedo, shadow);
+    let direct = det_barrier3(eval_direct_light(light, mat, world_pos, normal, view_dir, albedo, shadow));
 
     // Indirect lighting (IBL)
     // Note: Using unified eval_ibl from lighting_ibl.wgsl (requires converting ShadingParamsGPU to individual params)
     let metallic = clamp(mat.metallic, 0.0, 1.0);
     let roughness = clamp(mat.roughness, 0.0, 1.0);
     let clamped_albedo = clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0));
-    let f0 = mix(vec3<f32>(0.04), clamped_albedo, metallic);
+    let f0 = det_mix3(vec3<f32>(0.04), clamped_albedo, metallic);
     var indirect = vec3<f32>(0.0);
     if (gi.tech == GI_IBL) {
-        indirect = eval_ibl(normal, view_dir, clamped_albedo, metallic, roughness, f0) * gi.ibl_intensity;
+        indirect = det_barrier3(eval_ibl(normal, view_dir, clamped_albedo, metallic, roughness, f0) * gi.ibl_intensity);
     }
 
     // Combine
     var final_color = direct + indirect;
 
     // Apply exposure
-    final_color *= atmo.exposure;
+    final_color = det_barrier3(final_color * atmo.exposure);
 
     // TODO P0-S4: Apply fog based on atmo.fog_density
 

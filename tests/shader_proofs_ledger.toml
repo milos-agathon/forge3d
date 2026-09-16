@@ -1,3 +1,15 @@
+[[unproven]]
+path = "src/shaders/det_probe.wgsl"
+reason = "det_probe.wgsl: certification harness whose arithmetic-canary outputs are compared to committed probe goldens at deterministic context start; its fixed output-contract coverage is not yet modeled"
+owner = "determinism"
+expiry = "2027-08-06"
+
+[[unproven]]
+path = "src/shaders/det_raster.wgsl"
+reason = "det_raster.wgsl: raster canary whose output hash is compared to committed goldens at deterministic context start; its rasterizer-precision contract coverage is not yet modeled"
+owner = "determinism"
+expiry = "2027-08-06"
+
 # PROBATUM proof-coverage ledger. Expired entries fail tests/test_shader_proofs.py.
 
 [[unproven]]

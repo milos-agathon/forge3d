@@ -54,7 +54,7 @@ struct TerrainChild {
 
 fn terrain_safe_inv(direction: f32) -> f32 {
     let magnitude = max(abs(direction), 1e-12);
-    return select(1.0 / magnitude, -1.0 / magnitude, direction < 0.0);
+    return select(det_div(1.0, magnitude), det_div(-1.0, magnitude), direction < 0.0);
 }
 
 fn terrain_slab_xz(
@@ -99,7 +99,7 @@ fn terrain_height_limit_range(
     let height1 = terrain_height_limit(distance1_m, coefficients);
     var minimum = min(height0, height1);
     if coefficients.z > 0.0 {
-        let vertex = -coefficients.y / (2.0 * coefficients.z);
+        let vertex = det_div(-coefficients.y, 2.0 * coefficients.z);
         let distance_min = min(distance0_m, distance1_m);
         let distance_max = max(distance0_m, distance1_m);
         if vertex >= distance_min && vertex <= distance_max {
@@ -128,16 +128,16 @@ fn terrain_leaf_deviation(
     distance1_m: f32,
     height_coefficients: vec3<f32>,
 ) -> f32 {
-    let pixel = origin + segment_t * direction;
-    let u = clamp(pixel.x - f32(cell_x), 0.0, 1.0);
-    let v = clamp(pixel.y - f32(cell_y), 0.0, 1.0);
-    let terrain_height = det_mix(
+    let pixel = origin + det_barrier2(segment_t * direction);
+    let u = clamp(det_barrier(pixel.x) - f32(cell_x), 0.0, 1.0);
+    let v = clamp(det_barrier(pixel.y) - f32(cell_y), 0.0, 1.0);
+    let terrain_height = det_barrier(det_mix(
         det_mix(heights.x, heights.y, u),
         det_mix(heights.z, heights.w, u),
-        v,
+        v),
     );
     let distance_m = det_mix(distance0_m, distance1_m, segment_t);
-    return terrain_height - terrain_height_limit(distance_m, height_coefficients);
+    return terrain_height - det_barrier(terrain_height_limit(distance_m, height_coefficients));
 }
 
 fn terrain_leaf_occluded(
@@ -165,11 +165,11 @@ fn terrain_leaf_occluded(
 
     // Exact quadratic fit on q in [0,1], identical to the production leaf
     // intersection. Here its maximum directly answers the any-hit query.
-    let quadratic = 2.0 * deviation.z + 2.0 * deviation.x - 4.0 * deviation.y;
-    let linear = deviation.z - deviation.x - quadratic;
+    let quadratic = det_barrier(det_barrier(det_barrier(2.0 * deviation.z) + det_barrier(2.0 * deviation.x)) - det_barrier(4.0 * deviation.y));
+    let linear = det_barrier(det_barrier(deviation.z) - det_barrier(deviation.x)) - quadratic;
     var maximum = max(deviation.x, deviation.z);
     if abs(quadratic) > 1e-12 {
-        let vertex = -linear / (2.0 * quadratic);
+        let vertex = det_div(-linear, 2.0 * quadratic);
         if vertex > 0.0 && vertex < 1.0 {
             maximum = max(
                 maximum,
@@ -362,23 +362,23 @@ fn terrain_trace_segment(
 }
 
 fn inverse_radius(direction_m: vec2<f32>) -> f32 {
-    let distance_squared = dot(direction_m, direction_m);
+    let distance_squared = det_dot2(direction_m, direction_m);
     if distance_squared == 0.0 {
         return 0.0;
     }
-    let east_fraction_squared = direction_m.x * direction_m.x / distance_squared;
-    let north_fraction_squared = direction_m.y * direction_m.y / distance_squared;
-    return north_fraction_squared * uniforms.physics.x
-        + east_fraction_squared * uniforms.physics.y;
+    let east_fraction_squared = det_div(direction_m.x * direction_m.x, distance_squared);
+    let north_fraction_squared = det_div(direction_m.y * direction_m.y, distance_squared);
+    return det_barrier(north_fraction_squared * uniforms.physics.x)
+        + det_barrier(east_fraction_squared * uniforms.physics.y);
 }
 
 fn latlon_to_pixel(latitude: f32, longitude: f32) -> vec2<f32> {
     var longitude_deg = degrees(longitude);
     if longitude_deg < uniforms.geodetic.z {
-        longitude_deg += 360.0;
+        longitude_deg = det_barrier(longitude_deg + 360.0);
     }
     if longitude_deg > uniforms.geodetic.z + 180.0 {
-        longitude_deg -= 360.0;
+        longitude_deg = det_barrier(longitude_deg - 360.0);
     }
     return vec2<f32>(
         det_div(longitude_deg - uniforms.geodetic.z, uniforms.metric.y) - 0.5,
@@ -399,19 +399,19 @@ fn geodesic_sample_pixel(
         let sin_latitude = det_fma(
             det_sin(origin_latitude),
             det_cos(angular_distance),
-            det_sin(angular_distance) * det_cos(origin_latitude) * det_cos(azimuth),
+            det_barrier(det_sin(angular_distance) * det_cos(origin_latitude)) * det_cos(azimuth),
         );
         let latitude = 1.5707963267948966
             - det_acos(clamp(sin_latitude, -1.0, 1.0));
         let longitude = origin_longitude + det_atan2(
-            det_sin(azimuth) * det_sin(angular_distance) * det_cos(origin_latitude),
-            det_cos(angular_distance) - det_sin(origin_latitude) * det_sin(latitude),
+            det_barrier(det_sin(azimuth) * det_sin(angular_distance)) * det_cos(origin_latitude),
+            det_cos(angular_distance) - det_barrier(det_sin(origin_latitude) * det_sin(latitude)),
         );
         return latlon_to_pixel(latitude, longitude);
     }
     let flattening = 1.0 / 298.257223563;
     let semi_major = 6378137.0;
-    let semi_minor = semi_major * (1.0 - flattening);
+    let semi_minor = det_barrier(semi_major * (1.0 - flattening));
     let reduced_latitude = det_atan2(
         (1.0 - flattening) * det_sin(origin_latitude),
         det_cos(origin_latitude),
@@ -421,54 +421,54 @@ fn geodesic_sample_pixel(
     let sin_azimuth = det_sin(azimuth);
     let cos_azimuth = det_cos(azimuth);
     let sigma1 = det_atan2(sin_u1, cos_u1 * cos_azimuth);
-    let sin_alpha = cos_u1 * sin_azimuth;
-    let cos_sq_alpha = 1.0 - sin_alpha * sin_alpha;
-    let u_sq = cos_sq_alpha
-        * (semi_major * semi_major - semi_minor * semi_minor)
-        / (semi_minor * semi_minor);
-    let coefficient_a = 1.0 + u_sq / 16384.0
-        * (4096.0 + u_sq * (-768.0 + u_sq * (320.0 - 175.0 * u_sq)));
-    let coefficient_b = u_sq / 1024.0
-        * (256.0 + u_sq * (-128.0 + u_sq * (74.0 - 47.0 * u_sq)));
+    let sin_alpha = det_barrier(cos_u1 * sin_azimuth);
+    let cos_sq_alpha = 1.0 - det_barrier(sin_alpha * sin_alpha);
+    let u_sq = det_div(cos_sq_alpha
+        * (det_barrier(semi_major * semi_major) - det_barrier(semi_minor * semi_minor)), semi_minor * semi_minor);
+    let coefficient_a = 1.0 + det_barrier(det_div(u_sq, 16384.0)
+        * (4096.0 + det_barrier(u_sq * (-768.0 + det_barrier(u_sq * (320.0 - det_barrier(175.0 * u_sq)))))));
+    let coefficient_b = det_barrier(det_div(u_sq, 1024.0)
+        * (256.0 + det_barrier(u_sq * (-128.0 + det_barrier(u_sq * (74.0 - det_barrier(47.0 * u_sq)))))));
     var sigma = det_div(distance_m, semi_minor * coefficient_a);
     for (var iteration = 0u; iteration < 4u; iteration += 1u) {
-        let two_sigma_m = 2.0 * sigma1 + sigma;
+        let two_sigma_m = det_barrier(2.0 * sigma1) + sigma;
         let sin_sigma = det_sin(sigma);
         let cos_sigma = det_cos(sigma);
         let cos_two_sigma_m = det_cos(two_sigma_m);
-        let delta_sigma = coefficient_b * sin_sigma
-            * (cos_two_sigma_m + coefficient_b / 4.0
-                * (cos_sigma * (-1.0 + 2.0 * cos_two_sigma_m * cos_two_sigma_m)
-                    - coefficient_b / 6.0 * cos_two_sigma_m
-                    * (-3.0 + 4.0 * sin_sigma * sin_sigma)
-                    * (-3.0 + 4.0 * cos_two_sigma_m * cos_two_sigma_m)));
-        sigma = det_div(distance_m, semi_minor * coefficient_a) + delta_sigma;
+        let delta_sigma = det_barrier(det_barrier(coefficient_b * sin_sigma)
+            * (cos_two_sigma_m + det_barrier(det_div(coefficient_b, 4.0)
+                * (det_barrier(cos_sigma * (-1.0 + det_barrier(det_barrier(2.0 * cos_two_sigma_m) * cos_two_sigma_m)))
+                    - det_barrier(det_barrier(det_barrier(det_div(coefficient_b, 6.0) * cos_two_sigma_m)
+                    * (-3.0 + det_barrier(det_barrier(4.0 * sin_sigma) * sin_sigma)))
+                    * (-3.0 + det_barrier(det_barrier(4.0 * cos_two_sigma_m) * cos_two_sigma_m)))))));
+        sigma = det_barrier(det_div(distance_m, semi_minor * coefficient_a) + delta_sigma);
     }
     let sin_sigma = det_sin(sigma);
     let cos_sigma = det_cos(sigma);
-    let two_sigma_m = 2.0 * sigma1 + sigma;
-    let temporary = sin_u1 * sin_sigma - cos_u1 * cos_sigma * cos_azimuth;
+    let two_sigma_m = det_barrier(2.0 * sigma1) + sigma;
+    let temporary = det_barrier(sin_u1 * sin_sigma) - det_barrier(det_barrier(cos_u1 * cos_sigma) * cos_azimuth);
     let latitude = det_atan2(
-        sin_u1 * cos_sigma + cos_u1 * sin_sigma * cos_azimuth,
+        det_barrier(sin_u1 * cos_sigma) + det_barrier(det_barrier(cos_u1 * sin_sigma) * cos_azimuth),
         (1.0 - flattening)
-            * det_sqrt(sin_alpha * sin_alpha + temporary * temporary),
+            * det_sqrt(det_barrier(sin_alpha * sin_alpha) + det_barrier(temporary * temporary)),
     );
     let lambda = det_atan2(
         sin_sigma * sin_azimuth,
-        cos_u1 * cos_sigma - sin_u1 * sin_sigma * cos_azimuth,
+        det_barrier(cos_u1 * cos_sigma) - det_barrier(det_barrier(sin_u1 * sin_sigma) * cos_azimuth),
     );
-    let coefficient_c = flattening / 16.0 * cos_sq_alpha
-        * (4.0 + flattening * (4.0 - 3.0 * cos_sq_alpha));
+    let coefficient_c = det_barrier(det_barrier(det_div(flattening, 16.0) * cos_sq_alpha)
+        * (4.0 + det_barrier(flattening * (4.0 - det_barrier(3.0 * cos_sq_alpha)))));
     let cos_two_sigma_m = det_cos(two_sigma_m);
-    let longitude_delta = lambda - (1.0 - coefficient_c) * flattening * sin_alpha
-        * (sigma + coefficient_c * sin_sigma
-            * (cos_two_sigma_m + coefficient_c * cos_sigma
-                * (-1.0 + 2.0 * cos_two_sigma_m * cos_two_sigma_m)));
+    let longitude_delta = det_barrier(lambda - det_barrier(det_barrier(det_barrier((1.0 - coefficient_c) * flattening) * sin_alpha)
+        * (sigma + det_barrier(det_barrier(coefficient_c * sin_sigma)
+            * (cos_two_sigma_m + det_barrier(det_barrier(coefficient_c * cos_sigma)
+                * (-1.0 + det_barrier(det_barrier(2.0 * cos_two_sigma_m) * cos_two_sigma_m))))))));
     return latlon_to_pixel(latitude, origin_longitude + longitude_delta);
 }
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    det_seed(f32(id.x));
     if id.x >= uniforms.dimensions.x || id.y >= uniforms.dimensions.y {
         return;
     }
@@ -476,20 +476,20 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let target_pixel = vec2<f32>(id.xy);
     let delta_pixel = target_pixel - uniforms.observer.xy;
     let direction_m = geodesic_positions_m[index];
-    let distance_m = length(direction_m);
-    let azimuth = atan2(direction_m.x, direction_m.y);
+    let distance_m = det_length2(direction_m);
+    let azimuth = det_atan2(direction_m.x, direction_m.y);
     let inv_radius = inverse_radius(direction_m);
-    let vacuum_drop = 0.5 * inv_radius * distance_m * distance_m;
-    let effective_drop = vacuum_drop * uniforms.physics.z;
+    let vacuum_drop = det_barrier(det_barrier(det_barrier(0.5 * inv_radius) * distance_m) * distance_m);
+    let effective_drop = det_barrier(vacuum_drop * uniforms.physics.z);
     let refraction_gain = vacuum_drop - effective_drop;
-    let observer_elevation = height_at(uniforms.observer.xy) + uniforms.observer.z;
-    let target_absolute_elevation = textureLoad(height_texture, vec2<i32>(id.xy), 0).x
-        + uniforms.observer.w;
+    let observer_elevation = det_barrier(det_barrier(height_at(uniforms.observer.xy)) + uniforms.observer.z);
+    let target_absolute_elevation = det_barrier(textureLoad(height_texture, vec2<i32>(id.xy), 0).x
+        + uniforms.observer.w);
     var horizon_distance = uniforms.metric.x;
     if inv_radius > 0.0 {
         let effective_inv_radius = inv_radius * uniforms.physics.z;
-        horizon_distance = sqrt(2.0 * max(observer_elevation, 0.0) / effective_inv_radius)
-            + sqrt(2.0 * max(target_absolute_elevation, 0.0) / effective_inv_radius);
+        horizon_distance = det_sqrt(det_div(2.0 * max(observer_elevation, 0.0), effective_inv_radius))
+            + det_sqrt(det_div(2.0 * max(target_absolute_elevation, 0.0), effective_inv_radius));
     }
 
     if distance_m == 0.0 {
@@ -501,11 +501,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
 
-    let target_elevation = target_absolute_elevation - effective_drop;
+    let target_elevation = det_barrier(target_absolute_elevation - effective_drop);
     let height_coefficients = vec3<f32>(
         observer_elevation,
         det_div(target_elevation - observer_elevation, distance_m),
-        0.5 * inv_radius * uniforms.physics.z,
+        det_barrier(0.5 * inv_radius) * uniforms.physics.z,
     );
     // Geodesics are curved in the geographic raster. Consecutive chords stay
     // within half a cell, while terrain_trace_segment continuously traverses
@@ -564,15 +564,15 @@ fn local_inverse_radius(latitude: f32, azimuth: f32) -> f32 {
         return 0.0;
     }
     if uniforms.metric.w > 0.0 {
-        return 1.0 / uniforms.metric.w;
+        return det_div(1.0, uniforms.metric.w);
     }
     let semi_major = 6378137.0;
     let eccentricity_squared = 0.0066943799901413165;
     let sin_latitude = det_sin(latitude);
-    let w = det_sqrt(1.0 - eccentricity_squared * sin_latitude * sin_latitude);
+    let w = det_sqrt(1.0 - det_barrier(det_barrier(eccentricity_squared * sin_latitude) * sin_latitude));
     let meridional = det_div(
         semi_major * (1.0 - eccentricity_squared),
-        w * w * w,
+        det_barrier(w * w) * w,
     );
     let prime_vertical = det_div(semi_major, w);
     let sin_azimuth = det_sin(azimuth);
@@ -583,8 +583,8 @@ fn local_inverse_radius(latitude: f32, azimuth: f32) -> f32 {
 
 fn shadow_step_m(latitude: f32, azimuth: f32) -> f32 {
     let sin_latitude = det_sin(latitude);
-    let flattening_term = 1.0 - 0.0066943799901413165
-        * sin_latitude * sin_latitude;
+    let flattening_term = 1.0 - det_barrier(det_barrier(0.0066943799901413165
+        * sin_latitude) * sin_latitude);
     let root = det_sqrt(flattening_term);
     let meridional = det_div(
         6378137.0 * (1.0 - 0.0066943799901413165),
@@ -598,7 +598,7 @@ fn shadow_step_m(latitude: f32, azimuth: f32) -> f32 {
         uniforms.metric.w > 0.0,
     );
     let north_cell_m = horizontal_meridional * radians(uniforms.metric.z);
-    let east_cell_m = horizontal_prime_vertical * det_cos(latitude)
+    let east_cell_m = det_barrier(horizontal_prime_vertical * det_cos(latitude))
         * radians(uniforms.metric.y);
     let east_crossing_m = det_div(east_cell_m, max(abs(det_sin(azimuth)), 1e-6));
     let north_crossing_m = det_div(north_cell_m, max(abs(det_cos(azimuth)), 1e-6));
@@ -607,6 +607,7 @@ fn shadow_step_m(latitude: f32, azimuth: f32) -> f32 {
 
 @compute @workgroup_size(8, 8, 1)
 fn shadow_mask_main(@builtin(global_invocation_id) id: vec3<u32>) {
+    det_seed(f32(id.x));
     if id.x >= uniforms.dimensions.x || id.y >= uniforms.dimensions.y {
         return;
     }
@@ -623,7 +624,7 @@ fn shadow_mask_main(@builtin(global_invocation_id) id: vec3<u32>) {
         det_cos(geodetic_and_sun.w),
     );
     let inv_radius = local_inverse_radius(origin_geodetic.x, azimuth);
-    let effective_inv_radius = inv_radius * uniforms.physics.z;
+    let effective_inv_radius = det_barrier(inv_radius * uniforms.physics.z);
 
     var visible = 1u;
     let height_coefficients = vec3<f32>(
@@ -667,7 +668,7 @@ fn shadow_mask_main(@builtin(global_invocation_id) id: vec3<u32>) {
         }
         if segment_end_distance_m >= uniforms.metric.x { break; }
         segment_latitude = radians(det_fma(
-            -(segment_end_pixel.y + 0.5),
+            -(det_barrier(segment_end_pixel.y) + 0.5),
             uniforms.metric.z,
             uniforms.geodetic.w,
         ));

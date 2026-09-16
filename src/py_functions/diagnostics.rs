@@ -532,3 +532,62 @@ pub(crate) fn shader_report(py: Python<'_>, mode: Option<String>) -> PyResult<Py
     let json_mod = py.import_bound("json")?;
     Ok(json_mod.call_method1("loads", (json,))?.into())
 }
+
+// ---------------------------------------------------------
+// TERRA-DETERMINATA: arithmetic canary probe
+// ---------------------------------------------------------
+/// Run the arithmetic canary on the ACTIVE adapter and report the probe hash
+/// plus adapter evidence. The identical WGSL also runs in browser WebGPU
+/// (tools/determinism_browser/det_probe.js), so `probe_sha256` is a real
+/// executed arithmetic-identity leg across native and browser implementations.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn determinism_probe(py: Python<'_>) -> PyResult<PyObject> {
+    let (bytes, sha256_hex) = crate::core::det_probe::run_det_probe().map_err(|e| e.to_py_err())?;
+    let (raster_bytes, raster_sha256_hex) =
+        crate::core::det_probe::run_det_raster().map_err(|e| e.to_py_err())?;
+    let d = PyDict::new_bound(py);
+    d.set_item("status", "ok")?;
+    d.set_item("probe_sha256", sha256_hex)?;
+    d.set_item(
+        "probe_bytes_hex",
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+    )?;
+    d.set_item("raster_sha256", raster_sha256_hex)?;
+    d.set_item(
+        "raster_bytes_hex",
+        raster_bytes
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
+    )?;
+    d.set_item(
+        "wgsl_sha256",
+        format!(
+            "{:x}",
+            <sha2::Sha256 as sha2::Digest>::digest(
+                crate::core::det_probe::det_probe_shader_source().as_bytes()
+            )
+        ),
+    )?;
+    d.set_item(
+        "raster_wgsl_sha256",
+        format!(
+            "{:x}",
+            <sha2::Sha256 as sha2::Digest>::digest(
+                crate::core::det_probe::det_raster_shader_source().as_bytes()
+            )
+        ),
+    )?;
+    if let Some((info, software_fallback)) = crate::core::gpu::active_adapter_info() {
+        d.set_item("adapter_name", info.name)?;
+        d.set_item("adapter_vendor", info.vendor)?;
+        d.set_item("adapter_device", info.device)?;
+        d.set_item("adapter_device_type", format!("{:?}", info.device_type))?;
+        d.set_item("adapter_backend", format!("{:?}", info.backend))?;
+        d.set_item("adapter_driver", info.driver)?;
+        d.set_item("adapter_driver_info", info.driver_info)?;
+        d.set_item("software_fallback", software_fallback)?;
+    }
+    Ok(d.into_py(py))
+}

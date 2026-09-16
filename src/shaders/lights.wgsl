@@ -112,7 +112,7 @@ fn light_sequence_seed() -> vec2<f32> {
 //   Normalized direction vector (world space)
 fn sample_directional(i: u32) -> vec3<f32> {
     let light = lights[i];
-    return normalize(-light.dir_ws);
+    return det_normalize3(-light.dir_ws);
 }
 
 // Sample point light with uniform spherical distribution
@@ -127,11 +127,11 @@ fn sample_point(i: u32, Xi: vec2<f32>) -> vec3<f32> {
     let u = Xi.x;
     let v = Xi.y;
     let phi = 2.0 * PI * u;
-    let cos_theta = 1.0 - 2.0 * v;
-    let sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
+    let cos_theta = 1.0 - det_barrier(2.0 * v);
+    let sin_theta = det_sqrt(max(0.0, 1.0 - det_barrier(cos_theta * cos_theta)));
     return vec3<f32>(
-        sin_theta * cos(phi),
-        sin_theta * sin(phi),
+        sin_theta * det_cos(phi),
+        sin_theta * det_sin(phi),
         cos_theta
     );
 }
@@ -151,24 +151,24 @@ fn sample_spot(i: u32, Xi: vec2<f32>) -> vec3<f32> {
     let outer_cos = light.cone_cos.y;
     let u = Xi.x;
     let v = Xi.y;
-    let cos_theta = mix(outer_cos, inner_cos, u);
-    let sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
+    let cos_theta = det_mix(outer_cos, inner_cos, u);
+    let sin_theta = det_sqrt(max(0.0, 1.0 - det_barrier(cos_theta * cos_theta)));
     let phi = 2.0 * PI * v;
     let local_dir = vec3<f32>(
-        sin_theta * cos(phi),
-        sin_theta * sin(phi),
+        sin_theta * det_cos(phi),
+        sin_theta * det_sin(phi),
         cos_theta
     );
     // Build orthonormal basis from light direction
     // Note: Assumes up=(0,1,0) but spot direction can point anywhere
-    let forward = normalize(light.dir_ws);
+    let forward = det_normalize3(light.dir_ws);
     let up = vec3<f32>(0.0, 1.0, 0.0);
-    let right = normalize(cross(up, forward));
-    let ortho_up = cross(forward, right);
-    return normalize(
-        local_dir.x * right +
-        local_dir.y * ortho_up +
-        local_dir.z * forward
+    let right = det_normalize3(det_cross3(up, forward));
+    let ortho_up = det_cross3(forward, right);
+    return det_normalize3(
+        det_barrier3(det_barrier3(local_dir.x * right) +
+        det_barrier3(local_dir.y * ortho_up)) +
+        det_barrier3(local_dir.z * forward)
     );
 }
 
@@ -186,20 +186,20 @@ fn sample_area_rect(i: u32, Xi: vec2<f32>) -> vec3<f32> {
     let half_width = light.area_half.x;
     let half_height = light.area_half.y;
     let local = vec3<f32>(
-        mix(-half_width, half_width, Xi.x),
+        det_mix(-half_width, half_width, Xi.x),
         0.0,
-        mix(-half_height, half_height, Xi.y)
+        det_mix(-half_height, half_height, Xi.y)
     );
-    let normal = normalize(light.dir_ws);
+    let normal = det_normalize3(light.dir_ws);
     // Robust basis construction: fallback to X-axis if normal near-vertical
     var up = vec3<f32>(0.0, 1.0, 0.0);
     if (abs(normal.y) > 0.99) {
         up = vec3<f32>(1.0, 0.0, 0.0);
     }
-    let tangent = normalize(cross(up, normal));
-    let bitangent = cross(normal, tangent);
-    let world_pos = light.pos_ws + tangent * local.x + bitangent * local.z;
-    return normalize(world_pos - light.pos_ws);
+    let tangent = det_normalize3(det_cross3(up, normal));
+    let bitangent = det_cross3(normal, tangent);
+    let world_pos = det_barrier3(det_barrier3(light.pos_ws + det_barrier3(tangent * local.x)) + det_barrier3(bitangent * local.z));
+    return det_normalize3(world_pos - light.pos_ws);
 }
 
 // Sample disk-shaped area light
@@ -215,19 +215,19 @@ fn sample_area_rect(i: u32, Xi: vec2<f32>) -> vec3<f32> {
 fn sample_area_disk(i: u32, Xi: vec2<f32>) -> vec3<f32> {
     let light = lights[i];
     let radius = light.area_half.x;
-    let r = radius * sqrt(Xi.x);
+    let r = det_barrier(radius * det_sqrt(Xi.x));
     let theta = 2.0 * PI * Xi.y;
-    let local = vec3<f32>(r * cos(theta), 0.0, r * sin(theta));
-    let normal = normalize(light.dir_ws);
+    let local = vec3<f32>(r * det_cos(theta), 0.0, r * det_sin(theta));
+    let normal = det_normalize3(light.dir_ws);
     // Robust basis construction: fallback to X-axis if normal near-vertical
     var up = vec3<f32>(0.0, 1.0, 0.0);
     if (abs(normal.y) > 0.99) {
         up = vec3<f32>(1.0, 0.0, 0.0);
     }
-    let tangent = normalize(cross(up, normal));
-    let bitangent = cross(normal, tangent);
-    let world_pos = light.pos_ws + tangent * local.x + bitangent * local.z;
-    return normalize(world_pos - light.pos_ws);
+    let tangent = det_normalize3(det_cross3(up, normal));
+    let bitangent = det_cross3(normal, tangent);
+    let world_pos = det_barrier3(det_barrier3(light.pos_ws + det_barrier3(tangent * det_barrier(local.x))) + det_barrier3(bitangent * det_barrier(local.z)));
+    return det_normalize3(world_pos - light.pos_ws);
 }
 
 // Sample spherical area light
@@ -258,11 +258,11 @@ fn sample_area_sphere(i: u32, Xi: vec2<f32>) -> vec3<f32> {
 fn sample_environment(Xi: vec2<f32>) -> vec3<f32> {
     // Placeholder lat-long mapping
     let phi = 2.0 * PI * Xi.x;
-    let cos_theta = 1.0 - 2.0 * Xi.y;
-    let sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
+    let cos_theta = 1.0 - det_barrier(2.0 * Xi.y);
+    let sin_theta = det_sqrt(max(0.0, 1.0 - det_barrier(cos_theta * cos_theta)));
     return vec3<f32>(
-        sin_theta * cos(phi),
+        sin_theta * det_cos(phi),
         cos_theta,
-        sin_theta * sin(phi)
+        sin_theta * det_sin(phi)
     );
 }

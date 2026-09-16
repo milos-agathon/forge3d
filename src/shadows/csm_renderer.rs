@@ -383,9 +383,9 @@ fn create_shadow_sampler(device: &Device) -> Sampler {
         address_mode_u: AddressMode::ClampToEdge,
         address_mode_v: AddressMode::ClampToEdge,
         address_mode_w: AddressMode::ClampToEdge,
-        mag_filter: FilterMode::Linear,
-        min_filter: FilterMode::Linear,
-        mipmap_filter: FilterMode::Nearest,
+        mag_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Linear),
+        min_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Linear),
+        mipmap_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Nearest),
         compare: Some(CompareFunction::LessEqual),
         ..Default::default()
     })

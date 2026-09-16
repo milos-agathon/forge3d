@@ -1176,8 +1176,30 @@ class DeviceProbeResult(TypedDict, total=False):
     backend: str
     software_fallback: bool
 
+class DeterminismProbeResult(TypedDict, total=False):
+    # status is always present: "ok" | "probe_error" | "native_missing".
+    status: str
+    reason: str
+    remediation: str
+    # Present when status == "ok".
+    probe_sha256: str
+    probe_bytes_hex: str
+    raster_sha256: str
+    raster_bytes_hex: str
+    wgsl_sha256: str
+    raster_wgsl_sha256: str
+    adapter_name: str
+    adapter_vendor: int
+    adapter_device: int
+    adapter_device_type: str
+    adapter_backend: str
+    adapter_driver: str
+    adapter_driver_info: str
+    software_fallback: bool
+
 def enumerate_adapters() -> list[dict[str, Any]]: ...
 def device_probe(backend: Optional[str] = ...) -> DeviceProbeResult: ...
+def determinism_probe() -> DeterminismProbeResult: ...
 def native_import_error() -> BaseException | None: ...
 
 def memory_metrics() -> Dict[str, Any]: ...
