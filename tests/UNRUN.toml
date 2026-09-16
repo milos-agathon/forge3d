@@ -63,6 +63,6 @@ expires = "2026-10-10"
 # --- CI-only decode divergence under investigation ----------------------------
 [[entries]]
 file = "tests/test_cog_streaming.py"
-reason = "ci_only_lzw_divergence: tile reads fail on hosted runners with LZW 'code out of range' while the identical LFS object decodes cleanly across every tile locally (verified 2026-07-11); needs on-runner debugging of the fetched bytes/decoder"
+reason = "ci_only_lzw_divergence: tile reads fail on hosted runners with LZW 'code out of range' while the identical LFS object decodes cleanly across every tile locally (verified 2026-07-11). Re-verified locally 2026-09-16: 20 passed / 2 conditional self-skips after the predictor fixture gained the CRS the ORBIS reader requires; hosted-runner decode still unverified and needs on-runner debugging of the fetched bytes/decoder"
 owner = "milos"
-expires = "2026-08-15"
+expires = "2026-10-16"

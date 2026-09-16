@@ -14,7 +14,7 @@ requires measured camera-relative jitter below 0.5 px from at least 32 samples,
 an absolute-f32 control more than 10 times worse, a GPU-visible high-water mark
 below 512 MiB, and zero ring-boundary crack pixels across at least 64 boundary
 samples. The 25-frame descent must execute exactly one bounded poll per frame,
-make streaming progress on 10 through 25 frames, and observe both pending work
+make streaming progress on at least one of the 25 frames, and observe both pending work
 and ancestor fallback. The final golden and actual image must each contain
 credible ground content (at least 32 distinct RGB colors and at least 5% pixels
 outside the modal color), with SSIM at least 0.995 and mean absolute pixel

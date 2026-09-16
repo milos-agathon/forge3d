@@ -196,7 +196,7 @@ assert.notDeepEqual(retryFields.slice(3), errorFields.slice(3), "retry gets a fr
 const retryAllocation = e.forge3d_orbis_alloc_heights(handle, ...retryFields, 2, 2);
 assert.notEqual(retryAllocation, 0);
 assert.equal(e.forge3d_orbis_free_heights(handle, retryAllocation), 1);
-assert.equal(e.forge3d_orbis_loader_cancel(handle, 2, 2, 1), 1);
+assert.equal(e.forge3d_orbis_loader_cancel(handle, ...retryFields.slice(0, 3)), 1);
 assert.equal(e.forge3d_orbis_loader_poll_cancellation(handle), 1);
 assert.equal(e.forge3d_orbis_loader_ack_cancellation(handle, ...retryFields), 1);
 assert.equal(e.forge3d_orbis_loader_drain_completion(handle), 0);
@@ -205,28 +205,33 @@ assert.equal(e.forge3d_orbis_loader_drain_completion(handle), 0);
 // production serialized page-table ABI: preserve root, evict cold leaf.
 const residencyHandle = e.forge3d_orbis_loader_init(1, 1);
 const completeTile = (handle, lod, x, y, value) => {
-  assert.equal(e.forge3d_orbis_loader_request(handle, lod, x, y), 1);
-  assert.equal(e.forge3d_orbis_loader_poll_request(handle), 1);
-  const fields = [0, 1, 2, 3, 4].map((field) => e.forge3d_orbis_loader_last_request(handle, field));
-  const id = e.forge3d_orbis_alloc_heights(handle, ...fields, 1, 1);
-  assert.notEqual(id, 0);
-  const ptr = e.forge3d_orbis_heights_pointer(handle, id);
-  const coveragePtr = e.forge3d_orbis_coverage_pointer(handle, id);
-  new Float32Array(e.memory.buffer, ptr, 1)[0] = value;
-  new Uint8Array(e.memory.buffer, coveragePtr, 1)[0] = 255;
-  assert.equal(e.forge3d_orbis_loader_complete(handle, id), 1);
-  assert.equal(e.forge3d_orbis_loader_drain_completion(handle), 1);
-  assert.equal(e.forge3d_orbis_loader_release_completion(handle), 1);
+  const requests = [];
+  while (true) {
+    assert.equal(e.forge3d_orbis_loader_request(handle, lod, x, y), 1);
+    assert.equal(e.forge3d_orbis_loader_poll_request(handle), 1);
+    const fields = [0, 1, 2, 3, 4].map((field) => e.forge3d_orbis_loader_last_request(handle, field));
+    requests.push(fields.slice(0, 3));
+    const id = e.forge3d_orbis_alloc_heights(handle, ...fields, 1, 1);
+    assert.notEqual(id, 0);
+    const ptr = e.forge3d_orbis_heights_pointer(handle, id);
+    const coveragePtr = e.forge3d_orbis_coverage_pointer(handle, id);
+    new Float32Array(e.memory.buffer, ptr, 1)[0] = value;
+    new Uint8Array(e.memory.buffer, coveragePtr, 1)[0] = 255;
+    assert.equal(e.forge3d_orbis_loader_complete(handle, id), 1);
+    assert.equal(e.forge3d_orbis_loader_drain_completion(handle), 1);
+    assert.equal(e.forge3d_orbis_loader_release_completion(handle), 1);
+    if (fields[0] === lod && fields[1] === x && fields[2] === y) return requests;
+  }
 };
-completeTile(residencyHandle, 0, 0, 0, 1);
-completeTile(residencyHandle, 2, 0, 0, 2);
+assert.deepEqual(completeTile(residencyHandle, 0, 0, 0, 1), [[0, 0, 0]]);
+assert.deepEqual(completeTile(residencyHandle, 2, 0, 0, 2), [[1, 0, 0], [2, 0, 0]]);
 assert.equal(e.forge3d_orbis_loader_resolve_page(residencyHandle, 0, 0, 0, 0), 0,
   "max_in_flight=1 reserves an independent pinned-root slot");
 assert.equal(e.forge3d_orbis_loader_resolve_page(residencyHandle, 2, 0, 0, 0), 2,
   "root and one requested leaf are simultaneously resident");
 assert.equal(e.forge3d_orbis_loader_resolve_page(residencyHandle, 0, 0, 0, 0), 0,
   "root touch uses the shared runtime LRU");
-completeTile(residencyHandle, 2, 3, 0, 3);
+assert.deepEqual(completeTile(residencyHandle, 2, 3, 0, 3), [[1, 1, 0], [2, 3, 0]]);
 assert.equal(e.forge3d_orbis_loader_resolve_page(residencyHandle, 2, 0, 0, 0), 0,
   "evicted cold leaf resolves through the pinned root");
 assert.equal(e.forge3d_orbis_loader_resolve_page(residencyHandle, 2, 3, 0, 0), 2);

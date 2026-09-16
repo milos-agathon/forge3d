@@ -47,6 +47,27 @@ struct WasmLoaderFacade {
     last_completion_bytes: u64,
 }
 
+impl WasmLoaderFacade {
+    fn request(&mut self, requested: TileId) -> bool {
+        let _ = self.residency.touch_resolved(requested);
+        let mut candidate = requested;
+        if self.residency.slot_of(requested).is_none() {
+            let mut cursor = requested;
+            while let Some(parent) = cursor.parent() {
+                if self.residency.slot_of(parent).is_none() {
+                    candidate = parent;
+                }
+                cursor = parent;
+            }
+        }
+        !self
+            .submitted_payload_bytes
+            .keys()
+            .any(|ticket| ticket.tile_id == candidate)
+            && self.loader.request(candidate)
+    }
+}
+
 struct PayloadAllocation {
     loader: u32,
     ticket: RequestTicket,
@@ -182,7 +203,7 @@ pub extern "C" fn forge3d_orbis_loader_init(max_in_flight: u32, tile_resolution:
                     max_in_flight as usize,
                     1,
                     std::sync::Arc::new(BrowserReader),
-                    CoalescePolicy::PreferFine,
+                    CoalescePolicy::PreferCoarse,
                 ),
                 tile_resolution,
                 last_request: None,
@@ -228,13 +249,7 @@ pub extern "C" fn forge3d_orbis_loader_request(handle: u32, lod: u32, x: u32, y:
             .borrow_mut()
             .loaders
             .get_mut(&handle)
-            .is_some_and(|facade| {
-                !facade
-                    .submitted_payload_bytes
-                    .keys()
-                    .any(|ticket| ticket.tile_id == id)
-                    && facade.loader.request(id)
-            }) as u32
+            .is_some_and(|facade| facade.request(id)) as u32
     })
 }
 

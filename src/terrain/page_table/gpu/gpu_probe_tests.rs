@@ -1,7 +1,9 @@
 #![cfg(feature = "enable-globe")]
 
 use super::*;
-use wgpu::util::DeviceExt;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
+};
 
 fn r32_texture(
     device: &wgpu::Device,
@@ -10,21 +12,25 @@ fn r32_texture(
     width: u32,
     height: u32,
     values: &[f32],
-) -> (wgpu::Texture, wgpu::TextureView) {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+) -> (TrackedTexture, wgpu::TextureView) {
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )
+    .unwrap();
     let mut padded = vec![0u8; 256 * height as usize];
     for row in 0..height as usize {
         let source =
@@ -96,11 +102,15 @@ fn production_shader_samples_regional_overview_at_two_global_positions() {
     let overview = OverviewUvTransform::from_lonlat_bounds((-180.0, 0.0, 0.0, 90.0)).unwrap();
     let initial =
         SerializedPageTable::from_entries_with_overview(&[], 4, 2, 1, (1, 1), 1, overview).unwrap();
-    let page_table = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("orbis.overview-probe.page-table"),
-        contents: &initial.bytes(),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
+    let page_table = tracked_create_buffer_init(
+        &device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("orbis.overview-probe.page-table"),
+            contents: &initial.bytes(),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        },
+    )
+    .unwrap();
     let (_overview_texture, overview_view) = r32_texture(
         &device,
         &queue,
@@ -124,23 +134,35 @@ fn production_shader_samples_regional_overview_at_two_global_positions() {
         production_globe_center_uv(-135.0, 67.5),
         production_globe_center_uv(90.0, -45.0),
     ];
-    let probe_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("orbis.overview-probe.uvs"),
-        contents: bytemuck::cast_slice(&probes),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let output = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("orbis.overview-probe.output"),
-        size: 12,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("orbis.overview-probe.readback"),
-        size: 12,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    let probe_buffer = tracked_create_buffer_init(
+        &device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("orbis.overview-probe.uvs"),
+            contents: bytemuck::cast_slice(&probes),
+            usage: wgpu::BufferUsages::STORAGE,
+        },
+    )
+    .unwrap();
+    let output = tracked_create_buffer(
+        &device,
+        &wgpu::BufferDescriptor {
+            label: Some("orbis.overview-probe.output"),
+            size: 12,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    )
+    .unwrap();
+    let readback = tracked_create_buffer(
+        &device,
+        &wgpu::BufferDescriptor {
+            label: Some("orbis.overview-probe.readback"),
+            size: 12,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )
+    .unwrap();
     let shader = format!(
         "{}\n@group(0) @binding(23) var<storage, read> orbis_probe_uvs: array<vec2<f32>>;\n\
          @group(0) @binding(24) var<storage, read_write> orbis_probe_out: array<f32>;\n\

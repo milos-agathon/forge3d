@@ -199,9 +199,11 @@ mod tests {
         // Both the ordinary geometry path and every clipmap morph lookup must
         // share the same reconstruction instead of drifting by callsite.
         assert!(source.contains("let h_raw = sample_height_bilinear(uv);"));
-        assert!(source.contains("let h_fine = sample_height_bilinear(uv);"));
+        assert!(source.contains(
+            "let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"
+        ));
         assert_eq!(
-            source.matches("sample_height_bilinear(coarse_base").count(),
+            source.matches("sample_height_bilinear(level_base").count(),
             4
         );
 
@@ -212,7 +214,9 @@ mod tests {
         assert!(!resolve.contains("textureSample(height_tex"));
         assert!(!resolve.contains("textureSampleLevel(height_tex"));
         assert_eq!(resolve.matches("textureLoad(height_tex").count(), 4);
-        assert!(resolve.contains("let h_fine = sample_height_bilinear(uv);"));
+        assert!(resolve.contains(
+            "let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"
+        ));
 
         // The CSM caster and visible surface must agree between texel centres.
         let shadow = terrain_shadow_depth();

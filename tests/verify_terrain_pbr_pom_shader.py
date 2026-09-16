@@ -40,8 +40,8 @@ def test_shader_milestone_4_complete():
     # Task 4.2: Triplanar Texture Sampling
     print("Task 4.2: Triplanar Texture Sampling")
     assert "fn sample_triplanar" in shader_source, "Missing sample_triplanar function"
-    assert "fn sample_triplanar_vt_family" in shader_source, \
-        "Missing triplanar material-family sampling"
+    assert "fn terrain_vt_sample_family_data" in shader_source, \
+        "Missing residency-gated material-family sampling"
     assert "fn apply_encoded_tangent_normal" in shader_source, \
         "Missing tangent-space normal application"
     assert "fn apply_material_normal_map" in shader_source, \
@@ -62,7 +62,7 @@ def test_shader_milestone_4_complete():
     assert "uv_z = world_pos.xy * scale" in shader_source, "Missing Z-axis UVs"
 
     print("  ✓ sample_triplanar() implemented")
-    print("  ✓ triplanar material families and tangent normals implemented")
+    print("  ✓ residency-gated material families and tangent normals implemented")
     print("  ✓ Blend weights calculated from surface normal")
     print("  ✓ Three-axis sampling (X, Y, Z)")
     print()

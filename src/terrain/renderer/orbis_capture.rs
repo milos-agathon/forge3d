@@ -642,14 +642,35 @@ impl OrbisPendingCapture {
                 first.frame_anchor_ecef + first.local_to_ecef.transform_vector3(a.local);
             let world_b =
                 second.frame_anchor_ecef + second.local_to_ecef.transform_vector3(b.local);
-            let canonical = canonical_selected_world_identity(world_a, world_b, a.local, b.local)
-                .map_err(|error| {
-                    anyhow!(
-                        "ORBIS tracked ground vertex {index}: {error}; cpu_a={:?}, cpu_b={:?}",
-                        first.mesh_vertices.get(index),
-                        second.mesh_vertices.get(index),
-                    )
-                })?;
+            let cpu_a = first
+                .mesh_vertices
+                .get(index)
+                .ok_or_else(|| anyhow!("ORBIS first CPU vertex {index} is out of range"))?;
+            let cpu_b = second
+                .mesh_vertices
+                .get(index)
+                .ok_or_else(|| anyhow!("ORBIS second CPU vertex {index} is out of range"))?;
+            let base_a = Vec3::from(cpu_a.position).as_dvec3();
+            let base_b = Vec3::from(cpu_b.position).as_dvec3();
+            let base_world_a =
+                first.frame_anchor_ecef + first.local_to_ecef.transform_vector3(base_a);
+            let base_world_b =
+                second.frame_anchor_ecef + second.local_to_ecef.transform_vector3(base_b);
+            let canonical = canonical_selected_world_identity(
+                world_a,
+                world_b,
+                a.local,
+                b.local,
+                base_a,
+                base_b,
+                base_world_a,
+                base_world_b,
+            )
+            .map_err(|error| {
+                anyhow!(
+                    "ORBIS tracked ground vertex {index}: {error}; cpu_a={cpu_a:?}, cpu_b={cpu_b:?}",
+                )
+            })?;
             let expected_local_0 = first
                 .local_to_ecef
                 .transpose()
@@ -688,6 +709,43 @@ impl OrbisPendingCapture {
 
         let depth = map_readback(device, &second.depth_readback)?;
         let coverage = map_readback(device, &second.coverage_readback)?;
+        if std::env::var_os("FORGE3D_ORBIS_DEBUG_CRACKS").is_some() {
+            let mut depth_vis = format!("P2\n{} {}\n65535\n", second.width, second.height);
+            for y in 0..second.height {
+                for x in 0..second.width {
+                    let offset =
+                        y as usize * second.depth_bytes_per_row as usize + x as usize * 4;
+                    let d = f32::from_le_bytes(
+                        depth[offset..offset + 4].try_into().unwrap(),
+                    );
+                    let v = (d.clamp(0.0, 1.0) * 65535.0) as u32;
+                    depth_vis.push_str(&format!("{v} "));
+                }
+                depth_vis.push('\n');
+            }
+            let _ = std::fs::write("orbis-debug-depth.pgm", depth_vis);
+            let mut depth_raw = Vec::with_capacity(
+                second.height as usize * second.width as usize * 4,
+            );
+            for y in 0..second.height {
+                for x in 0..second.width {
+                    let offset =
+                        y as usize * second.depth_bytes_per_row as usize + x as usize * 4;
+                    depth_raw.extend_from_slice(&depth[offset..offset + 4]);
+                }
+            }
+            let _ = std::fs::write("orbis-debug-depth.f32", depth_raw);
+            let mut cov_vis = format!("P2\n{} {}\n255\n", second.width, second.height);
+            for y in 0..second.height {
+                for x in 0..second.width {
+                    let offset =
+                        y as usize * second.coverage_bytes_per_row as usize + x as usize;
+                    cov_vis.push_str(&format!("{} ", coverage[offset]));
+                }
+                cov_vis.push('\n');
+            }
+            let _ = std::fs::write("orbis-debug-coverage.pgm", cov_vis);
+        }
         let world_units_per_pixel = second.terrain_span
             / f64::from(second.width.min(second.height).max(1));
         let (cracks, boundary_samples, variance) = analyze_paired_cracks(
@@ -868,12 +926,30 @@ fn canonical_selected_world_identity(
     world_b: DVec3,
     local_a: DVec3,
     local_b: DVec3,
+    base_a: DVec3,
+    base_b: DVec3,
+    base_world_a: DVec3,
+    base_world_b: DVec3,
 ) -> Result<DVec3> {
     ensure!(
-        world_a.is_finite() && world_b.is_finite() && local_a.is_finite() && local_b.is_finite(),
+        world_a.is_finite()
+            && world_b.is_finite()
+            && local_a.is_finite()
+            && local_b.is_finite()
+            && base_a.is_finite()
+            && base_b.is_finite()
+            && base_world_a.is_finite()
+            && base_world_b.is_finite(),
         "selected world identity is non-finite"
     );
-    let quantization_bound = local_vector_quantization_bound(local_a, local_b);
+    let quantization_bound = local_vector_quantization_bound(
+        local_a,
+        local_b,
+        base_a,
+        base_b,
+        base_world_a,
+        base_world_b,
+    )?;
     ensure!(
         quantization_bound < 0.001,
         "selected local-coordinate quantization bound {quantization_bound:.9} m is not below half the 2 mm probe"
@@ -891,12 +967,30 @@ fn validate_mating_world_identity(
     world_b: DVec3,
     local_a: DVec3,
     local_b: DVec3,
+    base_a: DVec3,
+    base_b: DVec3,
+    base_world_a: DVec3,
+    base_world_b: DVec3,
 ) -> Result<()> {
     ensure!(
-        world_a.is_finite() && world_b.is_finite() && local_a.is_finite() && local_b.is_finite(),
+        world_a.is_finite()
+            && world_b.is_finite()
+            && local_a.is_finite()
+            && local_b.is_finite()
+            && base_a.is_finite()
+            && base_b.is_finite()
+            && base_world_a.is_finite()
+            && base_world_b.is_finite(),
         "mating world identity is non-finite"
     );
-    let quantization_bound = local_vector_quantization_bound(local_a, local_b);
+    let quantization_bound = local_vector_quantization_bound(
+        local_a,
+        local_b,
+        base_a,
+        base_b,
+        base_world_a,
+        base_world_b,
+    )?;
     let drift = (world_b - world_a).length();
     ensure!(
         drift <= quantization_bound,
@@ -905,17 +999,42 @@ fn validate_mating_world_identity(
     Ok(())
 }
 
-fn local_vector_quantization_bound(local_a: DVec3, local_b: DVec3) -> f64 {
-    // Each independently rounded f32 component is within half an ULP of the
-    // same f64 ground point. The difference of two 3D vectors is therefore
-    // bounded by one epsilon per component; use the Euclidean norm of that
-    // componentwise cube instead of the insufficient scalar-axis bound.
-    let component_scale = local_a
-        .abs()
-        .max(local_b.abs())
-        .max_element()
-        .max(1.0);
-    f64::from(f32::EPSILON) * component_scale * 3.0_f64.sqrt() + 1.0e-6
+fn f32_rounding_ulp(value: f64) -> f64 {
+    let magnitude = value.abs();
+    if magnitude < f64::from(f32::MIN_POSITIVE) {
+        f64::from(f32::from_bits(1))
+    } else {
+        magnitude.log2().floor().exp2() * f64::from(f32::EPSILON)
+    }
+}
+
+fn f32_pair_rounding_bound(a: DVec3, b: DVec3) -> f64 {
+    let component = |x, y| (f32_rounding_ulp(x) + f32_rounding_ulp(y)) * 0.5;
+    DVec3::new(
+        component(a.x, b.x),
+        component(a.y, b.y),
+        component(a.z, b.z),
+    )
+    .length()
+}
+
+fn local_vector_quantization_bound(
+    local_a: DVec3,
+    local_b: DVec3,
+    base_a: DVec3,
+    base_b: DVec3,
+    base_world_a: DVec3,
+    base_world_b: DVec3,
+) -> Result<f64> {
+    // Validate the first stored-f32 stage from observed ECEF drift, then add
+    // the final shader displacement's independent half-ULP endpoint bound.
+    let base_drift = (base_world_b - base_world_a).length();
+    let base_bound = f32_pair_rounding_bound(base_a, base_b) + 1.0e-6;
+    ensure!(
+        base_drift.is_finite() && base_drift <= base_bound,
+        "stored base ECEF drift {base_drift:.9} m exceeds quantization bound {base_bound:.9} m"
+    );
+    Ok(base_drift + f32_pair_rounding_bound(local_a, local_b) + 1.0e-6)
 }
 
 #[derive(Debug)]
@@ -1126,12 +1245,34 @@ fn selected_mating_boundaries(
                     .ok_or_else(|| anyhow!("ORBIS mating boundary projection is missing"))
             })
             .collect::<Result<Vec<_>>>()?;
-        validate_projected_seam_pair(&inner, &outer)?;
-        pairs.push(ProjectedSeamPair {
+        let inner_depth = component
+            .vertices
+            .iter()
+            .map(|&vertex| {
+                projections
+                    .get(vertex)
+                    .map(|sample| sample.ndc_depth)
+                    .ok_or_else(|| anyhow!("ORBIS inner mating depth is missing"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let outer_depth = other_vertices
+            .iter()
+            .map(|&vertex| {
+                projections
+                    .get(vertex)
+                    .map(|sample| sample.ndc_depth)
+                    .ok_or_else(|| anyhow!("ORBIS outer mating depth is missing"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let pair = ProjectedSeamPair {
             inner,
             outer,
+            inner_depth,
+            outer_depth,
             silhouette: false,
-        });
+        };
+        validate_projected_seam_pair(&pair)?;
+        pairs.push(pair);
     }
     ensure!(!pairs.is_empty(), "ORBIS exact selection has no paired interior seam");
     Ok(pairs)
@@ -1206,11 +1347,33 @@ fn validate_boundary_identity(
             .ok_or_else(|| anyhow!("ORBIS second mating endpoint projection is missing"))?;
         let world_a = frame.frame_anchor_ecef + frame.local_to_ecef.transform_vector3(a.local);
         let world_b = frame.frame_anchor_ecef + frame.local_to_ecef.transform_vector3(b.local);
-        validate_mating_world_identity(world_a, world_b, a.local, b.local).map_err(|error| {
+        let cpu_a = frame
+            .mesh_vertices
+            .get(a_index)
+            .ok_or_else(|| anyhow!("ORBIS first mating CPU vertex is out of range"))?;
+        let cpu_b = frame
+            .mesh_vertices
+            .get(b_index)
+            .ok_or_else(|| anyhow!("ORBIS second mating CPU vertex is out of range"))?;
+        let base_a = Vec3::from(cpu_a.position).as_dvec3();
+        let base_b = Vec3::from(cpu_b.position).as_dvec3();
+        let base_world_a =
+            frame.frame_anchor_ecef + frame.local_to_ecef.transform_vector3(base_a);
+        let base_world_b =
+            frame.frame_anchor_ecef + frame.local_to_ecef.transform_vector3(base_b);
+        validate_mating_world_identity(
+            world_a,
+            world_b,
+            a.local,
+            b.local,
+            base_a,
+            base_b,
+            base_world_a,
+            base_world_b,
+        )
+        .map_err(|error| {
             anyhow!(
-                "ORBIS paired boundary identity {a_index}->{b_index}: {error}; cpu_a={:?}, cpu_b={:?}",
-                frame.mesh_vertices.get(a_index),
-                frame.mesh_vertices.get(b_index),
+                "ORBIS paired boundary identity {a_index}->{b_index}: {error}; cpu_a={cpu_a:?}, cpu_b={cpu_b:?}",
             )
         })?;
         ensure!(
@@ -1339,16 +1502,29 @@ fn component_radius_vertices(
 struct ProjectedSeamPair {
     inner: Vec<Vec2>,
     outer: Vec<Vec2>,
+    inner_depth: Vec<f32>,
+    outer_depth: Vec<f32>,
     silhouette: bool,
 }
 
-fn validate_projected_seam_pair(inner: &[Vec2], outer: &[Vec2]) -> Result<()> {
+fn validate_projected_seam_pair(pair: &ProjectedSeamPair) -> Result<()> {
     ensure!(
-        inner.len() >= 2 && outer.len() >= 2,
+        pair.inner.len() >= 2
+            && pair.outer.len() >= 2
+            && pair.inner.len() == pair.inner_depth.len()
+            && pair.outer.len() == pair.outer_depth.len(),
         "ORBIS selected seam is missing one mating boundary"
     );
     ensure!(
-        inner.iter().chain(outer).all(|point| point.is_finite()),
+        pair.inner
+            .iter()
+            .chain(&pair.outer)
+            .all(|point| point.is_finite())
+            && pair
+                .inner_depth
+                .iter()
+                .chain(&pair.outer_depth)
+                .all(|depth| depth.is_finite()),
         "ORBIS selected seam contains non-finite projected evidence"
     );
     Ok(())
@@ -1378,6 +1554,19 @@ fn sample_polyline(points: &[Vec2], cumulative: &[f32], total: f32, t: f32) -> V
     points[lower].lerp(points[upper], (distance - cumulative[lower]) / span)
 }
 
+fn sample_polyline_scalar(values: &[f32], cumulative: &[f32], total: f32, t: f32) -> f32 {
+    if total <= f32::EPSILON {
+        return values[0];
+    }
+    let distance = t.clamp(0.0, 1.0) * total;
+    let upper = cumulative
+        .partition_point(|value| *value < distance)
+        .clamp(1, values.len() - 1);
+    let lower = upper - 1;
+    let span = (cumulative[upper] - cumulative[lower]).max(f32::EPSILON);
+    values[lower] + (values[upper] - values[lower]) * ((distance - cumulative[lower]) / span)
+}
+
 fn linearize_depth(depth: f32, clip_near: f64, clip_far: f64) -> Option<f64> {
     if !depth.is_finite() || !(0.0..=1.0).contains(&depth) {
         return None;
@@ -1402,7 +1591,8 @@ struct SeamDepthSample {
 }
 
 fn extrapolate_seam_depth(samples: &[SeamDepthSample]) -> Option<(f64, f64)> {
-    let samples = samples.get(..4)?;
+    let order = samples.len().min(4);
+    let samples = samples.get(..order).filter(|_| order >= 2)?;
     let mut estimate = 0.0_f64;
     let mut quantization = 0.0_f64;
     for (index, sample) in samples.iter().enumerate() {
@@ -1455,12 +1645,12 @@ fn analyze_paired_cracks(
     let mut crack_pixels = HashSet::<(u32, u32)>::new();
     let mut depth_values = Vec::new();
     let mut active_pairs = 0_usize;
-    for pair in pairs {
+    for (pair_index, pair) in pairs.iter().enumerate() {
         if pair.silhouette {
             continue;
         }
         active_pairs += 1;
-        validate_projected_seam_pair(&pair.inner, &pair.outer)?;
+        validate_projected_seam_pair(pair)?;
         let (inner_cumulative, inner_total) = polyline_lengths(&pair.inner);
         let (outer_cumulative, outer_total) = polyline_lengths(&pair.outer);
         ensure!(
@@ -1507,6 +1697,50 @@ fn analyze_paired_cracks(
             };
             ensure!(normal != Vec2::ZERO, "ORBIS selected seam normal is degenerate");
 
+            // Boundary attestation: the linear depth each submitted mating
+            // edge claims to render at this seam position. Corridor pixels can
+            // only be judged against it; without it no depth classification is
+            // possible.
+            let inner_linear = linearize_depth(
+                sample_polyline_scalar(
+                    &pair.inner_depth,
+                    &inner_cumulative,
+                    inner_total,
+                    t,
+                ),
+                clip_near,
+                clip_far,
+            );
+            let outer_linear = linearize_depth(
+                sample_polyline_scalar(
+                    &pair.outer_depth,
+                    &outer_cumulative,
+                    outer_total,
+                    t,
+                ),
+                clip_near,
+                clip_far,
+            );
+            let attested = match (inner_linear, outer_linear) {
+                (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
+                (Some(v), None) | (None, Some(v)) => Some((v, v)),
+                _ => None,
+            };
+            let separation = f64::from((outer - inner).dot(normal)).max(0.0);
+            // Without attestation the corridor cannot be classified; preserve
+            // the strictest behaviour and let the side comparison run.
+            let mut seam_visible = attested.is_none();
+            // Flanked-hole evidence for seams too narrow for strictly interior
+            // pixel centres: content behind both submitted surfaces on the
+            // seam band is a hole when attested surface renders on both sides
+            // of it and nothing behind appears further out. A silhouette always
+            // leaves its far side behind the attestation, so it never flanks.
+            let mut seam_band_behind = Vec::new();
+            let mut inner_flank_attested = false;
+            let mut outer_flank_attested = false;
+            let mut inner_flank_behind = false;
+            let mut outer_flank_behind = false;
+
             // Rasterize the closed corridor between the two submitted mating
             // boundaries, dilated by two pixels on both sides. Sampling both
             // longitudinal endpoints is deliberate: endpoint holes are cracks.
@@ -1526,20 +1760,87 @@ fn analyze_paired_cracks(
                 let coverage_offset =
                     y as usize * coverage_bytes_per_row as usize + x as usize;
                 if coverage_bytes[coverage_offset] <= 127 {
-                    crack_pixels.insert(pixel);
-                } else {
-                    let depth_offset =
-                        y as usize * bytes_per_row as usize + x as usize * 4;
-                    let depth = f32::from_le_bytes(
-                        bytes[depth_offset..depth_offset + 4]
-                            .try_into()
-                            .unwrap(),
-                    );
-                    if let Some(linear) =
-                        linearize_depth(depth, clip_near, clip_far)
-                    {
-                        depth_values.push(linear);
+                    if std::env::var_os("FORGE3D_ORBIS_DEBUG_CRACKS").is_some() {
+                        eprintln!("ORBIS coverage crack pair={pair_index} pixel={pixel:?}");
                     }
+                    crack_pixels.insert(pixel);
+                    continue;
+                }
+                let depth_offset =
+                    y as usize * bytes_per_row as usize + x as usize * 4;
+                let depth = f32::from_le_bytes(
+                    bytes[depth_offset..depth_offset + 4]
+                        .try_into()
+                        .unwrap(),
+                );
+                let Some(linear) = linearize_depth(depth, clip_near, clip_far) else {
+                    continue;
+                };
+                depth_values.push(linear);
+                // Depth classification applies only inside the strict band
+                // between the polylines (plus a half-pixel rasterization
+                // allowance): the two-pixel dilation is slop margin where
+                // legitimately different content may abut a surface edge.
+                let Some((attested_lo, attested_hi)) = attested else {
+                    continue;
+                };
+                let along = f64::from((point.round() - inner).dot(normal));
+                let bound = linear_depth_quantization_bound(linear, clip_near, clip_far)
+                    + linear_depth_quantization_bound(attested_lo, clip_near, clip_far)
+                    + linear_depth_quantization_bound(attested_hi, clip_near, clip_far)
+                    + world_units_per_pixel * 2.0;
+                let consistent = linear >= attested_lo - bound && linear <= attested_hi + bound;
+                // A pixel rendering at the claimed depth anywhere in the
+                // dilated band proves the submitted seam surface is visible;
+                // only then is the side depth-step comparison meaningful.
+                if consistent {
+                    seam_visible = true;
+                }
+                // Only pixel centers strictly interior to the sliver between
+                // the two projected edges are reliable hole evidence. A
+                // center within half a pixel of either claimed edge is edge
+                // quantization: it may legitimately lie just past the
+                // rasterized surface edge at a silhouette.
+                let interior = along > 0.5 && along < separation - 0.5;
+                let behind = linear > attested_hi + bound;
+                if along < -0.5 {
+                    inner_flank_attested |= consistent;
+                    inner_flank_behind |= behind;
+                } else if along > separation + 0.5 {
+                    outer_flank_attested |= consistent;
+                    outer_flank_behind |= behind;
+                } else if behind && !interior {
+                    seam_band_behind.push(pixel);
+                }
+                if std::env::var_os("FORGE3D_ORBIS_DEBUG_CRACKS").is_some() {
+                    eprintln!(
+                        "ORBIS strict pixel pair={pair_index} step={step} pixel={pixel:?} rendered={linear:.2} attested=({attested_lo:.2},{attested_hi:.2}) along={along:.3} sep={separation:.3} interior={interior} class={}",
+                        if linear > attested_hi + bound { "behind" } else if consistent { "consistent" } else { "occluder" },
+                    );
+                }
+                if interior && linear > attested_hi + bound {
+                    // Covered by content behind both submitted surfaces: the
+                    // claimed seam did not render here, so this is a hole.
+                    if std::env::var_os("FORGE3D_ORBIS_DEBUG_CRACKS").is_some() {
+                        eprintln!(
+                            "ORBIS depth crack pair={pair_index} pixel={pixel:?} rendered={linear:.6} attested=({attested_lo:.6}, {attested_hi:.6}) bound={bound:.6}"
+                        );
+                    }
+                    crack_pixels.insert(pixel);
+                }
+                // A pixel nearer than both boundaries is legitimate occlusion
+                // of the seam by foreground terrain, not crack evidence.
+            }
+            if inner_flank_attested
+                && outer_flank_attested
+                && !inner_flank_behind
+                && !outer_flank_behind
+            {
+                for pixel in seam_band_behind {
+                    if std::env::var_os("FORGE3D_ORBIS_DEBUG_CRACKS").is_some() {
+                        eprintln!("ORBIS flanked hole pair={pair_index} step={step} pixel={pixel:?}");
+                    }
+                    crack_pixels.insert(pixel);
                 }
             }
 
@@ -1592,22 +1893,115 @@ fn analyze_paired_cracks(
                 }
                 side
             };
-            let left = sample_side(-1.0);
-            let right = sample_side(1.0);
-            if let (Some((left_at_seam, left_quantization)), Some((right_at_seam, right_quantization))) =
-                (extrapolate_seam_depth(&left), extrapolate_seam_depth(&right))
-            {
-                depth_values.extend(left.iter().chain(&right).map(|sample| sample.linear_depth));
-                let tolerance = (left_quantization + right_quantization) * 2.0
-                    + world_units_per_pixel * 0.01;
-                if (left_at_seam - right_at_seam).abs() > tolerance {
-                    let pixel = midpoint.round().as_ivec2();
-                    if pixel.x >= 0
-                        && pixel.y >= 0
-                        && pixel.x < width as i32
-                        && pixel.y < height as i32
+            // Restrict each side's sample run to the contiguous surface that
+            // abuts the seam: the first sample must lie within the attested
+            // interval, and each later sample must continue the previous one
+            // within a quantization-plus-slope bound. A run that crosses an
+            // occlusion edge (a silhouette or a foreign surface) ends there —
+            // extrapolating through it invents depths that were never
+            // submitted. Boundary-only evidence cannot separate a mating
+            // surface rendered behind its attestation from a local terrain
+            // silhouette running along the seam (the physical Rainier probe
+            // has both seams crossing a ridge against 6 km terrain), so an
+            // unflanked far side is not crack evidence; the flanked-hole rule
+            // above covers holes the surface resumes past.
+            let seam_run = |mut side: Vec<SeamDepthSample>| -> Vec<SeamDepthSample> {
+                if let Some((attested_lo, attested_hi)) = attested {
+                    if let Some(first) = side.first() {
+                        let bound = first.quantization
+                            + linear_depth_quantization_bound(
+                                attested_lo,
+                                clip_near,
+                                clip_far,
+                            )
+                            + linear_depth_quantization_bound(
+                                attested_hi,
+                                clip_near,
+                                clip_far,
+                            )
+                            + first.distance.abs() * world_units_per_pixel;
+                        if first.linear_depth < attested_lo - bound
+                            || first.linear_depth > attested_hi + bound
+                        {
+                            side.clear();
+                        }
+                    }
+                }
+                let mut end = side.len();
+                for index in 1..side.len() {
+                    let previous = side[index - 1];
+                    let current = side[index];
+                    let jump = (current.linear_depth - previous.linear_depth).abs();
+                    let run = (current.distance - previous.distance).abs();
+                    if jump
+                        > previous.quantization
+                            + current.quantization
+                            + run * world_units_per_pixel
                     {
-                        crack_pixels.insert((pixel.x as u32, pixel.y as u32));
+                        end = index;
+                        break;
+                    }
+                }
+                side.truncate(end);
+                side
+            };
+            let left = seam_run(sample_side(-1.0));
+            let right = seam_run(sample_side(1.0));
+            if std::env::var_os("FORGE3D_ORBIS_DEBUG_CRACKS").is_some() {
+                eprintln!(
+                    "ORBIS seam samples pair={pair_index} step={step}/{longitudinal_steps} mid={midpoint:?} inner_linear={inner_linear:?} outer_linear={outer_linear:?} visible={seam_visible} left={:?} right={:?}",
+                    left.iter().map(|s| (s.distance, s.linear_depth)).collect::<Vec<_>>(),
+                    right.iter().map(|s| (s.distance, s.linear_depth)).collect::<Vec<_>>(),
+                );
+            }
+            // The depth-step comparison only runs where the strict corridor
+            // proved the submitted seam surface is actually visible; an
+            // occluded seam cannot show a crack.
+            if seam_visible {
+                if let (
+                    Some((left_at_seam, left_quantization)),
+                    Some((right_at_seam, right_quantization)),
+                ) = (extrapolate_seam_depth(&left), extrapolate_seam_depth(&right))
+                {
+                    depth_values.extend(
+                        left.iter().chain(&right).map(|sample| sample.linear_depth),
+                    );
+                    // A covered corridor whose two submitted boundaries render
+                    // at different depths is legitimate neighbor occlusion,
+                    // not a hole: only a step beyond the boundary-attested
+                    // separation is unexplained.
+                    let (boundary_step, boundary_quantization) = match attested {
+                        Some((attested_lo, attested_hi)) => (
+                            attested_hi - attested_lo,
+                            linear_depth_quantization_bound(attested_lo, clip_near, clip_far)
+                                + linear_depth_quantization_bound(
+                                    attested_hi,
+                                    clip_near,
+                                    clip_far,
+                                ),
+                        ),
+                        _ => (0.0, 0.0),
+                    };
+                    let tolerance = (left_quantization + right_quantization) * 2.0
+                        + boundary_quantization
+                        + world_units_per_pixel * 0.01;
+                    let excess =
+                        (left_at_seam - right_at_seam).abs() - boundary_step.abs();
+                    if excess > tolerance {
+                        let pixel = midpoint.round().as_ivec2();
+                        if pixel.x >= 0
+                            && pixel.y >= 0
+                            && pixel.x < width as i32
+                            && pixel.y < height as i32
+                        {
+                            let pixel = (pixel.x as u32, pixel.y as u32);
+                            if std::env::var_os("FORGE3D_ORBIS_DEBUG_CRACKS").is_some() {
+                                eprintln!(
+                                    "ORBIS depth crack pair={pair_index} pixel={pixel:?} left={left_at_seam:.6} right={right_at_seam:.6} excess={excess:.6} boundary_step={boundary_step:.6} tolerance={tolerance:.6}",
+                                );
+                            }
+                            crack_pixels.insert(pixel);
+                        }
                     }
                 }
             }
@@ -1685,9 +2079,17 @@ mod tests {
     }
 
     fn vertical_pair(silhouette: bool) -> ProjectedSeamPair {
+        // Attestation tracks the submitted surface at each boundary vertex —
+        // matching `seam_fixture` — but deliberately without the +5 step so a
+        // rendered step is an unattested crack.
+        let vertex_depth = |x: f32, y: f32| {
+            encode_depth(100.0 + f64::from(y) * 0.2 + f64::from(x) * 0.1, 0.1, 1000.0)
+        };
         ProjectedSeamPair {
             inner: vec![Vec2::new(31.0, 8.0), Vec2::new(31.0, 55.0)],
             outer: vec![Vec2::new(32.0, 8.0), Vec2::new(32.0, 55.0)],
+            inner_depth: vec![vertex_depth(31.0, 8.0), vertex_depth(31.0, 55.0)],
+            outer_depth: vec![vertex_depth(32.0, 8.0), vertex_depth(32.0, 55.0)],
             silhouette,
         }
     }
@@ -1710,7 +2112,12 @@ mod tests {
         .unwrap()
         .0 > 0);
 
+        let vertex_depth = |x: f32, y: f32| {
+            encode_depth(100.0 + f64::from(y) * 0.2 + f64::from(x) * 0.1, 0.1, 1000.0)
+        };
         let separated = ProjectedSeamPair {
+            inner_depth: vec![vertex_depth(28.0, 8.0), vertex_depth(28.0, 55.0)],
+            outer_depth: vec![vertex_depth(35.0, 8.0), vertex_depth(35.0, 55.0)],
             inner: vec![Vec2::new(28.0, 8.0), Vec2::new(28.0, 55.0)],
             outer: vec![Vec2::new(35.0, 8.0), Vec2::new(35.0, 55.0)],
             silhouette: false,
@@ -1736,12 +2143,160 @@ mod tests {
         .unwrap()
         .0 > 0);
 
+        // A gap between the projected edges whose interior pixels render
+        // content deeper than both submitted surfaces is a crack: the
+        // claimed surfaces do not cover their own seam.
+        let gapped = ProjectedSeamPair {
+            inner: vec![Vec2::new(30.0, 8.0), Vec2::new(30.0, 55.0)],
+            outer: vec![Vec2::new(34.0, 8.0), Vec2::new(34.0, 55.0)],
+            inner_depth: vec![vertex_depth(30.0, 8.0), vertex_depth(30.0, 55.0)],
+            outer_depth: vec![vertex_depth(34.0, 8.0), vertex_depth(34.0, 55.0)],
+            silhouette: false,
+        };
         let (depth, coverage, drow, crow) = seam_fixture(true, &[]);
         assert!(analyze_paired_cracks(
-            &depth, &coverage, 64, 64, drow, crow, 0.1, 1000.0, 1.0, &[pair],
+            &depth, &coverage, 64, 64, drow, crow, 0.1, 1000.0, 1.0, &[gapped],
         )
         .unwrap()
         .0 > 0);
+    }
+
+    #[test]
+    fn paired_seam_oracle_ignores_neighbor_occlusion_when_corridor_is_covered() {
+        // The mating boundaries themselves render at the 5 m step: the
+        // neighbor surface legitimately occludes the covered corridor, so the
+        // observed discontinuity is boundary-attested, not a crack.
+        let encode = |linear: f64| encode_depth(linear, 0.1, 1000.0);
+        let mut pair = vertical_pair(false);
+        pair.inner_depth = pair
+            .inner
+            .iter()
+            .map(|point| encode(100.0 + f64::from(point.y) * 0.2 + f64::from(point.x) * 0.1))
+            .collect();
+        pair.outer_depth = pair
+            .outer
+            .iter()
+            .map(|point| {
+                encode(100.0 + f64::from(point.y) * 0.2 + f64::from(point.x) * 0.1 + 5.0)
+            })
+            .collect();
+        let (depth, coverage, drow, crow) = seam_fixture(true, &[]);
+        let result = analyze_paired_cracks(
+            &depth,
+            &coverage,
+            64,
+            64,
+            drow,
+            crow,
+            0.1,
+            1000.0,
+            1.0,
+            std::slice::from_ref(&pair),
+        )
+        .unwrap();
+        assert_eq!(result.0, 0);
+    }
+
+    #[test]
+    fn paired_seam_oracle_skips_occluded_and_silhouette_seams() {
+        // The submitted boundaries attest the far surface while foreground
+        // terrain renders in front of the projected seam: an occluded seam
+        // cannot show a crack and produces no depth evidence.
+        let encode = |linear: f64| encode_depth(linear, 0.1, 1000.0);
+        let mut pair = vertical_pair(false);
+        pair.inner_depth = pair.inner.iter().map(|_| encode(900.0)).collect();
+        pair.outer_depth = pair.outer.iter().map(|_| encode(900.0)).collect();
+        let (depth, coverage, drow, crow) = seam_fixture(false, &[]);
+        let result = analyze_paired_cracks(
+            &depth, &coverage, 64, 64, drow, crow, 0.1, 1000.0, 1.0,
+            std::slice::from_ref(&pair),
+        )
+        .unwrap();
+        assert_eq!(result.0, 0, "an occluded seam is not crack evidence");
+
+        // The seam surface is visible and attested-consistent, but one side's
+        // run crosses a real terrain silhouette four pixels out. The foreign
+        // surface must not poison the seam extrapolation.
+        let (width, height, row) = (64_u32, 64_u32, 256_u32);
+        let mut depth = vec![0_u8; row as usize * height as usize];
+        let coverage = vec![u8::MAX; row as usize * height as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let mut linear = 100.0 + f64::from(y) * 0.2 + f64::from(x) * 0.1;
+                if x >= 32 {
+                    linear += 5.0;
+                }
+                if x <= 28 {
+                    linear += 700.0;
+                }
+                let encoded = encode_depth(linear, 0.1, 1000.0).to_le_bytes();
+                let offset = y as usize * row as usize + x as usize * 4;
+                depth[offset..offset + 4].copy_from_slice(&encoded);
+            }
+        }
+        let mut pair = vertical_pair(false);
+        pair.outer_depth = pair
+            .outer
+            .iter()
+            .map(|point| {
+                encode(100.0 + f64::from(point.y) * 0.2 + f64::from(point.x) * 0.1 + 5.0)
+            })
+            .collect();
+        let result = analyze_paired_cracks(
+            &depth, &coverage, 64, 64, row, row, 0.1, 1000.0, 1.0,
+            std::slice::from_ref(&pair),
+        )
+        .unwrap();
+        assert_eq!(result.0, 0, "a foreign surface past the silhouette is not a crack");
+    }
+
+    fn seam_fixture_with_far_columns(far: impl Fn(u32, u32) -> bool) -> (Vec<u8>, Vec<u8>, u32) {
+        let (width, height, row) = (64_u32, 64_u32, 256_u32);
+        let mut depth = vec![0_u8; row as usize * height as usize];
+        let coverage = vec![u8::MAX; row as usize * height as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let mut linear = 100.0 + f64::from(y) * 0.2 + f64::from(x) * 0.1;
+                if far(x, y) {
+                    linear += 600.0;
+                }
+                let encoded = encode_depth(linear, 0.1, 1000.0).to_le_bytes();
+                let offset = y as usize * row as usize + x as usize * 4;
+                depth[offset..offset + 4].copy_from_slice(&encoded);
+            }
+        }
+        (depth, coverage, row)
+    }
+
+    #[test]
+    fn paired_seam_oracle_detects_covered_sliver_on_narrow_seam() {
+        // A one-pixel seam has no strictly interior pixel centres. Farther
+        // terrain showing through the seam band while the attested surface
+        // renders on both sides is a hole even though coverage is full.
+        let pair = vertical_pair(false);
+        let (depth, coverage, row) =
+            seam_fixture_with_far_columns(|x, y| (31..=32).contains(&x) && (20..=24).contains(&y));
+        let result = analyze_paired_cracks(
+            &depth, &coverage, 64, 64, row, row, 0.1, 1000.0, 1.0,
+            std::slice::from_ref(&pair),
+        )
+        .unwrap();
+        assert!(result.0 >= 5, "covered sliver on a narrow seam was not flagged: {}", result.0);
+    }
+
+    #[test]
+    fn paired_seam_oracle_ignores_far_silhouette_along_narrow_seam() {
+        // Boundary-only evidence cannot separate this from a mating surface
+        // rendered behind its attestation; the far side never resumes, so it
+        // is treated as a terrain silhouette (as on the physical Rainier probe).
+        let pair = vertical_pair(false);
+        let (depth, coverage, row) = seam_fixture_with_far_columns(|x, _| x >= 32);
+        let result = analyze_paired_cracks(
+            &depth, &coverage, 64, 64, row, row, 0.1, 1000.0, 1.0,
+            std::slice::from_ref(&pair),
+        )
+        .unwrap();
+        assert_eq!(result.0, 0, "a silhouette along the seam is not a crack");
     }
 
     #[test]
@@ -1767,15 +2322,27 @@ mod tests {
     #[test]
     fn silhouette_pair_is_excluded_but_missing_mate_fails_closed() {
         let (depth, coverage, drow, crow) = seam_fixture(false, &[(31, 20)]);
+        let vertex_depth = |x: f32, y: f32| {
+            encode_depth(100.0 + f64::from(y) * 0.2 + f64::from(x) * 0.1, 0.1, 1000.0)
+        };
         let pairs = [vertical_pair(true), ProjectedSeamPair {
             inner: vec![Vec2::new(20.0, 8.0), Vec2::new(20.0, 55.0)],
             outer: vec![Vec2::new(21.0, 8.0), Vec2::new(21.0, 55.0)],
+            inner_depth: vec![vertex_depth(20.0, 8.0), vertex_depth(20.0, 55.0)],
+            outer_depth: vec![vertex_depth(21.0, 8.0), vertex_depth(21.0, 55.0)],
             silhouette: false,
         }];
         assert_eq!(analyze_paired_cracks(
             &depth, &coverage, 64, 64, drow, crow, 0.1, 1000.0, 1.0, &pairs,
         ).unwrap().0, 0);
-        assert!(validate_projected_seam_pair(&[Vec2::ZERO], &[]).is_err());
+        assert!(validate_projected_seam_pair(&ProjectedSeamPair {
+            inner: vec![Vec2::ZERO],
+            outer: Vec::new(),
+            inner_depth: vec![0.5],
+            outer_depth: Vec::new(),
+            silhouette: false,
+        })
+        .is_err());
     }
 
     #[test]
@@ -1798,13 +2365,28 @@ mod tests {
 
         let anchor = DVec3::new(1_000_000.0, 2_000_000.0, 3_000_000.0);
         let local = DVec3::new(1_250.0, -700.0, 20.0);
-        assert!(canonical_selected_world_identity(anchor + local, anchor + local, local, local).is_ok());
+        assert!(canonical_selected_world_identity(
+            anchor + local,
+            anchor + local,
+            local,
+            local,
+            local,
+            local,
+            anchor + local,
+            anchor + local,
+        )
+        .is_ok());
         assert!(canonical_selected_world_identity(
             anchor + local,
             anchor + local + DVec3::X * 0.003,
             local,
             local + DVec3::X * 0.003,
-        ).is_err());
+            local,
+            local + DVec3::X * 0.003,
+            anchor + local,
+            anchor + local + DVec3::X * 0.003,
+        )
+        .is_err());
 
         let far_ring = DVec3::new(12_500.0, -12_500.0, -6_000.0);
         assert!(validate_mating_world_identity(
@@ -1812,13 +2394,23 @@ mod tests {
             anchor + far_ring + DVec3::X * 0.001,
             far_ring,
             far_ring + DVec3::X * 0.001,
-        ).is_ok());
+            far_ring,
+            far_ring + DVec3::X * 0.001,
+            anchor + far_ring,
+            anchor + far_ring + DVec3::X * 0.001,
+        )
+        .is_ok());
         assert!(validate_mating_world_identity(
             anchor + far_ring,
             anchor + far_ring + DVec3::X * 0.003,
             far_ring,
             far_ring + DVec3::X * 0.003,
-        ).is_err());
+            far_ring,
+            far_ring + DVec3::X * 0.003,
+            anchor + far_ring,
+            anchor + far_ring + DVec3::X * 0.003,
+        )
+        .is_err());
 
         let identity =
             crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::identity(7, 2);
@@ -1826,6 +2418,24 @@ mod tests {
         let mut translated = identity;
         translated.transform[3][0] = 1.0;
         assert!(validate_selected_instance(&translated, 7, 2).is_err());
+    }
+
+    #[test]
+    fn six_kilometre_reanchor_quantization_bound_stays_below_half_probe() {
+        let first = Vec3::new(-835.4459, -835.4459, -6000.1094).as_dvec3();
+        let second = Vec3::new(-835.4459, -835.4459, -6026.2183).as_dvec3();
+        assert!(
+            local_vector_quantization_bound(
+                first,
+                second,
+                first,
+                second,
+                DVec3::ZERO,
+                DVec3::ZERO,
+            )
+            .unwrap()
+                < ORBIS_MICRO_STEP_M * 0.5
+        );
     }
 
     #[test]

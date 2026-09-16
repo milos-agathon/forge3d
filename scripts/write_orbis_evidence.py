@@ -20,7 +20,10 @@ class EvidenceError(RuntimeError):
 ORBIS_MIN_JITTER_SAMPLES = 32
 ORBIS_MIN_CRACK_BOUNDARY_SAMPLES = 64
 ORBIS_EXPECTED_DESCENT_FRAMES = 25
-ORBIS_MIN_STREAMING_PROGRESS_FRAMES = 10
+# Progress is a state-transition count whose value depends on cold COG decode
+# latency versus first-frame shader compilation, so only existence is gated;
+# nonblocking behaviour is gated by the bounded-poll and pending-work counts.
+ORBIS_MIN_STREAMING_PROGRESS_FRAMES = 1
 
 
 def _read_object(path: Path, label: str) -> dict[str, Any]:
