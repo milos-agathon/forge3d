@@ -1219,9 +1219,9 @@ class TestTerrainVTPbrFamilies:
         virtual_size = 1024
         # The mask family acts on roughness. Compare the roughness view
         # (debug 11) rather than beauty luminance: with the corrected split-sum
-        # BRDF a roughness change moves dielectric beauty by <2/255, while the
-        # roughness view isolates the resident-vs-fallback override this gate
-        # is about.
+        # BRDF (cb161cc4) a roughness change moves dielectric beauty by <2/255,
+        # while the roughness view isolates exactly the resident-vs-fallback
+        # override this gate is about.
         roughness_view = 11
         baseline = _render_beauty(
             vt_render_env,
