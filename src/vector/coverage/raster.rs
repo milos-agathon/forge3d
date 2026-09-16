@@ -778,11 +778,7 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 }
 
 pub(super) fn raster_shader_source() -> String {
-    format!(
-        "{}\n{}",
-        include_str!("../../shaders/includes/determinism.wgsl"),
-        include_str!("../../shaders/vector_coverage_raster.wgsl")
-    )
+    crate::shader_sources::vector_coverage_raster()
 }
 
 #[cfg(test)]

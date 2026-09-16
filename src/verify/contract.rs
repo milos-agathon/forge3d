@@ -2046,7 +2046,7 @@ expiry = "2027-01-17"
             .map(|entry| entry.name.clone())
             .collect();
         assert_eq!(contract_names, source_names);
-        assert_eq!(contract_names.len(), 31);
+        assert_eq!(contract_names.len(), 115);
     }
 
     #[test]

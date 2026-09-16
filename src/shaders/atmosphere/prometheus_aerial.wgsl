@@ -53,7 +53,7 @@ fn prometheus_load_boundary_transmittance(height_unit: f32, mu: f32) -> vec3<f32
     let coord = vec2<i32>(
         // The transmittance table retains its linear cosine axis. Only the
         // accumulated-scattering table uses the nonlinear horizon mapping.
-        i32(round((0.5 * (clamp(mu, -1.0, 1.0) + 1.0)) * f32(max(dims.x, 1u) - 1u))),
+        i32(round((det_barrier(0.5 * (clamp(mu, -1.0, 1.0) + 1.0))) * f32(max(dims.x, 1u) - 1u))),
         i32(round(clamp(height_unit, 0.0, 1.0) * f32(max(dims.y, 1u) - 1u))),
     );
     return clamp(textureLoad(prometheus_transmittance_lut, coord, 0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
@@ -86,7 +86,7 @@ fn prometheus_load_aerial_transmittance(distance_unit: f32, height_unit: f32, mu
         i32(round(clamp(distance_unit, 0.0, 1.0) * f32(max(dims.x, 1u) - 1u))),
         // The aerial LUT is baked on a linear mu_view axis. The nonlinear
         // horizon mapping is exclusive to the accumulated-scattering table.
-        i32(round(0.5 * (clamp(mu_view, -1.0, 1.0) + 1.0)
+        i32(round(det_barrier(0.5 * (clamp(mu_view, -1.0, 1.0) + 1.0))
             * f32(max(dims.y, 1u) - 1u))),
         i32(round(clamp(height_unit, 0.0, 1.0) * f32(max(dims.z, 1u) - 1u))),
     );
@@ -95,6 +95,7 @@ fn prometheus_load_aerial_transmittance(distance_unit: f32, height_unit: f32, mu
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    det_seed(f32(gid.x));
     let width = prometheus_atmosphere.dimensions_frames.x;
     let height = prometheus_atmosphere.dimensions_frames.y;
     if (gid.x >= width || gid.y >= height) {
@@ -103,21 +104,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pixel_index = gid.y * width + gid.x;
     let accumulated = prometheus_accum_hdr[pixel_index];
     let surface_or_environment = aether_eval_clamp_hdr_radiance(
-        accumulated.rgb / max(accumulated.a, 1.0),
+        det_div3(accumulated.rgb, vec3<f32>(max(accumulated.a, 1.0))),
     );
     let depth = textureLoad(prometheus_depth_aov, vec2<i32>(gid.xy), 0).x;
     let visibility = textureLoad(prometheus_visibility_aov, vec2<i32>(gid.xy), 0).x;
 
-    let ndc_x = ((f32(gid.x) + 0.5) / f32(width)) * 2.0 - 1.0;
-    let ndc_y = (1.0 - (f32(gid.y) + 0.5) / f32(height)) * 2.0 - 1.0;
+    let ndc_x = det_barrier((det_div(f32(gid.x) + 0.5, f32(width))) * 2.0) - 1.0;
+    let ndc_y = det_barrier((1.0 - det_div(f32(gid.y) + 0.5, f32(height))) * 2.0) - 1.0;
     let tan_half_fov = prometheus_atmosphere.camera_right_tan_half_fov.w;
     let aspect = prometheus_atmosphere.camera_up_aspect.w;
-    let ray = normalize(
-        prometheus_atmosphere.camera_right_tan_half_fov.xyz * (ndc_x * tan_half_fov * aspect)
-        + prometheus_atmosphere.camera_up_aspect.xyz * (ndc_y * tan_half_fov)
+    let ray = det_normalize3(
+        det_barrier3(det_barrier3(prometheus_atmosphere.camera_right_tan_half_fov.xyz * (det_barrier(det_barrier(ndc_x * tan_half_fov) * aspect)))
+        + det_barrier3(prometheus_atmosphere.camera_up_aspect.xyz * (det_barrier(ndc_y * tan_half_fov))))
         + prometheus_atmosphere.camera_forward_ground.xyz
     );
-    let sun_dir = normalize(prometheus_atmosphere.sun_direction_intensity.xyz);
+    let sun_dir = det_normalize3(prometheus_atmosphere.sun_direction_intensity.xyz);
     let sun_intensity = aether_eval_clamp_radiometric_scale(
         prometheus_atmosphere.sun_direction_intensity.w,
     );
@@ -129,7 +130,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         1.0,
     );
     let camera_height = max(prometheus_atmosphere.camera_origin_exposure.y, 0.0);
-    let camera_height_unit = clamp(camera_height / atmosphere_height, 0.0, 1.0);
+    let camera_height_unit = clamp(det_div(camera_height, atmosphere_height), 0.0, 1.0);
 
     // Use PROMETHEUS' explicit frame-0 visibility AOV for classification.
     // A self-inequality NaN probe is not portable under Metal fast-math.
@@ -138,7 +139,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             camera_height_unit,
             sun_dir.y,
             ray.y,
-            dot(ray, sun_dir),
+            det_dot3(ray, sun_dir),
         ) * sun_intensity;
         let ldr = tonemap_apply_operator(
             aether_eval_clamp_hdr_radiance(miss_scattering) * atmosphere_exposure,
@@ -159,7 +160,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         depth,
         prometheus_atmosphere.planet_radii_path.x,
     );
-    let view_sun_nu = dot(ray, sun_dir);
+    let view_sun_nu = det_dot3(ray, sun_dir);
     let endpoint_mus = aether_eval_spherical_endpoint_mus(
         camera_height,
         ray.y,
@@ -178,20 +179,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         prometheus_atmosphere.planet_radii_path.w,
     );
     let boundary_t = prometheus_load_boundary_transmittance(camera_height_unit, ray.y);
-    let camera_scattering = prometheus_load_endpoint_scattering(
+    let camera_scattering = det_barrier3(prometheus_load_endpoint_scattering(
         camera_height_unit,
         sun_dir.y,
         ray.y,
         view_sun_nu,
-    ) * sun_intensity;
-    let endpoint_height_unit = clamp(endpoint_height / atmosphere_height, 0.0, 1.0);
-    let endpoint_scattering = prometheus_load_endpoint_scattering(
+    ) * sun_intensity);
+    let endpoint_height_unit = clamp(det_div(endpoint_height, atmosphere_height), 0.0, 1.0);
+    let endpoint_scattering = det_barrier3(prometheus_load_endpoint_scattering(
         endpoint_height_unit,
         endpoint_mus.y,
         endpoint_mus.x,
         view_sun_nu,
-    ) * sun_intensity;
-    let distance_unit = depth / max(prometheus_atmosphere.planet_radii_path.z, 1.0);
+    ) * sun_intensity);
+    let distance_unit = det_div(depth, max(prometheus_atmosphere.planet_radii_path.z, 1.0));
     let aerial_mean_transmittance = prometheus_load_aerial_transmittance(
         distance_unit,
         camera_height_unit,
@@ -199,10 +200,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     );
     // Preserve the genuine per-wavelength color of the segment integral while
     // anchoring its mean extinction to the shipped aerial froxel.
-    let analytic_mean_t = dot(analytic_segment_t, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let analytic_mean_t = det_dot3(analytic_segment_t, vec3<f32>(0.2126, 0.7152, 0.0722));
     let transmittance = max(
         clamp(
-            analytic_segment_t * (aerial_mean_transmittance / max(analytic_mean_t, 1.0e-6)),
+            analytic_segment_t * (det_div(aerial_mean_transmittance, max(analytic_mean_t, 1.0e-6))),
             vec3<f32>(0.0),
             vec3<f32>(1.0),
         ),
@@ -212,11 +213,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // the endpoint. The aerial froxel contributes its transmittance anchor;
     // inscatter comes from the accumulated single+higher-order LUT itself.
     let finite_inscatter = max(
-        camera_scattering - transmittance * endpoint_scattering,
+        camera_scattering - det_barrier3(transmittance * endpoint_scattering),
         vec3<f32>(0.0),
     );
     let linear_hdr = aether_eval_clamp_hdr_radiance(
-        surface_or_environment * transmittance + finite_inscatter,
+        det_barrier3(surface_or_environment * transmittance) + finite_inscatter,
     );
     let ldr = tonemap_apply_operator(
         linear_hdr * atmosphere_exposure,

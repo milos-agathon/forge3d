@@ -37,9 +37,9 @@ fn aether_eval_clamp_hdr_radiance(radiance: vec3<f32>) -> vec3<f32> {
 
 fn aether_eval_xyz_to_rgb(xyz: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(
-        dot(vec3<f32>(3.2404542, -1.5371385, -0.4985314), xyz) / 3.2613921,
-        dot(vec3<f32>(-0.9692660, 1.8760108, 0.0415560), xyz) / 2.5069624,
-        dot(vec3<f32>(0.0556434, -0.2040259, 1.0572252), xyz) / 2.3679786,
+        det_div(det_dot3(vec3<f32>(3.2404542, -1.5371385, -0.4985314), xyz), 3.2613921),
+        det_div(det_dot3(vec3<f32>(-0.9692660, 1.8760108, 0.0415560), xyz), 2.5069624),
+        det_div(det_dot3(vec3<f32>(0.0556434, -0.2040259, 1.0572252), xyz), 2.3679786),
     );
 }
 
@@ -51,17 +51,17 @@ fn aether_eval_spectral_xyz(
     turbidity: f32,
 ) -> vec3<f32> {
     let lambda_nm = AETHER_EVAL_WAVELENGTHS_NM[wavelength_index];
-    let wavelength_ratio = 550.0 / lambda_nm;
-    let wavelength_ratio_squared = wavelength_ratio * wavelength_ratio;
-    let rayleigh_beta = 1.2989e-5 * wavelength_ratio_squared * wavelength_ratio_squared;
-    let mie_beta = 1.0e-5 * turbidity * wavelength_ratio;
-    let ozone_wavelength_delta = (lambda_nm - 600.0) / 85.0;
-    let ozone_beta = 1.2e-6
-        * det_exp(-0.5 * ozone_wavelength_delta * ozone_wavelength_delta);
+    let wavelength_ratio = det_div(550.0, lambda_nm);
+    let wavelength_ratio_squared = det_barrier(wavelength_ratio * wavelength_ratio);
+    let rayleigh_beta = det_barrier(det_barrier(1.2989e-5 * wavelength_ratio_squared) * wavelength_ratio_squared);
+    let mie_beta = det_barrier(det_barrier(1.0e-5 * turbidity) * wavelength_ratio);
+    let ozone_wavelength_delta = det_div(lambda_nm - 600.0, 85.0);
+    let ozone_beta = det_barrier(1.2e-6
+        * det_exp(det_barrier(-0.5 * ozone_wavelength_delta) * ozone_wavelength_delta));
     let spectral_t = det_exp(-max(
-        rayleigh_beta * rayleigh_column
-            + mie_beta * mie_column
-            + ozone_beta * ozone_column,
+        det_barrier(det_barrier(rayleigh_beta * rayleigh_column)
+            + det_barrier(mie_beta * mie_column))
+            + det_barrier(ozone_beta * ozone_column),
         0.0,
     ));
     let endpoint_weight = select(
@@ -69,12 +69,12 @@ fn aether_eval_spectral_xyz(
         0.5,
         wavelength_index == 0u || wavelength_index + 1u == AETHER_EVAL_WAVELENGTH_COUNT,
     );
-    return AETHER_EVAL_CIE_XYZ[wavelength_index] * spectral_t * endpoint_weight;
+    return det_barrier3(AETHER_EVAL_CIE_XYZ[wavelength_index] * spectral_t) * endpoint_weight;
 }
 
 fn aether_eval_mu_to_unit(mu: f32) -> f32 {
     let bounded = clamp(mu, -1.0, 1.0);
-    let magnitude = sqrt(abs(bounded));
+    let magnitude = det_sqrt(abs(bounded));
     // Avoid sign(0.0): some Metal toolchains have produced a NaN for the
     // otherwise well-defined horizon coordinate during pipeline execution.
     let signed_root = select(-magnitude, magnitude, bounded >= 0.0);
@@ -82,13 +82,13 @@ fn aether_eval_mu_to_unit(mu: f32) -> f32 {
 }
 
 fn aether_eval_nu_to_unit(nu: f32) -> f32 {
-    return 1.0 - sqrt(max(0.5 * (1.0 - clamp(nu, -1.0, 1.0)), 0.0));
+    return 1.0 - det_sqrt(max(0.5 * (1.0 - clamp(nu, -1.0, 1.0)), 0.0));
 }
 
 fn aether_eval_scattering_height_to_unit(height_unit: f32) -> f32 {
     // The bake stores h = H*u^2 so eight slices resolve the dense lower
     // atmosphere instead of landing 14.3 km apart on a linear altitude axis.
-    return sqrt(clamp(height_unit, 0.0, 1.0));
+    return det_sqrt(clamp(height_unit, 0.0, 1.0));
 }
 
 fn aether_eval_load_scattering_texel(
@@ -121,8 +121,8 @@ fn aether_eval_sample_accumulated_scattering(
     let height_count = max(i32(height_count_raw), 2);
     let nu_count = max(i32(nu_count_raw), 2);
     let coordinates = vec4<f32>(
-        aether_eval_mu_to_unit(mu_view) * f32(dimensions.x - 1u),
-        aether_eval_mu_to_unit(mu_sun) * f32(dimensions.y - 1u),
+        det_barrier(aether_eval_mu_to_unit(mu_view)) * f32(dimensions.x - 1u),
+        det_barrier(aether_eval_mu_to_unit(mu_sun)) * f32(dimensions.y - 1u),
         aether_eval_scattering_height_to_unit(height_unit) * f32(height_count - 1),
         aether_eval_nu_to_unit(nu) * f32(nu_count - 1),
     );
@@ -146,17 +146,17 @@ fn aether_eval_sample_accumulated_scattering(
                     let sun_index = select(lower.y, upper.y, sun_side == 1);
                     let height_index = select(lower.z, upper.z, height_side == 1);
                     let nu_index = select(lower.w, upper.w, nu_side == 1);
-                    let weight = select(1.0 - fraction.x, fraction.x, view_side == 1)
-                        * select(1.0 - fraction.y, fraction.y, sun_side == 1)
-                        * select(1.0 - fraction.z, fraction.z, height_side == 1)
-                        * select(1.0 - fraction.w, fraction.w, nu_side == 1);
-                    accumulated = accumulated + weight * aether_eval_load_scattering_texel(
+                    let weight = det_barrier(det_barrier(det_barrier(select(1.0 - fraction.x, fraction.x, view_side == 1)
+                        * select(1.0 - fraction.y, fraction.y, sun_side == 1))
+                        * select(1.0 - fraction.z, fraction.z, height_side == 1))
+                        * select(1.0 - fraction.w, fraction.w, nu_side == 1));
+                    accumulated = det_barrier4(accumulated + det_barrier4(weight * aether_eval_load_scattering_texel(
                         accumulated_scattering,
                         view_index,
                         sun_index,
                         height_index,
                         nu_index,
-                        nu_count,
+                        nu_count)),
                     );
                 }
             }
@@ -174,11 +174,11 @@ fn aether_eval_spherical_radius_m(
     let radius_m = max(bottom_radius_m, 1.0) + clamp(camera_height_m, 0.0, 100000.0);
     let bounded_distance_m = clamp(distance_m, 0.0, 20000000.0);
     let radial_squared = max(
-        radius_m * radius_m + bounded_distance_m * bounded_distance_m
-            + 2.0 * radius_m * bounded_distance_m * clamp(view_mu, -1.0, 1.0),
+        det_barrier(det_barrier(radius_m * radius_m) + det_barrier(bounded_distance_m * bounded_distance_m))
+            + det_barrier(det_barrier(det_barrier(2.0 * radius_m) * bounded_distance_m) * clamp(view_mu, -1.0, 1.0)),
         0.0,
     );
-    return sqrt(radial_squared);
+    return det_sqrt(radial_squared);
 }
 
 fn aether_eval_spherical_altitude(
@@ -210,11 +210,9 @@ fn aether_eval_spherical_endpoint_mus(
         1.0,
     );
     let endpoint_view_mu =
-        (radius_m * clamp(view_mu, -1.0, 1.0) + bounded_distance_m) / endpoint_radius_m;
-    let endpoint_sun_mu = (
-        radius_m * clamp(sun_mu, -1.0, 1.0)
-            + bounded_distance_m * clamp(view_sun_nu, -1.0, 1.0)
-    ) / endpoint_radius_m;
+        det_div(det_barrier(radius_m * clamp(view_mu, -1.0, 1.0)) + bounded_distance_m, endpoint_radius_m);
+    let endpoint_sun_mu = det_div(det_barrier(radius_m * clamp(sun_mu, -1.0, 1.0))
+            + det_barrier(bounded_distance_m * clamp(view_sun_nu, -1.0, 1.0)), endpoint_radius_m);
     return clamp(vec2<f32>(endpoint_view_mu, endpoint_sun_mu), vec2<f32>(-1.0), vec2<f32>(1.0));
 }
 
@@ -280,65 +278,65 @@ fn aether_eval_segment_transmittance(
     let h15 = aether_eval_spherical_altitude(
         bounded_camera_height_m, view_mu, bounded_distance_m * 0.96875, bottom_radius_m,
     );
-    let rayleigh_density_sum = det_exp(-h00 / 8000.0) + det_exp(-h01 / 8000.0)
-        + det_exp(-h02 / 8000.0) + det_exp(-h03 / 8000.0)
-        + det_exp(-h04 / 8000.0) + det_exp(-h05 / 8000.0)
-        + det_exp(-h06 / 8000.0) + det_exp(-h07 / 8000.0)
-        + det_exp(-h08 / 8000.0) + det_exp(-h09 / 8000.0)
-        + det_exp(-h10 / 8000.0) + det_exp(-h11 / 8000.0)
-        + det_exp(-h12 / 8000.0) + det_exp(-h13 / 8000.0)
-        + det_exp(-h14 / 8000.0) + det_exp(-h15 / 8000.0);
-    let mie_density_sum = det_exp(-h00 / 1200.0) + det_exp(-h01 / 1200.0)
-        + det_exp(-h02 / 1200.0) + det_exp(-h03 / 1200.0)
-        + det_exp(-h04 / 1200.0) + det_exp(-h05 / 1200.0)
-        + det_exp(-h06 / 1200.0) + det_exp(-h07 / 1200.0)
-        + det_exp(-h08 / 1200.0) + det_exp(-h09 / 1200.0)
-        + det_exp(-h10 / 1200.0) + det_exp(-h11 / 1200.0)
-        + det_exp(-h12 / 1200.0) + det_exp(-h13 / 1200.0)
-        + det_exp(-h14 / 1200.0) + det_exp(-h15 / 1200.0);
-    let ozone_density_sum = max(1.0 - abs((h00 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h01 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h02 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h03 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h04 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h05 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h06 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h07 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h08 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h09 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h10 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h11 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h12 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h13 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h14 - 25000.0) / 15000.0), 0.0)
-        + max(1.0 - abs((h15 - 25000.0) / 15000.0), 0.0);
+    let rayleigh_density_sum = det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_exp(det_div(-h00, 8000.0)) + det_exp(det_div(-h01, 8000.0)))
+        + det_exp(det_div(-h02, 8000.0))) + det_exp(det_div(-h03, 8000.0)))
+        + det_exp(det_div(-h04, 8000.0))) + det_exp(det_div(-h05, 8000.0)))
+        + det_exp(det_div(-h06, 8000.0))) + det_exp(det_div(-h07, 8000.0)))
+        + det_exp(det_div(-h08, 8000.0))) + det_exp(det_div(-h09, 8000.0)))
+        + det_exp(det_div(-h10, 8000.0))) + det_exp(det_div(-h11, 8000.0)))
+        + det_exp(det_div(-h12, 8000.0))) + det_exp(det_div(-h13, 8000.0)))
+        + det_exp(det_div(-h14, 8000.0))) + det_exp(det_div(-h15, 8000.0));
+    let mie_density_sum = det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_exp(det_div(-h00, 1200.0)) + det_exp(det_div(-h01, 1200.0)))
+        + det_exp(det_div(-h02, 1200.0))) + det_exp(det_div(-h03, 1200.0)))
+        + det_exp(det_div(-h04, 1200.0))) + det_exp(det_div(-h05, 1200.0)))
+        + det_exp(det_div(-h06, 1200.0))) + det_exp(det_div(-h07, 1200.0)))
+        + det_exp(det_div(-h08, 1200.0))) + det_exp(det_div(-h09, 1200.0)))
+        + det_exp(det_div(-h10, 1200.0))) + det_exp(det_div(-h11, 1200.0)))
+        + det_exp(det_div(-h12, 1200.0))) + det_exp(det_div(-h13, 1200.0)))
+        + det_exp(det_div(-h14, 1200.0))) + det_exp(det_div(-h15, 1200.0));
+    let ozone_density_sum = det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(det_barrier(max(1.0 - abs(det_div(h00 - 25000.0, 15000.0)), 0.0)
+        + max(1.0 - abs(det_div(h01 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h02 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h03 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h04 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h05 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h06 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h07 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h08 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h09 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h10 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h11 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h12 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h13 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h14 - 25000.0, 15000.0)), 0.0))
+        + max(1.0 - abs(det_div(h15 - 25000.0, 15000.0)), 0.0);
 
-    let path_per_sample = bounded_distance_m * density_scale * 0.0625;
+    let path_per_sample = det_barrier(det_barrier(bounded_distance_m * density_scale) * 0.0625);
     let rayleigh_column = path_per_sample * rayleigh_density_sum;
     let mie_column = path_per_sample * mie_density_sum;
-    let ozone_column = path_per_sample * ozone_density_sum * ozone_du / 300.0;
-    let xyz = aether_eval_spectral_xyz(
-        0u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        1u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        2u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        3u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        4u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        5u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        6u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        7u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        8u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        9u, rayleigh_column, mie_column, ozone_column, turbidity,
-    ) + aether_eval_spectral_xyz(
-        10u, rayleigh_column, mie_column, ozone_column, turbidity,
+    let ozone_column = det_div(det_barrier(path_per_sample * ozone_density_sum) * ozone_du, 300.0);
+    let xyz = det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(aether_eval_spectral_xyz(
+        0u, rayleigh_column, mie_column, ozone_column, turbidity),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        1u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        2u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        3u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        4u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        5u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        6u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        7u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        8u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        9u, rayleigh_column, mie_column, ozone_column, turbidity)),
+    ) + det_barrier3(aether_eval_spectral_xyz(
+        10u, rayleigh_column, mie_column, ozone_column, turbidity),
     );
     return clamp(aether_eval_xyz_to_rgb(xyz), vec3<f32>(0.0), vec3<f32>(1.0));
 }

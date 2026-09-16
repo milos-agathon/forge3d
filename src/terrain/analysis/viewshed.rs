@@ -347,11 +347,7 @@ pub fn compute_viewshed(
 }
 
 fn shader_source() -> String {
-    format!(
-        "{}\n{}",
-        include_str!("../../shaders/includes/determinism.wgsl"),
-        include_str!("../../shaders/terrain_viewshed.wgsl")
-    )
+    crate::shader_sources::viewshed()
 }
 
 fn analysis_bind_group_layout_entries(

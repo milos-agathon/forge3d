@@ -47,8 +47,8 @@ fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
     let dimensions = textureDimensions(height_tex, 0);
     let max_x = max(i32(dimensions.x) - 1, 0);
     let max_y = max(i32(dimensions.y) - 1, 0);
-    let texel_x = clamp(uv.x, 0.0, 1.0) * f32(max_x);
-    let texel_y = clamp(uv.y, 0.0, 1.0) * f32(max_y);
+    let texel_x = det_barrier(clamp(uv.x, 0.0, 1.0) * f32(max_x));
+    let texel_y = det_barrier(clamp(uv.y, 0.0, 1.0) * f32(max_y));
     let x0 = i32(floor(texel_x));
     let y0 = i32(floor(texel_y));
     let x1 = clamp(x0 + 1, 0, max_x);
@@ -82,7 +82,7 @@ fn apply_height_curve(t: f32) -> f32 {
         let power = max(u_shadow.height_curve.z, 0.01);
         curved = det_pow(t, power);
     } else if (mode == 2u) {
-        curved = t * t * (3.0 - 2.0 * t);
+        curved = det_barrier(t * t) * (3.0 - det_barrier(2.0 * t));
     } else if (mode == 3u) {
         curved = height_curve_lut_sample(t);
     }
@@ -94,6 +94,7 @@ fn apply_height_curve(t: f32) -> f32 {
 /// Uses vertex_index to generate a grid of vertices covering the terrain
 @vertex
 fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
+    det_seed(f32(vertex_id));
     var out: VertexOutput;
     
     // Extract parameters in the order uploaded by the native terrain renderer.
@@ -138,16 +139,16 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     
     // Convert grid position to UV [0,1]
     let uv = vec2<f32>(
-        f32(grid_x) / f32(grid_res - 1u),
-        f32(grid_y) / f32(grid_res - 1u)
+        det_div(f32(grid_x), f32(grid_res - 1u)),
+        det_div(f32(grid_y), f32(grid_res - 1u))
     );
     
-    let h_raw = sample_height_bilinear(uv);
+    let h_raw = det_barrier(sample_height_bilinear(uv));
     
     // Match terrain_pbr_pom.wgsl::normalize_for_shadow exactly.
     let world_xy = (uv - vec2<f32>(0.5)) * terrain_span;
     let height_range = max(height_max - height_min, 1e-6);
-    let height_normalized = clamp((h_raw - height_min) / height_range, 0.0, 1.0);
+    let height_normalized = clamp(det_div(h_raw - height_min, height_range), 0.0, 1.0);
     let world_z = apply_height_curve(height_normalized) * z_scale;
     let world_pos = vec3<f32>(world_xy, world_z);
     

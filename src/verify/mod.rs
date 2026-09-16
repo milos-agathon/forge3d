@@ -7,6 +7,9 @@
 //! returns `unproven`; there is no ignore mechanism.
 
 pub(crate) mod contract;
+mod det_rewrite;
+#[cfg(test)]
+pub(crate) mod determinism_lint;
 pub(crate) mod domain;
 mod ir;
 
@@ -68,6 +71,90 @@ const PROVEN_TARGETS: &[Target] = &[
     determinism_target("det_atan01"),
     determinism_target("det_atan2"),
     determinism_target("det_acos"),
+    determinism_target("det_seed"),
+    determinism_target("det_barrier2"),
+    determinism_target("det_fma2"),
+    determinism_target("det_fma4"),
+    determinism_target("det_mul3"),
+    determinism_target("det_mul4"),
+    determinism_target("det_mul5"),
+    determinism_target("det_mul3_2"),
+    determinism_target("det_mul3_3"),
+    determinism_target("det_mul4_3"),
+    determinism_target("det_length2"),
+    determinism_target("det_length3"),
+    determinism_target("det_length4"),
+    determinism_target("det_distance2"),
+    determinism_target("det_distance3"),
+    determinism_target("det_smoothstep"),
+    determinism_target("det_rcp2"),
+    determinism_target("det_rcp3"),
+    determinism_target("det_rcp4"),
+    determinism_target("det_div2"),
+    determinism_target("det_div3"),
+    determinism_target("det_div4"),
+    determinism_target("det_asin"),
+    determinism_target("det_exp_2"),
+    determinism_target("det_exp4"),
+    determinism_target("det_exp2_2"),
+    determinism_target("det_exp2_3"),
+    determinism_target("det_exp2_4"),
+    determinism_target("det_log"),
+    determinism_target("det_log_2"),
+    determinism_target("det_log3"),
+    determinism_target("det_log4"),
+    determinism_target("det_log2_2"),
+    determinism_target("det_sqrt2"),
+    determinism_target("det_inverse_sqrt2"),
+    determinism_target("det_sin2"),
+    determinism_target("det_cos2"),
+    determinism_target("det_tan2"),
+    determinism_target("det_asin2"),
+    determinism_target("det_acos2"),
+    determinism_target("det_log2_3"),
+    determinism_target("det_sqrt3"),
+    determinism_target("det_inverse_sqrt3"),
+    determinism_target("det_sin3"),
+    determinism_target("det_cos3"),
+    determinism_target("det_tan3"),
+    determinism_target("det_asin3"),
+    determinism_target("det_acos3"),
+    determinism_target("det_log2_4"),
+    determinism_target("det_sqrt4"),
+    determinism_target("det_inverse_sqrt4"),
+    determinism_target("det_sin4"),
+    determinism_target("det_cos4"),
+    determinism_target("det_tan4"),
+    determinism_target("det_asin4"),
+    determinism_target("det_acos4"),
+    determinism_target("det_tan"),
+    determinism_target("det_atan"),
+    determinism_target("det_atan_2"),
+    determinism_target("det_atan3"),
+    determinism_target("det_atan4"),
+    determinism_target("det_pow2"),
+    determinism_target("det_pow4"),
+    determinism_target("det_atan2_2"),
+    determinism_target("det_atan2_3"),
+    determinism_target("det_atan2_4"),
+    determinism_target("det_mix2"),
+    determinism_target("det_mix4"),
+    determinism_target("det_mix2v"),
+    determinism_target("det_mix3v"),
+    determinism_target("det_mix4v"),
+    determinism_target("det_smoothstep2"),
+    determinism_target("det_smoothstep3"),
+    determinism_target("det_smoothstep4"),
+    determinism_target("det_distance4"),
+    determinism_target("det_normalize4"),
+    determinism_target("det_reflect4"),
+    determinism_target("det_mat2_mul_vec2"),
+    determinism_target("det_vec2_mul_mat2"),
+    determinism_target("det_mat2_mul_mat2"),
+    determinism_target("det_vec3_mul_mat3"),
+    determinism_target("det_mat3_mul_mat3"),
+    determinism_target("det_vec4_mul_mat4"),
+    determinism_target("det_mat4_mul_mat4"),
     Target {
         module: "tonemap_common",
         path: "src/shaders/includes/tonemap_common.wgsl",
@@ -955,7 +1042,7 @@ mod tests {
             baseline.alarms
         );
         let source = crate::shader_sources::terrain().replace(
-            "let path_per_sample = bounded_distance_m * density_scale * 0.0625;",
+            "let path_per_sample = det_barrier(det_barrier(bounded_distance_m * density_scale) * 0.0625);",
             "let path_per_sample = distance_m / (density_scale - density_scale);",
         );
         let mutant = verify_source(
@@ -988,7 +1075,7 @@ mod tests {
             baseline.alarms
         );
         let source = crate::shader_sources::terrain().replace(
-            "let transported = bounded_surface * transmittance + finite_inscatter;",
+            "let transported = det_barrier3(bounded_surface * transmittance) + det_barrier3(finite_inscatter);",
             "let transported = bounded_surface / (transmittance - transmittance);",
         );
         let mutant = verify_source(

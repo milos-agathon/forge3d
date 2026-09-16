@@ -10,6 +10,12 @@ inputs = ["value:x:-65536:65536"]
 outputs = ["return:-65536:65536"]
 
 [[entry]]
+name = "det_barrier2"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:-65536:65536"]
+
+[[entry]]
 name = "det_barrier3"
 proof_status = "proven"
 inputs = ["value:v:-65536:65536"]
@@ -28,7 +34,19 @@ inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:c:-1024:1024"]
 outputs = ["return:-1049600:1049600"]
 
 [[entry]]
+name = "det_fma2"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:c:-1024:1024"]
+outputs = ["return:-1049600:1049600"]
+
+[[entry]]
 name = "det_fma3"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:c:-1024:1024"]
+outputs = ["return:-1049600:1049600"]
+
+[[entry]]
+name = "det_fma4"
 proof_status = "proven"
 inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:c:-1024:1024"]
 outputs = ["return:-1049600:1049600"]
@@ -191,3 +209,499 @@ name = "det_acos"
 proof_status = "proven"
 inputs = ["value:x:-1:1"]
 outputs = ["return:0:3.2"]
+
+[[entry]]
+name = "det_seed"
+proof_status = "proven"
+inputs = ["value:s:-65536:65536"]
+outputs = ["return:0:1"]
+
+[[entry]]
+name = "det_mul3"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128", "value:c:-128:128"]
+outputs = ["return:-2100000:2100000"]
+
+[[entry]]
+name = "det_mul4"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128", "value:c:-128:128", "value:d:-128:128"]
+outputs = ["return:-269000000:269000000"]
+
+[[entry]]
+name = "det_mul5"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128", "value:c:-128:128", "value:d:-128:128", "value:e:-128:128"]
+outputs = ["return:-34400000000:34400000000"]
+
+[[entry]]
+name = "det_mul3_2"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128", "value:c:-128:128"]
+outputs = ["return:-2100000:2100000"]
+
+[[entry]]
+name = "det_mul3_3"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128", "value:c:-128:128"]
+outputs = ["return:-2100000:2100000"]
+
+[[entry]]
+name = "det_mul4_3"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128", "value:c:-128:128", "value:d:-128:128"]
+outputs = ["return:-269000000:269000000"]
+
+[[entry]]
+name = "det_rcp2"
+proof_status = "proven"
+inputs = ["value:v.x:-65536:65536", "value:v.y:-65536:65536"]
+outputs = ["return:-1000000:1000000"]
+invariants = ["abs_ge:v.x:0.000001", "abs_ge:v.y:0.000001"]
+
+[[entry]]
+name = "det_div2"
+proof_status = "proven"
+inputs = ["value:a.x:-65536:65536", "value:a.y:-65536:65536", "value:b.x:-65536:65536", "value:b.y:-65536:65536"]
+outputs = ["return:-65536000000:65536000000"]
+invariants = ["abs_ge:b.x:0.000001", "abs_ge:b.y:0.000001"]
+
+[[entry]]
+name = "det_sqrt2"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:0:256.001"]
+
+[[entry]]
+name = "det_inverse_sqrt2"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:0:1024"]
+
+[[entry]]
+name = "det_rcp3"
+proof_status = "proven"
+inputs = ["value:v.x:-65536:65536", "value:v.y:-65536:65536", "value:v.z:-65536:65536"]
+outputs = ["return:-1000000:1000000"]
+invariants = ["abs_ge:v.x:0.000001", "abs_ge:v.y:0.000001", "abs_ge:v.z:0.000001"]
+
+[[entry]]
+name = "det_div3"
+proof_status = "proven"
+inputs = ["value:a.x:-65536:65536", "value:a.y:-65536:65536", "value:a.z:-65536:65536", "value:b.x:-65536:65536", "value:b.y:-65536:65536", "value:b.z:-65536:65536"]
+outputs = ["return:-65536000000:65536000000"]
+invariants = ["abs_ge:b.x:0.000001", "abs_ge:b.y:0.000001", "abs_ge:b.z:0.000001"]
+
+[[entry]]
+name = "det_sqrt3"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:0:256.001"]
+
+[[entry]]
+name = "det_inverse_sqrt3"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:0:1024"]
+
+[[entry]]
+name = "det_rcp4"
+proof_status = "proven"
+inputs = ["value:v.x:-65536:65536", "value:v.y:-65536:65536", "value:v.z:-65536:65536", "value:v.w:-65536:65536"]
+outputs = ["return:-1000000:1000000"]
+invariants = ["abs_ge:v.x:0.000001", "abs_ge:v.y:0.000001", "abs_ge:v.z:0.000001", "abs_ge:v.w:0.000001"]
+
+[[entry]]
+name = "det_div4"
+proof_status = "proven"
+inputs = ["value:a.x:-65536:65536", "value:a.y:-65536:65536", "value:a.z:-65536:65536", "value:a.w:-65536:65536", "value:b.x:-65536:65536", "value:b.y:-65536:65536", "value:b.z:-65536:65536", "value:b.w:-65536:65536"]
+outputs = ["return:-65536000000:65536000000"]
+invariants = ["abs_ge:b.x:0.000001", "abs_ge:b.y:0.000001", "abs_ge:b.z:0.000001", "abs_ge:b.w:0.000001"]
+
+[[entry]]
+name = "det_sqrt4"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:0:256.001"]
+
+[[entry]]
+name = "det_inverse_sqrt4"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:0:1024"]
+
+[[entry]]
+name = "det_length2"
+proof_status = "proven"
+inputs = ["value:v:-128:128"]
+outputs = ["return:0:181.02"]
+
+[[entry]]
+name = "det_length3"
+proof_status = "proven"
+inputs = ["value:v:-128:128"]
+outputs = ["return:0:221.71"]
+
+[[entry]]
+name = "det_length4"
+proof_status = "proven"
+inputs = ["value:v:-128:128"]
+outputs = ["return:0:256.01"]
+
+[[entry]]
+name = "det_distance2"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128"]
+outputs = ["return:0:362.04"]
+
+[[entry]]
+name = "det_distance3"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128"]
+outputs = ["return:0:443.41"]
+
+[[entry]]
+name = "det_distance4"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128"]
+outputs = ["return:0:512.02"]
+
+[[entry]]
+name = "det_smoothstep"
+proof_status = "proven"
+inputs = ["value:lo:-1024:1024", "value:hi:-1024:1024", "value:x:-65536:65536"]
+outputs = ["return:0:3"]
+invariants = ["difference_ge:hi:lo:0.000001"]
+
+[[entry]]
+name = "det_smoothstep2"
+proof_status = "proven"
+inputs = ["value:lo:-1024:1024", "value:hi:-1024:1024", "value:x:-65536:65536"]
+outputs = ["return:0:3"]
+invariants = ["difference_ge:hi:lo:0.000001"]
+
+[[entry]]
+name = "det_smoothstep3"
+proof_status = "proven"
+inputs = ["value:lo:-1024:1024", "value:hi:-1024:1024", "value:x:-65536:65536"]
+outputs = ["return:0:3"]
+invariants = ["difference_ge:hi:lo:0.000001"]
+
+[[entry]]
+name = "det_smoothstep4"
+proof_status = "proven"
+inputs = ["value:lo:-1024:1024", "value:hi:-1024:1024", "value:x:-65536:65536"]
+outputs = ["return:0:3"]
+invariants = ["difference_ge:hi:lo:0.000001"]
+
+[[entry]]
+name = "det_normalize4"
+proof_status = "proven"
+inputs = ["value:v:-128:128"]
+outputs = ["return:-1.01:1.01"]
+
+[[entry]]
+name = "det_reflect4"
+proof_status = "proven"
+inputs = ["value:i:-1:1", "value:n:-1:1"]
+outputs = ["return:-9:9"]
+
+[[entry]]
+name = "det_mat2_mul_vec2"
+proof_status = "proven"
+inputs = ["value:m:-16:16", "value:v:-16:16"]
+outputs = ["return:-512:512"]
+
+[[entry]]
+name = "det_vec2_mul_mat2"
+proof_status = "proven"
+inputs = ["value:v:-16:16", "value:m:-16:16"]
+outputs = ["return:-512:512"]
+
+[[entry]]
+name = "det_vec3_mul_mat3"
+proof_status = "proven"
+inputs = ["value:v:-16:16", "value:m:-16:16"]
+outputs = ["return:-768:768"]
+
+[[entry]]
+name = "det_vec4_mul_mat4"
+proof_status = "proven"
+inputs = ["value:v:-16:16", "value:m:-16:16"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_mat2_mul_mat2"
+proof_status = "proven"
+inputs = ["value:a:-16:16", "value:b:-16:16"]
+outputs = ["return:-512:512"]
+
+[[entry]]
+name = "det_mat3_mul_mat3"
+proof_status = "proven"
+inputs = ["value:a:-16:16", "value:b:-16:16"]
+outputs = ["return:-768:768"]
+
+[[entry]]
+name = "det_mat4_mul_mat4"
+proof_status = "proven"
+inputs = ["value:a:-16:16", "value:b:-16:16"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_exp_2"
+proof_status = "proven"
+inputs = ["value:v:-10:10"]
+outputs = ["return:0:30000"]
+
+[[entry]]
+name = "det_exp4"
+proof_status = "proven"
+inputs = ["value:v:-10:10"]
+outputs = ["return:0:30000"]
+
+[[entry]]
+name = "det_exp2_2"
+proof_status = "proven"
+inputs = ["value:v:-10:10"]
+outputs = ["return:0:2048"]
+
+[[entry]]
+name = "det_exp2_3"
+proof_status = "proven"
+inputs = ["value:v:-10:10"]
+outputs = ["return:0:2048"]
+
+[[entry]]
+name = "det_exp2_4"
+proof_status = "proven"
+inputs = ["value:v:-10:10"]
+outputs = ["return:0:2048"]
+
+[[entry]]
+name = "det_log"
+proof_status = "proven"
+inputs = ["value:x:0.000001:65536"]
+outputs = ["return:-14:12"]
+
+[[entry]]
+name = "det_log_2"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:-14:12"]
+
+[[entry]]
+name = "det_log3"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:-14:12"]
+
+[[entry]]
+name = "det_log4"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:-14:12"]
+
+[[entry]]
+name = "det_log2_2"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:-32:32"]
+
+[[entry]]
+name = "det_log2_3"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:-32:32"]
+
+[[entry]]
+name = "det_log2_4"
+proof_status = "proven"
+inputs = ["value:v:0.000001:65536"]
+outputs = ["return:-32:32"]
+
+[[entry]]
+name = "det_pow2"
+proof_status = "proven"
+inputs = ["value:a:0.0001:16", "value:b:-8:8"]
+outputs = ["return:0:1.000001e32"]
+
+[[entry]]
+name = "det_pow4"
+proof_status = "proven"
+inputs = ["value:a:0.0001:16", "value:b:-8:8"]
+outputs = ["return:0:1.000001e32"]
+
+[[entry]]
+name = "det_sin2"
+proof_status = "proven"
+inputs = ["value:v:-1000:1000"]
+outputs = ["return:-1.1:1.1"]
+
+[[entry]]
+name = "det_cos2"
+proof_status = "proven"
+inputs = ["value:v:-1000:1000"]
+outputs = ["return:-1.1:1.1"]
+
+[[entry]]
+name = "det_tan2"
+proof_status = "proven"
+inputs = ["value:v:-1.4:1.4"]
+outputs = ["return:-16:16"]
+
+[[entry]]
+name = "det_sin3"
+proof_status = "proven"
+inputs = ["value:v:-1000:1000"]
+outputs = ["return:-1.1:1.1"]
+
+[[entry]]
+name = "det_cos3"
+proof_status = "proven"
+inputs = ["value:v:-1000:1000"]
+outputs = ["return:-1.1:1.1"]
+
+[[entry]]
+name = "det_tan3"
+proof_status = "proven"
+inputs = ["value:v:-1.4:1.4"]
+outputs = ["return:-16:16"]
+
+[[entry]]
+name = "det_sin4"
+proof_status = "proven"
+inputs = ["value:v:-1000:1000"]
+outputs = ["return:-1.1:1.1"]
+
+[[entry]]
+name = "det_cos4"
+proof_status = "proven"
+inputs = ["value:v:-1000:1000"]
+outputs = ["return:-1.1:1.1"]
+
+[[entry]]
+name = "det_tan4"
+proof_status = "proven"
+inputs = ["value:v:-1.4:1.4"]
+outputs = ["return:-16:16"]
+
+[[entry]]
+name = "det_tan"
+proof_status = "proven"
+inputs = ["value:x:-1.4:1.4"]
+outputs = ["return:-16:16"]
+
+[[entry]]
+name = "det_asin"
+proof_status = "proven"
+inputs = ["value:x:-1:1"]
+outputs = ["return:-1.6:1.6"]
+
+[[entry]]
+name = "det_asin2"
+proof_status = "proven"
+inputs = ["value:v:-1:1"]
+outputs = ["return:-1.6:1.6"]
+
+[[entry]]
+name = "det_acos2"
+proof_status = "proven"
+inputs = ["value:v:-1:1"]
+outputs = ["return:0:3.2"]
+
+[[entry]]
+name = "det_asin3"
+proof_status = "proven"
+inputs = ["value:v:-1:1"]
+outputs = ["return:-1.6:1.6"]
+
+[[entry]]
+name = "det_acos3"
+proof_status = "proven"
+inputs = ["value:v:-1:1"]
+outputs = ["return:0:3.2"]
+
+[[entry]]
+name = "det_asin4"
+proof_status = "proven"
+inputs = ["value:v:-1:1"]
+outputs = ["return:-1.6:1.6"]
+
+[[entry]]
+name = "det_acos4"
+proof_status = "proven"
+inputs = ["value:v:-1:1"]
+outputs = ["return:0:3.2"]
+
+[[entry]]
+name = "det_atan"
+proof_status = "proven"
+inputs = ["value:x:-65536:65536"]
+outputs = ["return:-1.6:1.6"]
+
+[[entry]]
+name = "det_atan_2"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:-1.6:1.6"]
+
+[[entry]]
+name = "det_atan3"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:-1.6:1.6"]
+
+[[entry]]
+name = "det_atan4"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:-1.6:1.6"]
+
+[[entry]]
+name = "det_atan2_2"
+proof_status = "proven"
+inputs = ["value:a:-65536:65536", "value:b:-65536:65536"]
+outputs = ["return:-3.2:3.2"]
+
+[[entry]]
+name = "det_atan2_3"
+proof_status = "proven"
+inputs = ["value:a:-65536:65536", "value:b:-65536:65536"]
+outputs = ["return:-3.2:3.2"]
+
+[[entry]]
+name = "det_atan2_4"
+proof_status = "proven"
+inputs = ["value:a:-65536:65536", "value:b:-65536:65536"]
+outputs = ["return:-3.2:3.2"]
+
+[[entry]]
+name = "det_mix2"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:t:0:1"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_mix4"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:t:0:1"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_mix2v"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:t:0:1"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_mix3v"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:t:0:1"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_mix4v"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:t:0:1"]
+outputs = ["return:-1024:1024"]

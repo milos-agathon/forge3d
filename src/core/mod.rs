@@ -29,6 +29,10 @@ pub mod shader_registry;
 // PROBATUM: feature-gated runtime shader-contract observations
 pub(crate) mod shader_contract_runtime;
 
+// TERRA-DETERMINATA: arithmetic + raster canary probes for the deterministic
+// contract (runtime gate at context init and the Python determinism_probe leg).
+pub mod det_probe;
+
 // CENSOR Task 9: RenderCertificate execution report (per-render pass timings)
 pub mod certificate;
 

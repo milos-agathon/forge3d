@@ -14,6 +14,7 @@ pub(super) fn register_diagnostics_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(numpy_to_exr, m)?)?;
 
     m.add_function(wrap_pyfunction!(engine_info, m)?)?;
+    m.add_function(wrap_pyfunction!(determinism_probe, m)?)?;
     m.add_function(wrap_pyfunction!(report_device, m)?)?;
     m.add_function(wrap_pyfunction!(c5_build_framegraph_report, m)?)?;
     m.add_function(wrap_pyfunction!(c6_mt_record_demo, m)?)?;

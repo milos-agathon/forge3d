@@ -18,6 +18,7 @@ fn apply_operator(color: vec3<f32>) -> vec3<f32> {
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    det_seed(f32(gid.x));
     if (gid.x >= uniforms.width || gid.y >= uniforms.height) {
         return;
     }

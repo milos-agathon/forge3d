@@ -114,7 +114,7 @@ pub(super) fn create_atmosphere_init_resources(
     let sky_shader = crate::core::shader_registry::create_labeled_shader_module(
         device,
         "terrain.sky.shader",
-        include_str!("../../shaders/sky.wgsl"),
+        &crate::shader_sources::sky_module(),
     );
 
     let sky_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

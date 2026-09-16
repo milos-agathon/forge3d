@@ -251,9 +251,9 @@ impl GpuMaterialSet {
             address_mode_u: AddressMode::Repeat,
             address_mode_v: AddressMode::Repeat,
             address_mode_w: AddressMode::Repeat,
-            mag_filter: FilterMode::Linear,
-            min_filter: FilterMode::Linear,
-            mipmap_filter: FilterMode::Linear,
+            mag_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Linear),
+            min_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Linear),
+            mipmap_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Linear),
             anisotropy_clamp: 16,
             ..Default::default()
         });

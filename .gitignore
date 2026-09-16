@@ -414,6 +414,7 @@ scripts/*
 !scripts/helios_evidence_report.py
 !scripts/run_nvidia_visual_acceptance.py
 !scripts/run_nvidia_determinism_acceptance.py
+!scripts/run_browser_probe.py
 
 # forge3d outputs (A13) 
 out/

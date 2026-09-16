@@ -142,6 +142,7 @@ class TestNativeModuleSymbols:
         "open_terrain_viewer",
         "enumerate_adapters",
         "device_probe",
+        "determinism_probe",
         "sun_position",
         "sun_position_utc",
         "solar_position",

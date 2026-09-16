@@ -280,9 +280,9 @@ impl TerrainScene {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mag_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            min_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            mipmap_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Nearest),
             ..Default::default()
         });
         let probe_grid_uniform_buffer = tracked_create_buffer_init(
@@ -325,9 +325,9 @@ impl TerrainScene {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mag_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            min_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            mipmap_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
             ..Default::default()
         });
         let reflection_probe_fallback_texture = tracked_create_texture(

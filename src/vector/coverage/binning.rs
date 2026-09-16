@@ -155,11 +155,7 @@ pub struct CoverageBinner {
 
 impl CoverageBinner {
     pub fn new(device: &wgpu::Device) -> Self {
-        let source = format!(
-            "{}\n{}",
-            include_str!("../../shaders/includes/determinism.wgsl"),
-            include_str!("../../shaders/vector_coverage_bin.wgsl")
-        );
+        let source = crate::shader_sources::vector_coverage_bin();
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "vector_coverage_bin.wgsl",
@@ -442,11 +438,7 @@ mod tests {
 
     #[test]
     fn bin_shader_and_pinned_math_assemble_as_valid_wgsl() {
-        let source = format!(
-            "{}\n{}",
-            include_str!("../../shaders/includes/determinism.wgsl"),
-            include_str!("../../shaders/vector_coverage_bin.wgsl")
-        );
+        let source = crate::shader_sources::vector_coverage_bin();
         let module =
             naga::front::wgsl::parse_str(&source).expect("combined LIMES bin shader must parse");
         naga::valid::Validator::new(
