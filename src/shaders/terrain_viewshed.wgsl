@@ -153,7 +153,7 @@ fn terrain_leaf_occluded(
     tolerance_m: f32,
 ) -> bool {
     let heights = terrain_cell_heights(cell_x, cell_y);
-    let segment_mid = 0.5 * (segment_t0 + segment_t1);
+    let segment_mid = det_barrier(0.5 * (segment_t0 + segment_t1));
     let deviation = vec3<f32>(
         terrain_leaf_deviation(origin, direction, heights, cell_x, cell_y,
             segment_t0, distance0_m, distance1_m, height_coefficients),
@@ -502,10 +502,10 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 
     let target_elevation = det_barrier(target_absolute_elevation - effective_drop);
-    let height_coefficients = vec3<f32>(
+    let height_coefficients = det_barrier3(vec3<f32>(
         observer_elevation,
         det_div(target_elevation - observer_elevation, distance_m),
-        det_barrier(0.5 * inv_radius) * uniforms.physics.z,
+        det_barrier(0.5 * inv_radius) * uniforms.physics.z),
     );
     // Geodesics are curved in the geographic raster. Consecutive chords stay
     // within half a cell, while terrain_trace_segment continuously traverses
@@ -515,7 +515,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     var segment_start_pixel = uniforms.observer.xy;
     loop {
         let segment_latitude = radians(det_fma(
-            -(segment_start_pixel.y + 0.5),
+            -(det_barrier(segment_start_pixel.y) + 0.5),
             uniforms.metric.z,
             uniforms.geodetic.w,
         ));
@@ -524,11 +524,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             segment_start_distance_m + segment_length_m,
             distance_m,
         );
-        let segment_end_pixel = geodesic_sample_pixel(
+        let segment_end_pixel = det_barrier2(geodesic_sample_pixel(
             uniforms.geodetic.x,
             uniforms.geodetic.y,
             azimuth,
-            segment_end_distance_m,
+            segment_end_distance_m),
         );
         let outer_min = vec2<f32>(-0.5);
         let outer_max = vec2<f32>(uniforms.dimensions.xy) - vec2<f32>(0.5);
@@ -627,10 +627,10 @@ fn shadow_mask_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let effective_inv_radius = det_barrier(inv_radius * uniforms.physics.z);
 
     var visible = 1u;
-    let height_coefficients = vec3<f32>(
+    let height_coefficients = det_barrier3(vec3<f32>(
         origin_height,
         ray_slope,
-        0.5 * effective_inv_radius,
+        0.5 * effective_inv_radius),
     );
     var segment_start_distance_m = 0.0;
     var segment_start_pixel = vec2<f32>(id.xy);
@@ -640,11 +640,11 @@ fn shadow_mask_main(@builtin(global_invocation_id) id: vec3<u32>) {
             segment_start_distance_m + shadow_step_m(segment_latitude, azimuth),
             uniforms.metric.x,
         );
-        let segment_end_pixel = geodesic_sample_pixel(
+        let segment_end_pixel = det_barrier2(geodesic_sample_pixel(
             origin_geodetic.x,
             origin_geodetic.y,
             azimuth,
-            segment_end_distance_m,
+            segment_end_distance_m),
         );
         let outer_min = vec2<f32>(-0.5);
         let outer_max = vec2<f32>(uniforms.dimensions.xy) - vec2<f32>(0.5);

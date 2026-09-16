@@ -373,7 +373,7 @@ fn sample_shadow_pcss(
     let cascade_texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
     let max_bias = cascade_texel_size * 3.0;
     let bias = min(csm_uniforms.depth_bias + det_barrier(csm_uniforms.slope_bias * slope_scale), max_bias);
-    let receiver_depth = det_barrier(shadow_coords.z) - bias;
+    let receiver_depth = det_barrier(det_barrier(shadow_coords.z) - bias);
 
     // Extract PCSS parameters
     let blocker_search_radius = csm_uniforms.technique_params.x;
@@ -385,7 +385,7 @@ fn sample_shadow_pcss(
 
     // Step 1: Blocker search
     let avg_blocker_depth = pcss_blocker_search(
-        shadow_coords.xy,
+        det_barrier2(shadow_coords.xy),
         receiver_depth,
         cascade_idx,
         clamped_blocker_radius
@@ -495,7 +495,7 @@ fn sample_shadow_vsm(
 
     // Sample moment map (RG channels contain E[x] and E[x^2])
     let moments = sample_moments(shadow_coords.xy, cascade_idx);
-    let mean = moments.r;      // E[x]
+    let mean = det_barrier(moments.r);      // E[x]
     let mean_sq = det_barrier(moments.g);   // E[x^2]
 
     // If receiver is closer than mean, it is definitely lit.
@@ -551,7 +551,7 @@ fn sample_shadow_evsm(
     let receiver_depth = clamp(det_barrier(shadow_coords.z) - bias, 0.0, 1.0);
 
     // Sample moment map (RGBA channels)
-    let moments = sample_moments(shadow_coords.xy, cascade_idx);
+    let moments = det_barrier4(sample_moments(shadow_coords.xy, cascade_idx));
 
     // EVSM uses exponential warp to reduce light leaking
     let c_pos = csm_uniforms.evsm_positive_exp;
@@ -576,7 +576,7 @@ fn sample_shadow_evsm(
     shadow_factor = min(
         shadow_factor,
         evsm_moment_leak_control(
-            moments.rg,
+            det_barrier2(moments.rg),
             warp_depth_pos,
             c_pos,
             variance_floor.x

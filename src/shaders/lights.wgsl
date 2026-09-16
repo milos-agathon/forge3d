@@ -166,8 +166,8 @@ fn sample_spot(i: u32, Xi: vec2<f32>) -> vec3<f32> {
     let right = det_normalize3(det_cross3(up, forward));
     let ortho_up = det_cross3(forward, right);
     return det_normalize3(
-        det_barrier3(det_barrier3(local_dir.x * right) +
-        det_barrier3(local_dir.y * ortho_up)) +
+        det_barrier3(det_barrier3(det_barrier(local_dir.x) * right) +
+        det_barrier3(det_barrier(local_dir.y) * ortho_up)) +
         det_barrier3(local_dir.z * forward)
     );
 }

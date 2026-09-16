@@ -142,7 +142,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             det_dot3(ray, sun_dir),
         ) * sun_intensity;
         let ldr = tonemap_apply_operator(
-            aether_eval_clamp_hdr_radiance(miss_scattering) * atmosphere_exposure,
+            det_barrier3(aether_eval_clamp_hdr_radiance(miss_scattering) * atmosphere_exposure),
             TONEMAP_OPERATOR_REINHARD,
             1.0,
         );
@@ -220,7 +220,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         det_barrier3(surface_or_environment * transmittance) + finite_inscatter,
     );
     let ldr = tonemap_apply_operator(
-        linear_hdr * atmosphere_exposure,
+        det_barrier3(linear_hdr * atmosphere_exposure),
         TONEMAP_OPERATOR_REINHARD,
         1.0,
     );

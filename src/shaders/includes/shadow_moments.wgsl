@@ -73,13 +73,13 @@ fn evsm_visibility_from_moments(
     let negative_variance = max(negative_bounds.y, variance_floor.y);
     let positive_visibility =
         chebyshev_upper_bound_visibility(
-            positive_bounds.x,
+            det_barrier(positive_bounds.x),
             positive_variance,
             positive_receiver
         );
     let negative_visibility =
         chebyshev_upper_bound_visibility(
-            negative_bounds.x,
+            det_barrier(negative_bounds.x),
             negative_variance,
             negative_receiver
         );
@@ -108,7 +108,7 @@ fn evsm_moment_leak_control(
     let moment_bounds = evsm_fp16_moment_bounds(positive_moments);
     let variance = max(moment_bounds.y, minimum_variance);
     let visibility = chebyshev_upper_bound_visibility(
-        moment_bounds.x,
+        det_barrier(moment_bounds.x),
         variance,
         positive_receiver
     );
@@ -157,11 +157,11 @@ fn msm_visibility_from_moments(
 
     let l32 = det_div(l32_d22, d22);
     var coefficients = vec3<f32>(1.0, receiver, receiver * receiver);
-    coefficients.y -= det_barrier(b.x);
-    coefficients.z -= det_barrier(det_barrier(b.y) + det_barrier(l32 * coefficients.y));
+    coefficients.y = det_barrier(coefficients.y) - (det_barrier(b.x));
+    coefficients.z = det_barrier(coefficients.z) - (det_barrier(det_barrier(b.y) + det_barrier(l32 * coefficients.y)));
     coefficients.y = det_div(coefficients.y, d22);
     coefficients.z *= det_div(d22, d33_d22);
-    coefficients.y -= det_barrier(l32 * coefficients.z);
+    coefficients.y = det_barrier(coefficients.y) - (det_barrier(l32 * det_barrier(coefficients.z)));
     coefficients.x -= det_barrier(det_dot2(coefficients.yz, b.xy));
     if (!(abs(coefficients.z) > MSM_MATRIX_EPSILON) ||
         !all(abs(coefficients) <= vec3<f32>(MSM_FINITE_LIMIT))) {

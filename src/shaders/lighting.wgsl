@@ -368,7 +368,7 @@ fn calculate_lighting(
     let metallic = clamp(mat.metallic, 0.0, 1.0);
     let roughness = clamp(mat.roughness, 0.0, 1.0);
     let clamped_albedo = clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0));
-    let f0 = det_mix3(vec3<f32>(0.04), clamped_albedo, metallic);
+    let f0 = det_barrier3(det_mix3(vec3<f32>(0.04), clamped_albedo, metallic));
     var indirect = vec3<f32>(0.0);
     if (gi.tech == GI_IBL) {
         indirect = det_barrier3(eval_ibl(normal, view_dir, clamped_albedo, metallic, roughness, f0) * gi.ibl_intensity);

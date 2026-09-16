@@ -8,7 +8,7 @@ const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xd904_56ee_98b5_6d96;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0xcbcc_d585_9475_3534;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xd6da_1716_2141_7c6b;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x5315_c1a2_9bbe_01a3;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {

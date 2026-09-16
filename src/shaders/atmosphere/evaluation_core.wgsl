@@ -312,8 +312,8 @@ fn aether_eval_segment_transmittance(
         + max(1.0 - abs(det_div(h15 - 25000.0, 15000.0)), 0.0);
 
     let path_per_sample = det_barrier(det_barrier(bounded_distance_m * density_scale) * 0.0625);
-    let rayleigh_column = path_per_sample * rayleigh_density_sum;
-    let mie_column = path_per_sample * mie_density_sum;
+    let rayleigh_column = det_barrier(path_per_sample * rayleigh_density_sum);
+    let mie_column = det_barrier(path_per_sample * mie_density_sum);
     let ozone_column = det_div(det_barrier(path_per_sample * ozone_density_sum) * ozone_du, 300.0);
     let xyz = det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(det_barrier3(aether_eval_spectral_xyz(
         0u, rayleigh_column, mie_column, ozone_column, turbidity),

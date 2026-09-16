@@ -73,7 +73,7 @@ fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     let h01 = sample_height_bilinear(clamp(det_barrier2(coarse_base) + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)));
     let h11 = sample_height_bilinear(clamp(det_barrier2(coarse_base) + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)));
     let h_coarse = det_mix(det_mix(h00, h10, coarse_t.x), det_mix(h01, h11, coarse_t.x), coarse_t.y);
-    let h_raw = det_mix(h_fine, h_coarse, clamp(source.morph_data.x, 0.0, 1.0));
+    let h_raw = det_barrier(det_mix(h_fine, h_coarse, clamp(source.morph_data.x, 0.0, 1.0)));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -184,11 +184,11 @@ fn visibility_sample_surface(
     let bary_screen = visibility_barycentrics(
         framebuffer_xy,
         visibility_snap_to_subpixel_grid(
-            visibility_framebuffer_of(v0.clip.xy, w.x, dimensions)),
+            det_barrier2(visibility_framebuffer_of(v0.clip.xy, w.x, dimensions))),
         visibility_snap_to_subpixel_grid(
-            visibility_framebuffer_of(v1.clip.xy, w.y, dimensions)),
+            det_barrier2(visibility_framebuffer_of(v1.clip.xy, w.y, dimensions))),
         visibility_snap_to_subpixel_grid(
-            visibility_framebuffer_of(v2.clip.xy, w.z, dimensions)),
+            det_barrier2(visibility_framebuffer_of(v2.clip.xy, w.z, dimensions))),
     );
     let perspective = det_div3(bary_screen, vec3<f32>(w));
     let bary = det_div3(perspective, vec3<f32>(max(
@@ -295,13 +295,13 @@ fn fs_visibility_resolve_fullscreen(
     // so sampling the same triangle at the quad's three anchor centres
     // reproduces the value the rasteriser would have produced for it, whatever
     // the neighbouring pixels' triangles happen to be.
-    let quad_origin = vec2<f32>(quad_base) + vec2<f32>(0.5, 0.5);
+    let quad_origin = det_barrier2(vec2<f32>(quad_base) + vec2<f32>(0.5, 0.5));
     let anchor00 = visibility_sample_surface(
         quad_origin, v0, v1, v2, w, dimensions);
     let anchor10 = visibility_sample_surface(
-        det_barrier2(quad_origin) + vec2<f32>(1.0, 0.0), v0, v1, v2, w, dimensions);
+        det_barrier2(det_barrier2(quad_origin) + vec2<f32>(1.0, 0.0)), v0, v1, v2, w, dimensions);
     let anchor01 = visibility_sample_surface(
-        det_barrier2(quad_origin) + vec2<f32>(0.0, 1.0), v0, v1, v2, w, dimensions);
+        det_barrier2(det_barrier2(quad_origin) + vec2<f32>(0.0, 1.0)), v0, v1, v2, w, dimensions);
     let feedback_ddx_uv = anchor10.uv - anchor00.uv;
     let feedback_ddy_uv = anchor01.uv - anchor00.uv;
     let feedback_ddx_world = anchor10.world - anchor00.world;

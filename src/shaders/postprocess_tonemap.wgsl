@@ -106,7 +106,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     
     // Apply exposure
-    let exposed_color = color * uniforms.exposure;
+    let exposed_color = det_barrier3(color * uniforms.exposure);
     
     var tonemapped_color = tonemap_apply_operator(exposed_color, uniforms.operator_index, uniforms.white_point);
     
