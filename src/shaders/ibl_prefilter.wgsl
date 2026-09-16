@@ -167,7 +167,7 @@ fn cs_specular_prefilter(@builtin(global_invocation_id) gid: vec3<u32>) {
     let sample_count = max(params.sample_count, 1u);
 
     for (var i = 0u; i < sample_count; i = i + 1u) {
-        let xi = hammersley_2d(i, sample_count);
+        let xi = det_barrier2(hammersley_2d(i, sample_count));
         let half_dir = importance_sample_ggx(xi, normal, roughness);
         let light_dir = det_normalize3(det_barrier3(det_barrier(2.0 * det_dot3(view_dir, half_dir)) * half_dir) - view_dir);
 

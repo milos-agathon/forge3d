@@ -283,8 +283,10 @@ jobs:
           retention-days: 7
 
   # Optional Apple/Metal diagnostic retained for backend support. It is
-  # opt-out (FORGE3D_RUN_METAL_DIAGNOSTIC=0), publishes its own artifacts,
-  # and is not a dependency of the determinism acceptance summary. Apple is
+  # opt-out (FORGE3D_RUN_METAL_DIAGNOSTIC=0) and continue-on-error, and
+  # publishes its own artifacts. The acceptance summary lists it in `needs`
+  # only so the diff gate waits for determinism-hash-apple before enforcing
+  # --require apple; opting out therefore fails that required leg loudly. Apple is
   # deliberately not a required leg of the hosted render job: the base-owned
   # CI contracts forbid an Apple matrix entry there, and hosted macos-14
   # exposes an Apple Paravirtual VM device that deterministic mode refuses.
@@ -630,7 +632,7 @@ jobs:
 
   diff:
     name: Determinism Acceptance Summary
-    needs: [f3dz-stream, render, render-nvidia, browser, wasm-policy, anamnesis-seed, anamnesis-portability]
+    needs: [f3dz-stream, render, render-nvidia, metal-diagnostic, browser, wasm-policy, anamnesis-seed, anamnesis-portability]
     if: always()
     runs-on: ubuntu-latest
     steps:

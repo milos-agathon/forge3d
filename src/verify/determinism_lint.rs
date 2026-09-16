@@ -8,6 +8,10 @@
 //!   an unbarriered add/subtract feeding an add/subtract (reassociation), and
 //!   an unbarriered multiply feeding a multiply (product-tree reassociation).
 //!   A `det_barrier*` call between producer and consumer breaks the edge.
+//!   Edges are followed the way a backend sees them after inlining: through
+//!   call results (a callee's tail op, or a parameter it returns unchanged),
+//!   into callees (an argument the callee adds to or multiplies again), and
+//!   through `var` locals by constant field/element path.
 //! - raw float `/`, and the per-API intrinsics outside `det_*`: `sqrt`,
 //!   `inverseSqrt`, `dot`, `mix`, `fma`, `pow`, `exp`, `exp2`, `log`, `log2`,
 //!   all trig/hyperbolic forms, `length`, `distance`, `normalize`, `cross`,
@@ -149,11 +153,285 @@ fn forbidden_math(fun: MathFunction) -> Option<&'static str> {
     })
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProducerKind {
     Mul,
     AddSub,
     Div,
+}
+
+/// The fuseable producer -> consumer edges: mul->add/sub (fma contraction),
+/// add/sub->add/sub (reassociation), mul->mul (product-tree reassociation).
+fn is_bad_edge(producer: ProducerKind, consumer: ProducerKind) -> bool {
+    matches!(
+        (producer, consumer),
+        (ProducerKind::Mul, ProducerKind::AddSub)
+            | (ProducerKind::AddSub, ProducerKind::AddSub)
+            | (ProducerKind::Mul, ProducerKind::Mul)
+    )
+}
+
+/// Stores into a function's `var` locals: root local -> (constant access
+/// path from the root, stored value). A dynamic `a[i]` index ends the path,
+/// so that store conservatively covers every element below it.
+type LocalStores = HashMap<usize, Vec<StoredValue>>;
+
+/// One store into a local: constant access path, whether that path is exact
+/// (no dynamic index was truncated away), the stored value, and whether the
+/// store sits inside a loop (where it can feed a load that runs before it).
+type StoredValue = (Vec<u32>, bool, Handle<Expression>, bool);
+
+/// Root local, constant access path, and exactness of a pointer
+/// (`s.x` -> (s, [0], true); `a[i].x` -> (a, [], false)).
+fn pointer_path(
+    function: &naga::Function,
+    mut pointer: Handle<Expression>,
+) -> Option<(usize, Vec<u32>, bool)> {
+    let mut reversed = Vec::new();
+    let mut exact = true;
+    loop {
+        match function.expressions[pointer] {
+            Expression::LocalVariable(local) => {
+                reversed.reverse();
+                return Some((local.index(), reversed, exact));
+            }
+            Expression::AccessIndex { base, index } => {
+                reversed.push(index);
+                pointer = base;
+            }
+            Expression::Access { base, .. } => {
+                // Dynamic index: everything collected so far is below an
+                // unknown element; keep only the part above it.
+                reversed.clear();
+                exact = false;
+                pointer = base;
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// Stored values a load of `path` under `root` may observe, each with the
+/// projection still to apply inside the stored value. Paths overlap when one
+/// is a prefix of the other: a whole-struct store feeds a field load (with
+/// the remaining projection), and a field store feeds a whole-struct load.
+fn stores_for_load<'a>(
+    stores: &'a LocalStores,
+    root: usize,
+    path: &'a [u32],
+    load_exact: bool,
+) -> impl Iterator<Item = (Handle<Expression>, Vec<u32>)> + 'a {
+    stores
+        .get(&root)
+        .into_iter()
+        .flatten()
+        .filter_map(move |(stored, store_exact, value, _)| {
+            if path.starts_with(stored) {
+                // Only project into the stored value when both paths name
+                // exact elements; otherwise take the whole value.
+                let projection = if load_exact && *store_exact {
+                    path[stored.len()..].to_vec()
+                } else {
+                    Vec::new()
+                };
+                Some((*value, projection))
+            } else if stored.starts_with(path) {
+                Some((*value, Vec::new()))
+            } else {
+                None
+            }
+        })
+}
+
+/// Does a `Compose` of this type take exactly one component per indexable
+/// element, so `AccessIndex(k)` selects `components[k]`?
+fn compose_is_elementwise(inner: &TypeInner, components: usize) -> bool {
+    match inner {
+        TypeInner::Vector { size, .. } => *size as usize == components,
+        TypeInner::Matrix { columns, .. } => *columns as usize == components,
+        TypeInner::Struct { members, .. } => members.len() == components,
+        TypeInner::Array {
+            size: naga::ArraySize::Constant(size),
+            ..
+        } => size.get() as usize == components,
+        _ => false,
+    }
+}
+
+/// Every call in a body with its argument handles.
+fn call_sites(body: &naga::Block) -> Vec<(Handle<naga::Function>, Vec<Handle<Expression>>)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<&Statement> = body.iter().collect();
+    while let Some(statement) = stack.pop() {
+        match statement {
+            Statement::Call {
+                function,
+                arguments,
+                ..
+            } => out.push((*function, arguments.clone())),
+            Statement::Block(block) => stack.extend(block.iter()),
+            Statement::If { accept, reject, .. } => {
+                stack.extend(accept.iter());
+                stack.extend(reject.iter());
+            }
+            Statement::Switch { cases, .. } => {
+                for case in cases {
+                    stack.extend(case.body.iter());
+                }
+            }
+            Statement::Loop {
+                body, continuing, ..
+            } => {
+                stack.extend(body.iter());
+                stack.extend(continuing.iter());
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The call statement (callee and arguments) that produced a CallResult.
+fn call_statement(
+    body: &naga::Block,
+    result: Handle<Expression>,
+) -> Option<(Handle<naga::Function>, Vec<Handle<Expression>>)> {
+    let callee = call_result_producer(body, result)?;
+    let mut stack: Vec<&Statement> = body.iter().collect();
+    while let Some(statement) = stack.pop() {
+        match statement {
+            Statement::Call {
+                function,
+                arguments,
+                result: Some(r),
+            } if *r == result && *function == callee => {
+                return Some((*function, arguments.clone()))
+            }
+            Statement::Block(block) => stack.extend(block.iter()),
+            Statement::If { accept, reject, .. } => {
+                stack.extend(accept.iter());
+                stack.extend(reject.iter());
+            }
+            Statement::Switch { cases, .. } => {
+                for case in cases {
+                    stack.extend(case.body.iter());
+                }
+            }
+            Statement::Loop {
+                body, continuing, ..
+            } => {
+                stack.extend(body.iter());
+                stack.extend(continuing.iter());
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parameters that `handle` carries unchanged, traced backward through the
+/// same transparent wrappers the edge resolver sees through.
+fn params_reaching(
+    function: &naga::Function,
+    local_producers: &LocalStores,
+    handle: Handle<Expression>,
+) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    let mut seen = HashSet::new();
+    let mut stack = vec![handle];
+    while let Some(current) = stack.pop() {
+        if !seen.insert(current) {
+            continue;
+        }
+        match &function.expressions[current] {
+            Expression::FunctionArgument(index) => {
+                out.insert(*index);
+            }
+            Expression::Access { base, .. } | Expression::AccessIndex { base, .. } => {
+                stack.push(*base)
+            }
+            Expression::Swizzle { vector, .. } => stack.push(*vector),
+            Expression::Splat { value, .. } => stack.push(*value),
+            Expression::Compose { components, .. } => stack.extend(components.iter().copied()),
+            Expression::Unary { expr, .. } => stack.push(*expr),
+            Expression::As { expr, .. } => stack.push(*expr),
+            Expression::Load { pointer } => {
+                if let Some((local, path, exact)) = pointer_path(function, *pointer) {
+                    stack.extend(
+                        stores_for_load(local_producers, local, &path, exact)
+                            .map(|(value, _)| value),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn function_local_producers(function: &naga::Function) -> LocalStores {
+    let mut local_producers = HashMap::new();
+    for statement in function.body.iter() {
+        collect_stores(function, statement, false, &mut local_producers);
+    }
+    local_producers
+}
+
+/// Parameters a callee returns unchanged (through transparent wrappers).
+fn returned_params(module: &naga::Module, callee: Handle<naga::Function>) -> HashSet<u32> {
+    let function = &module.functions[callee];
+    let local_producers = function_local_producers(function);
+    let mut returns = Vec::new();
+    collect_return_values(&function.body, &mut returns);
+    returns
+        .into_iter()
+        .flat_map(|value| params_reaching(function, &local_producers, value))
+        .collect()
+}
+
+/// Float arithmetic kinds each parameter of `callee` feeds directly once the
+/// call is inlined, following parameters into nested calls. `det_barrier*`
+/// consume their parameter through bitcasts and report none; valid WGSL has
+/// an acyclic call graph, so the recursion terminates.
+fn param_consumer_kinds(
+    module: &naga::Module,
+    info: &naga::valid::ModuleInfo,
+    callee: Handle<naga::Function>,
+    memo: &mut HashMap<usize, Vec<Vec<ProducerKind>>>,
+) -> Vec<Vec<ProducerKind>> {
+    if let Some(found) = memo.get(&callee.index()) {
+        return found.clone();
+    }
+    let function = &module.functions[callee];
+    let function_info = &info[callee];
+    let local_producers = function_local_producers(function);
+    let mut kinds = vec![Vec::new(); function.arguments.len()];
+    for (handle, expression) in function.expressions.iter() {
+        let Expression::Binary { op, left, right } = expression else {
+            continue;
+        };
+        let inner = function_info[handle].ty.inner_with(&module.types);
+        let Some(kind) = producer_kind(inner, *op) else {
+            continue;
+        };
+        for operand in [*left, *right] {
+            for index in params_reaching(function, &local_producers, operand) {
+                kinds[index as usize].push(kind);
+            }
+        }
+    }
+    for (nested_callee, arguments) in call_sites(&function.body) {
+        let nested = param_consumer_kinds(module, info, nested_callee, memo);
+        for (position, argument) in arguments.iter().enumerate() {
+            for index in params_reaching(function, &local_producers, *argument) {
+                if let Some(nested_kinds) = nested.get(position) {
+                    kinds[index as usize].extend(nested_kinds.iter().copied());
+                }
+            }
+        }
+    }
+    memo.insert(callee.index(), kinds.clone());
+    kinds
 }
 
 /// Kind of arithmetic a function's return value carries when inlined: the
@@ -328,7 +606,7 @@ pub fn analyze_source(
     .validate(&module)
     {
         Ok(info) => info,
-        Err(_) => {
+        Err(error) => {
             return (
                 None,
                 None,
@@ -337,7 +615,10 @@ pub fn analyze_source(
                     function: String::new(),
                     line: 1,
                     kind: "validate",
-                    detail: "naga validation failed on the assembled WGSL".to_string(),
+                    detail: format!(
+                        "naga validation failed on the assembled WGSL: {}",
+                        error.emit_to_string(source)
+                    ),
                     site: None,
                 }],
             );
@@ -553,10 +834,7 @@ fn lint_function(
 
     // var-locals: a Load's producer is whatever was stored into the local
     // (over-approximated across control flow; order-insensitive by design).
-    let mut local_producers: HashMap<usize, Vec<Handle<Expression>>> = HashMap::new();
-    for statement in function.body.iter() {
-        collect_stores(function, statement, &mut local_producers);
-    }
+    let local_producers = function_local_producers(function);
 
     // Resolve an operand handle through transparent wrappers to the actual
     // producer: compose/swizzle/access/unary pass through, local loads
@@ -564,11 +842,29 @@ fn lint_function(
     // callee's tail kind (a call is inlined by the backend, so `det_fma(..)
     // + x` is an unbarriered add feeding an add). det_barrier* results are
     // opaque leaves — that is exactly what they exist to be.
-    let resolve = |handle: Handle<Expression>| -> Option<(ProducerKind, Handle<Expression>)> {
+    //
+    // Each stack entry carries the constant component projection still to
+    // apply (`v.x` of `vec3(a, b * c, d)` is `a`, not the product), so a
+    // product in one lane of a composite is not blamed on another lane. A
+    // projection that cannot be followed exactly is dropped, which only
+    // widens the search.
+    //
+    // `consumer` is the expression consuming the operand. Outside a loop a
+    // store can never feed a load in its own right-hand side, so the
+    // consumer's own result stored back (`x.y -= b`) is not its producer.
+    let self_stores: HashSet<Handle<Expression>> = local_producers
+        .values()
+        .flatten()
+        .filter(|(_, _, _, in_loop)| !in_loop)
+        .map(|(_, _, value, _)| *value)
+        .collect();
+    let resolve = |handle: Handle<Expression>,
+                   consumer: Option<Handle<Expression>>|
+     -> Option<(ProducerKind, Handle<Expression>)> {
         let mut seen = HashSet::new();
-        let mut stack = vec![handle];
-        while let Some(current) = stack.pop() {
-            if !seen.insert(current) {
+        let mut stack: Vec<(Handle<Expression>, Vec<u32>)> = vec![(handle, Vec::new())];
+        while let Some((current, projection)) = stack.pop() {
+            if !seen.insert((current, projection.clone())) {
                 continue;
             }
             let expression = &function.expressions[current];
@@ -580,28 +876,57 @@ fn lint_function(
                     }
                 }
                 Expression::CallResult(_) => {
-                    if let Some(callee) = call_result_producer(&function.body, current) {
+                    if let Some((callee, arguments)) = call_statement(&function.body, current) {
                         let callee_name = module.functions[callee].name.as_deref().unwrap_or("");
                         if !callee_name.starts_with("det_barrier") {
                             if let Some(kind) = call_tail_kind(module, info, callee) {
                                 return Some((kind, current));
                             }
+                            // A callee that returns a parameter unchanged
+                            // is transparent after inlining: the caller's
+                            // argument is the producer.
+                            for index in returned_params(module, callee) {
+                                if let Some(argument) = arguments.get(index as usize) {
+                                    stack.push((*argument, Vec::new()));
+                                }
+                            }
                         }
                     }
                 }
-                Expression::Access { base, .. } | Expression::AccessIndex { base, .. } => {
-                    stack.push(*base);
+                Expression::AccessIndex { base, index } => {
+                    let mut deeper = vec![*index];
+                    deeper.extend(projection.iter().copied());
+                    stack.push((*base, deeper));
                 }
-                Expression::Swizzle { vector, .. } => stack.push(*vector),
-                Expression::Splat { value, .. } => stack.push(*value),
-                Expression::Compose { components, .. } => stack.extend(components.iter().copied()),
-                Expression::Unary { expr, .. } => stack.push(*expr),
-                Expression::As { expr, .. } => stack.push(*expr),
-                Expression::Load { pointer } => {
-                    if let Expression::LocalVariable(local) = function.expressions[*pointer] {
-                        if let Some(producers) = local_producers.get(&local.index()) {
-                            stack.extend(producers.iter().copied());
+                Expression::Access { base, .. } => stack.push((*base, Vec::new())),
+                Expression::Swizzle { vector, .. } => stack.push((*vector, Vec::new())),
+                Expression::Splat { value, .. } => stack.push((*value, Vec::new())),
+                Expression::Compose { components, .. } => {
+                    let inner = function_info[current].ty.inner_with(&module.types);
+                    match projection.split_first() {
+                        Some((first, rest))
+                            if compose_is_elementwise(inner, components.len())
+                                && (*first as usize) < components.len() =>
+                        {
+                            stack.push((components[*first as usize], rest.to_vec()));
                         }
+                        _ => stack.extend(components.iter().map(|c| (*c, Vec::new()))),
+                    }
+                }
+                Expression::Unary { expr, .. } => stack.push((*expr, projection.clone())),
+                Expression::As { expr, .. } => stack.push((*expr, projection.clone())),
+                Expression::Load { pointer } => {
+                    if let Some((local, mut path, exact)) = pointer_path(function, *pointer) {
+                        if exact {
+                            path.extend(projection.iter().copied());
+                        }
+                        stack.extend(
+                            stores_for_load(&local_producers, local, &path, exact).filter(
+                                |(value, _)| {
+                                    Some(*value) != consumer || !self_stores.contains(value)
+                                },
+                            ),
+                        );
                     }
                 }
                 // Select/Relational/ImageLoad/Literal/argument boundaries are
@@ -652,14 +977,8 @@ fn lint_function(
                     // For each operand, find the producer through the
                     // transparent wrappers and check the edge rule.
                     for operand in [*left, *right] {
-                        if let Some((producer, producer_handle)) = resolve(operand) {
-                            let bad = matches!(
-                                (producer, kind),
-                                (ProducerKind::Mul, ProducerKind::AddSub)
-                                    | (ProducerKind::AddSub, ProducerKind::AddSub)
-                                    | (ProducerKind::Mul, ProducerKind::Mul)
-                            );
-                            if bad {
+                        if let Some((producer, producer_handle)) = resolve(operand, Some(handle)) {
+                            if is_bad_edge(producer, kind) {
                                 let producer_op = match function.expressions[producer_handle] {
                                     Expression::Binary { op, .. } => op,
                                     _ => *op,
@@ -724,6 +1043,38 @@ fn lint_function(
                 });
             }
             _ => {}
+        }
+    }
+
+    // ---- call arguments ----------------------------------------------------
+    // Backends inline calls, so a caller-side product passed as an argument
+    // that the callee adds to (or multiplies again) is the same contractible
+    // edge as `a * b + c` spelled in one function.
+    let mut consumer_memo = HashMap::new();
+    for (callee, arguments) in call_sites(&function.body) {
+        let consumers = param_consumer_kinds(module, info, callee, &mut consumer_memo);
+        let callee_name = module.functions[callee].name.as_deref().unwrap_or("?");
+        for (position, argument) in arguments.iter().enumerate() {
+            let Some((producer, producer_handle)) = resolve(*argument, None) else {
+                continue;
+            };
+            let Some(consumer) = consumers
+                .get(position)
+                .and_then(|kinds| kinds.iter().find(|kind| is_bad_edge(producer, **kind)))
+            else {
+                continue;
+            };
+            violations.push(Violation {
+                module: module_name.to_string(),
+                function: name.to_string(),
+                line: span_line(producer_handle),
+                kind: "unbarriered_edge",
+                detail: format!(
+                    "{producer:?} result passed as argument {position} of {callee_name}, which \
+                     feeds it to {consumer:?} without a det_barrier* between them"
+                ),
+                site: Some(Site::edge(func_site, *argument, producer_handle)),
+            });
         }
     }
 
@@ -813,31 +1164,32 @@ fn lint_function(
 fn collect_stores(
     function: &naga::Function,
     statement: &Statement,
-    local_producers: &mut HashMap<usize, Vec<Handle<Expression>>>,
+    in_loop: bool,
+    local_producers: &mut LocalStores,
 ) {
     match statement {
         Statement::Store { pointer, value } => {
-            if let Expression::LocalVariable(local) = function.expressions[*pointer] {
+            if let Some((local, path, exact)) = pointer_path(function, *pointer) {
                 local_producers
-                    .entry(local.index())
+                    .entry(local)
                     .or_default()
-                    .push(*value);
+                    .push((path, exact, *value, in_loop));
             }
         }
         Statement::Block(block) => {
             for s in block.iter() {
-                collect_stores(function, s, local_producers);
+                collect_stores(function, s, in_loop, local_producers);
             }
         }
         Statement::If { accept, reject, .. } => {
             for s in accept.iter().chain(reject.iter()) {
-                collect_stores(function, s, local_producers);
+                collect_stores(function, s, in_loop, local_producers);
             }
         }
         Statement::Switch { cases, .. } => {
             for case in cases {
                 for s in case.body.iter() {
-                    collect_stores(function, s, local_producers);
+                    collect_stores(function, s, in_loop, local_producers);
                 }
             }
         }
@@ -845,7 +1197,7 @@ fn collect_stores(
             body, continuing, ..
         } => {
             for s in body.iter().chain(continuing.iter()) {
-                collect_stores(function, s, local_producers);
+                collect_stores(function, s, true, local_producers);
             }
         }
         _ => {}
@@ -978,6 +1330,63 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
         assert!(violation_kinds(source).contains(&"unbarriered_edge"));
+    }
+
+    #[test]
+    fn verify_product_argument_fused_by_callee_is_rejected() {
+        let source = r#"
+fn add_one(x: f32) -> f32 { return x + 1.0; }
+fn forward(x: f32) -> f32 { return add_one(x); }
+fn caller(a: f32, b: f32) -> f32 { return forward(a * b); }
+"#;
+        assert!(violation_kinds(source).contains(&"unbarriered_edge"));
+    }
+
+    #[test]
+    fn verify_barriered_argument_passes() {
+        let source = r#"
+var<private> det_zu: u32 = 0u;
+fn det_barrier(x: f32) -> f32 {
+    return bitcast<f32>(bitcast<u32>(x) | det_zu);
+}
+fn add_one(x: f32) -> f32 { return x + 1.0; }
+fn caller(a: f32, b: f32) -> f32 { return add_one(det_barrier(a * b)); }
+"#;
+        assert!(!violation_kinds(source).contains(&"unbarriered_edge"));
+    }
+
+    #[test]
+    fn verify_identity_callee_is_transparent() {
+        let source = r#"
+fn identity(x: f32) -> f32 { return x; }
+fn caller(a: f32, b: f32) -> f32 { return identity(a * b) + 1.0; }
+"#;
+        assert!(violation_kinds(source).contains(&"unbarriered_edge"));
+    }
+
+    #[test]
+    fn verify_struct_field_store_edge_is_rejected() {
+        let source = r#"
+struct Pair { v: f32, w: f32 }
+fn caller(a: f32, b: f32) -> f32 {
+    var pair: Pair;
+    pair.v = a * b;
+    return pair.v + 1.0;
+}
+"#;
+        assert!(violation_kinds(source).contains(&"unbarriered_edge"));
+    }
+
+    #[test]
+    fn verify_product_in_another_lane_is_not_blamed() {
+        let source = r#"
+fn caller(receiver: f32, b: f32) -> f32 {
+    var coefficients = vec3<f32>(1.0, receiver, receiver * receiver);
+    coefficients.y -= b;
+    return coefficients.y;
+}
+"#;
+        assert!(!violation_kinds(source).contains(&"unbarriered_edge"));
     }
 
     #[test]

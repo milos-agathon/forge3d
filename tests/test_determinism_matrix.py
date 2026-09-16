@@ -647,6 +647,11 @@ def test_render_acceptance_required_legs():
         "--raster-golden tests/goldens/determinism/",
     ):
         assert flag in workflow
+    # A required leg's artifact must come from a job the diff gate waits on;
+    # otherwise --require apple races the metal-diagnostic upload.
+    summary_needs = workflow.split("  diff:\n", 1)[1].split("\n    if:", 1)[0]
+    assert "metal-diagnostic" in summary_needs
+    assert "name: determinism-hash-apple" in workflow.split("  metal-diagnostic:\n", 1)[1]
     assert "--expected-legs intel amd nvidia" in workflow
 
 

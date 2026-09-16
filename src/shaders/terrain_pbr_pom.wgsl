@@ -673,8 +673,8 @@ fn sample_material_noise(terrain_uv: vec2<f32>, height_norm: f32) -> TerrainMate
         terrain_fbm(macro_coords + vec3<f32>(0.0, 0.0, 0.0), octaves),
         terrain_fbm(detail_coords + vec3<f32>(17.3, 9.1, 3.7), detail_octaves),
         terrain_ridged_fbm(macro_coords + vec3<f32>(31.7, 5.2, 11.9), octaves),
-        1.0 - terrain_cellular_distance(detail_coords + vec3<f32>(2.1, 13.4, 7.6)),
-        1.0 - terrain_cellular_distance(macro_coords + vec3<f32>(19.5, 23.1, 5.7)),
+        det_barrier(1.0 - terrain_cellular_distance(detail_coords + vec3<f32>(2.1, 13.4, 7.6))),
+        det_barrier(1.0 - terrain_cellular_distance(macro_coords + vec3<f32>(19.5, 23.1, 5.7))),
         terrain_fbm(detail_coords + vec3<f32>(41.0, 17.0, 29.0), detail_octaves),
     );
 }
@@ -729,7 +729,7 @@ fn compute_snow_layer_weight(
 
     // Combined snow weight
     let snow_weight = apply_material_variation(
-        det_barrier(altitude_factor * slope_factor) * aspect_factor,
+        det_barrier(det_barrier(altitude_factor * slope_factor) * aspect_factor),
         material_noise.snow_macro,
         material_noise.snow_detail,
         material_layer_uniforms.snow_variation.x,
@@ -791,7 +791,7 @@ fn compute_wetness_layer_coverage(
     // Flat areas (low slope) are wetter
     let flat_factor = 1.0 - clamp(det_div(slope, 3.14159265 * 0.25), 0.0, 1.0);
     return apply_material_variation(
-        flat_factor * slope_influence,
+        det_barrier(flat_factor * slope_influence),
         material_noise.wetness_macro,
         material_noise.wetness_detail,
         material_layer_uniforms.wetness_variation.x,
@@ -915,7 +915,7 @@ fn sample_water_reflection(
     // Convert NDC to UV [0,1]
     var reflection_uv = det_barrier2(det_barrier2(reflection_ndc.xy * 0.5) + 0.5);
     // Flip Y for texture coordinate system
-    reflection_uv.y = 1.0 - reflection_uv.y;
+    reflection_uv.y = det_barrier(1.0 - reflection_uv.y);
 
     // Wave-based UV distortion
     // Wave normal deviation from flat (0,1,0) creates UV offset
@@ -1206,7 +1206,7 @@ fn sample_shadow_pcf_terrain(
     let bias = det_barrier(det_barrier(csm_uniforms.depth_bias
         + det_barrier(csm_uniforms.slope_bias * slope_factor))
         + csm_uniforms.peter_panning_offset);
-    let compare_depth = depth_01 - bias;
+    let compare_depth = det_barrier(depth_01 - bias);
 
     // P0.2/M3: Shadow technique dispatch based on technique uniform
     // technique=0: HARD (single sample, hard edges)
@@ -1550,7 +1550,7 @@ fn apply_height_curve01(t: f32) -> f32 {
 }
 
 fn sample_height_geom(uv : vec2<f32>) -> f32 {
-    let h_raw = sample_height_bilinear(uv);
+    let h_raw = det_barrier(sample_height_bilinear(uv));
     let t = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -1646,7 +1646,7 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     let world_xy = (uv - vec2<f32>(0.5, 0.5)) * spacing;
 
     // Sample height from the portable explicit-bilinear path.
-    let h_raw = sample_height_bilinear(uv);
+    let h_raw = det_barrier(sample_height_bilinear(uv));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -1686,7 +1686,7 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
 
 /// Sample height at a specific LOD level for LOD-aware normal computation.
 fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
-    let h_raw = sample_height_bilinear_level(uv, lod);
+    let h_raw = det_barrier(sample_height_bilinear_level(uv, lod));
     let t = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -1851,7 +1851,7 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
 
     // Octave 1: Medium detail (weight 0.5)
     {
-        let oct_lod = base_lod + 1.0;
+        let oct_lod = det_barrier(base_lod + 1.0);
         let oct_texel = det_barrier2(texel_uv * 2.0);
         let off_x = det_barrier2(vec2<f32>(oct_texel.x, 0.0));
         let off_y = det_barrier2(vec2<f32>(0.0, oct_texel.y));
@@ -1872,7 +1872,7 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
 
     // Octave 2: Coarse detail (weight 0.25)
     {
-        let oct_lod = base_lod + 2.0;
+        let oct_lod = det_barrier(base_lod + 2.0);
         let oct_texel = det_barrier2(texel_uv * 4.0);
         let off_x = det_barrier2(vec2<f32>(oct_texel.x, 0.0));
         let off_y = det_barrier2(vec2<f32>(0.0, oct_texel.y));
@@ -1964,9 +1964,9 @@ fn sample_triplanar_checker(
     let weights = compute_triplanar_weights(normal, blend_sharpness);
 
     // Project world position to each axis plane
-    let uv_x = world_pos.yz * scale;
-    let uv_y = world_pos.xz * scale;
-    let uv_z = world_pos.xy * scale;
+    let uv_x = det_barrier2(world_pos.yz * scale);
+    let uv_y = det_barrier2(world_pos.xz * scale);
+    let uv_z = det_barrier2(world_pos.xy * scale);
 
     // Sample checker pattern for each projection
     let check_x = checker_pattern(uv_x, checker_scale);
@@ -2710,9 +2710,9 @@ fn apply_detail_normal(
 
     // Detail UVs from world position
     let uv_scale = det_div(1.0, detail_scale);
-    let detail_x = procedural_detail_normal(vec3<f32>(0.0, world_pos.y, world_pos.z) * uv_scale, 1.0);
-    let detail_y = procedural_detail_normal(vec3<f32>(world_pos.x, 0.0, world_pos.z) * uv_scale, 1.0);
-    let detail_z = procedural_detail_normal(vec3<f32>(world_pos.x, world_pos.y, 0.0) * uv_scale, 1.0);
+    let detail_x = procedural_detail_normal(det_barrier3(vec3<f32>(0.0, world_pos.y, world_pos.z) * uv_scale), 1.0);
+    let detail_y = procedural_detail_normal(det_barrier3(vec3<f32>(world_pos.x, 0.0, world_pos.z) * uv_scale), 1.0);
+    let detail_z = procedural_detail_normal(det_barrier3(vec3<f32>(world_pos.x, world_pos.y, 0.0) * uv_scale), 1.0);
 
     // Blend triplanar detail normals
     let blended_detail = det_normalize3(
@@ -3427,10 +3427,10 @@ fn terrain_aov_depth(input : VertexOutput) -> vec4<f32> {
     let clip_near = max(u_terrain.camera_mode_params.z, 1e-5);
     let clip_far = max(u_terrain.camera_mode_params.w, clip_near + 1e-5);
     let ndc_depth = clamp(input.clip_position.z, 0.0, 1.0);
-    let screen_view_position = det_mat4_mul_vec4(
+    let screen_view_position = det_barrier4(det_mat4_mul_vec4(
         u_terrain.view,
         vec4<f32>(input.world_position, 1.0)
-    );
+    ));
     var linear_depth = -screen_view_position.z;
     if (u_terrain.camera_mode_params.x >= 0.5) {
         linear_depth = det_div(clip_near * clip_far, max(
@@ -3515,7 +3515,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // Capture pre-normalized normal for specular AA (Toksvig)
     let mixed_normal = det_mix3(base_normal, amplified_height_normal, normal_blend);
     let normal_len = det_sqrt(det_dot3(mixed_normal, mixed_normal));
-    let blended_normal = mixed_normal * det_rcp(max(normal_len, 1e-5));
+    let blended_normal = det_barrier3(mixed_normal * det_rcp(max(normal_len, 1e-5)));
 
     let tbn = build_tbn(blended_normal);
     // Extract camera position from view matrix properly
@@ -3533,10 +3533,10 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let tx = u_terrain.view[3][0];
     let ty = u_terrain.view[3][1];
     let tz = u_terrain.view[3][2];
-    let camera_pos = vec3<f32>(
+    let camera_pos = det_barrier3(vec3<f32>(
         -(det_barrier(det_barrier(r00 * tx) + det_barrier(r10 * ty)) + det_barrier(r20 * tz)),
         -(det_barrier(det_barrier(r01 * tx) + det_barrier(r11 * ty)) + det_barrier(r21 * tz)),
-        -(det_barrier(det_barrier(r02 * tx) + det_barrier(r12 * ty)) + det_barrier(r22 * tz)),
+        -(det_barrier(det_barrier(r02 * tx) + det_barrier(r12 * ty)) + det_barrier(r22 * tz))),
     );
     let view_dir = det_normalize3(det_barrier3(camera_pos) - input.world_position);
     let view_dir_tangent = det_mat3_mul_vec3(tbn, view_dir);
@@ -3659,7 +3659,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     var dominant_layer_weight = -1.0;
     for (var idx = 0; idx < 4; idx = idx + 1) {
         if (idx < layer_count) {
-            let weight = weights[idx];
+            let weight = det_barrier(weights[idx]);
             let layer = f32(idx);
             // Use base_normal (smooth vertex normal) for triplanar weights, NOT blended_normal
             // blended_normal has high-frequency height perturbations that cause weight jitter → flakes
@@ -3671,7 +3671,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
                 layer,
                 lod_value
             );
-            albedo = det_barrier3(albedo) + det_barrier3(sample_rgb * weight);
+            albedo = det_barrier3(det_barrier3(albedo) + det_barrier3(sample_rgb * weight));
             if (weight > dominant_layer_weight) {
                 dominant_layer_weight = weight;
                 terrain_vt_albedo_source_id = terrain_vt_source_id_triplanar(
@@ -3682,8 +3682,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
                     layer,
                 );
             }
-            roughness = det_barrier(roughness) + det_barrier(u_shading.layer_roughness[idx] * weight);
-            metallic = det_barrier(metallic) + det_barrier(u_shading.layer_metallic[idx] * weight);
+            roughness = det_barrier(det_barrier(roughness) + det_barrier(u_shading.layer_roughness[idx] * weight));
+            metallic = det_barrier(det_barrier(metallic) + det_barrier(u_shading.layer_metallic[idx] * weight));
             if (vt_normal_enabled) {
                 // Normal and mask are recovered raster data aligned to the
                 // GridVertex UV, not world-space triplanar color coordinates.
@@ -3762,7 +3762,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         let shallow_color = vec3<f32>(0.1, 0.5, 0.85);
 
         // Blend based on depth - this gives visible shoreline gradient
-        let underwater_color = det_mix3(shallow_color, deep_water_color, water_depth_value);
+        let underwater_color = det_barrier3(det_mix3(shallow_color, deep_water_color, water_depth_value));
 
         // Water albedo - vibrant blue that shows through reflections
         albedo = underwater_color;
@@ -3802,7 +3802,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     if (!is_water) {
         var map_mask = material_map_mask(parallax_uv);
         if (vt_mask_enabled) {
-            map_mask = det_barrier(map_mask) * clamp(vt_mask_data.r, 0.0, 1.0);
+            map_mask = det_barrier(det_barrier(map_mask) * clamp(vt_mask_data.r, 0.0, 1.0));
         }
         if (vt_normal_enabled) {
             shading_normal = apply_encoded_tangent_normal(
@@ -3818,7 +3818,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             normal_strength,
             map_mask
         );
-        roughness = apply_material_roughness_map(roughness, parallax_uv, map_mask);
+        roughness = det_barrier(apply_material_roughness_map(roughness, parallax_uv, map_mask));
         if (vt_mask_enabled) {
             // Feed the mask family's roughness channel into the BRDF, gated by
             // residency coverage: fragments whose mask tiles are not yet
@@ -3888,11 +3888,11 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         if (blend_mode == 0u) { // Replace
             albedo = overlay_rgb;
         } else if (blend_mode == 1u) { // Alpha
-            albedo = det_mix3(albedo, overlay_rgb, strength);
+            albedo = det_barrier3(det_mix3(albedo, overlay_rgb, strength));
         } else if (blend_mode == 2u) { // Multiply
-            albedo = det_mix3(albedo, albedo * overlay_rgb, strength);
+            albedo = det_barrier3(det_mix3(albedo, albedo * overlay_rgb, strength));
         } else if (blend_mode == 3u) { // Additive
-            albedo = det_barrier3(albedo) + det_barrier3(strength * overlay_rgb);
+            albedo = det_barrier3(det_barrier3(albedo) + det_barrier3(strength * overlay_rgb));
         }
     }
 
@@ -3924,7 +3924,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     if (detail_enabled && !is_water && detail_albedo_noise_amp > 0.0) {
         let albedo_fade = calculate_detail_fade(view_distance, detail_fade_start, detail_fade_end);
         if (albedo_fade > 0.0) {
-            let noise_mult = procedural_albedo_noise(input.world_position, detail_albedo_noise_amp * albedo_fade);
+            let noise_mult = procedural_albedo_noise(input.world_position, det_barrier(detail_albedo_noise_amp * albedo_fade));
             albedo = clamp(albedo * noise_mult, vec3<f32>(0.0), vec3<f32>(1.0));
         }
     }
@@ -3934,7 +3934,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // The caller can set strength to zero when the supplied palette must remain authoritative.
     if (!is_water) {
         let hue_variation_strength = clamp(u_overlay.params3.z, 0.0, 0.2);
-        albedo = apply_slope_hue_variation(albedo, slope_factor, height_norm, hue_variation_strength);
+        albedo = det_barrier3(apply_slope_hue_variation(albedo, slope_factor, height_norm, hue_variation_strength));
     }
 
     var terrain_layer_weights = TerrainLayerWeights(0.0, 0.0, 0.0);
@@ -3959,9 +3959,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         terrain_subsurface = resolve_terrain_subsurface(terrain_layer_weights);
         // Apply material layers in order: wetness (darkening) -> rock -> snow
         // Order matters: snow on top, then rock, then wetness darkening at base
-        albedo = apply_wetness_layer(albedo, terrain_layer_weights.wetness);
-        albedo = apply_rock_layer(albedo, terrain_layer_weights.rock);
-        albedo = apply_snow_layer(albedo, terrain_layer_weights.snow);
+        albedo = det_barrier3(apply_wetness_layer(albedo, terrain_layer_weights.wetness));
+        albedo = det_barrier3(apply_rock_layer(albedo, terrain_layer_weights.rock));
+        albedo = det_barrier3(apply_snow_layer(albedo, terrain_layer_weights.snow));
     }
 
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
@@ -4016,7 +4016,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let roughness_mult = max(u_overlay.params2.y, 0.001);
     if (roughness_mult != 1.0) {
         base_roughness = det_barrier(base_roughness) * roughness_mult;
-        specular_roughness = det_barrier(specular_roughness) * roughness_mult;
+        specular_roughness = det_barrier(det_barrier(specular_roughness) * roughness_mult);
     }
     // P3: Roughness floor - lowered to 0.25 for land (from 0.65) to restore specular detail
     // Toksvig anti-aliasing handles sparkles instead of a high roughness floor
@@ -4027,7 +4027,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // Legacy roughness variable for IBL and other uses (use specular_roughness)
     roughness = specular_roughness;
     metallic = clamp(metallic, 0.0, 1.0);
-    var f0 = det_mix3(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic);
+    var f0 = det_barrier3(det_mix3(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic));
     if (is_water) {
         let ior = 1.33;
         let f0_scalar = det_pow(det_div((ior - 1.0), (ior + 1.0)), 2.0);
@@ -4069,7 +4069,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     if (TERRAIN_USE_SHADOWS) {
         // Calculate view-space depth for cascade selection
         let view_pos = det_mat4_mul_vec4(u_terrain.view, vec4<f32>(input.world_position, 1.0));
-        let view_depth = -view_pos.z; // Positive depth in view space
+        let view_depth = det_barrier(-view_pos.z); // Positive depth in view space
 
         // Check for cascade debug mode (compile-time OR runtime via csm_uniforms.debug_mode)
         let shadow_debug_mode = csm_uniforms.debug_mode;
@@ -4867,7 +4867,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // Reduced to allow deeper shadows while preventing pitch-black
             // D2 fix: Remove warm bias - reference has cooler neutrality
             let ibl_diffuse_biased = blended_diffuse;
-            let ibl_diffuse_factor = det_length3(ibl_diffuse_biased) * u_ibl.intensity;
+            let ibl_diffuse_factor = det_barrier(det_length3(ibl_diffuse_biased) * u_ibl.intensity);
             let ibl_term = det_barrier(det_barrier(ibl_diffuse_factor) * AMBIENT_FLOOR) * 0.35;
             let terrain_sss = evaluate_terrain_subsurface(
                 terrain_subsurface,
@@ -4930,7 +4930,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         if (screen_pos.x < stamp_size && screen_pos.y < stamp_size) {
             // Encode mode in blue channel: 0.0-1.0 maps to mode 0-255
             let mode_signal = det_div(f32(debug_mode), 255.0);
-            final_color.b = clamp(final_color.b + mode_signal, 0.0, 1.0);
+            final_color.b = clamp(det_barrier(final_color.b) + mode_signal, 0.0, 1.0);
         }
     }
 
@@ -5164,7 +5164,7 @@ fn vs_clipmap_main(
     let h01 = sample_height_bilinear(det_barrier2(coarse_base) + vec2<f32>(0.0, coarse_step.y));
     let h11 = sample_height_bilinear(det_barrier2(coarse_base) + coarse_step);
     let h_coarse = det_mix(det_mix(h00, h10, coarse_t.x), det_mix(h01, h11, coarse_t.x), coarse_t.y);
-    let h_raw = det_mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0));
+    let h_raw = det_barrier(det_mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0)));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;

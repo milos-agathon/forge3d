@@ -279,7 +279,7 @@ fn shade_pbr(input: VertexOutput) -> vec4<f32> {
     
     // Calculate F0 (surface reflection at zero incidence)
     let dielectric_f0 = vec3<f32>(0.04);
-    let f0 = det_mix3(dielectric_f0, base_color.rgb, metallic);
+    let f0 = det_barrier3(det_mix3(dielectric_f0, base_color.rgb, metallic));
     
     // DIRECT LIGHTING (P2-03: BRDF dispatch via eval_brdf, P3-08: shadow visibility)
     var direct_lighting = vec3<f32>(0.0);
@@ -303,7 +303,7 @@ fn shade_pbr(input: VertexOutput) -> vec4<f32> {
         // P3-08: Apply shadow visibility
         // Calculate view-space depth for cascade selection
         let view_pos = det_mat4_mul_vec4(uniforms.view_matrix, vec4<f32>(input.world_position, 1.0));
-        let view_depth = -view_pos.z; // Positive depth in view space
+        let view_depth = det_barrier(-view_pos.z); // Positive depth in view space
         
         // Sample shadows (returns 0.0 = full shadow, 1.0 = no shadow)
         let shadow_visibility =
@@ -371,7 +371,7 @@ fn shade_pbr(input: VertexOutput) -> vec4<f32> {
             let st = det_sqrt(max(0.0, 1.0 - det_barrier(ct * ct)));
             // local dir in hemisphere about n (z up)
             let dl = vec3<f32>(st * det_cos(phi), st * det_sin(phi), ct);
-            let d = det_barrier3(det_barrier3(tangent * dl.x) + det_barrier3(bitan * dl.y)) + det_barrier3(world_normal * dl.z);
+            let d = det_barrier3(det_barrier3(tangent * det_barrier(dl.x)) + det_barrier3(bitan * det_barrier(dl.y))) + det_barrier3(world_normal * dl.z);
             if (d.y < -1e-4) {
                 let t_plane = det_div(input.world_position.y, -d.y);
                 // Nearest occluder along the ray: the plane or one of the
@@ -422,7 +422,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     det_seed(input.clip_position.x);
     // Tone mapping. The Rgba8UnormSrgb target applies final sRGB encoding.
     let color = shade_pbr(input);
-    return vec4<f32>(tonemap_reinhard(color.rgb * lighting.exposure), color.a);
+    return vec4<f32>(tonemap_reinhard(det_barrier3(color.rgb * lighting.exposure)), color.a);
 }
 
 @fragment
@@ -502,7 +502,7 @@ fn fs_pbr_simple(input: VertexOutput) -> @location(0) vec4<f32> {
         
         // P3-08: Apply shadow visibility
         let view_pos = det_mat4_mul_vec4(uniforms.view_matrix, vec4<f32>(input.world_position, 1.0));
-        let view_depth = -view_pos.z;
+        let view_depth = det_barrier(-view_pos.z);
         let shadow_visibility =
             calculate_shadow(input.world_position, view_depth, world_normal);
         

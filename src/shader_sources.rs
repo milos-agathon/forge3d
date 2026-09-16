@@ -506,9 +506,13 @@ pub(crate) fn vector_coverage_resolve() -> String {
 }
 
 /// Every deterministic-path WGSL assembly is linted through
-/// `deterministic_module_parts` (below): any module that includes
-/// `determinism.wgsl` must appear there or it escapes the naga-IR lint and
-/// the shader-proof accounting.
+/// `deterministic_module_parts` (below): a deterministic-path module that
+/// includes `determinism.wgsl` must appear there or it escapes the naga-IR
+/// lint and the shader-proof accounting. Two includers are deliberately NOT
+/// deterministic paths and are not linted: the interactive viewer terrain
+/// shader (`viewer::terrain::shader_pbr`, which includes the prelude only so
+/// `shadow_moments.wgsl` resolves its `det_*` calls) and the DUPLA
+/// `dd_harness` substitution assemblies (`core::dd::gpu_exec`).
 
 #[cfg(any(test, all(feature = "enable-pbr", feature = "enable-tbn")))]
 pub(crate) fn pbr() -> String {
@@ -611,10 +615,7 @@ pub(crate) fn terrain_visbuffer_write(bindless: bool) -> String {
         terrain_base(bindless),
         include_str!("shaders/terrain_visbuffer_write.wgsl").to_string(),
     ]
-    .join(
-        "
-",
-    )
+    .join("\n")
 }
 
 /// TESSELLA pass 2: the shared terrain module plus the full-screen material
@@ -635,10 +636,7 @@ pub(crate) fn terrain_visbuffer_resolve(bindless: bool) -> String {
         terrain_base(bindless),
         include_str!("shaders/terrain_visibility_fullscreen.wgsl").to_string(),
     ]
-    .join(
-        "
-",
-    )
+    .join("\n")
 }
 
 /// File composition of [`pbr`]: the first three parts are what
@@ -953,10 +951,14 @@ mod tests {
 
         // Both the ordinary geometry path and every clipmap morph lookup must
         // share the same reconstruction instead of drifting by callsite.
-        assert!(source.contains("let h_raw = sample_height_bilinear(uv);"));
+        assert!(source.contains("let h_raw = det_barrier(sample_height_bilinear(uv));"));
         assert!(source.contains("let h_fine = sample_height_bilinear(uv);"));
+        // The three offset taps barrier `coarse_base` before the add.
         assert_eq!(
-            source.matches("sample_height_bilinear(coarse_base").count(),
+            source.matches("sample_height_bilinear(coarse_base").count()
+                + source
+                    .matches("sample_height_bilinear(det_barrier2(coarse_base)")
+                    .count(),
             4
         );
 
@@ -975,7 +977,7 @@ mod tests {
         assert_eq!(shadow.matches("textureLoad(height_tex").count(), 4);
         assert!(!shadow.contains("textureSample(height_tex"));
         assert!(!shadow.contains("textureSampleLevel(height_tex"));
-        assert!(shadow.contains("let h_raw = sample_height_bilinear(uv);"));
+        assert!(shadow.contains("let h_raw = det_barrier(sample_height_bilinear(uv));"));
     }
 
     #[test]

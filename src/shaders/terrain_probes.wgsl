@@ -318,7 +318,7 @@ fn sample_reflection_probe_at_index(
     reflection_dir: vec3<f32>,
     roughness: f32,
 ) -> vec3<f32> {
-    let probe_center = reflection_probe_center(probe_index);
+    let probe_center = det_barrier3(reflection_probe_center(probe_index));
     let corrected_dir = reflection_probe_box_project(world_pos, reflection_dir, probe_center);
     return sample_reflection_probe_array(probe_index, corrected_dir, roughness);
 }

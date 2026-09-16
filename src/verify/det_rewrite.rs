@@ -450,6 +450,65 @@ mod instrument {
                         (s, e, lanes(expr_info(prod)))
                     }
                 };
+                // det_barrier* take float scalars/vectors only: a struct or
+                // matrix operand (e.g. a helper returning a struct whose
+                // field is a raw product) must be barriered inside the
+                // producer by hand.
+                let barrierable = |h: Handle<Expression>| {
+                    matches!(
+                        expr_info(h),
+                        TypeInner::Scalar(naga::Scalar {
+                            kind: naga::ScalarKind::Float,
+                            ..
+                        }) | TypeInner::Vector {
+                            scalar: naga::Scalar {
+                                kind: naga::ScalarKind::Float,
+                                ..
+                            },
+                            ..
+                        }
+                    )
+                };
+                if !barrierable(target) {
+                    return Err(format!(
+                        "operand is not a float scalar/vector ({:?}); barrier the producer by hand",
+                        expr_info(target)
+                    ));
+                }
+                // The operand is the target of a compound assignment
+                // (`x.y -= rhs`): an lvalue cannot be wrapped, so expand to
+                // `x.y = det_barrier(x.y) - (rhs)`, which is the same value.
+                let after = source[e..].trim_start();
+                if let Some(op) = ["+=", "-=", "*="]
+                    .into_iter()
+                    .find(|op| after.starts_with(op))
+                {
+                    let rhs_start = e + (source[e..].len() - after.len()) + op.len();
+                    let mut depth = 0i32;
+                    let rhs_end = source[rhs_start..]
+                        .char_indices()
+                        .find_map(|(i, c)| {
+                            match c {
+                                '(' | '[' => depth += 1,
+                                ')' | ']' => depth -= 1,
+                                ';' if depth == 0 => return Some(rhs_start + i),
+                                _ => {}
+                            }
+                            None
+                        })
+                        .ok_or("compound assignment without `;`")?;
+                    let lhs = &source[s..e];
+                    let rhs = source[rhs_start..rhs_end].trim();
+                    return Ok(AsmEdit {
+                        start: s,
+                        end: rhs_end,
+                        payload: Payload::Name(format!(
+                            "{lhs} = {}({lhs}) {} ({rhs})",
+                            barrier_name(k),
+                            &op[..1]
+                        )),
+                    });
+                }
                 Ok(AsmEdit {
                     start: s,
                     end: e,
