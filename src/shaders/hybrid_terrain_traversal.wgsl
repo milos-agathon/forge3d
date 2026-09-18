@@ -25,7 +25,7 @@ struct TerrainPtUniforms {
     // mip_count, flags (bit0 terrain enabled, bit1 per-texel albedo map at
     // group 2 binding 16, bit2 spectral ReSTIR), env_w, env_h.
     mips: vec4<u32>,
-    extra: vec4<u32>,          // spp, stats readback cadence, unused, unused
+    extra: vec4<u32>,          // spp, stats readback cadence, albedo sampling (0 nearest, 1 bilinear), unused
 }
 
 struct EarthCurvatureUniforms {
@@ -494,13 +494,17 @@ fn terrain_env_radiance(dir: vec3<f32>) -> vec3<f32> {
 // ---------------------------------------------------------------------------
 // Per-texel albedo + shared atmosphere model
 // ---------------------------------------------------------------------------
-// Bilinear albedo at DEM texel resolution. Same (origin, spacing, dims)
-// texel grid as the height pyramid: world xz -> texel coordinate. Bit 1 of
-// terrain.mips.y selects the map; bit 0 only gates terrain visibility.
-// `terrain_albedo_taps_at` additionally returns the four texel ids and their
-// bilinear weights — the reverse pass scatters dL/d(albedo) into exactly
-// those texels with exactly these weights, so the gradient is the adjoint of
-// the same bilinear operator the primal evaluates.
+// Albedo at DEM texel resolution. Same (origin, spacing, dims) texel grid as
+// the height pyramid: world xz -> texel coordinate. Bit 1 of terrain.mips.y
+// selects the map; bit 0 only gates terrain visibility. terrain.extra.z picks
+// nearest (0, categorical palettes: no bleeding across class boundaries) or
+// bilinear (1) sampling. A texel whose alpha is below 1 declares "no
+// material" and contributes the constant terrain albedo instead.
+// `terrain_albedo_taps_at` additionally returns the texel ids and weights the
+// value was built from (mapped texels only; fallback texels get weight 0) —
+// the reverse pass scatters dL/d(albedo) into exactly those texels with
+// exactly these weights, so the gradient is the adjoint of the operator the
+// primal evaluates, in either sampling mode.
 struct TerrainAlbedoTaps {
     alb: vec3<f32>,
     texels: vec4<u32>,   // row-major texel ids; 0xffffffff when the map is off
@@ -520,19 +524,37 @@ fn terrain_albedo_taps_at(p: vec3<f32>) -> TerrainAlbedoTaps {
         0.0, f32(aw) - 1.0);
     let tz = clamp((p.z - terrain.origin_spacing.y) / terrain.origin_spacing.w,
         0.0, f32(ah) - 1.0);
+    if (terrain.extra.z == 0u) {
+        let xn = min(u32(floor(tx + 0.5)), aw - 1u);
+        let zn = min(u32(floor(tz + 0.5)), ah - 1u);
+        let c = textureLoad(terrain_albedo_tex, vec2<i32>(i32(xn), i32(zn)), 0);
+        let mapped = c.a >= 1.0;
+        t.alb = select(terrain.albedo_pad.rgb, c.rgb, mapped);
+        t.texels = vec4<u32>(zn * aw + xn, 0xffffffffu, 0xffffffffu, 0xffffffffu);
+        t.weights = vec4<f32>(select(0.0, 1.0, mapped), 0.0, 0.0, 0.0);
+        return t;
+    }
     let x0 = u32(floor(tx));
     let z0 = u32(floor(tz));
     let x1 = min(x0 + 1u, aw - 1u);
     let z1 = min(z0 + 1u, ah - 1u);
     let fx = tx - f32(x0);
     let fz = tz - f32(z0);
-    let c00 = textureLoad(terrain_albedo_tex, vec2<i32>(i32(x0), i32(z0)), 0).rgb;
-    let c10 = textureLoad(terrain_albedo_tex, vec2<i32>(i32(x1), i32(z0)), 0).rgb;
-    let c01 = textureLoad(terrain_albedo_tex, vec2<i32>(i32(x0), i32(z1)), 0).rgb;
-    let c11 = textureLoad(terrain_albedo_tex, vec2<i32>(i32(x1), i32(z1)), 0).rgb;
-    t.alb = mix(mix(c00, c10, fx), mix(c01, c11, fx), fz);
+    let c00 = textureLoad(terrain_albedo_tex, vec2<i32>(i32(x0), i32(z0)), 0);
+    let c10 = textureLoad(terrain_albedo_tex, vec2<i32>(i32(x1), i32(z0)), 0);
+    let c01 = textureLoad(terrain_albedo_tex, vec2<i32>(i32(x0), i32(z1)), 0);
+    let c11 = textureLoad(terrain_albedo_tex, vec2<i32>(i32(x1), i32(z1)), 0);
+    let base = terrain.albedo_pad.rgb;
+    let a00 = select(base, c00.rgb, c00.a >= 1.0);
+    let a10 = select(base, c10.rgb, c10.a >= 1.0);
+    let a01 = select(base, c01.rgb, c01.a >= 1.0);
+    let a11 = select(base, c11.rgb, c11.a >= 1.0);
+    t.alb = mix(mix(a00, a10, fx), mix(a01, a11, fx), fz);
     t.texels = vec4<u32>(z0 * aw + x0, z0 * aw + x1, z1 * aw + x0, z1 * aw + x1);
-    t.weights = vec4<f32>(
+    let mapped = vec4<f32>(
+        select(0.0, 1.0, c00.a >= 1.0), select(0.0, 1.0, c10.a >= 1.0),
+        select(0.0, 1.0, c01.a >= 1.0), select(0.0, 1.0, c11.a >= 1.0));
+    t.weights = mapped * vec4<f32>(
         (1.0 - fx) * (1.0 - fz), fx * (1.0 - fz),
         (1.0 - fx) * fz, fx * fz);
     return t;
@@ -684,11 +706,14 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // Independently seeded pseudorandom camera/env estimates: avalanche-hash
     // the (seed, pixel, frame) tuple so distinct seeds/pixels decorrelate.
+    // The pixel is the GLOBAL sensor pixel, so a tile of an offset/off-axis
+    // poster render draws exactly the samples the full-frame render draws
+    // there (for a single-pass render gpix == pix).
+    let gpx = global_pixel(gid.xy);
+    let gpix = gpx.y * max(uniforms.full_width, W) + gpx.x;
     var st = terrain_seed_hash(uniforms.seed_hi ^ uniforms.seed_lo
-        ^ terrain_seed_hash(pix) ^ terrain_seed_hash(uniforms.frame_index + 1u));
+        ^ terrain_seed_hash(gpix) ^ terrain_seed_hash(uniforms.frame_index + 1u));
     st = select(st, 0x6d2b79f5u, st == 0u);
-    let half_h = tan(0.5 * uniforms.cam_fov_y);
-    let half_w = uniforms.cam_aspect * half_h;
     let spp = max(terrain.extra.x, 1u);
     let wi = normalize(lighting.light_dir);
     let spectral_restir = terrain_spectral_restir_enabled();
@@ -715,12 +740,10 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         let jx = terrain_tent_offset(xorshift32(&st)) * 0.5;
         let jy = terrain_tent_offset(xorshift32(&st)) * 0.5;
 
-        // Jittered beauty ray.
-        let ndc_x = ((f32(gid.x) + 0.5 + jx) / f32(W)) * 2.0 - 1.0;
-        let ndc_y = (1.0 - (f32(gid.y) + 0.5 + jy) / f32(H)) * 2.0 - 1.0;
-        var rd = normalize(vec3<f32>(ndc_x * half_w, ndc_y * half_h, -1.0));
-        rd = normalize(rd.x * uniforms.cam_right + rd.y * uniforms.cam_up + rd.z * (-uniforms.cam_forward));
-        let ray = Ray(uniforms.cam_origin, 1e-3, rd, 1e30);
+        // Jittered beauty ray (pinhole, orthographic or off-axis sensor).
+        let camera = generate_camera_ray(gid.xy, vec2<f32>(jx, jy));
+        let rd = camera.direction;
+        let ray = Ray(camera.origin, 1e-3, rd, 1e30);
 
         let hit = intersect_hybrid(ray);
         if (hit.hit == 0u) {
@@ -750,11 +773,14 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
         // --- Sun shading through the merged reservoir (temporal + spatial
         // reuse) from the previous frame; frame 0 falls back to the fresh
-        // candidate, which is the identical delta sample with W = 1. ---
+        // candidate, which is the identical delta sample with W = 1.
+        // Seamless/global-camera renders (tiled posters) skip the reuse
+        // weight: spatial reuse would read across tile edges, and with one
+        // delta light every reservoir holds the same sample anyway. ---
         var sun_dir = wi;
         var reuse_w = 1.0;
         var selected_channel = 3u;
-        if (prev_valid) {
+        if (uniforms.camera_flags == 0u && prev_valid) {
             sun_dir = normalize(prev_r.sample.direction);
             reuse_w = clamp(prev_r.weight, 0.0, TERRAIN_RESTIR_W_CAP);
             selected_channel = prev_r.sample.light_index;
@@ -842,11 +868,8 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
     // --- Geometric AOVs from the unjittered center ray (frame 0 only via
     // aov_flags) so they align with rasterizer pixel-center sampling ---
     if (uniforms.aov_flags != 0u) {
-        let cx = ((f32(gid.x) + 0.5) / f32(W)) * 2.0 - 1.0;
-        let cy = (1.0 - (f32(gid.y) + 0.5) / f32(H)) * 2.0 - 1.0;
-        var crd = normalize(vec3<f32>(cx * half_w, cy * half_h, -1.0));
-        crd = normalize(crd.x * uniforms.cam_right + crd.y * uniforms.cam_up + crd.z * (-uniforms.cam_forward));
-        let cray = Ray(uniforms.cam_origin, 1e-3, crd, 1e30);
+        let center_camera = generate_camera_ray(gid.xy, vec2<f32>(0.0));
+        let cray = Ray(center_camera.origin, 1e-3, center_camera.direction, 1e30);
         let chit = intersect_hybrid(cray);
         let is_hit = chit.hit != 0u;
         let calbedo = get_surface_properties(chit);
@@ -886,13 +909,8 @@ fn main_terrain_gbuffer(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= W || gid.y >= H) { return; }
     let pix = gid.y * W + gid.x;
 
-    let half_h = tan(0.5 * uniforms.cam_fov_y);
-    let half_w = uniforms.cam_aspect * half_h;
-    let ndc_x = ((f32(gid.x) + 0.5) / f32(W)) * 2.0 - 1.0;
-    let ndc_y = (1.0 - (f32(gid.y) + 0.5) / f32(H)) * 2.0 - 1.0;
-    var rd = normalize(vec3<f32>(ndc_x * half_w, ndc_y * half_h, -1.0));
-    rd = normalize(rd.x * uniforms.cam_right + rd.y * uniforms.cam_up + rd.z * (-uniforms.cam_forward));
-    let ray = Ray(uniforms.cam_origin, 1e-3, rd, 1e30);
+    let center_camera = generate_camera_ray(gid.xy, vec2<f32>(0.0));
+    let ray = Ray(center_camera.origin, 1e-3, center_camera.direction, 1e30);
 
     let hit = intersect_hybrid(ray);
     if (hit.hit != 0u) {

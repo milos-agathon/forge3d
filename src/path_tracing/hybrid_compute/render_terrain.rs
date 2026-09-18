@@ -13,7 +13,7 @@
 // RELEVANT FILES: src/shaders/hybrid_terrain_traversal.wgsl,
 //                 src/path_tracing/hybrid_compute/terrain_heightfield.rs
 
-use super::terrain_heightfield::TerrainPtScene;
+use super::terrain_heightfield::{AlbedoSampling, TerrainPtScene};
 use super::*;
 use crate::core::atmosphere::AETHER_RADIOMETRIC_SCALE_MAX;
 use crate::core::memory_tracker::global_tracker;
@@ -245,8 +245,34 @@ fn observe_runtime_contract(
         exact(
             "uniforms.cam_aspect",
             &[base.cam_aspect],
-            &[desc.width as f32 / desc.height as f32],
+            &[desc.full_width as f32 / desc.full_height as f32],
         );
+        exact(
+            "uniforms.camera_model",
+            &[base.camera_model as f32],
+            &[desc.camera_model as u32 as f32],
+        );
+        exact(
+            "uniforms.camera_flags",
+            &[base.camera_flags as f32],
+            &[u32::from(desc.seamless_camera) as f32],
+        );
+        exact(
+            "uniforms.full_size",
+            &[base.full_width as f32, base.full_height as f32],
+            &[desc.full_width as f32, desc.full_height as f32],
+        );
+        exact(
+            "uniforms.pixel_offset",
+            &[base.pixel_offset_x as f32, base.pixel_offset_y as f32],
+            &[desc.pixel_offset_x as f32, desc.pixel_offset_y as f32],
+        );
+        exact(
+            "uniforms.ortho_half_height",
+            &[base.ortho_half_height],
+            &[desc.ortho_half_height],
+        );
+        exact("uniforms.sensor_rect", &base.sensor_rect, &desc.sensor_rect);
         exact(
             "uniforms.cam_fov_y",
             &[base.cam_fov_y],
@@ -373,7 +399,12 @@ fn observe_runtime_contract(
         exact(
             "terrain.extra",
             &terrain.extra.map(|v| v as f32),
-            &[desc.spp as f32, WELFORD_WINDOW as f32, 0.0, 0.0],
+            &[
+                desc.spp as f32,
+                WELFORD_WINDOW as f32,
+                desc.albedo_sampling as u32 as f32,
+                0.0,
+            ],
         );
     }
     {
@@ -688,6 +719,15 @@ fn record_runtime_contract(
 /// accumulate over ALL frames and are never windowed or reset.
 pub const WELFORD_WINDOW: u32 = 32;
 
+/// Projection of the terrain reference camera. `OffAxis` is a pinhole whose
+/// output covers `sensor_rect` of a larger virtual sensor (poster tiles).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CameraModel {
+    Pinhole = 0,
+    Orthographic = 1,
+    OffAxis = 2,
+}
+
 /// Full scene description for the terrain reference render.
 pub struct TerrainReferenceDesc {
     pub heights: Vec<f32>,
@@ -696,11 +736,13 @@ pub struct TerrainReferenceDesc {
     pub spacing: (f32, f32),
     pub exaggeration: f32,
     pub albedo: [f32; 3],
-    /// Optional per-texel linear-RGB albedo at DEM texel resolution
-    /// ((w*h*3) f32, dims must equal dem_width x dem_height). When present it
+    /// Optional per-texel RGBA albedo on the DEM grid (dem_width *
+    /// dem_height * 4 f32, RGB >= 0, alpha in [0, 1]). When present it
     /// overrides `albedo` through the shared `terrain_albedo_at` fetch
-    /// (group 2 binding 16).
-    pub albedo_map: Option<(Vec<f32>, u32, u32)>,
+    /// (group 2 binding 16); texels with alpha < 1 keep the constant albedo.
+    pub albedo_map: Option<Vec<f32>>,
+    /// Nearest (categorical palettes) or bilinear sampling of `albedo_map`.
+    pub albedo_sampling: AlbedoSampling,
     /// Linke-style aerosol turbidity (>= 1; 1 = clean-air reference). Drives
     /// the shared spectral sun extinction + diffuse env in-scatter terms in
     /// hybrid_terrain_traversal.wgsl (TERRAIN_ATMOS_BETA / TERRAIN_ATMOS_HAZE).
@@ -708,7 +750,20 @@ pub struct TerrainReferenceDesc {
     pub cam_origin: [f32; 3],
     pub cam_look_at: [f32; 3],
     pub cam_up: [f32; 3],
+    pub camera_model: CameraModel,
+    /// Global-sensor camera contract (any non-pinhole model, an explicit full
+    /// size or a pixel offset): rays and RNG seeds follow the global pixel and
+    /// spatial reservoir reuse stays inside the pixel, so a tile reproduces
+    /// the monolithic render exactly.
+    pub seamless_camera: bool,
     pub fov_y_deg: f32,
+    pub ortho_half_height: f32,
+    /// Output window in normalised full-sensor coordinates (x0, y0, x1, y1).
+    pub sensor_rect: [f32; 4],
+    pub full_width: u32,
+    pub full_height: u32,
+    pub pixel_offset_x: u32,
+    pub pixel_offset_y: u32,
     pub exposure: f32,
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
@@ -771,6 +826,11 @@ pub struct TerrainReferenceOutput {
     pub traversal_mip_count: u32,
     pub converged: bool,
     pub peak_host_visible_bytes: u64,
+    /// Merged reservoirs that ended valid (m > 0, weight > 0, target > 0),
+    /// and the range of their history lengths.
+    pub reservoir_valid_count: u64,
+    pub reservoir_m_min: u32,
+    pub reservoir_m_max: u32,
     pub minmax_pyramid_bytes: u64,
     /// Sum of every GPU resource this render registered with the memory
     /// tracker (pyramid, env, accum, Welford, reservoirs, G-buffer, UBOs,
@@ -989,10 +1049,68 @@ fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
     {
         return err("camera up vector must not be parallel to the view direction".into());
     }
-    if !(desc.fov_y_deg.is_finite() && desc.fov_y_deg > 0.0 && desc.fov_y_deg < 180.0) {
+    match desc.camera_model {
+        CameraModel::Pinhole | CameraModel::OffAxis => {
+            if !(desc.fov_y_deg.is_finite() && desc.fov_y_deg > 0.0 && desc.fov_y_deg < 180.0) {
+                return err(format!(
+                    "fov_y must be finite and in (0, 180) degrees, got {}",
+                    desc.fov_y_deg
+                ));
+            }
+        }
+        CameraModel::Orthographic => {
+            if !(desc.ortho_half_height.is_finite() && desc.ortho_half_height > 0.0) {
+                return err(format!(
+                    "orthographic half_height must be finite and > 0, got {}",
+                    desc.ortho_half_height
+                ));
+            }
+        }
+    }
+    let [x0, y0, x1, y1] = desc.sensor_rect;
+    if !desc.sensor_rect.iter().all(|v| v.is_finite())
+        || x0 < 0.0
+        || y0 < 0.0
+        || x1 > 1.0
+        || y1 > 1.0
+        || x0 >= x1
+        || y0 >= y1
+    {
         return err(format!(
-            "fov_y must be finite and in (0, 180) degrees, got {}",
-            desc.fov_y_deg
+            "sensor_rect must be finite, ordered, and inside [0,1], got {:?}",
+            desc.sensor_rect
+        ));
+    }
+    if desc.full_width == 0
+        || desc.full_height == 0
+        || desc.pixel_offset_x.saturating_add(desc.width) > desc.full_width
+        || desc.pixel_offset_y.saturating_add(desc.height) > desc.full_height
+    {
+        return err(format!(
+            "tile {}x{} at ({},{}) exceeds full image {}x{}",
+            desc.width,
+            desc.height,
+            desc.pixel_offset_x,
+            desc.pixel_offset_y,
+            desc.full_width,
+            desc.full_height
+        ));
+    }
+    let expected_rect = [
+        desc.pixel_offset_x as f32 / desc.full_width as f32,
+        desc.pixel_offset_y as f32 / desc.full_height as f32,
+        (desc.pixel_offset_x + desc.width) as f32 / desc.full_width as f32,
+        (desc.pixel_offset_y + desc.height) as f32 / desc.full_height as f32,
+    ];
+    if desc
+        .sensor_rect
+        .iter()
+        .zip(expected_rect)
+        .any(|(actual, expected)| (actual - expected).abs() > 1e-4)
+    {
+        return err(format!(
+            "sensor_rect {:?} does not match canonical tile rectangle {:?}",
+            desc.sensor_rect, expected_rect
         ));
     }
     if !(desc.exposure.is_finite() && desc.exposure > 0.0) {
@@ -1016,18 +1134,25 @@ fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
             desc.turbidity
         ));
     }
-    if let Some((data, w, h)) = &desc.albedo_map {
-        if *w != desc.dem_width || *h != desc.dem_height {
+    if let Some(albedo_map) = &desc.albedo_map {
+        let expected = (desc.dem_width as usize)
+            .checked_mul(desc.dem_height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or_else(|| RenderError::Render("albedo map dimensions overflow".into()))?;
+        if albedo_map.len() != expected {
             return err(format!(
-                "albedo_map dims {w}x{h} must equal the DEM texel dims {}x{}",
-                desc.dem_width, desc.dem_height
+                "albedo map length {} does not match DEM shape {}x{}x4",
+                albedo_map.len(),
+                desc.dem_height,
+                desc.dem_width
             ));
         }
-        if data.len() != (*w as usize) * (*h as usize) * 3 {
-            return err("albedo_map length does not match dims * 3".into());
-        }
-        if data.iter().any(|v| !v.is_finite() || *v < 0.0) {
-            return err("albedo_map contains non-finite or negative samples".into());
+        if albedo_map.chunks_exact(4).any(|rgba| {
+            rgba.iter().any(|v| !v.is_finite())
+                || rgba[..3].iter().any(|v| *v < 0.0)
+                || !(0.0..=1.0).contains(&rgba[3])
+        }) {
+            return err("albedo map RGB must be finite and >= 0; alpha must be in [0,1]".into());
         }
     }
     if !(desc.variance_threshold.is_finite() && desc.variance_threshold > 0.0) {
@@ -1101,7 +1226,7 @@ impl HybridPathTracer {
 
         // --- Terrain scene: min-max pyramid + env map (validates the DEM,
         // registers itself with the memory tracker, frees on drop) ---
-        let terrain_scene = TerrainPtScene::new(
+        let terrain_scene = TerrainPtScene::new_with_albedo(
             device,
             queue,
             &desc.heights,
@@ -1114,9 +1239,8 @@ impl HybridPathTracer {
                 .as_ref()
                 .map(|(data, w, h)| (data.as_slice(), *w, *h)),
             env_intensity,
-            desc.albedo_map
-                .as_ref()
-                .map(|(data, w, h)| (data.as_slice(), *w, *h)),
+            desc.albedo_map.as_deref(),
+            desc.albedo_sampling,
             desc.turbidity,
         )?;
 
@@ -1178,7 +1302,7 @@ impl HybridPathTracer {
             cam_origin: desc.cam_origin,
             cam_fov_y: desc.fov_y_deg.to_radians(),
             cam_right: right.into(),
-            cam_aspect: width as f32 / height as f32,
+            cam_aspect: desc.full_width as f32 / desc.full_height as f32,
             cam_up: up.into(),
             cam_exposure: exposure,
             cam_forward: forward.into(),
@@ -1189,7 +1313,14 @@ impl HybridPathTracer {
                 .seed
                 .wrapping_mul(0x9E37_79B9)
                 .wrapping_add(0x85EB_CA6B),
-            _pad_end: [0; 3],
+            camera_model: desc.camera_model as u32,
+            full_width: desc.full_width,
+            full_height: desc.full_height,
+            pixel_offset_x: desc.pixel_offset_x,
+            pixel_offset_y: desc.pixel_offset_y,
+            ortho_half_height: desc.ortho_half_height,
+            camera_flags: u32::from(desc.seamless_camera),
+            sensor_rect: desc.sensor_rect,
         };
         let base_ubo = tracked_create_buffer_init(
             device,
@@ -1893,7 +2024,9 @@ impl HybridPathTracer {
         let res_stride = std::mem::size_of::<Reservoir>() as u64;
         let res_bytes = read_buffer(device, queue, &reservoir_prev, px_count * res_stride)?;
         let reservoirs: &[Reservoir] = bytemuck::cast_slice(&res_bytes);
-        let mut any_valid = false;
+        let mut reservoir_valid_count = 0u64;
+        let mut reservoir_m_min = u32::MAX;
+        let mut reservoir_m_max = 0u32;
         for r in reservoirs {
             if !(r.w_sum.is_finite() && r.weight.is_finite() && r.target_pdf.is_finite()) {
                 return Err(RenderError::Render(
@@ -1901,11 +2034,13 @@ impl HybridPathTracer {
                 ));
             }
             if r.m > 0 && r.weight > 0.0 && r.target_pdf > 0.0 {
-                any_valid = true;
+                reservoir_valid_count += 1;
+                reservoir_m_min = reservoir_m_min.min(r.m);
+                reservoir_m_max = reservoir_m_max.max(r.m);
             }
         }
         if should_require_valid_sun_reservoirs(desc.sun_elevation_deg, sun_intensity, sun_color)
-            && !any_valid
+            && reservoir_valid_count == 0
         {
             return Err(RenderError::Render(
                 "terrain PT ReSTIR reuse chain produced no valid reservoirs for a sun-lit \
@@ -2041,6 +2176,13 @@ impl HybridPathTracer {
             traversal_mip_count: terrain_scene.pyramid.mip_count,
             converged,
             peak_host_visible_bytes: peak,
+            reservoir_valid_count,
+            reservoir_m_min: if reservoir_valid_count == 0 {
+                0
+            } else {
+                reservoir_m_min
+            },
+            reservoir_m_max,
             minmax_pyramid_bytes: terrain_scene.pyramid.byte_size,
             gpu_resource_bytes,
         })
@@ -2069,6 +2211,7 @@ mod tests {
             exaggeration: 1.0,
             albedo: [0.6; 3],
             albedo_map: None,
+            albedo_sampling: AlbedoSampling::Nearest,
             turbidity: 1.0,
             cam_origin: if dawn {
                 [0.0, 35.0, 90.0]
@@ -2077,7 +2220,15 @@ mod tests {
             },
             cam_look_at: [0.0; 3],
             cam_up: [0.0, 1.0, 0.0],
+            camera_model: CameraModel::Pinhole,
+            seamless_camera: false,
             fov_y_deg: 45.0,
+            ortho_half_height: 1.0,
+            sensor_rect: [0.0, 0.0, 1.0, 1.0],
+            full_width: if dawn { 256 } else { 8 },
+            full_height: 8,
+            pixel_offset_x: 0,
+            pixel_offset_y: 0,
             exposure: 1.0,
             sun_azimuth_deg: if dawn {
                 1.28047261849929_f64 as f32
@@ -2127,7 +2278,14 @@ mod tests {
             cam_forward: forward.to_array(),
             seed_hi: 7,
             seed_lo: 7u32.wrapping_mul(0x9E37_79B9).wrapping_add(0x85EB_CA6B),
-            _pad_end: [0; 3],
+            camera_model: 0,
+            full_width: desc.width,
+            full_height: desc.height,
+            pixel_offset_x: 0,
+            pixel_offset_y: 0,
+            ortho_half_height: 1.0,
+            camera_flags: 0,
+            sensor_rect: [0.0, 0.0, 1.0, 1.0],
         };
         let hybrid = HybridUniforms {
             traversal_mode: 3,
@@ -2422,5 +2580,70 @@ mod tests {
             2.5,
             [1.0, 0.97, 0.92]
         ));
+    }
+
+    // --- OBLIQUA camera and material validation (ported from 1.36.0) ---
+    fn obliqua_desc(camera_model: CameraModel) -> TerrainReferenceDesc {
+        let (mut d, _, _, _, _, _) = contract_fixture(false);
+        d.camera_model = camera_model;
+        d.seamless_camera = true;
+        d.width = 8;
+        d.height = 8;
+        d.full_width = 8;
+        d.full_height = 8;
+        d
+    }
+
+    #[test]
+    fn camera_validation_branches_by_model() {
+        let mut pinhole = obliqua_desc(CameraModel::Pinhole);
+        pinhole.fov_y_deg = f32::NAN;
+        assert!(validate_desc(&pinhole).is_err());
+
+        let mut ortho = obliqua_desc(CameraModel::Orthographic);
+        ortho.fov_y_deg = f32::NAN;
+        assert!(validate_desc(&ortho).is_ok());
+        ortho.ortho_half_height = 0.0;
+        assert!(validate_desc(&ortho).is_err());
+    }
+
+    #[test]
+    fn camera_validation_rejects_invalid_sensor_rects() {
+        for rect in [
+            [-0.1, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 1.1, 1.0],
+            [0.5, 0.0, 0.5, 1.0],
+            [0.0, 0.8, 1.0, 0.2],
+        ] {
+            let mut value = obliqua_desc(CameraModel::OffAxis);
+            value.sensor_rect = rect;
+            assert!(validate_desc(&value).is_err(), "accepted {rect:?}");
+        }
+    }
+
+    #[test]
+    fn camera_validation_rejects_tiles_outside_full_image() {
+        let mut value = obliqua_desc(CameraModel::OffAxis);
+        value.width = 5;
+        value.pixel_offset_x = 4;
+        assert!(validate_desc(&value).is_err());
+        value.width = 4;
+        assert!(validate_desc(&value).is_err());
+        value.sensor_rect = [0.5, 0.0, 1.0, 1.0];
+        assert!(validate_desc(&value).is_ok());
+    }
+
+    #[test]
+    fn albedo_map_must_match_the_dem_grid() {
+        // the fixture DEM is 4 x 4, so an RGBA map is 64 floats
+        let mut value = obliqua_desc(CameraModel::Pinhole);
+        value.albedo_map = Some(vec![1.0; 63]);
+        assert!(validate_desc(&value).is_err());
+        value.albedo_map = Some(vec![1.0; 64]);
+        assert!(validate_desc(&value).is_ok());
+        value.albedo_map.as_mut().unwrap()[3] = 0.5;
+        assert!(validate_desc(&value).is_ok());
+        value.albedo_map.as_mut().unwrap()[3] = 1.5;
+        assert!(validate_desc(&value).is_err());
     }
 }
