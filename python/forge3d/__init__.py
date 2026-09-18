@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.35.0"
+__version__ = "1.36.0"
 version = __version__
 
 import numpy as np
@@ -293,6 +293,7 @@ from .path_tracing import (
     PathTracer,
     hybrid_render_terrain_reference,
     make_camera,
+    render_terrain_poster,
 )
 from .inverse import (
     InverseSolveUnavailable,
@@ -720,6 +721,7 @@ __all__ = [
     "PathTracer",
     "ExperimentalSyntheticOutput",
     "make_camera",
+    "render_terrain_poster",
     # Native types (when available)
     "Scene",
     "Session",
