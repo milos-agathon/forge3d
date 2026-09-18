@@ -6,6 +6,34 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.37.0] - 2026-09-18
+1.36.0 was published from the OBLIQUA branch before it reached `main`. 1.37.0 is the
+first release built from `main` with both lines merged: everything in 1.36.0 plus
+everything merged to `main` since.
+
+### Added
+- DIFFERENTIA: differentiable inverse path tracing that recovers per-texel terrain albedo, sun direction and intensity, and aerosol turbidity from a single observed image, running the real PROMETHEUS forward kernels in reverse mode. Adds Python `recover_scene`, `RecoveredScene` and `InverseSolveUnavailable`, and the native `inverse_solve` / `inverse_render_primal` behind the `enable-inverse-pt` feature, which the wheel now builds with. (#180)
+- `hybrid_render_terrain_reference` gains `turbidity` (>= 1, default 1 = identity: spectral Beer extinction on the direct sun plus diffuse in-scatter on the environment), `sdf_scene` (a native SDF scene traversed alongside the terrain by primary and shadow rays; exhausted SDF marches fail closed), and new outputs: linear `radiance`, `luminance_variance`, `convergence_metric` and measured `traversal` counters. Mapped terrain uses spectral ReSTIR. (#174, #180)
+- TERRA-DETERMINATA v2: compute and raster determinism canaries run before a deterministic context serves work, `forge3d.determinism_probe()`, a determinism IR lint with a one-edit rewrite pass, and browser (headless Chrome WebGPU) and Apple legs of the cross-vendor matrix. (#178)
+- PROMETHEUS acceptance: a provenance-verified Gore Range DEM fixture with persisted beauty/AOV references, numeric scores and CI gates in the protected GPU lane, and a 1 -> 8 spp timing gate on a real DEM. (#174)
+
+### Changed
+- Convergence is now the estimated variance of the mean frame luminance (Welford M2/(N*(N-1)) over all frames, checked every 32 frames) instead of the running-mean stability window, so renders stop at different frame counts than in 1.36.0. (#174)
+- `albedo_map` accepts an `(H, W, 3)` linear-RGB array as well as the `(H, W, 4)` RGBA form. `albedo_sampling` now defaults to `None`, which means nearest for RGBA maps (the 1.36.0 behaviour) and bilinear for RGB maps; an explicit value is honoured as before. Nearest sampling and the alpha fallback also apply in the inverse solver's adjoint: texels that fall back to the constant albedo receive no gradient.
+- Bumped the package and PyPI version to `1.37.0`.
+
+### Fixed
+- The `seed` argument had no effect on the terrain kernel: its RNG state XOR-ed `seed` with `seed ^ constant`, so every seed produced the same image. Seeds now give independent streams, hashed on the global sensor pixel so poster tiles still reproduce the monolithic render exactly. Output for a given seed therefore differs from 1.36.0. (#174)
+- Terrain ReSTIR could finalize a reservoir weight far outside its contract on grazing surfaces (measured 4.4e6) and abort the render; the weight is now capped at 4.0 at the source. (#177)
+- The determinism IR lint missed inlined fusion edges (455 sites, several on the canonical terrain path, are now barriered), and the Apple-leg acceptance job could run before its artifact existed. (#179)
+- The AETHER spectral reference bound its terrain resources without the earth-curvature uniform (binding 10) its layout declares; it is now bound.
+- The wavefront path tracer bound a 96-byte uniform block to the ReSTIR shaders, whose shared camera block is 128 bytes since OBLIQUA; it now supplies the full block (single-pass values, so its output is unchanged).
+- Type stubs: `hybrid_render_aether_spectral_reference` no longer lists parameters the native function does not accept.
+
+### Compatibility
+- Default renders (no albedo map, pinhole camera, no tile offset) are byte-identical to `main` before this release. They differ from 1.36.0 only through the seed and convergence changes above.
+- OBLIQUA's public API is unchanged: RGBA maps default to nearest sampling as in 1.36.0, and `render_terrain_poster` tiles remain byte-identical to the monolithic render.
+
 ## [1.36.0] - 2026-09-05
 ### Added
 - OBLIQUA: added public `render_terrain_poster` rendering of exact full-sensor tiles for orthographic, pinhole, and off-axis (oblique) terrain cameras, with full-frame dimensions, sensor rectangles, pixel offsets, independent per-tile convergence, owner-scoped peak-memory diagnostics, ReSTIR reservoir evidence, and render-certificate inputs.
