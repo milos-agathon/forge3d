@@ -595,7 +595,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # Keep the full matrix on the reviewed lint toolchain used by the
+        # permanent fast contract; an unpinned stable release changed the
+        # enforced Clippy set during this acceptance run.
+        uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: ${{ matrix.target }}
 
