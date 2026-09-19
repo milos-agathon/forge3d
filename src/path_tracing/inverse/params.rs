@@ -16,8 +16,8 @@ use crate::core::error::RenderError;
 /// (sun_dir xyz, sun_intensity, turbidity, edge-mass diagnostic,
 /// non-finite-adds counter, spare). Order must match pt_inverse_loss.wgsl.
 pub const GRAD_SCALAR_SLOTS: usize = 8;
-/// Clamp on the score-function (REINFORCE) log-probability gradient —
-/// bounds the variance of the discrete-selection correction.
+/// Legacy score clamp value retained in the uniform block for layout
+/// compatibility. The current likelihood score is not clipped.
 pub const SCORE_CLAMP: f32 = 4.0;
 /// Weight of the luminance-structure term inside the per-pixel loss
 /// (loss = MSE + w * luminance_error², a small SSIM-ish regularizer).
@@ -84,7 +84,8 @@ pub struct InverseParamsGpu {
     /// rgb = unit-intensity sun color, a = sun intensity. Kept in sync with
     /// the lighting uniform the primal reads (`light_color = color*I`).
     pub sunv: [f32; 4],
-    /// x = LOSS_STRUCT_W, y = SCORE_CLAMP, z = 1/pixel_count,
+    /// x = LOSS_STRUCT_W, y = legacy reserved score clamp (unused),
+    /// z = 1/pixel_count,
     /// w = 1/(frames*spp).
     pub fl: [f32; 4],
     /// x = 1/replicate_count (mean-image accumulation weight), y = replicate
@@ -218,7 +219,7 @@ pub struct InverseSolveDesc {
     pub early_stop_patience: u32,
     /// Run the spatial reuse pass between primal and shading (default true).
     pub spatial_reuse: bool,
-    /// Evaluate the reparameterized boundary term (default true).
+    /// Evaluate the current AOV-pair boundary approximation (default true).
     pub edge_term: bool,
     /// Score-function correction for the detached discrete reservoir
     /// selection (default true). This is an expectation-space term — the

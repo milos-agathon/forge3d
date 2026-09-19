@@ -43,7 +43,7 @@ struct InvParams {
     ctrl: vec4<u32>,   // flags (bit0 spatial, bit1 edge, bit2 score),
                        // whist slot count K = min(tile_size, frames), unused x2
     sunv: vec4<f32>,   // unit-intensity sun color rgb, sun intensity
-    fl: vec4<f32>,     // struct_w, score_clamp, 1/pixel_count, 1/(frames*spp)
+    fl: vec4<f32>,     // struct_w, reserved legacy clamp, 1/pixel_count, 1/(frames*spp)
     rsv0: vec4<f32>,   // x = 1/replicate_count, y = replicate ordinal (0/1)
     rsv1: vec4<f32>,
 }
@@ -51,12 +51,15 @@ struct InvParams {
 const INV_FLAG_SPATIAL: u32 = 1u;
 const INV_FLAG_EDGE: u32 = 2u;
 const INV_FLAG_SCORE: u32 = 4u;
-// Loss reads the replicate-mean image region instead of this eval's accum —
-// the solver evaluates the nonlinear display metric on the R-replicate mean
-// so the objective is loss(E[cur]) (variance enters at 1/R), NOT
-// E[loss(cur)] whose embedded Var(cur) term biases descent toward display-
-// space compression (higher intensity/turbidity).
+// Loss reads the replicate-mean image region instead of this eval's accum.
+// Its expectation is E[loss((sum_r cur_r)/R)] for the finite replicate count;
+// a finite mean inside a nonlinear loss is not loss(E[cur]).
 const INV_FLAG_MEAN_LOSS: u32 = 8u;
+// Edge provenance preflight: run the certified-edge entry point against the
+// real replay history, capture its camera/light inputs, and return before any
+// receiver-dependent event work or gradient accumulation. The host certifies
+// the subsequent full event batch only when it reports this exact snapshot.
+const INV_FLAG_EDGE_PROBE: u32 = 16u;
 
 // gid.y folds 1-D dispatches wider than the 65535-workgroup x limit: the
 // host dispatches x = min(wg, 65535), y = ceil(wg/65535), so the flat index
@@ -322,6 +325,31 @@ fn main_inv_accum_mean(@builtin(global_invocation_id) gid: vec3<u32>) {
 // lives in display-encoded sRGB as the spec requires.
 // adj_lin = dL/dlin = dL/dcur . srgb'(reinhard(lin)) . reinhard'(lin),
 // folded with 1/pixel_count.
+struct InvPixelLoss {
+    value: f32,
+    adjoint: vec3<f32>,
+}
+
+// Pure loss evaluation shared by the image loss pass and boundary replay.
+// target_raw is the observed quantized Reinhard output, before the OETF.
+// Both outputs are per pixel; callers apply the image normalization.
+fn inv_pixel_loss(lin: vec3<f32>, target_raw: vec3<f32>, exposure: f32,
+    struct_weight: f32) -> InvPixelLoss {
+    let tm = reinhard_tonemap(lin, exposure);
+    let cur = vec3<f32>(inv_srgb(tm.r), inv_srgb(tm.g), inv_srgb(tm.b));
+    let tgt = vec3<f32>(inv_srgb(target_raw.r), inv_srgb(target_raw.g),
+        inv_srgb(target_raw.b));
+    let diff = cur - tgt;
+    let lumw = vec3<f32>(0.2126, 0.7152, 0.0722);
+    let ld = dot(lumw, diff);
+    let value = dot(diff, diff) / 3.0 + struct_weight * ld * ld;
+    var adj = (2.0 / 3.0) * diff + 2.0 * struct_weight * ld * lumw;
+    adj *= vec3<f32>(inv_srgb_d(tm.r), inv_srgb_d(tm.g), inv_srgb_d(tm.b));
+    let denom = vec3<f32>(1.0) + exposure * lin;
+    let dtm = exposure / (denom * denom);
+    return InvPixelLoss(value, adj * dtm);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn main_inverse_loss(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= uniforms.width || gid.y >= uniforms.height) { return; }
@@ -332,21 +360,9 @@ fn main_inverse_loss(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((inv_params.ctrl.x & INV_FLAG_MEAN_LOSS) != 0u) {
         lin = inv_v4[inv_mean_index(gpix)].rgb;
     }
-    let tm = reinhard_tonemap(lin, uniforms.cam_exposure);
-    let cur = vec3<f32>(inv_srgb(tm.r), inv_srgb(tm.g), inv_srgb(tm.b));
     let tgt_raw = textureLoad(inv_target_tex, vec2<i32>(i32(gid.x), i32(gid.y)), 0).rgb;
-    let tgt = vec3<f32>(inv_srgb(tgt_raw.r), inv_srgb(tgt_raw.g), inv_srgb(tgt_raw.b));
-    let diff = cur - tgt;
-    let lumw = vec3<f32>(0.2126, 0.7152, 0.0722);
-    let ld = dot(lumw, diff);
-    let sw = inv_params.fl.x;
+    let loss = inv_pixel_loss(lin, tgt_raw, uniforms.cam_exposure, inv_params.fl.x);
     atomicStore(&inv_u32[inv_u32_loss_base() + gpix],
-        bitcast<u32>(dot(diff, diff) / 3.0 + sw * ld * ld));
-
-    var adj = (2.0 / 3.0) * diff + 2.0 * sw * ld * lumw;
-    adj *= vec3<f32>(inv_srgb_d(tm.r), inv_srgb_d(tm.g), inv_srgb_d(tm.b));
-    let ex = uniforms.cam_exposure;
-    let denom = vec3<f32>(1.0) + ex * lin;
-    let dtm = ex / (denom * denom);
-    inv_v4[gpix] = vec4<f32>(adj * dtm * inv_params.fl.z, 0.0);
+        bitcast<u32>(loss.value));
+    inv_v4[gpix] = vec4<f32>(loss.adjoint * inv_params.fl.z, 0.0);
 }

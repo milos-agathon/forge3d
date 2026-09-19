@@ -12,10 +12,9 @@
 //            plus the consolidated inverse buffers (11 = vec4 adjoint/weight
 //            history, 12 = atomic<u32> scalars/loss/albedo-gradient)
 //   group 3: the forward output + AOV storage textures (0..7) plus the
-//            sampled observation target (8); the edge pass instead binds the
-//            Normal/Depth AOVs as SAMPLED textures (9, 10) under its own
-//            group-3 layout — a texture cannot be storage and sampled in the
-//            same dispatch.
+//            sampled observation target (8); certified edge replay uses a
+//            separate group-2 layout with event records at binding 13 and a
+//            target-only group-3 layout.
 //
 // main_terrain_gbuffer uses the forward's G-buffer group-2 variant
 // (bindings 1,2,3 + 8,9,10) — the same arrangement as the forward driver.
@@ -85,11 +84,14 @@ pub struct InversePipelines {
     pub inv_g0: wgpu::BindGroupLayout,
     pub inv_g1: wgpu::BindGroupLayout,
     pub inv_g2: wgpu::BindGroupLayout,
+    pub inv_g2_edge: wgpu::BindGroupLayout,
     pub inv_g3: wgpu::BindGroupLayout,
-    /// Sampled-AOV group 3 for the edge pass (Normal + Depth as textures).
+    /// Observed target sampled by certified boundary replay.
     pub inv_g3_edge: wgpu::BindGroupLayout,
     /// Forward G-buffer group-2 variant (terrain tex/uniforms + nr/pos).
     pub inv_g2_gbuffer: wgpu::BindGroupLayout,
+    /// Score-only layout adds the primal G-buffer validity record.
+    pub inv_g2_score_spatial: wgpu::BindGroupLayout,
     pub restir_g0: wgpu::BindGroupLayout,
     pub restir_empty: wgpu::BindGroupLayout,
     pub restir_temporal_g2: wgpu::BindGroupLayout,
@@ -112,6 +114,9 @@ pub struct InversePipelines {
     pub wsnap: wgpu::ComputePipeline,
     pub loss: wgpu::ComputePipeline,
     pub shade: wgpu::ComputePipeline,
+    /// Whole-loss likelihood scores for fresh and spatial spectral draws.
+    pub score_candidate: wgpu::ComputePipeline,
+    pub score_spatial: wgpu::ComputePipeline,
     pub edge: wgpu::ComputePipeline,
 }
 
@@ -173,14 +178,10 @@ impl InversePipelines {
                 sampled_texture_entry(8),                                   // target
             ],
         });
-        // Edge pass: the frame-0 Normal/Depth AOVs re-bound as SAMPLED
-        // textures (the storage bindings stay exclusive to the primal).
+        // The edge pass samples only the observed target.
         let inv_g3_edge = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("inv-bgl3-edge-aov"),
-            entries: &[
-                sampled_texture_entry(9),  // aov_normal (sampled)
-                sampled_texture_entry(10), // aov_depth (sampled)
-            ],
+            label: Some("inv-bgl3-edge-target"),
+            entries: &[sampled_texture_entry(8)],
         });
         // Forward terrain-G-buffer group 2 (bindings 1,2,3 + 8,9,10) — the same
         // arrangement the forward driver binds for main_terrain_gbuffer.
@@ -195,6 +196,38 @@ impl InversePipelines {
                 uniform_entry(10),
             ],
         });
+        let inv_g2_edge = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("inv-bgl2-certified-edge"),
+            entries: &[
+                sampled_texture_entry(1),
+                sampled_texture_entry(2),
+                uniform_entry(3),
+                sampled_texture_entry(6),
+                uniform_entry(10),
+                storage_entry(11, false),
+                storage_entry(12, false),
+                storage_entry(13, true),
+                // Per-event, actual-WGSL replay witness. The host reads this
+                // after dispatch and rejects an event whose camera/IBL branch
+                // or numerical replay cannot be certified from those inputs.
+                storage_entry(14, false),
+                // Edge-only f32 CAS sums, kept separate from the full
+                // gradient so the host can bound the actual atomic error.
+                storage_entry(15, false),
+                sampled_texture_entry(16),
+            ],
+        });
+        let inv_g2_score_spatial =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("inv-bgl2-score-spatial"),
+                entries: &[
+                    uniform_entry(3),         // terrain spectral-mode parameters
+                    storage_entry(5, false),  // temporal output, rebound as curr
+                    storage_entry(7, false),  // spatial output reservoir
+                    storage_entry(9, false),  // G-buffer position and hit flag
+                    storage_entry(12, false), // inverse scalar accumulators
+                ],
+            });
 
         // One module carries the forward kernel + the inverse files (see
         // shader_sources::inverse_kernel); each entry point gets a pipeline.
@@ -215,7 +248,12 @@ impl InversePipelines {
         });
         let edge_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("inverse-pt-edge-layout"),
-            bind_group_layouts: &[&inv_g0, &inv_g1, &inv_g2, &inv_g3_edge],
+            bind_group_layouts: &[&inv_g0, &inv_g1, &inv_g2_edge, &inv_g3_edge],
+            push_constant_ranges: &[],
+        });
+        let score_spatial_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("inverse-pt-score-spatial-layout"),
+            bind_group_layouts: &[&inv_g0, &inv_g1, &inv_g2_score_spatial, &inv_g3],
             push_constant_ranges: &[],
         });
         let mk = |label: &'static str, layout: &wgpu::PipelineLayout, entry: &'static str| {
@@ -252,7 +290,21 @@ impl InversePipelines {
         let wsnap = mk("inverse-pt-wsnap", &main_layout, "main_inv_wsnap")?;
         let loss = mk("inverse-pt-loss", &main_layout, "main_inverse_loss")?;
         let shade = mk("inverse-pt-shade", &main_layout, "main_inverse_shade")?;
-        let edge = mk("inverse-pt-edge", &edge_layout, "main_inverse_edge")?;
+        let score_candidate = mk(
+            "inverse-pt-score-candidate",
+            &score_spatial_layout,
+            "main_inverse_score_candidate",
+        )?;
+        let score_spatial = mk(
+            "inverse-pt-score-spatial",
+            &score_spatial_layout,
+            "main_inverse_score_spatial",
+        )?;
+        let edge = mk(
+            "inverse-pt-certified-edge",
+            &edge_layout,
+            "main_inverse_edge_certified",
+        )?;
 
         // Standalone ReSTIR passes — same modules and layout shapes the
         // forward driver uses (group 0 is the shared base-uniform buffer;
@@ -334,9 +386,11 @@ impl InversePipelines {
             inv_g0,
             inv_g1,
             inv_g2,
+            inv_g2_edge,
             inv_g3,
             inv_g3_edge,
             inv_g2_gbuffer,
+            inv_g2_score_spatial,
             restir_g0,
             restir_empty,
             restir_temporal_g2,
@@ -354,6 +408,8 @@ impl InversePipelines {
             wsnap,
             loss,
             shade,
+            score_candidate,
+            score_spatial,
             edge,
         })
     }

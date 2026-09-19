@@ -2098,6 +2098,28 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
     }
 
     #[test]
+    fn production_shadow_ray_uses_later_bilinear_root_after_tmin() {
+        // In the first cell h(u,v) = 0.25u + 0.25v - uv. Along u=v=t,
+        // a horizontal ray at y=0 meets it at t=0 and t=0.5. The proof
+        // dispatch uses tmin=1e-3, so the first root is excluded while the
+        // second remains admissible under the proof's small curvature term.
+        // Other cells lie below the ray.
+        let mut heights = vec![-10.0; PROOF_DEM_SIDE * PROOF_DEM_SIDE];
+        heights[0] = 0.0;
+        heights[1] = 0.25;
+        heights[PROOF_DEM_SIDE] = 0.25;
+        heights[PROOF_DEM_SIDE + 1] = -0.5;
+        let rays = [ProofRay {
+            origin: [0.0, 0.0, 0.0],
+            direction: [PROOF_SPACING_M, 0.0, PROOF_SPACING_M],
+            inv_two_r_prime: 1.0 / 14_650_000.0,
+        }];
+        let (hits, _, _) = production_gpu_hits(&heights, &rays)
+            .expect("production terrain traversal GPU check must run");
+        assert_eq!(hits, [1], "later bilinear root must survive tmin cutoff");
+    }
+
+    #[test]
     fn curvature_descent_is_conservative() {
         assert_eq!(std::mem::size_of::<EarthCurvatureUniforms>(), 24);
         let shader = crate::shader_sources::hybrid_kernel();

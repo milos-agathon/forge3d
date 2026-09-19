@@ -14,7 +14,6 @@ documented public surface.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -55,7 +54,7 @@ class RecoveredScene:
         albedo_delta_e2000_median: median per-texel CIEDE2000 between the
             recovered albedo and the `reference_albedo` passed to
             :func:`recover_scene`, computed with the canonical AEQUITAS
-            metric (``tests/_deltae.py``); ``None`` when no reference was
+            metric (``forge3d._deltae``); ``None`` when no reference was
             given.
     """
 
@@ -134,12 +133,12 @@ def recover_scene(
             seed-deterministic forward chain per tile instead of caching
             every per-frame reservoir snapshot.
         spatial_reuse / edge_term / score_correction: estimator switches
-            (ReSTIR spatial reuse, reparameterized boundary term,
-            score-function selection correction).
+            (ReSTIR spatial reuse, current AOV-pair boundary approximation,
+            categorical likelihood-score correction).
         reference_albedo: optional (demH, demW, 3) ground-truth linear
             albedo; when given, the result carries
             ``albedo_delta_e2000_median`` — the AEQUITAS CIEDE2000 score,
-            computed by the canonical ``tests/_deltae.py`` implementation
+            computed by the canonical ``forge3d._deltae`` implementation
             (the metric is never reimplemented natively).
     """
     fn = _native_inverse("inverse_solve")
@@ -212,8 +211,8 @@ def recover_scene(
     )
     albedo_delta_e2000_median = None
     if reference_albedo is not None:
-        # AEQUITAS contract: score with the canonical CIEDE2000 in
-        # tests/_deltae.py — never a native port or reimplementation.
+        # AEQUITAS contract: score with the canonical CIEDE2000 in the
+        # production package module — never a native port or reimplementation.
         albedo_delta_e2000_median = _canonical_deltae().median_delta_e2000_linear(
             out["albedo"], reference_albedo
         )
@@ -231,32 +230,10 @@ def recover_scene(
 
 
 def _canonical_deltae():
-    """Import the canonical CIEDE2000 module (tests/_deltae.py).
+    """Load the shipped AEQUITAS CIEDE2000 implementation on demand."""
+    from . import _deltae
 
-    Preferred when tests/ is already importable; otherwise loaded by path
-    from the repository checkout. Raises InverseSolveUnavailable in an
-    installed wheel where the module is genuinely absent — scoring stays
-    honest rather than falling back to a reimplementation.
-    """
-    try:
-        import _deltae
-
-        return _deltae
-    except ImportError:
-        pass
-    import importlib.util
-
-    path = Path(__file__).resolve().parents[2] / "tests" / "_deltae.py"
-    spec = importlib.util.spec_from_file_location("_deltae", path)
-    if spec is None or spec.loader is None or not path.is_file():
-        raise InverseSolveUnavailable(
-            "reference_albedo scoring requires the canonical "
-            "tests/_deltae.py module, which is not importable in this "
-            "environment"
-        )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return _deltae
 
 
 def render_primal(

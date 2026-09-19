@@ -1173,6 +1173,7 @@ jobs:
           "FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR=$(Join-Path $root 'recipe-goldens')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_SUBSTRATIA_ARTIFACT_DIR=$(Join-Path $root 'substratia')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_SIDERA_ARTIFACT_DIR=$(Join-Path $root 'sidera')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_INVERSE_ARTIFACT_DIR=$(Join-Path $root 'inverse')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_EXPECTED_ADAPTER_PROBE=$(Join-Path $root 'adapter-probe.json')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Set up Python
@@ -1259,10 +1260,9 @@ jobs:
         shell: pwsh
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
-          FORGE3D_INVERSE_ARTIFACT_DIR: tests/artifacts/inverse
         run: |
           New-Item -ItemType Directory -Force -Path $env:FORGE3D_INVERSE_ARTIFACT_DIR | Out-Null
-          python -m pytest tests/test_inverse_pt.py -v --tb=short --junitxml="$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
+          python -m pytest tests/test_inverse_scoring.py tests/test_inverse_pt.py -v --tb=short --junitxml="$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
           exit $LASTEXITCODE

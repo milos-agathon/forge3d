@@ -286,8 +286,9 @@ fn terrain_leaf_intersect(
     // A rounded shared-cell boundary can place this leaf's entry infinitesimally
     // below the continuous surface. That is already an any-hit intersection;
     // requiring another crossing inside the leaf would create a numeric crack.
+    // An entry excluded by the ray interval must still test the cell's roots.
     var s_hit = 1e30;
-    if (any_hit && c <= 0.0) {
+    if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {
         s_hit = 0.0;
     } else if (abs(a) < 1e-12) {
         if (abs(b) > 1e-12) {
@@ -304,8 +305,18 @@ fn terrain_leaf_intersect(
             var r0 = q / a;
             var r1 = select(c / q, 1e30, abs(q) < 1e-30);
             if (r0 > r1) { let tmp = r0; r0 = r1; r1 = tmp; }
-            if (r0 >= 0.0 && r0 <= 1.0) { s_hit = r0; }
-            else if (r1 >= 0.0 && r1 <= 1.0) { s_hit = r1; }
+            // Apply the ray's strict interval before choosing a root. A
+            // contact exactly at tmin must not hide a later admissible
+            // crossing of this same nonplanar bilinear cell.
+            let t_root0 = t0 + r0 * (t1 - t0);
+            let t_root1 = t0 + r1 * (t1 - t0);
+            if (r0 >= 0.0 && r0 <= 1.0
+                && t_root0 > ray.tmin && t_root0 < ray.tmax) {
+                s_hit = r0;
+            } else if (r1 >= 0.0 && r1 <= 1.0
+                && t_root1 > ray.tmin && t_root1 < ray.tmax) {
+                s_hit = r1;
+            }
         }
     }
     if (s_hit <= 1.0) {
@@ -382,13 +393,15 @@ fn terrain_trace(ray: Ray, any_hit: bool, apply_curvature: bool) -> HybridHitRes
         let t_hi = min(span.y, min(ray.tmax, res.t));
         if (t_lo > t_hi) { continue; }
 
-        // Height band test: skip when the ray segment stays entirely above
-        // max or below min over this node's footprint.
+        // A shadow any-hit ray entering a cell below its surface is itself a
+        // hit when that entry is strictly after tmin. Keep below-band nodes
+        // for the leaf's entry test; the ordinary first-hit path still needs
+        // a surface crossing.
         terrain_count(vec4<u32>(0u, 1u, 0u, 0u));
         let mm = textureLoad(terrain_minmax_tex, vec2<i32>(i32(nx), i32(ny)), i32(level)).rg
             * terrain.h_params.z;
         let ray_height = terrain_curved_height_range(ray, t_lo, t_hi, apply_curvature);
-        if (ray_height.x > mm.y || ray_height.y < mm.x) { continue; }
+        if (ray_height.x > mm.y || (!any_hit && ray_height.y < mm.x)) { continue; }
 
         if (level == 0u) {
             let leaf = terrain_leaf_intersect(ray, cx0, cz0, t_lo, t_hi, apply_curvature, any_hit);
@@ -695,22 +708,6 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var frame_radiance = vec3<f32>(0.0);
     var cand: RestirReservoir; // zero-initialized: m=0 marks "no candidate"
-    if (spectral_restir) {
-        let probabilities = terrain_spectral_probabilities();
-        var reservoir_st = st;
-        let channel = terrain_sample_spectral_channel(probabilities, xorshift32(&reservoir_st));
-        cand.sample.position = vec3<f32>(0.0);
-        cand.sample.light_index = channel;
-        cand.sample.direction = wi;
-        cand.sample.intensity = 1.0;
-        cand.sample.light_type = 1u;
-        cand.sample.params = probabilities;
-        cand.w_sum = 1.0;
-        cand.m = 1u;
-        cand.target_pdf = probabilities[channel];
-        cand.weight = 1.0 / probabilities[channel];
-    }
-
     for (var s = 0u; s < spp; s = s + 1u) {
         let jx = terrain_tent_offset(xorshift32(&st)) * 0.5;
         let jy = terrain_tent_offset(xorshift32(&st)) * 0.5;
@@ -731,7 +728,7 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         let albedo = get_surface_properties(hit);
 
         // --- Sun candidate generation. Mapped terrain uses the spectral
-        // residual reservoir initialized above; the legacy uniform-albedo
+        // residual reservoir initialized after the loop; the legacy uniform-albedo
         // path keeps its single delta-light candidate unchanged. ---
         if (!spectral_restir) {
             let ndotl = max(dot(n, wi), 0.0);
@@ -799,6 +796,23 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         frame_radiance = frame_radiance + sun + ibl;
     }
     frame_radiance = frame_radiance / f32(spp);
+
+    // Draw the spectral candidate after all beauty camera/env samples so its
+    // category does not reuse a beauty random variate.
+    if (spectral_restir) {
+        let probabilities = terrain_spectral_probabilities();
+        let channel = terrain_sample_spectral_channel(probabilities, xorshift32(&st));
+        cand.sample.position = vec3<f32>(0.0);
+        cand.sample.light_index = channel;
+        cand.sample.direction = wi;
+        cand.sample.intensity = 1.0;
+        cand.sample.light_type = 1u;
+        cand.sample.params = probabilities;
+        cand.w_sum = 1.0;
+        cand.m = 1u;
+        cand.target_pdf = probabilities[channel];
+        cand.weight = 1.0 / probabilities[channel];
+    }
 
     // Finalize + publish this frame's candidate reservoir for the reuse chain.
     if (cand.m > 0u && cand.w_sum > 0.0 && cand.target_pdf > 0.0) {
