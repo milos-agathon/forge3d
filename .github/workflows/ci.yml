@@ -628,7 +628,7 @@ jobs:
         # These direct-GPU checks are run on the physical NVIDIA Vulkan lane
         # below.  The generic matrix must not silently substitute WARP, Mesa,
         # or Metal for their hardware assertions.
-        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip live_shared_msm_sampler_consumes_third_and_fourth_moments
+        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip raster_capture_executes_production_shader --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip live_shared_msm_sampler_consumes_third_and_fourth_moments
         env:
           RUST_TEST_THREADS: 1
 
@@ -1306,6 +1306,7 @@ jobs:
           # This exact-head lane has already required the NVIDIA Vulkan adapter.
           $features = 'default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts'
           $checks = @(
+            'offscreen::adjudication_raster::tests::raster_capture_executes_production_shader',
             'offscreen::adjudication_raster::tests::adjudication_shadow_map_dump',
             'path_tracing::adjudication::tests::pt_reference_renders_multibounce_frames',
             'path_tracing::hybrid_compute::terrain_heightfield::tests::production_shadow_ray_uses_later_bilinear_root_after_tmin',
