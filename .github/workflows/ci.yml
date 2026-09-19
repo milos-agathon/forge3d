@@ -600,6 +600,7 @@ jobs:
         # enforced Clippy set during this acceptance run.
         uses: dtolnay/rust-toolchain@1.97.1
         with:
+          components: clippy
           targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
@@ -631,7 +632,7 @@ jobs:
         # These direct-GPU checks are run on the physical NVIDIA Vulkan lane
         # below.  The generic matrix must not silently substitute WARP, Mesa,
         # or Metal for their hardware assertions.
-        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip raster_capture_executes_production_shader --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip live_shared_msm_sampler_consumes_third_and_fourth_moments
+        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip gpu_timing_double_buffered_measures_copy --skip raster_capture_executes_production_shader --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip pbr_pipeline_initializes_real_ibl_and_shader --skip draw_batch_params_renders_pixels --skip live_shared_msm_sampler_treats_front_of_mean_as_lit --skip live_shared_msm_sampler_consumes_third_and_fourth_moments --skip generation_and_blur_cover_a_1024_moment_atlas --skip execute_rejects_unbound_and_mismatched_allocations --skip legacy_view_prepare_and_execute_sequence_remains_compatible --skip separable_blur_filters_both_axes --skip execute_rejects_invalid_or_mismatched_atlas_dimensions --skip execute_rejects_invalid_texture_contracts_before_view_creation --skip execute_rejects_invalid_evsm_exponents --skip bind_groups_follow_atlas_resource_identity --skip shared_evsm_visibility_helpers_execute_lit_front_of_mean --skip shared_evsm_minimum_variance_scales_each_warp_derivative --skip shared_evsm_moment_leak_control_preserves_a_soft_penumbra --skip shared_evsm_uniform_distribution_does_not_widen --skip shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver --skip shared_evsm_chebyshev_is_conservative_for_uniform_half_moments --skip shared_evsm_uniform_half_uncertainty_has_a_bounded_transition --skip shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows --skip shared_evsm_helpers_fail_open_for_non_finite_inputs --skip shared_pcss_penumbra_grows_with_light_size_and_receiver_separation --skip shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs
         env:
           RUST_TEST_THREADS: 1
 
@@ -1309,6 +1310,7 @@ jobs:
           # This exact-head lane has already required the NVIDIA Vulkan adapter.
           $features = 'default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts'
           $checks = @(
+            'core::gpu_timing::tests::gpu_timing_double_buffered_measures_copy',
             'offscreen::adjudication_raster::tests::raster_capture_executes_production_shader',
             'offscreen::adjudication_raster::tests::adjudication_shadow_map_dump',
             'path_tracing::adjudication::tests::pt_reference_renders_multibounce_frames',
@@ -1321,7 +1323,29 @@ jobs:
             'path_tracing::inverse::tests::inverse_gradient_matches_finite_difference',
             'path_tracing::inverse::tests::inverse_reservoir_boundary_selection_probe',
             'path_tracing::inverse::tests::inverse_score_correction_is_exercised',
-            'shadows::msm_tests::live_shared_msm_sampler_consumes_third_and_fourth_moments'
+            'pipeline::pbr::tests::pbr_pipeline_initializes_real_ibl_and_shader',
+            'render::mesh_instanced::tests::draw_batch_params_renders_pixels',
+            'shadows::msm_tests::live_shared_msm_sampler_treats_front_of_mean_as_lit',
+            'shadows::msm_tests::live_shared_msm_sampler_consumes_third_and_fourth_moments',
+            'shadows::moment_pass::dimension_tests::generation_and_blur_cover_a_1024_moment_atlas',
+            'shadows::moment_pass::tests::execute_rejects_unbound_and_mismatched_allocations',
+            'shadows::moment_pass::tests::legacy_view_prepare_and_execute_sequence_remains_compatible',
+            'shadows::blur_pass::tests::separable_blur_filters_both_axes',
+            'shadows::blur_pass::tests::execute_rejects_invalid_or_mismatched_atlas_dimensions',
+            'shadows::blur_pass::tests::execute_rejects_invalid_texture_contracts_before_view_creation',
+            'shadows::blur_pass::tests::execute_rejects_invalid_evsm_exponents',
+            'shadows::blur_pass::tests::bind_groups_follow_atlas_resource_identity',
+            'shadows::tests::shared_evsm_visibility_helpers_execute_lit_front_of_mean',
+            'shadows::tests::shared_evsm_minimum_variance_scales_each_warp_derivative',
+            'shadows::tests::shared_evsm_moment_leak_control_preserves_a_soft_penumbra',
+            'shadows::tests::shared_evsm_uniform_distribution_does_not_widen',
+            'shadows::tests::shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver',
+            'shadows::tests::shared_evsm_chebyshev_is_conservative_for_uniform_half_moments',
+            'shadows::tests::shared_evsm_uniform_half_uncertainty_has_a_bounded_transition',
+            'shadows::tests::shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows',
+            'shadows::tests::shared_evsm_helpers_fail_open_for_non_finite_inputs',
+            'shadows::tests::shared_pcss_penumbra_grows_with_light_size_and_receiver_separation',
+            'shadows::tests::shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs'
           )
           $log = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR 'physical-rust-gpu-checks.log'
           foreach ($check in $checks) {
