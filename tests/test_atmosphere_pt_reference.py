@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from _terrain_runtime import terrain_rendering_available
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,8 +85,8 @@ def native():
         pytest.skip(f"native forge3d extension unavailable: {error}")
     if not hasattr(_forge3d, "hybrid_render_aether_spectral_reference"):
         pytest.skip("native extension predates the AETHER stochastic reference")
-    if not forge3d.has_gpu():
-        pytest.skip("AETHER stochastic reference execution requires a GPU adapter")
+    if not terrain_rendering_available():
+        pytest.skip("AETHER stochastic reference requires a terrain-safe GPU adapter")
     return _forge3d
 
 

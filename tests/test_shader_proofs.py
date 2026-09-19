@@ -6,6 +6,7 @@ import pathlib
 import numpy as np
 import pytest
 from _toml_compat import load_toml
+from _terrain_runtime import terrain_rendering_available
 
 import forge3d as f3d
 from forge3d._native import NATIVE_AVAILABLE
@@ -89,8 +90,8 @@ def test_runtime_contract_assert_mode_fails_closed_without_observations():
     assert runtime_assert["observed_inputs"] is False
 
 def test_runtime_contract_asserts_observed_gpu_inputs():
-    if not f3d.has_gpu():
-        pytest.skip("runtime shader-contract assertions require a GPU render")
+    if not terrain_rendering_available():
+        pytest.skip("runtime shader-contract assertions require a terrain-safe GPU render")
 
     f3d.render_brdf_tile("lambert", 0.4, 32, 32, certificate=True)
     runtime_assert = verify.shader_report()["runtime_assert"]
