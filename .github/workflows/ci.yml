@@ -1292,6 +1292,19 @@ jobs:
           python scripts/assert_junit_zero_skips.py "tests/artifacts/prometheus/junit.xml"
           exit $LASTEXITCODE
 
+      - name: Run AETHER NVIDIA Vulkan reference gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          $aetherDir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "aether"
+          New-Item -ItemType Directory -Force -Path $aetherDir | Out-Null
+          $junit = Join-Path $aetherDir "junit.xml"
+          python -m pytest tests/test_atmosphere_pt_reference.py -v --tb=short --junitxml="$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
       - name: Run DIFFERENTIA inverse solver gate
         shell: pwsh
         env:
