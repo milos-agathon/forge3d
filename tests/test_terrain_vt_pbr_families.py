@@ -284,6 +284,7 @@ def _build_render_params(
     culling: str = "frustum",
     prefetch_horizon_ms: float = 100.0,
     vt_upload_budget_bytes: int = 16 * 1024 * 1024,
+    debug_mode: int = 0,
 ) -> "f3d.TerrainRenderParams":
     config = make_terrain_params_config(
         size_px=size_px,
@@ -309,6 +310,7 @@ def _build_render_params(
         shading=shading,
         prefetch_horizon_ms=prefetch_horizon_ms,
         vt_upload_budget_bytes=vt_upload_budget_bytes,
+        debug_mode=debug_mode,
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         aov=AovSettings(enabled=True, albedo=False, normal=normal_aov, depth=False),
     )
@@ -592,8 +594,10 @@ def test_shader_carries_family_info_and_residency_gate() -> None:
         "fn terrain_vt_normalize_family_uv(",
         "let normal_sample = terrain_vt_sample_family_data(",
         "let mask_sample = terrain_vt_sample_family_data(",
-        "vt_mask_resident_roughness = vt_mask_resident_roughness",
-        "roughness * (1.0 - clamp(vt_mask_residency, 0.0, 1.0))",
+        # TERRA v2 determinism barriers; the resident-only accumulation and
+        # residency-weighted base-roughness blend are unchanged.
+        "vt_mask_resident_roughness = det_barrier(vt_mask_resident_roughness)",
+        "det_barrier(roughness) * (1.0 - clamp(vt_mask_residency, 0.0, 1.0))",
     ):
         assert token in shader, f"missing hardened VT shader token: {token}"
 
@@ -660,11 +664,13 @@ def test_shader_carries_family_info_and_residency_gate() -> None:
 
     geometry_fn = visibility_shader.split("fn fs_visibility_geometry(", 1)[1]
     discard_offset = geometry_fn.index("if (encoded != expected)")
+    # TERRA v2 pins terrain fragment derivatives to the Coarse variants
+    # (plain dpdx/dpdy precision is implementation-defined across vendors).
     for declaration in (
-        "let resolve_ddx_uv = dpdx(input.tex_coord);",
-        "let resolve_ddy_uv = dpdy(input.tex_coord);",
-        "let resolve_ddx_world = dpdx(input.world_position);",
-        "let resolve_ddy_world = dpdy(input.world_position);",
+        "let resolve_ddx_uv = dpdxCoarse(input.tex_coord);",
+        "let resolve_ddy_uv = dpdyCoarse(input.tex_coord);",
+        "let resolve_ddx_world = dpdxCoarse(input.world_position);",
+        "let resolve_ddy_world = dpdyCoarse(input.world_position);",
     ):
         assert geometry_fn.index(declaration) < discard_offset
     geometry_feedback = geometry_fn.split("terrain_vt_write_surface_feedback(", 1)[1]
@@ -1211,9 +1217,15 @@ class TestTerrainVTPbrFamilies:
         renderer = vt_render_env[0]
         renderer.clear_material_vt_sources()
         virtual_size = 1024
+        # The mask family acts on roughness. Compare the roughness view
+        # (debug 11) rather than beauty luminance: with the corrected split-sum
+        # BRDF a roughness change moves dielectric beauty by <2/255, while the
+        # roughness view isolates the resident-vs-fallback override this gate
+        # is about.
+        roughness_view = 11
         baseline = _render_beauty(
             vt_render_env,
-            _build_render_params(vt_settings=None, cam_radius=3.0),
+            _build_render_params(vt_settings=None, cam_radius=3.0, debug_mode=roughness_view),
         )
 
         destructive_mask = np.full(
@@ -1256,6 +1268,7 @@ class TestTerrainVTPbrFamilies:
                 vt_settings=settings(256, 0.25),
                 cam_radius=3.0,
                 vt_upload_budget_bytes=256 * 1024,
+                debug_mode=roughness_view,
             ),
         )
         partial_stats = renderer.get_material_vt_stats()
@@ -1265,6 +1278,7 @@ class TestTerrainVTPbrFamilies:
                 vt_settings=settings(2048, 64.0),
                 cam_radius=3.0,
                 vt_upload_budget_bytes=64 * 1024 * 1024,
+                debug_mode=roughness_view,
             ),
         )
         full_stats = renderer.get_material_vt_stats()
