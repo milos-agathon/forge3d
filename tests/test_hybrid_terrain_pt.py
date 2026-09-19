@@ -509,6 +509,12 @@ def test_sun_color_signature_stubs_and_native_order():
         ("exaggeration", ko, 1.0, "float"),
         ("albedo", ko, (0.6, 0.6, 0.6), "tuple[float, float, float]"),
         ("albedo_map", ko, None, "np.ndarray | None"),
+        ("albedo_sampling", ko, None, "str | None"),
+        ("camera_model", ko, None, "str | None"),
+        ("sensor_rect", ko, None, "tuple[float, float, float, float] | None"),
+        ("full_width", ko, None, "int | None"),
+        ("full_height", ko, None, "int | None"),
+        ("pixel_offset", ko, None, "tuple[int, int] | None"),
         ("turbidity", ko, 1.0, "float"),
         ("sun_azimuth_deg", ko, None, "float | None"),
         ("sun_elevation_deg", ko, None, "float | None"),
@@ -544,6 +550,8 @@ def test_sun_color_signature_stubs_and_native_order():
     wrapper_stub[3] = ("camera", po, "...", "dict | None")
     wrapper_stub[4] = ("spacing", ko, "...", "Tuple[float, float]")
     wrapper_stub[6] = ("albedo", ko, "...", "Tuple[float, float, float]")
+    wrapper_stub[10] = ("sensor_rect", ko, "...", "Tuple[float, float, float, float] | None")
+    wrapper_stub[13] = ("pixel_offset", ko, "...", "Optional[Tuple[int, int]]")
     path_stub = [
         (
             name,
@@ -596,6 +604,12 @@ def test_sun_color_signature_stubs_and_native_order():
         ("certificate", po, None, ""),
         ("sun_color", po, None, ""),
         ("cache", po, None, ""),
+        ("camera_model", po, None, ""),
+        ("sensor_rect", po, None, ""),
+        ("full_width", po, None, ""),
+        ("full_height", po, None, ""),
+        ("pixel_offset", po, None, ""),
+        ("albedo_sampling", po, None, ""),
         ("observer_latitude_deg", po, 0.0, ""),
         ("observer_longitude_deg", po, 0.0, ""),
         ("earth_model", po, "ellipsoid", ""),

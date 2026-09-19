@@ -177,7 +177,16 @@ fn frame_uniforms(desc: &InverseSolveDesc, frame_index: u32, seed: u32) -> Unifo
         // decorrelate seed_hi ^ seed_lo in the kernel's xor mixing so
         // distinct seeds produce distinct streams (seed ^ C cancels).
         seed_lo: seed.wrapping_mul(0x9E37_79B9).wrapping_add(0x85EB_CA6B),
-        _pad_end: [0; 3],
+        // Single-pass pinhole: the full sensor is the render itself, so the
+        // global-pixel ray and seed paths reduce exactly to the local ones.
+        camera_model: 0,
+        full_width: desc.width,
+        full_height: desc.height,
+        pixel_offset_x: 0,
+        pixel_offset_y: 0,
+        ortho_half_height: 1.0,
+        camera_flags: 0,
+        sensor_rect: [0.0, 0.0, 1.0, 1.0],
     }
 }
 

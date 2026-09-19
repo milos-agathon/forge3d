@@ -29,7 +29,8 @@ use wgpu::{Device, Queue, TextureFormat};
 ///                         bit2 = spectral ReSTIR for mapped terrain),
 ///                         env_width, env_height (0 = constant env fallback)
 ///   row 5 extra:          spp (camera samples per frame), statistics
-///                         readback cadence in frames, unused, unused
+///                         readback cadence in frames, albedo sampling
+///                         (0 nearest, 1 bilinear), unused
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct TerrainPtUniforms {
@@ -39,6 +40,16 @@ pub struct TerrainPtUniforms {
     pub dims: [u32; 4],
     pub mips: [u32; 4],
     pub extra: [u32; 4],
+}
+
+/// How the per-texel albedo map is sampled at a traversal hit. `Nearest` keeps
+/// categorical palettes (land cover, LUTs) free of colour bleeding across class
+/// boundaries; `Bilinear` suits continuous fields and is what the inverse
+/// solver's adjoint scatter assumes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AlbedoSampling {
+    Nearest = 0,
+    Bilinear = 1,
 }
 
 /// Curvature parameters consumed by the shared terrain traversal. The two
@@ -364,6 +375,7 @@ impl TerrainMinMaxPyramid {
         stats_readback_cadence: u32,
         turbidity: f32,
         albedo_map_active: bool,
+        albedo_sampling: AlbedoSampling,
     ) -> TerrainPtUniforms {
         let origin_x = -0.5 * (self.width as f32 - 1.0) * spacing_x;
         let origin_z = -0.5 * (self.height as f32 - 1.0) * spacing_z;
@@ -378,7 +390,12 @@ impl TerrainMinMaxPyramid {
                 env_dims.0,
                 env_dims.1,
             ],
-            extra: [spp.max(1), stats_readback_cadence.max(2), 0, 0],
+            extra: [
+                spp.max(1),
+                stats_readback_cadence.max(2),
+                albedo_sampling as u32,
+                0,
+            ],
         }
     }
 }
@@ -393,13 +410,15 @@ pub struct TerrainPtScene {
     /// (0, 0) selects the constant-white env fallback in the kernel.
     pub env_dims: (u32, u32),
     /// Per-texel albedo map at DEM texel resolution (RGBA32F). A 1x1 white
-    /// placeholder when `albedo_map` was `None`; consumers still bind it at
-    /// group 2 binding 16 so the layout stays fixed.
+    /// placeholder when no map was given; consumers still bind it at group 2
+    /// binding 16 so the layout stays fixed. Texels with alpha < 1 fall back to
+    /// the constant `albedo`.
     pub albedo_texture: TrackedTexture,
     /// Whether the mapped-albedo and spectral-ReSTIR flags are raised.
     pub has_albedo_map: bool,
     /// Tracked byte size of the albedo texture.
     albedo_bytes: u64,
+    albedo_sampling: AlbedoSampling,
     spacing: (f32, f32),
     exaggeration: f32,
     albedo: [f32; 3],
@@ -409,6 +428,9 @@ pub struct TerrainPtScene {
 }
 
 impl TerrainPtScene {
+    /// Scene with an optional linear-RGB albedo map (`(data, w, h)`, w*h*3,
+    /// dims equal to the DEM), sampled bilinearly. This is the form the
+    /// inverse solver optimises; it is `new_with_albedo` with alpha = 1.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: &Device,
@@ -422,6 +444,62 @@ impl TerrainPtScene {
         env_map: Option<(&[f32], u32, u32)>,
         env_intensity: f32,
         albedo_map: Option<(&[f32], u32, u32)>,
+        turbidity: f32,
+    ) -> Result<Self, RenderError> {
+        let rgba: Option<Vec<f32>> = match albedo_map {
+            Some((data, w, h)) => {
+                if w != dem_width || h != dem_height {
+                    return Err(RenderError::Upload(format!(
+                        "terrain albedo map dims {w}x{h} must equal the DEM texel dims {dem_width}x{dem_height}"
+                    )));
+                }
+                if data.len() != (w as usize) * (h as usize) * 3 {
+                    return Err(RenderError::Upload(
+                        "terrain albedo map length does not match dims * 3".into(),
+                    ));
+                }
+                Some(
+                    data.chunks_exact(3)
+                        .flat_map(|c| [c[0], c[1], c[2], 1.0])
+                        .collect(),
+                )
+            }
+            None => None,
+        };
+        Self::new_with_albedo(
+            device,
+            queue,
+            heights,
+            dem_width,
+            dem_height,
+            spacing,
+            exaggeration,
+            albedo,
+            env_map,
+            env_intensity,
+            rgba.as_deref(),
+            AlbedoSampling::Bilinear,
+            turbidity,
+        )
+    }
+
+    /// Scene with an optional RGBA albedo map on the DEM grid (w*h*4 floats,
+    /// RGB finite and >= 0, alpha in [0, 1]; alpha < 1 declares "no material"
+    /// and falls back to the constant `albedo`), sampled per `albedo_sampling`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_albedo(
+        device: &Device,
+        queue: &Queue,
+        heights: &[f32],
+        dem_width: u32,
+        dem_height: u32,
+        spacing: (f32, f32),
+        exaggeration: f32,
+        albedo: [f32; 3],
+        env_map: Option<(&[f32], u32, u32)>,
+        env_intensity: f32,
+        albedo_rgba: Option<&[f32]>,
+        albedo_sampling: AlbedoSampling,
         turbidity: f32,
     ) -> Result<Self, RenderError> {
         if !(spacing.0.is_finite() && spacing.0 > 0.0 && spacing.1.is_finite() && spacing.1 > 0.0) {
@@ -452,28 +530,25 @@ impl TerrainPtScene {
         let pyramid =
             TerrainMinMaxPyramid::from_heightfield(device, queue, heights, dem_width, dem_height)?;
 
-        let (alb_w, alb_h, alb_rgba): (u32, u32, Vec<f32>) = match albedo_map {
-            Some((data, w, h)) => {
-                if w != dem_width || h != dem_height {
+        let (alb_w, alb_h, alb_rgba): (u32, u32, Vec<f32>) = match albedo_rgba {
+            Some(data) => {
+                if data.len() != (dem_width as usize) * (dem_height as usize) * 4 {
                     return Err(RenderError::Upload(format!(
-                        "terrain albedo map dims {w}x{h} must equal the DEM texel dims {dem_width}x{dem_height}"
+                        "terrain albedo map must match the DEM grid {dem_width}x{dem_height} \
+                         with four channels"
                     )));
                 }
-                if data.len() != (w as usize) * (h as usize) * 3 {
+                if data.chunks_exact(4).any(|rgba| {
+                    rgba.iter().any(|v| !v.is_finite())
+                        || rgba[..3].iter().any(|v| *v < 0.0)
+                        || !(0.0..=1.0).contains(&rgba[3])
+                }) {
                     return Err(RenderError::Upload(
-                        "terrain albedo map length does not match dims * 3".into(),
+                        "terrain albedo map RGB must be finite and >= 0; alpha must be in [0,1]"
+                            .into(),
                     ));
                 }
-                if data.iter().any(|v| !v.is_finite() || *v < 0.0) {
-                    return Err(RenderError::Upload(
-                        "terrain albedo map contains non-finite or negative samples".into(),
-                    ));
-                }
-                let rgba: Vec<f32> = data
-                    .chunks_exact(3)
-                    .flat_map(|c| [c[0], c[1], c[2], 1.0])
-                    .collect();
-                (w, h, rgba)
+                (dem_width, dem_height, data.to_vec())
             }
             None => (1, 1, vec![1.0, 1.0, 1.0, 1.0]),
         };
@@ -578,8 +653,9 @@ impl TerrainPtScene {
             env_texture,
             env_dims,
             albedo_texture,
-            has_albedo_map: albedo_map.is_some(),
+            has_albedo_map: albedo_rgba.is_some(),
             albedo_bytes: (alb_w as u64) * (alb_h as u64) * 16,
+            albedo_sampling,
             spacing,
             exaggeration,
             albedo,
@@ -608,6 +684,7 @@ impl TerrainPtScene {
             stats_readback_cadence,
             self.turbidity,
             self.has_albedo_map,
+            self.albedo_sampling,
         )
     }
 }
