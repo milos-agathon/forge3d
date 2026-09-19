@@ -1477,23 +1477,32 @@ mod tests {
         expression: naga::Handle<naga::Expression>,
         entry_deviation: naga::Handle<naga::Expression>,
     ) -> bool {
-        let naga::Expression::Binary {
-            op: naga::BinaryOperator::LogicalAnd,
-            left,
-            right,
-        } = function.expressions[expression]
-        else {
-            return false;
-        };
-        let is_any_hit = |operand| {
-            matches!(
-                function.expressions[operand],
+        fn conjunction_terms(
+            function: &naga::Function,
+            expression: naga::Handle<naga::Expression>,
+            entry_deviation: naga::Handle<naga::Expression>,
+        ) -> (bool, bool) {
+            if let naga::Expression::Binary {
+                op: naga::BinaryOperator::LogicalAnd,
+                left,
+                right,
+            } = function.expressions[expression]
+            {
+                let (left_any_hit, left_entry_nonpositive) =
+                    conjunction_terms(function, left, entry_deviation);
+                let (right_any_hit, right_entry_nonpositive) =
+                    conjunction_terms(function, right, entry_deviation);
+                return (
+                    left_any_hit || right_any_hit,
+                    left_entry_nonpositive || right_entry_nonpositive,
+                );
+            }
+            let is_any_hit = matches!(
+                function.expressions[expression],
                 naga::Expression::FunctionArgument(6)
-            )
-        };
-        let is_entry_nonpositive = |operand| {
-            matches!(
-                function.expressions[operand],
+            );
+            let is_entry_nonpositive = matches!(
+                function.expressions[expression],
                 naga::Expression::Binary {
                     op: naga::BinaryOperator::LessEqual,
                     left,
@@ -1503,10 +1512,13 @@ mod tests {
                         function.expressions[right],
                         naga::Expression::Literal(naga::Literal::F32(value)) if value == 0.0
                     )
-            )
-        };
-        (is_any_hit(left) && is_entry_nonpositive(right))
-            || (is_entry_nonpositive(left) && is_any_hit(right))
+            );
+            (is_any_hit, is_entry_nonpositive)
+        }
+
+        let (has_any_hit, has_entry_nonpositive) =
+            conjunction_terms(function, expression, entry_deviation);
+        has_any_hit && has_entry_nonpositive
     }
 
     fn local_reaches_global_store(
@@ -2248,20 +2260,20 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
                 "let c = 1.0;\n    let a = 0.0;\n    let b = 1.0;",
             ),
             shader.replace(
-                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
-                "if (any_hit && c >= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
+                "if (any_hit && c >= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
             ),
             shader.replace(
-                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
-                "if (any_hit && d3.y <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
+                "if (any_hit && d3.y <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
             ),
             shader.replace(
-                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
-                "if (any_hit || c <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
+                "if (any_hit || c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
             ),
             shader.replace(
-                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
-                "if (!any_hit && c <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
+                "if (!any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
             ),
         ] {
             assert_ne!(mutant, shader, "HELIOS mutation target drifted");
