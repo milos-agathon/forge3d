@@ -888,7 +888,7 @@ jobs:
       - name: Install wheel and slow-lane dependencies
         run: |
           python scripts/install_compatible_wheel.py dist
-          pip install pytest pyyaml numpy pillow pyproj
+          pip install pytest pyyaml numpy pillow pyproj rasterio
 
       - name: Run accounted slow Python lane
         env:
