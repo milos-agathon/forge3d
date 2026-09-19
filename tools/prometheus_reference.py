@@ -118,7 +118,7 @@ def capture_reference(directory, resume_checkpoint=None):
     checkpoint_path = Path(resume_checkpoint) if resume_checkpoint else ROOT / "tmp/prometheus-slice1/real_dem_capture.npz"
     if resume_checkpoint:
         checkpoint = json.loads(checkpoint_path.with_suffix(".json").read_text(encoding="utf-8"))
-        if checkpoint["scene"] != scene or checkpoint["fixture_sha256"] != t.sha256(t.DEM_PATH) or checkpoint["provenance_sha256"] != t.sha256(t.PROVENANCE_PATH):
+        if checkpoint["scene"] != scene or checkpoint["fixture_sha256"] != t.sha256(t.DEM_PATH) or checkpoint["provenance_sha256"] != t.canonical_text_sha256(t.PROVENANCE_PATH):
             raise ValueError("Checkpoint inputs differ from this reference scene")
         if checkpoint["arrays_sha256"] != t.sha256(checkpoint_path):
             raise ValueError("Checkpoint arrays checksum mismatch")
@@ -142,7 +142,7 @@ def capture_reference(directory, resume_checkpoint=None):
         from forge3d import _forge3d as native
         checkpoint = {
             "scene": scene, "fixture_sha256": t.sha256(t.DEM_PATH),
-            "provenance_sha256": t.sha256(t.PROVENANCE_PATH),
+            "provenance_sha256": t.canonical_text_sha256(t.PROVENANCE_PATH),
             "adapter": adapter, "native_extension_sha256": t.sha256(native.__file__),
             "arrays_sha256": t.sha256(checkpoint_path), "array_names": list(arrays),
             "out": {key: value for key, value in out.items() if key not in arrays},
@@ -162,7 +162,7 @@ def capture_reference(directory, resume_checkpoint=None):
     scores = {
         "schema_version": 1,
         "fixture_sha256": t.sha256(t.DEM_PATH),
-        "provenance_sha256": t.sha256(t.PROVENANCE_PATH),
+        "provenance_sha256": t.canonical_text_sha256(t.PROVENANCE_PATH),
         "scene": t.scene_metadata(),
         "convergence_metric": out["convergence_metric"],
         "frames": out["frames"],
