@@ -1,11 +1,11 @@
-# DIFFERENTIA item 03 review — 2026-09-19
+# DIFFERENTIA item 03 review — 2026-09-20
 
 ## Assessment
 
-**Partial.** The admitted-event gradient implementation now closes the local
-source-ray and numerical-bound proof gap. The required exact hosted NVIDIA
-Vulkan acceptance has not run against a clean candidate, so item 03 cannot
-truthfully be marked full.
+**Full.** The admitted-event gradient implementation closes the local
+source-ray and numerical-bound proof gap, and the required exact hosted NVIDIA
+Vulkan acceptance completed successfully against clean candidate
+`b4f3dd3afab442615c2e15c97febb81cd34a7311`.
 
 ## Implemented and observed locally
 
@@ -71,16 +71,27 @@ truthfully be marked full.
   reservoir channels; finite differences are corroborating evidence, not the
   source/branch proof.
 
-## Remaining blocker
+## Hosted acceptance evidence
 
-The exact hosted `Visual Goldens (NVIDIA Vulkan)` workflow has not run. It
-requires a clean committed candidate SHA plus a push and full workflow
-dispatch; none is authorized by this task. The local RTX 3070/Vulkan result
-is evidence for the changed wheel, but it is not a substitute for hosted
-candidate provenance, hosted JUnit/adapter/recovery/memory artifacts, and
-hosted image review. Until that external gate runs cleanly, the required
-evidence section of `differentia-gradient-contract.md` is incomplete.
+The full [hosted workflow 35486972634](https://github.com/milos-agathon/forge3d/actions/runs/35486972634)
+completed successfully for the exact clean candidate
+`b4f3dd3afab442615c2e15c97febb81cd34a7311`; both `Visual Goldens (NVIDIA
+Vulkan)` and `Full Acceptance Summary` succeeded. Its `visual-gpu-evidence`
+artifact was downloaded and inspected:
 
-The ignored local `docs/moonshot-roadmap.html` tracker therefore remains
-**partial**. This tracked review is the current evidence record; it must not
-be promoted to full before the hosted gate is observed.
+- `inverse/junit.xml` reported 5 tests with zero failures, errors, and skips.
+- `adapter-probe.json` recorded a physical NVIDIA GeForce RTX 3070 on Vulkan
+  (vendor 4318, device 9348, `DiscreteGpu`, NVIDIA driver 610.60) with
+  `software_fallback: false`.
+- Recovery measured median ΔE2000 `2.6210417695592048` (< 4), sun error
+  `0.42404854307296574` degrees (< 2), and turbidity relative error
+  `0.07304167747497559` (< 0.15). Peak host-visible memory was 147456 bytes,
+  below the enforced 536870912-byte (512 MiB) limit.
+- The hosted target/recovered beauty and ground-truth/recovered albedo PNGs
+  were visually inspected. The 96×96 beauty pair and 16×16 albedo pair agree
+  with the recovery evidence; supplemental image comparisons measured beauty
+  SSIM 0.951509 and albedo SSIM 0.861913.
+
+Every hosted term in `differentia-gradient-contract.md` is now supported by
+observed artifact evidence. The ignored local `docs/moonshot-roadmap.html`
+tracker is marked **Full** alongside this review.
