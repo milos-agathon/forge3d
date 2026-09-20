@@ -1614,7 +1614,9 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'm06'))
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
-    timeout-minutes: 35
+    # A cold isolated release build exceeded the former 35-minute envelope;
+    # keep the required physical acceptance intact while allowing cleanup.
+    timeout-minutes: 45
     env:
       WGPU_BACKEND: vulkan
       FORGE3D_NO_BOOTSTRAP: '1'
