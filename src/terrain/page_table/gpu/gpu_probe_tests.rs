@@ -4,6 +4,7 @@ use super::*;
 use crate::core::resource_tracker::{
     tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
 };
+use crate::core::shader_registry::create_compute_pipeline_scoped;
 
 fn r32_texture(
     device: &wgpu::Device,
@@ -224,12 +225,15 @@ fn production_shader_samples_regional_overview_at_two_global_positions() {
         bind_group_layouts: &[&layout],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("orbis.overview-probe.pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &module,
-        entry_point: "cs_orbis_overview_probe",
-    });
+    let pipeline = create_compute_pipeline_scoped(
+        &device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("orbis.overview-probe.pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: "cs_orbis_overview_probe",
+        },
+    );
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("orbis.overview-probe.bind-group"),
         layout: &layout,

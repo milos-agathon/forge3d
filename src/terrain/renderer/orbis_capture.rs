@@ -399,12 +399,25 @@ impl TerrainScene {
             bind_group_layouts: &layouts,
             push_constant_ranges: &[],
         });
-        let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("orbis.metric.probe.pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &module,
-            entry_point: "orbis_metric_probe",
-        });
+        let pipeline = match crate::core::shader_registry::try_create_compute_pipeline_scoped(
+            self.device.as_ref(),
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("orbis.metric.probe.pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &module,
+                entry_point: "orbis_metric_probe",
+            },
+        ) {
+            Ok(pipeline) => pipeline,
+            Err(message) => {
+                // Balance the outer validation scope opened above so the next
+                // capture's error accounting is not misattributed.
+                let _ = pollster::block_on(self.device.pop_error_scope());
+                return Err(anyhow!(
+                    "ORBIS metric probe pipeline validation failed: {message}"
+                ));
+            }
+        };
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("orbis.metric.probe.bind_group"),
             layout: &probe_layout,

@@ -262,6 +262,10 @@ def test_rotated_utm_bounds_retain_densified_edge_extrema(tmp_path: Path) -> Non
 
 def test_throttled_remote_cog_runtime_keeps_io_driven(tmp_path: Path) -> None:
     native = _native()
+    import forge3d as f3d
+
+    if not f3d.has_gpu():
+        pytest.skip("no GPU adapter")
     source = _write_quadrant_cog(tmp_path / "remote.tif")
     with _throttled_range_server(source.read_bytes()) as url:
         dataset = native.CogDataset(url, cache_size_mb=1)
