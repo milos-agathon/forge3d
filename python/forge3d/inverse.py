@@ -133,7 +133,7 @@ def recover_scene(
             seed-deterministic forward chain per tile instead of caching
             every per-frame reservoir snapshot.
         spatial_reuse / edge_term / score_correction: estimator switches
-            (ReSTIR spatial reuse, current AOV-pair boundary approximation,
+            (ReSTIR spatial reuse, terrain and shadow-boundary handling,
             categorical likelihood-score correction).
         reference_albedo: optional (demH, demW, 3) ground-truth linear
             albedo; when given, the result carries

@@ -7,6 +7,17 @@ source-ray and numerical-bound proof gap, and the required exact hosted NVIDIA
 Vulkan acceptance completed successfully against clean candidate
 `b4f3dd3afab442615c2e15c97febb81cd34a7311`.
 
+## What this means for existing maps
+
+Upgrading does not redraw or change any existing map. The correction matters
+only when a user explicitly reruns `recover_scene()` to match a compatible
+Forge3D terrain reference. In that workflow, the recovered land colours,
+sunlight, and haze are now more reliable around ridges, terrain-cell seams,
+and cast-shadow boundaries; ambiguous boundary calculations are rejected rather
+than used as confident evidence. It remains a flat, terrain-only recovery
+workflow with known terrain shape, not a general aerial- or satellite-photo
+converter.
+
 ## Implemented and observed locally
 
 - AEQUITAS CIEDE2000 scoring is packaged in production Python. A freshly

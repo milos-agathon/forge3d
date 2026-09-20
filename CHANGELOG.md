@@ -6,6 +6,32 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.37.1] - 2026-09-20
+
+### Fixed
+- DIFFERENTIA scene recovery now accounts for tricky places where a terrain
+  slope, a seam in the height data, or a cast shadow changes the image. For a
+  compatible Forge3D terrain reference, this makes the recovered ground
+  colours, sun position, sun strength, and haze more dependable. When that
+  calculation is not clear enough, Forge3D rejects it rather than quietly
+  treating a guess as a reliable adjustment. (#182)
+
+### Compatibility
+- Installing 1.37.1 does not redraw, recolour, or otherwise alter an existing
+  map. Ordinary viewer and rendering calls produce the same kind of output as
+  before. The correction applies only when an application explicitly reruns
+  `recover_scene()` to match a compatible terrain reference image.
+- A rerun of `recover_scene()` can produce different recovered colours or
+  lighting around terrain and shadow edges; that is the intended accuracy fix.
+  Its public Python API and output shapes are unchanged.
+- This does not turn arbitrary aerial or satellite photographs into supported
+  inputs. The recovery workflow remains for flat, terrain-only Forge3D
+  reference scenes with known terrain shape.
+
+### Changed
+
+- Bumped the package and PyPI version to `1.37.1`.
+
 ## [1.37.0] - 2026-09-18
 1.36.0 was published from the OBLIQUA branch before it reached `main`. 1.37.0 is the
 first release built from `main` with both lines merged: everything in 1.36.0 plus
