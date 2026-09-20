@@ -51,6 +51,11 @@ mod local_path_tests {
     fn standard_windows_file_uri_becomes_drive_path() {
         #[cfg(windows)]
         assert_eq!(local_file_url_path("file:///D:/data/terrain.tif"), "D:/data/terrain.tif");
+        #[cfg(not(windows))]
+        assert_eq!(
+            local_file_url_path("file:///data/terrain.tif"),
+            "/data/terrain.tif"
+        );
     }
 
 }
