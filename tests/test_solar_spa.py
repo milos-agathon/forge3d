@@ -554,6 +554,7 @@ def test_helios_ci_path_filter_covers_trust_boundary() -> None:
     assert "python scripts/install_compatible_wheel.py dist" in helios_job
     assert "python -m pip install pytest numpy rasterio pyproj" in helios_job
     assert "FORGE3D_HELIOS_REQUIRE_PHYSICAL_GPU: '1'" in helios_job
+    assert "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'" in helios_job
     assert (
         "path_tracing::hybrid_compute::terrain_heightfield::tests::"
         "curvature_descent_production_gpu_is_conservative -- --exact --nocapture"

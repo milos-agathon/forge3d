@@ -30,6 +30,12 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def canonical_text_sha256(path):
+    """Hash a UTF-8 provenance record independently of checkout newlines."""
+    canonical = Path(path).read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def real_dem():
     provenance = json.loads(PROVENANCE_PATH.read_text(encoding="utf-8"))
     assert provenance["source_sha256"] == SOURCE_SHA256
@@ -194,7 +200,7 @@ def raster_metrics_in_subprocess(out, capture_path=None):
 def load_reference_files():
     scores = json.loads((GOLDEN_DIR / "gore_range_scores.json").read_text(encoding="utf-8"))
     assert scores["fixture_sha256"] == sha256(DEM_PATH)
-    assert scores["provenance_sha256"] == sha256(PROVENANCE_PATH)
+    assert scores["provenance_sha256"] == canonical_text_sha256(PROVENANCE_PATH)
     assert scores["scene"] == json.loads(json.dumps(scene_metadata()))
     assert scores["convergence_metric"] == "frame_mean_estimator_variance"
     assert scores["variance"] < VARIANCE_THRESHOLD

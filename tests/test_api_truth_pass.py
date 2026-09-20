@@ -51,7 +51,11 @@ def test_terrain_public_docs_drop_stale_sky_and_shadow_claims() -> None:
     shadow_doc = ShadowSettings.validate_for_terrain.__doc__ or ""
 
     assert "Rayleigh" not in sky_doc
-    assert "Mie" not in sky_doc
+    # Mie is only truthful for the AETHER spectral LUT path, which really
+    # exposes Mie anisotropy; the procedural Hosek-Wilkie model must not claim it.
+    mie_lines = [line for line in sky_doc.splitlines() if "Mie" in line]
+    assert all("AETHER" in line for line in mie_lines), mie_lines
+    assert "mie_g" in SkySettings.__dataclass_fields__
     assert "Hosek-Wilkie RGB coefficient-table" in sky_doc
     assert "NOT implemented" not in shadow_doc
     assert "moment_maps binding exists" not in shadow_doc

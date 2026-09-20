@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "fixture_sha256": "9dad0295bd571495b8d047e4586a6c1c8556ca02ceb67b3ce4a33f393d99c96c",
-  "provenance_sha256": "d62efdd9ae77ae65ba0b8487b0aa850f8e78ea9fd5cd268dabe63a8df0e7b4e0",
+  "provenance_sha256": "1adb66d0fd4ef4f50fd7f53c0a9afeed089001385361001bcd69c3bf2119e64f",
   "scene": {
     "width": 256,
     "height": 256,

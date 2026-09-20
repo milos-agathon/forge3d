@@ -6,12 +6,14 @@
 // The reservoir-selected channel is observable in the primal, its proposal
 // probability depends on sun elevation and turbidity, and W = 1/q remains
 // below the forward weight cap by construction. The pathwise dW term and the
-// score-function term are exact opposites in expectation; keeping both makes
-// the adjoint match the parameter-independent RGB sum while still
-// differentiating the realized ReSTIR selection.
+// likelihood score account for different parts of the derivative. The
+// pathwise pass differentiates the realized image; the score passes count
+// every fresh candidate and spatial redraw using the affected pixel's
+// complete nonlinear loss of the finite replicate mean.
 //
-// Visibility remains detached here. Its moving cast-shadow boundary is handled
-// by pt_edge_sample.wgsl.
+// Visibility remains detached here. pt_edge_sample.wgsl currently estimates
+// its moving cast-shadow boundary from neighboring pixel-center AOVs; that
+// approximation does not establish complete boundary support.
 // RELEVANT FILES: src/shaders/pt_inverse_loss.wgsl, src/path_tracing/inverse/mod.rs
 
 struct InvSpectralState {
@@ -98,6 +100,63 @@ fn inv_spectral_state() -> InvSpectralState {
         dlogq_wy);
 }
 
+// Spectral temporal and spatial reuse are pixel-local in this specialization,
+// so decisions at one pixel cannot affect another pixel's loss. This removes
+// cross-pixel zero-mean noise from the whole-image likelihood score. The host
+// divides all scalar gradients by R; compensate that division here.
+fn inv_add_trace_score(channel: u32, pix: u32) {
+    let spectral_state = inv_spectral_state();
+    let pixel_loss = bitcast<f32>(atomicLoad(&inv_u32[inv_u32_loss_base() + pix]));
+    let reward = pixel_loss * inv_params.fl.z / inv_params.rsv0.x;
+    inv_add_scalar(INV_GRAD_SUN_Y, reward * spectral_state.dlogq_wy[channel]);
+    inv_add_scalar(INV_GRAD_TURBIDITY, reward * spectral_state.dlogq_tau[channel]);
+}
+
+// Dispatch once after each replayed frame chain. The fresh candidate remains
+// in curr; binding 7 is rebound to the temporal output for this entry point.
+// A spectral spatial self-redraw erases the candidate category before any
+// later beauty frame, so that candidate carries no score in that case.
+@compute @workgroup_size(256)
+fn main_inverse_score_candidate(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let pix = gid.y * INV_DISPATCH_X + gid.x;
+    if (pix >= uniforms.width * uniforms.height) { return; }
+    // The final frame's candidate is never shaded by a later frame.
+    if (uniforms.frame_index + 1u >= inv_params.dims.w) { return; }
+    if ((inv_params.ctrl.x & INV_FLAG_SCORE) == 0u || !terrain_spectral_restir_enabled()) { return; }
+    if ((inv_params.ctrl.x & INV_FLAG_SPATIAL) != 0u
+        && terrain_gbuffer_pos[pix].w != 0.0) {
+        let temporal = terrain_reservoirs_prev[pix];
+        let q_sum = temporal.sample.params.x + temporal.sample.params.y
+            + temporal.sample.params.z;
+        if (temporal.sample.light_type == 1u && q_sum > 0.0) { return; }
+    }
+    let candidate = terrain_reservoirs_curr[pix];
+    if (candidate.sample.light_type != 1u || candidate.sample.light_index >= 3u) { return; }
+    inv_add_trace_score(candidate.sample.light_index, pix);
+}
+
+// Dispatch once immediately after each replayed spatial pass. Pixels without
+// a G-buffer hit bypass that pass's spectral draw and contribute no score.
+@compute @workgroup_size(256)
+fn main_inverse_score_spatial(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let pix = gid.y * INV_DISPATCH_X + gid.x;
+    if (pix >= uniforms.width * uniforms.height) { return; }
+    // The final frame's redraw is likewise outside the realized image.
+    if (uniforms.frame_index + 1u >= inv_params.dims.w) { return; }
+    if ((inv_params.ctrl.x & INV_FLAG_SCORE) == 0u || !terrain_spectral_restir_enabled()) { return; }
+    if (terrain_gbuffer_pos[pix].w == 0.0) { return; }
+    // This binding is rebound to the temporal output for this score pass.
+    // The spatial shader tests that input before drawing a new category.
+    let input = terrain_reservoirs_curr[pix];
+    let input_sum = input.sample.params.x + input.sample.params.y + input.sample.params.z;
+    if (input.sample.light_type != 1u || !(input_sum > 0.0)) { return; }
+    let redraw = terrain_reservoirs_prev[pix];
+    let spectral_sum = redraw.sample.params.x + redraw.sample.params.y + redraw.sample.params.z;
+    if (redraw.sample.light_type != 1u || !(spectral_sum > 0.0)
+        || redraw.sample.light_index >= 3u) { return; }
+    inv_add_trace_score(redraw.sample.light_index, pix);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn main_inverse_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= uniforms.width || gid.y >= uniforms.height) { return; }
@@ -111,8 +170,6 @@ fn main_inverse_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
     let tile_count = f_end - tile_base + 1u;
     let spp = max(terrain.extra.x, 1u);
     let inv_fs = inv_params.fl.w;
-    let score_on = (inv_params.ctrl.x & INV_FLAG_SCORE) != 0u;
-    let score_clamp = inv_params.fl.y;
     let omega = normalize(lighting.light_dir);
     let spectral = terrain_spectral_restir_enabled();
     let spectral_state = inv_spectral_state();
@@ -189,7 +246,7 @@ fn main_inverse_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
             let env_u2 = xorshift32(&st);
             let env_dir = terrain_cosine_dir(n, env_u1, env_u2);
             var env_visibility = 1.0;
-            if (intersect_shadow_ray(
+            if (intersect_ibl_occlusion_ray(
                 Ray(hit.point + n * 1e-3, 1e-3, env_dir, 1e30), 1e30)) {
                 env_visibility = 0.0;
             }
@@ -244,12 +301,6 @@ fn main_inverse_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (sampled) {
             d_sun.y -= weighted_residual_reward * dlogq_wy;
             d_tau -= weighted_residual_reward * dlogq_tau;
-            if (score_on) {
-                d_sun.y += weighted_residual_reward
-                    * clamp(dlogq_wy, -score_clamp, score_clamp);
-                d_tau += weighted_residual_reward
-                    * clamp(dlogq_tau, -score_clamp, score_clamp);
-            }
         }
     }
 

@@ -15,6 +15,7 @@
 # Before/after recovery images are written to FORGE3D_INVERSE_ARTIFACT_DIR
 # (default: tests/artifacts/inverse/, which is git-ignored).
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -309,10 +310,23 @@ def test_recover_synthetic_scene():
     sun_err = _sun_angular_error_deg(rec.sun_dir, TRUE_AZ, TRUE_EL)
     tau_err = abs(rec.turbidity - TRUE_TAU) / TRUE_TAU
     inten_err = abs(rec.sun_intensity - TRUE_I) / TRUE_I
+    (ARTIFACT_DIR / "recovery-metrics.json").write_text(
+        json.dumps(
+            {
+                "albedo_delta_e2000_median": de_median,
+                "sun_error_deg": sun_err,
+                "turbidity_relative_error": tau_err,
+                "intensity_relative_error": inten_err,
+                "peak_host_visible_bytes": rec.peak_host_visible_bytes,
+            },
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
 
     # The reported AEQUITAS score is computed by the wrapper from the
-    # canonical tests/_deltae.py — same function, so agreement must be
-    # exact to float64 precision.
+    # canonical AEQUITAS function, now shipped with the package — agreement
+    # with the independent test reference must be exact to float64 precision.
     assert rec.albedo_delta_e2000_median is not None, (
         "solver did not report albedo_delta_e2000_median for a supplied "
         "reference_albedo"
@@ -360,6 +374,17 @@ def test_solve_memory_budget():
         seed=3,
     )
     limit = 512 * 1024 * 1024
+    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    (ARTIFACT_DIR / "memory-metrics.json").write_text(
+        json.dumps(
+            {
+                "peak_host_visible_bytes": rec.peak_host_visible_bytes,
+                "limit_bytes": limit,
+            },
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
     assert rec.peak_host_visible_bytes < limit, (
         f"solver exceeded host-visible budget: {rec.peak_host_visible_bytes} "
         f">= {limit} bytes"

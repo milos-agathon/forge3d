@@ -10,6 +10,7 @@ import sys
 
 import numpy as np
 import pytest
+from _terrain_runtime import terrain_rendering_available
 
 import forge3d
 from forge3d.geo import SolarTime, solar_position
@@ -246,8 +247,8 @@ print(json.dumps({"sha256": hashlib.sha256(mask.tobytes()).hexdigest(),
 
 
 def test_curved_shadow_memory_matches_flat_baseline() -> None:
-    if not forge3d.has_gpu():
-        pytest.skip("terrain path-tracer memory gate requires a GPU")
+    if not terrain_rendering_available():
+        pytest.skip("terrain path-tracer memory gate requires a terrain-safe GPU")
     script = r'''
 import hashlib
 import json

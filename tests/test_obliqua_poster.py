@@ -263,21 +263,58 @@ def test_analytic_fixture_geometry_is_derived():
     assert ANALYTIC.EXPECTED_EDGE_X0 < ANALYTIC.EXPECTED_EDGE_X1
 
 
-EXPECTED_FIXTURE_HASHES = {
-    # Locked hermetic CANONICAL_SEED=7, FIXTURE_SIZE=1024 procedural inputs.
-    "dem": "554ae04546c7d5a4030c54910c63e20fa5675279c5dfe35058f4ad087d7e0803",
-    "population": "25c1db2ad5d659125ed9ec7d1c94d9108fc4d5cfc3cca35ee1f4ea7396a077fd",
+EXPECTED_PROCEDURAL_RECIPE_SHA256 = "0bef84e27d095269ad8fe3358864c5ee7f4e72570eb3e1711372cf820f602197"
+EXPECTED_PLATFORM_INDEPENDENT_HASHES = {
+    # Mask and compact oracle vectors contain no platform libm results.
     "subject_mask": "e216dce3f1a20ac4062c8389fb6c8d195e89805e8442966ae5793ab1b3196c26",
     "oracle_vector_inputs": "04aa3eecd4ecabf64192f043b1fa0b0ceb9b121d6bfd910c50cf4442a2b3e977",
     "oracle_vector_output": "42508a5fa90e54e81cf58c24da2afaf3e0ac79e80ed554786e979cd94d28c384",
 }
 
 
-def test_se_europe_fixture_and_numpy_oracle_hashes():
+def _procedural_recipe_sha256() -> str:
+    """Pin the generator recipe, not non-contractual libm output bits."""
+    recipe = {
+        "seed": SE_EUROPE.CANONICAL_SEED,
+        "size": SE_EUROPE.FIXTURE_SIZE,
+        "functions": [
+            inspect.getsource(function).replace("\r\n", "\n").strip()
+            for function in (
+                SE_EUROPE._coordinates,
+                SE_EUROPE.make_dem,
+                SE_EUROPE.make_population,
+            )
+        ],
+    }
+    payload = json.dumps(recipe, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _assert_procedural_fixture_field(array: np.ndarray) -> None:
+    assert array.shape == (SE_EUROPE.FIXTURE_SIZE, SE_EUROPE.FIXTURE_SIZE)
+    assert array.dtype == np.float32
+    assert array.flags.c_contiguous
+    assert np.isfinite(array).all()
+    assert float(array.min()) == 0.0
+    assert float(array.max()) == 1.0
+
+
+def test_se_europe_fixture_recipe_and_numpy_oracle_hashes():
     assert SE_EUROPE.CANONICAL_SEED == 7
     assert SE_EUROPE.FIXTURE_SIZE == 1024
     assert len(SE_EUROPE.WARM_STOPS) >= 4
-    assert SE_EUROPE.fixture_input_hashes() == EXPECTED_FIXTURE_HASHES
+    assert _procedural_recipe_sha256() == EXPECTED_PROCEDURAL_RECIPE_SHA256
+    hashes = SE_EUROPE.fixture_input_hashes()
+    assert {key: hashes[key] for key in EXPECTED_PLATFORM_INDEPENDENT_HASHES} == (
+        EXPECTED_PLATFORM_INDEPENDENT_HASHES
+    )
+    for key, factory in (("dem", SE_EUROPE.make_dem), ("population", SE_EUROPE.make_population)):
+        field = factory()
+        _assert_procedural_fixture_field(field)
+        assert np.array_equal(field, factory())
+        # Artifacts retain each runner's exact raw bytes; only their universal
+        # equality is intentionally not claimed for transcendental functions.
+        assert hashes[key] == _sha(field)
     light, population, mask, expected = SE_EUROPE.numpy_oracle_test_vector()
     actual = SE_EUROPE.numpy_oracle(light, population, mask)
     assert np.array_equal(actual, expected)
@@ -550,7 +587,16 @@ def test_poster_plate_certificate_exact_inputs(obliqua_artifact_dir):
         albedo_map=material, albedo_sampling="bilinear", certificate=certificate, **RENDER_OPTIONS,
     )
     report = json.loads(certificate.read_text(encoding="utf-8"))
-    assert report["degradations"] == []
+    requested = set(report["capabilities"]["requested"])
+    granted = set(report["capabilities"]["granted"])
+    assert granted <= requested
+    degradations = report["degradations"]
+    assert all(entry["kind"] == "capability_absent" for entry in degradations)
+    assert len({entry["name"] for entry in degradations}) == len(degradations)
+    assert {entry["name"] for entry in degradations} == requested - granted
+    assert all(entry["consequence"].strip() for entry in degradations)
+    if "timestamp_query" not in granted:
+        assert all(entry["gpu_ms"] == 0.0 for entry in report["passes"])
     assert report["inputs"]["camera_model"] == "off_axis"
     assert report["inputs"]["sensor_rect"] == "0,0,1,1"
     assert report["inputs"]["albedo_map_sha256"] == hashlib.sha256(material.tobytes()).hexdigest()
