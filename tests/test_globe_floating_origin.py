@@ -586,8 +586,14 @@ def test_orbis_ci_contract_is_lfs_restored_zero_skip_and_evidence_bound():
     job = workflow.split("  test-golden-images-nvidia:", 1)[1].split(
         "\n  # ============================================================================", 1
     )[0]
-    assert "needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths]" in job
-    assert "lfs-fixture-bundles" in job and "python-tiffs.zip" in job
+    assert "needs: [build-wheel-windows, terrain-golden-paths]" in job
+    assert "prepare-lfs-fixtures" not in job
+    assert "lfs-fixture-bundles" not in job and "python-tiffs.zip" not in job
+    assert (
+        "Path = 'assets/tif/dem_rainier.tif'; "
+        "Sha256 = '875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3'"
+        in job
+    )
     assert "FORGE3D_RUN_ORBIS_GPU: '1'" in job
     assert "run_nvidia_visual_acceptance.py --suite orbis" in job
     assert "assert_junit_zero_skips.py" in job

@@ -1179,7 +1179,7 @@ jobs:
     # Candidate acceptance proves physical pixels without exposing production
     # signing material to branch code. Signed certificate rotation remains the
     # protected main-only responsibility of certificate-refresh.yml.
-    needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths]
+    needs: [build-wheel-windows, terrain-golden-paths]
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     if: >-
       github.event_name == 'schedule' ||
@@ -1243,6 +1243,7 @@ jobs:
           $fixtures = @(
             @{ Path = 'assets/tif/switzerland_dem.tif'; Sha256 = 'd09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478' }
             @{ Path = 'assets/tif/switzerland_land_cover.tif'; Sha256 = '6b254585be4982ed9e8da63b8536ecc2f5fa4c64c6545db06c73eb1fe39a8f7f' }
+            @{ Path = 'assets/tif/dem_rainier.tif'; Sha256 = '875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3' }
           )
           foreach ($fixture in $fixtures) {
             $url = "$baseUrl/$($fixture.Path)"
@@ -1263,16 +1264,6 @@ jobs:
         with:
           name: wheels-windows
           path: dist/
-
-      - name: Download shared LFS fixture artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: lfs-fixture-bundles
-          path: lfs-fixture-bundles
-
-      - name: Restore verified Rainier COG fixture
-        shell: pwsh
-        run: Expand-Archive lfs-fixture-bundles/python-tiffs.zip -DestinationPath . -Force
 
       - name: Install wheel and test dependencies
         shell: pwsh

@@ -125,11 +125,9 @@ def test_python_nvidia_golden_and_m06_use_only_their_fixtures() -> None:
     slow_job = workflow.split("  test-python-slow:", 1)[1].split(
         "\n  # ============================================================================\n  # TERMINUS", 1
     )[0]
-    golden_job = workflow.split("  test-golden-images:", 1)[1].split(
+    golden_job = workflow.split("  test-golden-images-nvidia:", 1)[1].split(
         "  test-m06-full-geospatial-viewer:", 1
     )[0]
-    metal_job = golden_job.split("  test-golden-images-nvidia:", 1)[0]
-    nvidia_job = golden_job.split("  test-golden-images-nvidia:", 1)[1]
     m06_job = workflow.split("  test-m06-full-geospatial-viewer:", 1)[1].split(
         "\n  # ============================================================================\n  # COMPENDIUM F3DZ", 1
     )[0]
@@ -158,13 +156,11 @@ def test_python_nvidia_golden_and_m06_use_only_their_fixtures() -> None:
         assert "restore_lfs:" not in workflow.split(f"  {smoke_job}:", 1)[1].split(
             "\n\n", 1
         )[0]
-    assert "lfs-fixture-bundles" not in metal_job
-    assert (
-        "needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths]"
-        in nvidia_job
-    )
-    assert nvidia_job.count("name: lfs-fixture-bundles") == 1
-    assert nvidia_job.count("python-tiffs.zip") == 1
+    assert "needs: [build-wheel-windows, terrain-golden-paths]" in golden_job
+    assert "prepare-lfs-fixtures" not in golden_job
+    assert "lfs-fixture-bundles" not in golden_job
+    assert "python-tiffs.zip" not in golden_job
+    assert "m06-dem.zip" not in golden_job
     media_base = (
         "https://media.githubusercontent.com/media/milos-agathon/forge3d/"
         "92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
