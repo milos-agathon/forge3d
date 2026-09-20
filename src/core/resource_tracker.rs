@@ -62,9 +62,9 @@ fn register_buffer_with_ledger(
     is_host_visible: bool,
     label: String,
     call_site: String,
-) -> ResourceHandle {
+) -> Result<ResourceHandle, RenderError> {
     let tracker = global_tracker();
-    tracker.track_buffer_allocation(size, is_host_visible);
+    tracker.track_buffer_allocation_labeled(size, is_host_visible, &label)?;
     tracker.track_ledger_allocation(size, is_host_visible);
     let ledger_id = ledger().insert(
         label,
@@ -73,11 +73,11 @@ fn register_buffer_with_ledger(
         LedgerCategory::Buffer,
         call_site,
     );
-    ResourceHandle::Buffer {
+    Ok(ResourceHandle::Buffer {
         size,
         is_host_visible,
         ledger_id,
-    }
+    })
 }
 
 fn register_texture_with_ledger(size: u64, label: String, call_site: String) -> ResourceHandle {
@@ -90,7 +90,7 @@ fn register_texture_with_ledger(size: u64, label: String, call_site: String) -> 
 
 /// Register a buffer allocation and return a handle that will unregister on drop
 #[track_caller]
-pub fn register_buffer(size: u64, usage: BufferUsages) -> ResourceHandle {
+pub fn register_buffer(size: u64, usage: BufferUsages) -> Result<ResourceHandle, RenderError> {
     let is_host_visible = is_host_visible_usage(usage);
     let call_site = caller_label();
     register_buffer_with_ledger(size, is_host_visible, call_site.clone(), call_site)
@@ -111,9 +111,21 @@ pub fn register_texture_bytes(size: u64) -> ResourceHandle {
 
 /// Register a buffer allocation with explicit host-visible flag
 #[track_caller]
-pub fn register_buffer_explicit(size: u64, is_host_visible: bool) -> ResourceHandle {
+pub fn register_buffer_explicit(
+    size: u64,
+    is_host_visible: bool,
+) -> Result<ResourceHandle, RenderError> {
     let call_site = caller_label();
     register_buffer_with_ledger(size, is_host_visible, call_site.clone(), call_site)
+}
+
+/// Register a scoped non-wgpu host allocation after enforcing the global
+/// host-visible budget. This is used for transient upload encodings whose
+/// backing `Vec` is otherwise invisible to the GPU resource wrappers.
+#[track_caller]
+pub fn tracked_host_allocation(size: u64, label: &str) -> Result<ResourceHandle, RenderError> {
+    let call_site = caller_label();
+    register_buffer_with_ledger(size, true, label.to_owned(), call_site)
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +328,38 @@ impl LedgerCapture {
     }
 }
 
+struct OwnerCapture {
+    capture: LedgerCapture,
+}
+
+impl OwnerCapture {
+    fn new(entries: &HashMap<u64, LedgerEntry>, owner_id: u64) -> Self {
+        Self {
+            capture: LedgerCapture::new(entries, &[owner_id]),
+        }
+    }
+
+    fn add(&mut self, id: u64, entry: &LedgerEntry) {
+        self.capture.add(id, entry);
+    }
+
+    fn remove(&mut self, id: u64, entry: &LedgerEntry) {
+        self.capture.remove(id, entry);
+    }
+
+    fn report(self) -> OwnerLedgerReport {
+        let report = self.capture.report();
+        OwnerLedgerReport {
+            peak_host_visible_bytes: report.peak_host_visible_bytes,
+            peak_device_local_bytes: report.peak_device_local_bytes,
+            peak_total_bytes: report.peak_total_bytes,
+            current_host_visible_bytes: report.current_host_visible_bytes,
+            current_device_local_bytes: report.current_device_local_bytes,
+            by_label: report.by_label,
+        }
+    }
+}
+
 /// Global ledger recording every live tracked allocation.
 ///
 /// Counters are only ever mutated while the `entries` mutex is held, so
@@ -330,7 +374,7 @@ pub struct AllocationLedger {
     peak_device_local: AtomicU64,
     peak_total: AtomicU64,
     capture: Mutex<Option<LedgerCapture>>,
-    owner_captures: Mutex<HashMap<u64, LedgerCapture>>,
+    owner_captures: Mutex<BTreeMap<u64, OwnerCapture>>,
     owner_groups: Mutex<HashMap<(u64, String), OwnerGroupState>>,
 }
 
@@ -345,7 +389,7 @@ impl AllocationLedger {
             peak_device_local: AtomicU64::new(0),
             peak_total: AtomicU64::new(0),
             capture: Mutex::new(None),
-            owner_captures: Mutex::new(HashMap::new()),
+            owner_captures: Mutex::new(BTreeMap::new()),
             owner_groups: Mutex::new(HashMap::new()),
         }
     }
@@ -425,20 +469,25 @@ impl AllocationLedger {
         id
     }
 
-    fn begin_owner_capture(&self, owner_id: u64) {
+    fn begin_owner_capture(&self, owner_id: u64) -> OwnerCaptureGuard<'_> {
         let entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
         self.owner_captures
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .insert(owner_id, LedgerCapture::new(&entries, &[owner_id]));
+            .insert(owner_id, OwnerCapture::new(&entries, owner_id));
+        OwnerCaptureGuard {
+            ledger: self,
+            owner_id,
+            active: true,
+        }
     }
 
-    fn finish_owner_capture(&self, owner_id: u64) -> LedgerReport {
+    fn finish_owner_capture(&self, owner_id: u64) -> OwnerLedgerReport {
         self.owner_captures
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&owner_id)
-            .map(LedgerCapture::report)
+            .map(OwnerCapture::report)
             .unwrap_or_default()
     }
 
@@ -628,6 +677,45 @@ impl LedgerReport {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct OwnerLedgerReport {
+    pub peak_host_visible_bytes: u64,
+    pub peak_device_local_bytes: u64,
+    pub peak_total_bytes: u64,
+    pub current_host_visible_bytes: u64,
+    pub current_device_local_bytes: u64,
+    pub by_label: BTreeMap<String, u64>,
+}
+
+impl OwnerLedgerReport {
+    pub fn current_total_bytes(&self) -> u64 {
+        self.current_host_visible_bytes
+            .saturating_add(self.current_device_local_bytes)
+    }
+}
+
+#[must_use = "an owner capture must be finished or retained until the render exits"]
+pub struct OwnerCaptureGuard<'a> {
+    ledger: &'a AllocationLedger,
+    owner_id: u64,
+    active: bool,
+}
+
+impl OwnerCaptureGuard<'_> {
+    pub fn finish(mut self) -> OwnerLedgerReport {
+        self.active = false;
+        self.ledger.finish_owner_capture(self.owner_id)
+    }
+}
+
+impl Drop for OwnerCaptureGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.ledger.abort_owner_capture(self.owner_id);
+        }
+    }
+}
+
 static LEDGER: OnceLock<AllocationLedger> = OnceLock::new();
 
 /// Access the process-global allocation ledger.
@@ -644,6 +732,14 @@ pub fn owner_group_report(owner: &AllocationOwner, group: &str) -> OwnerGroupRep
     ledger().owner_group_report(owner.id(), group)
 }
 
+pub fn begin_owner_capture(owner_id: u64) -> OwnerCaptureGuard<'static> {
+    ledger().begin_owner_capture(owner_id)
+}
+
+pub fn finish_owner_capture(owner_id: u64) -> OwnerLedgerReport {
+    ledger().finish_owner_capture(owner_id)
+}
+
 /// Start render-local peak accounting from the allocations currently alive.
 pub fn begin_ledger_capture(owner_ids: &[u64]) {
     ledger().begin_capture(owner_ids);
@@ -652,10 +748,12 @@ pub fn begin_ledger_capture(owner_ids: &[u64]) {
 /// Begin a renderer-owner capture that remains active across nested render
 /// certificate captures. Existing live allocations seed the bracket.
 pub fn begin_owner_ledger_capture(owner: &AllocationOwner) {
-    ledger().begin_owner_capture(owner.id());
+    // The RAII guard would abort the capture on drop; this API intentionally
+    // leaves the capture active until finish/abort_owner_ledger_capture.
+    std::mem::forget(ledger().begin_owner_capture(owner.id()));
 }
 
-pub fn finish_owner_ledger_capture(owner: &AllocationOwner) -> LedgerReport {
+pub fn finish_owner_ledger_capture(owner: &AllocationOwner) -> OwnerLedgerReport {
     ledger().finish_owner_capture(owner.id())
 }
 
@@ -804,11 +902,8 @@ pub fn tracked_create_buffer(
         .label
         .map(|s| s.to_string())
         .unwrap_or_else(|| call_site.clone());
-    if host_visible {
-        global_tracker().check_budget_labeled(desc.size, &label)?;
-    }
+    let registry = register_buffer_with_ledger(desc.size, host_visible, label, call_site)?;
     let buffer = device.create_buffer(desc);
-    let registry = register_buffer_with_ledger(desc.size, host_visible, label, call_site);
     Ok(TrackedBuffer {
         inner: buffer,
         _registry: registry,
@@ -832,11 +927,8 @@ pub fn tracked_create_buffer_init(
     let unpadded = desc.contents.len() as u64;
     let align_mask = wgpu::COPY_BUFFER_ALIGNMENT - 1;
     let size = ((unpadded + align_mask) & !align_mask).max(wgpu::COPY_BUFFER_ALIGNMENT);
-    if host_visible {
-        global_tracker().check_budget_labeled(size, &label)?;
-    }
+    let registry = register_buffer_with_ledger(size, host_visible, label, call_site)?;
     let buffer = device.create_buffer_init(desc);
-    let registry = register_buffer_with_ledger(size, host_visible, label, call_site);
     Ok(TrackedBuffer {
         inner: buffer,
         _registry: registry,
@@ -972,7 +1064,9 @@ mod tests {
 
         // Test buffer handle
         {
-            global_tracker().track_buffer_allocation(1024, true);
+            global_tracker()
+                .track_buffer_allocation(1024, true)
+                .expect("test allocation fits budget");
             global_tracker().track_ledger_allocation(1024, true);
             let handle = ResourceHandle::Buffer {
                 size: 1024,
@@ -987,7 +1081,9 @@ mod tests {
             };
 
             // Manually track allocation to simulate what register_buffer does
-            registry.track_buffer_allocation(1024, true);
+            registry
+                .track_buffer_allocation(1024, true)
+                .expect("test allocation fits budget");
 
             let metrics = registry.get_metrics();
             assert_eq!(metrics.buffer_count, 1);
@@ -1005,7 +1101,7 @@ mod tests {
         let initial_metrics = global_tracker().get_metrics();
 
         {
-            let _handle = register_buffer(2048, usage);
+            let _handle = register_buffer(2048, usage).expect("test allocation fits budget");
             let after_alloc_metrics = global_tracker().get_metrics();
 
             // Should have increased by our allocation
@@ -1453,10 +1549,99 @@ mod tests {
     }
 
     #[test]
+    fn owner_captures_are_independent_under_root_capture() {
+        let ledger = AllocationLedger::new();
+        let owner_a = AllocationOwner::new();
+        let owner_b = AllocationOwner::new();
+
+        ledger.begin_capture(&[]);
+        let capture_a = ledger.begin_owner_capture(owner_a.id());
+        let capture_b = ledger.begin_owner_capture(owner_b.id());
+
+        let allocation_a = {
+            let _scope = owner_a.activate();
+            ledger.insert(
+                "owner-a-temporary".to_string(),
+                1024,
+                true,
+                LedgerCategory::Buffer,
+                "test:owner-a".to_string(),
+            )
+        };
+        let allocation_b = {
+            let _scope = owner_b.activate();
+            ledger.insert(
+                "owner-b-persistent".to_string(),
+                4096,
+                false,
+                LedgerCategory::Texture,
+                "test:owner-b".to_string(),
+            )
+        };
+        ledger.remove(allocation_a);
+
+        let report_a = capture_a.finish();
+        let report_b = capture_b.finish();
+        let root_report = ledger.finish_capture();
+
+        assert_eq!(report_a.peak_host_visible_bytes, 1024);
+        assert_eq!(report_a.current_host_visible_bytes, 0);
+        assert_eq!(report_a.by_label.get("owner-a-temporary"), Some(&1024));
+        assert_eq!(report_a.peak_device_local_bytes, 0);
+        assert_eq!(report_b.peak_device_local_bytes, 4096);
+        assert_eq!(report_b.current_device_local_bytes, 4096);
+        assert_eq!(report_b.by_label.get("owner-b-persistent"), Some(&4096));
+        assert_eq!(report_b.peak_host_visible_bytes, 0);
+        assert_eq!(root_report.peak_host_visible_bytes, 1024);
+        assert_eq!(root_report.peak_device_local_bytes, 4096);
+        assert_eq!(root_report.by_label.get("owner-a-temporary"), Some(&1024));
+        assert_eq!(root_report.by_label.get("owner-b-persistent"), Some(&4096));
+
+        ledger.remove(allocation_b);
+    }
+
+    #[test]
+    fn owner_capture_guard_aborts_on_early_error() {
+        fn fail_after_allocation(
+            ledger: &AllocationLedger,
+            owner: &AllocationOwner,
+            allocation: &mut Option<u64>,
+        ) -> Result<(), ()> {
+            let _capture = ledger.begin_owner_capture(owner.id());
+            let _scope = owner.activate();
+            *allocation = Some(ledger.insert(
+                "early-error".to_string(),
+                2048,
+                true,
+                LedgerCategory::Buffer,
+                "test:early-error".to_string(),
+            ));
+            Err(())
+        }
+
+        let ledger = AllocationLedger::new();
+        let owner = AllocationOwner::new();
+        let mut allocation = None;
+        let result = fail_after_allocation(&ledger, &owner, &mut allocation);
+
+        assert!(result.is_err());
+        assert!(!ledger
+            .owner_captures
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&owner.id()));
+
+        ledger.remove(allocation.expect("the failing path allocated a resource"));
+        let report = ledger.begin_owner_capture(owner.id()).finish();
+        assert_eq!(report.peak_host_visible_bytes, 0);
+        assert_eq!(report.current_host_visible_bytes, 0);
+    }
+
+    #[test]
     fn global_ledger_registry_cross_check_matches_both_axes() {
         let before_ledger = ledger_snapshot();
         let before_registry = global_tracker().ledger_totals();
-        let _handle = register_buffer_explicit(4096, true);
+        let _handle = register_buffer_explicit(4096, true).expect("test allocation fits budget");
         let ledger = ledger_snapshot();
         let registry = global_tracker().ledger_totals();
         assert_eq!(ledger.current_host_visible_bytes, registry.0);
@@ -1467,6 +1652,48 @@ mod tests {
         );
         assert_eq!(registry.0, before_registry.0 + 4096);
         assert!(ledger_registry_cross_check().is_ok());
+    }
+
+    #[test]
+    fn mixed_host_visible_paths_atomically_enforce_aggregate_budget() {
+        let _policy_guard = save_policy();
+        global_tracker()
+            .set_budget_policy("enforce")
+            .expect("valid policy");
+        let tracker = global_tracker();
+        let before = tracker.get_metrics().host_visible_bytes;
+        let available = tracker
+            .get_budget_limit()
+            .checked_sub(before)
+            .expect("tracker starts within budget");
+        let request = available / 2 + 1;
+        let start = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let scoped_start = std::sync::Arc::clone(&start);
+        let scoped = std::thread::spawn(move || {
+            scoped_start.wait();
+            tracked_host_allocation(request, "mixed.atomic.scoped")
+        });
+        let ordinary_start = std::sync::Arc::clone(&start);
+        let ordinary = std::thread::spawn(move || {
+            ordinary_start.wait();
+            register_buffer_explicit(request, true)
+        });
+        start.wait();
+        let scoped_result = scoped.join().expect("scoped path completes");
+        let ordinary_result = ordinary.join().expect("ordinary path completes");
+        let success_count =
+            usize::from(scoped_result.is_ok()) + usize::from(ordinary_result.is_ok());
+        assert_eq!(success_count, 1, "exactly one racing reservation must fit");
+        let failure_count = usize::from(matches!(&scoped_result, Err(RenderError::Budget(_))))
+            + usize::from(matches!(&ordinary_result, Err(RenderError::Budget(_))));
+        assert_eq!(
+            failure_count, 1,
+            "the losing path returns a typed budget error"
+        );
+        assert_eq!(tracker.get_metrics().host_visible_bytes, before + request);
+        drop(scoped_result);
+        drop(ordinary_result);
+        assert_eq!(tracker.get_metrics().host_visible_bytes, before);
     }
 
     #[test]

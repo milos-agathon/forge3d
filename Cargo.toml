@@ -1,6 +1,6 @@
 [package]
 name = "forge3d"
-version = "1.34.0"
+version = "1.37.1"
 edition = "2021"
 autoexamples = false
 description = "GPU-accelerated offline 3D map rendering with Rust-first GIS vector, rasterization, mask, thematic, CRS, affine, windowing, and reprojection support"
@@ -24,6 +24,9 @@ default = ["images", "enable-gpu-instancing", "enable-staging-rings"]
 extension-module = ["pyo3/extension-module"]
 # Debug-only runtime contract assertions for proven shader inputs.
 shader-contract-asserts = []
+# AETHER's CPU multiple-scattering bake is an offline acceptance tool. Runtime
+# evaluation always uses the shipped, provenance-locked LUT bank.
+atmosphere-bake = []
 # Optional async/double-buffered readback (R9)
 async_readback = ["dep:tokio"]
 weighted-oit = []
@@ -34,12 +37,14 @@ enable-pbr = []
 enable-tbn = []
 enable-normal-mapping = ["enable-tbn"]
 enable-hdr-offscreen = []
-# GPU instancing experimental flag (no-op stub for now)
-enable-gpu-instancing = []
+# GPU mesh instancing includes the opt-in solid-material PBR pipeline.
+enable-gpu-instancing = ["enable-pbr", "enable-tbn"]
 # P0-03: Renderer config plumbing (no shader/pipeline changes)
 enable-renderer-config = []
 # Workstream O: Resource & Memory Management
 enable-staging-rings = []
+# DIFFERENTIA: differentiable inverse path tracing (scene-parameter recovery)
+enable-inverse-pt = []
 # A14: AOV image format support
 images = ["dep:exr"]
 # P2.2: LAZ decompression in COPC reader

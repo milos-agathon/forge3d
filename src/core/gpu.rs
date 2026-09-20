@@ -84,13 +84,16 @@ pub(crate) fn active_adapter_info() -> Option<(wgpu::AdapterInfo, bool)> {
 /// determinism leg claims to measure, and their hashes must never masquerade
 /// as a hardware leg's.
 pub fn deterministic_mode() -> bool {
-    matches!(
-        std::env::var("FORGE3D_DETERMINISTIC")
-            .unwrap_or_default()
-            .to_lowercase()
-            .as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    static LATCHED: OnceCell<bool> = OnceCell::new();
+    *LATCHED.get_or_init(|| {
+        matches!(
+            std::env::var("FORGE3D_DETERMINISTIC")
+                .unwrap_or_default()
+                .to_lowercase()
+                .as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 /// TERRA-DETERMINATA escape hatch: allow a software rasterizer or
@@ -100,13 +103,37 @@ pub fn deterministic_mode() -> bool {
 /// `FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1` only for an explicitly
 /// software/virtual-labelled determinism leg.
 pub fn deterministic_allow_software() -> bool {
-    matches!(
-        std::env::var("FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE")
-            .unwrap_or_default()
-            .to_lowercase()
-            .as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    static LATCHED: OnceCell<bool> = OnceCell::new();
+    *LATCHED.get_or_init(|| {
+        matches!(
+            std::env::var("FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE")
+                .unwrap_or_default()
+                .to_lowercase()
+                .as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// TERRA-DETERMINATA: pin a sampler's fixed-function filtering under
+/// deterministic mode.
+///
+/// Vendor texture-unit filtering (linear, anisotropic, mipmap blending, and
+/// hardware percentage-closer filtering on comparison samplers) is not
+/// IEEE-754 arithmetic: each vendor's texture unit applies its own tap
+/// coefficients and accumulation order, and wgpu 0.19 exposes no knob to
+/// request correctly-rounded filtering. Any sampler feeding a canonical-path
+/// texture lookup therefore runs nearest filtering when `FORGE3D_DETERMINISTIC`
+/// is set, removing vendor filter-weight arithmetic. Hardware texel selection
+/// remains at the advisory `hardware_sample` sites reported by the IR lint and
+/// is covered by the runtime canaries and cross-vendor hash matrix. Normal
+/// (non-deterministic) renders keep the requested mode unchanged.
+pub fn deterministic_filter_mode(requested: wgpu::FilterMode) -> wgpu::FilterMode {
+    if deterministic_mode() {
+        wgpu::FilterMode::Nearest
+    } else {
+        requested
+    }
 }
 
 fn is_virtualized_adapter_name(name: &str) -> bool {
@@ -120,7 +147,12 @@ pub(crate) fn is_physical_proof_adapter(
     adapter_info: &wgpu::AdapterInfo,
     software_fallback: bool,
 ) -> bool {
-    !software_fallback && !is_virtualized_adapter_name(&adapter_info.name)
+    !software_fallback
+        && matches!(
+            adapter_info.device_type,
+            wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu
+        )
+        && !is_virtualized_adapter_name(&adapter_info.name)
 }
 
 /// Parse `WGPU_BACKENDS`/`WGPU_BACKEND` into a single requested backend, if set.
@@ -156,7 +188,7 @@ fn parse_backend_request(raw: String) -> RenderResult<(String, wgpu::Backends, w
     Ok((raw, pair.0, pair.1))
 }
 
-/// Instance flags for every forge3d-owned wgpu instance.
+/// Instance flags for a forge3d-owned wgpu instance over `backends`.
 ///
 /// wgpu's build-config default enables DEBUG and VALIDATION together in
 /// debug builds. DEBUG makes naga embed the complete WGSL source and line
@@ -168,8 +200,26 @@ fn parse_backend_request(raw: String) -> RenderResult<(String, wgpu::Backends, w
 /// shader sources; `WGPU_DEBUG=1` opts back in and `WGPU_VALIDATION=0` opts
 /// out, per wgpu's standard environment convention. Release builds keep
 /// wgpu's empty default.
-pub(crate) fn instance_flags() -> wgpu::InstanceFlags {
-    (wgpu::InstanceFlags::default() - wgpu::InstanceFlags::DEBUG).with_env()
+///
+/// Deterministic-mode exception: on a DX12-only instance the DEBUG bit is
+/// restored even though embedded debug info is unwanted, because it is the
+/// only wgpu 0.19 lever that makes wgpu-hal pass
+/// D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION to FXC. Optimizing FXC
+/// folds the WGSL `bitcast<f32>(bitcast<u32>)` barrier pair and contracts
+/// the surrounding multiply+add into a hardware FMA, which diverges from
+/// the unfused SPIR-V lowering (measured on RTX 3070: 7 divergent probe
+/// lanes, `i * k + c` contracted through `det_barrier`). Under `-Od` FXC
+/// emits the literally spelled mul/add sequence and the DX12 probe output
+/// is bit-identical to Vulkan. The flag is applied after `.with_env()` so
+/// `WGPU_DEBUG=0` cannot silently strip the contraction pin on a
+/// deterministic leg; it is restricted to a DX12-only mask because a mixed
+/// instance would reintroduce the Vulkan validation-layer crash.
+pub(crate) fn instance_flags(backends: wgpu::Backends) -> wgpu::InstanceFlags {
+    let mut flags = (wgpu::InstanceFlags::default() - wgpu::InstanceFlags::DEBUG).with_env();
+    if deterministic_mode() && backends == wgpu::Backends::DX12 {
+        flags |= wgpu::InstanceFlags::DEBUG;
+    }
+    flags
 }
 
 fn backends_from_env() -> RenderResult<wgpu::Backends> {
@@ -219,7 +269,7 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
         let backends = backends_from_env()?;
         let mut instance_desc = wgpu::InstanceDescriptor {
             backends,
-            flags: instance_flags(),
+            flags: instance_flags(backends),
             ..Default::default()
         };
         let dx12_compiler = if deterministic_mode() {
@@ -233,12 +283,51 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             instance_desc.dx12_shader_compiler = wgpu::Dx12Compiler::Fxc;
         }
         let instance = Arc::new(wgpu::Instance::new(instance_desc));
-        let hardware = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            // LowPower tends to resolve faster and avoids eGPU/discrete probing on macOS
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }));
+        let hardware = if deterministic_mode() {
+            // Deterministic selection: enumerate every adapter the pinned
+            // backend exposes and pick by a fixed order rather than the
+            // driver's power-preference heuristic, which can silently resolve
+            // to an integrated GPU on dual-adapter hosts. Rank: discrete >
+            // integrated > other > virtual > cpu; ties broken by
+            // (vendor, device, name) so the choice is reproducible on this
+            // machine and attributable in the evidence record.
+            fn device_type_rank(t: wgpu::DeviceType) -> u8 {
+                match t {
+                    wgpu::DeviceType::DiscreteGpu => 0,
+                    wgpu::DeviceType::IntegratedGpu => 1,
+                    wgpu::DeviceType::Other => 2,
+                    wgpu::DeviceType::VirtualGpu => 3,
+                    wgpu::DeviceType::Cpu => 4,
+                }
+            }
+            let mut candidates: Vec<(wgpu::AdapterInfo, wgpu::Adapter)> = instance
+                .enumerate_adapters(backends)
+                .into_iter()
+                .map(|a| (a.get_info(), a))
+                .collect();
+            candidates.sort_by(|(a, _), (b, _)| {
+                (
+                    device_type_rank(a.device_type),
+                    a.vendor,
+                    a.device,
+                    a.name.as_str(),
+                )
+                    .cmp(&(
+                        device_type_rank(b.device_type),
+                        b.vendor,
+                        b.device,
+                        b.name.as_str(),
+                    ))
+            });
+            candidates.into_iter().next().map(|(_, adapter)| adapter)
+        } else {
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                // LowPower tends to resolve faster and avoids eGPU/discrete probing on macOS
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            }))
+        };
         let (adapter, mut software_fallback) = match hardware {
             Some(adapter) => (adapter, false),
             None => {
@@ -334,6 +423,19 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
         let mut capabilities =
             crate::core::capabilities::CapabilitySet::negotiate(adapter.features());
 
+        if deterministic_mode() {
+            // TERRA-DETERMINATA: pin an identical device surface on every
+            // adapter — no optional features (each granted feature is a
+            // potential codegen path difference) and the fixed WebGPU-default
+            // limit set, which already meets the terrain floor of 8 storage
+            // buffers per stage. An adapter that cannot meet the floor fails
+            // request_device loudly instead of running a different device
+            // configuration. The negotiated capability record is kept for
+            // diagnostics; only the granted set is zeroed.
+            capabilities.granted = wgpu::Features::empty();
+            limits = wgpu::Limits::default();
+        }
+
         // Robustness: some drivers advertise features that still fail at
         // request_device time. Requesting a feature must never hard-fail the
         // context, so on error we record a degradation and retry once with an
@@ -389,6 +491,59 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             poison_context(format!("device lost ({reason:?}): {msg}"));
         });
 
+        // TERRA-DETERMINATA canary gate: under deterministic mode the
+        // compute and raster probes must reproduce their committed goldens on
+        // THIS adapter before the context serves any work. A mismatch means
+        // this backend/driver produces different bits than the pinned reference —
+        // refuse rather than render divergently. Adapters explicitly opted in
+        // via FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE are their own
+        // non-comparable leg and skip the golden check.
+        if deterministic_mode() && !deterministic_allow_software() {
+            let probe_sha256 = crate::core::det_probe::run_det_probe_on(&device, &queue)
+                .map_err(|err| {
+                    RenderError::device(format!(
+                        "FORGE3D_DETERMINISTIC arithmetic canary failed on '{}' \
+                         ({:?} backend): {err}",
+                        adapter_info.name, adapter_info.backend,
+                    ))
+                })?
+                .1;
+            if probe_sha256 != crate::core::det_probe::EXPECTED_DET_PROBE_SHA256 {
+                return Err(RenderError::device(format!(
+                    "FORGE3D_DETERMINISTIC arithmetic canary mismatch on '{}' \
+                     ({:?} backend): probe_sha256 {probe_sha256} does not equal the \
+                     committed golden {}. This backend/driver computes different \
+                     bits than the pinned reference; refusing to run \
+                     nondeterministically.",
+                    adapter_info.name,
+                    adapter_info.backend,
+                    crate::core::det_probe::EXPECTED_DET_PROBE_SHA256,
+                )));
+            }
+
+            let raster_sha256 = crate::core::det_probe::run_det_raster_on(&device, &queue)
+                .map_err(|err| {
+                    RenderError::device(format!(
+                        "FORGE3D_DETERMINISTIC raster canary failed on '{}' \
+                         ({:?} backend): {err}",
+                        adapter_info.name, adapter_info.backend,
+                    ))
+                })?
+                .1;
+            if raster_sha256 != crate::core::det_probe::EXPECTED_DET_RASTER_SHA256 {
+                return Err(RenderError::device(format!(
+                    "FORGE3D_DETERMINISTIC raster canary mismatch on '{}' \
+                     ({:?} backend): raster_sha256 {raster_sha256} does not equal the \
+                     committed golden {}. This backend/driver rasterizes different \
+                     bits than the pinned reference; refusing to run \
+                     nondeterministically.",
+                    adapter_info.name,
+                    adapter_info.backend,
+                    crate::core::det_probe::EXPECTED_DET_RASTER_SHA256,
+                )));
+            }
+        }
+
         let context = GpuContext {
             instance,
             device: Arc::new(device),
@@ -417,7 +572,7 @@ pub fn align_copy_bpr(unpadded: u32) -> u32 {
 pub fn create_device_for_test() -> Option<wgpu::Device> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
-        flags: instance_flags(),
+        flags: instance_flags(wgpu::Backends::all()),
         ..Default::default()
     });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -466,7 +621,7 @@ pub fn create_device_for_test() -> Option<wgpu::Device> {
 pub fn create_device_and_queue_for_test() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
-        flags: instance_flags(),
+        flags: instance_flags(wgpu::Backends::all()),
         ..Default::default()
     });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -509,7 +664,19 @@ pub fn create_device_and_queue_for_test() -> Option<(wgpu::Device, wgpu::Queue)>
 
 #[cfg(test)]
 mod backend_request_tests {
-    use super::{is_virtualized_adapter_name, parse_backend_request};
+    use super::{is_physical_proof_adapter, is_virtualized_adapter_name, parse_backend_request};
+
+    fn adapter(name: &str, device_type: wgpu::DeviceType) -> wgpu::AdapterInfo {
+        wgpu::AdapterInfo {
+            name: name.to_string(),
+            vendor: 0x10de,
+            device: 0x2484,
+            device_type,
+            driver: String::new(),
+            driver_info: String::new(),
+            backend: wgpu::Backend::Vulkan,
+        }
+    }
 
     #[test]
     fn backend_request_is_exact_and_rejects_ambiguous_or_substring_values() {
@@ -536,5 +703,35 @@ mod backend_request_tests {
         assert!(!is_virtualized_adapter_name("NVIDIA GeForce RTX 3070"));
         assert!(!is_virtualized_adapter_name("AMD Radeon RX 7900 XTX"));
         assert!(!is_virtualized_adapter_name("Intel Arc A770"));
+    }
+
+    #[test]
+    fn proof_hardware_classifier_requires_a_physical_gpu_type() {
+        assert!(is_physical_proof_adapter(
+            &adapter("NVIDIA GeForce RTX 3070", wgpu::DeviceType::DiscreteGpu),
+            false
+        ));
+        assert!(is_physical_proof_adapter(
+            &adapter("Intel Arc integrated", wgpu::DeviceType::IntegratedGpu),
+            false
+        ));
+        for device_type in [
+            wgpu::DeviceType::Other,
+            wgpu::DeviceType::VirtualGpu,
+            wgpu::DeviceType::Cpu,
+        ] {
+            assert!(!is_physical_proof_adapter(
+                &adapter("generic adapter", device_type),
+                false
+            ));
+        }
+        assert!(!is_physical_proof_adapter(
+            &adapter("NVIDIA GeForce RTX 3070", wgpu::DeviceType::DiscreteGpu),
+            true
+        ));
+        assert!(!is_physical_proof_adapter(
+            &adapter("Apple Paravirtual device", wgpu::DeviceType::DiscreteGpu),
+            false
+        ));
     }
 }

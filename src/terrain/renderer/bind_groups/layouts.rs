@@ -55,11 +55,16 @@ impl TerrainScene {
         })
     }
 
+    /// Create the dedicated shared-atmosphere layout at terrain group 4.
+    ///
+    /// The legacy function name is retained to avoid needless internal churn,
+    /// but the group exclusively owns fog, sky, and AETHER LUT resources. The
+    /// other terrain bind-group indices remain stable.
     pub(in crate::terrain::renderer) fn create_fog_bind_group_layout(
         device: &wgpu::Device,
     ) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("terrain_pbr_pom.fog_bind_group_layout"),
+            label: Some("terrain_pbr_pom.atmosphere_bind_group_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -77,6 +82,16 @@ impl TerrainScene {
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D3,
                         multisampled: false,
                     },
                     count: None,

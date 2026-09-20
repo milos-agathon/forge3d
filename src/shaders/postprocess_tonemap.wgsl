@@ -35,6 +35,7 @@ struct VertexOutput {
 // Vertex shader - generates full-screen triangle
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    det_seed(f32(vertex_index));
     // Full-screen triangle technique
     // Vertex 0: (-1, -1) -> UV (0, 1)
     // Vertex 1: (-1,  3) -> UV (0, -1) 
@@ -43,7 +44,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
         f32((vertex_index << 1u) & 2u),
         f32(vertex_index & 2u)
     );
-    let pos = vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
+    let pos = vec4<f32>(det_barrier2(uv * 2.0) - 1.0, 0.0, 1.0);
     
     return VertexOutput(
         vec4<f32>(pos.x, -pos.y, pos.z, pos.w), // Flip Y for correct orientation
@@ -56,23 +57,23 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 fn apply_white_balance(color: vec3<f32>, temperature: f32, tint: f32) -> vec3<f32> {
     // Convert temperature to approximate RGB multipliers
     // Based on Kelvin to RGB approximation (simplified Planckian locus)
-    let temp_normalized = (temperature - 6500.0) / 5500.0; // Normalize around D65
+    let temp_normalized = det_div(temperature - 6500.0, 5500.0); // Normalize around D65
     
     // Temperature: negative = warmer (more red), positive = cooler (more blue)
     var r_mult = 1.0;
     var b_mult = 1.0;
     if (temp_normalized < 0.0) {
         // Warmer: boost red, reduce blue
-        r_mult = 1.0 - temp_normalized * 0.3;
-        b_mult = 1.0 + temp_normalized * 0.3;
+        r_mult = 1.0 - det_barrier(temp_normalized * 0.3);
+        b_mult = 1.0 + det_barrier(temp_normalized * 0.3);
     } else {
         // Cooler: reduce red, boost blue
-        r_mult = 1.0 - temp_normalized * 0.3;
-        b_mult = 1.0 + temp_normalized * 0.3;
+        r_mult = 1.0 - det_barrier(temp_normalized * 0.3);
+        b_mult = 1.0 + det_barrier(temp_normalized * 0.3);
     }
     
     // Tint: negative = more green, positive = more magenta
-    var g_mult = 1.0 - tint * 0.2;
+    var g_mult = 1.0 - det_barrier(tint * 0.2);
     
     return color * vec3<f32>(r_mult, g_mult, b_mult);
 }
@@ -83,9 +84,9 @@ fn sample_lut(color: vec3<f32>, lut_size: f32) -> vec3<f32> {
     let clamped = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
     
     // Scale to LUT coordinates (0.5/size to 1-0.5/size for proper texel centers)
-    let half_texel = 0.5 / lut_size;
-    let scale = (lut_size - 1.0) / lut_size;
-    let lut_coord = clamped * scale + half_texel;
+    let half_texel = det_div(0.5, lut_size);
+    let scale = det_div(lut_size - 1.0, lut_size);
+    let lut_coord = det_barrier3(clamped * scale) + half_texel;
     
     // Sample with trilinear filtering
     return textureSampleLevel(lut_texture, lut_sampler, lut_coord, 0.0).rgb;
@@ -95,23 +96,24 @@ fn sample_lut(color: vec3<f32>, lut_size: f32) -> vec3<f32> {
 // Rgba8UnormSrgb targets apply the final sRGB encode in hardware.
 @fragment  
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    det_seed(input.position.x);
     // Sample HDR input
     var color = textureSample(hdr_texture, hdr_sampler, input.uv).rgb;
     
     // M6: Apply white balance before exposure (in linear space)
     if (uniforms.white_balance_enabled > 0u) {
-        color = apply_white_balance(color, uniforms.temperature, uniforms.tint);
+        color = det_barrier3(apply_white_balance(color, uniforms.temperature, uniforms.tint));
     }
     
     // Apply exposure
-    let exposed_color = color * uniforms.exposure;
+    let exposed_color = det_barrier3(color * uniforms.exposure);
     
     var tonemapped_color = tonemap_apply_operator(exposed_color, uniforms.operator_index, uniforms.white_point);
     
     // M6: Apply 3D LUT after tonemapping (before display encode)
     if (uniforms.lut_enabled > 0u && uniforms.lut_size > 0.0) {
         let lut_color = sample_lut(tonemapped_color, uniforms.lut_size);
-        tonemapped_color = mix(tonemapped_color, lut_color, uniforms.lut_strength);
+        tonemapped_color = det_mix3(tonemapped_color, lut_color, uniforms.lut_strength);
     }
     
     return vec4<f32>(clamp(tonemapped_color, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);

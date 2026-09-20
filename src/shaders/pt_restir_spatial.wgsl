@@ -1,8 +1,11 @@
 // src/shaders/pt_restir_spatial.wgsl
-// ReSTIR DI: Spatial reuse (MVP stub)
-// For each pixel, compare its reservoir to 4-neighborhood (up, down, left, right)
-// and keep the reservoir with the highest weight. Writes a diagnostic flag if
-// a neighbor was adopted (bit 0 = adopted neighbor, 0 = kept self).
+// ReSTIR DI: spatial reuse — stochastic reservoir merge over K random
+// neighbours in an R-window plus the pixel's own reservoir. Each candidate
+// is re-evaluated against the receiving pixel's G-buffer record (target pdf
+// at the receiver), contributes reuse weight w = w_sum * p_curr / target_pdf,
+// and replaces the running sample with probability w / Wsum (the canonical
+// reservoir update). Spectral residual reservoirs carry one global proposal;
+// merging identical proposals collapses exactly to one fresh categorical draw.
 
 struct Uniforms {
     width: u32,
@@ -18,7 +21,14 @@ struct Uniforms {
     cam_forward: vec3<f32>,
     seed_hi: u32,
     seed_lo: u32,
-    _pad: u32,
+    camera_model: u32,
+    full_width: u32,
+    full_height: u32,
+    pixel_offset_x: u32,
+    pixel_offset_y: u32,
+    ortho_half_height: f32,
+    camera_flags: u32,
+    sensor_rect: vec4<f32>,
 }
 
 // Scene lights (Group 1)
@@ -63,16 +73,22 @@ fn consider_candidate(
     let P = gbuffer_pos[pix_idx].xyz;
     var p_curr: f32 = 0.0;
     if (r.sample.light_type == 1u) {
-        // Directional (delta): selection probability only
+        // Directional (delta): selection probability only. Spectral ReSTIR
+        // stores its three-channel proposal in sample.params; legacy light
+        // samples keep params=0 and use the scene-light importance table.
         if (dir_count == 0u) { return; }
-        let idx = min(r.sample.light_index, dir_count - 1u);
-        let imp = max(directional_lights[idx].importance, 0.0);
-        let p_sel = select(1.0 / f32(dir_count), imp / max(sum_imp_dir, 1e-8), sum_imp_dir > 0.0);
+        let spectral_sum = r.sample.params.x + r.sample.params.y + r.sample.params.z;
+        if (r.sample.light_index < 3u && spectral_sum > 0.0) {
+            p_curr = r.sample.params[r.sample.light_index] / spectral_sum;
+        } else {
+            let idx = min(r.sample.light_index, dir_count - 1u);
+            let imp = max(directional_lights[idx].importance, 0.0);
+            p_curr = select(1.0 / f32(dir_count), imp / max(sum_imp_dir, 1e-8), sum_imp_dir > 0.0);
+        }
         // Require surface-facing to avoid zero-contribution picks
         let wi = normalize(r.sample.direction);
         let cosTheta = max(dot(N, wi), 0.0);
         if (cosTheta <= 0.0) { return; }
-        p_curr = p_sel;
     } else if (r.sample.light_type == 2u) {
         // Area disc: selection probability times area->solid-angle
         if (area_count == 0u) { return; }
@@ -155,13 +171,22 @@ fn xorshift32(state: ptr<function, u32>) -> f32 {
 
 const PI: f32 = 3.141592653589793;
 
+// gid.y folds 1-D dispatches wider than the 65535-workgroup x limit: the
+// host dispatches x = min(wg, 65535), y = ceil(wg/65535).
+const DISPATCH_X_WG: u32 = 16776960u; // 65535 * 256
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
+    let idx = gid.y * DISPATCH_X_WG + gid.x;
     let W = uniforms.width;
     let H = uniforms.height;
     let pixel_count = W * H;
     if (idx >= pixel_count) { return; }
+
+    if (gbuffer_pos[idx].w == 0.0) {
+        out_reservoirs[idx] = in_reservoirs[idx];
+        return;
+    }
 
     let x = idx % W;
     let y = idx / W;
@@ -170,9 +195,32 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let K: u32 = 8u;
     let R: u32 = 3u;
 
-    var seed = (uniforms.seed_hi ^ uniforms.frame_index) + idx * 1664525u + 1013904223u;
+    let global_idx = (y + uniforms.pixel_offset_y) * uniforms.full_width
+        + x + uniforms.pixel_offset_x;
+    var seed = (uniforms.seed_hi ^ uniforms.frame_index)
+        + global_idx * 1664525u + 1013904223u;
 
     let r_self = in_reservoirs[idx];
+    let spectral_sum = r_self.sample.params.x + r_self.sample.params.y + r_self.sample.params.z;
+    if (r_self.sample.light_type == 1u && spectral_sum > 0.0) {
+        let probabilities = r_self.sample.params / spectral_sum;
+        let u = xorshift32(&seed);
+        var channel = 2u;
+        if (u < probabilities.x) {
+            channel = 0u;
+        } else if (u < probabilities.x + probabilities.y) {
+            channel = 1u;
+        }
+        var spectral = r_self;
+        spectral.sample.light_index = channel;
+        spectral.sample.params = probabilities;
+        spectral.w_sum = 1.0;
+        spectral.m = 1u;
+        spectral.target_pdf = probabilities[channel];
+        spectral.weight = 1.0 / probabilities[channel];
+        out_reservoirs[idx] = spectral;
+        return;
+    }
     var out_r: Reservoir;
     var chosen_sample: LightSample = r_self.sample;
     var chosen_pdf: f32 = r_self.target_pdf;
@@ -193,18 +241,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     consider_candidate(r_self, idx, true, &Wsum, &chosen_sample, &chosen_pdf, &reused, &seed, sum_imp_area, AREA_COUNT, sum_imp_dir, DIR_COUNT);
     m_total = m_total + r_self.m;
 
-    // Random K neighbors in window
-    for (var i: u32 = 0u; i < K; i = i + 1u) {
-        // Uniform in [-R, R]
-        let rx = i32(floor(xorshift32(&seed) * f32(2u * R + 1u))) - i32(R);
-        let ry = i32(floor(xorshift32(&seed) * f32(2u * R + 1u))) - i32(R);
-        if (rx == 0 && ry == 0) { continue; }
-        let nx = u32(clamp(i32(x) + rx, 0, i32(W) - 1));
-        let ny = u32(clamp(i32(y) + ry, 0, i32(H) - 1));
-        let ni = ny * W + nx;
-        let rn = in_reservoirs[ni];
-        consider_candidate(rn, idx, false, &Wsum, &chosen_sample, &chosen_pdf, &reused, &seed, sum_imp_area, AREA_COUNT, sum_imp_dir, DIR_COUNT);
-        m_total = m_total + rn.m;
+    // Full-sensor poster tiles use self-only spatial resampling so an edge
+    // pixel has identical history in a tile and a monolithic frame. Temporal
+    // reuse remains active and the finalized reservoir still shades beauty.
+    if (uniforms.camera_flags == 0u) {
+        // Random K neighbors in window
+        for (var i: u32 = 0u; i < K; i = i + 1u) {
+            // Uniform in [-R, R]
+            let rx = i32(floor(xorshift32(&seed) * f32(2u * R + 1u))) - i32(R);
+            let ry = i32(floor(xorshift32(&seed) * f32(2u * R + 1u))) - i32(R);
+            if (rx == 0 && ry == 0) { continue; }
+            let nx = u32(clamp(i32(x) + rx, 0, i32(W) - 1));
+            let ny = u32(clamp(i32(y) + ry, 0, i32(H) - 1));
+            let ni = ny * W + nx;
+            let rn = in_reservoirs[ni];
+            if (rn.target_pdf <= 0.0 || rn.weight <= 0.0 || gbuffer_pos[ni].w == 0.0) { continue; }
+            consider_candidate(rn, idx, false, &Wsum, &chosen_sample, &chosen_pdf, &reused, &seed, sum_imp_area, AREA_COUNT, sum_imp_dir, DIR_COUNT);
+            m_total = m_total + rn.m;
+        }
     }
 
     // Finalize output reservoir

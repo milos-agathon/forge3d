@@ -313,6 +313,7 @@ def instance_mesh_gpu_render(
     *,
     certificate: bool | str = False,
     cache: str | None = None,
+    pbr: Dict[str, Any] | None = None,
 ) -> np.ndarray:
     """Render an instanced mesh via the native GPU instancing path, returning an RGBA8 image.
 
@@ -324,6 +325,11 @@ def instance_mesh_gpu_render(
         Row-major 4x4 transforms, one per instance.
     width, height : int
         Output image dimensions.
+    pbr : dict, optional
+        Solid-material PBR mode: base_color (RGBA), roughness, metallic,
+        environment (constant linear RGB radiance), and sun_color (RGB).
+        Uses precomputed IBL and requires enable-pbr/enable-tbn. The default
+        remains legacy lighting. This entry point has no shadow-caster pass.
 
     Returns
     -------
@@ -348,7 +354,8 @@ def instance_mesh_gpu_render(
     if arr.ndim != 2 or arr.shape[1] != 16:
         raise ValueError("transforms must have shape (N,16) row-major 4x4")
     payload = _mesh_to_py(mesh)
-    return fn(int(width), int(height), payload, arr, certificate=certificate)
+    options = {} if pbr is None else {"pbr": pbr}
+    return fn(int(width), int(height), payload, arr, certificate=certificate, **options)
 
 
 def generate_thick_polyline(

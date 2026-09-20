@@ -70,6 +70,51 @@ def test_intra_backend_bit_identity(tmp_path):
     )
 
 
+def test_determinism_probe_canary_is_repeatable(tmp_path):
+    """The arithmetic canaries must produce identical bytes on repeated runs.
+
+    The probe/raster hashes are the cross-implementation canary (native
+    wgpu + browser WebGPU run the same WGSL). Intra-process repeatability is
+    the local proxy; cross-implementation equality is enforced by the
+    committed canary goldens in the CI diff job.
+
+    Runs in a subprocess: FORGE3D_DETERMINISTIC latches process-wide at the
+    first GPU init (src/core/gpu.rs), so an in-process call would leak
+    deterministic mode and the backend pin into every later test.
+    """
+    env = dict(os.environ)
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=_local_backend())
+    source_python = Path(__file__).parents[1] / "python"
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(source_python), env["PYTHONPATH"]]
+        if env.get("PYTHONPATH")
+        else [str(source_python)]
+    )
+    script = (
+        "import json; import forge3d; "
+        "first = forge3d.determinism_probe(); second = forge3d.determinism_probe(); "
+        "print(json.dumps({'first': first, 'second': second}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    first, second = payload["first"], payload["second"]
+    assert first["status"] == "ok", first
+    assert second["status"] == "ok", second
+    assert first["probe_sha256"] == second["probe_sha256"], (
+        "probe canary not repeatable:\n"
+        f"  first:  {first['probe_sha256']}\n  second: {second['probe_sha256']}"
+    )
+    assert first["raster_sha256"] == second["raster_sha256"], (
+        "raster canary not repeatable:\n"
+        f"  first:  {first['raster_sha256']}\n  second: {second['raster_sha256']}"
+    )
+    assert first.get("software_fallback") is False, first
+    assert first.get("adapter_name"), first
+    assert first.get("adapter_backend"), first
+
+
 def test_dupla_dd_demo_is_backend_pinned_and_byte_identical():
     """The committed DD render participates in the determinism harness."""
     backend = _local_backend()
@@ -90,7 +135,9 @@ def test_dupla_dd_demo_is_backend_pinned_and_byte_identical():
     result = subprocess.run(
         [sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True
     )
-    report = json.loads(result.stdout)
+    # The JSON record is the last stdout line; the Vulkan loader may prepend
+    # validation-layer warnings on hosts with the SDK installed.
+    report = json.loads(result.stdout.strip().splitlines()[-1])
     assert report["a"] == report["b"]
     assert report["dd"] < 0.01
     assert report["raw"] >= 100
@@ -241,4 +288,4 @@ def test_device_probe_reports_initialized_render_adapter(monkeypatch, tmp_path):
         "print(json.dumps(f3d.device_probe('vulkan')))"
     )
     result = subprocess.run([sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True)
-    assert json.loads(result.stdout)["backend"] == "Dx12"
+    assert json.loads(result.stdout.strip().splitlines()[-1])["backend"] == "Dx12"

@@ -18,8 +18,8 @@ environment before importing forge3d, which is the only ordering that
 guarantees the pin precedes GPU init. Determinism failures are loud: the
 native layer panics if the pinned backend cannot be honored.
 
-This module is pure Python over the existing native surface — no PyO3 symbols
-are added, so no ``__all__``/contract/.pyi registration is required.
+This module orchestrates the native terrain and determinism-canary surfaces;
+the registered ``determinism_probe`` symbol is exposed through the package API.
 """
 from __future__ import annotations
 
@@ -50,8 +50,10 @@ import numpy as np
 #   - Directional sun az=135 deg, el=35 deg, intensity 2.5; IBL intensity 1.0.
 #   - PCF shadows (512px map, 2 cascades) so the CSM filtering path is on.
 #   - Fixed orbit camera: radius 4.0, phi=45 deg, theta=45 deg, fov 55 deg.
-#   - POM disabled (its raymarch is deterministic but slow; out of the minimal
-#     hash surface), MSAA 1, render_scale 1.0, exposure 1.0, gamma 2.2.
+#   - POM enabled in Occlusion mode (scale 0.04, 12..40 raymarch steps, 4
+#     refine steps, self-shadow + occlusion on) so the heightfield raymarch
+#     path is inside the hashed surface, MSAA 1, render_scale 1.0,
+#     exposure 1.0, gamma 2.2.
 CANONICAL_SCENE = "terra_determinata_v1"
 
 _HDR_WIDTH = 16
@@ -138,7 +140,7 @@ def _canonical_params_config():
                 True, "PCF", 512, 2, 250.0, 1.0, 0.8, 0.002, 0.001, 0.3, 1e-4, 0.5, 2.0, 0.9
             ),
             triplanar=TriplanarSettings(6.0, 4.0, 1.0),
-            pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
+            pom=PomSettings(True, "Occlusion", 0.04, 12, 40, 4, True, True),
             lod=LodSettings(0, 0.0, 0.0),
             sampling=SamplingSettings(
                 "Linear", "Linear", "Linear", 1, "Repeat", "Repeat", "Repeat"
@@ -323,6 +325,22 @@ def _main(argv: Optional[list] = None) -> int:
         "device": probe.get("device"),
         "software_fallback": probe.get("software_fallback"),
     }
+    # Arithmetic canary on the SAME adapter that rendered the frame: the
+    # probe_sha256 is a cross-implementation identity leg (the identical WGSL
+    # also runs in browser WebGPU via tools/determinism_browser/det_probe.js).
+    canary = f3d.determinism_probe()
+    probe_record = {
+        "status": canary.get("status"),
+        "sha256": canary.get("probe_sha256"),
+        "raster_sha256": canary.get("raster_sha256"),
+        "wgsl_sha256": canary.get("wgsl_sha256"),
+        "raster_wgsl_sha256": canary.get("raster_wgsl_sha256"),
+        "adapter_name": canary.get("adapter_name"),
+        "adapter_backend": canary.get("adapter_backend"),
+        "software_fallback": canary.get("software_fallback"),
+    }
+    if canary.get("status") != "ok":
+        probe_record["reason"] = canary.get("reason")
     print(
         json.dumps(
             {
@@ -331,6 +349,7 @@ def _main(argv: Optional[list] = None) -> int:
                 "backend_env": backend_env,
                 "deterministic": os.environ.get("FORGE3D_DETERMINISTIC"),
                 "adapter": adapter,
+                "probe": probe_record,
             }
         )
     )

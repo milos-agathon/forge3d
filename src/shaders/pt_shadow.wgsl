@@ -154,7 +154,23 @@ struct BlasDesc {
 @group(1) @binding(15) var<storage, read> blas_descs: array<BlasDesc>;
 @group(2) @binding(0) var<storage, read_write> shadow_queue_header: QueueHeader;
 @group(2) @binding(1) var<storage, read_write> shadow_queue: array<ShadowRay>;
-@group(3) @binding(0) var<storage, read_write> accum_hdr: array<vec4<f32>>;
+@group(3) @binding(0) var<storage, read_write> accum_hdr: array<atomic<u32>>;
+
+fn add_radiance(index: u32, value: f32) {
+    var previous = atomicLoad(&accum_hdr[index]);
+    loop {
+        let next = bitcast<u32>(bitcast<f32>(previous) + value);
+        let result = atomicCompareExchangeWeak(&accum_hdr[index], previous, next);
+        if (result.exchanged) { break; }
+        previous = result.old_value;
+    }
+}
+
+fn accumulate_shadow(pixel: u32, contribution: vec3<f32>) {
+    add_radiance(pixel * 4u, contribution.r);
+    add_radiance(pixel * 4u + 1u, contribution.g);
+    add_radiance(pixel * 4u + 2u, contribution.b);
+}
 
 // Ray-sphere intersection
 fn ray_sphere(ro: vec3<f32>, rd: vec3<f32>, c: vec3<f32>, r: f32, tmin: f32, tmax: f32) -> bool {
@@ -288,7 +304,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (!occluded) {
             // Accumulate contribution
             let p = sr.pixel;
-            accum_hdr[p] = accum_hdr[p] + vec4<f32>(sr.contrib, 0.0);
+            accumulate_shadow(p, sr.contrib);
         }
     }
 }

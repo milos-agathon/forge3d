@@ -10,7 +10,9 @@ fn registry_basic_operations() {
     assert_eq!(metrics.buffer_bytes, 0);
     assert!(metrics.within_budget);
 
-    registry.track_buffer_allocation(1024, true);
+    registry
+        .track_buffer_allocation(1024, true)
+        .expect("test allocation fits budget");
     let metrics = registry.get_metrics();
     assert_eq!(metrics.buffer_count, 1);
     assert_eq!(metrics.buffer_bytes, 1024);

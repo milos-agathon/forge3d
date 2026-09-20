@@ -155,11 +155,7 @@ pub struct CoverageBinner {
 
 impl CoverageBinner {
     pub fn new(device: &wgpu::Device) -> Self {
-        let source = format!(
-            "{}\n{}",
-            include_str!("../../shaders/includes/determinism.wgsl"),
-            include_str!("../../shaders/vector_coverage_bin.wgsl")
-        );
+        let source = crate::shader_sources::vector_coverage_bin();
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "vector_coverage_bin.wgsl",
@@ -201,6 +197,15 @@ impl CoverageBinner {
         geometry: &CoverageGeometry,
     ) -> Result<CoverageBins, RenderError> {
         let layout = BinLayout::measure(geometry)?;
+        self.prepare_compiled(device, geometry, layout)
+    }
+
+    pub(super) fn prepare_compiled(
+        &self,
+        device: &wgpu::Device,
+        geometry: &CoverageGeometry,
+        layout: BinLayout,
+    ) -> Result<CoverageBins, RenderError> {
         let zero_primitive = PrimitiveRecord::zeroed();
         let primitive_bytes: &[u8] = if geometry.primitives.is_empty() {
             bytemuck::bytes_of(&zero_primitive)
@@ -433,11 +438,7 @@ mod tests {
 
     #[test]
     fn bin_shader_and_pinned_math_assemble_as_valid_wgsl() {
-        let source = format!(
-            "{}\n{}",
-            include_str!("../../shaders/includes/determinism.wgsl"),
-            include_str!("../../shaders/vector_coverage_bin.wgsl")
-        );
+        let source = crate::shader_sources::vector_coverage_bin();
         let module =
             naga::front::wgsl::parse_str(&source).expect("combined LIMES bin shader must parse");
         naga::valid::Validator::new(

@@ -497,6 +497,10 @@ class TestTerrainProbeLighting:
         )
 
     def test_reflection_probe_out_of_bounds_weight_zero(self, probe_render_env) -> None:
+        # Measure the reflection-probe blend weight directly (debug 53). The
+        # specular-only view (debug 8) is dominated by the split-sum BRDF,
+        # which cb161cc4 corrected from an inflated LUT to physically small
+        # dielectric values, so it no longer isolates the probe footprint.
         renderer, material_set, ibl, heightmap, overlay, _ = probe_render_env
         baseline = _render_probe_scene(
             renderer,
@@ -506,7 +510,7 @@ class TestTerrainProbeLighting:
             overlay,
             probes=ProbeSettings(enabled=False),
             reflection_probes=None,
-            debug_mode=8,
+            debug_mode=53,
         )
         centered = _render_probe_scene(
             renderer,
@@ -523,7 +527,7 @@ class TestTerrainProbeLighting:
                 fallback_blend_distance=(0.18, 0.12),
                 ray_count=9,
             ),
-            debug_mode=8,
+            debug_mode=53,
         )
         out_of_bounds = _render_probe_scene(
             renderer,
@@ -540,15 +544,19 @@ class TestTerrainProbeLighting:
                 fallback_blend_distance=(0.18, 0.12),
                 ray_count=9,
             ),
-            debug_mode=8,
+            debug_mode=53,
         )
         assert _mean_abs_diff(baseline, centered) > 3.0
         assert _mean_abs_diff(baseline, out_of_bounds) <= 1.0
 
     def test_reflection_probe_env_rotation_changes_bake(self, probe_render_env) -> None:
         renderer, material_set, _, heightmap, overlay, _ = probe_render_env
-        base_ibl = _build_test_ibl(rotation_deg=0.0)
-        rotated_ibl = _build_test_ibl(rotation_deg=90.0)
+        # Compare the baked local reflection color (debug 52). With the
+        # corrected split-sum BRDF (cb161cc4) a unit environment leaves
+        # dielectric specular near black; a 4x environment keeps the bake's
+        # rotation signal well above threshold without tonemap saturation.
+        base_ibl = _build_test_ibl(rotation_deg=0.0, intensity=4.0)
+        rotated_ibl = _build_test_ibl(rotation_deg=90.0, intensity=4.0)
         settings = ReflectionProbeSettings(enabled=True, grid_dims=(5, 5), resolution=16, ray_count=16)
         base = _render_probe_scene(
             renderer,
@@ -558,7 +566,7 @@ class TestTerrainProbeLighting:
             overlay,
             probes=ProbeSettings(enabled=False),
             reflection_probes=settings,
-            debug_mode=8,
+            debug_mode=52,
         )
         rotated = _render_probe_scene(
             renderer,
@@ -568,7 +576,7 @@ class TestTerrainProbeLighting:
             overlay,
             probes=ProbeSettings(enabled=False),
             reflection_probes=settings,
-            debug_mode=8,
+            debug_mode=52,
         )
         assert _mean_abs_diff(base, rotated) > 5.0
 
@@ -622,6 +630,12 @@ class TestTerrainProbeLighting:
         y0, y1 = np.quantile(ys, [0.2, 0.8])
         roi_mask = water_pixels & (grid_x >= x0) & (grid_x <= x1) & (grid_y >= y0) & (grid_y <= y1)
         assert int(np.count_nonzero(roi_mask)) > 1000, "Expected substantial interior water ROI from debug mode 4"
+
+        # With the corrected split-sum BRDF (cb161cc4), water's low-F0 specular
+        # probe delta under a unit environment sits near 8-bit quantization,
+        # which also skews the half/full ratio. A 4x environment keeps the
+        # contribution measurable and the ratio near the physical 0.5.
+        ibl = _build_test_ibl(intensity=4.0)
 
         baseline = _render_probe_scene(
             renderer,

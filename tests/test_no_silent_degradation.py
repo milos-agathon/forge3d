@@ -105,10 +105,14 @@ PORTABLE_CI_CARGO_FEATURES = {
     "enable-hdr-offscreen",
     "enable-renderer-config",
     "enable-staging-rings",
+    # DIFFERENTIA: the differentiable inverse solver is compiled into every
+    # portable CI check/test/doc lane.
+    "enable-inverse-pt",
     "shader-contract-asserts",
     "enable-globe",
 }
 DEDICATED_SYSTEM_FEATURES = {"proj"}
+DEDICATED_ACCEPTANCE_FEATURES = {"atmosphere-bake"}
 
 
 def _cargo_features() -> set[str]:
@@ -212,7 +216,15 @@ def test_c_every_feature_referenced_and_ci_list_curated():
     assert "PyO3/maturin-action" in wheel_yml, (
         "reusable CI wheel builder does not exercise maturin features"
     )
-    covered = _feature_closure(PORTABLE_CI_CARGO_FEATURES) | DEDICATED_SYSTEM_FEATURES | maturin
+    assert any(
+        set(raw.split(",")) == DEDICATED_ACCEPTANCE_FEATURES for raw in lists
+    ), "ci.yml lacks a dedicated atmosphere-bake acceptance check"
+    covered = (
+        _feature_closure(PORTABLE_CI_CARGO_FEATURES)
+        | DEDICATED_SYSTEM_FEATURES
+        | DEDICATED_ACCEPTANCE_FEATURES
+        | maturin
+    )
     assert covered == declared, f"declared features not compiled by any CI lane: {sorted(declared - covered)}"
 
     # Routine linting stays deliberately small. Explicit acceptance linting
@@ -228,7 +240,11 @@ def test_c_every_feature_referenced_and_ci_list_curated():
     }, (
         f"routine clippy expanded beyond the small contract: {sorted(routine)}"
     )
-    assert acceptance == PORTABLE_CI_CARGO_FEATURES | {"extension-module"}, (
+    assert acceptance == (
+        PORTABLE_CI_CARGO_FEATURES
+        | DEDICATED_ACCEPTANCE_FEATURES
+        | {"extension-module"}
+    ), (
         f"acceptance clippy feature drift: {sorted(acceptance)}"
     )
 
@@ -268,7 +284,26 @@ WHEEL_REQUIRED_FEATURES = {
     # MENSURA ships real topology ops (pure-Rust `geo` crate) as a wheel
     # feature; the public forge3d.gis topology surface requires it.
     "geos-topology",
+    # AETHER exposes an explicit offline bake API in the shipped wheel while
+    # normal rendering still consumes its shipped LUT bank.
+    "atmosphere-bake",
+    # DIFFERENTIA: `inverse_solve`/`inverse_render_primal` are public API.
+    "enable-inverse-pt",
 }
+
+
+def test_d_aether_bake_api_is_feature_gated_and_runtime_surface_is_shipped():
+    maturin = _maturin_features()
+    assert "atmosphere-bake" in maturin
+    init_source = (ROOT / "python" / "forge3d" / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"atmosphere_bake_luts"' in init_source
+    boundary = (ROOT / "src" / "py_functions" / "atmosphere.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "Custom AETHER LUT inputs require" in boundary
+    assert "no nearest shipped table or legacy" in boundary
 
 
 def _maturin_features() -> set[str]:
@@ -399,9 +434,11 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
 
     fast_lane = set(ci_pytest_lane.fast_lane_files())
     expected_fast = {
+        "tests/test_aether_acceptance_evidence.py",
         "tests/test_install_smoke.py",
         "tests/test_license.py",
         "tests/test_api_contracts.py",
+        "tests/test_solar_spa.py",
         "tests/test_capability_negotiation.py",
         "tests/test_budget_enforce.py",
         "tests/test_memory_budget_policy.py",

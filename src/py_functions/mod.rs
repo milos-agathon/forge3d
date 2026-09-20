@@ -1,11 +1,14 @@
 pub mod adjudication;
 pub mod astro;
+pub mod atmosphere;
 pub mod brdf;
 pub mod codec;
 pub mod csm;
 pub mod diagnostics;
 pub mod frame;
 pub mod geodesy;
+#[cfg(all(feature = "extension-module", feature = "enable-inverse-pt"))]
+pub mod inverse;
 pub mod labels;
 pub mod path_tracing;
 pub mod pointcloud;
@@ -17,12 +20,15 @@ pub mod viewer;
 
 pub(crate) use adjudication::*;
 pub(crate) use astro::*;
+pub(crate) use atmosphere::*;
 pub(crate) use brdf::*;
 pub(crate) use codec::*;
 pub(crate) use csm::*;
 pub(crate) use diagnostics::*;
 pub(crate) use frame::*;
 pub(crate) use geodesy::*;
+#[cfg(all(feature = "extension-module", feature = "enable-inverse-pt"))]
+pub(crate) use inverse::*;
 pub(crate) use labels::*;
 pub(crate) use path_tracing::*;
 pub(crate) use pointcloud::*;

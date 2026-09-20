@@ -116,7 +116,7 @@ fn limes_atan01(value: f32) -> f32 {
         return limes_atan_series(a);
     }
     let reduced = det_div(a - 1.0, a + 1.0);
-    return det_barrier(0.7853981633974483 + limes_atan_series(reduced));
+    return det_barrier(0.7853981633974483 + det_barrier(limes_atan_series(reduced)));
 }
 
 fn limes_atan2(y: f32, x: f32) -> f32 {
@@ -126,7 +126,7 @@ fn limes_atan2(y: f32, x: f32) -> f32 {
     if high == 0.0 {
         return 0.0;
     }
-    var angle = limes_atan01(det_div(min(ax, ay), high));
+    var angle = det_barrier(limes_atan01(det_div(min(ax, ay), high)));
     angle = select(angle, 1.5707963267948966 - angle, ay > ax);
     angle = select(angle, 3.141592653589793 - angle, x < 0.0);
     return select(angle, -angle, y < 0.0);
@@ -148,7 +148,7 @@ fn circle_segment_integral(a: f32, b: f32, radius: f32) -> f32 {
 
 fn primitive_integral(primitive: PrimitiveRecord, a: f32, b: f32) -> f32 {
     if primitive.metadata.x == PRIMITIVE_LINE {
-        return 0.5 * (primitive_x(primitive, a) + primitive_x(primitive, b)) * (b - a);
+        return det_barrier(0.5 * (det_barrier(primitive_x(primitive, a)) + det_barrier(primitive_x(primitive, b)))) * (b - a);
     }
     let segment = circle_segment_integral(a - primitive.geometry.y,
                                           b - primitive.geometry.y,
@@ -292,7 +292,7 @@ fn line_line_break(values: ptr<function, array<f32, 256>>,
     let t = det_div(det_fma(offset.x, s.y, -offset.y * s.x), denominator);
     let u = det_div(det_fma(offset.x, r.y, -offset.y * r.x), denominator);
     if t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 {
-        intersection_break(values, count, limes_fma2(r, vec2<f32>(t), left.geometry.xy),
+        intersection_break(values, count, det_barrier2(limes_fma2(r, vec2<f32>(t), left.geometry.xy)),
                            left, right, pixel);
     }
 }
@@ -307,7 +307,7 @@ fn line_arc_breaks(values: ptr<function, array<f32, 256>>,
     if qa <= EPSILON {
         return;
     }
-    let qb = 2.0 * det_dot2(offset, direction);
+    let qb = det_barrier(2.0 * det_dot2(offset, direction));
     let qc = det_fma(-arc.geometry.z, arc.geometry.z, det_dot2(offset, offset));
     let discriminant = det_fma(-4.0 * qa, qc, qb * qb);
     if discriminant < 0.0 {
@@ -319,11 +319,11 @@ fn line_arc_breaks(values: ptr<function, array<f32, 256>>,
     let t1 = det_div(-qb + root, denominator);
     if t0 >= -EPSILON && t0 <= 1.0 + EPSILON {
         intersection_break(values, count,
-            limes_fma2(direction, vec2<f32>(t0), line.geometry.xy), line, arc, pixel);
+            det_barrier2(limes_fma2(direction, vec2<f32>(t0), line.geometry.xy)), line, arc, pixel);
     }
     if t1 >= -EPSILON && t1 <= 1.0 + EPSILON && abs(t1 - t0) > EPSILON {
         intersection_break(values, count,
-            limes_fma2(direction, vec2<f32>(t1), line.geometry.xy), line, arc, pixel);
+            det_barrier2(limes_fma2(direction, vec2<f32>(t1), line.geometry.xy)), line, arc, pixel);
     }
 }
 
@@ -335,7 +335,7 @@ fn arc_arc_breaks(values: ptr<function, array<f32, 256>>,
     let distance = det_sqrt(max(det_dot2(delta, delta), 0.0));
     let r0 = left.geometry.z;
     let r1 = right.geometry.z;
-    if distance <= EPSILON || distance > r0 + r1 + EPSILON ||
+    if distance <= EPSILON || distance > det_barrier(r0 + r1) + EPSILON ||
        distance < abs(r0 - r1) - EPSILON {
         return;
     }
@@ -343,11 +343,11 @@ fn arc_arc_breaks(values: ptr<function, array<f32, 256>>,
                         2.0 * distance);
     let height = det_sqrt(max(det_fma(-along, along, r0 * r0), 0.0));
     let unit = delta * det_rcp(distance);
-    let base = limes_fma2(unit, vec2<f32>(along), left.geometry.xy);
-    let perpendicular = vec2<f32>(-unit.y, unit.x) * height;
-    intersection_break(values, count, base + perpendicular, left, right, pixel);
+    let base = det_barrier2(limes_fma2(unit, vec2<f32>(along), left.geometry.xy));
+    let perpendicular = det_barrier2(det_barrier2(vec2<f32>(-unit.y, unit.x)) * height);
+    intersection_break(values, count, det_barrier2(base + perpendicular), left, right, pixel);
     if height > EPSILON {
-        intersection_break(values, count, base - perpendicular, left, right, pixel);
+        intersection_break(values, count, det_barrier2(base - perpendicular), left, right, pixel);
     }
 }
 
@@ -409,13 +409,14 @@ fn clipped_integral(boundary: u32, a: f32, b: f32, mid: f32,
 
 fn interval_area(left: u32, right: u32, a: f32, b: f32, mid: f32,
                  x0: f32, x1: f32, tile_left: f32, tile_right: f32) -> f32 {
-    let left_integral = clipped_integral(left, a, b, mid, x0, x1, tile_left, tile_right);
-    let right_integral = clipped_integral(right, a, b, mid, x0, x1, tile_left, tile_right);
+    let left_integral = det_barrier(clipped_integral(left, a, b, mid, x0, x1, tile_left, tile_right));
+    let right_integral = det_barrier(clipped_integral(right, a, b, mid, x0, x1, tile_left, tile_right));
     return max(right_integral - left_integral, 0.0);
 }
 
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    det_seed(f32(gid.x));
     let width = params.extent_layers.x;
     let height = params.extent_layers.y;
     let layer_count = params.extent_layers.z;
@@ -437,9 +438,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var active_indices: array<u32, 96>;
     var active_count = 0u;
     let x0 = f32(pixel_x);
-    let x1 = x0 + 1.0;
+    let x1 = det_barrier(x0 + 1.0);
     let y0 = f32(pixel_y);
-    let y1 = y0 + 1.0;
+    let y1 = det_barrier(y0 + 1.0);
     var component_slot = 0u;
     loop {
         if component_slot >= dispatch.z {
@@ -470,7 +471,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     let rule = layer_rules[layer_index].x;
-    let pixel_bounds = vec4<f32>(x0, x1, y0, y1);
+    let pixel_bounds = det_barrier4(vec4<f32>(x0, x1, y0, y1));
 
     var breaks: array<f32, 256>;
     var break_count = 2u;
@@ -526,7 +527,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if i >= break_count {
             break;
         }
-        if abs(breaks[i] - breaks[unique_count - 1u]) > EPSILON {
+        if abs(det_barrier(breaks[i]) - det_barrier(breaks[unique_count - 1u])) > EPSILON {
             breaks[unique_count] = breaks[i];
             unique_count += 1u;
         }
@@ -539,9 +540,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if slab_index + 1u >= unique_count {
             break;
         }
-        let a = breaks[slab_index];
-        let b = breaks[slab_index + 1u];
-        let mid = 0.5 * (a + b);
+        let a = det_barrier(breaks[slab_index]);
+        let b = det_barrier(breaks[slab_index + 1u]);
+        let mid = det_barrier(0.5 * (a + b));
         if b - a > EPSILON {
             var crossing_indices: array<u32, 96>;
             var crossing_x: array<f32, 96>;
@@ -554,7 +555,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let primitive_index = active_indices[i];
                 let primitive = primitives[primitive_index];
                 if active_at(primitive, mid) {
-                    let x = primitive_x(primitive, mid);
+                    let x = det_barrier(primitive_x(primitive, mid));
                     if x >= x0 - EPSILON && x <= x1 + EPSILON {
                         // Insertion-sort the crossing immediately. Stable ID is
                         // the tie break, independent of atomic bin order.
@@ -585,7 +586,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             let baseline_index = pixel_offset;
             var state = tile_baselines.values[baseline_index];
-            let row_center = y0 + 0.5;
+            let row_center = det_barrier(y0 + 0.5);
             // The uploaded baseline is at row center. Adjust it exactly to this
             // slab midpoint using the complete closed components intersecting
             // this pixel. Components outside the pixel have zero net state.
@@ -629,14 +630,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if !was_inside && inside {
                     left_boundary = representative;
                 } else if was_inside && !inside {
-                    result += interval_area(left_boundary, representative, a, b, mid,
-                                            x0, x1, x0, x1);
+                    result = det_barrier(result + interval_area(left_boundary, representative, a, b, mid,
+                                            x0, x1, x0, x1));
                 }
                 cursor = group_end;
             }
             if inside {
-                result += interval_area(left_boundary, RIGHT_BOUNDARY, a, b, mid,
-                                        x0, x1, x0, x1);
+                result = det_barrier(result + interval_area(left_boundary, RIGHT_BOUNDARY, a, b, mid,
+                                        x0, x1, x0, x1));
             }
         }
         slab_index += 1u;
@@ -652,6 +653,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 // generic 96-edge/256-break workspace.
 @compute @workgroup_size(64, 1, 1)
 fn main_simple_capsule(@builtin(global_invocation_id) gid: vec3<u32>) {
+    det_seed(f32(gid.x));
     if gid.x >= params.dispatch.x {
         return;
     }
@@ -673,9 +675,9 @@ fn main_simple_capsule(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pixel_y = layer_pixel / width;
     let pixel_x = layer_pixel - pixel_y * width;
     let x0 = f32(pixel_x);
-    let x1 = x0 + 1.0;
+    let x1 = det_barrier(x0 + 1.0);
     let y0 = f32(pixel_y);
-    let y1 = y0 + 1.0;
+    let y1 = det_barrier(y0 + 1.0);
     let first_primitive = component.x;
 
     var breaks: array<f32, 40>;
@@ -725,7 +727,7 @@ fn main_simple_capsule(@builtin(global_invocation_id) gid: vec3<u32>) {
         if i >= break_count {
             break;
         }
-        if abs(breaks[i] - breaks[unique_count - 1u]) > EPSILON {
+        if abs(det_barrier(breaks[i]) - det_barrier(breaks[unique_count - 1u])) > EPSILON {
             breaks[unique_count] = breaks[i];
             unique_count += 1u;
         }
@@ -733,16 +735,16 @@ fn main_simple_capsule(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     let rule = layer_rules[layer_index].x;
-    let row_center = y0 + 0.5;
+    let row_center = det_barrier(y0 + 0.5);
     var result = 0.0;
     var slab_index = 0u;
     loop {
         if slab_index + 1u >= unique_count {
             break;
         }
-        let a = breaks[slab_index];
-        let b = breaks[slab_index + 1u];
-        let mid = 0.5 * (a + b);
+        let a = det_barrier(breaks[slab_index]);
+        let b = det_barrier(breaks[slab_index + 1u]);
+        let mid = det_barrier(0.5 * (a + b));
         if b - a > EPSILON {
             var crossing_indices: array<u32, 6>;
             var crossing_x: array<f32, 6>;
@@ -755,7 +757,7 @@ fn main_simple_capsule(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let primitive_index = first_primitive + i;
                 let primitive = primitives[primitive_index];
                 if active_at(primitive, mid) {
-                    let x = primitive_x(primitive, mid);
+                    let x = det_barrier(primitive_x(primitive, mid));
                     if x >= x0 - EPSILON && x <= x1 + EPSILON {
                         var position = crossing_count;
                         loop {
@@ -823,14 +825,14 @@ fn main_simple_capsule(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if !was_inside && inside {
                     left_boundary = representative;
                 } else if was_inside && !inside {
-                    result += interval_area(left_boundary, representative, a, b, mid,
-                                            x0, x1, x0, x1);
+                    result = det_barrier(result + interval_area(left_boundary, representative, a, b, mid,
+                                            x0, x1, x0, x1));
                 }
                 cursor = group_end;
             }
             if inside {
-                result += interval_area(left_boundary, RIGHT_BOUNDARY, a, b, mid,
-                                        x0, x1, x0, x1);
+                result = det_barrier(result + interval_area(left_boundary, RIGHT_BOUNDARY, a, b, mid,
+                                        x0, x1, x0, x1));
             }
         }
         slab_index += 1u;

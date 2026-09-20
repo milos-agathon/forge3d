@@ -7,6 +7,10 @@ pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResu
 
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
     m.add_function(wrap_pyfunction!(hybrid_render_terrain_reference, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        hybrid_render_aether_spectral_reference,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(render_adjudication_pair, m)?)?;
     m.add_function(wrap_pyfunction!(render_brdf_tile, m)?)?;
     m.add_function(wrap_pyfunction!(render_brdf_tile_overrides, m)?)?;
@@ -18,6 +22,11 @@ pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResu
         crate::lighting::py_bindings::sun_position_utc,
         m
     )?)?;
+    #[cfg(feature = "enable-inverse-pt")]
+    {
+        m.add_function(wrap_pyfunction!(inverse_solve, m)?)?;
+        m.add_function(wrap_pyfunction!(inverse_render_primal, m)?)?;
+    }
     m.add_function(wrap_pyfunction!(read_laz_points_info_py, m)?)?;
     m.add_function(wrap_pyfunction!(read_laz_point_attributes_py, m)?)?;
     m.add_function(wrap_pyfunction!(copc_read_node_points_py, m)?)?;

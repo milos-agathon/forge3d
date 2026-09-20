@@ -46,7 +46,7 @@ impl TerrainRenderParams {
             lens_effects: parse_lens_effects_settings(&params),
             denoise: parse_denoise_settings(&params),
             volumetrics: parse_volumetrics_settings(&params),
-            sky: parse_sky_settings(&params),
+            sky: parse_sky_settings(&params)?,
             probes: parse_probe_settings(&params),
             reflection_probes: parse_reflection_probe_settings(&params),
             vt: parse_vt_settings(&params),

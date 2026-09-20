@@ -10,6 +10,8 @@ pub mod aov;
 pub mod compute;
 pub mod compute_types;
 pub mod hybrid_compute;
+#[cfg(feature = "enable-inverse-pt")]
+pub mod inverse;
 pub mod io;
 pub mod lighting;
 pub mod mesh;

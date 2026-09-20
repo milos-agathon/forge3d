@@ -51,7 +51,11 @@ def test_terrain_public_docs_drop_stale_sky_and_shadow_claims() -> None:
     shadow_doc = ShadowSettings.validate_for_terrain.__doc__ or ""
 
     assert "Rayleigh" not in sky_doc
-    assert "Mie" not in sky_doc
+    # Mie is only truthful for the AETHER spectral LUT path, which really
+    # exposes Mie anisotropy; the procedural Hosek-Wilkie model must not claim it.
+    mie_lines = [line for line in sky_doc.splitlines() if "Mie" in line]
+    assert all("AETHER" in line for line in mie_lines), mie_lines
+    assert "mie_g" in SkySettings.__dataclass_fields__
     assert "Hosek-Wilkie RGB coefficient-table" in sky_doc
     assert "NOT implemented" not in shadow_doc
     assert "moment_maps binding exists" not in shadow_doc
@@ -76,10 +80,10 @@ def test_terrain_sky_storage_format_matches_rust_texture_contract() -> None:
     output = rust.split('label: Some("terrain.sky.output")', 1)[1].split(
         "let sky_view", 1
     )[0]
-    assert "format: wgpu::TextureFormat::Rgba8Unorm" in layout
-    assert "format: wgpu::TextureFormat::Rgba8Unorm" in output
-    assert "texture_storage_2d<rgba8unorm, write>" in shader
-    assert "texture_storage_2d<rgba16float, write>" not in shader
+    assert "format: wgpu::TextureFormat::Rgba16Float" in layout
+    assert "format: wgpu::TextureFormat::Rgba16Float" in output
+    assert "texture_storage_2d<rgba16float, write>" in shader
+    assert "texture_storage_2d<rgba8unorm, write>" not in shader
     assert "try_create_compute_pipeline_scoped" in rust
     assert "create_compute_pipeline_scoped(" not in rust.replace(
         "try_create_compute_pipeline_scoped(", ""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import textwrap
 from pathlib import Path
 
 import yaml
@@ -16,6 +17,22 @@ UPLOAD_STEP = re.compile(
 )
 
 
+class _UniqueKeyLoader(yaml.BaseLoader):
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        mapping = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key ({key})",
+                    key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
+
 def _workflow(name: str) -> str:
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
@@ -25,6 +42,25 @@ def _workflow_data(name: str) -> dict:
     assert isinstance(data, dict), f"{name} is not a workflow mapping"
     assert isinstance(data.get("jobs"), dict), f"{name} has no jobs mapping"
     return data
+
+
+def test_paths_filter_literals_are_valid_yaml_without_duplicate_keys() -> None:
+    workflow = _workflow("ci.yml")
+    steps = re.findall(
+        r"(?ms)^      - .*?uses: dorny/paths-filter@v3.*?(?=^      - |^  \S|\Z)",
+        workflow,
+    )
+    assert steps, "ci.yml has no dorny/paths-filter steps"
+    for step in steps:
+        match = re.search(
+            r"(?ms)^          filters: \|\n(?P<body>(?:^ {12}.*(?:\n|\Z))*)",
+            step,
+        )
+        assert match, "dorny/paths-filter step has no literal filters mapping"
+        filters = yaml.load(
+            textwrap.dedent(match.group("body")), Loader=_UniqueKeyLoader
+        )
+        assert isinstance(filters, dict) and filters
 
 
 def _job(workflow: str, name: str) -> str:
@@ -68,7 +104,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
     assert "types: [opened, synchronize, reopened, ready_for_review]" in trigger
     assert "labeled" not in trigger
     assert "unlabeled" not in trigger
-    scopes = ["core", "full", "determinism", "m06", "f3dz", "anamnesis"]
+    scopes = ["core", "full", "determinism", "m06", "f3dz", "anamnesis", "helios"]
     if tessella_enabled:
         scopes.append("tessella")
     for scope in scopes:
@@ -183,6 +219,16 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         physical_artifacts.append(
             ("test-tessella-gpu", "tessella-physical-gpu-evidence")
         )
+    if "test-helios-gpu" in jobs:
+        physical_artifacts.extend(
+            [
+                (
+                    "test-helios-rust-conservative",
+                    "helios-rust-conservative-${{ github.run_id }}-${{ github.run_attempt }}",
+                ),
+                ("test-helios-gpu", "helios-physical-gpu-evidence"),
+            ]
+        )
     for job, artifact in physical_artifacts:
         assert "retention-days: 90" in _artifact_step(_job(workflow, job), artifact)
 
@@ -262,6 +308,58 @@ def test_only_the_small_core_jobs_can_run_on_pr_or_push_events() -> None:
             "github.event_name == 'schedule'" in condition
             or "github.event_name == 'workflow_dispatch'" in condition
         ), f"{name} is not routed through schedule or explicit dispatch"
+
+
+def test_aether_closure_lane_is_explicit_and_optional_on_metal() -> None:
+    workflow = _workflow("ci.yml")
+    golden = _job(workflow, "test-golden-images")
+    probe = (ROOT / "scripts" / "terrain_ci_probe.py").read_text(encoding="utf-8")
+
+    # VirtualGpu and software adapters may be useful development paths, but they
+    # are not physical-Metal closure evidence.
+    assert 'PHYSICAL_DEVICE_TYPES = {"discretegpu", "integratedgpu"}' in probe
+    assert 'args.mode in {"sidera-metal", "aether-metal"}' in probe
+    aether_branch = probe.split('if args.mode == "aether-metal":', 1)[1].split(
+        "# Exit-code contract", 1
+    )[0]
+    assert "_adapter_is_physical_metal(probe)" in aether_branch
+    assert "_smoke_render(args.mode)" in aether_branch
+    assert 'write_evidence("failed")' in aether_branch
+    assert "return 3" in aether_branch
+
+    assert "python scripts/terrain_ci_probe.py --mode aether-metal" in golden
+    assert "tests/test_atmosphere_spectral.py" in golden
+    assert "tests/test_atmosphere_reference.py" in golden
+    assert "tests/test_atmosphere_pt_reference.py" in golden
+    assert "tests/test_atmosphere_golden.py" in golden
+    assert 'python scripts/assert_junit_zero_skips.py "$junit"' in golden
+    assert "FORGE3D_AETHER_PHYSICAL_METAL: '1'" in golden
+    assert "FORGE3D_TEST_INSTALLED_WHEEL: '1'" in golden
+    assert "aether_lane=absent" in golden
+    assert "software execution does not prove physical Metal" in golden
+    # Candidate acceptance must never receive production certificate material.
+    assert "FORGE3D_CERT_SIGNING_KEY" not in golden
+    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" not in golden
+
+    summary = _job(workflow, "full-acceptance-summary")
+    # The protected NVIDIA lane is the required full-acceptance proof. Metal is
+    # an explicitly opt-in diagnostic and therefore must not gate the summary.
+    assert "needs.test-golden-images.outputs.aether_lane" not in summary
+    assert "test-golden-images," not in summary.split("\n    runs-on:", 1)[0]
+
+
+def test_aether_offline_bake_feature_is_explicit_in_acceptance_and_wheel() -> None:
+    workflow = _workflow("ci.yml")
+    rust_job = _job(workflow, "test-rust")
+    golden_job = _job(workflow, "test-golden-images")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    maturin = pyproject.split("[tool.maturin]", 1)[1].split("\n[", 1)[0]
+
+    assert "--features atmosphere-bake core::atmosphere" in rust_job
+    assert "atmosphere-bake" in maturin
+    assert "atmosphere_bake_luts(" in golden_job
+    assert "assert h.precomputed is False" in golden_job
+    assert "tests/test_atmosphere_lut_handoff.py" in golden_job
 
 
 def test_publish_cost_controls_are_tag_only_and_retention_aware() -> None:

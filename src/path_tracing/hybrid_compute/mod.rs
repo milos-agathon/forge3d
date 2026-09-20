@@ -16,14 +16,18 @@ use crate::path_tracing::aov::{AovFrames, AovKind};
 use crate::path_tracing::compute::{Sphere, Uniforms};
 use crate::sdf::HybridScene;
 
+mod aether_post;
+mod aether_reference;
 mod layouts;
 mod render;
 mod render_terrain;
+mod sdf_scene;
 mod setup;
 pub mod terrain_heightfield;
 
-pub use render_terrain::{TerrainReferenceDesc, TerrainReferenceOutput};
-pub use terrain_heightfield::TerrainPtScene;
+pub use aether_reference::{AetherSpectralReferenceDesc, AetherSpectralReferenceOutput};
+pub use render_terrain::{CameraModel, TerrainReferenceDesc, TerrainReferenceOutput};
+pub use terrain_heightfield::{AlbedoSampling, TerrainPtScene};
 
 /// Additional uniforms for hybrid traversal
 #[repr(C)]
@@ -105,7 +109,14 @@ impl Default for HybridTracerParams {
                 cam_forward: [0.0, 0.0, -1.0],
                 seed_hi: 12345,
                 seed_lo: 67890,
-                _pad_end: [0, 0, 0],
+                camera_model: 0,
+                full_width: 512,
+                full_height: 512,
+                pixel_offset_x: 0,
+                pixel_offset_y: 0,
+                ortho_half_height: 1.0,
+                camera_flags: 0,
+                sensor_rect: [0.0, 0.0, 1.0, 1.0],
             },
             lighting_uniforms: LightingUniforms {
                 light_dir,
@@ -132,6 +143,9 @@ pub struct HybridPathTracer {
     pipeline: wgpu::ComputePipeline,
     /// Accumulating terrain-reference entry (`main_terrain`).
     pipeline_terrain: wgpu::ComputePipeline,
+    /// Acceptance-only stochastic spectral atmosphere reference.
+    pipeline_aether_reference: wgpu::ComputePipeline,
+    pipeline_terrain_publish: wgpu::ComputePipeline,
     /// One-shot ReSTIR G-buffer entry (`main_terrain_gbuffer`).
     pipeline_terrain_gbuffer: wgpu::ComputePipeline,
     /// Canonical ReSTIR reuse passes (pt_restir_temporal/spatial.wgsl)

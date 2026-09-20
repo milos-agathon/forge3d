@@ -26,9 +26,11 @@ from _toml_compat import load_toml  # noqa: E402
 
 
 FAST_LANE_FILES = [
+    "tests/test_aether_acceptance_evidence.py",
     "tests/test_install_smoke.py",
     "tests/test_license.py",
     "tests/test_api_contracts.py",
+    "tests/test_solar_spa.py",
     "tests/test_capability_negotiation.py",
     "tests/test_budget_enforce.py",
     "tests/test_memory_budget_policy.py",

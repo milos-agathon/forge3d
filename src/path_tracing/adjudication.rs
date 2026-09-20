@@ -5,10 +5,9 @@
 // continuation rays up to the scheduler depth cap, Russian roulette from
 // depth 4) — every frame must execute at least two wavefront iterations
 // (primary wave + a bounce wave) or rendering fails.
-// ReSTIR is fully disabled for determinism (no temporal history leaks into the
-// single-frame reference); the scene-spatial bind group is still initialized
-// and asserted Some so the ReSTIR spatial stage would be fully scene-bound if
-// enabled (dispatch_restir_spatial cannot early-return for a missing scene).
+// ReSTIR spatial reuse runs on current-frame primary geometry with real sun
+// samples. Temporal reuse stays disabled, and each frame must dispatch the
+// scene-bound spatial pass before shading from its resolved reservoir.
 // RELEVANT FILES: src/path_tracing/wavefront/render.rs, src/path_tracing/reference_scene.rs
 
 use crate::core::error::RenderError;
@@ -40,7 +39,18 @@ struct WavefrontUniforms {
     cam_forward: [f32; 3],
     seed_hi: u32,
     seed_lo: u32,
-    _pad_end: [u32; 3],
+    // The ReSTIR temporal/spatial shaders share the hybrid kernel's camera
+    // block (128-byte struct); the other wavefront shaders read only the
+    // first 96 bytes. Single-pass pinhole values keep the legacy paths:
+    // full sensor == render, no offset, camera_flags 0.
+    camera_model: u32,
+    full_width: u32,
+    full_height: u32,
+    pixel_offset_x: u32,
+    pixel_offset_y: u32,
+    ortho_half_height: f32,
+    camera_flags: u32,
+    sensor_rect: [f32; 4],
 }
 
 fn storage_buffer(
@@ -90,9 +100,10 @@ pub fn render_pt_reference(
 
     let mut scheduler = WavefrontScheduler::new(device.clone(), queue.clone(), width, height)
         .map_err(|e| RenderError::Render(format!("wavefront scheduler init: {e}")))?;
-    // Deterministic reference: no ReSTIR temporal/spatial resampling.
-    scheduler.set_restir_enabled(false);
-    scheduler.set_restir_spatial_enabled(false);
+    // Spatial reuse uses current-frame geometry, without temporal history.
+    scheduler.set_restir_enabled(true);
+    scheduler.set_restir_spatial_enabled(true);
+    scheduler.set_restir_temporal_enabled(false);
     scheduler.set_environment_params(&desc.environment_raw());
 
     // --- Scene buffers from the single ReferenceSceneDesc ---
@@ -114,6 +125,10 @@ pub fn render_pt_reference(
         "adjudication-dir-lights",
         bytemuck::cast_slice(&dir_lights),
     )?;
+    let (light_samples, alias_entries, light_probs) =
+        crate::path_tracing::restir::build_light_samples_and_alias(device, &[], &dir_lights)?;
+    scheduler.set_restir_light_data(light_samples, alias_entries);
+    scheduler.set_restir_light_probs(light_probs);
     let importance = desc.object_importance();
     let importance_buffer = storage_buffer(
         device,
@@ -204,7 +219,14 @@ pub fn render_pt_reference(
         cam_forward: forward.into(),
         seed_hi: desc.seed_hi,
         seed_lo: desc.seed_lo,
-        _pad_end: [0; 3],
+        camera_model: 0,
+        full_width: width,
+        full_height: height,
+        pixel_offset_x: 0,
+        pixel_offset_y: 0,
+        ortho_half_height: 1.0,
+        camera_flags: 0,
+        sensor_rect: [0.0, 0.0, 1.0, 1.0],
     };
     let uniforms_buffer = tracked_create_buffer_init(
         device,
@@ -265,6 +287,12 @@ pub fn render_pt_reference(
         if frame % 64 == 63 {
             device.poll(wgpu::Maintain::Wait);
         }
+    }
+
+    if scheduler.restir_spatial_dispatches() != spp_frames {
+        return Err(RenderError::Render(
+            "adjudication requires one spatial dispatch per frame".into(),
+        ));
     }
 
     // --- Readback through a tracked host-visible staging buffer ---
@@ -332,6 +360,250 @@ mod tests {
     }
 
     #[test]
+    fn adjudication_requires_spatial_reuse_without_temporal_history() {
+        let driver = include_str!("adjudication.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(driver.contains("scheduler.set_restir_enabled(true)"));
+        assert!(driver.contains("scheduler.set_restir_spatial_enabled(true)"));
+        assert!(driver.contains("scheduler.set_restir_temporal_enabled(false)"));
+    }
+
+    fn assert_shadow_accumulation(device: &wgpu::Device, queue: &wgpu::Queue) {
+        use crate::core::resource_tracker::tracked_create_buffer;
+        let source = include_str!("../shaders/pt_shadow.wgsl").to_owned()
+            + r#"
+@compute @workgroup_size(256)
+fn stress_accumulation() {
+    accumulate_shadow(0u, vec3<f32>(1.0, 2.0, 3.0));
+}
+"#;
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shadow-accumulation-stress"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("shadow-accumulation-stress"),
+                layout: None,
+                module: &shader,
+                entry_point: "stress_accumulation",
+            },
+        );
+        let result = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("shadow-stress-result"),
+                size: 16,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )
+        .unwrap();
+        let readback = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("shadow-stress-readback"),
+                size: 16,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .unwrap();
+        let groups: Vec<_> = (0..4)
+            .map(|group| {
+                let entries = [wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: result.as_entire_binding(),
+                }];
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.get_bind_group_layout(group),
+                    entries: if group == 3 { &entries } else { &[] },
+                })
+            })
+            .collect();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipeline);
+            for (index, group) in groups.iter().enumerate() {
+                pass.set_bind_group(index as u32, group, &[]);
+            }
+            pass.dispatch_workgroups(2, 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&result, 0, &readback, 0, 16);
+        queue.submit(Some(encoder.finish()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| tx.send(result).unwrap());
+        device.poll(wgpu::Maintain::Wait);
+        rx.recv().unwrap().unwrap();
+        let data = readback.slice(..).get_mapped_range();
+        assert_eq!(
+            bytemuck::cast_slice::<u8, f32>(&data),
+            &[512.0, 1024.0, 1536.0, 0.0]
+        );
+        drop(data);
+        readback.unmap();
+    }
+
+    fn assert_transport_response(device: &wgpu::Device, queue: &wgpu::Queue) {
+        let shade = include_str!("../shaders/pt_shade.wgsl").to_owned()
+            + r#"
+@compute @workgroup_size(1)
+fn transport_probe() {
+    let n = vec3<f32>(0.0, 1.0, 0.0);
+    let brdf = bsdf_eval_pdf(n, n, n, vec3<f32>(0.0), 0.0, 1.0, 1.0, 1.0);
+    accum_hdr[0] = vec4<f32>(sampled_brdf_weight(brdf, 1.0), 1.0);
+}
+"#;
+        let scatter = include_str!("../shaders/pt_scatter.wgsl").to_owned()
+            + r#"
+@compute @workgroup_size(1)
+fn transport_probe() {
+    accum_hdr[0] = vec4<f32>(environment_escape_weight(0u, 1.0),
+        environment_escape_weight(1u, 0.5), environment_escape_weight(1u, 0.0), 1.0);
+}
+"#;
+        for (source, expected) in [
+            (shade, [0.01, 0.01, 0.01, 1.0]),
+            (scatter, [1.0, 0.0, 1.0, 1.0]),
+        ] {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("adjudication-transport-probe"),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            });
+            let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("adjudication-transport-probe"),
+                    layout: None,
+                    module: &shader,
+                    entry_point: "transport_probe",
+                },
+            );
+            let output = super::tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("transport-probe-output"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            )
+            .unwrap();
+            let readback = super::tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("transport-probe-readback"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            )
+            .unwrap();
+            let groups: Vec<_> = (0..4)
+                .map(|index| {
+                    let entries = [wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: output.as_entire_binding(),
+                    }];
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &pipeline.get_bind_group_layout(index),
+                        entries: if index == 3 { &entries } else { &[] },
+                    })
+                })
+                .collect();
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&pipeline);
+                for (index, group) in groups.iter().enumerate() {
+                    pass.set_bind_group(index as u32, group, &[]);
+                }
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+            encoder.copy_buffer_to_buffer(&output, 0, &readback, 0, 16);
+            queue.submit(Some(encoder.finish()));
+            let (tx, rx) = std::sync::mpsc::channel();
+            readback
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| tx.send(result).unwrap());
+            device.poll(wgpu::Maintain::Wait);
+            rx.recv().unwrap().unwrap();
+            let data = readback.slice(..).get_mapped_range();
+            for (got, expected) in bytemuck::cast_slice::<u8, f32>(&data).iter().zip(expected) {
+                assert!(
+                    (got - expected).abs() <= f32::EPSILON,
+                    "{got} != {expected}"
+                );
+            }
+            drop(data);
+            readback.unmap();
+        }
+    }
+
+    fn assert_constant_environment_plane(
+        device: &std::sync::Arc<wgpu::Device>,
+        queue: &std::sync::Arc<wgpu::Queue>,
+    ) {
+        let mut desc = crate::path_tracing::reference_scene::adjudication_scene();
+        desc.cam_origin = [0.0, 1.0, 0.0];
+        desc.cam_look_at = [0.0, 0.0, 0.0];
+        desc.cam_up = [0.0, 0.0, -1.0];
+        desc.fov_y_deg = 0.0;
+        desc.sun_intensity = 0.0;
+        desc.ambient_color = [1.0; 3];
+        desc.sky_color = [0.0; 3];
+        for sphere in desc.spheres.iter_mut().take(3) {
+            sphere.radius = 0.0;
+        }
+        desc.spheres[3].albedo = [0.25, 0.5, 0.75];
+        desc.spheres[3].roughness = 1.0;
+        let a = 1.0f64 / 2.0f64.sqrt();
+        let mut diffuse_fresnel_integral = 0.0;
+        let mut specular_fresnel_integral = 0.0;
+        for (power, coefficient) in [1.0, -5.0, 10.0, -10.0, 5.0, -1.0].into_iter().enumerate() {
+            let k = power as i32;
+            diffuse_fresnel_integral += coefficient
+                * (8.0 * (1.0 - a.powi(k + 4)) / f64::from(k + 4)
+                    - 4.0 * (1.0 - a.powi(k + 2)) / f64::from(k + 2));
+            let inverse_term = if k == 0 {
+                -2.0 * a.ln()
+            } else {
+                2.0 * (1.0 - a.powi(k)) / f64::from(k)
+            };
+            specular_fresnel_integral +=
+                coefficient * (4.0 * (1.0 - a.powi(k + 2)) / f64::from(k + 2) - inverse_term);
+        }
+        let diffuse = 0.96 - 1.92 * diffuse_fresnel_integral;
+        let specular = 0.04 * (1.0 - 2.0f64.ln()) + 0.96 * specular_fresnel_integral;
+        let mut expected_hdr = [0.0f32; 4];
+        for (channel, albedo) in desc.spheres[3].albedo.iter().enumerate() {
+            expected_hdr[channel] = (f64::from(*albedo) * diffuse + specular) as f32;
+        }
+        expected_hdr[3] = 1.0;
+        let hdr = super::render_pt_reference(device, queue, &desc, 32, 32, 4096, None).unwrap();
+        let actual = crate::core::tonemap::resolve_reference_hdr_to_rgba8(&hdr, 1.0);
+        let expected = crate::core::tonemap::resolve_reference_hdr_to_rgba8(&expected_hdr, 1.0);
+        let mean_absolute_error = actual
+            .chunks_exact(4)
+            .map(|pixel| {
+                (0..3)
+                    .map(|channel| (f64::from(pixel[channel]) - f64::from(expected[channel])).abs())
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
+            / (32.0 * 32.0 * 3.0);
+        assert!(mean_absolute_error <= 2.0, "constant-environment plane disagrees with analytic Lambert/GGX integral: {mean_absolute_error}");
+    }
+
+    #[test]
     fn pt_reference_renders_multibounce_frames() {
         // Fails if the adjudication PT path is ever rewired as a
         // one-iteration/direct-lighting shortcut: render_pt_reference errors
@@ -360,5 +632,8 @@ mod tests {
             .expect("multi-bounce PT reference render");
         assert_eq!(hdr.len(), 32 * 32 * 4);
         assert!(hdr.iter().any(|&v| v > 0.0), "PT reference is all black");
+        assert_shadow_accumulation(&device, &queue);
+        assert_transport_response(&device, &queue);
+        assert_constant_environment_plane(&device, &queue);
     }
 }

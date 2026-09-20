@@ -1,16 +1,46 @@
-# PROBATUM proof-coverage ledger. Expired entries fail tests/test_shader_proofs.py.
+[[unproven]]
+path = "src/shaders/det_probe.wgsl"
+reason = "det_probe.wgsl: certification harness whose arithmetic-canary outputs are compared to committed probe goldens at deterministic context start; its fixed output-contract coverage is not yet modeled"
+owner = "determinism"
+expiry = "2027-08-06"
 
 [[unproven]]
-path = "src/shaders/adjudication_raster.wgsl"
-reason = "adjudication_raster.wgsl: nonlinear native-math result envelopes are not yet modeled"
-owner = "render-quality"
-expiry = "2027-01-17"
+path = "src/shaders/det_raster.wgsl"
+reason = "det_raster.wgsl: raster canary whose output hash is compared to committed goldens at deterministic context start; its rasterizer-precision contract coverage is not yet modeled"
+owner = "determinism"
+expiry = "2027-08-06"
+
+# PROBATUM proof-coverage ledger. Expired entries fail tests/test_shader_proofs.py.
 
 [[unproven]]
 path = "src/shaders/ao_from_aovs.wgsl"
 reason = "ao_from_aovs.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/atmosphere/evaluation_core.wgsl"
+reason = "atmosphere/evaluation_core.wgsl: the shared quadrilinear 3D texture dimension and packed height-by-nu coordinate relations are not yet modeled standalone; its loop-free 16-sample segment integral is proven transitively through the terrain AETHER lemmas, and all three assembled consumers are Naga-validated"
+owner = "atmosphere"
+expiry = "2027-08-06"
+
+[[unproven]]
+path = "src/shaders/atmosphere/prometheus_aerial.wgsl"
+reason = "atmosphere/prometheus_aerial.wgsl: fixed spectral-array loops together with 3D LUT coordinate and dimension relations are not yet modeled; dedicated physical Metal closure and AOV-preservation acceptance tests exercise the shipped path"
+owner = "atmosphere"
+expiry = "2027-08-06"
+
+[[unproven]]
+path = "src/shaders/atmosphere/prometheus_spectral_reference.wgsl"
+reason = "atmosphere/prometheus_spectral_reference.wgsl: stochastic delta tracking, RNG, spectral-loop, pointer, and hybrid traversal relations are not yet modeled; deterministic estimator contracts plus seed, variance, terrain-hit, and physical Metal colorimetric tests exercise the shipped path"
+owner = "atmosphere"
+expiry = "2027-08-06"
+
+[[unproven]]
+path = "src/shaders/atmosphere/scattering.wgsl"
+reason = "atmosphere/scattering.wgsl: 3D LUT sampling plus Cornette-Shanks and nonlinear horizon-coordinate envelopes are not yet modeled; Rust bake convergence and physical colorimetric acceptance tests provide executable coverage"
+owner = "atmosphere"
+expiry = "2027-08-06"
 
 [[unproven]]
 path = "src/shaders/bloom_blur_h.wgsl"
@@ -421,9 +451,27 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
+path = "src/shaders/pt_edge_sample.wgsl"
+reason = "pt_edge_sample.wgsl: DIFFERENTIA silhouette edge-sampling adjoint over sampled AOV neighbourhoods; host-computed storage offsets and atomic CAS gradient accumulation are not yet modeled; FD gradient tests in path_tracing::inverse exercise the shipped path"
+owner = "path-tracing"
+expiry = "2027-01-17"
+
+[[unproven]]
 path = "src/shaders/pt_intersect.wgsl"
 reason = "pt_intersect.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/pt_inverse_loss.wgsl"
+reason = "pt_inverse_loss.wgsl: DIFFERENTIA loss adjoint over the replicate-mean image; tiled K*px storage offsets and atomic<u32> bitcast CAS accumulation are not yet modeled; FD gradient and checkpointed-replay tests exercise the shipped path"
+owner = "path-tracing"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/pt_inverse_shade.wgsl"
+reason = "pt_inverse_shade.wgsl: DIFFERENTIA reverse-mode spectral ReSTIR shading; per-slot reservoir-history indexing and atomic CAS gradient accumulation are not yet modeled; FD gradient, primal-parity, and synthetic-recovery tests exercise the shipped path"
+owner = "path-tracing"
 expiry = "2027-01-17"
 
 [[unproven]]
@@ -619,6 +667,12 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
+path = "src/shaders/terrain_aether_blit.wgsl"
+reason = "terrain_aether_blit.wgsl: the display-only pass has no PROVEN_TARGETS contract yet and its sampled-texture coordinate relation is not yet modeled; source contracts and physical render acceptance tests lock linear-HDR ordering"
+owner = "atmosphere"
+expiry = "2027-08-06"
+
+[[unproven]]
 path = "src/shaders/terrain_blit.wgsl"
 reason = "terrain_blit.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
@@ -651,6 +705,12 @@ expiry = "2027-01-17"
 [[unproven]]
 path = "src/shaders/terrain_shadow_depth.wgsl"
 reason = "terrain_shadow_depth.wgsl: texture/resource dimension and sampling relations are not yet modeled"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/terrain_viewshed.wgsl"
+reason = "terrain_viewshed.wgsl: storage-buffer dimensions and line-of-sight loop relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 

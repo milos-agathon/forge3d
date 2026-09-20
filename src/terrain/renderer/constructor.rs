@@ -31,8 +31,14 @@ impl TerrainScene {
         let sky_bind_group_layout0 = atmosphere_resources.sky_bind_group_layout0;
         let sky_bind_group_layout1 = atmosphere_resources.sky_bind_group_layout1;
         let sky_pipeline = atmosphere_resources.sky_pipeline;
+        let aether_sky_bind_group_layout2 = atmosphere_resources.aether_sky_bind_group_layout2;
+        let aether_sky_pipeline = atmosphere_resources.aether_sky_pipeline;
+        let atmosphere_lut_cache = atmosphere_resources.atmosphere_lut_cache;
         let sky_fallback_texture = atmosphere_resources.sky_fallback_texture;
         let sky_fallback_view = atmosphere_resources.sky_fallback_view;
+        let atmosphere_scattering_fallback_texture =
+            atmosphere_resources.scattering_fallback_texture;
+        let atmosphere_scattering_fallback_view = atmosphere_resources.scattering_fallback_view;
         let height_curve_identity_texture = base_resources.height_curve_identity_texture;
         let height_curve_identity_view = base_resources.height_curve_identity_view;
         let water_mask_fallback_texture = base_resources.water_mask_fallback_texture;
@@ -278,9 +284,9 @@ impl TerrainScene {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mag_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            min_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            mipmap_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Nearest),
             ..Default::default()
         });
         let probe_grid_uniform_buffer = tracked_create_buffer_init(
@@ -323,9 +329,9 @@ impl TerrainScene {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mag_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            min_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            mipmap_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
             ..Default::default()
         });
         let reflection_probe_fallback_texture = tracked_create_texture(
@@ -431,6 +437,12 @@ impl TerrainScene {
             color_format,
             1,
         );
+        let aether_background_blit_pipeline = Self::create_aether_depth_blit_pipeline(
+            device.as_ref(),
+            &blit_bind_group_layout,
+            color_format,
+            1,
+        );
         let normal_blit_pipeline = Self::create_normal_blit_pipeline(
             device.as_ref(),
             &blit_bind_group_layout,
@@ -486,9 +498,9 @@ impl TerrainScene {
             Self::create_shadow_depth_pipeline(device.as_ref(), &shadow_depth_bind_group_layout);
 
         let tracker = crate::core::memory_tracker::global_tracker();
-        tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false);
-        tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false);
-        tracker.track_buffer_allocation(reflection_probe_grid_uniform_alloc_bytes, false);
+        tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false)?;
+        tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false)?;
+        tracker.track_buffer_allocation(reflection_probe_grid_uniform_alloc_bytes, false)?;
         let tracked_scene_textures = vec![
             crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::Rgba8Unorm),
             crate::core::resource_tracker::register_texture(256, 1, wgpu::TextureFormat::R32Float),
@@ -529,14 +541,20 @@ impl TerrainScene {
             blit_pipeline,
             aov_blit_pipeline,
             background_blit_pipeline,
+            aether_background_blit_pipeline,
             normal_blit_pipeline,
             offline_compute,
             sampler_linear,
             sky_bind_group_layout0,
             sky_bind_group_layout1,
             sky_pipeline,
+            aether_sky_bind_group_layout2,
+            aether_sky_pipeline,
+            atmosphere_lut_cache,
             _sky_fallback_texture: sky_fallback_texture,
             sky_fallback_view,
+            _atmosphere_scattering_fallback_texture: atmosphere_scattering_fallback_texture,
+            atmosphere_scattering_fallback_view,
             _height_curve_identity_texture: height_curve_identity_texture,
             height_curve_identity_view,
             _water_mask_fallback_texture: water_mask_fallback_texture,

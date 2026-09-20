@@ -63,18 +63,17 @@ fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     // barycentrics -- and therefore the interpolated UV -- by a fraction of a
     // pixel across the whole morph band of every clipmap ring.
     let height_dims = vec2<f32>(textureDimensions(height_tex));
-    let coarse_texels = exp2(min(max(source.morph_data.y, 0.0) + 1.0, 16.0));
-    let coarse_step = vec2<f32>(coarse_texels)
-        / max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0));
-    let coarse_cell = uv / coarse_step;
+    let coarse_texels = det_exp2(min(max(source.morph_data.y, 0.0) + 1.0, 16.0));
+    let coarse_step = det_div2(vec2<f32>(coarse_texels), max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0)));
+    let coarse_cell = det_div2(uv, coarse_step);
     let coarse_base = floor(coarse_cell) * coarse_step;
     let coarse_t = fract(coarse_cell);
     let h00 = sample_height_bilinear(clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)));
-    let h10 = sample_height_bilinear(clamp(coarse_base + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
-    let h01 = sample_height_bilinear(clamp(coarse_base + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)));
-    let h11 = sample_height_bilinear(clamp(coarse_base + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)));
-    let h_coarse = mix(mix(h00, h10, coarse_t.x), mix(h01, h11, coarse_t.x), coarse_t.y);
-    let h_raw = mix(h_fine, h_coarse, clamp(source.morph_data.x, 0.0, 1.0));
+    let h10 = sample_height_bilinear(clamp(det_barrier2(coarse_base) + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h01 = sample_height_bilinear(clamp(det_barrier2(coarse_base) + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h11 = sample_height_bilinear(clamp(det_barrier2(coarse_base) + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)));
+    let h_coarse = det_mix(det_mix(h00, h10, coarse_t.x), det_mix(h01, h11, coarse_t.x), coarse_t.y);
+    let h_raw = det_barrier(det_mix(h_fine, h_coarse, clamp(source.morph_data.x, 0.0, 1.0)));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -88,7 +87,7 @@ fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     );
     let centered = vec3<f32>(
         source.position,
-        (h_disp - h_center - skirt_offset) * h_exag,
+        (det_barrier(det_barrier(h_disp) - det_barrier(h_center)) - skirt_offset) * h_exag,
     );
     var out: VisibilityReconstructedVertex;
     out.clip = det_mat4_mul_vec4(
@@ -100,7 +99,7 @@ fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     );
     out.world = vec3<f32>(
         source.position,
-        (h_disp - skirt_offset) * h_exag,
+        (det_barrier(h_disp) - skirt_offset) * h_exag,
     );
     out.uv = uv;
     return out;
@@ -123,15 +122,15 @@ fn visibility_barycentrics(
     let v0 = b - a;
     let v1 = c - a;
     let v2 = p - a;
-    let denominator = v0.x * v1.y - v1.x * v0.y;
-    let inverse_denominator = 1.0 / select(
+    let denominator = det_barrier(v0.x * v1.y) - det_barrier(v1.x * v0.y);
+    let inverse_denominator = det_div(1.0, select(
         1e-8,
         denominator,
-        abs(denominator) > 1e-8,
+        abs(denominator) > 1e-8),
     );
-    let y = (v2.x * v1.y - v1.x * v2.y) * inverse_denominator;
-    let z = (v0.x * v2.y - v2.x * v0.y) * inverse_denominator;
-    return vec3<f32>(1.0 - y - z, y, z);
+    let y = (det_barrier(v2.x * v1.y) - det_barrier(v1.x * v2.y)) * inverse_denominator;
+    let z = (det_barrier(v0.x * v2.y) - det_barrier(v2.x * v0.y)) * inverse_denominator;
+    return vec3<f32>(det_barrier(1.0 - det_barrier(y)) - det_barrier(z), y, z);
 }
 
 struct VisibilitySurfaceSample {
@@ -153,17 +152,16 @@ struct VisibilitySurfaceSample {
 const TERRAIN_VISBUFFER_SUBPIXEL: f32 = 256.0;
 
 fn visibility_snap_to_subpixel_grid(framebuffer_xy: vec2<f32>) -> vec2<f32> {
-    return round(framebuffer_xy * TERRAIN_VISBUFFER_SUBPIXEL)
-        / TERRAIN_VISBUFFER_SUBPIXEL;
+    return det_div2(round(framebuffer_xy * TERRAIN_VISBUFFER_SUBPIXEL), vec2<f32>(TERRAIN_VISBUFFER_SUBPIXEL));
 }
 
 // Clip space -> framebuffer pixel coordinates, matching the viewport transform
 // the rasteriser applies ((0.5, 0.5) is the centre of the top-left pixel).
 fn visibility_framebuffer_of(clip_xy: vec2<f32>, w: f32, dimensions: vec2<f32>) -> vec2<f32> {
-    let ndc = clip_xy / w;
+    let ndc = det_div2(clip_xy, vec2<f32>(w));
     return vec2<f32>(
-        (ndc.x * 0.5 + 0.5) * dimensions.x,
-        (0.5 - ndc.y * 0.5) * dimensions.y,
+        (det_barrier(ndc.x * 0.5) + 0.5) * dimensions.x,
+        (0.5 - det_barrier(ndc.y * 0.5)) * dimensions.y,
     );
 }
 
@@ -186,20 +184,20 @@ fn visibility_sample_surface(
     let bary_screen = visibility_barycentrics(
         framebuffer_xy,
         visibility_snap_to_subpixel_grid(
-            visibility_framebuffer_of(v0.clip.xy, w.x, dimensions)),
+            det_barrier2(visibility_framebuffer_of(v0.clip.xy, w.x, dimensions))),
         visibility_snap_to_subpixel_grid(
-            visibility_framebuffer_of(v1.clip.xy, w.y, dimensions)),
+            det_barrier2(visibility_framebuffer_of(v1.clip.xy, w.y, dimensions))),
         visibility_snap_to_subpixel_grid(
-            visibility_framebuffer_of(v2.clip.xy, w.z, dimensions)),
+            det_barrier2(visibility_framebuffer_of(v2.clip.xy, w.z, dimensions))),
     );
-    let perspective = bary_screen / w;
-    let bary = perspective / max(
-        perspective.x + perspective.y + perspective.z,
-        1e-8,
+    let perspective = det_div3(bary_screen, vec3<f32>(w));
+    let bary = det_div3(perspective, vec3<f32>(max(
+        det_barrier(perspective.x + perspective.y) + perspective.z,
+        1e-8)),
     );
     var sample: VisibilitySurfaceSample;
-    sample.world = v0.world * bary.x + v1.world * bary.y + v2.world * bary.z;
-    sample.uv = v0.uv * bary.x + v1.uv * bary.y + v2.uv * bary.z;
+    sample.world = det_barrier3(det_barrier3(v0.world * bary.x) + det_barrier3(v1.world * bary.y)) + det_barrier3(v2.world * bary.z);
+    sample.uv = det_barrier2(det_barrier2(v0.uv * bary.x) + det_barrier2(v1.uv * bary.y)) + det_barrier2(v2.uv * bary.z);
     return sample;
 }
 
@@ -218,10 +216,11 @@ fn visibility_pixel_identity(pixel: vec2<i32>) -> u32 {
 fn vs_visibility_fullscreen(
     @builtin(vertex_index) vertex_index: u32,
 ) -> VisibilityFullscreenOutput {
+    det_seed(f32(vertex_index));
     var out: VisibilityFullscreenOutput;
     let x = f32((vertex_index << 1u) & 2u);
     let y = f32(vertex_index & 2u);
-    out.clip_position = vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+    out.clip_position = vec4<f32>(det_barrier(x * 2.0) - 1.0, 1.0 - det_barrier(y * 2.0), 0.0, 1.0);
     return out;
 }
 
@@ -229,6 +228,7 @@ fn vs_visibility_fullscreen(
 fn fs_visibility_resolve_fullscreen(
     input: VisibilityFullscreenOutput,
 ) -> FragmentOutput {
+    det_seed(input.clip_position.x);
     let pixel = vec2<i32>(input.clip_position.xy);
     let covered = visibility_pixel_identity(pixel);
     // Helper-lane emulation. The forward rasteriser runs a partially covered
@@ -295,13 +295,13 @@ fn fs_visibility_resolve_fullscreen(
     // so sampling the same triangle at the quad's three anchor centres
     // reproduces the value the rasteriser would have produced for it, whatever
     // the neighbouring pixels' triangles happen to be.
-    let quad_origin = vec2<f32>(quad_base) + vec2<f32>(0.5, 0.5);
+    let quad_origin = det_barrier2(vec2<f32>(quad_base) + vec2<f32>(0.5, 0.5));
     let anchor00 = visibility_sample_surface(
         quad_origin, v0, v1, v2, w, dimensions);
     let anchor10 = visibility_sample_surface(
-        quad_origin + vec2<f32>(1.0, 0.0), v0, v1, v2, w, dimensions);
+        det_barrier2(det_barrier2(quad_origin) + vec2<f32>(1.0, 0.0)), v0, v1, v2, w, dimensions);
     let anchor01 = visibility_sample_surface(
-        quad_origin + vec2<f32>(0.0, 1.0), v0, v1, v2, w, dimensions);
+        det_barrier2(det_barrier2(quad_origin) + vec2<f32>(0.0, 1.0)), v0, v1, v2, w, dimensions);
     let feedback_ddx_uv = anchor10.uv - anchor00.uv;
     let feedback_ddy_uv = anchor01.uv - anchor00.uv;
     let feedback_ddx_world = anchor10.world - anchor00.world;
@@ -358,16 +358,17 @@ fn fs_visibility_geometry(
     input: VertexOutput,
     @builtin(primitive_index) primitive_index: u32,
 ) -> FragmentOutput {
+    det_seed(input.clip_position.x);
     // Capture the rasteriser's real quad gradients before the visibility-ID
     // ownership test discards neighbouring helper/non-owning lanes. The
     // Grid-UV normal and mask families now consume UV derivatives, while
     // albedo consumes world-space triplanar derivatives; evaluating either
     // after the divergent discard makes boundary derivatives undefined and
     // produced a one-pixel forward/visibility mismatch on Metal.
-    let resolve_ddx_uv = dpdx(input.tex_coord);
-    let resolve_ddy_uv = dpdy(input.tex_coord);
-    let resolve_ddx_world = dpdx(input.world_position);
-    let resolve_ddy_world = dpdy(input.world_position);
+    let resolve_ddx_uv = dpdxCoarse(input.tex_coord);
+    let resolve_ddy_uv = dpdyCoarse(input.tex_coord);
+    let resolve_ddx_world = dpdxCoarse(input.world_position);
+    let resolve_ddy_world = dpdyCoarse(input.world_position);
     let pixel = vec2<i32>(input.clip_position.xy);
     let encoded = textureLoad(terrain_visibility_ids, pixel, 0).x;
     let expected = (((input.tile_id & 0xffffu) << 16u)

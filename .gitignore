@@ -289,10 +289,17 @@ __pycache__/
 !tests/golden/
 !tests/golden/terrain/
 !tests/golden/terrain/*.png
+!tests/golden/helios/
+!tests/golden/helios/*.png
+!tests/golden/viewshed/
+!tests/golden/viewshed/*.png
+!tests/golden/viewshed/PROVENANCE.md
 !tests/golden/recipes/
 !tests/golden/recipes/*.png
 !tests/golden/presets/
 !tests/golden/presets/*.png
+!tests/golden/atmosphere/
+!tests/golden/atmosphere/*.png
 !python/forge3d/data/fonts/
 !python/forge3d/data/fonts/*.png
 !docs/gallery/images/*.png
@@ -395,9 +402,9 @@ examples/**/*.py
 !examples/moon_south_pole.py
 tests/test_*example*.py
 tests/test_*examples*.py
-!tests/test_italy_forest_cover_example.py
 .superpowers/
 scripts/*
+!scripts/aether_acceptance_evidence.py
 !scripts/summarize_m06_evidence.py
 !scripts/check_anamnesis_portability.py
 !scripts/run_dupla_proof.py
@@ -407,8 +414,10 @@ scripts/*
 !scripts/tessella_evidence_thresholds.py
 !scripts/substratia_evidence_report.py
 !scripts/write_orbis_evidence.py
+!scripts/helios_evidence_report.py
 !scripts/run_nvidia_visual_acceptance.py
 !scripts/run_nvidia_determinism_acceptance.py
+!scripts/run_browser_probe.py
 
 # forge3d outputs (A13) 
 out/
@@ -426,3 +435,16 @@ docs/_build/
 
 # Large data files
 landuse/landuse/glad_cropland_2019.tif
+
+# OBLIQUA proof fixtures, examples, and compatibility reference
+!examples/obliqua_analytic_camera_fixture.py
+!examples/obliqua_se_europe_fixture.py
+!examples/southeast_europe_population_pt_native.py
+!examples/swiss_landcover_pt_oblique.py
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/map-maker/
+.claude/skills/map-maker/*
+!.claude/skills/map-maker/references/
+.claude/skills/map-maker/references/*
+!.claude/skills/map-maker/references/recipes.md

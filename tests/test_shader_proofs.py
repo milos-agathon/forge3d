@@ -6,6 +6,7 @@ import pathlib
 import numpy as np
 import pytest
 from _toml_compat import load_toml
+from _terrain_runtime import terrain_rendering_available
 
 import forge3d as f3d
 from forge3d._native import NATIVE_AVAILABLE
@@ -51,6 +52,22 @@ def test_unsafe_fixture_rejected_and_accumulation_proved():
     assert "declared_output_ranges" in hybrid["claims"]
 
 
+def test_terrain_publication_entry_has_its_own_proof():
+    report = verify.shader_report()
+    entries = {
+        verdict["entry_point"]: verdict
+        for verdict in report["verdicts"]
+        if verdict["module"] == "hybrid_terrain_traversal"
+    }
+    assert {"main_terrain", "main_terrain_publish"} <= entries.keys()
+    publication = entries["main_terrain_publish"]
+    assert publication["contract"] == "shaders/contracts/hybrid_terrain_traversal.toml"
+    assert publication["parsed_by_naga"] is True
+    assert publication["proof_status"] == "proven"
+    assert publication["alarms"] == []
+    assert "declared_output_ranges" in publication["claims"]
+
+
 def test_seeded_ablations_are_caught():
     report = verify.shader_report()
     div = report["ablations"]["height_range_div"]
@@ -73,8 +90,8 @@ def test_runtime_contract_assert_mode_fails_closed_without_observations():
     assert runtime_assert["observed_inputs"] is False
 
 def test_runtime_contract_asserts_observed_gpu_inputs():
-    if not f3d.has_gpu():
-        pytest.skip("runtime shader-contract assertions require a GPU render")
+    if not terrain_rendering_available():
+        pytest.skip("runtime shader-contract assertions require a terrain-safe GPU render")
 
     f3d.render_brdf_tile("lambert", 0.4, 32, 32, certificate=True)
     runtime_assert = verify.shader_report()["runtime_assert"]
@@ -123,7 +140,13 @@ def test_runtime_contract_asserts_observed_gpu_inputs():
         entry
         for entry in hybrid_report["checked_entries"]
         if entry["module"] == "hybrid_terrain_traversal"
+        and entry["contract"] == "shaders/contracts/hybrid_terrain_traversal.toml"
     )
+    runtime = next(
+        entry for entry in hybrid_report["checked_entries"]
+        if entry["contract"] == "runtime-safety:hybrid-terrain"
+    )
+    assert runtime["status"] == "passed"
     assert hybrid["scene"].endswith("-4f")
     checks = {binding["name"]: binding for binding in hybrid["checked_bindings"]}
     assert checks["uniforms.frame_index"]["observed_max"] == 3.0

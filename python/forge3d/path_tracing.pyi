@@ -1,4 +1,4 @@
-﻿# python/forge3d/path_tracing.pyi
+# python/forge3d/path_tracing.pyi
 # Type stubs for path tracing API skeleton (Workstream A).
 # This exists to keep the package typed and IDE-friendly.
 # RELEVANT FILES:python/forge3d/path_tracing.py,python/forge3d/__init__.pyi,tests/test_path_tracing_api.py
@@ -6,6 +6,8 @@
 from __future__ import annotations
 from typing import Tuple, Iterable, Dict, Mapping, Callable, Any, Optional, Sequence
 import numpy as np
+from . import AtmosphereLutHandle
+from .atmosphere import AtmosphereSettings
 
 class ExperimentalSyntheticOutput(RuntimeError): ...
 
@@ -61,6 +63,8 @@ def save_aovs(
 
 def iter_tiles(width: int, height: int, tile: int) -> Iterable[Tuple[int, int, int, int]]: ...
 
+# ``earth_model="flat"`` requires ``refraction_model="none"``; unsupported
+# model names or pairs raise an exception and never silently fall back.
 def hybrid_render_terrain_reference(
     heightmap: np.ndarray,
     width: int,
@@ -70,6 +74,55 @@ def hybrid_render_terrain_reference(
     spacing: Tuple[float, float] = ...,
     exaggeration: float = ...,
     albedo: Tuple[float, float, float] = ...,
+    albedo_map: np.ndarray | None = ...,
+    albedo_sampling: str | None = ...,
+    camera_model: str | None = ...,
+    sensor_rect: Tuple[float, float, float, float] | None = ...,
+    full_width: int | None = ...,
+    full_height: int | None = ...,
+    pixel_offset: Optional[Tuple[int, int]] = ...,
+    turbidity: float = ...,
+    sun_azimuth_deg: float | None = ...,
+    sun_elevation_deg: float | None = ...,
+    solar_time: object | None = ...,
+    sun_intensity: float = ...,
+    sun_color: Sequence[float] | np.ndarray = ...,
+    env_map: np.ndarray | None = ...,
+    env_intensity: float = ...,
+    mesh_vertices: np.ndarray | None = ...,
+    mesh_indices: np.ndarray | None = ...,
+    spp: int = ...,
+    max_frames: int = ...,
+    min_frames: int = ...,
+    variance_threshold: float = ...,
+    seed: int = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
+    observer_latitude_deg: float | None = ...,
+    observer_longitude_deg: float | None = ...,
+    earth_model: str = ...,
+    sphere_radius_m: float = ...,
+    refraction_model: str = ...,
+    refraction_k: float = ...,
+    pressure_mbar: float | None = ...,
+    temperature_c: float | None = ...,
+    atmosphere: AtmosphereSettings | Mapping[str, object] | AtmosphereLutHandle | None = ...,
+    sdf_scene: object | None = ...,
+) -> Dict[str, object]: ...
+
+def render_terrain_poster(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    camera: dict | None = ...,
+    *,
+    albedo_map: np.ndarray | None = ...,
+    albedo_sampling: str = ...,
+    tile: int = ...,
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    albedo: Tuple[float, float, float] = ...,
+    camera_model: str | None = ...,
     sun_azimuth_deg: float = ...,
     sun_elevation_deg: float = ...,
     sun_intensity: float = ...,
@@ -85,4 +138,5 @@ def hybrid_render_terrain_reference(
     seed: int = ...,
     certificate: bool | str | None = ...,
     cache: str | None = ...,
+    **kwargs: Any,
 ) -> Dict[str, object]: ...

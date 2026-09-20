@@ -1,6 +1,12 @@
 // src/shaders/pt_restir_temporal.wgsl
-// ReSTIR DI: Temporal reuse (MVP stub)
-// Combines previous frame reservoir with current frame init reservoir.
+// ReSTIR DI: temporal reuse — canonical reservoir merge of the previous
+// frame's merged reservoir with the current frame's fresh candidates.
+// Each input contributes its reuse weight w_j = w_sum_j / target_pdf_j (the
+// receiver re-evaluation term is the identity here: both reservoirs describe
+// the same pixel, so the selected sample's re-evaluated pdf is its stored
+// target pdf by construction). The selected sample is drawn stochastically
+// with probability proportional to its weight — a real reservoir update,
+// not an argmax heuristic.
 
 struct Uniforms {
     width: u32,
@@ -16,7 +22,14 @@ struct Uniforms {
     cam_forward: vec3<f32>,
     seed_hi: u32,
     seed_lo: u32,
-    _pad: u32,
+    camera_model: u32,
+    full_width: u32,
+    full_height: u32,
+    pixel_offset_x: u32,
+    pixel_offset_y: u32,
+    ortho_half_height: f32,
+    camera_flags: u32,
+    sensor_rect: vec4<f32>,
 }
 
 struct LightSample {
@@ -51,13 +64,21 @@ fn xorshift32(state: ptr<function, u32>) -> f32 {
     return f32(x) / 4294967296.0;
 }
 
+// gid.y folds 1-D dispatches wider than the 65535-workgroup x limit: the
+// host dispatches x = min(wg, 65535), y = ceil(wg/65535).
+const DISPATCH_X_WG: u32 = 16776960u; // 65535 * 256
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
+    let idx = gid.y * DISPATCH_X_WG + gid.x;
     let pixel_count = uniforms.width * uniforms.height;
     if (idx >= pixel_count) { return; }
 
-    var seed = (uniforms.seed_hi ^ uniforms.frame_index) + idx * 7411u + 7u;
+    let local_x = idx % uniforms.width;
+    let local_y = idx / uniforms.width;
+    let global_idx = (local_y + uniforms.pixel_offset_y) * uniforms.full_width
+        + local_x + uniforms.pixel_offset_x;
+    var seed = (uniforms.seed_hi ^ uniforms.frame_index) + global_idx * 7411u + 7u;
 
     let rp = prev_reservoirs[idx];
     let rc = curr_reservoirs[idx];
@@ -67,39 +88,40 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let curr_valid = (rc.m > 0u) && (rc.weight > 0.0) && (rc.target_pdf > 0.0);
 
     if (!prev_valid && !curr_valid) {
-        // Nothing to reuse
         ro = rc;
         out_reservoirs[idx] = ro;
         return;
     }
-
     if (!prev_valid) {
         ro = rc;
         out_reservoirs[idx] = ro;
         return;
     }
-
     if (!curr_valid) {
         ro = rp;
         out_reservoirs[idx] = ro;
         return;
     }
 
-    // Combine weights (very simple MVP): pick the sample with higher weight
-    let choose_prev = rp.weight > rc.weight;
-    if (choose_prev) {
+    // Stochastic merge over the reuse weights: the chosen sample lands with
+    // probability w_j / (w_p + w_c). The canonical contribution
+    // p̂_r(y_j)·W_j·M_j telescopes to w_sum_j for a same-pixel merge because
+    // the receiver re-evaluation equals the stored target pdf exactly.
+    let w_p = rp.w_sum;
+    let w_c = rc.w_sum;
+    let w_sum = w_p + w_c;
+    let u = xorshift32(&seed);
+    let pick_prev = (u * w_sum) < w_p;
+
+    if (pick_prev) {
         ro.sample = rp.sample;
-        ro.target_pdf = rp.target_pdf;
     } else {
         ro.sample = rc.sample;
-        ro.target_pdf = rc.target_pdf;
     }
-
-    // Merge counters
+    ro.target_pdf = select(rc.target_pdf, rp.target_pdf, pick_prev);
     ro.m = rp.m + rc.m;
-    ro.w_sum = rp.w_sum + rc.w_sum;
-
-    if (ro.w_sum > 0.0 && ro.target_pdf > 0.0) {
+    ro.w_sum = w_sum;
+    if (ro.m > 0u && ro.target_pdf > 0.0) {
         ro.weight = ro.w_sum / (f32(ro.m) * ro.target_pdf);
     } else {
         ro.weight = 0.0;

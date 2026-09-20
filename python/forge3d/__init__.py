@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.34.0"
+__version__ = "1.37.1"
 version = __version__
 
 import numpy as np
@@ -41,6 +41,7 @@ from ._gpu import (
     enumerate_adapters,
     device_probe,
     has_gpu,
+    determinism_probe,
     get_device,
 )
 from .mem import (
@@ -112,11 +113,20 @@ _NATIVE_ONLY_EXPORTS = (
         "copc_read_node_points",  # P2.3: native COPC node decode
         "render_adjudication_pair",  # AEQUITAS: PT-vs-raster adjudication pair
         "hybrid_render_terrain_reference",  # PROMETHEUS: terrain PT reference
+        "hybrid_render_aether_spectral_reference",  # AETHER: stochastic PT acceptance reference
+        "AtmosphereLutHandle",  # AETHER: exact typed LUT payload handoff
+        "atmosphere_bake_luts",  # AETHER: shipped LUT resolver / offline bake
+        "atmosphere_spectral_to_linear_rgb",  # AETHER: spectral conversion
+        "atmosphere_generate_environment",  # AETHER: validation environment
+        "atmosphere_reference_aerial",  # AETHER: CPU transport diagnostic
+        "inverse_solve",  # DIFFERENTIA: reverse-mode scene recovery
+        "inverse_render_primal",  # DIFFERENTIA: differentiable primal
         "render_brdf_tile",  # CENSOR: certified BRDF pixel render
         "render_brdf_tile_overrides",  # CENSOR: certified BRDF pixel render
         "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
         "verify_provenance",  # VERITAS: native manifest verification
-        "declutter_optimal",  # CARTOGRAPHER-PRIME: bounded-optimal label solve
+        "declutter",  # CARTOGRAPHER-PRIME: generic typed label solve
+        "declutter_optimal",  # CARTOGRAPHER-PRIME: compatibility alias
         "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
@@ -264,10 +274,13 @@ from .terrain_params import (
     VTLayerFamily,
     TerrainVTSettings,
     validate_terrain_vt_support,
+    SkySettings,
 )
 from .offline import OfflineProgress, OfflineResult, render_offline
 from .denoise_oidn import oidn_available, oidn_denoise
 from . import presets
+from . import geo
+from . import terrain
 from . import animation
 from . import gis
 from . import thematic
@@ -277,7 +290,19 @@ from . import codec
 # -----------------------------------------------------------------------------
 # Core rendering API
 # -----------------------------------------------------------------------------
-from .path_tracing import ExperimentalSyntheticOutput, PathTracer, make_camera
+from .path_tracing import (
+    ExperimentalSyntheticOutput,
+    PathTracer,
+    hybrid_render_terrain_reference,
+    make_camera,
+    render_terrain_poster,
+)
+from .inverse import (
+    InverseSolveUnavailable,
+    RecoveredScene,
+    recover_scene,
+)
+from . import inverse
 
 # -----------------------------------------------------------------------------
 # Interactive Viewer API
@@ -291,7 +316,19 @@ from .viewer import (
     open_viewer,
     open_viewer_async,
 )
-from . import astro, viewer_ipc, colors, interactive, datasets, widgets, sky, smoke, verify
+from . import (
+    astro,
+    atmosphere,
+    viewer_ipc,
+    colors,
+    interactive,
+    datasets,
+    widgets,
+    sky,
+    smoke,
+    verify,
+)
+from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .datasets import (
     available as available_datasets,
     bundled as bundled_datasets,
@@ -675,6 +712,9 @@ __all__ = [
     "verify",
     "codec",
     "precision",
+    "atmosphere",
+    "AtmosphereSettings",
+    "SUN_ELEVATION_SWEEP_DEG",
     "dd_selftest",
     "dd_harness",
     "dd_jitter_demo",
@@ -683,6 +723,7 @@ __all__ = [
     "PathTracer",
     "ExperimentalSyntheticOutput",
     "make_camera",
+    "render_terrain_poster",
     # Native types (when available)
     "Scene",
     "Session",
@@ -704,10 +745,25 @@ __all__ = [
     "SunPosition",
     "sun_position",
     "sun_position_utc",
+    "geo",
+    "terrain",
     # AEQUITAS: PT-vs-raster adjudication
     "render_adjudication_pair",
     # PROMETHEUS: GPU terrain path-traced reference
     "hybrid_render_terrain_reference",
+    "hybrid_render_aether_spectral_reference",
+    # AETHER: spectral atmosphere bake/validation surface
+    "AtmosphereLutHandle",
+    "atmosphere_bake_luts",
+    "atmosphere_spectral_to_linear_rgb",
+    "atmosphere_generate_environment",
+    "atmosphere_reference_aerial",
+    # DIFFERENTIA: differentiable inverse solver
+    "inverse_solve",
+    "inverse_render_primal",
+    "recover_scene",
+    "RecoveredScene",
+    "InverseSolveUnavailable",
     # CENSOR: certified BRDF pixel renders
     "render_brdf_tile",
     "render_brdf_tile_overrides",
@@ -715,6 +771,7 @@ __all__ = [
     "seal_provenance",
     "verify_provenance",
     # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
+    "declutter",
     "declutter_optimal",
     "LabelRationale",
     # CENSOR: global degradation sink
@@ -775,6 +832,7 @@ __all__ = [
     "VTLayerFamily",
     "TerrainVTSettings",
     "validate_terrain_vt_support",
+    "SkySettings",
     "OfflineProgress",
     "OfflineResult",
     "render_offline",
@@ -786,6 +844,7 @@ __all__ = [
     "available_colormaps",
     # GPU utilities
     "has_gpu",
+    "determinism_probe",
     "get_device",
     "enumerate_adapters",
     "device_probe",

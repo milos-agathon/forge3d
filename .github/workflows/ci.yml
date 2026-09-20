@@ -23,6 +23,7 @@ on:
           - f3dz
           - anamnesis
           - tessella
+          - helios
 
 permissions:
   contents: read
@@ -154,7 +155,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy, rustfmt
       - name: Install focused build and test dependencies
         run: |
           sudo apt-get update
@@ -216,7 +219,8 @@ jobs:
     if: >-
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' &&
-       (inputs.scope == 'core' || inputs.scope == 'full' || inputs.scope == 'm06'))
+       (inputs.scope == 'core' || inputs.scope == 'full' || inputs.scope == 'm06' ||
+        inputs.scope == 'helios'))
     runs-on: ubuntu-latest
 
     steps:
@@ -287,6 +291,7 @@ jobs:
       terrain_goldens: ${{ steps.filter.outputs.terrain_goldens }}
       m06: ${{ steps.filter.outputs.m06 }}
       f3dz: ${{ steps.filter.outputs.f3dz }}
+      helios: ${{ steps.filter.outputs.helios }}
       anamnesis: ${{ steps.filter.outputs.anamnesis }}
       determinism_render: ${{ steps.filter.outputs.determinism_render }}
       determinism_f3dz: ${{ steps.filter.outputs.determinism_f3dz }}
@@ -319,7 +324,17 @@ jobs:
               - 'tests/test_recipe_goldens.py'
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
+              - 'tests/test_prometheus_dem_reference.py'
+              - 'tests/test_inverse_pt.py'
+              - 'tests/data/prometheus/**'
+              - 'tools/prometheus_reference.py'
               - 'tests/_deltae.py'
+              - 'tests/_ssim.py'
+              - 'tests/_obliqua_gpu_guard.py'
+              - 'tests/test_obliqua_*.py'
+              - 'examples/obliqua_*.py'
+              - 'examples/southeast_europe_*.py'
+              - 'examples/swiss_landcover_*.py'
               - 'tests/golden/terrain/**'
               - 'tests/golden/recipes/**'
               - 'tests/golden/adjudication/**'
@@ -502,6 +517,47 @@ jobs:
               - 'tests/test_f3dz_codec.py'
               - 'tests/data/codec_corpus/**'
               - '.github/workflows/determinism-matrix.yml'
+            helios:
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/build-wheel.yml'
+              - 'src/geo/refraction.rs'
+              - 'src/geo/solar.rs'
+              - 'src/geo/solar_coefficients.rs'
+              - 'src/geo/mod.rs'
+              - 'src/path_tracing/hybrid_compute/terrain_heightfield.rs'
+              - 'src/path_tracing/hybrid_compute/render_terrain.rs'
+              - 'src/py_functions/geodesy.rs'
+              - 'src/py_functions/path_tracing/terrain_reference.rs'
+              - 'src/py_module/functions/geodesy.rs'
+              - 'src/shaders/hybrid_terrain_traversal.wgsl'
+              - 'src/shaders/terrain_viewshed.wgsl'
+              - 'src/terrain/analysis/viewshed.rs'
+              - 'src/viewer/cmd/terrain_command.rs'
+              - 'src/viewer/ipc/protocol/translate/terrain.rs'
+              - 'src/viewer/state/viewer_helpers/core.rs'
+              - 'src/viewer/terrain/scene.rs'
+              - 'src/viewer/terrain/scene/terrain_load.rs'
+              - 'python/forge3d/geo.py'
+              - 'python/forge3d/geo.pyi'
+              - 'python/forge3d/path_tracing.py'
+              - 'python/forge3d/path_tracing.pyi'
+              - 'python/forge3d/terrain.py'
+              - 'python/forge3d/terrain.pyi'
+              - 'python/forge3d/viewer.py'
+              - 'python/forge3d/viewer.pyi'
+              - 'scripts/ci_pytest_lane.py'
+              - 'scripts/helios_evidence_report.py'
+              - 'scripts/terrain_ci_probe.py'
+              - 'scripts/assert_junit_zero_skips.py'
+              - 'scripts/install_compatible_wheel.py'
+              - 'tests/test_api_contracts.py'
+              - 'tests/test_solar_spa.py'
+              - 'tests/test_viewshed_curvature.py'
+              - 'tests/test_shadow_tip.py'
+              - 'tests/data/spa_reference.csv'
+              - 'tests/data/spa_reference.PROVENANCE.md'
+              - 'tests/golden/helios/**'
+              - 'tests/golden/viewshed/**'
             determinism_anamnesis:
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -568,8 +624,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # Keep the full matrix on the reviewed lint toolchain used by the
+        # permanent fast contract; an unpinned stable release changed the
+        # enforced Clippy set during this acceptance run.
+        uses: dtolnay/rust-toolchain@1.97.1
         with:
+          components: clippy
           targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
@@ -591,14 +651,23 @@ jobs:
           sudo apt-get install -y libvulkan-dev libproj-dev libsqlite3-dev sqlite3 pkg-config
 
       - name: Run cargo check
-        run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts,enable-globe
+        run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe
 
       - name: Run cargo check (system PROJ feature)
         if: matrix.os == 'ubuntu-latest'
         run: cargo check --workspace --features proj
 
       - name: Run cargo test (skip GPU-dependent tests)
-        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts,enable-globe -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
+        # These direct-GPU checks are run on the physical NVIDIA Vulkan lane
+        # below.  The generic matrix must not silently substitute WARP, Mesa,
+        # or Metal for their hardware assertions.
+        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip gpu_timing_double_buffered_measures_copy --skip raster_capture_executes_production_shader --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip pbr_pipeline_initializes_real_ibl_and_shader --skip draw_batch_params_renders_pixels --skip live_shared_msm_sampler_treats_front_of_mean_as_lit --skip live_shared_msm_sampler_consumes_third_and_fourth_moments --skip generation_and_blur_cover_a_1024_moment_atlas --skip execute_rejects_unbound_and_mismatched_allocations --skip legacy_view_prepare_and_execute_sequence_remains_compatible --skip separable_blur_filters_both_axes --skip execute_rejects_invalid_or_mismatched_atlas_dimensions --skip execute_rejects_invalid_texture_contracts_before_view_creation --skip execute_rejects_invalid_evsm_exponents --skip bind_groups_follow_atlas_resource_identity --skip shared_evsm_visibility_helpers_execute_lit_front_of_mean --skip shared_evsm_minimum_variance_scales_each_warp_derivative --skip shared_evsm_moment_leak_control_preserves_a_soft_penumbra --skip shared_evsm_uniform_distribution_does_not_widen --skip shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver --skip shared_evsm_chebyshev_is_conservative_for_uniform_half_moments --skip shared_evsm_uniform_half_uncertainty_has_a_bounded_transition --skip shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows --skip shared_evsm_helpers_fail_open_for_non_finite_inputs --skip shared_pcss_penumbra_grows_with_light_size_and_receiver_separation --skip shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs
+        env:
+          RUST_TEST_THREADS: 1
+
+      - name: Run AETHER offline-bake acceptance tests
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --workspace --features atmosphere-bake core::atmosphere -- --test-threads=1
         env:
           RUST_TEST_THREADS: 1
 
@@ -606,7 +675,7 @@ jobs:
         # Executes rustdoc examples, including the five `compile_fail` proofs in
         # src/geo/units.rs that make unit/height/CRS/epoch mismatches and the raw
         # f64->f32 world-coordinate narrowing genuinely fail to compile.
-        run: cargo test --doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts,enable-globe
+        run: cargo test --doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe
 
       - name: Run cargo clippy
         run: cargo forge3d-clippy-acceptance
@@ -852,7 +921,7 @@ jobs:
       - name: Install wheel and slow-lane dependencies
         run: |
           python scripts/install_compatible_wheel.py dist
-          pip install pytest pyyaml numpy pillow
+          pip install pytest pyyaml numpy pillow pyproj rasterio
 
       - name: Run accounted slow Python lane
         env:
@@ -963,11 +1032,14 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-      vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
+       vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
+    outputs:
+      aether_lane: ${{ steps.aether-absent.outputs.aether_lane || steps.aether-ran.outputs.aether_lane || steps.aether-software-absent.outputs.aether_lane || 'unknown' }}
     env:
       WGPU_BACKEND: metal
       FORGE3D_ALLOW_HOSTED_MACOS_TERRAIN: '1'
       FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
       FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: metal
       FORGE3D_RUN_TERRAIN_GOLDENS: '1'
     steps:
@@ -1005,6 +1077,87 @@ jobs:
       - name: Run optional Metal terrain control
         if: steps.metal-probe.outputs.probe == 'positive'
         run: python -m pytest tests/test_terrain_visual_goldens.py -v --tb=short
+      - name: Probe AETHER physical Metal closure backend
+        if: ${{ !cancelled() }}
+        id: aether-metal-probe
+        shell: bash
+        run: |
+          set +e
+          python scripts/terrain_ci_probe.py --mode aether-metal --json tests/artifacts/aether/adapter-probe.json
+          code=$?
+          set -e
+          if [ "$code" = "0" ]; then
+            echo "probe=positive" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = "2" ]; then
+            echo "probe=absent" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::AETHER physical Metal probe crashed (exit $code)"
+            exit "$code"
+          fi
+      - name: Verify exact AETHER wheel custom-bake provenance
+        if: ${{ !cancelled() && steps.aether-metal-probe.outputs.probe == 'positive' }}
+        id: aether_custom_bake
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: python -c 'from forge3d._native import get_native_module; h=get_native_module().atmosphere_bake_luts(ozone_du=321.0, mie_g=0.71, ground_albedo=0.42, scattering_orders=2); assert h.precomputed is False'
+      - name: Run AETHER Metal closure and golden gates
+        if: ${{ !cancelled() && steps.aether-metal-probe.outputs.probe == 'positive' && steps.aether_custom_bake.outcome == 'success' }}
+        id: aether-ran
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_AETHER_PHYSICAL_METAL: '1'
+          FORGE3D_AETHER_METRICS_PATH: tests/artifacts/aether/metrics.json
+        run: |
+          mkdir -p tests/artifacts/aether
+          git rev-parse HEAD > tests/artifacts/aether/checked-out-head.txt
+          junit=tests/artifacts/aether/junit.xml
+          python -m pytest \
+            tests/test_atmosphere_spectral.py \
+            tests/test_atmosphere_reference.py \
+            tests/test_atmosphere_pt_reference.py \
+            tests/test_atmosphere_golden.py \
+            tests/test_atmosphere_lut_handoff.py \
+            -v --tb=short --junitxml="$junit"
+          python scripts/assert_junit_zero_skips.py "$junit"
+          python scripts/aether_acceptance_evidence.py tests/artifacts/aether \
+            --head-sha '${{ github.sha }}' \
+            --repository '${{ github.repository }}' \
+            --run-id '${{ github.run_id }}' \
+            --run-attempt '${{ github.run_attempt }}' \
+            --job '${{ github.job }}'
+          echo "aether_lane=ran" >> "$GITHUB_OUTPUT"
+      - name: Upload AETHER physical Metal evidence
+        if: always() && steps.aether-metal-probe.outputs.probe == 'positive'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-physical-metal-evidence
+          path: tests/artifacts/aether/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Record AETHER Metal lane ABSENT
+        if: ${{ !cancelled() && steps.aether-metal-probe.outputs.probe == 'absent' }}
+        id: aether-absent
+        shell: bash
+        run: |
+          mkdir -p aether-out
+          echo "AETHER closure lane ABSENT: no proven physical Metal adapter" > aether-out/aether.ABSENT
+          echo "aether_lane=absent" >> "$GITHUB_OUTPUT"
+      - name: Record AETHER Metal lane ABSENT under software override
+        if: ${{ !cancelled() && env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1' }}
+        id: aether-software-absent
+        shell: bash
+        run: |
+          mkdir -p aether-out
+          echo "AETHER closure lane ABSENT: software execution does not prove physical Metal" > aether-out/aether.ABSENT
+          echo "aether_lane=absent" >> "$GITHUB_OUTPUT"
+      - name: Upload AETHER Metal lane marker
+        if: always() && (steps.aether-absent.outcome == 'success' || steps.aether-software-absent.outcome == 'success')
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-metal-lane-marker
+          path: aether-out/
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload optional Metal absence marker
         if: steps.metal-probe.outputs.probe == 'absent'
         uses: actions/upload-artifact@v4
@@ -1046,6 +1199,7 @@ jobs:
       FORGE3D_RECIPE_GOLDEN_VARIANT: nvidia-vulkan
       FORGE3D_SUBSTRATIA_GOLDEN_VARIANT: nvidia-vulkan
       FORGE3D_SUBSTRATIA_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      FORGE3D_RUN_OBLIQUA_GPU: '1'
 
     steps:
       - uses: actions/checkout@v4
@@ -1063,12 +1217,46 @@ jobs:
           "FORGE3D_SUBSTRATIA_ARTIFACT_DIR=$(Join-Path $root 'substratia')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_SIDERA_ARTIFACT_DIR=$(Join-Path $root 'sidera')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_ORBIS_ARTIFACT_DIR=$(Join-Path $root 'orbis')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_INVERSE_ARTIFACT_DIR=$(Join-Path $root 'inverse')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_OBLIQUA_ARTIFACT_DIR=$(Join-Path $root 'obliqua')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_EXPECTED_ADAPTER_PROBE=$(Join-Path $root 'adapter-probe.json')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+
+      - name: Bind lane to exact clean candidate
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA) { throw "candidate SHA mismatch" }
+          $dirty = (git status --porcelain --untracked-files=no | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw "candidate tracked worktree is dirty: $dirty" }
+          if ($env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA.Length -ne 40) { throw "candidate SHA is not full length" }
+          New-Item -ItemType Directory -Force -Path $env:FORGE3D_VISUAL_ARTIFACT_DIR | Out-Null
+
+      - name: Download verified OBLIQUA fixtures
+        shell: pwsh
+        run: |
+          $baseUrl = 'https://media.githubusercontent.com/media/milos-agathon/forge3d/92a86baa3c8f6ba3c3a7368e4f80d4004905a433'
+          $fixtures = @(
+            @{ Path = 'assets/tif/switzerland_dem.tif'; Sha256 = 'd09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478' }
+            @{ Path = 'assets/tif/switzerland_land_cover.tif'; Sha256 = '6b254585be4982ed9e8da63b8536ecc2f5fa4c64c6545db06c73eb1fe39a8f7f' }
+          )
+          foreach ($fixture in $fixtures) {
+            $url = "$baseUrl/$($fixture.Path)"
+            curl.exe --fail --location --retry 3 --output $fixture.Path $url
+            if ($LASTEXITCODE -ne 0) {
+              Remove-Item -LiteralPath $fixture.Path -Force -ErrorAction SilentlyContinue
+              throw "curl.exe failed to download $($fixture.Path) (exit $LASTEXITCODE)"
+            }
+            $actual = (Get-FileHash -LiteralPath $fixture.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $fixture.Sha256) {
+              Remove-Item -LiteralPath $fixture.Path -Force
+              throw "SHA-256 mismatch for $($fixture.Path)`: expected $($fixture.Sha256), got $actual"
+            }
+          }
 
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
@@ -1091,18 +1279,8 @@ jobs:
         run: |
           python scripts/install_compatible_wheel.py dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install pytest numpy pyproj pillow
+          python -m pip install pytest numpy pyproj pillow rasterio
           exit $LASTEXITCODE
-
-      - name: Bind lane to exact clean candidate
-        shell: pwsh
-        run: |
-          $head = (git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $head -ne $env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA) { throw "candidate SHA mismatch" }
-          $dirty = (git status --porcelain --untracked-files=no | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0 -or $dirty) { throw "candidate tracked worktree is dirty: $dirty" }
-          if ($env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA.Length -ne 40) { throw "candidate SHA is not full length" }
-          New-Item -ItemType Directory -Force -Path $env:FORGE3D_VISUAL_ARTIFACT_DIR | Out-Null
 
       - name: Require physical NVIDIA Vulkan terrain adapter
         shell: pwsh
@@ -1155,6 +1333,126 @@ jobs:
             --command "python scripts/run_nvidia_visual_acceptance.py --suite orbis --junit `"$junit`"" `
             --output (Join-Path $env:FORGE3D_ORBIS_ARTIFACT_DIR "orbis-evidence.json")
           exit $LASTEXITCODE
+
+      - name: Run AEQUITAS adjudication gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_ADJUDICATION_ARTIFACT_DIR: tests/artifacts/adjudication
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:FORGE3D_ADJUDICATION_ARTIFACT_DIR | Out-Null
+          python -m pytest tests/test_adjudication_gate.py -v --tb=short --junitxml="$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/junit.xml"
+          exit $LASTEXITCODE
+
+      - name: Run PROMETHEUS terrain reference gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          New-Item -ItemType Directory -Force -Path tests/artifacts/prometheus | Out-Null
+          python -m pytest tests/test_hybrid_terrain_pt.py tests/test_prometheus_dem_reference.py -v --tb=short --junitxml="tests/artifacts/prometheus/junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "tests/artifacts/prometheus/junit.xml"
+          exit $LASTEXITCODE
+
+      - name: Run physical NVIDIA Vulkan Python GPU checks
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          $gpuChecksDir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "physical-python-gpu-checks"
+          New-Item -ItemType Directory -Force -Path $gpuChecksDir | Out-Null
+          $junit = Join-Path $gpuChecksDir "junit.xml"
+          python -m pytest `
+            tests/test_atmosphere_pt_reference.py `
+            tests/test_shader_proofs.py::test_runtime_contract_asserts_observed_gpu_inputs `
+            tests/test_shadow_tip.py::test_curved_shadow_memory_matches_flat_baseline `
+            -v --tb=short --junitxml="$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
+      - name: Run DIFFERENTIA inverse solver gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:FORGE3D_INVERSE_ARTIFACT_DIR | Out-Null
+          python -m pytest tests/test_inverse_scoring.py tests/test_inverse_pt.py -v --tb=short --junitxml="$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
+          exit $LASTEXITCODE
+
+      - name: Run GPU-only Rust checks on physical NVIDIA Vulkan
+        shell: pwsh
+        run: |
+          # Each check is excluded only from the non-physical Rust matrix above.
+          # This exact-head lane has already required the NVIDIA Vulkan adapter.
+          $features = 'default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts'
+          $checks = @(
+            'core::gpu_timing::tests::gpu_timing_double_buffered_measures_copy',
+            'offscreen::adjudication_raster::tests::raster_capture_executes_production_shader',
+            'offscreen::adjudication_raster::tests::adjudication_shadow_map_dump',
+            'path_tracing::adjudication::tests::pt_reference_renders_multibounce_frames',
+            'path_tracing::hybrid_compute::terrain_heightfield::tests::production_shadow_ray_uses_later_bilinear_root_after_tmin',
+            'path_tracing::inverse::tests::inverse_checkpointed_replay_matches_untiled',
+            'path_tracing::inverse::tests::inverse_edge_term_exercises_boundary_classes_on_gpu',
+            'path_tracing::inverse::tests::inverse_edge_term_replays_nonuniform_environment_map_on_gpu',
+            'path_tracing::inverse::tests::inverse_gaussian_smooth_and_crease_gpu_probe',
+            'path_tracing::inverse::tests::inverse_gradient_matches_fd_nonflat_all_terms',
+            'path_tracing::inverse::tests::inverse_gradient_matches_finite_difference',
+            'path_tracing::inverse::tests::inverse_reservoir_boundary_selection_probe',
+            'path_tracing::inverse::tests::inverse_score_correction_is_exercised',
+            'pipeline::pbr::tests::pbr_pipeline_initializes_real_ibl_and_shader',
+            'render::mesh_instanced::tests::draw_batch_params_renders_pixels',
+            'shadows::msm_tests::live_shared_msm_sampler_treats_front_of_mean_as_lit',
+            'shadows::msm_tests::live_shared_msm_sampler_consumes_third_and_fourth_moments',
+            'shadows::moment_pass::dimension_tests::generation_and_blur_cover_a_1024_moment_atlas',
+            'shadows::moment_pass::tests::execute_rejects_unbound_and_mismatched_allocations',
+            'shadows::moment_pass::tests::legacy_view_prepare_and_execute_sequence_remains_compatible',
+            'shadows::blur_pass::tests::separable_blur_filters_both_axes',
+            'shadows::blur_pass::tests::execute_rejects_invalid_or_mismatched_atlas_dimensions',
+            'shadows::blur_pass::tests::execute_rejects_invalid_texture_contracts_before_view_creation',
+            'shadows::blur_pass::tests::execute_rejects_invalid_evsm_exponents',
+            'shadows::blur_pass::tests::bind_groups_follow_atlas_resource_identity',
+            'shadows::tests::shared_evsm_visibility_helpers_execute_lit_front_of_mean',
+            'shadows::tests::shared_evsm_minimum_variance_scales_each_warp_derivative',
+            'shadows::tests::shared_evsm_moment_leak_control_preserves_a_soft_penumbra',
+            'shadows::tests::shared_evsm_uniform_distribution_does_not_widen',
+            'shadows::tests::shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver',
+            'shadows::tests::shared_evsm_chebyshev_is_conservative_for_uniform_half_moments',
+            'shadows::tests::shared_evsm_uniform_half_uncertainty_has_a_bounded_transition',
+            'shadows::tests::shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows',
+            'shadows::tests::shared_evsm_helpers_fail_open_for_non_finite_inputs',
+            'shadows::tests::shared_pcss_penumbra_grows_with_light_size_and_receiver_separation',
+            'shadows::tests::shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs'
+          )
+          $log = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR 'physical-rust-gpu-checks.log'
+          foreach ($check in $checks) {
+            "running $check" | Tee-Object -FilePath $log -Append
+            cargo test --release --lib --features $features $check -- --exact --nocapture *>&1 | Tee-Object -FilePath $log -Append
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Run strict OBLIQUA NVIDIA Vulkan gates
+        shell: pwsh
+        env:
+          WGPU_BACKEND: vulkan
+          FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
+          FORGE3D_RUN_OBLIQUA_GPU: '1'
+        run: |
+          python -m pytest tests/test_obliqua_camera.py tests/test_obliqua_albedo.py tests/test_obliqua_poster.py tests/test_api_contracts.py tests/test_render_certificate_contract.py -v --tb=short
+          exit $LASTEXITCODE
+
+      - name: Upload OBLIQUA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: obliqua-artifacts
+          path: ${{ env.FORGE3D_OBLIQUA_ARTIFACT_DIR }}/
+          if-no-files-found: error
 
       - name: Record visual golden lane RAN
         id: golden-pass
@@ -1386,7 +1684,9 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'm06'))
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
-    timeout-minutes: 35
+    # A cold isolated release build exceeded the former 35-minute envelope;
+    # keep the required physical acceptance intact while allowing cleanup.
+    timeout-minutes: 45
     env:
       WGPU_BACKEND: vulkan
       FORGE3D_NO_BOOTSTRAP: '1'
@@ -2138,6 +2438,178 @@ jobs:
           retention-days: 90
 
   # ============================================================================
+  # HELIOS conservative-descent proof
+  # ============================================================================
+  test-helios-rust-conservative:
+    name: HELIOS Conservative Descent (Rust)
+    needs: terrain-golden-paths
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.scope == 'helios' || inputs.scope == 'full')) ||
+      (github.event_name == 'schedule' && needs.terrain-golden-paths.outputs.helios == 'true')
+    runs-on: ubuntu-latest
+    outputs:
+      gate: ${{ steps.helios-rust-pass.outputs.gate || 'unknown' }}
+    env:
+      FORGE3D_HELIOS_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Bind Rust proof to exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/forge3d-helios-rust-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$artifact_dir"
+          echo "FORGE3D_HELIOS_RUST_ARTIFACT_DIR=$artifact_dir" >> "$GITHUB_ENV"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$FORGE3D_HELIOS_CANDIDATE_SHA"
+          printf '%s\n' "$actual" > "$artifact_dir/rust-checked-out-head.txt"
+      - name: Run the exact conservative-descent proof
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --release --lib \
+            path_tracing::hybrid_compute::terrain_heightfield::tests::curvature_descent_is_conservative \
+            -- --exact --nocapture 2>&1 | tee "$FORGE3D_HELIOS_RUST_ARTIFACT_DIR/rust-conservative-descent.log"
+      - name: Record conservative-descent PASS
+        id: helios-rust-pass
+        shell: bash
+        run: echo "gate=pass" >> "$GITHUB_OUTPUT"
+      - name: Upload HELIOS Rust proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helios-rust-conservative-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/forge3d-helios-rust-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90
+
+  # ============================================================================
+  # HELIOS physical-GPU acceptance
+  # ============================================================================
+  test-helios-gpu:
+    name: HELIOS (NVIDIA DX12 + Vulkan)
+    needs: [build-wheel-windows, prepare-lfs-fixtures, terrain-golden-paths, test-helios-rust-conservative]
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.scope == 'helios' || inputs.scope == 'full')) ||
+      (github.event_name == 'schedule' && needs.terrain-golden-paths.outputs.helios == 'true')
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 20
+    outputs:
+      lane: ${{ steps.helios-pass.outputs.lane || 'unknown' }}
+      verifier: ${{ steps.helios-pass.outputs.verifier || 'unknown' }}
+    env:
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      FORGE3D_HELIOS_REQUIRE_PHYSICAL_GPU: '1'
+      # This labeled physical NVIDIA runner has already been hardware-probed.
+      # Opt into terrain tests so the required memory gate executes, not skips.
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
+      FORGE3D_HELIOS_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      WGPU_BACKEND: vulkan
+      WGPU_BACKENDS: vulkan
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Initialize exact-candidate HELIOS evidence
+        shell: pwsh
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "forge3d-helios-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "FORGE3D_HELIOS_ARTIFACT_DIR=$artifactDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:FORGE3D_HELIOS_CANDIDATE_SHA) {
+            throw "HELIOS checkout mismatch: expected=$env:FORGE3D_HELIOS_CANDIDATE_SHA actual=$actual"
+          }
+          $dirty = (git status --porcelain --untracked-files=no | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw "HELIOS tracked worktree is dirty: $dirty" }
+          $actual | Set-Content "$artifactDir/checked-out-head.txt"
+          @{
+            repository = $env:GITHUB_REPOSITORY
+            head_sha = $env:FORGE3D_HELIOS_CANDIDATE_SHA
+            checked_out_head = $actual
+            runner_name = $env:RUNNER_NAME
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            required_backend = 'vulkan'
+            required_labels = @('self-hosted', 'Windows', 'X64', 'forge3d-gpu', 'gpu-nvidia')
+          } | ConvertTo-Json -Depth 4 | Set-Content "$artifactDir/run-context.json"
+      - name: Download conservative-descent proof
+        uses: actions/download-artifact@v4
+        with:
+          name: helios-rust-conservative-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/forge3d-helios-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: lfs-fixture-bundles
+      - name: Restore HELIOS real-DEM fixture
+        shell: pwsh
+        run: python -m zipfile -e lfs-fixture-bundles/python-tiffs.zip .
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install exact-head wheel and acceptance dependencies
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist *>&1 | Tee-Object "$env:FORGE3D_HELIOS_ARTIFACT_DIR/wheel-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install pytest numpy rasterio pyproj *>&1 | Tee-Object "$env:FORGE3D_HELIOS_ARTIFACT_DIR/dependency-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import hashlib, json, pathlib, forge3d._forge3d as native; p=pathlib.Path(native.__file__).resolve(); print(json.dumps({'native_extension': str(p), 'native_sha256': hashlib.sha256(p.read_bytes()).hexdigest()}, indent=2))" | Set-Content "$env:FORGE3D_HELIOS_ARTIFACT_DIR/installed-wheel-runtime.json"
+      - name: Require physical NVIDIA Vulkan
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_HELIOS_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_HELIOS_ARTIFACT_DIR/adapter-probe.log"
+          exit $LASTEXITCODE
+      - name: Dispatch exact production terrain_trace proof on physical GPU
+        shell: pwsh
+        run: |
+          cargo test --release --lib path_tracing::hybrid_compute::terrain_heightfield::tests::curvature_descent_production_gpu_is_conservative -- --exact --nocapture *>&1 | Tee-Object "$env:FORGE3D_HELIOS_ARTIFACT_DIR/production-gpu-conservative-descent.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run all HELIOS wins with zero skips
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:FORGE3D_HELIOS_ARTIFACT_DIR "pytest-junit.xml"
+          python -m pytest tests/test_solar_spa.py tests/test_viewshed_curvature.py tests/test_shadow_tip.py -v --tb=short --capture=tee-sys --junitxml="$junit" *>&1 | Tee-Object "$env:FORGE3D_HELIOS_ARTIFACT_DIR/pytest.log"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit" *>&1 | Tee-Object "$env:FORGE3D_HELIOS_ARTIFACT_DIR/junit-verifier.log"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          exit $verifyCode
+      - name: Verify and consolidate HELIOS evidence
+        shell: pwsh
+        run: |
+          python scripts/helios_evidence_report.py --artifact-dir "$env:FORGE3D_HELIOS_ARTIFACT_DIR" --candidate-sha "$env:FORGE3D_HELIOS_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_HELIOS_ARTIFACT_DIR/evidence-verifier.log"
+          exit $LASTEXITCODE
+      - name: Record physical lane RAN and verifier PASS
+        id: helios-pass
+        shell: pwsh
+        run: |
+          $lane = Get-Content (Join-Path $env:FORGE3D_HELIOS_ARTIFACT_DIR "lane-ran.json") -Raw | ConvertFrom-Json
+          $verification = Get-Content (Join-Path $env:FORGE3D_HELIOS_ARTIFACT_DIR "verification.json") -Raw | ConvertFrom-Json
+          if ($lane.status -ne "RAN" -or $verification.status -ne "PASS") { throw "HELIOS evidence did not record RAN/PASS" }
+          "lane=ran" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "verifier=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Upload SHA-, adapter-, and metric-bound HELIOS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helios-physical-gpu-evidence
+          path: ${{ runner.temp }}/forge3d-helios-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90
+
+  # ============================================================================
   # Hosted determinism families. These consume the exact platform wheels above
   # and run only for nightly acceptance or an explicit manual scope. ABSENT
   # hosted GPU evidence never substitutes for the physical NVIDIA acceptance
@@ -2194,7 +2666,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust docs
-        run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts,enable-globe --no-deps
+        run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe --no-deps
 
   # ============================================================================
   # Stable hosted gate for every existing and future PR. Configure branch
@@ -2216,7 +2688,7 @@ jobs:
   # selected high-cost hosted and physical claims without delaying every merge.
   full-acceptance-summary:
     name: Full Acceptance Summary
-    needs: [pr-core-success, test-orbis-wasm, terrain-golden-paths, test-rust, test-python-full-linux, test-python-full-windows, test-python-full-macos, test-python-slow, test-terminus-fuzz, test-python-linux-arm, test-golden-images-nvidia, test-substratia-gpu-nvidia, build-docs, determinism-render, determinism-f3dz, determinism-anamnesis, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, test-tessella-gpu]
+    needs: [pr-core-success, test-orbis-wasm, terrain-golden-paths, test-rust, test-python-full-linux, test-python-full-windows, test-python-full-macos, test-python-slow, test-terminus-fuzz, test-python-linux-arm, test-golden-images-nvidia, test-substratia-gpu-nvidia, build-docs, determinism-render, determinism-f3dz, determinism-anamnesis, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, test-tessella-gpu, test-helios-rust-conservative, test-helios-gpu]
     runs-on: ubuntu-latest
     if: >-
       always() &&
@@ -2248,6 +2720,7 @@ jobs:
           f3dz_physical_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'f3dz')) }}"
           anamnesis_physical_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'anamnesis')) }}"
           tessella_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'tessella')) }}"
+          helios_selected="${{ (github.event_name == 'schedule' && needs.terrain-golden-paths.outputs.helios == 'true') || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'helios')) }}"
           render_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism')) }}"
           f3dz_hosted_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism' || inputs.scope == 'f3dz')) }}"
           anamnesis_hosted_selected="${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'determinism' || inputs.scope == 'anamnesis')) }}"
@@ -2299,4 +2772,20 @@ jobs:
           check_selected "$anamnesis_physical_selected" '${{ needs.test-anamnesis-portability.result }}' anamnesis-portability
           check_selected "$anamnesis_physical_selected" '${{ needs.test-anamnesis-production.result }}' anamnesis-production
           check_selected "$tessella_selected" '${{ needs.test-tessella-gpu.result }}' tessella-physical
+          check_selected "$helios_selected" '${{ needs.test-helios-rust-conservative.result }}' helios-rust-conservative
+          check_selected "$helios_selected" '${{ needs.test-helios-gpu.result }}' helios-physical
+          if [ "$helios_selected" = "true" ]; then
+            if [ '${{ needs.test-helios-rust-conservative.outputs.gate }}' != 'pass' ]; then
+              echo "::error::HELIOS conservative-descent proof did not record PASS"
+              failed=1
+            fi
+            if [ '${{ needs.test-helios-gpu.outputs.lane }}' != 'ran' ]; then
+              echo "::error::HELIOS physical lane did not record RAN"
+              failed=1
+            fi
+            if [ '${{ needs.test-helios-gpu.outputs.verifier }}' != 'pass' ]; then
+              echo "::error::HELIOS evidence verifier did not record PASS"
+              failed=1
+            fi
+          fi
           exit "$failed"

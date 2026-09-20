@@ -12,7 +12,12 @@ from pathlib import Path
 import numpy as np
 
 import forge3d as f3d
-from forge3d.terrain_params import AovSettings, PomSettings, make_terrain_params_config
+from forge3d.terrain_params import (
+    AovSettings,
+    PomSettings,
+    SkySettings,
+    make_terrain_params_config,
+)
 
 
 SOFTWARE_ADAPTER_TOKENS = (
@@ -27,6 +32,7 @@ SOFTWARE_ADAPTER_TOKENS = (
     "warp",
 )
 HARDWARE_DEVICE_TYPES = {"discretegpu", "integratedgpu", "virtualgpu"}
+PHYSICAL_DEVICE_TYPES = {"discretegpu", "integratedgpu"}
 
 
 def _write_test_hdr(path: Path, width: int = 8, height: int = 4) -> None:
@@ -99,7 +105,20 @@ def _adapter_is_ci_safe(
     return True
 
 
-def _build_params(*, with_aov: bool) -> object:
+def _adapter_is_physical_metal(probe: dict) -> bool:
+    if probe.get("status") != "ok":
+        return False
+    if str(probe.get("backend", "")).lower() != "metal":
+        return False
+    if bool(probe.get("software_fallback", False)):
+        return False
+    if str(probe.get("device_type", "")).lower() not in PHYSICAL_DEVICE_TYPES:
+        return False
+    name = str(probe.get("name", "")).lower()
+    return not any(token in name for token in (*SOFTWARE_ADAPTER_TOKENS, "paravirtual"))
+
+
+def _build_params(*, with_aov: bool, with_aether: bool = False) -> object:
     return f3d.TerrainRenderParams(
         make_terrain_params_config(
             size_px=(96, 64),
@@ -125,6 +144,16 @@ def _build_params(*, with_aov: bool) -> object:
             aov=AovSettings(enabled=with_aov, albedo=True, normal=True, depth=True)
             if with_aov
             else None,
+            sky=SkySettings(
+                enabled=True,
+                model="aether",
+                turbidity=2.0,
+                ozone_du=300.0,
+                mie_g=0.8,
+                aerial_perspective=True,
+            )
+            if with_aether
+            else None,
         )
     )
 
@@ -134,7 +163,9 @@ def _smoke_render(mode: str) -> None:
     renderer = f3d.TerrainRenderer(session)
     material_set = f3d.MaterialSet.terrain_default()
     heightmap = _build_heightmap()
-    params = _build_params(with_aov=mode == "terrain-aov")
+    params = _build_params(
+        with_aov=mode == "terrain-aov", with_aether=mode == "aether-metal"
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp_hdr:
         hdr_path = Path(tmp_hdr.name)
@@ -168,7 +199,11 @@ def _smoke_render(mode: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("terrain", "terrain-aov"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("terrain", "terrain-aov", "sidera-metal", "aether-metal"),
+        required=True,
+    )
     parser.add_argument("--json", type=Path, help="write exact adapter/probe evidence")
     parser.add_argument(
         "--require-nvidia-vulkan",
@@ -177,16 +212,57 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    backend = os.environ.get("WGPU_BACKEND")
+    backend = (
+        "metal"
+        if args.mode in {"sidera-metal", "aether-metal"}
+        else os.environ.get("WGPU_BACKEND")
+    )
     probe = f3d.device_probe(backend)
     print(f"terrain-ci-probe backend={backend!r} probe={probe}")
-    if args.json is not None:
+
+    evidence = {
+        "requested_backend": backend,
+        "mode": args.mode,
+        "probe": probe,
+    }
+
+    def write_evidence(status: str) -> None:
+        evidence["status"] = status
+        if args.json is None:
+            return
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(
-            json.dumps({"requested_backend": backend, "probe": probe}, indent=2, sort_keys=True)
-            + "\n",
+            json.dumps(evidence, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+
+    if args.mode == "sidera-metal":
+        if not _adapter_is_physical_metal(probe):
+            write_evidence("absent")
+            print("SIDERA reference lane ABSENT — no proven physical Metal adapter.")
+            return 2
+        write_evidence("passed")
+        print("SIDERA reference lane has a physical Metal adapter.")
+        return 0
+
+    if args.mode == "aether-metal":
+        if not _adapter_is_physical_metal(probe):
+            write_evidence("absent")
+            print("AETHER closure lane ABSENT — no proven physical Metal adapter.")
+            return 2
+        try:
+            _smoke_render(args.mode)
+        except Exception as exc:
+            evidence["error"] = str(exc)
+            write_evidence("failed")
+            print(
+                "AETHER closure probe: CRASH — physical Metal adapter present but "
+                f"the live spectral terrain smoke failed: {exc}"
+            )
+            return 3
+        write_evidence("passed")
+        print("AETHER closure lane executed a live spectral terrain render on Metal.")
+        return 0
 
     # Exit-code contract (CENSOR audit F-10). CI must not conflate "this
     # runner has no usable GPU" with "the renderer is broken":
@@ -201,18 +277,22 @@ def main() -> int:
         required_backend=required_backend,
         require_nvidia=args.require_nvidia_vulkan,
     ):
+        write_evidence("absent")
         print("terrain-ci-probe: ABSENT — no CI-safe hardware adapter on this runner.")
         return 2
 
     try:
         _smoke_render(args.mode)
     except Exception as exc:
+        evidence["error"] = str(exc)
+        write_evidence("failed")
         print(
             "terrain-ci-probe: CRASH — CI-safe adapter present but the terrain "
             f"smoke render failed: {exc}"
         )
         return 3
 
+    write_evidence("passed")
     print("Terrain CI lane is supported on this adapter.")
     return 0
 

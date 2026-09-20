@@ -88,11 +88,15 @@ fn bsdf_eval_pdf(
     // Specular PDF (half-vector sampling model approx)
     let pdf_s = (D * n_dot_h) / max(4.0 * v_dot_h, 1e-6);
 
-    // Mixture model PDF with simple weights kd/ks
-    let ks = 1.0 - kd;
-    let pdf_mix = kd * pdf_d + ks * pdf_s;
-    let f = fd + fs;
-    return BrdfEval(f, max(pdf_mix, 1e-8));
+    // PDF of the continuation sampler selected below.
+    let pdf_mix = select(pdf_d, pdf_s, metallic > 0.5);
+    let f = fd * (vec3<f32>(1.0) - F) + fs;
+    return BrdfEval(f, pdf_mix);
+}
+
+fn sampled_brdf_weight(brdf: BrdfEval, cos_theta: f32) -> vec3<f32> {
+    if (brdf.pdf <= 0.0) { return vec3<f32>(0.0); }
+    return brdf.f * (cos_theta / brdf.pdf);
 }
 
 // -----------------------------------------------------------------------------
@@ -289,7 +293,7 @@ struct RestirSettings {
     debug_aov_mode: u32,
     qmc_mode: u32,
     adaptive_threshold_u32: u32,
-    _pad: u32,
+    enabled: u32,
 };
 @group(1) @binding(12) var<uniform> restir_settings: RestirSettings;
 @group(1) @binding(13) var<storage, read_write> restir_gbuffer_mat: array<u32>;        // material id per pixel
@@ -531,17 +535,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let ay = max(0.002, scene_spheres[mat_idx].ay);
         let F0 = mix(vec3<f32>(0.04), albedo, saturate(metallic));
 
-        // --- ReSTIR-driven direct lighting (temporal reservoir) ---
+        // --- ReSTIR-driven primary direct lighting (resolved reservoir) ---
+        var restir_light_type = 0u;
         {
             let r = restir_reservoirs[h.pixel];
-            if (r.m > 0u && r.weight > 0.0 && r.target_pdf > 0.0) {
+            if (restir_settings.enabled != 0u && h.depth == 0u && r.m > 0u && r.weight > 0.0 && r.target_pdf > 0.0) {
+                restir_light_type = r.sample.light_type;
                 var wi_r: vec3<f32> = vec3<f32>(0.0);
                 var dist_r: f32 = 1e30;
                 var Li_r: vec3<f32> = vec3<f32>(0.0);
                 if (r.sample.light_type == 1u) {
                     // Directional: direction stored as incoming wi
                     wi_r = normalize(r.sample.direction);
-                    Li_r = vec3<f32>(r.sample.intensity);
+                    let light = directional_lights[r.sample.light_index];
+                    Li_r = light.color * light.intensity;
                 } else if (r.sample.light_type == 2u) {
                     // Area disc: params.x = radius, position is sample pos
                     let dir = r.sample.position - h.p;
@@ -549,7 +556,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (d > 1e-6) {
                         wi_r = dir / d;
                         dist_r = d;
-                        Li_r = vec3<f32>(r.sample.intensity);
+                        let light = area_lights[r.sample.light_index];
+                        Li_r = light.color * light.intensity;
                     }
                 }
                 let cos_surf_r = max(dot(n, wi_r), 0.0);
@@ -586,7 +594,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
 
         // --- Start NEE: Environment light sample (mixture sampler, visibility via shadow pass) ---
-        {
+        if (!(ior > 1.01 && metallic <= 0.5)) {
             let u1_l = xorshift32(&rng_state);
             let u2_l = xorshift32(&rng_state);
             let u3_l = xorshift32(&rng_state);
@@ -597,8 +605,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let L_env = env_color(wi_l);
                 let pdf_light = s_env.pdf;
                 let br = bsdf_eval_pdf(wo, wi_l, n, albedo, metallic, roughness, ax, ay);
-                // Balance heuristic
-                let w_mis = pdf_light / max(pdf_light + br.pdf, 1e-8);
+                // Environment NEE owns finite-BSDF escape paths.
+                let w_mis = 1.0;
                 let imp = select(1.0, object_importance[mat_idx], mat_idx < arrayLength(&object_importance));
                 let contrib = h.throughput * br.f * L_env * (cos_surf / max(pdf_light, 1e-8)) * w_mis * imp * mtrans;
                 // Push shadow ray (to env): use large tmax
@@ -634,7 +642,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let L = directional_lights[min(idx, count - 1u)];
                 let wi = normalize(-L.direction);
                 let cos_surf = max(dot(n, wi), 0.0);
-                if (cos_surf > 0.0) {
+                if (cos_surf > 0.0 && restir_light_type != 1u) {
                     let br = bsdf_eval_pdf(wo, wi, n, albedo, metallic, roughness, ax, ay);
                     let Li = L.color * L.intensity;
                     // Selection probability only (delta light)
@@ -677,7 +685,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let u1_l = xorshift32(&rng_state);
                 let u2_l = xorshift32(&rng_state);
                 let s = sample_area_light_disc(h.p, n, light, u1_l, u2_l);
-                if (s.pdf > 0.0 && s.cos_on_light > 0.0) {
+                if (s.pdf > 0.0 && s.cos_on_light > 0.0 && restir_light_type != 2u) {
                     let br = bsdf_eval_pdf(wo, s.wi, n, albedo, metallic, roughness, ax, ay);
                     let cos_surf = max(dot(n, s.wi), 0.0);
                     if (cos_surf > 0.0) {
@@ -762,8 +770,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 );
                 let F = fresnel_schlick(v_dot_h, F0);
                 let spec = (D * G) / max(4.0 * n_dot_l * n_dot_v, 1e-6) * F;
-                pdf = (D * n_dot_h) / max(4.0 * v_dot_h, 1e-6);
-                new_throughput = h.throughput * spec * (n_dot_l / max(pdf, 1e-6));
+                let brdf = bsdf_eval_pdf(wo, wi, n, albedo, metallic, roughness, ax, ay);
+                pdf = brdf.pdf;
+                new_throughput = h.throughput * sampled_brdf_weight(brdf, n_dot_l);
             } else {
                 // Invalid sample
                 continue;
@@ -792,8 +801,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     wi = normalize(reflect(-wo, n));
                 }
             }
-            // Delta lobe: pdf=1, color via albedo as tint
-            pdf = 1.0;
+            // Zero continuous density identifies delta escapes for environment sampling.
+            pdf = 0.0;
             new_throughput = h.throughput * max(albedo, vec3<f32>(0.0));
         } else {
             // Lambertian
@@ -802,9 +811,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let local_dir = sample_cosine_hemisphere(u1, u2);
             wi = normalize(basis * local_dir);
             let cos_theta = max(0.0, dot(n, wi));
-            pdf = cos_theta / PI + 1e-8;
-            let brdf = albedo / PI;
-            new_throughput = h.throughput * brdf * (cos_theta / pdf);
+            let brdf = bsdf_eval_pdf(wo, wi, n, albedo, metallic, roughness, ax, ay);
+            pdf = brdf.pdf;
+            new_throughput = h.throughput * sampled_brdf_weight(brdf, cos_theta);
         }
 
         // Russian roulette with optional adaptive threshold (A16)

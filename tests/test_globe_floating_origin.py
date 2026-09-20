@@ -28,9 +28,12 @@ ORBIS_GOLDEN = (
     / "orbis_rainier_ground.nvidia-vulkan.png"
 )
 ORBIS_SELECTED = os.environ.get("FORGE3D_RUN_ORBIS_GPU") == "1"
-# The physical baseline has 51 RGB colors and a 67.02% non-modal fraction;
-# these lower bounds retain broad rendering tolerance while rejecting blank frames.
-ORBIS_MIN_DISTINCT_GROUND_COLORS = 32
+# The physical baseline has 18 RGB colors and a 61.46% non-modal fraction after
+# the AETHER/TERRA-DETERMINATA IBL corrections (Karis split-sum BRDF LUT and
+# cosine-weighted irradiance) removed the inflated env-specular term that used
+# to carry most of the ground frame's variation; these lower bounds retain broad
+# rendering tolerance while rejecting blank frames.
+ORBIS_MIN_DISTINCT_GROUND_COLORS = 16
 ORBIS_MIN_NON_MODAL_GROUND_FRACTION = 0.05
 
 

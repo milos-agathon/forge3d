@@ -282,10 +282,31 @@ pub(super) fn eval_int_binary(
     right: Value,
     op: naga::BinaryOperator,
 ) -> Option<Value> {
+    use naga::BinaryOperator as B;
+    // Exact bitwise identities: `x | 0 = x`, `x ^ 0 = x`, `x & 0 = 0`. The
+    // determinism include's opaque barrier is `bitcast(x) | det_zu` with
+    // det_zu modeled as 0, so these folds are what lets the barrier evaluate
+    // to its input instead of an unconstrained integer interval.
+    match op {
+        B::InclusiveOr | B::ExclusiveOr => {
+            if matches!(right, Value::Int { lo: 0, hi: 0 }) {
+                return Some(left);
+            }
+            if matches!(left, Value::Int { lo: 0, hi: 0 }) {
+                return Some(right);
+            }
+        }
+        B::And
+            if matches!(left, Value::Int { lo: 0, hi: 0 })
+                || matches!(right, Value::Int { lo: 0, hi: 0 }) =>
+        {
+            return Some(Value::Int { lo: 0, hi: 0 });
+        }
+        _ => {}
+    }
     let (Value::Int { lo: ll, hi: lh }, Value::Int { lo: rl, hi: rh }) = (left, right) else {
         return None;
     };
-    use naga::BinaryOperator as B;
     match op {
         B::ShiftRight if rl == rh && (0..32).contains(&rl) => Some(Value::Int {
             lo: ll >> rl,

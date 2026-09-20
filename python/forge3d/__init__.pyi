@@ -4,15 +4,19 @@
 # RELEVANT FILES: python/forge3d/__init__.py, python/forge3d/config.py, src/render/params.rs, examples/terrain_demo.py
 # ruff: noqa: F401
 from __future__ import annotations
-from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping, Callable
+from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping, Callable, NoReturn
 import os
 import numpy as np
 from . import gis
+from . import geo as geo
+from . import terrain as terrain
 from . import codec as codec
 from . import text as text
 from . import precision as precision
 from . import astro as astro
 from . import sky as sky
+from . import atmosphere as atmosphere
+from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
@@ -62,6 +66,7 @@ from .terrain_params import (
     VTLayerFamily,
     TerrainVTSettings,
     validate_terrain_vt_support,
+    SkySettings,
 )
 from . import terrain as terrain
 from .terrain import VTStore as VTStore, open_vt_store as open_vt_store
@@ -147,7 +152,7 @@ from .style import (
 )
 from . import smoke
 from . import verify
-from .path_tracing import ExperimentalSyntheticOutput
+from .path_tracing import ExperimentalSyntheticOutput, render_terrain_poster
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -242,6 +247,16 @@ class Scene:
     def debug_uniforms_f32(self) -> np.ndarray: ...
     def debug_lut_format(self) -> str: ...
     def get_stats(self) -> Dict[str, Any]: ...
+
+    # --- AETHER spectral atmosphere ---
+    def set_atmosphere(
+        self,
+        turbidity: float = ...,
+        ozone_du: float = ...,
+        mie_g: float = ...,
+    ) -> None: ...
+    def clear_atmosphere(self) -> None: ...
+    def get_atmosphere_settings(self) -> Dict[str, Any]: ...
 
     # --- SSAO ---
     def ssao_enabled(self) -> bool: ...
@@ -1259,8 +1274,30 @@ class DeviceProbeResult(TypedDict, total=False):
     backend: str
     software_fallback: bool
 
+class DeterminismProbeResult(TypedDict, total=False):
+    # status is always present: "ok" | "probe_error" | "native_missing".
+    status: str
+    reason: str
+    remediation: str
+    # Present when status == "ok".
+    probe_sha256: str
+    probe_bytes_hex: str
+    raster_sha256: str
+    raster_bytes_hex: str
+    wgsl_sha256: str
+    raster_wgsl_sha256: str
+    adapter_name: str
+    adapter_vendor: int
+    adapter_device: int
+    adapter_device_type: str
+    adapter_backend: str
+    adapter_driver: str
+    adapter_driver_info: str
+    software_fallback: bool
+
 def enumerate_adapters() -> list[dict[str, Any]]: ...
 def device_probe(backend: Optional[str] = ...) -> DeviceProbeResult: ...
+def determinism_probe() -> DeterminismProbeResult: ...
 def native_import_error() -> BaseException | None: ...
 
 def memory_metrics() -> Dict[str, Any]: ...
@@ -1389,29 +1426,6 @@ class SSRSettings:
         edge_fade: float = ...,
         temporal_alpha: float = ...
     ) -> None: ...
-
-# P6: Atmospherics & sky classes
-class SkySettings:
-    sun_direction: Tuple[float, float, float]
-    turbidity: float
-    ground_albedo: float
-    model: str  # "off", "preetham", "hosek-wilkie", or "approximate"
-    sun_intensity: float
-    exposure: float
-    def __init__(
-        self,
-        sun_direction: Tuple[float, float, float] = ...,
-        turbidity: float = ...,
-        ground_albedo: float = ...,
-        model: str = ...,
-        sun_intensity: float = ...,
-        exposure: float = ...
-    ) -> None: ...
-    @staticmethod
-    def preetham(turbidity: float, ground_albedo: float) -> SkySettings: ...
-    @staticmethod
-    def hosek_wilkie(turbidity: float, ground_albedo: float) -> SkySettings: ...
-    def with_sun_angles(self, azimuth_deg: float, elevation_deg: float) -> None: ...
 
 class VolumetricSettings:
     density: float
@@ -1551,7 +1565,17 @@ def declutter_optimal(
         Tuple[int, int, Tuple[float, float, float, float], float, bool]
     ],
     gap_tolerance: float = ...,
-    node_budget: int = ...,
+    node_budget: int | None = ...,
+    margin: float = ...,
+) -> Tuple[List[Tuple[int, int]], float, LabelRationale]: ...
+
+def declutter(
+    candidates: Sequence[
+        Tuple[int, int, Tuple[float, float, float, float], float, bool]
+    ],
+    algorithm: Literal["optimal"] = ...,
+    gap_tolerance: float = ...,
+    node_budget: int | None = ...,
     margin: float = ...,
 ) -> Tuple[List[Tuple[int, int]], float, LabelRationale]: ...
 
@@ -1564,31 +1588,194 @@ def render_adjudication_pair(
     cache: str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
 
-# PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
-def hybrid_render_terrain_reference(
+# DIFFERENTIA: differentiable inverse path tracing (enable-inverse-pt)
+from .inverse import (
+    InverseSolveUnavailable,
+    RecoveredScene,
+    recover_scene,
+)
+from . import inverse as inverse
+
+def inverse_solve(
+    target_rgba: np.ndarray,
     heightmap: np.ndarray,
     width: int,
     height: int,
     cam: Dict[str, Any],
     spacing: Tuple[float, float] = ...,
     exaggeration: float = ...,
-    albedo: Tuple[float, float, float] = ...,
+    init_albedo: Optional[Any] = ...,
     sun_azimuth_deg: float = ...,
     sun_elevation_deg: float = ...,
     sun_intensity: float = ...,
+    turbidity: float = ...,
+    sun_color: Tuple[float, float, float] = ...,
     env_map: Optional[np.ndarray] = ...,
     env_intensity: float = ...,
-    mesh_vertices: Optional[np.ndarray] = ...,
-    mesh_indices: Optional[np.ndarray] = ...,
+    iters: int = ...,
+    spp: int = ...,
+    frames: int = ...,
+    tile_size: int = ...,
+    seed: int = ...,
+    lr_albedo: float = ...,
+    lr_sun: float = ...,
+    lr_turbidity: float = ...,
+    early_stop_tol: float = ...,
+    early_stop_patience: int = ...,
+    spatial_reuse: bool = ...,
+    edge_term: bool = ...,
+    score_correction: bool = ...,
+) -> Dict[str, Any]: ...
+
+def inverse_render_primal(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    cam: Dict[str, Any],
+    albedo: Any,
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    turbidity: float = ...,
+    sun_color: Tuple[float, float, float] = ...,
+    env_map: Optional[np.ndarray] = ...,
+    env_intensity: float = ...,
+    spp: int = ...,
+    frames: int = ...,
+    seed: int = ...,
+) -> Dict[str, Any]: ...
+
+# PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
+# ``earth_model="flat"`` requires ``refraction_model="none"``; unsupported
+# model names or pairs raise an exception and never silently fall back.
+def hybrid_render_terrain_reference(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    camera: dict | None = ...,
+    *,
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    albedo: Tuple[float, float, float] = ...,
+    albedo_map: np.ndarray | None = ...,
+    albedo_sampling: str | None = ...,
+    camera_model: str | None = ...,
+    sensor_rect: Tuple[float, float, float, float] | None = ...,
+    full_width: int | None = ...,
+    full_height: int | None = ...,
+    pixel_offset: Optional[Tuple[int, int]] = ...,
+    turbidity: float = ...,
+    sun_azimuth_deg: float | None = ...,
+    sun_elevation_deg: float | None = ...,
+    solar_time: object | None = ...,
+    sun_intensity: float = ...,
+    sun_color: Sequence[float] | np.ndarray = ...,
+    env_map: np.ndarray | None = ...,
+    env_intensity: float = ...,
+    mesh_vertices: np.ndarray | None = ...,
+    mesh_indices: np.ndarray | None = ...,
     spp: int = ...,
     max_frames: int = ...,
     min_frames: int = ...,
     variance_threshold: float = ...,
     seed: int = ...,
     certificate: bool | str | PathLikeStr | None = ...,
-    sun_color: Optional[Sequence[float] | np.ndarray] = ...,
+    cache: str | PathLikeStr | None = ...,
+    observer_latitude_deg: float | None = ...,
+    observer_longitude_deg: float | None = ...,
+    earth_model: str = ...,
+    sphere_radius_m: float = ...,
+    refraction_model: str = ...,
+    refraction_k: float = ...,
+    pressure_mbar: float | None = ...,
+    temperature_c: float | None = ...,
+    atmosphere: AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None = ...,
+    sdf_scene: object | None = ...,
+) -> Dict[str, Any]: ...
+
+# AETHER: independent stochastic spectral atmosphere acceptance reference.
+def hybrid_render_aether_spectral_reference(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    cam: Dict[str, Any],
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    turbidity: float = ...,
+    ozone_du: float = ...,
+    mie_g: float = ...,
+    ground_albedo: float = ...,
+    spp: int = ...,
+    seed: int = ...,
+    enabled: bool = ...,
+    variance_threshold: float = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
     cache: str | PathLikeStr | None = ...,
 ) -> Dict[str, Any]: ...
+
+# AETHER: spectral atmosphere public/native surface
+class AtmosphereLutHandle:
+    def __new__(cls) -> NoReturn: ...
+    @property
+    def turbidity(self) -> float: ...
+    @property
+    def ozone_du(self) -> float: ...
+    @property
+    def mie_g(self) -> float: ...
+    @property
+    def ground_albedo(self) -> float: ...
+    @property
+    def scattering_orders(self) -> int: ...
+    @property
+    def precomputed(self) -> bool: ...
+    @property
+    def byte_size(self) -> int: ...
+    @property
+    def deterministic_sha256(self) -> str: ...
+    @property
+    def aerial_lut_semantics(self) -> str: ...
+    def __getitem__(self, key: str) -> Any: ...
+    def __contains__(self, key: object) -> bool: ...
+    def __len__(self) -> int: ...
+    def keys(self) -> List[str]: ...
+    def as_dict(self) -> Dict[str, Any]: ...
+
+def atmosphere_bake_luts(
+    turbidity: float = ...,
+    ozone_du: float = ...,
+    mie_g: float = ...,
+    ground_albedo: float = ...,
+    scattering_orders: int = ...,
+) -> AtmosphereLutHandle: ...
+def atmosphere_spectral_to_linear_rgb(
+    samples: Sequence[float],
+) -> Tuple[float, float, float]: ...
+def atmosphere_generate_environment(
+    width: int,
+    height: int,
+    sun_elevation_deg: float,
+    turbidity: float = ...,
+    ozone_du: float = ...,
+    mie_g: float = ...,
+    ground_albedo: float = ...,
+    mode: Literal["lut", "reference"] = ...,
+) -> Dict[str, Any]: ...
+def atmosphere_reference_aerial(
+    surface_rgb: Tuple[float, float, float],
+    observer_altitude_m: float,
+    distance_m: float,
+    view_dir: Tuple[float, float, float],
+    sun_dir: Tuple[float, float, float],
+    turbidity: float = ...,
+    ozone_du: float = ...,
+    mie_g: float = ...,
+    ground_albedo: float = ...,
+) -> Tuple[float, float, float]: ...
 
 def render_offscreen_rgba(
     width: int,

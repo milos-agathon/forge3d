@@ -14,6 +14,7 @@ pub(super) fn register_diagnostics_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(numpy_to_exr, m)?)?;
 
     m.add_function(wrap_pyfunction!(engine_info, m)?)?;
+    m.add_function(wrap_pyfunction!(determinism_probe, m)?)?;
     m.add_function(wrap_pyfunction!(report_device, m)?)?;
     m.add_function(wrap_pyfunction!(c5_build_framegraph_report, m)?)?;
     m.add_function(wrap_pyfunction!(c6_mt_record_demo, m)?)?;
@@ -26,6 +27,10 @@ pub(super) fn register_diagnostics_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(clear_native_degradations, m)?)?;
     m.add_function(wrap_pyfunction!(capabilities, m)?)?;
     m.add_function(wrap_pyfunction!(render_execution_report, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        _record_terrain_poster_certificate_inputs,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(begin_render_execution_capture, m)?)?;
     m.add_function(wrap_pyfunction!(finish_render_execution_capture, m)?)?;
     m.add_function(wrap_pyfunction!(abort_render_execution_capture, m)?)?;
