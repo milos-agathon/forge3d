@@ -169,7 +169,6 @@ jobs:
         run: |
           cargo fmt --check
           cargo forge3d-clippy
-          cargo test --lib height_upload_capacity_admits_configured_max_batch_exactly --features enable-globe,extension-module
       - name: Build the development extension once
         run: maturin develop
       - name: Run focused CENSOR truth contracts
@@ -1426,6 +1425,15 @@ jobs:
             cargo test --release --lib --features $features $check -- --exact --nocapture *>&1 | Tee-Object -FilePath $log -Append
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+          # The renderer tree is #[cfg(feature = "extension-module")]-gated and
+          # extension-module cannot link a test binary on hosted Linux, so the
+          # ORBIS upload-capacity contract runs here on the physical Windows
+          # lane where pyo3 resolves python3.dll at link time.
+          $globeFeatures = "$features,enable-globe,extension-module"
+          $globeCheck = 'terrain::renderer::streaming::tests::height_upload_capacity_admits_configured_max_batch_exactly'
+          "running $globeCheck" | Tee-Object -FilePath $log -Append
+          cargo test --release --lib --features $globeFeatures $globeCheck -- --exact --nocapture *>&1 | Tee-Object -FilePath $log -Append
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run strict OBLIQUA NVIDIA Vulkan gates
         shell: pwsh
