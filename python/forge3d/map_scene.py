@@ -2374,6 +2374,56 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
     return _alpha_composite_rgba(base, np.asarray(overlay, dtype=np.uint8)), True, metadata
 
 
+# Cap height of the packaged Noto Sans default, in em; used to centre a label's
+# glyph block vertically on its solver box.
+_LABEL_CAP_HEIGHT_EM = 0.714
+
+
+def _label_pen_origin(
+    accepted: Any,
+    positioned: Sequence[Mapping[str, Any]],
+    render_size: float,
+    width: int,
+    height: int,
+) -> tuple[float, float]:
+    """Pen origin that centres a label's glyph block on its solver box.
+
+    The declutter solver reserves ``candidate.bounds``, a box centred on the
+    candidate anchor. Glyph origins are relative to the pen (left end of the
+    baseline), so drawing from the anchor itself would shift the text half a
+    label right of the box the solver kept clear. Geometry-authority labels
+    (curved and line) carry glyph origins already laid out around their
+    anchor and are drawn from it unchanged.
+    """
+    candidate = getattr(accepted, "candidate", None)
+    details = dict(getattr(candidate, "details", None) or {})
+    bounds = getattr(candidate, "bounds", None) or getattr(accepted, "screen_bounds", None)
+    if details.get("geometry_authority") or not bounds or len(bounds) < 4 or not positioned:
+        return _render_label_anchor(accepted, width, height)
+    xs: list[float] = []
+    ys: list[float] = []
+    try:
+        for glyph in positioned:
+            origin = glyph.get("origin") or (0.0, 0.0)
+            advance = glyph.get("advance") or (0.0, 0.0)
+            xs.extend((float(origin[0]), float(origin[0]) + float(advance[0])))
+            ys.append(float(origin[1]))
+    except (AttributeError, IndexError, TypeError, ValueError):
+        # Malformed glyphs are reported by the compositor's own validation.
+        return _render_label_anchor(accepted, width, height)
+    if not all(math.isfinite(value) for value in (*xs, *ys)):
+        return _render_label_anchor(accepted, width, height)
+    centre_x, centre_y = _render_point_to_pixel(
+        ((float(bounds[0]) + float(bounds[2])) * 0.5, (float(bounds[1]) + float(bounds[3])) * 0.5),
+        width,
+        height,
+    )
+    block_centre_x = (min(xs) + max(xs)) * 0.5 * render_size
+    cap_height = _LABEL_CAP_HEIGHT_EM * render_size
+    block_centre_y = ((min(ys) * render_size - cap_height) + max(ys) * render_size) * 0.5
+    return centre_x - block_centre_x, centre_y - block_centre_y
+
+
 def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any]) -> tuple[Any, bool]:
     label_layers = [layer for layer in recipe.layers if isinstance(layer, LabelLayer)]
     if not label_layers:
@@ -2488,7 +2538,6 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                 else typography.get("halo_width", typography.get("text_halo_width")),
                 1.0,
             )
-            anchor_x, anchor_y = _render_label_anchor(accepted, int(width), int(height))
             # The packaged atlas bake resolution is an implementation detail,
             # not the public default label size. Keep MapScene's default at
             # 12 px there. An explicitly bound custom atlas retains its own
@@ -2507,6 +2556,9 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                 })
             atlas_scale = render_size / atlas_font_size
             positioned = tuple(getattr(accepted, "positioned_glyphs", ()) or ())
+            anchor_x, anchor_y = _label_pen_origin(
+                accepted, positioned, render_size, int(width), int(height)
+            )
             if not positioned:
                 raise MapSceneTextLayoutError({
                     "status": "diagnostic_block",

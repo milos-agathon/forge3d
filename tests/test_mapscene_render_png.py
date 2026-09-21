@@ -639,8 +639,18 @@ def test_gpu_backend_uses_native_msdf_text_for_labels(tmp_path, monkeypatch):
     metrics = load_atlas_metrics(default_latin_atlas_paths()[1])
     accepted = scene.compiled_label_plans["labels"].accepted[0]
     positioned = [glyph for glyph in accepted.positioned_glyphs if glyph["has_outline"]]
-    anchor_x, anchor_y = map_scene._render_label_anchor(accepted, 80, 64)
     render_size = 12.0
+    anchor_x, anchor_y = map_scene._label_pen_origin(
+        accepted, accepted.positioned_glyphs, render_size, 80, 64
+    )
+    # The drawn glyph block is centred on the box the declutter solver reserved.
+    left = min(g["origin"][0] for g in accepted.positioned_glyphs)
+    right = max(g["origin"][0] + g["advance"][0] for g in accepted.positioned_glyphs)
+    box = accepted.candidate.bounds
+    assert anchor_x + (left + right) * 0.5 * render_size == pytest.approx((box[0] + box[2]) * 0.5, abs=1.0)
+    assert anchor_y - 0.5 * map_scene._LABEL_CAP_HEIGHT_EM * render_size == pytest.approx(
+        (box[1] + box[3]) * 0.5, abs=1.0
+    )
     atlas_scale = render_size / metrics["font_size"]
     expected = []
     for item in positioned:
