@@ -202,6 +202,7 @@ class TestNativeModuleSymbols:
         "_reserve_label_depth_host_allocation",
         "declutter",
         "declutter_optimal",
+        "layout_label_candidates",
         "anamnesis_leaf_key",
         "anamnesis_pass_key",
         "anamnesis_engine_fingerprint",
@@ -846,6 +847,7 @@ class TestPackageLevelApiContracts:
         # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
         "declutter",
         "declutter_optimal",
+        "layout_label_candidates",
         "LabelRationale",
         # CENSOR: native Ed25519 certificate signer
         "sign_render_certificate_digest",

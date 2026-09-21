@@ -76,14 +76,37 @@ def test_repeated_line_label_without_authority_is_rejected_not_synthesized():
     assert plan.rejected[0].details["required_authority"] == "compute_line_label_placement"
 
 
-def test_curved_line_labels_are_explicitly_diagnosed_not_silent_success():
+def test_curved_line_labels_use_produced_geometry_authority():
     plan = f3d.LabelPlan.compile(
         labels=[
             {
                 "id": "river-curve",
                 "text": "River",
-                "geometry": {"type": "LineString", "coordinates": [[0, 0], [20, 10], [40, 0]]},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[20.0, 50.0], [50.0, 60.0], [80.0, 50.0]],
+                },
                 "curved_text": True,
+            }
+        ],
+        camera={},
+        viewport=(100, 100),
+    )
+
+    assert not plan.rejected
+    assert len(plan.accepted) == 1
+    accepted = plan.accepted[0]
+    assert accepted.candidate.details["geometry_authority"] == "layout_curved_text"
+    assert accepted.candidate.details["positioned_glyphs"]
+
+
+def test_line_label_without_authority_still_rejects_when_production_fails():
+    plan = f3d.LabelPlan.compile(
+        labels=[
+            {
+                "id": "road-too-short",
+                "text": "A label far too long for the supplied path segment",
+                "geometry": {"type": "LineString", "coordinates": [[10.0, 50.0], [30.0, 50.0]]},
             }
         ],
         camera={},
@@ -95,6 +118,6 @@ def test_curved_line_labels_are_explicitly_diagnosed_not_silent_success():
     diagnostic = next(
         d for d in plan.diagnostics if d.code == "label_geometry_authority_missing"
     )
-    assert diagnostic.object_id == "river-curve"
+    assert diagnostic.object_id == "road-too-short"
     assert diagnostic.severity == "error"
-    assert diagnostic.details["required_authority"] == "layout_curved_text"
+    assert diagnostic.details["required_authority"] == "compute_line_label_placement"

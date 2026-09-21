@@ -984,3 +984,153 @@ def test_mapscene_visibility_uses_stable_instance_and_source_identity():
     assert by_source["source-a"]["visible"] is True
     assert by_source["source-b"]["visible"] is False
     assert by_source["source-b"]["reason"] == "terrain_occluded"
+
+
+class TestGeometryAuthorityProduction:
+    """Line/curved labels without a caller-supplied geometry_authority payload
+    get one produced by the native authority (layout_label_candidates); the
+    produced payload must satisfy the same decode contract and feed the same
+    all-candidate solver bridge."""
+
+    def _line_record(self, **overrides):
+        record = {
+            "id": "road-1",
+            "text": "Main Street",
+            "geometry": {"type": "LineString", "coordinates": [[5.0, 50.0], [95.0, 50.0]]},
+            "priority": 4,
+        }
+        record.update(overrides)
+        return record
+
+    def test_line_label_authority_is_produced_and_solved(self):
+        plan = lp.LabelPlan.compile(
+            labels=[self._line_record()],
+            camera={},
+            viewport=(100, 100),
+        )
+        assert [label.label_id for label in plan.accepted] == ["road-1"]
+        assert not any(
+            diagnostic.code == "label_geometry_authority_missing"
+            for diagnostic in plan.diagnostics
+        )
+        accepted = plan.accepted[0]
+        assert len(accepted.candidates) >= 1
+        for candidate in accepted.candidates:
+            assert (candidate.details or {}).get("geometry_authority") == (
+                "compute_line_label_placement"
+            )
+            assert candidate.bounds is not None
+            assert candidate.bounds[2] > candidate.bounds[0]
+            assert candidate.bounds[3] > candidate.bounds[1]
+        positioned = (accepted.candidate.details or {}).get("positioned_glyphs")
+        assert positioned, "accepted candidate must carry authority glyph geometry"
+        assert all(
+            glyph["glyph_id"] >= 0 and glyph["font_index"] >= 0
+            for glyph in positioned
+        )
+
+    def test_curved_label_authority_is_produced_and_solved(self):
+        plan = lp.LabelPlan.compile(
+            labels=[
+                self._line_record(
+                    id="river-1",
+                    text="Riverbend",
+                    curved_text=True,
+                    geometry={
+                        "type": "LineString",
+                        "coordinates": [[5.0, 60.0], [50.0, 40.0], [95.0, 60.0]],
+                    },
+                )
+            ],
+            camera={},
+            viewport=(100, 100),
+        )
+        assert [label.label_id for label in plan.accepted] == ["river-1"]
+        accepted = plan.accepted[0]
+        for candidate in accepted.candidates:
+            assert (candidate.details or {}).get("geometry_authority") == (
+                "layout_curved_text"
+            )
+
+    def test_malformed_caller_authority_still_rejects(self):
+        plan = lp.LabelPlan.compile(
+            labels=[
+                self._line_record(
+                    geometry_authority={
+                        "source": "compute_line_label_placement",
+                        "positioned_glyphs": [{"glyph_id": 1, "font_index": 0}],
+                    }
+                )
+            ],
+            camera={},
+            viewport=(100, 100),
+        )
+        assert plan.rejected and plan.rejected[0].reason == "missing_geometry_authority"
+
+    def test_produced_plan_is_deterministic(self):
+        kwargs = dict(
+            labels=[self._line_record()],
+            camera={},
+            viewport=(100, 100),
+        )
+        first = lp.LabelPlan.compile(**kwargs).to_dict()
+        second = lp.LabelPlan.compile(**kwargs).to_dict()
+        assert first == second
+
+    def test_native_producer_contract(self):
+        native = f3d.layout_label_candidates
+        glyphs = [
+            {
+                "glyph_id": 10 + index,
+                "font_index": 0,
+                "cluster": index,
+                "line_index": 0,
+                "origin": [0.0, 0.0],
+                "advance": [0.6, 0.0],
+                "has_outline": True,
+            }
+            for index in range(4)
+        ]
+        payload = native(
+            kind="line",
+            label_id="road",
+            text="Road",
+            screen_path=[(0.0, 0.0, 0.0), (100.0, 0.0, 0.0)],
+            positioned_glyphs=glyphs,
+            font_size=12.0,
+        )
+        assert payload is not None
+        assert payload["source"] == "compute_line_label_placement"
+        assert payload["projection_authority"] == "deterministic"
+        assert payload["positioned_glyphs"], "shared glyph stream required"
+        assert payload["candidates"], "at least one candidate required"
+        for candidate in payload["candidates"]:
+            bounds = candidate["bounds"]
+            assert bounds[2] > bounds[0] and bounds[3] > bounds[1]
+            assert len(candidate["positioned_glyphs"]) == len(glyphs)
+        assert native(
+            kind="line",
+            label_id="short",
+            text="TooLongForPath",
+            screen_path=[(0.0, 0.0, 0.0), (4.0, 0.0, 0.0)],
+            positioned_glyphs=glyphs * 4,
+            font_size=12.0,
+        ) is None
+        with pytest.raises(ValueError):
+            native(
+                kind="diagonal",
+                label_id="bad",
+                text="x",
+                screen_path=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+                positioned_glyphs=glyphs,
+                font_size=12.0,
+            )
+        with pytest.raises(ValueError):
+            native(
+                kind="line",
+                label_id="bad",
+                text="x",
+                screen_path=[(0.0, 0.0, 0.0), (float("nan"), 0.0, 0.0)],
+                positioned_glyphs=glyphs,
+                font_size=12.0,
+            )

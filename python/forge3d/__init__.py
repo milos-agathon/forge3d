@@ -125,6 +125,7 @@ _NATIVE_ONLY_EXPORTS = (
         "verify_provenance",  # VERITAS: native manifest verification
         "declutter",  # CARTOGRAPHER-PRIME: generic typed label solve
         "declutter_optimal",  # CARTOGRAPHER-PRIME: compatibility alias
+        "layout_label_candidates",  # CARTOGRAPHER-PRIME: native geometry-authority producer
         "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
@@ -769,6 +770,7 @@ __all__ = [
     # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
     "declutter",
     "declutter_optimal",
+    "layout_label_candidates",
     "LabelRationale",
     # CENSOR: global degradation sink
     "native_degradations",
