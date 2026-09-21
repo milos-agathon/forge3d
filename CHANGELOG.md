@@ -6,6 +6,38 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-09-20
+
+### Added
+- ORBIS: whole-Earth globe rendering. Forge3D can now draw the entire planet,
+  not just flat local scenes — real Earth curvature, a horizon that bends away
+  correctly, and a camera that can descend smoothly from 408 km altitude down
+  to 1 m above the ground. Adds Python `GlobeScene` and `GlobeMetrics` with
+  `fly_to`, scripted descent, and snapshot calls; the native globe path sits
+  behind the `enable-globe` feature. (#141)
+- Globe terrain data streams in bounded pieces over the network as the camera
+  descends — locally and in the browser (WebAssembly) — without stalling
+  frames, with coarse stand-in imagery while detail arrives, and a hard
+  GPU-memory ceiling (~450 MB observed) so large datasets stay safe on modest
+  hardware. (#141)
+- Positions stay stable at planetary scale: the engine re-anchors arithmetic
+  around the camera so geometry does not jitter, and ring geometry is joined
+  without cracks between detail levels. On a physical NVIDIA Vulkan adapter
+  the audited descent measured ~0.00004 px of vertex jitter, zero crack
+  pixels, and 25/25 nonblocking streaming frames. (#141)
+
+### Changed
+- Environment lighting now follows the corrected upstream IBL math (Karis
+  separable-Smith split-sum and cosine-weighted irradiance). Scenes lit mainly
+  by the environment can render modestly dimmer but more physically correct;
+  the ORBIS ground golden was regenerated against the corrected lighting.
+  (#141)
+- Bumped the package and PyPI version to `1.38.0`.
+
+### Compatibility
+- Existing flat-terrain maps, viewers, and rendering calls are unchanged; the
+  globe path is opt-in via `GlobeScene`. No existing public API was altered.
+
 ## [1.37.1] - 2026-09-20
 
 ### Fixed
