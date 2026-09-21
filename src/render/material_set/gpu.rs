@@ -254,7 +254,11 @@ impl GpuMaterialSet {
             mag_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Linear),
             min_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Linear),
             mipmap_filter: crate::core::gpu::deterministic_filter_mode(FilterMode::Linear),
-            anisotropy_clamp: 16,
+            anisotropy_clamp: if crate::core::gpu::deterministic_mode() {
+                1
+            } else {
+                16
+            },
             ..Default::default()
         });
 

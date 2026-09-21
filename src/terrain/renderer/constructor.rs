@@ -59,7 +59,11 @@ impl TerrainScene {
         let sun_vis_uniform_buffer = heightfield_resources.sun_vis_uniform_buffer;
 
         let light_buffer = LightBuffer::new(&device)?;
-        let color_format = wgpu::TextureFormat::Rgba8Unorm;
+        let color_format = if crate::core::gpu::deterministic_mode() {
+            wgpu::TextureFormat::Rgba16Float
+        } else {
+            wgpu::TextureFormat::Rgba8Unorm
+        };
         let light_buffer_layout = light_buffer.bind_group_layout();
 
         let shadow_bind_group_layout = Self::create_shadow_bind_group_layout(device.as_ref());
