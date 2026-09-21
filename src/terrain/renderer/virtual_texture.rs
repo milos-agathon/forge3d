@@ -383,6 +383,9 @@ pub(super) struct TerrainMaterialVT {
     source_generation: u64,
     last_stats: TerrainMaterialVTStats,
     bound_store_path: Option<String>,
+    /// VERITAS test seam: when set, `prepare_frame` pages in exactly this
+    /// ordered tile list instead of camera-driven request collection.
+    test_residency_schedule: Option<Vec<TileKey>>,
 }
 
 #[cfg(feature = "extension-module")]
@@ -394,6 +397,7 @@ impl TerrainMaterialVT {
             source_generation: 0,
             last_stats: TerrainMaterialVTStats::default(),
             bound_store_path: None,
+            test_residency_schedule: None,
         }
     }
 
@@ -510,7 +514,45 @@ impl TerrainMaterialVT {
         self.source_generation = self.source_generation.wrapping_add(1);
         self.last_stats = TerrainMaterialVTStats::default();
         self.bound_store_path = None;
+        self.test_residency_schedule = None;
         let _ = self.get_stats();
+    }
+
+    /// VERITAS test seam: pin the exact ordered tile residency list that
+    /// `prepare_frame` pages in (family, material_index, tile_x, tile_y,
+    /// mip_level). Rejects unsupported families and `(family, material)`
+    /// pairs with no registered source. Setting the schedule drops the
+    /// runtime so the next physical render starts from an empty atlas and
+    /// page table.
+    pub fn set_test_residency_schedule(
+        &mut self,
+        schedule: Vec<(String, u32, u32, u32, u32)>,
+    ) -> Result<(), String> {
+        let mut keys = Vec::with_capacity(schedule.len());
+        for (index, (family, material_index, tile_x, tile_y, mip_level)) in
+            schedule.into_iter().enumerate()
+        {
+            let Some(family_slot) = Self::family_slot(&family) else {
+                return Err(format!(
+                    "terrain VT residency schedule entry {index}: unsupported family '{family}'"
+                ));
+            };
+            if !self.sources.contains_key(&(material_index, family.clone())) {
+                return Err(format!(
+                    "terrain VT residency schedule entry {index}: no source registered for family '{family}' material {material_index}"
+                ));
+            }
+            keys.push(TileKey {
+                family_slot,
+                material_index,
+                x: tile_x,
+                y: tile_y,
+                mip_level,
+            });
+        }
+        self.test_residency_schedule = Some(keys);
+        self.runtime = None;
+        Ok(())
     }
 
     pub fn get_stats(&self) -> HashMap<String, f32> {
@@ -922,8 +964,40 @@ impl TerrainMaterialVT {
             bytemuck::cast_slice(&fallback_colors),
         );
 
-        let (requests, feedback_admissions) =
-            runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback);
+        let (requests, feedback_admissions) = if let Some(schedule) =
+            self.test_residency_schedule.as_ref()
+        {
+            // Authored test schedule: page in exactly this ordered list —
+            // no request collection, no sorting, no ancestor fill — so the
+            // physical render starts from a known residency set.
+            for (index, key) in schedule.iter().enumerate() {
+                if !runtime
+                    .sources
+                    .contains_key(&(key.family_slot, key.material_index))
+                {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: no prepared source for family slot {} material {}",
+                        key.family_slot, key.material_index
+                    ));
+                }
+                if key.mip_level >= runtime.max_mip_levels {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: mip {} out of range (max_mip_levels {})",
+                        key.mip_level, runtime.max_mip_levels
+                    ));
+                }
+                let (pages_x, pages_y) = runtime.pages_at_mip(key.mip_level);
+                if key.x >= pages_x || key.y >= pages_y {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: page ({}, {}) outside {}x{} pages at mip {}",
+                        key.x, key.y, pages_x, pages_y, key.mip_level
+                    ));
+                }
+            }
+            (schedule.clone(), HashSet::new())
+        } else {
+            runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback)
+        };
         // Keep VT uploads separate from the 4K terrain draw. `queue.write_*`
         // copies are deferred until submit, so a single encoder can both trip
         // the Windows Vulkan watchdog and reuse staging-ring offsets before
@@ -1069,18 +1143,28 @@ impl TerrainMaterialVT {
         let Some(runtime) = self.runtime.as_mut() else {
             return Ok(Vec::new());
         };
-        let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() else {
-            return Ok(Vec::new());
-        };
         // `finish_frame` normally consumes the async readback first. Reuse
         // the exact decoded snapshot it retained; otherwise a second read of
         // the already-consumed staging buffer makes an active feedback frame
         // appear empty. If the async map is still pending, finish it here and
         // populate that same snapshot.
         if runtime.feedback_staged {
-            let entries = feedback_buffer.read_feedback_entries_blocking(device)?;
+            let entries = match runtime.feedback_buffer.as_ref() {
+                Some(feedback_buffer) => feedback_buffer.read_feedback_entries_blocking(device)?,
+                None => Vec::new(),
+            };
             runtime.ingest_shader_feedback(entries);
             runtime.feedback_staged = false;
+        }
+        // Scheduled test residency: the contributing set is exactly the
+        // authored resident list. Pages resident at their desired mip emit
+        // no shader-demand record, so the bounded feedback stream alone
+        // cannot name them.
+        if let Some(schedule) = self.test_residency_schedule.as_ref() {
+            return Ok(runtime.resolve_feedback_keys_to_tiles(schedule));
+        }
+        if runtime.feedback_buffer.is_none() {
+            return Ok(Vec::new());
         }
 
         Ok(runtime.resolve_feedback_keys_to_tiles(&runtime.latest_shader_feedback))

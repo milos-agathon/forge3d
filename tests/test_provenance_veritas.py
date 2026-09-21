@@ -23,12 +23,13 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
-from _terrain_runtime import _build_heightmap, terrain_rendering_available
+from _terrain_runtime import terrain_rendering_available
 from forge3d import provenance as prov
 from forge3d.terrain_params import (
     AovSettings,
     PomSettings,
     TerrainVTSettings,
+    TriplanarSettings,
     VTLayerFamily,
     make_terrain_params_config,
 )
@@ -40,6 +41,7 @@ GPU_AVAILABLE = terrain_rendering_available()
 
 # Fixed, committed test keypair seed (fixtures only — not a production key).
 TEST_PRIVATE_KEY = hashlib.sha256(b"forge3d-veritas-test-key").digest()
+TEST_IMAGE_BYTES = b"forge3d-veritas-rendered-image"
 
 # Authored albedo source colors (sRGB bytes), one per material index.
 SOURCE_COLORS = (
@@ -49,6 +51,16 @@ SOURCE_COLORS = (
     (220, 220, 30),
 )
 VIRTUAL_SIZE = 512
+RESIDENCY_SCHEDULE = (
+    ("albedo", 3, 0, 0, 1),
+    ("albedo", 1, 1, 1, 0),
+    ("albedo", 0, 0, 0, 1),
+    ("albedo", 2, 0, 0, 1),
+    ("albedo", 0, 0, 0, 0),
+    ("albedo", 1, 1, 0, 0),
+    ("albedo", 1, 0, 0, 1),
+    ("albedo", 0, 0, 1, 0),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +97,14 @@ def test_source_map_leaf_encoding() -> None:
     assert leaf[12:] == digest
 
 
+def test_image_leaf_encoding() -> None:
+    digest = hashlib.sha256(TEST_IMAGE_BYTES).digest()
+    leaf = prov.encode_image_leaf(digest)
+    assert len(leaf) == 36
+    assert leaf[:4] == b"VTIM"
+    assert leaf[4:] == digest
+
+
 def test_merkle_root_is_order_independent() -> None:
     leaves = [_tile(x=i, y=i * 2, source_id=(i % 4) + 1) for i in range(7)]
     shuffled = list(reversed(leaves))
@@ -103,7 +123,7 @@ def test_merkle_odd_node_promotion_rule() -> None:
 def test_merkle_empty_sentinel() -> None:
     assert (
         prov.build_merkle_root([])
-        == hashlib.sha256(b"forge3d.provenance.v1.empty").digest()
+        == hashlib.sha256(b"forge3d.provenance.v2.empty").digest()
     )
 
 
@@ -114,10 +134,11 @@ def test_known_answer_root_matches_rust_vector() -> None:
         prov.encode_tile_leaf(0, 1, 0, 0, 0, hashlib.sha256(b"source-a").digest()),
         prov.encode_tile_leaf(0, 2, 1, 0, 1, hashlib.sha256(b"source-b").digest()),
         prov.encode_source_map_leaf(4, 2, hashlib.sha256(b"source-map").digest()),
+        prov.encode_image_leaf(hashlib.sha256(TEST_IMAGE_BYTES).digest()),
     ]
     assert (
         prov.build_merkle_root(leaves).hex()
-        == "67e632b879b8d0f52360148abad03584b213f9065714e2b722db766e03e980c4"
+        == "579d5530432f9620ff2b8d4547df385c52b26282bd6a6a77c67e8ff6874cce75"
     )
 
 
@@ -149,11 +170,14 @@ def test_offline_seal_verify_round_trip_and_tamper() -> None:
     source_map[:8, :] = 1
     source_map[8:, :12] = 2  # remaining quadrant stays SOURCE_ID_NONE
 
-    manifest = prov.seal_provenance_offline(source_map, _sample_tiles(), TEST_PRIVATE_KEY)
-    report = prov.verify_provenance_offline(source_map, manifest)
+    manifest = prov.seal_provenance_offline(
+        source_map, _sample_tiles(), TEST_PRIVATE_KEY, TEST_IMAGE_BYTES
+    )
+    report = prov.verify_provenance_offline(source_map, manifest, TEST_IMAGE_BYTES)
     assert report["ok"] is True
     assert report["root_match"] is True
     assert report["signature_valid"] is True
+    assert report["image_sha256_match"] is True
 
     # SOURCE_ID_NONE is never counted as a real attribution.
     assert prov.SOURCE_ID_NONE not in report["coverage"]
@@ -163,15 +187,26 @@ def test_offline_seal_verify_round_trip_and_tamper() -> None:
     # Single-texel tamper: the recomputed root must break.
     tampered = source_map.copy()
     tampered[0, 0] ^= 1
-    tampered_report = prov.verify_provenance_offline(tampered, manifest)
+    tampered_report = prov.verify_provenance_offline(tampered, manifest, TEST_IMAGE_BYTES)
     assert tampered_report["root_match"] is False
     assert tampered_report["ok"] is False
+
+    replacement_report = prov.verify_provenance_offline(
+        source_map, manifest, TEST_IMAGE_BYTES + b"replacement"
+    )
+    assert replacement_report["image_sha256_match"] is False
+    assert replacement_report["root_match"] is False
+    assert replacement_report["ok"] is False
 
 
 def test_offline_seal_is_deterministic() -> None:
     source_map = np.arange(48, dtype=np.uint32).reshape(6, 8) % 3
-    a = prov.seal_provenance_offline(source_map, _sample_tiles(), TEST_PRIVATE_KEY)
-    b = prov.seal_provenance_offline(source_map, list(reversed(_sample_tiles())), TEST_PRIVATE_KEY)
+    a = prov.seal_provenance_offline(
+        source_map, _sample_tiles(), TEST_PRIVATE_KEY, TEST_IMAGE_BYTES
+    )
+    b = prov.seal_provenance_offline(
+        source_map, list(reversed(_sample_tiles())), TEST_PRIVATE_KEY, TEST_IMAGE_BYTES
+    )
     assert a == b, "seal must be independent of contributing-tile order"
 
 
@@ -182,16 +217,26 @@ def test_native_and_offline_seals_agree() -> None:
     source_map = np.zeros((10, 10), dtype=np.uint32)
     source_map[2:7, 3:9] = 1
     tiles = _sample_tiles()
-    native = f3d.seal_provenance(source_map, tiles, TEST_PRIVATE_KEY)
-    offline = prov.seal_provenance_offline(source_map, tiles, TEST_PRIVATE_KEY)
+    native = f3d.seal_provenance(
+        source_map, tiles, TEST_PRIVATE_KEY, TEST_IMAGE_BYTES
+    )
+    offline = prov.seal_provenance_offline(
+        source_map, tiles, TEST_PRIVATE_KEY, TEST_IMAGE_BYTES
+    )
     native_manifest = json.loads(bytes(native))
     offline_manifest = json.loads(offline)
     assert native_manifest["merkle_root"] == offline_manifest["merkle_root"]
     assert native_manifest["signature"] == offline_manifest["signature"]
     assert native_manifest["public_key"] == offline_manifest["public_key"]
+    assert native_manifest["image_sha256"] == offline_manifest["image_sha256"]
     # Cross-verification in both directions.
-    assert f3d.verify_provenance(source_map, offline) is True
-    assert prov.verify_provenance_offline(source_map, bytes(native))["ok"] is True
+    assert f3d.verify_provenance(source_map, offline, TEST_IMAGE_BYTES) is True
+    assert prov.verify_provenance_offline(
+        source_map, bytes(native), TEST_IMAGE_BYTES
+    )["ok"] is True
+    assert f3d.verify_provenance(
+        source_map, offline, TEST_IMAGE_BYTES + b"replacement"
+    ) is False
 
 
 def test_mapscene_render_validates_provenance_kwargs(tmp_path) -> None:
@@ -226,11 +271,6 @@ def test_mapscene_render_validates_provenance_kwargs(tmp_path) -> None:
 # GPU DoD gate
 # ---------------------------------------------------------------------------
 
-def _srgb_to_linear(c: np.ndarray) -> np.ndarray:
-    c = np.asarray(c, dtype=np.float64) / 255.0
-    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
-
-
 def _flat_source(color: tuple[int, int, int]) -> np.ndarray:
     img = np.zeros((VIRTUAL_SIZE, VIRTUAL_SIZE, 4), dtype=np.uint8)
     img[..., 0], img[..., 1], img[..., 2] = color
@@ -258,7 +298,7 @@ def _build_params(*, source_id: bool = True) -> "f3d.TerrainRenderParams":
         render_scale=1.0,
         terrain_span=8.0,
         msaa_samples=1,
-        z_scale=1.6,
+        z_scale=0.1,
         exposure=1.0,
         domain=(0.0, 1.0),
         albedo_mode="material",
@@ -268,23 +308,32 @@ def _build_params(*, source_id: bool = True) -> "f3d.TerrainRenderParams":
         light_azimuth_deg=136.0,
         light_elevation_deg=24.0,
         sun_intensity=2.2,
-        cam_radius=4.0,
-        cam_phi_deg=142.0,
-        cam_theta_deg=58.0,
+        cam_radius=10.0,
+        cam_phi_deg=0.0,
+        cam_theta_deg=0.0,
         fov_y_deg=50.0,
-        camera_mode="mesh",
+        camera_mode="mesh:zup",
+        triplanar=TriplanarSettings(scale=0.05, blend_sharpness=4.0, normal_strength=1.0),
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         aov=AovSettings(
-            enabled=True, albedo=True, normal=False, depth=False, source_id=source_id
+            enabled=True, albedo=True, normal=True, depth=True, source_id=source_id
         ),
     )
     config.cam_target = [0.0, 0.0, 0.0]
     config.vt = TerrainVTSettings(
         enabled=True,
         atlas_size=4096,
-        residency_budget_mb=192.0,
-        max_mip_levels=6,
-        layers=[VTLayerFamily(family="albedo", virtual_size_px=(VIRTUAL_SIZE, VIRTUAL_SIZE))],
+        residency_budget_mb=8.0,
+        max_mip_levels=2,
+        use_feedback=True,
+        layers=[
+            VTLayerFamily(
+                family="albedo",
+                virtual_size_px=(VIRTUAL_SIZE, VIRTUAL_SIZE),
+                tile_size=256,
+                tile_border=0,
+            )
+        ],
     )
     return f3d.TerrainRenderParams(config)
 
@@ -311,40 +360,17 @@ def _build_test_ibl():
         hdr_path.unlink(missing_ok=True)
 
 
-def _expected_ids_from_albedo(albedo: np.ndarray) -> np.ndarray:
-    """Ground-truth source layout recovered from the pre-lighting albedo AOV.
-
-    The terrain splat emits ``albedo = sum_i w_i * c_i`` with known,
-    linearly independent flat source colors ``c_i`` and ``sum(w) == 1``, so
-    the per-pixel layer weights are recoverable exactly by solving the 4x4
-    system ``[c_i^T; 1] w = [albedo; 1]``. The shader attributes each pixel
-    to its dominant layer (argmax w) — the same rule applied here.
-
-    The sampled set keeps only pixels where the dominance margin
-    (w_max - w_second) exceeds 0.30: the shader's unconditional
-    slope/elevation hue variation (strength 0.08 in terrain_pbr_pom.wgsl)
-    perturbs recovered weights by at most ~0.21 in this scene, so a 0.30
-    margin cannot be flipped by it. Ambiguous pixels (blend zones, fallback
-    gray, background) return 0 and are excluded from the fixed sampled set.
-    """
-    colors = np.stack([_srgb_to_linear(np.array(c)) for c in SOURCE_COLORS])  # (4, 3)
-    system = np.vstack([colors.T, np.ones(4)])  # (4, 4)
-    system_inv = np.linalg.inv(system)
-
-    height, width, _ = albedo.shape
-    flat = albedo.reshape(-1, 3).astype(np.float64)
-    rhs = np.concatenate([flat, np.ones((flat.shape[0], 1))], axis=1)
-    weights = (rhs @ system_inv.T).reshape(height, width, 4)
-
-    reconstructed = (weights.reshape(-1, 4) @ colors).reshape(height, width, 3)
-    residual = np.linalg.norm(reconstructed - albedo, axis=-1)
-    ordered = np.sort(weights, axis=-1)
-    margin = ordered[..., -1] - ordered[..., -2]
-    best = np.argmax(weights, axis=-1)
-    totals = albedo.sum(axis=-1)
-
-    unambiguous = (margin > 0.30) & (residual < 0.02) & (totals > 0.05)
-    return np.where(unambiguous, best + 1, 0).astype(np.uint32)
+def _expected_ids_from_authored_layout(
+    normal: np.ndarray, depth: np.ndarray
+) -> np.ndarray:
+    height, width, _ = normal.shape
+    columns = np.arange(width, dtype=np.int32)[None, :]
+    authored = np.where(columns < width // 2, 2, 1)
+    authored = np.broadcast_to(authored, (height, width))
+    terrain = (np.linalg.norm(normal, axis=-1) > 0.5) & (depth > 1e-6)
+    seam_distance = np.abs(columns + 0.5 - width / 2.0)
+    sampled = terrain & (seam_distance >= 4.0)
+    return np.where(sampled, authored, prov.SOURCE_ID_NONE).astype(np.uint32)
 
 
 @pytest.fixture()
@@ -353,8 +379,8 @@ def provenance_render_env():
         pytest.skip("VERITAS DoD test requires a terrain-capable GPU runtime")
     session = f3d.Session(window=False)
     renderer = f3d.TerrainRenderer(session)
-    material_set = f3d.MaterialSet.terrain_default()
-    heightmap = _build_heightmap(160)
+    material_set = f3d.MaterialSet.terrain_default(triplanar_scale=6.0)
+    heightmap = np.full((160, 160), 0.5, dtype=np.float32)
     ibl = _build_test_ibl()
     renderer.clear_material_vt_sources()
     try:
@@ -368,70 +394,83 @@ def provenance_render_env():
 
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="VERITAS DoD test requires GPU-backed forge3d")
 class TestVeritasProvenanceDoD:
-    def _render_triple(self, env):
+    def _render_triple(self, env, schedule=RESIDENCY_SCHEDULE):
         renderer, material_set, ibl, heightmap = env
         _register_sources(renderer)
-        params = _build_params()
-        frame = aov_frame = None
-        # Warm the streaming path: feedback-driven residency settles within a
-        # few frames for a fully-resident VT of this size.
-        for _ in range(3):
-            frame, aov_frame = renderer.render_with_aov(
-                material_set=material_set,
-                env_maps=ibl,
-                params=params,
-                heightmap=heightmap,
-            )
+        renderer.set_material_vt_residency_schedule_for_test(schedule)
+        frame, aov_frame = renderer.render_with_aov(
+            material_set=material_set,
+            env_maps=ibl,
+            params=_build_params(),
+            heightmap=heightmap,
+        )
         assert aov_frame.has_source_id
         rgba = np.asarray(frame.to_numpy())
         source_map = np.asarray(aov_frame.source_id(), dtype=np.uint32)
-        albedo = np.asarray(aov_frame.albedo(), dtype=np.float32)
+        normal = np.asarray(aov_frame.normal(), dtype=np.float32)
+        depth = np.asarray(aov_frame.depth(), dtype=np.float32)
         tiles = renderer.read_contributing_tiles()
-        return rgba, albedo, source_map, tiles
+        return rgba, normal, depth, source_map, tiles
 
     def test_measurable_win(self, provenance_render_env, tmp_path):
-        rgba, albedo, source_map, tiles = self._render_triple(provenance_render_env)
-        assert source_map.shape == albedo.shape[:2] == rgba.shape[:2]
+        rgba, normal, depth, source_map, tiles = self._render_triple(
+            provenance_render_env
+        )
+        _, _, _, reverse_source_map, reverse_tiles = self._render_triple(
+            provenance_render_env, tuple(reversed(RESIDENCY_SCHEDULE))
+        )
+        np.testing.assert_array_equal(reverse_source_map, source_map)
+        assert reverse_tiles == tiles
+        assert source_map.shape == normal.shape[:2] == depth.shape == rgba.shape[:2]
         assert tiles, "streaming VT feedback produced no contributing tiles"
         albedo_tiles = [t for t in tiles if t["family"] == "albedo"]
         assert albedo_tiles, "no albedo-family contributing tiles"
+        assert {t["mip_level"] for t in albedo_tiles} == {0, 1}
 
         # --- (1) 100% correct attribution over the fixed sampled set -------
-        expected = _expected_ids_from_albedo(albedo)
+        expected = _expected_ids_from_authored_layout(normal, depth)
         sampled = expected != prov.SOURCE_ID_NONE
         sampled_count = int(sampled.sum())
-        assert sampled_count >= 1024, f"only {sampled_count} unambiguous sampled pixels"
+        assert sampled_count >= 1024, f"only {sampled_count} authored sampled pixels"
         mismatches = int((source_map[sampled] != expected[sampled]).sum())
         assert mismatches == 0, (
             f"{mismatches}/{sampled_count} sampled pixels attributed to the wrong source"
         )
         distinct = set(np.unique(source_map[sampled]).tolist())
-        assert len(distinct) >= 2, f"expected >=2 overlapping sources, saw {distinct}"
+        assert distinct == {1, 2}, f"expected authored sources {{1, 2}}, saw {distinct}"
 
         # Every attributed pixel id must correspond to a contributing source.
         tile_ids = {t["source_id"] for t in albedo_tiles}
         assert distinct <= tile_ids
 
         # --- (2)+(3) seal: Merkle root match + signature True ---------------
-        manifest_bytes = f3d.seal_provenance(source_map, tiles, TEST_PRIVATE_KEY)
-        assert f3d.verify_provenance(source_map, manifest_bytes) is True
-        offline_report = prov.verify_provenance_offline(source_map, bytes(manifest_bytes))
+        image_path = tmp_path / "image.png"
+        smap_path = tmp_path / "source_map.npy"
+        manifest_path = tmp_path / "provenance.json"
+        f3d.numpy_to_png(str(image_path), rgba)
+        image_bytes = image_path.read_bytes()
+        manifest_bytes = f3d.seal_provenance(
+            source_map, tiles, TEST_PRIVATE_KEY, image_bytes
+        )
+        assert f3d.verify_provenance(source_map, manifest_bytes, image_bytes) is True
+        offline_report = prov.verify_provenance_offline(
+            source_map, bytes(manifest_bytes), image_bytes
+        )
         assert offline_report["root_match"] is True
         assert offline_report["signature_valid"] is True
+        assert offline_report["image_sha256_match"] is True
         assert offline_report["ok"] is True
         assert not offline_report["unknown_source_ids"]
 
         # --- (4) single-texel tamper detection ------------------------------
         tampered = source_map.copy()
         tampered[0, 0] ^= 1
-        assert f3d.verify_provenance(tampered, manifest_bytes) is False
-        assert prov.verify_provenance_offline(tampered, bytes(manifest_bytes))["ok"] is False
+        assert f3d.verify_provenance(tampered, manifest_bytes, image_bytes) is False
+        assert prov.verify_provenance_offline(
+            tampered, bytes(manifest_bytes), image_bytes
+        )["ok"] is False
 
         # --- standalone verifier CLI over the emitted triple ----------------
-        image_path = tmp_path / "image.png"
-        smap_path = tmp_path / "source_map.npy"
-        manifest_path = tmp_path / "provenance.json"
-        f3d.numpy_to_png(str(image_path), rgba)
         np.save(smap_path, source_map)
         manifest_path.write_bytes(bytes(manifest_bytes))
 
@@ -444,6 +483,7 @@ class TestVeritasProvenanceDoD:
         assert result.returncode == 0, f"verifier failed:\n{result.stdout}\n{result.stderr}"
         assert "merkle_root_match: True" in result.stdout
         assert "signature_valid: True" in result.stdout
+        assert "image_sha256_match: True" in result.stdout
         assert "tamper_probe_single_texel_detected: True" in result.stdout
         assert "verified: True" in result.stdout
 
@@ -455,10 +495,22 @@ class TestVeritasProvenanceDoD:
             shutil.copy2(manifest_path, FIXTURE_DIR / "provenance.json")
 
     def test_seal_is_deterministic_across_renders(self, provenance_render_env):
-        _, _, source_map_a, tiles_a = self._render_triple(provenance_render_env)
-        manifest_a = json.loads(bytes(f3d.seal_provenance(source_map_a, tiles_a, TEST_PRIVATE_KEY)))
-        _, _, source_map_b, tiles_b = self._render_triple(provenance_render_env)
-        manifest_b = json.loads(bytes(f3d.seal_provenance(source_map_b, tiles_b, TEST_PRIVATE_KEY)))
+        rgba_a, _, _, source_map_a, tiles_a = self._render_triple(provenance_render_env)
+        manifest_a = json.loads(
+            bytes(
+                f3d.seal_provenance(
+                    source_map_a, tiles_a, TEST_PRIVATE_KEY, rgba_a.tobytes()
+                )
+            )
+        )
+        rgba_b, _, _, source_map_b, tiles_b = self._render_triple(provenance_render_env)
+        manifest_b = json.loads(
+            bytes(
+                f3d.seal_provenance(
+                    source_map_b, tiles_b, TEST_PRIVATE_KEY, rgba_b.tobytes()
+                )
+            )
+        )
         assert manifest_a["merkle_root"] == manifest_b["merkle_root"]
         assert manifest_a["signature"] == manifest_b["signature"]
 

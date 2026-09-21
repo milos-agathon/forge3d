@@ -315,6 +315,7 @@ tests/golden/hybrid_terrain/
 !tests/golden/hybrid_terrain/
 tests/golden/hybrid_terrain/*
 !tests/golden/hybrid_terrain/mini_dem_reference.png
+!tests/fixtures/provenance/*.png
 tests/golden/labels/*.png
 tests/golden/labels/*.jpg
 tests/golden/labels/*.jpeg

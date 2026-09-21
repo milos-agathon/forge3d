@@ -824,6 +824,9 @@ class TerrainRenderer:
     def resolve_captured_vt_feedback_provenance(
         self, feedback: Sequence[Tuple[int, int, int, int, int]]
     ) -> List[Dict[str, Any]]: ...
+    def set_material_vt_residency_schedule_for_test(
+        self, schedule: Sequence[Tuple[str, int, int, int, int]]
+    ) -> None: ...
     # BOP-P2-02: runtime height-tile streaming for clipmap terrain.
     def enable_height_streaming(
         self,
@@ -1416,8 +1419,9 @@ def seal_provenance(
     source_map: np.ndarray,
     contributing_tiles: Sequence[Dict[str, Any]],
     private_key: bytes,
+    image_bytes: bytes,
 ) -> bytes: ...
-def verify_provenance(source_map: np.ndarray, manifest: bytes) -> bool: ...
+def verify_provenance(source_map: np.ndarray, manifest: bytes, image_bytes: bytes) -> bool: ...
 
 # CENSOR: global degradation sink
 def native_degradations() -> list[dict]: ...

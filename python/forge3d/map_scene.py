@@ -5931,6 +5931,10 @@ class MapScene:
                     native_result.source_map,
                     native_result.contributing_tiles,
                     provenance_signing_key,
+                    # The exact published image bytes — target_path was
+                    # already written above, so the seal binds what a
+                    # verifier will read back from disk.
+                    target_path.read_bytes(),
                 )
             )
             source_map_path = target_path.with_name(f"{target_path.stem}.source_map.npy")
