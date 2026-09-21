@@ -1090,6 +1090,28 @@ def test_native_scene_render_rgba_draws_raster_overlay_and_sdf_text():
     assert green_text > 100
 
 
+def test_native_scene_raster_overlay_passes_colour_through_unchanged():
+    # MapScene composites labels and vectors over the terrain frame through
+    # set_raster_overlay; an sRGB decode on upload darkened every such frame.
+    try:
+        scene = f3d.Scene(80, 64)
+    except Exception as exc:
+        pytest.skip(f"native Scene unavailable: {exc}")
+
+    scene.disable_terrain()
+    base = np.zeros((64, 80, 4), dtype=np.uint8)
+    base[..., 0] = 48
+    base[..., 1] = 128
+    base[..., 2] = 200
+    base[..., 3] = 255
+    scene.set_raster_overlay(base, 1.0, None, None)
+
+    rgba = np.asarray(scene.render_rgba())
+    centre = rgba[8:56, 8:72, :3].reshape(-1, 3).astype(np.int16)
+
+    assert np.abs(centre - np.array([48, 128, 200], dtype=np.int16)).max() <= 2
+
+
 def test_gpu_backend_uses_native_vector_oit_for_line_layers(tmp_path, monkeypatch):
     scene = f3d.MapScene(
         terrain=f3d.TerrainSource(
