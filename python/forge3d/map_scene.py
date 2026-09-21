@@ -178,6 +178,7 @@ class CompiledScenePlan:
     label_plans: Mapping[str, Any]
     manifest: Any
     validation_report: "ValidationReport"
+    frame: Any | None = None
 
 
 def _native_scene_class() -> Any | None:
@@ -1154,12 +1155,23 @@ def _mapscene_register_vt_sources(renderer: Any, recipe: "SceneRecipe") -> None:
         )
 
 
+def _mapscene_effective_camera_mode(recipe: "SceneRecipe") -> str:
+    settings = _metadata_dict(recipe.lighting.settings)
+    camera = settings.get("camera") if isinstance(settings.get("camera"), Mapping) else {}
+    cli_params = settings.get("cli_params") if isinstance(settings.get("cli_params"), Mapping) else {}
+    camera_mode = str(cli_params.get("camera_mode") or camera.get("camera_mode") or "screen")
+    if camera_mode == "screen":
+        camera_mode = _mapscene_clipmap_camera_mode(_mapscene_clipmap_config(recipe)) or camera_mode
+    return camera_mode
+
+
 def _build_mapscene_terrain_params(
     recipe: "SceneRecipe",
     heightmap: Any,
     render_size: tuple[int, int],
     *,
     emit_source_id: bool = False,
+    chronos_frame_json: str | None = None,
 ) -> Any | None:
     try:
         import forge3d as f3d
@@ -1201,15 +1213,11 @@ def _build_mapscene_terrain_params(
     renderer_config = load_renderer_config(renderer_config_data)
     ibl = settings.get("ibl") if isinstance(settings.get("ibl"), Mapping) else {}
     sun = settings.get("sun") if isinstance(settings.get("sun"), Mapping) else {}
-    camera = settings.get("camera") if isinstance(settings.get("camera"), Mapping) else {}
-    cli_params = settings.get("cli_params") if isinstance(settings.get("cli_params"), Mapping) else {}
     terrain_span = max(1.0, _terrain_scene_diagonal(recipe.terrain))
     clip_far = max(6000.0, terrain_span * 1.5)
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
-    camera_mode = str(cli_params.get("camera_mode") or camera.get("camera_mode") or "screen")
-    if camera_mode == "screen":
-        camera_mode = _mapscene_clipmap_camera_mode(_mapscene_clipmap_config(recipe)) or camera_mode
+    camera_mode = _mapscene_effective_camera_mode(recipe)
     config = make_terrain_params_config(
         size_px=render_size,
         render_scale=1.0,
@@ -1252,6 +1260,8 @@ def _build_mapscene_terrain_params(
         # beauty pass (requires the msaa_samples=1 path used above).
         config.aov.enabled = True
         config.aov.source_id = True
+    if chronos_frame_json is not None:
+        config.chronos_frame_json = chronos_frame_json
     return f3d.TerrainRenderParams(config)
 
 
@@ -1321,6 +1331,7 @@ def _render_terrain_renderer_result(
     heightmap: Any,
     *,
     emit_provenance: bool = False,
+    chronos_frame_json: str | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     try:
         import forge3d as f3d
@@ -1339,7 +1350,11 @@ def _render_terrain_renderer_result(
     assert output is not None
     render_size = (max(64, int(output.width)), max(64, int(output.height)))
     params = _build_mapscene_terrain_params(
-        recipe, heightmap, render_size, emit_source_id=emit_provenance
+        recipe,
+        heightmap,
+        render_size,
+        emit_source_id=emit_provenance,
+        chronos_frame_json=chronos_frame_json,
     )
     if params is None:
         return None
@@ -2289,6 +2304,25 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
     return _alpha_composite_rgba(base, np.asarray(overlay, dtype=np.uint8)), True, metadata
 
 
+def _chronos_label_plans(frame: Any) -> dict[str, Any]:
+    from .label_plan import LabelPlan
+
+    payload = json.loads(frame.to_json())
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in payload.get("labels") or []:
+        if not isinstance(record, Mapping) or not record.get("visible"):
+            continue
+        label_payload = dict(record.get("payload") or {})
+        typography = dict(label_payload.get("typography") or {})
+        typography["chronos_alpha"] = float(record.get("alpha", 1.0))
+        label_payload["typography"] = typography
+        grouped.setdefault(str(record.get("layer_id") or ""), []).append(label_payload)
+    return {
+        layer_id: LabelPlan(accepted=accepted, rejected=[])
+        for layer_id, accepted in grouped.items()
+    }
+
+
 def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any]) -> tuple[Any, bool]:
     label_layers = [layer for layer in recipe.layers if isinstance(layer, LabelLayer)]
     if not label_layers:
@@ -2397,6 +2431,15 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                     (0, 0, 0, 190),
                 )
             )
+            try:
+                chronos_alpha = float(typography.get("chronos_alpha", 1.0))
+            except (TypeError, ValueError):
+                chronos_alpha = 1.0
+            if not math.isfinite(chronos_alpha):
+                chronos_alpha = 1.0
+            chronos_alpha = min(max(chronos_alpha, 0.0), 1.0)
+            text_color = (*text_color[:3], text_color[3] * chronos_alpha)
+            halo_color = (*halo_color[:3], halo_color[3] * chronos_alpha)
             halo_width = _render_number(
                 typography.get("halo_width_px")
                 if "halo_width_px" in typography
@@ -3205,7 +3248,9 @@ def _render_native_offscreen_result(
             "MapScene render phase requires a CompiledScenePlan; "
             "call MapScene.compile_plan() before rendering"
         )
-    plans = compiled.label_plans
+    frame = getattr(compiled, "frame", None)
+    plans = _chronos_label_plans(frame) if frame is not None else compiled.label_plans
+    chronos_frame_json = frame.to_json() if frame is not None else None
     heightmap = _load_native_heightmap(recipe.terrain)
     if heightmap is None or recipe.output is None:
         return None
@@ -3215,10 +3260,12 @@ def _render_native_offscreen_result(
     try:
         # Keyword passed only when enabled so existing call-compatible test
         # doubles for `_render_terrain_renderer_result` stay valid.
+        render_kwargs: dict[str, Any] = {}
         if emit_provenance:
-            result = _render_terrain_renderer_result(recipe, heightmap, emit_provenance=True)
-        else:
-            result = _render_terrain_renderer_result(recipe, heightmap)
+            render_kwargs["emit_provenance"] = True
+        if chronos_frame_json is not None:
+            render_kwargs["chronos_frame_json"] = chronos_frame_json
+        result = _render_terrain_renderer_result(recipe, heightmap, **render_kwargs)
     except BaseException as exc:
         if _is_native_adapter_unavailable(exc):
             return None
@@ -5801,6 +5848,10 @@ class MapScene:
                     native_result.source_map,
                     native_result.contributing_tiles,
                     provenance_signing_key,
+                    # The exact published image bytes — target_path was
+                    # already written above, so the seal binds what a
+                    # verifier will read back from disk.
+                    target_path.read_bytes(),
                 )
             )
             source_map_path = target_path.with_name(f"{target_path.stem}.source_map.npy")

@@ -75,6 +75,7 @@ pub struct TerrainRenderParams {
     pub aa_seed: Option<u64>,
     /// Optional caller-provided terrain revision/checksum for cache invalidation.
     pub terrain_data_revision: Option<u64>,
+    pub chronos_frame: Option<Arc<crate::terrain::frame_compiler::CompiledFrame>>,
     pub height_curve_lut: Option<Arc<Vec<f32>>>,
     pub overlays: Vec<Py<crate::core::overlay_layer::OverlayLayer>>,
     pub(crate) light: Py<PyAny>,

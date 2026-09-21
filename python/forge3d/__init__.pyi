@@ -120,6 +120,10 @@ from .map_scene import (
     VectorOverlay as VectorOverlay,
 )
 from .recipe_manifest import recipe_manifest as recipe_manifest
+from .chronos import (
+    FlythroughManifest as FlythroughManifest,
+    render_flythrough as render_flythrough,
+)
 from .alignment import (
     alignment_report,
     alignment_residual,
@@ -776,6 +780,9 @@ class TerrainRenderer:
     def clear_material_vt_sources(self) -> None: ...
     def get_material_vt_stats(self) -> Dict[str, float]: ...
     def read_contributing_tiles(self) -> List[Dict[str, Any]]: ...
+    def set_material_vt_residency_schedule_for_test(
+        self, schedule: Sequence[Tuple[str, int, int, int, int]]
+    ) -> None: ...
     # BOP-P2-02: runtime height-tile streaming for clipmap terrain.
     def enable_height_streaming(
         self,
@@ -1356,8 +1363,9 @@ def seal_provenance(
     source_map: np.ndarray,
     contributing_tiles: Sequence[Dict[str, Any]],
     private_key: bytes,
+    image_bytes: bytes,
 ) -> bytes: ...
-def verify_provenance(source_map: np.ndarray, manifest: bytes) -> bool: ...
+def verify_provenance(source_map: np.ndarray, manifest: bytes, image_bytes: bytes) -> bool: ...
 
 # CENSOR: global degradation sink
 def native_degradations() -> list[dict]: ...
@@ -1396,6 +1404,42 @@ def request_host_visible_allocation_for_test(bytes: int, label: str) -> None: ..
 # PROBATUM: WGSL proof report
 def shader_report(mode: str | None = ...) -> Dict[str, Any]: ...
 
+# CHRONOS: deterministic compiled-frame flythrough
+class CompiledFrame:
+    @property
+    def frame_index(self) -> int: ...
+    @property
+    def base_seed(self) -> int: ...
+    @property
+    def frame_seed(self) -> int: ...
+    @property
+    def samples(self) -> int: ...
+    @property
+    def camera_hash(self) -> str: ...
+    @property
+    def scene_hash(self) -> str: ...
+    @property
+    def label_set_hash(self) -> str: ...
+    @property
+    def residency_hash(self) -> str: ...
+    @property
+    def lod_hash(self) -> str: ...
+    @property
+    def engine_revision(self) -> str: ...
+    def to_json(self) -> str: ...
+    @staticmethod
+    def from_json(json: str) -> "CompiledFrame": ...
+
+def frame_seed(base_seed: int, frame_index: int) -> int: ...
+def compile_frame(
+    frame_index: int,
+    base_seed: int,
+    samples: int,
+    camera_json: str,
+    scene_json: str,
+) -> CompiledFrame: ...
+def render_compiled_frame(compiled_frame: CompiledFrame, rgba: np.ndarray) -> str: ...
+
 # CARTOGRAPHER-PRIME: bounded-optimal, silhouette-aware label declutter
 class LabelRationale:
     def records(self) -> List[Dict[str, Any]]: ...
@@ -1410,6 +1454,19 @@ def declutter_optimal(
     node_budget: int = ...,
     margin: float = ...,
 ) -> Tuple[List[Tuple[int, int]], float, LabelRationale]: ...
+def layout_label_candidate(
+    kind: str,
+    label_id: int,
+    candidate_index: int,
+    path: Sequence[Tuple[float, float, float]],
+    text: str,
+    font_size: float,
+    priority: int,
+    viewport: Tuple[float, float],
+    glyph_advances: Sequence[float] | None = ...,
+    target_anchor: Tuple[float, float] | None = ...,
+    tracking: float = ...,
+) -> Dict[str, Any] | None: ...
 
 # AEQUITAS: PT-vs-raster perceptual adjudication pair
 def render_adjudication_pair(

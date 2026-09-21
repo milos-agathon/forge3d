@@ -1342,8 +1342,9 @@ struct FragmentOutput {
     @location(1) aov_albedo : vec4<f32>,   // Base color before lighting (RGB) + alpha
     @location(2) aov_normal : vec4<f32>,   // Normalized world-space normal (RGB) + alpha
     @location(3) aov_depth : vec4<f32>,    // Linear depth normalized to [0,1] (R) + padding
-    // VERITAS: albedo-family VT source id of the dominant material layer's
-    // dominant triplanar projection (R32Uint target; 0 == SOURCE_ID_NONE)
+    // VERITAS: albedo-family VT source id selected globally across all
+    // material layers and triplanar projections after residency resolution
+    // (R32Uint target; 0 == SOURCE_ID_NONE)
     @location(4) source_id : u32,
 };
 
@@ -1916,22 +1917,35 @@ fn terrain_vt_resolve_family_uv(
 
 // ──────────────────────────────────────────────────────────────────────────
 // VERITAS: per-pixel provenance.
-// Same residency-gated page walk as terrain_vt_resolve_family_uv, but
-// returns the stable source id of the tile actually sampled
-// (family_slot * capacity + material_index + 1) instead of a color, and 0
-// (SOURCE_ID_NONE) when the family is disabled or the whole mip chain is
+// Attribution is chosen GLOBALLY after residency resolution: every material
+// layer x triplanar projection produces a candidate carrying the resolved
+// source id and the mip actually resident. A valid candidate beats none;
+// the lower mip_level (higher resolution) wins; at equal mip the greater
+// contribution weight wins; exact ties keep the first candidate evaluated.
+// ──────────────────────────────────────────────────────────────────────────
+struct TerrainVTSourceCandidate {
+    source_id: u32,
+    mip_level: u32,
+    contribution_weight: f32,
+};
+
+// Same residency-gated page walk as terrain_vt_resolve_family_uv (same
+// desired mip, pages, page-table layers, and is_resident flag), but returns
+// the stable source id of the tile actually sampled
+// (family_slot * capacity + material_index + 1) together with the resident
+// mip_level instead of a color; returns source 0 (SOURCE_ID_NONE) and mip
+// 0xffffffffu when the family is disabled or the whole mip chain is
 // non-resident (i.e. the color path used the fallback). Never writes
 // feedback, so streaming behaviour is untouched.
-// ──────────────────────────────────────────────────────────────────────────
 fn terrain_vt_resolve_source_id(
     family_slot: u32,
     uv: vec2<f32>,
     ddx_uv: vec2<f32>,
     ddy_uv: vec2<f32>,
     layer: f32,
-) -> u32 {
+) -> TerrainVTSourceCandidate {
     if (!terrain_vt_enabled() || !terrain_vt_family_enabled(family_slot)) {
-        return 0u;
+        return TerrainVTSourceCandidate(0u, 0xffffffffu, 0.0);
     }
     let material_index = terrain_vt_material_index(layer);
     let virtual_size = vec2<f32>(
@@ -1953,42 +1967,97 @@ fn terrain_vt_resolve_source_id(
             0,
         );
         if (entry.z > 0.5) {
-            return family_slot * TERRAIN_VT_MATERIAL_CAPACITY + material_index + 1u;
+            return TerrainVTSourceCandidate(
+                family_slot * TERRAIN_VT_MATERIAL_CAPACITY + material_index + 1u,
+                mip_level,
+                0.0,
+            );
         }
         if (mip_level + 1u >= max_mip_levels) {
             break;
         }
         mip_level = mip_level + 1u;
     }
-    return 0u;
+    return TerrainVTSourceCandidate(0u, 0xffffffffu, 0.0);
 }
 
-// VERITAS: albedo source id at the dominant triplanar projection of one
-// material layer (argmax triplanar weight; ties prefer the Y axis, then X).
-// Single-source attribution by definition — never a blend.
+// Lexicographic candidate selection: a valid candidate (source_id != 0)
+// beats none; the lower mip_level (higher resolution) wins; at equal mip
+// the greater contribution_weight wins; exact ties preserve the incumbent.
+fn terrain_vt_select_source(
+    best: TerrainVTSourceCandidate,
+    source_id: u32,
+    mip_level: u32,
+    contribution_weight: f32,
+) -> TerrainVTSourceCandidate {
+    if (source_id == 0u) { return best; }
+    if (
+        best.source_id == 0u ||
+        mip_level < best.mip_level ||
+        (mip_level == best.mip_level && contribution_weight > best.contribution_weight)
+    ) {
+        return TerrainVTSourceCandidate(source_id, mip_level, contribution_weight);
+    }
+    return best;
+}
+
+// VERITAS: albedo source candidate of one material layer across ALL three
+// triplanar projections — no projection is picked before the residency
+// lookup. Evaluated in the deterministic order Y, then X, then Z (exact
+// ties keep the first candidate); each candidate carries its triplanar
+// projection weight as contribution_weight. Single-source attribution by
+// definition — never a blend.
 fn terrain_vt_source_id_triplanar(
     world_pos: vec3<f32>,
     normal: vec3<f32>,
     scale: f32,
     blend_sharpness: f32,
     layer: f32,
-) -> u32 {
+) -> TerrainVTSourceCandidate {
     let weights = compute_triplanar_weights(normal, blend_sharpness);
     let dpdx_world = dpdxCoarse(world_pos) * scale;
     let dpdy_world = dpdyCoarse(world_pos) * scale;
-    var uv = world_pos.yz * scale;
-    var ddx_uv = dpdx_world.yz;
-    var ddy_uv = dpdy_world.yz;
-    if (weights.y >= weights.x && weights.y >= weights.z) {
-        uv = world_pos.xz * scale;
-        ddx_uv = dpdx_world.xz;
-        ddy_uv = dpdy_world.xz;
-    } else if (weights.z > weights.x) {
-        uv = world_pos.xy * scale;
-        ddx_uv = dpdx_world.xy;
-        ddy_uv = dpdy_world.xy;
-    }
-    return terrain_vt_resolve_source_id(TERRAIN_VT_FAMILY_ALBEDO, uv, ddx_uv, ddy_uv, layer);
+    var best = TerrainVTSourceCandidate(0u, 0xffffffffu, -1.0);
+    let candidate_y = terrain_vt_resolve_source_id(
+        TERRAIN_VT_FAMILY_ALBEDO,
+        world_pos.xz * scale,
+        dpdx_world.xz,
+        dpdy_world.xz,
+        layer,
+    );
+    best = terrain_vt_select_source(
+        best,
+        candidate_y.source_id,
+        candidate_y.mip_level,
+        weights.y,
+    );
+    let candidate_x = terrain_vt_resolve_source_id(
+        TERRAIN_VT_FAMILY_ALBEDO,
+        world_pos.yz * scale,
+        dpdx_world.yz,
+        dpdy_world.yz,
+        layer,
+    );
+    best = terrain_vt_select_source(
+        best,
+        candidate_x.source_id,
+        candidate_x.mip_level,
+        weights.x,
+    );
+    let candidate_z = terrain_vt_resolve_source_id(
+        TERRAIN_VT_FAMILY_ALBEDO,
+        world_pos.xy * scale,
+        dpdx_world.xy,
+        dpdy_world.xy,
+        layer,
+    );
+    best = terrain_vt_select_source(
+        best,
+        candidate_z.source_id,
+        candidate_z.mip_level,
+        weights.z,
+    );
+    return best;
 }
 
 fn terrain_vt_sample_family_uv(
@@ -3065,9 +3134,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // r = material-map gate, g = roughness, b = ambient occlusion (reserved).
     var vt_mask_data = vec3<f32>(0.0, 0.0, 0.0);
     var vt_mask_residency = 0.0;
-    // VERITAS: attribution is single-source — the albedo source id of the
-    // dominant (max-weight, first index wins ties) material layer.
-    var dominant_layer_weight = -1.0;
+    // VERITAS: attribution is single-source and chosen globally after
+    // residency resolution. Every active material layer offers its best
+    // triplanar candidate; the lowest resident mip wins, and the
+    // contribution weight (triplanar projection weight x material layer
+    // weight) only breaks exact mip ties — a finer resident mip wins even
+    // when its material/projection weight is lower.
+    var best_source = TerrainVTSourceCandidate(0u, 0xffffffffu, -1.0);
     for (var idx = 0; idx < 4; idx = idx + 1) {
         if (idx < layer_count) {
             let weight = weights[idx];
@@ -3083,16 +3156,19 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
                 lod_value
             );
             albedo = albedo + sample_rgb * weight;
-            if (weight > dominant_layer_weight) {
-                dominant_layer_weight = weight;
-                terrain_vt_albedo_source_id = terrain_vt_source_id_triplanar(
-                    input.world_position,
-                    base_normal,
-                    tri_scale,
-                    tri_blend,
-                    layer,
-                );
-            }
+            let layer_candidate = terrain_vt_source_id_triplanar(
+                input.world_position,
+                base_normal,
+                tri_scale,
+                tri_blend,
+                layer,
+            );
+            best_source = terrain_vt_select_source(
+                best_source,
+                layer_candidate.source_id,
+                layer_candidate.mip_level,
+                layer_candidate.contribution_weight * weight,
+            );
             roughness = roughness + u_shading.layer_roughness[idx] * weight;
             metallic = metallic + u_shading.layer_metallic[idx] * weight;
             if (vt_normal_enabled) {
@@ -3122,6 +3198,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             }
         }
     }
+    terrain_vt_albedo_source_id = best_source.source_id;
 
     // Optional water override: when mask is active, treat surface as water material.
     // Store terrain normal for non-water, give water proper wave normals for reflections
@@ -4492,7 +4569,16 @@ fn vs_clipmap_main(
     var out : VertexOutput;
 
     let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_size = vec2<f32>(textureDimensions(height_tex, 0));
+    let coarse_step = exp2(max(clip_morph.y, 0.0)) / h_size;
+    let uv_coarse = clamp(
+        floor(uv / coarse_step) * coarse_step,
+        vec2<f32>(0.0),
+        vec2<f32>(1.0)
+    );
+    let h_fine = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_coarse = textureSampleLevel(height_tex, height_samp, uv_coarse, 0.0).r;
+    let h_raw = mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;

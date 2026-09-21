@@ -157,6 +157,9 @@ pub(super) struct TerrainMaterialVT {
     runtime: Option<TerrainMaterialVTRuntime>,
     source_generation: u64,
     last_stats: TerrainMaterialVTStats,
+    /// VERITAS test seam: when set, `prepare_frame` pages in exactly this
+    /// ordered tile list instead of camera-driven request collection.
+    test_residency_schedule: Option<Vec<TileKey>>,
 }
 
 #[cfg(feature = "extension-module")]
@@ -167,6 +170,7 @@ impl TerrainMaterialVT {
             runtime: None,
             source_generation: 0,
             last_stats: TerrainMaterialVTStats::default(),
+            test_residency_schedule: None,
         }
     }
 
@@ -239,6 +243,44 @@ impl TerrainMaterialVT {
         self.runtime = None;
         self.source_generation = self.source_generation.wrapping_add(1);
         self.last_stats = TerrainMaterialVTStats::default();
+        self.test_residency_schedule = None;
+    }
+
+    /// VERITAS test seam: pin the exact ordered tile residency list that
+    /// `prepare_frame` pages in (family, material_index, tile_x, tile_y,
+    /// mip_level). Rejects unsupported families and `(family, material)`
+    /// pairs with no registered source. Setting the schedule drops the
+    /// runtime so the next physical render starts from an empty atlas and
+    /// page table.
+    pub fn set_test_residency_schedule(
+        &mut self,
+        schedule: Vec<(String, u32, u32, u32, u32)>,
+    ) -> Result<(), String> {
+        let mut keys = Vec::with_capacity(schedule.len());
+        for (index, (family, material_index, tile_x, tile_y, mip_level)) in
+            schedule.into_iter().enumerate()
+        {
+            let Some(family_slot) = Self::family_slot(&family) else {
+                return Err(format!(
+                    "terrain VT residency schedule entry {index}: unsupported family '{family}'"
+                ));
+            };
+            if !self.sources.contains_key(&(material_index, family.clone())) {
+                return Err(format!(
+                    "terrain VT residency schedule entry {index}: no source registered for family '{family}' material {material_index}"
+                ));
+            }
+            keys.push(TileKey {
+                family_slot,
+                material_index,
+                x: tile_x,
+                y: tile_y,
+                mip_level,
+            });
+        }
+        self.test_residency_schedule = Some(keys);
+        self.runtime = None;
+        Ok(())
     }
 
     pub fn get_stats(&self) -> HashMap<String, f32> {
@@ -446,10 +488,117 @@ impl TerrainMaterialVT {
             bytemuck::cast_slice(&fallback_colors),
         );
 
-        let requests =
-            runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback);
-        for key in requests {
-            runtime.ensure_tile_resident(encoder, device.as_ref(), queue.as_ref(), key)?;
+        if let Some(chronos_frame) = params.chronos_frame.as_ref() {
+            let required = &chronos_frame.state().required_residency;
+            for (index, record) in required.iter().enumerate() {
+                if record.family_slot >= TERRAIN_VT_FAMILY_COUNT {
+                    return Err(format!(
+                        "chronos residency[{index}]: family slot {} out of range ({} families)",
+                        record.family_slot, TERRAIN_VT_FAMILY_COUNT
+                    ));
+                }
+                if record.material_index >= effective_material_count {
+                    return Err(format!(
+                        "chronos residency[{index}]: material index {} out of range (material_count {})",
+                        record.material_index, effective_material_count
+                    ));
+                }
+                if !runtime
+                    .sources
+                    .contains_key(&(record.family_slot, record.material_index))
+                {
+                    return Err(format!(
+                        "chronos residency[{index}]: no prepared source for family slot {} material {}",
+                        record.family_slot, record.material_index
+                    ));
+                }
+                if record.mip_level >= runtime.max_mip_levels {
+                    return Err(format!(
+                        "chronos residency[{index}]: mip {} out of range (max_mip_levels {})",
+                        record.mip_level, runtime.max_mip_levels
+                    ));
+                }
+                let (pages_x, pages_y) = runtime.pages_at_mip(record.mip_level);
+                if record.x >= pages_x || record.y >= pages_y {
+                    return Err(format!(
+                        "chronos residency[{index}]: page ({}, {}) outside {}x{} pages at mip {}",
+                        record.x, record.y, pages_x, pages_y, record.mip_level
+                    ));
+                }
+            }
+            for record in required.iter() {
+                runtime.ensure_tile_resident(
+                    encoder,
+                    device.as_ref(),
+                    queue.as_ref(),
+                    TileKey {
+                        family_slot: record.family_slot,
+                        material_index: record.material_index,
+                        x: record.x,
+                        y: record.y,
+                        mip_level: record.mip_level,
+                    },
+                )?;
+            }
+            for (index, record) in required.iter().enumerate() {
+                if !runtime.page_is_resident(TileKey {
+                    family_slot: record.family_slot,
+                    material_index: record.material_index,
+                    x: record.x,
+                    y: record.y,
+                    mip_level: record.mip_level,
+                }) {
+                    return Err(format!(
+                        "chronos residency[{index}]: required page family {} material {} ({}, {}) mip {} is not resident after synchronous paging",
+                        record.family_slot,
+                        record.material_index,
+                        record.x,
+                        record.y,
+                        record.mip_level
+                    ));
+                }
+            }
+        } else if let Some(schedule) = self.test_residency_schedule.as_ref() {
+            // Authored test schedule: page in exactly this ordered list —
+            // no request collection, no sorting, no ancestor fill — so the
+            // physical render starts from a known residency set.
+            for (index, key) in schedule.iter().enumerate() {
+                if !runtime
+                    .sources
+                    .contains_key(&(key.family_slot, key.material_index))
+                {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: no prepared source for family slot {} material {}",
+                        key.family_slot, key.material_index
+                    ));
+                }
+                if key.mip_level >= runtime.max_mip_levels {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: mip {} out of range (max_mip_levels {})",
+                        key.mip_level, runtime.max_mip_levels
+                    ));
+                }
+                let (pages_x, pages_y) = runtime.pages_at_mip(key.mip_level);
+                if key.x >= pages_x || key.y >= pages_y {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: page ({}, {}) outside {}x{} pages at mip {}",
+                        key.x, key.y, pages_x, pages_y, key.mip_level
+                    ));
+                }
+            }
+            for key in schedule.iter().copied() {
+                runtime.ensure_tile_resident(encoder, device.as_ref(), queue.as_ref(), key)?;
+            }
+        } else {
+            let requests = runtime.collect_requests(
+                params,
+                render_width,
+                render_height,
+                decoded.vt.use_feedback,
+            );
+            for key in requests {
+                runtime.ensure_tile_resident(encoder, device.as_ref(), queue.as_ref(), key)?;
+            }
         }
         runtime.upload_page_tables(queue.as_ref());
         runtime.refresh_stats();
@@ -1402,6 +1551,26 @@ impl TerrainMaterialVTRuntime {
     fn layer_mip_index(&self, family_slot: u32, material_index: u32, mip_level: u32) -> usize {
         ((family_slot * self.material_count + material_index) * self.max_mip_levels + mip_level)
             as usize
+    }
+
+    fn page_is_resident(&self, key: TileKey) -> bool {
+        if key.family_slot >= TERRAIN_VT_FAMILY_COUNT
+            || key.material_index >= self.material_count
+            || key.mip_level >= self.max_mip_levels
+        {
+            return false;
+        }
+        let (pages_x, pages_y) = self.pages_at_mip(key.mip_level);
+        if key.x >= pages_x || key.y >= pages_y {
+            return false;
+        }
+        let layer_index = self.layer_mip_index(key.family_slot, key.material_index, key.mip_level);
+        let page_index = (key.y * pages_x + key.x) as usize;
+        self.page_tables
+            .get(layer_index)
+            .and_then(|table| table.get(page_index))
+            .map(|entry| entry.is_resident > 0)
+            .unwrap_or(false)
     }
 
     fn encode_cache_tile(&self, key: TileKey) -> TileId {

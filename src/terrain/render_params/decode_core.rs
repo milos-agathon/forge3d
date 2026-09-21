@@ -32,6 +32,7 @@ pub(super) struct CoreTerrainParams {
     pub aa_seed: Option<u64>,
     pub terrain_data_revision: Option<u64>,
     pub height_curve_lut: Option<Arc<Vec<f32>>>,
+    pub chronos_frame_json: Option<String>,
 }
 
 pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerrainParams> {
@@ -199,6 +200,15 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         })?),
         None => None,
     };
+    let chronos_frame_json = match params.getattr("chronos_frame_json").ok() {
+        Some(value) if value.is_none() => None,
+        Some(value) => Some(
+            value
+                .extract::<String>()
+                .map_err(|_| PyValueError::new_err("chronos_frame_json must be a string"))?,
+        ),
+        None => None,
+    };
 
     let height_curve_lut = if height_curve_mode == "lut" {
         let raw_lut = params.getattr("height_curve_lut")?;
@@ -254,5 +264,6 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         aa_seed,
         terrain_data_revision,
         height_curve_lut,
+        chronos_frame_json,
     })
 }

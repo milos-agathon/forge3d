@@ -27,6 +27,24 @@ pub(in crate::terrain::renderer) struct ClipmapGeometryKey {
     morph_range_bits: u32,
     terrain_span_bits: u32,
     center_bits: (u32, u32),
+    chronos_morph_bits: Vec<(u32, u32)>,
+}
+
+fn chronos_morph_bits(
+    params: &crate::terrain::render_params::TerrainRenderParams,
+) -> Vec<(u32, u32)> {
+    params
+        .chronos_frame
+        .as_ref()
+        .map(|frame| {
+            frame
+                .state()
+                .ring_morphs
+                .iter()
+                .map(|morph| (morph.ring, morph.morph.to_bits()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl ClipmapGeometryKey {
@@ -34,6 +52,7 @@ impl ClipmapGeometryKey {
         config: &ClipmapConfig,
         terrain_span: f32,
         center: glam::Vec2,
+        params: &crate::terrain::render_params::TerrainRenderParams,
     ) -> Self {
         Self {
             ring_count: config.ring_count,
@@ -43,6 +62,7 @@ impl ClipmapGeometryKey {
             morph_range_bits: config.morph_range.to_bits(),
             terrain_span_bits: terrain_span.to_bits(),
             center_bits: (center.x.to_bits(), center.y.to_bits()),
+            chronos_morph_bits: chronos_morph_bits(params),
         }
     }
 }
@@ -105,7 +125,7 @@ impl TerrainScene {
 
         let center = self.height_streaming_center();
         let terrain_span = params.terrain_span.max(1.0);
-        let cache_key = ClipmapGeometryKey::new(&config, terrain_span, center);
+        let cache_key = ClipmapGeometryKey::new(&config, terrain_span, center, params);
         if let Some(TerrainGeometryProvider::Clipmap {
             cache_key: existing,
             ..
@@ -116,7 +136,22 @@ impl TerrainScene {
             }
         }
 
-        let mesh = crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span);
+        let mut mesh =
+            crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span);
+        if let Some(chronos_frame) = params.chronos_frame.as_ref() {
+            let ring_morphs = &chronos_frame.state().ring_morphs;
+            for vertex in &mut mesh.vertices {
+                if vertex.is_skirt() {
+                    continue;
+                }
+                let factor = ring_morphs
+                    .iter()
+                    .find(|morph| morph.ring == vertex.ring_index())
+                    .map(|morph| morph.morph)
+                    .unwrap_or(1.0);
+                vertex.morph_data[0] *= factor;
+            }
+        }
         let vertex_buffer = tracked_create_buffer_init(
             self.device.as_ref(),
             &wgpu::util::BufferInitDescriptor {
