@@ -22,6 +22,7 @@ import pytest
 
 import forge3d as f3d
 from forge3d._native import NATIVE_AVAILABLE, get_native_module
+from _toml_compat import load_toml
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +187,9 @@ class TestNativeModuleSymbols:
         "atmosphere_spectral_to_linear_rgb",
         "atmosphere_generate_environment",
         "atmosphere_reference_aerial",
+        # DIFFERENTIA: differentiable inverse solver + primal
+        "inverse_solve",
+        "inverse_render_primal",
         # VERITAS: per-pixel cryptographic provenance
         "seal_provenance",
         "verify_provenance",
@@ -825,8 +829,14 @@ class TestPackageLevelApiContracts:
         "LicenseError",
         "render_offline",
         "oidn_available",
+        # OBLIQUA: tiled converged terrain poster driver
+        "render_terrain_poster",
         # AEQUITAS: PT-vs-raster adjudication pair
         "render_adjudication_pair",
+        # DIFFERENTIA: scene-parameter recovery surface
+        "recover_scene",
+        "RecoveredScene",
+        "InverseSolveUnavailable",
         # VERITAS: per-pixel cryptographic provenance
         "seal_provenance",
         "verify_provenance",
@@ -1021,10 +1031,9 @@ class TestCartographerPrimeNativeContract:
 
     def test_canonical_clippy_aliases_are_single_strings(self):
         from pathlib import Path
-        import tomllib
 
         config_path = Path(__file__).resolve().parents[1] / ".cargo" / "config.toml"
-        aliases = tomllib.loads(config_path.read_text(encoding="utf-8"))["alias"]
+        aliases = load_toml(config_path)["alias"]
         for name in ("forge3d-clippy", "forge3d-clippy-acceptance"):
             alias = aliases[name]
             assert isinstance(alias, str), f"{name} must use Cargo's string alias form"

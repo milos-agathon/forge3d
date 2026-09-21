@@ -1,6 +1,6 @@
 [package]
 name = "forge3d"
-version = "1.35.0"
+version = "1.37.1"
 edition = "2021"
 autoexamples = false
 description = "GPU-accelerated offline 3D map rendering with Rust-first GIS vector, rasterization, mask, thematic, CRS, affine, windowing, and reprojection support"
@@ -43,6 +43,8 @@ enable-gpu-instancing = ["enable-pbr", "enable-tbn"]
 enable-renderer-config = []
 # Workstream O: Resource & Memory Management
 enable-staging-rings = []
+# DIFFERENTIA: differentiable inverse path tracing (scene-parameter recovery)
+enable-inverse-pt = []
 # A14: AOV image format support
 images = ["dep:exr"]
 # P2.2: LAZ decompression in COPC reader

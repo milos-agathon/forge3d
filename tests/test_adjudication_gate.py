@@ -48,6 +48,11 @@ BAND_SSIM_MIN = 0.96
 # Drift thresholds vs committed goldens (terrain-golden convention).
 DRIFT_SSIM_MIN = 0.995
 DRIFT_MEAN_ABS_MAX = 2.0
+# The committed PNG pair produces the same metric on the Windows and macOS
+# full-matrix runners to within 37 float64 ulps.  Keep a 64-ulp cap for that
+# reduction-order difference; the score floor and image-drift gates below
+# remain exact regression checks.
+REFERENCE_METRIC_PORTABILITY_ABS = 64.0 * np.finfo(np.float64).eps
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +109,7 @@ def test_reference_consistency_rejects_lowered_scores(key):
         "lit_pass_fraction": 1.0, "shadow_band_ssim": 1.0,
     }
     measured = dict(reference)
-    reference[key] = np.nextafter(1.0, 0.0).item()
+    reference[key] = float(reference[key] - 2.0 * REFERENCE_METRIC_PORTABILITY_ABS)
     with pytest.raises(AssertionError, match="reference does not describe PNG"):
         _assert_reference_consistency(measured, reference)
 
@@ -233,7 +238,9 @@ def _assert_score_reference(scores, reference):
 def _assert_reference_consistency(scores, reference):
     _assert_score_reference(scores, reference)
     for key in ("lit_pass_fraction", "shadow_band_ssim"):
-        assert scores[key] == reference[key], f"reference does not describe PNG: {key}"
+        assert abs(scores[key] - reference[key]) <= REFERENCE_METRIC_PORTABILITY_ABS, (
+            f"reference does not describe PNG: {key}"
+        )
 
 
 def _load_score_reference():

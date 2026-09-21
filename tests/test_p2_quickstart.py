@@ -75,5 +75,15 @@ def test_p2_quickstart_advanced_labels_compile_or_diagnose():
         viewport=(120, 80),
     )
 
-    assert [label.label_id for label in plan.accepted] == ["road"]
-    assert any(diagnostic.code == "experimental_feature" for diagnostic in plan.diagnostics)
+    # CARTOGRAPHER-PRIME: advanced line labels compile only from geometry
+    # authority; otherwise they diagnose rather than silently succeed.
+    assert list(plan.accepted) == []
+    assert {r.label_id: r.reason for r in plan.rejected} == {
+        "road": "missing_geometry_authority",
+        "curved": "missing_geometry_authority",
+    }
+    assert {
+        d.object_id
+        for d in plan.diagnostics
+        if d.code == "label_geometry_authority_missing"
+    } == {"road", "curved"}

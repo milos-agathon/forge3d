@@ -152,7 +152,7 @@ from .style import (
 )
 from . import smoke
 from . import verify
-from .path_tracing import ExperimentalSyntheticOutput
+from .path_tracing import ExperimentalSyntheticOutput, render_terrain_poster
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -1490,6 +1490,65 @@ def render_adjudication_pair(
     cache: str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
 
+# DIFFERENTIA: differentiable inverse path tracing (enable-inverse-pt)
+from .inverse import (
+    InverseSolveUnavailable,
+    RecoveredScene,
+    recover_scene,
+)
+from . import inverse as inverse
+
+def inverse_solve(
+    target_rgba: np.ndarray,
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    cam: Dict[str, Any],
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    init_albedo: Optional[Any] = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    turbidity: float = ...,
+    sun_color: Tuple[float, float, float] = ...,
+    env_map: Optional[np.ndarray] = ...,
+    env_intensity: float = ...,
+    iters: int = ...,
+    spp: int = ...,
+    frames: int = ...,
+    tile_size: int = ...,
+    seed: int = ...,
+    lr_albedo: float = ...,
+    lr_sun: float = ...,
+    lr_turbidity: float = ...,
+    early_stop_tol: float = ...,
+    early_stop_patience: int = ...,
+    spatial_reuse: bool = ...,
+    edge_term: bool = ...,
+    score_correction: bool = ...,
+) -> Dict[str, Any]: ...
+
+def inverse_render_primal(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    cam: Dict[str, Any],
+    albedo: Any,
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    turbidity: float = ...,
+    sun_color: Tuple[float, float, float] = ...,
+    env_map: Optional[np.ndarray] = ...,
+    env_intensity: float = ...,
+    spp: int = ...,
+    frames: int = ...,
+    seed: int = ...,
+) -> Dict[str, Any]: ...
+
 # PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
 # ``earth_model="flat"`` requires ``refraction_model="none"``; unsupported
 # model names or pairs raise an exception and never silently fall back.
@@ -1502,6 +1561,14 @@ def hybrid_render_terrain_reference(
     spacing: Tuple[float, float] = ...,
     exaggeration: float = ...,
     albedo: Tuple[float, float, float] = ...,
+    albedo_map: np.ndarray | None = ...,
+    albedo_sampling: str | None = ...,
+    camera_model: str | None = ...,
+    sensor_rect: Tuple[float, float, float, float] | None = ...,
+    full_width: int | None = ...,
+    full_height: int | None = ...,
+    pixel_offset: Optional[Tuple[int, int]] = ...,
+    turbidity: float = ...,
     sun_azimuth_deg: float | None = ...,
     sun_elevation_deg: float | None = ...,
     solar_time: object | None = ...,
@@ -1551,7 +1618,6 @@ def hybrid_render_aether_spectral_reference(
     variance_threshold: float = ...,
     certificate: bool | str | PathLikeStr | None = ...,
     cache: str | PathLikeStr | None = ...,
-    sdf_scene: Optional[object] = ...,
 ) -> Dict[str, Any]: ...
 
 # AETHER: spectral atmosphere public/native surface

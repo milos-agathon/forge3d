@@ -39,7 +39,18 @@ struct WavefrontUniforms {
     cam_forward: [f32; 3],
     seed_hi: u32,
     seed_lo: u32,
-    _pad_end: [u32; 3],
+    // The ReSTIR temporal/spatial shaders share the hybrid kernel's camera
+    // block (128-byte struct); the other wavefront shaders read only the
+    // first 96 bytes. Single-pass pinhole values keep the legacy paths:
+    // full sensor == render, no offset, camera_flags 0.
+    camera_model: u32,
+    full_width: u32,
+    full_height: u32,
+    pixel_offset_x: u32,
+    pixel_offset_y: u32,
+    ortho_half_height: f32,
+    camera_flags: u32,
+    sensor_rect: [f32; 4],
 }
 
 fn storage_buffer(
@@ -208,7 +219,14 @@ pub fn render_pt_reference(
         cam_forward: forward.into(),
         seed_hi: desc.seed_hi,
         seed_lo: desc.seed_lo,
-        _pad_end: [0; 3],
+        camera_model: 0,
+        full_width: width,
+        full_height: height,
+        pixel_offset_x: 0,
+        pixel_offset_y: 0,
+        ortho_half_height: 1.0,
+        camera_flags: 0,
+        sensor_rect: [0.0, 0.0, 1.0, 1.0],
     };
     let uniforms_buffer = tracked_create_buffer_init(
         device,

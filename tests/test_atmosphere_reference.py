@@ -979,7 +979,8 @@ def test_aether_shader_and_depth_source_contracts_are_locked() -> None:
     assert "view_ws.xzy" in shared
     assert "sign(c)" not in core and "sign(c)" not in shared and "sign(c)" not in prometheus
     assert "fn atmosphere_ray_hits_ground" in shared
-    assert "sun_visible && alignment>=cos(sun_radius)" in shared
+    # TERRA v2 routes the sun-disc threshold through the deterministic cosine.
+    assert "sun_visible && alignment>=det_cos(sun_radius)" in shared
     assert "textureLoad(prometheus_depth_aov" in prometheus
     assert "textureLoad(prometheus_visibility_aov" in prometheus
     assert "depth != depth" not in prometheus
@@ -991,7 +992,7 @@ def test_aether_shader_and_depth_source_contracts_are_locked() -> None:
         "            camera_height_unit,\n"
         "            sun_dir.y,\n"
         "            ray.y,\n"
-        "            dot(ray, sun_dir),\n"
+        "            det_dot3(ray, sun_dir),\n"
         "        ) * sun_intensity;"
         in miss_branch
     )
@@ -1001,7 +1002,10 @@ def test_aether_shader_and_depth_source_contracts_are_locked() -> None:
     )
     assert "let sun_intensity = aether_eval_clamp_radiometric_scale(" in prometheus
     assert "let atmosphere_exposure = aether_eval_clamp_radiometric_scale(" in prometheus
-    assert "aether_eval_clamp_hdr_radiance(\n        surface_or_environment" in prometheus
+    assert (
+        "aether_eval_clamp_hdr_radiance(\n        det_barrier3(surface_or_environment"
+        in prometheus
+    )
     assert "aether_eval_sample_accumulated_scattering(" in shared
     assert "aether_eval_sample_accumulated_scattering(" in prometheus
     assert "aether_eval_segment_transmittance(" in prometheus
@@ -1023,11 +1027,14 @@ def test_aether_shader_and_depth_source_contracts_are_locked() -> None:
     assert "prometheus_load_boundary_mean_transmittance" not in prometheus
     assert "scatter_fraction" not in prometheus
     assert (
-        "camera_scattering - transmittance * endpoint_scattering,\n"
+        "camera_scattering - det_barrier3(transmittance * endpoint_scattering),\n"
         "        vec3<f32>(0.0),"
         in prometheus
     )
-    assert "surface_or_environment * transmittance + finite_inscatter" in prometheus
+    assert (
+        "det_barrier3(surface_or_environment * transmittance) + finite_inscatter"
+        in prometheus
+    )
     assert "let endpoint_mus = aether_eval_spherical_endpoint_mus(" in prometheus
     assert "endpoint_mus.y,\n        endpoint_mus.x," in prometheus
     aerial_loader = prometheus.split("fn prometheus_load_aerial_transmittance", 1)[1].split(
@@ -1043,7 +1050,12 @@ def test_aether_shader_and_depth_source_contracts_are_locked() -> None:
     assert "TONEMAP_OPERATOR_REINHARD" in prometheus
     assert "linear_to_srgb" not in prometheus
     assert 'include_str!("shaders/includes/tonemap_common.wgsl")' in source_registry
-    production_registry = source_registry.split("#[cfg(test)]", 1)[0]
+    # Production = everything before the unit-test module. Item-level
+    # #[cfg(test)] attributes (e.g. MODULE_REWRITES) precede production code.
+    production_registry = source_registry.replace("\r\n", "\n").split(
+        "#[cfg(test)]\nmod tests {", 1
+    )[0]
+    assert production_registry != source_registry.replace("\r\n", "\n")
     assert production_registry.count(
         'include_str!("shaders/atmosphere/evaluation_core.wgsl")'
     ) == 3

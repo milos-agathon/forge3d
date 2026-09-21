@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.35.0"
+__version__ = "1.37.1"
 version = __version__
 
 import numpy as np
@@ -117,6 +117,8 @@ _NATIVE_ONLY_EXPORTS = (
         "atmosphere_spectral_to_linear_rgb",  # AETHER: spectral conversion
         "atmosphere_generate_environment",  # AETHER: validation environment
         "atmosphere_reference_aerial",  # AETHER: CPU transport diagnostic
+        "inverse_solve",  # DIFFERENTIA: reverse-mode scene recovery
+        "inverse_render_primal",  # DIFFERENTIA: differentiable primal
         "render_brdf_tile",  # CENSOR: certified BRDF pixel render
         "render_brdf_tile_overrides",  # CENSOR: certified BRDF pixel render
         "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
@@ -291,7 +293,14 @@ from .path_tracing import (
     PathTracer,
     hybrid_render_terrain_reference,
     make_camera,
+    render_terrain_poster,
 )
+from .inverse import (
+    InverseSolveUnavailable,
+    RecoveredScene,
+    recover_scene,
+)
+from . import inverse
 
 # -----------------------------------------------------------------------------
 # Interactive Viewer API
@@ -712,6 +721,7 @@ __all__ = [
     "PathTracer",
     "ExperimentalSyntheticOutput",
     "make_camera",
+    "render_terrain_poster",
     # Native types (when available)
     "Scene",
     "Session",
@@ -744,6 +754,12 @@ __all__ = [
     "atmosphere_spectral_to_linear_rgb",
     "atmosphere_generate_environment",
     "atmosphere_reference_aerial",
+    # DIFFERENTIA: differentiable inverse solver
+    "inverse_solve",
+    "inverse_render_primal",
+    "recover_scene",
+    "RecoveredScene",
+    "InverseSolveUnavailable",
     # CENSOR: certified BRDF pixel renders
     "render_brdf_tile",
     "render_brdf_tile_overrides",

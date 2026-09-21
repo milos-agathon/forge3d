@@ -20,12 +20,17 @@ use wgpu::{Device, Queue, TextureFormat};
 ///                         spacing_x, spacing_z (world units per texel)
 ///   row 1 h_params:       h_min, h_max (raw DEM range), exaggeration
 ///                         (world y = height * exaggeration), env intensity
-///   row 2 albedo_pad:     terrain albedo rgb, unused
+///   row 2 albedo_pad:     terrain albedo rgb, turbidity excess (tau - 1;
+///                         0 = the clean-air reference the canonical fixture
+///                         ships, so default blocks stay identity)
 ///   row 3 dims:           width_texels, height_texels, cell_w, cell_h
-///   row 4 mips:           mip_count, flags (bit0 = terrain enabled),
+///   row 4 mips:           mip_count, flags (bit0 = terrain enabled,
+///                         bit1 = per-texel albedo map at group 2 binding 16,
+///                         bit2 = spectral ReSTIR for mapped terrain),
 ///                         env_width, env_height (0 = constant env fallback)
 ///   row 5 extra:          spp (camera samples per frame), statistics
-///                         readback cadence in frames, unused, unused
+///                         readback cadence in frames, albedo sampling
+///                         (0 nearest, 1 bilinear), unused
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct TerrainPtUniforms {
@@ -35,6 +40,16 @@ pub struct TerrainPtUniforms {
     pub dims: [u32; 4],
     pub mips: [u32; 4],
     pub extra: [u32; 4],
+}
+
+/// How the per-texel albedo map is sampled at a traversal hit. `Nearest` keeps
+/// categorical palettes (land cover, LUTs) free of colour bleeding across class
+/// boundaries; `Bilinear` suits continuous fields and is what the inverse
+/// solver's adjoint scatter assumes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AlbedoSampling {
+    Nearest = 0,
+    Bilinear = 1,
 }
 
 /// Curvature parameters consumed by the shared terrain traversal. The two
@@ -344,6 +359,9 @@ impl TerrainMinMaxPyramid {
 
     /// Uniform block for the traversal kernel; terrain is centered on the
     /// world origin: texel (0,0) sits at (-(w-1)/2*sx, -(h-1)/2*sz).
+    /// `turbidity` is Linke-style aerosol load (1 = clean reference air) and
+    /// `albedo_map_active` enables both the mapped-albedo fetch and its
+    /// non-degenerate spectral ReSTIR estimator.
     #[allow(clippy::too_many_arguments)]
     pub fn uniforms(
         &self,
@@ -355,16 +373,29 @@ impl TerrainMinMaxPyramid {
         env_dims: (u32, u32),
         spp: u32,
         stats_readback_cadence: u32,
+        turbidity: f32,
+        albedo_map_active: bool,
+        albedo_sampling: AlbedoSampling,
     ) -> TerrainPtUniforms {
         let origin_x = -0.5 * (self.width as f32 - 1.0) * spacing_x;
         let origin_z = -0.5 * (self.height as f32 - 1.0) * spacing_z;
         TerrainPtUniforms {
             origin_spacing: [origin_x, origin_z, spacing_x, spacing_z],
             h_params: [self.h_min, self.h_max, exaggeration, env_intensity],
-            albedo_pad: [albedo[0], albedo[1], albedo[2], 0.0],
+            albedo_pad: [albedo[0], albedo[1], albedo[2], (turbidity - 1.0).max(0.0)],
             dims: [self.width, self.height, self.cell_w, self.cell_h],
-            mips: [self.mip_count, 1, env_dims.0, env_dims.1],
-            extra: [spp.max(1), stats_readback_cadence.max(2), 0, 0],
+            mips: [
+                self.mip_count,
+                1 | if albedo_map_active { 2 | 4 } else { 0 },
+                env_dims.0,
+                env_dims.1,
+            ],
+            extra: [
+                spp.max(1),
+                stats_readback_cadence.max(2),
+                albedo_sampling as u32,
+                0,
+            ],
         }
     }
 }
@@ -378,14 +409,28 @@ pub struct TerrainPtScene {
     pub env_texture: TrackedTexture,
     /// (0, 0) selects the constant-white env fallback in the kernel.
     pub env_dims: (u32, u32),
+    /// Per-texel albedo map at DEM texel resolution (RGBA32F). A 1x1 white
+    /// placeholder when no map was given; consumers still bind it at group 2
+    /// binding 16 so the layout stays fixed. Texels with alpha < 1 fall back to
+    /// the constant `albedo`.
+    pub albedo_texture: TrackedTexture,
+    /// Whether the mapped-albedo and spectral-ReSTIR flags are raised.
+    pub has_albedo_map: bool,
+    /// Tracked byte size of the albedo texture.
+    albedo_bytes: u64,
+    albedo_sampling: AlbedoSampling,
     spacing: (f32, f32),
     exaggeration: f32,
     albedo: [f32; 3],
     env_intensity: f32,
     env_tracked: (u32, u32),
+    turbidity: f32,
 }
 
 impl TerrainPtScene {
+    /// Scene with an optional linear-RGB albedo map (`(data, w, h)`, w*h*3,
+    /// dims equal to the DEM), sampled bilinearly. This is the form the
+    /// inverse solver optimises; it is `new_with_albedo` with alpha = 1.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: &Device,
@@ -398,6 +443,64 @@ impl TerrainPtScene {
         albedo: [f32; 3],
         env_map: Option<(&[f32], u32, u32)>,
         env_intensity: f32,
+        albedo_map: Option<(&[f32], u32, u32)>,
+        turbidity: f32,
+    ) -> Result<Self, RenderError> {
+        let rgba: Option<Vec<f32>> = match albedo_map {
+            Some((data, w, h)) => {
+                if w != dem_width || h != dem_height {
+                    return Err(RenderError::Upload(format!(
+                        "terrain albedo map dims {w}x{h} must equal the DEM texel dims {dem_width}x{dem_height}"
+                    )));
+                }
+                if data.len() != (w as usize) * (h as usize) * 3 {
+                    return Err(RenderError::Upload(
+                        "terrain albedo map length does not match dims * 3".into(),
+                    ));
+                }
+                Some(
+                    data.chunks_exact(3)
+                        .flat_map(|c| [c[0], c[1], c[2], 1.0])
+                        .collect(),
+                )
+            }
+            None => None,
+        };
+        Self::new_with_albedo(
+            device,
+            queue,
+            heights,
+            dem_width,
+            dem_height,
+            spacing,
+            exaggeration,
+            albedo,
+            env_map,
+            env_intensity,
+            rgba.as_deref(),
+            AlbedoSampling::Bilinear,
+            turbidity,
+        )
+    }
+
+    /// Scene with an optional RGBA albedo map on the DEM grid (w*h*4 floats,
+    /// RGB finite and >= 0, alpha in [0, 1]; alpha < 1 declares "no material"
+    /// and falls back to the constant `albedo`), sampled per `albedo_sampling`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_albedo(
+        device: &Device,
+        queue: &Queue,
+        heights: &[f32],
+        dem_width: u32,
+        dem_height: u32,
+        spacing: (f32, f32),
+        exaggeration: f32,
+        albedo: [f32; 3],
+        env_map: Option<(&[f32], u32, u32)>,
+        env_intensity: f32,
+        albedo_rgba: Option<&[f32]>,
+        albedo_sampling: AlbedoSampling,
+        turbidity: f32,
     ) -> Result<Self, RenderError> {
         if !(spacing.0.is_finite() && spacing.0 > 0.0 && spacing.1.is_finite() && spacing.1 > 0.0) {
             return Err(RenderError::Upload(format!(
@@ -419,8 +522,72 @@ impl TerrainPtScene {
                 "env intensity must be finite and >= 0".into(),
             ));
         }
+        if !(turbidity.is_finite() && turbidity >= 1.0) {
+            return Err(RenderError::Upload(format!(
+                "terrain turbidity must be finite and >= 1, got {turbidity}"
+            )));
+        }
         let pyramid =
             TerrainMinMaxPyramid::from_heightfield(device, queue, heights, dem_width, dem_height)?;
+
+        let (alb_w, alb_h, alb_rgba): (u32, u32, Vec<f32>) = match albedo_rgba {
+            Some(data) => {
+                if data.len() != (dem_width as usize) * (dem_height as usize) * 4 {
+                    return Err(RenderError::Upload(format!(
+                        "terrain albedo map must match the DEM grid {dem_width}x{dem_height} \
+                         with four channels"
+                    )));
+                }
+                if data.chunks_exact(4).any(|rgba| {
+                    rgba.iter().any(|v| !v.is_finite())
+                        || rgba[..3].iter().any(|v| *v < 0.0)
+                        || !(0.0..=1.0).contains(&rgba[3])
+                }) {
+                    return Err(RenderError::Upload(
+                        "terrain albedo map RGB must be finite and >= 0; alpha must be in [0,1]"
+                            .into(),
+                    ));
+                }
+                (dem_width, dem_height, data.to_vec())
+            }
+            None => (1, 1, vec![1.0, 1.0, 1.0, 1.0]),
+        };
+        let albedo_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("hybrid-pt-terrain-albedo"),
+                size: wgpu::Extent3d {
+                    width: alb_w,
+                    height: alb_h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::Rgba32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )?;
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &albedo_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&alb_rgba),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(alb_w * 16),
+                rows_per_image: Some(alb_h),
+            },
+            wgpu::Extent3d {
+                width: alb_w,
+                height: alb_h,
+                depth_or_array_layers: 1,
+            },
+        );
 
         let (env_data, env_w, env_h, env_dims): (Vec<f32>, u32, u32, (u32, u32)) = match env_map {
             Some((data, w, h)) => {
@@ -485,18 +652,24 @@ impl TerrainPtScene {
             pyramid,
             env_texture,
             env_dims,
+            albedo_texture,
+            has_albedo_map: albedo_rgba.is_some(),
+            albedo_bytes: (alb_w as u64) * (alb_h as u64) * 16,
+            albedo_sampling,
             spacing,
             exaggeration,
             albedo,
             env_intensity,
             env_tracked: (env_w, env_h),
+            turbidity,
         })
     }
 
-    /// Total tracked GPU bytes (pyramid mips + DEM texture + env map).
+    /// Total tracked GPU bytes (pyramid mips + DEM texture + env map +
+    /// albedo map).
     pub fn byte_size(&self) -> u64 {
         let (ew, eh) = self.env_tracked;
-        self.pyramid.byte_size + (ew as u64) * (eh as u64) * 16
+        self.pyramid.byte_size + (ew as u64) * (eh as u64) * 16 + self.albedo_bytes
     }
 
     pub fn uniforms(&self, spp: u32, stats_readback_cadence: u32) -> TerrainPtUniforms {
@@ -509,6 +682,9 @@ impl TerrainPtScene {
             self.env_dims,
             spp,
             stats_readback_cadence,
+            self.turbidity,
+            self.has_albedo_map,
+            self.albedo_sampling,
         )
     }
 }
@@ -1301,23 +1477,32 @@ mod tests {
         expression: naga::Handle<naga::Expression>,
         entry_deviation: naga::Handle<naga::Expression>,
     ) -> bool {
-        let naga::Expression::Binary {
-            op: naga::BinaryOperator::LogicalAnd,
-            left,
-            right,
-        } = function.expressions[expression]
-        else {
-            return false;
-        };
-        let is_any_hit = |operand| {
-            matches!(
-                function.expressions[operand],
+        fn conjunction_terms(
+            function: &naga::Function,
+            expression: naga::Handle<naga::Expression>,
+            entry_deviation: naga::Handle<naga::Expression>,
+        ) -> (bool, bool) {
+            if let naga::Expression::Binary {
+                op: naga::BinaryOperator::LogicalAnd,
+                left,
+                right,
+            } = function.expressions[expression]
+            {
+                let (left_any_hit, left_entry_nonpositive) =
+                    conjunction_terms(function, left, entry_deviation);
+                let (right_any_hit, right_entry_nonpositive) =
+                    conjunction_terms(function, right, entry_deviation);
+                return (
+                    left_any_hit || right_any_hit,
+                    left_entry_nonpositive || right_entry_nonpositive,
+                );
+            }
+            let is_any_hit = matches!(
+                function.expressions[expression],
                 naga::Expression::FunctionArgument(6)
-            )
-        };
-        let is_entry_nonpositive = |operand| {
-            matches!(
-                function.expressions[operand],
+            );
+            let is_entry_nonpositive = matches!(
+                function.expressions[expression],
                 naga::Expression::Binary {
                     op: naga::BinaryOperator::LessEqual,
                     left,
@@ -1327,10 +1512,13 @@ mod tests {
                         function.expressions[right],
                         naga::Expression::Literal(naga::Literal::F32(value)) if value == 0.0
                     )
-            )
-        };
-        (is_any_hit(left) && is_entry_nonpositive(right))
-            || (is_entry_nonpositive(left) && is_any_hit(right))
+            );
+            (is_any_hit, is_entry_nonpositive)
+        }
+
+        let (has_any_hit, has_entry_nonpositive) =
+            conjunction_terms(function, expression, entry_deviation);
+        has_any_hit && has_entry_nonpositive
     }
 
     fn local_reaches_global_store(
@@ -1999,6 +2187,28 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
     }
 
     #[test]
+    fn production_shadow_ray_uses_later_bilinear_root_after_tmin() {
+        // In the first cell h(u,v) = 0.25u + 0.25v - uv. Along u=v=t,
+        // a horizontal ray at y=0 meets it at t=0 and t=0.5. The proof
+        // dispatch uses tmin=1e-3, so the first root is excluded while the
+        // second remains admissible under the proof's small curvature term.
+        // Other cells lie below the ray.
+        let mut heights = vec![-10.0; PROOF_DEM_SIDE * PROOF_DEM_SIDE];
+        heights[0] = 0.0;
+        heights[1] = 0.25;
+        heights[PROOF_DEM_SIDE] = 0.25;
+        heights[PROOF_DEM_SIDE + 1] = -0.5;
+        let rays = [ProofRay {
+            origin: [0.0, 0.0, 0.0],
+            direction: [PROOF_SPACING_M, 0.0, PROOF_SPACING_M],
+            inv_two_r_prime: 1.0 / 14_650_000.0,
+        }];
+        let (hits, _, _) = production_gpu_hits(&heights, &rays)
+            .expect("production terrain traversal GPU check must run");
+        assert_eq!(hits, [1], "later bilinear root must survive tmin cutoff");
+    }
+
+    #[test]
     fn curvature_descent_is_conservative() {
         assert_eq!(std::mem::size_of::<EarthCurvatureUniforms>(), 24);
         let shader = crate::shader_sources::hybrid_kernel();
@@ -2050,20 +2260,20 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
                 "let c = 1.0;\n    let a = 0.0;\n    let b = 1.0;",
             ),
             shader.replace(
-                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
-                "if (any_hit && c >= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
+                "if (any_hit && c >= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
             ),
             shader.replace(
-                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
-                "if (any_hit && d3.y <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
+                "if (any_hit && d3.y <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
             ),
             shader.replace(
-                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
-                "if (any_hit || c <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
+                "if (any_hit || c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
             ),
             shader.replace(
-                "if (any_hit && c <= 0.0) {\n        s_hit = 0.0;",
-                "if (!any_hit && c <= 0.0) {\n        s_hit = 0.0;",
+                "if (any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
+                "if (!any_hit && c <= 0.0 && t0 > ray.tmin && t0 < ray.tmax) {\n        s_hit = 0.0;",
             ),
         ] {
             assert_ne!(mutant, shader, "HELIOS mutation target drifted");

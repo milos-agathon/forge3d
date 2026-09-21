@@ -226,9 +226,12 @@ fn test_msm_fragment() -> @location(0) vec4<f32> {{
 
 #[test]
 fn live_shared_msm_sampler_treats_front_of_mean_as_lit() {
+    // Light-space z is already the [0, 1] shadow depth (cb161cc4 removed the
+    // old z * 0.5 + 0.5 remap); 0.25 sits in front of the 0.5 mean. A value
+    // outside [0, 1] would only exercise the out-of-bounds early return.
     let Some([shared, shared_mean]) = execute_msm_visibility(
         CsmRenderer::shader_source(),
-        "sample_shadow_msm(vec4<f32>(0.0, 0.0, -0.5, 1.0), 0u, vec3<f32>(0.0, 1.0, 0.0))",
+        "sample_shadow_msm(vec4<f32>(0.0, 0.0, 0.25, 1.0), 0u, vec3<f32>(0.0, 1.0, 0.0))",
         [0.5, 0.26, 0.125, 0.0625],
     ) else {
         return;
@@ -239,8 +242,10 @@ fn live_shared_msm_sampler_treats_front_of_mean_as_lit() {
 
 #[test]
 fn live_shared_msm_sampler_consumes_third_and_fourth_moments() {
+    // Receiver 0.6 is behind the 0.5 mean, so 4MSM must reconstruct partial
+    // occlusion from the higher moments (z is the [0, 1] shadow depth).
     let expression =
-        "sample_shadow_msm(vec4<f32>(0.0, 0.0, 0.2, 1.0), 0u, vec3<f32>(0.0, 1.0, 0.0))";
+        "sample_shadow_msm(vec4<f32>(0.0, 0.0, 0.6, 1.0), 0u, vec3<f32>(0.0, 1.0, 0.0))";
     let Some([uniform_distribution, _]) = execute_msm_visibility(
         CsmRenderer::shader_source(),
         expression,
