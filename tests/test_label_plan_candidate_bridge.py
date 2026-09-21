@@ -1052,6 +1052,32 @@ class TestGeometryAuthorityProduction:
                 "layout_curved_text"
             )
 
+    def test_produced_glyphs_draw_inside_their_candidate_bounds(self):
+        # The compositor draws each glyph at anchor + origin * font_size, so
+        # produced origins must be em units relative to the candidate anchor.
+        font_size = 16.0
+        for record in (
+            self._line_record(typography={"font_size": font_size}),
+            self._line_record(
+                id="river-1",
+                text="Riverbend",
+                curved_text=True,
+                typography={"font_size": font_size},
+                geometry={
+                    "type": "LineString",
+                    "coordinates": [[5.0, 60.0], [50.0, 40.0], [95.0, 60.0]],
+                },
+            ),
+        ):
+            plan = lp.LabelPlan.compile(labels=[record], camera={}, viewport=(100, 100))
+            assert plan.accepted, record["id"]
+            for candidate in plan.accepted[0].candidates:
+                x0, y0, x1, y1 = candidate.bounds
+                for glyph in candidate.details["positioned_glyphs"]:
+                    x = candidate.anchor[0] + glyph["origin"][0] * font_size
+                    y = candidate.anchor[1] + glyph["origin"][1] * font_size
+                    assert x0 <= x <= x1 and y0 <= y <= y1, (candidate.candidate_id, x, y)
+
     def test_malformed_caller_authority_still_rejects(self):
         plan = lp.LabelPlan.compile(
             labels=[

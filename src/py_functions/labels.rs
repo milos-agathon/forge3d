@@ -374,7 +374,14 @@ pub(crate) fn layout_label_candidates_py(
         return Ok(None);
     }
 
-    let emit_glyphs = |placed: &[(f32, f32, f32)]| -> PyResult<Py<pyo3::types::PyList>> {
+    // Glyph origins follow the compositor contract shared with caller-supplied
+    // authorities: em units relative to the candidate anchor (the compositor
+    // draws each glyph at `anchor + origin * font_size`). `placed` holds
+    // absolute screen positions, so rebase them on the candidate's anchor.
+    let emit_glyphs = |placed: &[(f32, f32, f32)],
+                       anchor_x: f32,
+                       anchor_y: f32|
+     -> PyResult<Py<pyo3::types::PyList>> {
         let list = pyo3::types::PyList::empty_bound(py);
         for (glyph, (x, y, rotation)) in glyphs_in.iter().zip(placed.iter()) {
             let item = PyDict::new_bound(py);
@@ -386,7 +393,10 @@ pub(crate) fn layout_label_candidates_py(
             if let Some(line_index) = glyph.line_index {
                 item.set_item("line_index", line_index)?;
             }
-            item.set_item("origin", (*x, *y))?;
+            item.set_item(
+                "origin",
+                ((*x - anchor_x) / font_size, (*y - anchor_y) / font_size),
+            )?;
             if let Some((ax, ay)) = glyph.advance {
                 item.set_item("advance", (ax, ay))?;
             }
@@ -404,7 +414,10 @@ pub(crate) fn layout_label_candidates_py(
     let candidates = pyo3::types::PyList::empty_bound(py);
     let mut shared_glyphs: Option<Py<pyo3::types::PyList>> = None;
     for (index, (fraction, placed)) in candidates_out.iter().enumerate() {
-        let glyphs = emit_glyphs(placed)?;
+        let anchor_distance = fraction * path_length as f32;
+        let (anchor_x, anchor_y, anchor_z) = screen_path_sample(&screen_path, anchor_distance)
+            .ok_or_else(|| PyValueError::new_err("screen_path produced no anchor sample"))?;
+        let glyphs = emit_glyphs(placed, anchor_x, anchor_y)?;
         if shared_glyphs.is_none() {
             shared_glyphs = Some(glyphs.clone_ref(py));
         }
@@ -420,9 +433,6 @@ pub(crate) fn layout_label_candidates_py(
             max_x = max_x.max(*x);
             max_y = max_y.max(*y);
         }
-        let anchor_distance = fraction * path_length as f32;
-        let (anchor_x, anchor_y, anchor_z) = screen_path_sample(&screen_path, anchor_distance)
-            .ok_or_else(|| PyValueError::new_err("screen_path produced no anchor sample"))?;
         let candidate = PyDict::new_bound(py);
         candidate.set_item("candidate_id", format!("{label_id}:authority-{index}"))?;
         candidate.set_item("candidate_type", "geometry_authority")?;
