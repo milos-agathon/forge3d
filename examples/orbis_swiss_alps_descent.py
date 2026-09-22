@@ -275,10 +275,12 @@ def format_altitude(altitude_m: float) -> str:
     return f"{altitude_m:.1f} m"
 
 
-def build_render_params(size: tuple[int, int], *, msaa: int = 4):
+def build_render_params(size: tuple[int, int], *, msaa: int = 4, render_scale: float = 1.0):
     """Look for the globe path: size, lighting and the fes elevation palette.
 
     GlobeScene owns the camera (pose, clip planes, clipmap mode and span).
+    ``render_scale`` supersamples the internal target and blit-resolves down
+    to ``size`` for crisper edges.
     """
     from forge3d.terrain_params import make_terrain_params_config
 
@@ -290,7 +292,7 @@ def build_render_params(size: tuple[int, int], *, msaa: int = 4):
     ]
     config = make_terrain_params_config(
         size_px=size,
-        render_scale=1.0,
+        render_scale=render_scale,
         terrain_span=1000.0,  # replaced by GlobeScene with the tile extent
         msaa_samples=msaa,
         z_scale=1.0,
@@ -378,7 +380,7 @@ def encode_video(frames_dir: Path, output: Path, fps: int) -> bool:
             "ffmpeg", "-y", "-loglevel", "error",
             "-framerate", str(fps),
             "-i", str(frames_dir / "frame_%04d.png"),
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:v", "libx264", "-preset", "slow", "-crf", "14",
             "-pix_fmt", "yuv420p", "-movflags", "+faststart",
             str(output),
         ],
@@ -413,10 +415,22 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--end-altitude", type=float, default=2_500.0, help="Final altitude above ground (m).")
     parser.add_argument("--msaa", type=int, default=4, choices=(1, 2, 4, 8))
     parser.add_argument(
+        "--render-scale",
+        type=float,
+        default=2.0,
+        help="Internal supersample factor; output is blit-resolved back to --size.",
+    )
+    parser.add_argument(
         "--warmup",
         type=int,
         default=240,
         help="Max unrecorded stream steps at the first waypoint before recording.",
+    )
+    parser.add_argument(
+        "--settle",
+        type=int,
+        default=24,
+        help="Max extra stream steps per waypoint until streaming converges (0 disables).",
     )
     parser.add_argument("--metrics", action="store_true", help="Also run scripted_descent() and write orbis_metrics.json.")
     parser.add_argument("--no-video", action="store_true", help="Skip MP4 encoding.")
@@ -435,7 +449,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         stale.unlink()
 
     earth_texture = load_earth_texture(args.etopo, args.output_dir / ".cache")
-    scene = make_scene(build_render_params(size, msaa=args.msaa), earth_texture)
+    scene = make_scene(
+        build_render_params(size, msaa=args.msaa, render_scale=args.render_scale),
+        earth_texture,
+    )
     path = descent_waypoints(args.frames, end_altitude_m=args.end_altitude)
     print(f"[ORBIS] {scene!r}")
     print(f"[ORBIS] {len(path)} waypoints, {format_altitude(path[0][2])} -> {format_altitude(path[-1][2])}")
@@ -451,8 +468,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     frame_paths: list[Path] = []
     started = time.perf_counter()
+    settled = 0
     for index, waypoint in enumerate(path):
         frame = scene.fly_to(*waypoint)
+        # One bounded stream step runs inside each fly_to. Keep polling the
+        # same waypoint until the loader is drained and the clipmap's demanded
+        # ring tiles are resident, so the recorded frame is not shaded from
+        # coarse fallback tiles.
+        settle_steps = 0
+        while (
+            settle_steps < args.settle
+            and not scene.streaming_stats().get("converged", False)
+        ):
+            frame = scene.fly_to(*waypoint)
+            settle_steps += 1
+        settled += settle_steps
         image = annotate_frame(frame.to_numpy(), waypoint, index / (len(path) - 1))
         out = frames_dir / f"frame_{len(frame_paths) + (args.hold_start if index else 0):04d}.png"
         image.save(out)
@@ -462,6 +492,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         frame_paths.append(out)
         if index % 30 == 0 or index == len(path) - 1:
             print(f"[ORBIS] frame {index:4d}  {format_altitude(waypoint[2]):>9}  pitch {waypoint[4]:4.1f}")
+    print(f"[ORBIS] settle: {settled} extra stream steps across {len(path)} waypoints")
     last = len(path) + args.hold_start
     for extra in range(args.hold):
         shutil.copyfile(frame_paths[-1], frames_dir / f"frame_{last + extra:04d}.png")
