@@ -22,6 +22,7 @@ from .map_scene import (
     _mapscene_effective_camera_mode,
     _mapscene_vt_config,
     _mapscene_vt_settings,
+    _shared_terrain_render_context,
     _terrain_scene_diagonal,
 )
 
@@ -471,6 +472,11 @@ def render_flythrough(
     ``MapScene``. Each frame writes ``frame_<index:08d>.png`` plus a canonical
     ``frame_<index:08d>.provenance.json`` sidecar, and the run writes a
     deterministic ``flythrough_manifest.json``.
+
+    The whole run shares one native ``Session``/``TerrainRenderer``/IBL set;
+    determinism lives in each frame's compiled inputs (seed, camera, scene
+    JSON), not in the renderer instance, so reuse preserves the pixel-hash
+    contract while avoiding per-frame pipeline construction.
     """
     f3d = _native()
     out_dir = Path(out_dir)
@@ -507,54 +513,55 @@ def render_flythrough(
 
     records: list[dict[str, Any]] = []
     compiled_frames: list[Any] = []
-    for index in sorted_indices:
-        frame_scene = frame_scenes[index]
+    with _shared_terrain_render_context():
+        for index in sorted_indices:
+            frame_scene = frame_scenes[index]
 
-        def events_for(layer_id: str, label_id: str, visible: bool, _i: int = index):
-            if not visible:
-                return (None, None)
-            return events.get((layer_id, label_id), {}).get(_i, (None, None))
+            def events_for(layer_id: str, label_id: str, visible: bool, _i: int = index):
+                if not visible:
+                    return (None, None)
+                return events.get((layer_id, label_id), {}).get(_i, (None, None))
 
-        label_records = _label_records(all_keys, accepted_maps[index], events_for)
-        compiled = f3d.compile_frame(
-            index,
-            int(base_seed),
-            int(samples),
-            _camera_json(frame_scene),
-            _scene_json(frame_scene, label_records),
-        )
-        plan = frame_scene.compiled_plan
-        frame_scene.compiled_plan = replace(plan, frame=compiled)
-        png_path = out_dir / _frame_png_name(index)
-        frame_scene.render(str(png_path))
-        rgba = _decode_png_rgba(png_path)
-        provenance_json = f3d.render_compiled_frame(compiled, rgba)
-        provenance = json.loads(provenance_json)
-        provenance_path = out_dir / _frame_provenance_name(index)
-        provenance_path.write_bytes(provenance_json.encode("utf-8"))
-        record = {
-            "frame_index": index,
-            "image": _frame_png_name(index),
-            "provenance": _frame_provenance_name(index),
-            "pixel_hash": provenance["pixel_hash"],
-            "width": int(rgba.shape[1]),
-            "height": int(rgba.shape[0]),
-            "compiled_frame": compiled.to_json(),
-        }
-        for field_name in (
-            "base_seed",
-            "frame_seed",
-            "samples",
-            "residency_hash",
-            "label_set_hash",
-            "lod_hash",
-            "engine_revision",
-            "camera_hash",
-            "scene_hash",
-        ):
-            record[field_name] = provenance[field_name]
-        records.append(record)
-        compiled_frames.append(compiled)
+            label_records = _label_records(all_keys, accepted_maps[index], events_for)
+            compiled = f3d.compile_frame(
+                index,
+                int(base_seed),
+                int(samples),
+                _camera_json(frame_scene),
+                _scene_json(frame_scene, label_records),
+            )
+            plan = frame_scene.compiled_plan
+            frame_scene.compiled_plan = replace(plan, frame=compiled)
+            png_path = out_dir / _frame_png_name(index)
+            frame_scene.render(str(png_path))
+            rgba = _decode_png_rgba(png_path)
+            provenance_json = f3d.render_compiled_frame(compiled, rgba)
+            provenance = json.loads(provenance_json)
+            provenance_path = out_dir / _frame_provenance_name(index)
+            provenance_path.write_bytes(provenance_json.encode("utf-8"))
+            record = {
+                "frame_index": index,
+                "image": _frame_png_name(index),
+                "provenance": _frame_provenance_name(index),
+                "pixel_hash": provenance["pixel_hash"],
+                "width": int(rgba.shape[1]),
+                "height": int(rgba.shape[0]),
+                "compiled_frame": compiled.to_json(),
+            }
+            for field_name in (
+                "base_seed",
+                "frame_seed",
+                "samples",
+                "residency_hash",
+                "label_set_hash",
+                "lod_hash",
+                "engine_revision",
+                "camera_hash",
+                "scene_hash",
+            ):
+                record[field_name] = provenance[field_name]
+            records.append(record)
+            compiled_frames.append(compiled)
 
     manifest = FlythroughManifest(
         base_seed=int(base_seed),

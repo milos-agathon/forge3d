@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
@@ -10,6 +11,7 @@ import os
 import platform
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -1088,13 +1090,15 @@ def _procedural_vt_source(size: int, material_index: int, pattern: str) -> Any:
 
 
 def _mapscene_register_vt_sources(renderer: Any, recipe: "SceneRecipe") -> None:
+    # Clear unconditionally so a shared renderer cannot leak a previous
+    # recipe's VT sources into this render.
+    if hasattr(renderer, "clear_material_vt_sources"):
+        renderer.clear_material_vt_sources()
     config = _mapscene_vt_config(recipe)
     if config is None or not bool(config.get("enabled", True)):
         return
     if not hasattr(renderer, "register_material_vt_source"):
         return
-    if hasattr(renderer, "clear_material_vt_sources"):
-        renderer.clear_material_vt_sources()
 
     import numpy as np
 
@@ -1326,6 +1330,57 @@ def _terrain_renderer_runtime_available() -> bool:
     return result.returncode == 0
 
 
+class _TerrainRenderResources:
+    """Native terrain render resources shared across a batch of renders.
+
+    ``Session``/``TerrainRenderer``/``MaterialSet`` construction compiles the
+    full pipeline set, and ``IBL.from_hdr`` uploads and prefilters the
+    environment map; together they dominate per-frame cost in flythrough
+    renders. The renderer's draw calls are pure functions of their
+    params/heightmap inputs (per-frame seeds travel inside
+    ``TerrainRenderParams``), so sharing one renderer preserves CHRONOS
+    determinism. Mutable per-render state (scatter batches, VT sources) is
+    reset by ``_render_terrain_renderer_result`` before every render.
+    """
+
+    def __init__(self, f3d: Any) -> None:
+        self._f3d = f3d
+        self.session = f3d.Session(window=False)
+        self.renderer = f3d.TerrainRenderer(self.session)
+        self.material_set = f3d.MaterialSet.terrain_default()
+        self._ibl_cache: dict[Any, Any] = {}
+
+    def env_maps(self, hdr_path: str, cache_key: Any) -> Any:
+        env_maps = self._ibl_cache.get(cache_key)
+        if env_maps is None:
+            env_maps = self._f3d.IBL.from_hdr(hdr_path, intensity=1.0)
+            self._ibl_cache[cache_key] = env_maps
+        return env_maps
+
+
+_ACTIVE_TERRAIN_RESOURCES = threading.local()
+
+
+@contextlib.contextmanager
+def _shared_terrain_render_context() -> Any:
+    """Share one native terrain renderer across renders inside this block.
+
+    ``chronos.render_flythrough`` enters this so a multi-frame run pays the
+    Session/pipeline/IBL setup cost once instead of per frame. Single renders
+    outside the context keep the historical fresh-renderer behavior. If a
+    render raises, the shared resources are dropped so the next render
+    rebuilds a clean renderer rather than inheriting partially mutated GPU
+    state.
+    """
+    holder: list[_TerrainRenderResources] = []
+    previous = getattr(_ACTIVE_TERRAIN_RESOURCES, "holder", None)
+    _ACTIVE_TERRAIN_RESOURCES.holder = holder
+    try:
+        yield
+    finally:
+        _ACTIVE_TERRAIN_RESOURCES.holder = previous
+
+
 def _render_terrain_renderer_result(
     recipe: "SceneRecipe",
     heightmap: Any,
@@ -1360,12 +1415,28 @@ def _render_terrain_renderer_result(
         return None
 
     hdr_path, delete_hdr = _native_ibl_path(recipe)
+    holder = getattr(_ACTIVE_TERRAIN_RESOURCES, "holder", None)
     try:
-        session = f3d.Session(window=False)
-        renderer = f3d.TerrainRenderer(session)
+        if holder:
+            resources = holder[0]
+        else:
+            resources = _TerrainRenderResources(f3d)
+            if holder is not None:
+                holder.append(resources)
+        renderer = resources.renderer
+        material_set = resources.material_set
+        if delete_hdr:
+            # The generated minimal HDR gets a fresh temp path per call; key
+            # the IBL cache on its (constant) content instead.
+            ibl_key = "forge3d:generated-minimal-ibl"
+        else:
+            try:
+                stat = os.stat(hdr_path)
+                ibl_key = (hdr_path, stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                ibl_key = hdr_path
+        env_maps = resources.env_maps(hdr_path, ibl_key)
         _mapscene_register_vt_sources(renderer, recipe)
-        material_set = f3d.MaterialSet.terrain_default()
-        env_maps = f3d.IBL.from_hdr(hdr_path, intensity=1.0)
         sample_count = max(1, int(output.samples))
         output_format = str(output.format).lower()
         needs_hdr = output_format == "exr" or bool(output.hdr)
@@ -1399,6 +1470,10 @@ def _render_terrain_renderer_result(
             scatter_batches, scatter_metadata = building_scatter
             renderer.set_scatter_batches(scatter_batches)
             metadata.update(scatter_metadata)
+        elif holder is not None and hasattr(renderer, "set_scatter_batches"):
+            # Shared renderer: drop batches left over from a previous render's
+            # recipe so they cannot leak into this frame.
+            renderer.set_scatter_batches([])
         if needs_offline:
             from .offline import render_offline
 
@@ -1460,6 +1535,10 @@ def _render_terrain_renderer_result(
             metadata["building_scatter_stats"] = dict(renderer.get_scatter_stats())
         if hasattr(renderer, "get_material_vt_stats"):
             metadata["material_vt_stats"] = dict(renderer.get_material_vt_stats())
+    except BaseException:
+        if holder is not None:
+            holder.clear()
+        raise
     finally:
         if delete_hdr:
             try:
