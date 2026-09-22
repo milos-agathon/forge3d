@@ -186,7 +186,7 @@ struct OverlayUniforms {
     params0 : vec4<f32>, // domain_min, inv_range, overlay_strength, offset
     params1 : vec4<f32>, // blend_mode, debug_mode, albedo_mode, colormap_strength
     params2 : vec4<f32>, // gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale
-    params3 : vec4<f32>, // P5: ao_weight, ao_fallback_enabled, hue_variation_strength, pad
+    params3 : vec4<f32>, // P5: ao_weight, ao_fallback_enabled, hue_variation_strength, material_slope_bias
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
@@ -537,7 +537,8 @@ struct TerrainVTUniforms {
     // source of truth for family enablement, addressing, size, and encoding.
     family_info: array<TerrainVtFamilyInfo, 3>,
     // Bounded feedback append (TESSELLA win 1). x = slot capacity (a power of
-    // two), y/z = physical page-table base width/height, w unused.
+    // two), y/z = physical page-table base width/height, w = VERITAS
+    // provenance bitset-capture flag (0 = append stream, 1 = bitset).
     config3: vec4<u32>,
 }
 
@@ -562,7 +563,10 @@ struct TerrainVTFallbackColors {
 // Layout: word 0 is an atomic append count, word 1 is an explicit overflow
 // count, and words 2 ..= capacity + 1 hold `page_index + 1`. The key alone
 // identifies the page, so the CPU inverts `terrain_vt_feedback_index` rather
-// than reading back separate coordinate words.
+// than reading back separate coordinate words. When config3.w requests
+// provenance capture the payload is instead an atomic bitset: bit i of
+// payload word N marks zero-based key index N * 32 + i, word 0 counts the
+// unique keys set, and word 1 stays the overflow count.
 
 @group(6) @binding(6)
 var<uniform> terrain_vt_uniforms: TerrainVTUniforms;
@@ -1982,6 +1986,10 @@ fn terrain_vt_enabled() -> bool {
     return terrain_vt_uniforms.config0.x > 0u;
 }
 
+fn terrain_vt_provenance_capture() -> bool {
+    return terrain_vt_uniforms.config3.w != 0u;
+}
+
 fn terrain_vt_family_enabled(family_slot: u32) -> bool {
     if (family_slot >= 3u) {
         return false;
@@ -2109,9 +2117,23 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
     if (tile_x >= base_pages_x || tile_y >= base_pages_y) {
         return;
     }
-    // `+ 1` keeps 0 reserved for an empty slot in malformed/partial readback.
-    let key = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y) + 1u;
+    let key_index = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y);
     let capacity = max(terrain_vt_uniforms.config3.x, 1u);
+    if (terrain_vt_provenance_capture()) {
+        let word_index = key_index / 32u;
+        if (word_index >= capacity) {
+            atomicAdd(&terrain_vt_feedback[1], 1u);
+            return;
+        }
+        let bit = 1u << (key_index % 32u);
+        let previous = atomicOr(&terrain_vt_feedback[word_index + 2u], bit);
+        if ((previous & bit) == 0u) {
+            atomicAdd(&terrain_vt_feedback[0], 1u);
+        }
+        return;
+    }
+    // `+ 1` keeps 0 reserved for an empty slot in malformed/partial readback.
+    let key = key_index + 1u;
     // A bounded append uses only operations supported by every shader backend:
     // reserve one slot with atomicAdd, then publish the key with atomicStore.
     // Duplicates are expected and are removed by the CPU readback parser.
@@ -2198,7 +2220,9 @@ fn terrain_vt_write_family_feedback_uv(
         desired_mip,
     );
     if (desired_entry.z > 0.5) {
-        return;
+        if (!terrain_vt_provenance_capture()) {
+            return;
+        }
     }
     terrain_vt_write_feedback(
         family_slot,
@@ -2331,6 +2355,15 @@ fn terrain_vt_resolve_family_uv(
             mip_level,
         );
         if (entry.z > 0.5) {
+            if (terrain_vt_provenance_capture()) {
+                terrain_vt_write_feedback(
+                    family_slot,
+                    material_index,
+                    mip_level,
+                    page.x,
+                    page.y,
+                );
+            }
             let page_origin = det_barrier2(vec2<f32>(f32(page.x), f32(page.y)) * page_size);
             let texel_in_page = det_div2(virtual_texel - page_origin, vec2<f32>(det_exp2(f32(mip_level))));
             let inner_texel = clamp(texel_in_page, vec2<f32>(0.0, 0.0), vec2<f32>(tile_size - 1.0, tile_size - 1.0));
@@ -3679,6 +3712,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     var weights = vec4<f32>(0.0);
     var weight_sum = 0.0;
     let slope_influence = 0.3; // How much slope affects layer selection
+    let material_slope_bias = clamp(u_overlay.params3.w, 0.0, 1.0);
 
     for (var idx = 0; idx < 4; idx = idx + 1) {
         if (idx < layer_count) {
@@ -3691,12 +3725,22 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // Modulate by slope: rock/bare materials favor steep slopes
             // Layer 0 (rock) prefers steep, layer 1 (grass) prefers flat
             var slope_mod = 1.0;
-            if (idx == 0) {
-                // Rock: boost on steep slopes
-                slope_mod = det_mix(1.0, 1.5, slope_factor);
-            } else if (idx == 1) {
-                // Grass: reduce on steep slopes
-                slope_mod = det_mix(1.0, 0.5, slope_factor);
+            if (material_slope_bias > 0.0) {
+                if (idx == 0) {
+                    let biased_slope_mod = det_mix(1.0, 1.5, slope_factor);
+                    if (material_slope_bias >= 1.0) {
+                        slope_mod = biased_slope_mod;
+                    } else {
+                        slope_mod = det_mix(1.0, biased_slope_mod, material_slope_bias);
+                    }
+                } else if (idx == 1) {
+                    let biased_slope_mod = det_mix(1.0, 0.5, slope_factor);
+                    if (material_slope_bias >= 1.0) {
+                        slope_mod = biased_slope_mod;
+                    } else {
+                        slope_mod = det_mix(1.0, biased_slope_mod, material_slope_bias);
+                    }
+                }
             }
 
             let w = height_weight * slope_mod;

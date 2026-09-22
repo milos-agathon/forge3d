@@ -604,6 +604,7 @@ class TerrainRenderParams:
     albedo_mode: str
     colormap_strength: float
     hue_variation_strength: float
+    material_slope_bias: float
     overlays: Sequence[OverlayLayer]
     terrain_data_revision: Optional[int]
     material_map_paths: Dict[str, str]

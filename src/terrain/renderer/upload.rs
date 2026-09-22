@@ -94,7 +94,7 @@ impl TerrainScene {
                     ao_weight,
                     ao_fallback_enabled,
                     params.hue_variation_strength.clamp(0.0, 0.2),
-                    0.0,
+                    params.material_slope_bias.clamp(0.0, 1.0),
                 ],
                 params4: [
                     detail_enabled,

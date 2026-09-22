@@ -14,7 +14,7 @@ use numpy::PyUntypedArrayMethods;
 #[cfg(feature = "extension-module")]
 use crate::core::provenance::{
     encode_image_leaf, encode_source_map_leaf, encode_tile_leaf, from_hex, merkle_root, sha256,
-    sign_root, to_hex, verify_root, ContributingTile, FAMILY_NAMES,
+    sign_root, to_hex, verify_root, ContributingTile, FAMILY_NAMES, SOURCE_ID_NONE,
 };
 
 /// Manifest schema version emitted by `seal_provenance` and accepted by
@@ -123,6 +123,27 @@ pub(crate) fn seal_provenance(
     }
     tiles.sort_by_key(|t| encode_tile_leaf(t));
     tiles.dedup();
+
+    use std::collections::BTreeSet;
+    let covered_source_ids: BTreeSet<u32> = tiles
+        .iter()
+        .filter(|tile| tile.family_slot == 0)
+        .map(|tile| tile.source_id)
+        .collect();
+    let uncovered: Vec<u32> = source_map
+        .as_array()
+        .iter()
+        .copied()
+        .filter(|id| *id != SOURCE_ID_NONE)
+        .collect::<BTreeSet<u32>>()
+        .difference(&covered_source_ids)
+        .copied()
+        .collect();
+    if !uncovered.is_empty() {
+        return Err(PyValueError::new_err(format!(
+            "source ids without contributing albedo tiles: {uncovered:?}"
+        )));
+    }
 
     let map_digest = source_map_digest(&source_map);
     let image_digest = sha256(&image_bytes);

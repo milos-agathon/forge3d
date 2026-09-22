@@ -23,7 +23,11 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
-from _terrain_runtime import terrain_rendering_available
+from _terrain_runtime import (
+    _build_heightmap,
+    _terrain_rendering_available_inprocess,
+    terrain_rendering_available,
+)
 from forge3d import provenance as prov
 from forge3d.terrain_params import (
     AovSettings,
@@ -37,7 +41,11 @@ from forge3d.terrain_params import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VERIFIER = REPO_ROOT / "tools" / "verify_provenance.py"
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "provenance"
-GPU_AVAILABLE = terrain_rendering_available()
+GPU_AVAILABLE = (
+    terrain_rendering_available()
+    if os.environ.get("GITHUB_ACTIONS") == "true"
+    else _terrain_rendering_available_inprocess()
+)
 
 # Fixed, committed test keypair seed (fixtures only — not a production key).
 TEST_PRIVATE_KEY = hashlib.sha256(b"forge3d-veritas-test-key").digest()
@@ -239,6 +247,16 @@ def test_native_and_offline_seals_agree() -> None:
     ) is False
 
 
+@pytest.mark.skipif(
+    not hasattr(f3d, "seal_provenance"), reason="native forge3d extension not available"
+)
+def test_native_seal_rejects_uncovered_source_ids() -> None:
+    source_map = np.zeros((4, 4), dtype=np.uint32)
+    source_map[0, 0] = 3
+    with pytest.raises(ValueError, match="source ids without contributing albedo tiles.*3"):
+        f3d.seal_provenance(source_map, _sample_tiles(), TEST_PRIVATE_KEY, b"image-bytes")
+
+
 def test_mapscene_render_validates_provenance_kwargs(tmp_path) -> None:
     """MapScene emission flag is off by default and validates its key without
     touching the GPU (validation happens before any render work)."""
@@ -303,6 +321,8 @@ def _build_params(*, source_id: bool = True) -> "f3d.TerrainRenderParams":
         domain=(0.0, 1.0),
         albedo_mode="material",
         colormap_strength=0.0,
+        hue_variation_strength=0.0,
+        material_slope_bias=0.0,
         ibl_enabled=True,
         ibl_intensity=1.8,
         light_azimuth_deg=136.0,
@@ -493,6 +513,130 @@ class TestVeritasProvenanceDoD:
             shutil.copy2(image_path, FIXTURE_DIR / "image.png")
             shutil.copy2(smap_path, FIXTURE_DIR / "source_map.npy")
             shutil.copy2(manifest_path, FIXTURE_DIR / "provenance.json")
+
+    def test_mapscene_emits_verified_provenance(self, tmp_path):
+        from forge3d.map_scene import (
+            LightingPreset,
+            MapScene,
+            OrbitCamera,
+            OutputSpec,
+            SceneRecipe,
+            TerrainSource,
+        )
+
+        image_path = tmp_path / "mapscene.png"
+        scene = MapScene(
+            SceneRecipe(
+                terrain=TerrainSource(
+                    data=_build_heightmap(160),
+                    crs="EPSG:32610",
+                    metadata={
+                        "asset_status": "fixture",
+                        "virtual_texture": {
+                            "enabled": True,
+                            "families": [
+                                {
+                                    "family": "albedo",
+                                    "virtual_size_px": [VIRTUAL_SIZE, VIRTUAL_SIZE],
+                                }
+                            ],
+                            "procedural_sources": True,
+                            "source_count": 4,
+                            "source_size": VIRTUAL_SIZE,
+                        },
+                    },
+                ),
+                camera=OrbitCamera(
+                    target=(0.0, 0.0, 0.0),
+                    distance=4.0,
+                    azimuth_deg=142.0,
+                    elevation_deg=58.0,
+                    fov_deg=50.0,
+                ),
+                lighting=LightingPreset(
+                    settings={
+                        "albedo_mode": "material",
+                        "colormap_strength": 0.0,
+                        "hue_variation_strength": 0.0,
+                        "material_slope_bias": 0.0,
+                    }
+                ),
+                output=OutputSpec(
+                    path=str(image_path), width=256, height=192, samples=1
+                ),
+            )
+        )
+        scene.render(
+            emit_provenance=True, provenance_signing_key=TEST_PRIVATE_KEY
+        )
+
+        source_map_path = image_path.with_name("mapscene.source_map.npy")
+        manifest_path = image_path.with_name("mapscene.provenance.json")
+        verified = subprocess.run(
+            [
+                sys.executable,
+                str(VERIFIER),
+                str(image_path),
+                str(source_map_path),
+                str(manifest_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert verified.returncode == 0, verified.stdout + verified.stderr
+        assert "verified: True" in verified.stdout
+        assert "unknown_source_ids" not in verified.stdout
+
+        tampered_source_map = np.load(source_map_path)
+        tampered_source_map.flat[0] ^= 1
+        tampered_source_map_path = tmp_path / "mapscene.tampered.source_map.npy"
+        np.save(tampered_source_map_path, tampered_source_map)
+        tampered = subprocess.run(
+            [
+                sys.executable,
+                str(VERIFIER),
+                str(image_path),
+                str(tampered_source_map_path),
+                str(manifest_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert tampered.returncode != 0
+        assert "verified: False" in tampered.stdout
+
+    def test_normal_settled_frame_skips_resident_feedback(
+        self, provenance_render_env
+    ):
+        renderer, material_set, ibl, heightmap = provenance_render_env
+        _register_sources(renderer)
+        params = _build_params(source_id=False)
+        # Render until streaming settles (no misses, nothing retained); the
+        # frame after that must not report resident pages as feedback.
+        settled = False
+        for _ in range(12):
+            renderer.render_with_aov(
+                material_set=material_set,
+                env_maps=ibl,
+                params=params,
+                heightmap=heightmap,
+            )
+            stats = renderer.get_material_vt_stats()
+            if stats["cache_misses"] == 0 and stats["retained_requests"] == 0:
+                settled = True
+                break
+        assert settled, f"VT streaming never settled: {stats}"
+        renderer.render_with_aov(
+            material_set=material_set,
+            env_maps=ibl,
+            params=params,
+            heightmap=heightmap,
+        )
+        stats = renderer.get_material_vt_stats()
+        assert stats["resident_pages"] > 0
+        assert stats["feedback_requests"] == 0
 
     def test_seal_is_deterministic_across_renders(self, provenance_render_env):
         rgba_a, _, _, source_map_a, tiles_a = self._render_triple(provenance_render_env)

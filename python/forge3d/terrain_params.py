@@ -2085,6 +2085,7 @@ class TerrainRenderParams:
     terrain_data_revision: Optional[int] = None
     # Slope/elevation hue rotation. 0.0 preserves the pre-lighting albedo palette.
     hue_variation_strength: float = 0.08
+    material_slope_bias: float = 1.0
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -2190,6 +2191,10 @@ class TerrainRenderParams:
         if not np.isfinite(self.hue_variation_strength):
             raise ValueError("hue_variation_strength must be finite")
         self.hue_variation_strength = min(max(self.hue_variation_strength, 0.0), 0.2)
+        self.material_slope_bias = float(self.material_slope_bias)
+        if not np.isfinite(self.material_slope_bias):
+            raise ValueError("material_slope_bias must be finite")
+        self.material_slope_bias = min(max(self.material_slope_bias, 0.0), 1.0)
 
         valid_curve_modes = {"linear", "pow", "smoothstep", "lut"}
         if self.height_curve_mode not in valid_curve_modes:
@@ -2291,6 +2296,7 @@ def make_terrain_params_config(
     albedo_mode: str = "mix",
     colormap_strength: float = 0.5,
     hue_variation_strength: float = 0.08,
+    material_slope_bias: float = 1.0,
     ibl_enabled: bool = True,
     light_azimuth_deg: float = 135.0,
     light_elevation_deg: float = 35.0,
@@ -2469,6 +2475,7 @@ def make_terrain_params_config(
         albedo_mode=albedo_mode,
         colormap_strength=colormap_strength,
         hue_variation_strength=hue_variation_strength,
+        material_slope_bias=material_slope_bias,
         height_curve_mode=height_curve_mode,
         height_curve_strength=height_curve_strength,
         height_curve_power=height_curve_power,
