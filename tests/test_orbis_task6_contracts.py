@@ -315,7 +315,10 @@ def test_cog_streaming_flat_and_globe_apis_are_explicit_and_unclamped() -> None:
     assert "pub fn enable_height_streaming_cog_globe(" in source
     assert "lod.min(6)" not in source
     assert "enable_height_streaming_cog_globe(" in scene
-    assert "let (overview, source_lod, tile)" in scene
+    assert "let (initial_seed, overview_lod)" in scene
+    assert "load_covered_overview(" in scene
+    assert "OverviewSeedCache::new(initial_seed)" in scene
+    assert "fn prepare_overview_seed(" in scene
     assert "effective_target_lod != u64::from(self.source_lod)" in scene
     assert "\n            source_lod,\n" in scene
     flat_impl = source.split("pub fn enable_height_streaming_cog(", 1)[1].split(
