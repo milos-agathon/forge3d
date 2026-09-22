@@ -482,6 +482,7 @@ fn append_clipmap_lod_variant(
                 ..Default::default()
             },
         );
+        #[cfg_attr(not(feature = "enable-globe"), allow(unused_mut))]
         let (skirt_vertices, mut skirt_indices) = crate::terrain::clipmap::make_ring_skirts(
             &vertices,
             &indices,

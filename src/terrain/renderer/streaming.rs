@@ -1620,6 +1620,7 @@ impl TerrainRenderer {
         Ok(())
     }
 
+    #[cfg(all(feature = "enable-globe", feature = "extension-module"))]
     pub(crate) fn set_height_detail_blend_override(&mut self, blend: Option<f32>) {
         self.scene.height_detail_blend_override = blend;
     }

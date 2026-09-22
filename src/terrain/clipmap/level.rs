@@ -202,6 +202,7 @@ impl ClipmapLevel {
                     self.config.morph_range,
                 ),
             };
+            #[cfg_attr(not(feature = "enable-globe"), allow(unused_mut))]
             let (skirt_verts, mut skirt_indices) = make_ring_skirts(
                 &ring_verts,
                 &ring_indices,
