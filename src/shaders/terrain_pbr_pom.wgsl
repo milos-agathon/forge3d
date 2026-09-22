@@ -527,7 +527,15 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
             }
             requested_lod = requested_lod - 1u;
         }
-        let detail_height = accumulated_height + remaining_weight * overview_height;
+        var detail_height = accumulated_height + remaining_weight * overview_height;
+        // Where part of the footprint is COG nodata (and no overview backs
+        // it), renormalize by the covered weight so the surface keeps its
+        // real height up to the data edge instead of sagging towards 0 m.
+        // Fully covered footprints (every flat path) are left bit-exact.
+        let covered_total = (1.0 - remaining_weight) + remaining_weight * overview_mapping.z;
+        if (covered_total > 0.000001 && covered_total < 0.999999) {
+            detail_height = det_div(detail_height, covered_total);
+        }
         if (u_terrain.spacing_h_exag.w >= 0.0) {
             return detail_height;
         }
@@ -2164,6 +2172,104 @@ fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
         vertical_scale,
         -det_div(dy, world_texel.y),
     ));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORBIS globe shading frame
+// ─────────────────────────────────────────────────────────────────────────────
+// On the planetary path `uv` is the global equirectangular coordinate (the
+// whole Earth spans [0, 1], v = 0 at the north pole) and the render frame is
+// east/north/up at the clipmap anchor, with +Z up. The flat height normal
+// above assumes a Y-up world and a heightmap spanning `terrain_span`, so it is
+// both mis-oriented and ~1000x too steep there. u_overlay.params3.w carries
+// ORBIS_GLOBE_FRAME_FLAG_OFFSET + anchor latitude (radians) when the globe is
+// active and 0 otherwise; the planet's axis in render space is then
+// (0, cos lat, sin lat).
+const ORBIS_GLOBE_FRAME_FLAG_OFFSET: f32 = 10.0;
+const ORBIS_EARTH_RADIUS_M: f32 = 6371008.8;
+const ORBIS_PI: f32 = 3.14159265358979;
+
+fn orbis_globe_active() -> bool {
+    return u_overlay.params3.w > ORBIS_GLOBE_FRAME_FLAG_OFFSET * 0.5;
+}
+
+/// Fraction of the surface at `uv` backed by source data. The finest resident
+/// page is authoritative: inside a loaded page zero coverage is COG nodata,
+/// not "not loaded yet", so coarser ancestors (down to the world-level
+/// prefill, whose single texel spans hundreds of kilometres) must not claim
+/// it. With no resident page, only the active overview seed counts.
+fn orbis_source_coverage(uv: vec2<f32>) -> f32 {
+    let overview_covered = height_overview_uv(uv).z;
+    if (height_pages.header.enabled == 0u) {
+        return overview_covered;
+    }
+    let target_lod = height_target_lod();
+    let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+    var requested_lod = target_lod;
+    for (var depth = 0u; depth <= target_lod; depth = depth + 1u) {
+        let axis = 1u << requested_lod;
+        let tile_xy = vec2<u32>(bounded_uv * f32(axis));
+        let entry = height_page_lookup(requested_lod, tile_xy.x, tile_xy.y);
+        if (entry.lod != HEIGHT_PAGE_EMPTY) {
+            let covered = height_page_sample_covered(entry, bounded_uv);
+            return max(covered.y, overview_covered);
+        }
+        if (requested_lod == 0u) {
+            break;
+        }
+        requested_lod = requested_lod - 1u;
+    }
+    return overview_covered;
+}
+
+fn orbis_render_pole() -> vec3<f32> {
+    let latitude = u_overlay.params3.w - ORBIS_GLOBE_FRAME_FLAG_OFFSET;
+    return vec3<f32>(0.0, det_cos(latitude), det_sin(latitude));
+}
+
+/// Terrain normal on the globe: Sobel gradient of the streamed height field
+/// at the fragment's footprint LOD, in metres per equirectangular texel,
+/// assembled in the fragment's local east/north/up frame (`up` is its
+/// geodetic up in render space).
+fn orbis_globe_height_normal(uv: vec2<f32>, up: vec3<f32>) -> vec3<f32> {
+    let lod_info = compute_height_lod(uv);
+    let lod = lod_info.lod;
+    let texel_uv = lod_info.texel_uv;
+    let offset_x = vec2<f32>(texel_uv.x, 0.0);
+    let offset_y = vec2<f32>(0.0, texel_uv.y);
+
+    let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) - offset_y, lod));
+    let t  = sample_height_geom_level(uv - offset_y, lod);
+    let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) - offset_y, lod));
+    let l  = sample_height_geom_level(uv - offset_x, lod);
+    let r  = sample_height_geom_level(uv + offset_x, lod);
+    let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) + offset_y, lod));
+    let b  = sample_height_geom_level(uv + offset_y, lod);
+    let br = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) + offset_y, lod));
+    // +u is east, +v is south.
+    let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
+    let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
+
+    let latitude = det_fma(-uv.y, ORBIS_PI, ORBIS_PI * 0.5);
+    let east_step_m = max(
+        det_barrier(texel_uv.x * 2.0 * ORBIS_PI * ORBIS_EARTH_RADIUS_M) * abs(det_cos(latitude)),
+        1e-3,
+    );
+    let north_step_m = max(det_barrier(texel_uv.y * ORBIS_PI) * ORBIS_EARTH_RADIUS_M, 1e-3);
+    let exag = u_terrain.spacing_h_exag.z;
+    // The 1-2-1 Sobel kernel spans two texels with total weight 4.
+    let slope_east = det_div(dx * exag, 8.0 * east_step_m);
+    let slope_south = det_div(dy * exag, 8.0 * north_step_m);
+
+    var east = det_cross3(orbis_render_pole(), up);
+    let east_length = det_length3(east);
+    if (east_length < 1e-4) {
+        // At the poles east is undefined; any tangent keeps the basis valid.
+        east = det_cross3(vec3<f32>(1.0, 0.0, 0.0), up);
+    }
+    east = det_normalize3(east);
+    let north = det_cross3(up, east);
+    return det_normalize3(up - east * slope_east + north * slope_south);
 }
 
 /// Sprint 2: Multi-scale height normal for enhanced edge visibility.
@@ -3821,7 +3927,19 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
 
     // LOD-aware height normal (Milestone 2: fixes flakes from mip mismatch)
     // Sprint 2 note: Multi-scale approach didn't improve edge ratio
-    let height_normal_lod = calculate_normal_lod_aware(uv);
+    let orbis_globe = orbis_globe_active();
+    // Globe clipmap rings extend past the source; where no data backs the
+    // surface, drop the fragment so the lit Earth behind shows through
+    // instead of a flat 0 m shelf.
+    if (orbis_globe && orbis_source_coverage(uv) < 0.5) {
+        discard;
+    }
+    var height_normal_lod: vec3<f32>;
+    if (orbis_globe) {
+        height_normal_lod = orbis_globe_height_normal(uv, base_normal);
+    } else {
+        height_normal_lod = calculate_normal_lod_aware(uv);
+    }
 
     // Legacy height normal for comparison (not LOD-aware)
     let texel_size = calculate_texel_size();
@@ -3849,7 +3967,13 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let lod_fade_end = 4.0;    // lod_hi: above this, no height-normal
     // smoothstep(edge0, edge1, x) = smooth hermite interpolation
     // We want fade=1.0 at lod_fade_start and fade=0.0 at lod_fade_end
-    let lod_fade = 1.0 - det_smoothstep(lod_fade_start, lod_fade_end, height_lod);
+    // The globe normal is already sampled at the footprint LOD; fading it
+    // would leave distant relief lit as the bare sphere.
+    let lod_fade = select(
+        1.0 - det_smoothstep(lod_fade_start, lod_fade_end, height_lod),
+        1.0,
+        orbis_globe,
+    );
 
     // P5-N: normal_strength controls local normal variation (range 0.25-4.0, default 1.0)
     // Values > 1.0 amplify the deviation between height_normal and base_normal
@@ -3897,7 +4021,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let refine_steps = clamp(u32(max(u_shading.pom_steps.z, 0.0)), 0u, 32u);
     let pom_scale = max(u_shading.triplanar_params.w, 0.0);
     let pom_flags = u32(u_shading.pom_steps.w + 0.5);
-    let pom_enabled = (pom_flags & 0x1u) != 0u && pom_scale > 0.0;
+    // Globe geometry is displaced and its UV spans the whole Earth, so a
+    // parallax offset would leave the loaded tiles entirely.
+    let pom_enabled = (pom_flags & 0x1u) != 0u && pom_scale > 0.0 && !orbis_globe;
     let occlusion_enabled = (pom_flags & 0x2u) != 0u;
     let shadow_enabled = (pom_flags & 0x4u) != 0u;
 
@@ -3943,7 +4069,13 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let tri_blend = max(u_shading.triplanar_params.y, 1.0);
     // Use base_normal (stable geometric normal) for slope, NOT blended_normal
     // blended_normal has high-frequency perturbations that cause layer selection jitter → flakes
-    let slope_raw = 1.0 - abs(base_normal.y);
+    // On the Z-up globe the geometric normal is the bare geodetic up, so the
+    // slope comes from the terrain normal measured against it.
+    let slope_raw = select(
+        1.0 - abs(base_normal.y),
+        1.0 - abs(det_dot3(height_normal_lod, base_normal)),
+        orbis_globe,
+    );
     let slope_factor = clamp(slope_raw, u_shading.clamp0.z, u_shading.clamp0.w);
     var layer_count = i32(u_shading.layer_control.x + 0.5);
     if (layer_count < 1) {
@@ -5549,9 +5681,15 @@ fn clipmap_resolve_vertex(
     let h_disp = det_fma(apply_height_curve01(t_geom), h_max - h_min, h_min);
     let h_exag = u_terrain.spacing_h_exag.z;
     let h_center = (h_min + h_max) * 0.5;
+    // Planetary skirts only have to seal vertical gaps between LOD samplings
+    // of the same clamped height field (at most its exaggerated relief) plus
+    // coarse-edge chord sag (~cell^2 / 8R, about a metre). The CPU depth
+    // also carries a camera-altitude allowance that would otherwise hang
+    // hundreds of kilometres of curtain below the terrain edge from orbit.
+    let planetary_skirt_bound = det_fma(max(h_max - h_min, 0.0), h_exag, 64.0);
     let skirt_depth = select(
         u_terrain.camera_mode_params.y * 0.001,
-        -clip_morph.x,
+        min(-clip_morph.x, planetary_skirt_bound),
         clip_morph.y < 0.0,
     );
     let skirt_offset = select(0.0, skirt_depth, clip_morph.x < 0.0);

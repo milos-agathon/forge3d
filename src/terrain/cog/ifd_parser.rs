@@ -21,6 +21,8 @@ const TAG_MODEL_PIXEL_SCALE: u16 = 33550;
 const TAG_MODEL_TIEPOINT: u16 = 33922;
 const TAG_MODEL_TRANSFORMATION: u16 = 34264;
 const TAG_GEO_KEY_DIRECTORY: u16 = 34735;
+/// GDAL private tag: the band nodata value as an ASCII decimal string.
+const TAG_GDAL_NODATA: u16 = 42113;
 
 /// Compression constants.
 pub const COMPRESSION_NONE: u16 = 1;
@@ -57,6 +59,8 @@ pub struct IfdEntry {
     pub tiles_across: u32,
     pub tiles_down: u32,
     pub geo_reference: Option<GeoReference>,
+    /// GDAL_NODATA sentinel; samples equal to it carry no data.
+    pub nodata: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -376,6 +380,7 @@ async fn parse_ifd(
     let mut tiepoint_info: Option<(u64, u64, u16)> = None;
     let mut transformation_info: Option<(u64, u64, u16)> = None;
     let mut geo_keys_info: Option<(u64, u64, u16)> = None;
+    let mut nodata_info: Option<(u64, u64)> = None;
 
     for i in 0..entry_count {
         let entry_offset = (i * entry_size) as usize;
@@ -467,9 +472,25 @@ async fn parse_ifd(
                     _ => unreachable!(),
                 }
             }
+            TAG_GDAL_NODATA => {
+                let inline_capacity = if bigtiff { 8 } else { 4 };
+                let data_offset = if count as usize > inline_capacity {
+                    external_offset
+                } else {
+                    offset + count_size + (i * entry_size) + value_offset as u64
+                };
+                nodata_info = Some((data_offset, count));
+            }
             _ => {}
         }
     }
+
+    let nodata = if let Some((off, count)) = nodata_info {
+        let bytes = reader.read_range(off, count.min(64)).await?;
+        parse_gdal_nodata(&bytes)
+    } else {
+        None
+    };
 
     let model_pixel_scale = if let Some((off, count, field_type)) = pixel_scale_info {
         let values = read_f64_array(reader, off, count as usize, field_type, big_endian).await?;
@@ -568,10 +589,21 @@ async fn parse_ifd(
             overview_level,
             tiles_across,
             tiles_down,
+            nodata,
             geo_reference,
         },
         next_ifd_offset,
     ))
+}
+
+/// Parse a GDAL_NODATA ASCII value (NUL-terminated decimal, `nan` allowed).
+fn parse_gdal_nodata(bytes: &[u8]) -> Option<f64> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let text = text.trim_end_matches('\0').trim();
+    if text.eq_ignore_ascii_case("nan") {
+        return Some(f64::NAN);
+    }
+    text.parse::<f64>().ok()
 }
 
 async fn read_f64_array(
@@ -747,6 +779,14 @@ fn type_size(field_type: u16) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gdal_nodata_ascii_values_parse() {
+        assert_eq!(parse_gdal_nodata(b"-3.39999995214436e+38\0"), Some(-3.39999995214436e38));
+        assert_eq!(parse_gdal_nodata(b"-9999"), Some(-9999.0));
+        assert!(parse_gdal_nodata(b"nan\0").is_some_and(f64::is_nan));
+        assert_eq!(parse_gdal_nodata(b"not-a-number"), None);
+    }
 
     fn parse_full_file_array_fixture(bigtiff: bool, external: bool) -> CogHeader {
         let (ifd_offset, count_size, entry_size, value_offset, inline_capacity) = if bigtiff {

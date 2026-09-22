@@ -168,3 +168,114 @@ def test_earth_context_blends_dem_and_crosses_overview_boundary_without_pop() ->
     ]
     assert differences[1] <= max(differences[0], differences[2])
     _assert_curved_limb_without_holes(frames[-1])
+
+
+def _elevation_params(size=(320, 180), *, colormap_stops=None, debug_mode=0):
+    """Colormap-only globe params; POM keeps its default (enabled)."""
+    from forge3d.terrain_params import make_terrain_params_config
+
+    domain = (190.0, 4200.0)
+    stops = colormap_stops or [(190.0, "#0000ff"), (4200.0, "#ff0000")]
+    colormap = f3d.Colormap1D.from_stops(stops=stops, domain=domain)
+    overlays = [
+        f3d.OverlayLayer.from_colormap1d(
+            colormap, strength=1.0, offset=0.0, blend_mode="Alpha", domain=domain
+        )
+    ]
+    config = make_terrain_params_config(
+        size_px=size,
+        render_scale=1.0,
+        terrain_span=1000.0,
+        msaa_samples=1,
+        z_scale=1.0,
+        exposure=1.0,
+        domain=domain,
+        albedo_mode="colormap",
+        colormap_strength=1.0,
+        light_azimuth_deg=150.0,
+        light_elevation_deg=32.0,
+        hue_variation_strength=0.0,
+        overlays=overlays,
+        debug_mode=debug_mode,
+    )
+    assert config.pom.enabled, "regression must exercise the default POM path"
+    return f3d.TerrainRenderParams(config)
+
+
+def _converged_scene(params, waypoint, max_steps=240):
+    scene = f3d.GlobeScene(
+        SWISS_DEM, JUNGFRAU_LON, JUNGFRAU_LAT, "Jungfrau", params=params
+    )
+    for _ in range(max_steps):
+        frame = scene.fly_to(*waypoint)
+        if scene.streaming_stats()["converged"]:
+            break
+    return scene, scene.fly_to(*waypoint).to_numpy()
+
+
+def _green_terrain_mask(frame: np.ndarray) -> np.ndarray:
+    rgb = frame[..., :3].astype(np.int32)
+    return (rgb[..., 1] - np.maximum(rgb[..., 0], rgb[..., 2])) > 30
+
+
+@pytest.mark.offscreen
+def test_globe_elevation_colormap_varies_with_default_pom() -> None:
+    _require_orbis_gpu()
+    _, frame = _converged_scene(
+        _elevation_params(), (JUNGFRAU_LON, JUNGFRAU_LAT, 20_000.0, 0.0, 0.0)
+    )
+    rgb = frame[..., :3].astype(np.float64)
+    red_minus_blue = rgb[..., 0] - rgb[..., 2]
+    # Valleys (~800 m) map blue and summits (~4000 m) red; a parallax offset
+    # on the global UV used to collapse every lookup onto the lowest colour.
+    assert float(np.percentile(red_minus_blue, 95) - np.percentile(red_minus_blue, 5)) > 60.0
+
+
+@pytest.mark.offscreen
+def test_globe_terrain_normals_are_sunlit_not_crumbled() -> None:
+    _require_orbis_gpu()
+    _, frame = _converged_scene(
+        _elevation_params(debug_mode=30),
+        (JUNGFRAU_LON, JUNGFRAU_LAT, 20_000.0, 0.0, 0.0),
+    )
+    n_dot_l = frame[..., 0].astype(np.float64) / 255.0
+    # A 32 degree sun lights most alpine slopes. Y-up, ~1000x over-steep
+    # height normals used to leave nearly every fragment at N.L = 0.
+    assert float(n_dot_l.mean()) > 0.3
+    assert float((n_dot_l < 0.05).mean()) < 0.2
+
+
+@pytest.mark.offscreen
+def test_orbit_oblique_view_frames_the_target_without_curtains() -> None:
+    _require_orbis_gpu()
+    green = [(190.0, "#20c040"), (4200.0, "#40ff60")]
+    _, frame = _converged_scene(
+        _elevation_params(colormap_stops=green),
+        (7.985, 46.56, 408_000.0, 180.0, 45.0),
+    )
+    mask = _green_terrain_mask(frame)
+    assert mask.sum() > 200, "no terrain rendered from orbit"
+    ys, xs = np.nonzero(mask)
+    height, width = mask.shape
+    # Coarse LOD variants used to be displaced by the camera-to-centre offset.
+    assert abs(float(xs.mean()) / width - 0.5) < 0.15
+    assert abs(float(ys.mean()) / height - 0.5) < 0.2
+    # Skirts used to hang an altitude-sized curtain below the terrain edge.
+    assert (ys.max() - ys.min()) < 1.2 * (xs.max() - xs.min())
+
+
+@pytest.mark.offscreen
+def test_source_nodata_outline_replaces_the_bounding_box() -> None:
+    _require_orbis_gpu()
+    green = [(190.0, "#20c040"), (4200.0, "#40ff60")]
+    _, frame = _converged_scene(
+        _elevation_params(size=(480, 270), colormap_stops=green),
+        (8.2, 46.8, 350_000.0, 0.0, 0.0),
+    )
+    mask = _green_terrain_mask(frame)
+    ys, xs = np.nonzero(mask)
+    assert mask.sum() > 1_000, "Swiss DEM not rendered from 350 km"
+    fill = mask.sum() / float((ys.max() - ys.min() + 1) * (xs.max() - xs.min() + 1))
+    # Switzerland fills well under 80% of its bounding box; nodata rendered
+    # as terrain used to fill the whole DEM rectangle (or a world-tile blob).
+    assert fill < 0.8

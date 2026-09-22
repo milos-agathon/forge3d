@@ -321,6 +321,33 @@ pub fn make_ring_skirts(
     (skirt_verts, skirt_indices)
 }
 
+/// Remove the skirt quads that hang from the outer boundary of the outermost
+/// globe ring. Skirts seal seams between adjacent LOD rings; the outermost
+/// edge has no neighbour, so its skirt is only a curtain hanging below the
+/// terrain edge when seen from altitude. `skirt_indices` holds the six-index
+/// quads emitted by [`make_ring_skirts`], whose first two indices are the
+/// ring edge; `ring_vertices` are the generator-local ring vertices.
+pub fn drop_outer_boundary_skirts(
+    ring_vertices: &[ClipmapVertex],
+    skirt_indices: &mut Vec<u32>,
+    outer_extent: f32,
+    cell_size: f32,
+) {
+    let tolerance = (cell_size * 0.01).max(1.0e-3);
+    let on_outer_boundary = |index: u32| {
+        ring_vertices.get(index as usize).is_some_and(|vertex| {
+            vertex.position[0].abs().max(vertex.position[1].abs()) >= outer_extent - tolerance
+        })
+    };
+    let kept = skirt_indices
+        .chunks_exact(6)
+        .filter(|quad| !(on_outer_boundary(quad[0]) && on_outer_boundary(quad[1])))
+        .flatten()
+        .copied()
+        .collect();
+    *skirt_indices = kept;
+}
+
 /// Minimum depth that hides a curved globe patch's chord-to-surface sagitta
 /// plus its altitude allowance. Invalid inputs fail closed to the configured
 /// depth, and the f64 intermediate avoids cancellation at planet scale.

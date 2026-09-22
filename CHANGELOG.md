@@ -25,6 +25,22 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   without cracks between detail levels. On a physical NVIDIA Vulkan adapter
   the audited descent measured ~0.00004 px of vertex jitter, zero crack
   pixels, and 25/25 nonblocking streaming frames. (#141)
+- Globe views now reach across the whole source DEM: coarse context tiles
+  fill the outer clipmap rings, and COG nodata (the `GDAL_NODATA` tag) is
+  honoured, so a country-wide DEM shows its real outline on a sun-lit Earth
+  with an atmosphere rim instead of a filled rectangle. `examples/orbis_swiss_alps_descent.py`
+  flies from orbit to the Jungfrau wall. (#141)
+
+### Fixed
+- Globe terrain shading: height normals are now built in each fragment's
+  east/north/up frame at metric scale (they were Y-up and ~1000x too steep,
+  which left slopes unlit and "crumbly"), slope-based materials use the real
+  terrain slope, and parallax mapping no longer shifts the global UV off the
+  loaded tiles (which collapsed elevation colormaps to one colour). (#141)
+- Globe geometry: coarse clipmap LOD variants were offset by the camera's
+  distance from the clipmap centre, so oblique and orbital views lost the
+  terrain; skirts no longer hang altitude-sized curtains below the terrain
+  edge. (#141)
 
 ### Changed
 - Environment lighting now follows the corrected upstream IBL math (Karis

@@ -118,6 +118,19 @@ fn validate_planetary_geography(
     Ok(((min_lon, min_lat, max_lon, max_lat), source, wgs84))
 }
 
+/// A stored height sample is usable when it is finite, within any physical
+/// planetary elevation, and not the dataset's GDAL_NODATA sentinel.
+fn is_valid_height_sample(height: f32, nodata: Option<f64>) -> bool {
+    if !height.is_finite() || height.abs() >= 1.0e6 {
+        return false;
+    }
+    match nodata {
+        Some(sentinel) if sentinel.is_nan() => true,
+        Some(sentinel) => f64::from(height) != sentinel && height != sentinel as f32,
+        None => true,
+    }
+}
+
 impl CogHeightReader {
     fn full_resolution_pixel_bounds(
         &self,
@@ -542,6 +555,7 @@ impl CogHeightReader {
             .or_else(|| self.header.ifds.iter().max_by_key(|ifd| ifd.width))
             .ok_or_else(|| CogError::InvalidIfd("COG contains no image levels".to_string()))?
             .clone();
+        let nodata = ifd.nodata.or(full.nodata);
 
         let scale_x = f64::from(ifd.width) / f64::from(full.width);
         let scale_y = f64::from(ifd.height) / f64::from(full.height);
@@ -644,9 +658,32 @@ impl CogHeightReader {
                 let h10 = window[(sy0 * window_width + sx1) as usize];
                 let h01 = window[(sy1 * window_width + sx0) as usize];
                 let h11 = window[(sy1 * window_width + sx1) as usize];
-                output[(output_y * request.output_width + output_x) as usize] =
+                let valid = |height: f32| is_valid_height_sample(height, nodata);
+                let height = if valid(h00) && valid(h10) && valid(h01) && valid(h11) {
                     (h00 * (1.0 - tx) + h10 * tx) * (1.0 - ty)
-                        + (h01 * (1.0 - tx) + h11 * tx) * ty;
+                        + (h01 * (1.0 - tx) + h11 * tx) * ty
+                } else {
+                    // Blend only the valid neighbours; a footprint that is
+                    // mostly nodata is left uncovered rather than invented.
+                    let mut sum = 0.0_f32;
+                    let mut weight = 0.0_f32;
+                    for (sample, sample_weight) in [
+                        (h00, (1.0 - tx) * (1.0 - ty)),
+                        (h10, tx * (1.0 - ty)),
+                        (h01, (1.0 - tx) * ty),
+                        (h11, tx * ty),
+                    ] {
+                        if valid(sample) {
+                            sum += sample * sample_weight;
+                            weight += sample_weight;
+                        }
+                    }
+                    if weight < 0.5 {
+                        continue;
+                    }
+                    sum / weight
+                };
+                output[(output_y * request.output_width + output_x) as usize] = height;
                 coverage[(output_y * request.output_width + output_x) as usize] = u8::MAX;
             }
         }
@@ -1118,6 +1155,19 @@ fn read_le_bytes8(data: &[u8], offset: usize) -> [u8; 8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn height_sample_validity_rejects_nodata_sentinels() {
+        let sentinel = Some(-3.3999999521443642e38);
+        assert!(is_valid_height_sample(1_234.5, sentinel));
+        assert!(!is_valid_height_sample(-3.4e38, sentinel));
+        assert!(!is_valid_height_sample(-9_999.0, Some(-9_999.0)));
+        assert!(!is_valid_height_sample(f32::NAN, None));
+        assert!(!is_valid_height_sample(f32::INFINITY, None));
+        assert!(!is_valid_height_sample(-3.4e38, None));
+        assert!(is_valid_height_sample(-420.0, None));
+        assert!(is_valid_height_sample(0.0, Some(f64::NAN)));
+    }
 
     fn pack_msb_codes(codes: &[(u16, u8)]) -> Vec<u8> {
         let mut packed = Vec::new();

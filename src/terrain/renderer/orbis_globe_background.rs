@@ -7,7 +7,12 @@ pub(in crate::terrain::renderer) struct OrbisGlobeUniforms {
     sphere: [f32; 4],
     base_color: [f32; 4],
     rim_color: [f32; 4],
+    sun_direction: [f32; 4],
+    space_color: [f32; 4],
 }
+
+/// Clear colour of the globe pass; the atmosphere halo composites over it.
+const ORBIS_SPACE_COLOR: [f32; 3] = [0.1, 0.1, 0.15];
 
 impl TerrainScene {
     pub(in crate::terrain::renderer) fn render_orbis_globe_background(
@@ -38,6 +43,7 @@ impl TerrainScene {
                 "ORBIS globe background camera matrices must be finite (eye={eye:?})"
             );
         }
+        let sun = params.decoded().light.direction;
         let uniforms = OrbisGlobeUniforms {
             inverse_view_projection: inverse.to_cols_array(),
             sphere: [
@@ -48,6 +54,20 @@ impl TerrainScene {
             ],
             base_color: [0.035, 0.095, 0.12, 1.0],
             rim_color: [0.12, 0.34, 0.55, 1.0],
+            // Same render-space light as the terrain pass, so the Earth
+            // outside the DEM shares the terrain's day side.
+            sun_direction: [
+                sun[0],
+                sun[1],
+                sun[2],
+                if sky_present { 1.0 } else { 0.0 },
+            ],
+            space_color: [
+                ORBIS_SPACE_COLOR[0],
+                ORBIS_SPACE_COLOR[1],
+                ORBIS_SPACE_COLOR[2],
+                1.0,
+            ],
         };
         self.queue
             .write_buffer(&self.orbis_globe_background_uniform, 0, bytemuck::bytes_of(&uniforms));
@@ -71,9 +91,9 @@ impl TerrainScene {
             wgpu::LoadOp::Load
         } else {
             wgpu::LoadOp::Clear(wgpu::Color {
-                r: 0.1,
-                g: 0.1,
-                b: 0.15,
+                r: f64::from(ORBIS_SPACE_COLOR[0]),
+                g: f64::from(ORBIS_SPACE_COLOR[1]),
+                b: f64::from(ORBIS_SPACE_COLOR[2]),
                 a: 1.0,
             })
         };

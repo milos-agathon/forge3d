@@ -482,13 +482,22 @@ fn append_clipmap_lod_variant(
                 ..Default::default()
             },
         );
-        let (skirt_vertices, skirt_indices) = crate::terrain::clipmap::make_ring_skirts(
+        let (skirt_vertices, mut skirt_indices) = crate::terrain::clipmap::make_ring_skirts(
             &vertices,
             &indices,
             config.skirt_depth,
             ring_index,
             resolution as usize + 1,
         );
+        #[cfg(feature = "enable-globe")]
+        if globe_level.is_some() && ring_index + 1 == config.ring_count {
+            crate::terrain::clipmap::ring::drop_outer_boundary_skirts(
+                &vertices,
+                &mut skirt_indices,
+                outer,
+                base_cell_size * 2.0_f32.powi(ring_index as i32 + 1),
+            );
+        }
         vertices.extend(skirt_vertices);
         indices.extend(skirt_indices);
         (vertices, indices)
@@ -874,6 +883,21 @@ impl TerrainScene {
         let chunked = minmax.is_some();
         let mut lod_tiles = Vec::new();
         let mut draw_templates = Vec::new();
+        let globe_level = self
+            .height_streaming
+            .as_ref()
+            .filter(|runtime| runtime.is_globe())
+            .map(|runtime| &runtime.streamer.clipmap);
+        // Globe variants are generated around the clipmap centre, exactly as
+        // `ClipmapLevel::generate` builds the base mesh, and
+        // `rebase_globe_vertices` places them from that centre. Passing the
+        // camera-relative render centre here would apply the centre offset
+        // twice and shift every coarse variant away from its base region.
+        let variant_center = if globe_level.is_some() {
+            glam::Vec2::ZERO
+        } else {
+            center
+        };
         for (region_index, region) in regions.iter().copied().enumerate() {
             let mut variants = vec![region];
             for variant in 0..variant_count {
@@ -882,14 +906,11 @@ impl TerrainScene {
                         append_clipmap_lod_variant(
                             &mut mesh,
                             &config,
-                            center,
+                            variant_center,
                             terrain_span,
                             region_index,
                             variant,
-                            self.height_streaming
-                                .as_ref()
-                                .filter(|runtime| runtime.is_globe())
-                                .map(|runtime| &runtime.streamer.clipmap),
+                            globe_level,
                         )
                         .map_err(|error| anyhow!("clipmap LOD variant generation failed: {error}"))?,
                     );

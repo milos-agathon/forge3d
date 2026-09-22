@@ -181,9 +181,29 @@ fn production_shader_samples_regional_overview_at_two_global_positions() {
         has_dynamic_offset: false,
         min_binding_size: std::num::NonZeroU64::new(min_size),
     };
+    // The shared height sampler reads `u_terrain.spacing_h_exag.w` (the ORBIS
+    // detail blend); zeroed terrain uniforms select the plain page walk.
+    let terrain_uniforms = tracked_create_buffer(
+        &device,
+        &wgpu::BufferDescriptor {
+            label: Some("orbis.overview-probe.terrain-uniforms"),
+            size: 176,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        },
+    )
+    .unwrap();
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("orbis.overview-probe.layout"),
         entries: &[
+            layout_entry(
+                0,
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: std::num::NonZeroU64::new(176),
+                },
+            ),
             layout_entry(
                 1,
                 wgpu::BindingType::Texture {
@@ -238,6 +258,10 @@ fn production_shader_samples_regional_overview_at_two_global_positions() {
         label: Some("orbis.overview-probe.bind-group"),
         layout: &layout,
         entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: terrain_uniforms.as_entire_binding(),
+            },
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::TextureView(&overview_view),

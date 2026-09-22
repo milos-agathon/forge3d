@@ -716,6 +716,11 @@ pub(in crate::terrain::renderer) struct HeightVtFamilyRuntime {
     coarse_prefill_enabled: bool,
     #[cfg(feature = "enable-globe")]
     overview_reservation_size: u32,
+    /// ORBIS context pages: coarse tiles covering the whole source so the
+    /// outer clipmap rings show real DEM beyond the target-LOD footprint.
+    /// Their slots are reserved out of the leaf capacity and they are
+    /// touched every step, so the leaf LRU never trades them for fine tiles.
+    context_tiles: Vec<TileId>,
 }
 
 #[cfg(feature = "enable-globe")]
@@ -983,6 +988,7 @@ impl HeightVtFamilyRuntime {
             coarse_prefill_enabled: coarse_prefill,
             #[cfg(feature = "enable-globe")]
             overview_reservation_size,
+            context_tiles: Vec::new(),
         };
         // Coarse prefill controls only when root demand begins; startup I/O is
         // always asynchronous. Until the root completes, all render paths keep
@@ -1217,7 +1223,16 @@ impl HeightVtFamilyRuntime {
                 camera_anchor,
                 focus_ecef,
             } if self.globe_mode => {
-                let max_leaf_tiles = globe_leaf_capacity(self.page_table.capacity, self.lod)?;
+                let max_leaf_tiles = globe_leaf_capacity(self.page_table.capacity, self.lod)?
+                    .checked_sub(self.context_tiles.len())
+                    .filter(|count| *count > 0)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "height atlas capacity {} cannot hold {} context tiles plus the target-LOD footprint",
+                            self.page_table.capacity,
+                            self.context_tiles.len()
+                        )
+                    })?;
                 self.streamer
                     .update_globe_focus(camera_anchor, focus_ecef, self.lod, max_leaf_tiles)
                     .map_err(|error| anyhow!(error))?
@@ -1272,10 +1287,12 @@ impl HeightVtFamilyRuntime {
             .map_or_else(HashSet::new, |center| {
                 local_ancestor_chain(*center).into_iter().collect()
             });
+        let context_tiles: HashSet<TileId> = self.context_tiles.iter().copied().collect();
         self.retry.retain(|tile, _| {
             *tile == TileId::new(0, 0, 0)
                 || active_fine_demand.contains(tile)
                 || (self.globe_mode && active_ancestors.contains(tile))
+                || context_tiles.contains(tile)
         });
         self.request_due_retries();
 
@@ -1323,6 +1340,16 @@ impl HeightVtFamilyRuntime {
         for tile in retry_tiles {
             self.touch_resident_or_ancestor(tile);
             if self.loader.request(tile) {
+                self.tiles_requested += 1;
+            }
+        }
+
+        // Context pages come after fine demand so the target footprint keeps
+        // loader priority; resident ones are touched to stay LRU-recent.
+        for tile in self.context_tiles.clone() {
+            if self.mosaic.slot_of(&tile).is_some() {
+                let _ = self.mosaic.touch_nearest_resident_ancestor(tile);
+            } else if self.loader.request(tile) {
                 self.tiles_requested += 1;
             }
         }
@@ -1574,6 +1601,25 @@ impl TerrainRenderer {
     }
 
     #[cfg(feature = "enable-globe")]
+    /// Coarse ORBIS context tiles (see `HeightVtFamilyRuntime::context_tiles`).
+    /// Tiles must be coarser than the streaming target LOD.
+    pub(crate) fn set_height_streaming_context_tiles(&mut self, tiles: Vec<TileId>) -> Result<()> {
+        let runtime = self
+            .scene
+            .height_streaming
+            .as_mut()
+            .filter(|runtime| runtime.is_globe())
+            .ok_or_else(|| anyhow!("context tiles require globe height streaming"))?;
+        if let Some(tile) = tiles.iter().find(|tile| tile.lod >= runtime.lod) {
+            return Err(anyhow!(
+                "context tile {tile:?} must be coarser than target LOD {}",
+                runtime.lod
+            ));
+        }
+        runtime.context_tiles = tiles;
+        Ok(())
+    }
+
     pub(crate) fn set_height_detail_blend_override(&mut self, blend: Option<f32>) {
         self.scene.height_detail_blend_override = blend;
     }
@@ -1601,6 +1647,27 @@ impl TerrainScene {
             runtime.streamer.clipmap.center_ecef(),
             runtime.streamer.clipmap.camera_anchor()?,
         ))
+    }
+
+    /// Latitude (radians) of the globe clipmap's render-frame anchor. The
+    /// render frame is east/north/up at that anchor, so the planet's rotation
+    /// axis in render coordinates is `(0, cos lat, sin lat)`; the fragment
+    /// stage uses it to build each fragment's local east/north basis.
+    pub(in crate::terrain::renderer) fn orbis_render_frame_latitude(&self) -> Option<f64> {
+        #[cfg(feature = "enable-globe")]
+        {
+            let runtime = self.height_streaming.as_ref().filter(|runtime| runtime.is_globe())?;
+            let anchor = runtime.streamer.clipmap.camera_anchor()?;
+            let length = anchor.length();
+            if !length.is_finite() || length <= 0.0 {
+                return None;
+            }
+            Some((anchor.z / length).clamp(-1.0, 1.0).asin())
+        }
+        #[cfg(not(feature = "enable-globe"))]
+        {
+            None
+        }
     }
 
     #[cfg(feature = "enable-globe")]

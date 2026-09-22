@@ -14,6 +14,10 @@ pub(super) const MIN_DETAIL_LOD: u32 = 13;
 pub(super) const TARGET_SAMPLE_SPACING_M: f32 = 60.0;
 pub(super) const STREAM_TILE_RESOLUTION: u32 = 64;
 const MIN_SOURCE_LOD: u32 = 10;
+/// Upper bound on coarse context tiles requested over the whole source.
+pub(super) const CONTEXT_TILE_BUDGET: usize = 256;
+/// Context tiles are at least this many levels coarser than the target LOD.
+const CONTEXT_MIN_LOD_GAP: u32 = 3;
 const MAX_SOURCE_LOD: u32 = 14;
 
 pub(super) fn normalize_source(source: &str) -> Result<String, String> {
@@ -192,6 +196,44 @@ pub(super) fn read_covered_seed(
     }))
 }
 
+/// Coarse tiles covering the whole source extent, at the finest LOD (at
+/// least `CONTEXT_MIN_LOD_GAP` below `target_lod`) whose covering set fits
+/// `CONTEXT_TILE_BUDGET`, ordered nearest-first from the target so the view
+/// fills outward. Empty when no LOD fits.
+pub(super) fn context_tiles(
+    source_bounds: (f64, f64, f64, f64),
+    target_lon: f64,
+    target_lat: f64,
+    target_lod: u32,
+) -> Vec<TileId> {
+    let (west, south, east, north) = source_bounds;
+    if ![west, south, east, north].iter().all(|value| value.is_finite())
+        || west >= east
+        || south >= north
+    {
+        return Vec::new();
+    }
+    for lod in (0..=target_lod.saturating_sub(CONTEXT_MIN_LOD_GAP)).rev() {
+        let first = target_tile(west, north, lod);
+        let last = target_tile(east, south, lod);
+        let count = (u64::from(last.x - first.x) + 1) * (u64::from(last.y - first.y) + 1);
+        if count > CONTEXT_TILE_BUDGET as u64 {
+            continue;
+        }
+        let center = target_tile(target_lon, target_lat, lod);
+        let mut tiles: Vec<TileId> = (first.y..=last.y)
+            .flat_map(|y| (first.x..=last.x).map(move |x| TileId::new(lod, x, y)))
+            .collect();
+        tiles.sort_by_key(|tile| {
+            let dx = i64::from(tile.x) - i64::from(center.x);
+            let dy = i64::from(tile.y) - i64::from(center.y);
+            (dx * dx + dy * dy, tile.y, tile.x)
+        });
+        return tiles;
+    }
+    Vec::new()
+}
+
 pub(super) fn overview_size_for_extent(terrain_extent_m: f32) -> u32 {
     ((terrain_extent_m / TARGET_SAMPLE_SPACING_M).ceil() as u32)
         .saturating_add(1)
@@ -278,7 +320,7 @@ pub(super) fn default_render_params(
     kwargs.set_item("z_scale", 1.0)?;
     kwargs.set_item("exposure", 1.0)?;
     kwargs.set_item("domain", (0.0, 5000.0))?;
-    kwargs.set_item("camera_mode", "clipmap:4:32:32:10:0.3:zup")?;
+    kwargs.set_item("camera_mode", super::GLOBE_CAMERA_MODE)?;
     kwargs.set_item("culling", "frustum")?;
     kwargs.set_item("shading", "forward")?;
     kwargs.set_item("cam_radius", DEFAULT_START_ALTITUDE_M as f32)?;
@@ -380,6 +422,61 @@ mod overview_seed_tests {
         }
         assert_eq!(reads, vec![second]);
         assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn swiss_dem_nodata_is_uncovered_and_never_blended_into_heights() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("tif")
+            .join("switzerland_dem.tif");
+        if std::fs::metadata(&path).map_or(true, |meta| meta.len() < 1024) {
+            eprintln!("skipping: {} is missing or an LFS pointer", path.display());
+            return;
+        }
+        let url = normalize_source(&path.to_string_lossy()).unwrap();
+        let dataset = PyCogDataset::new(&url, 64, None, Some(64)).unwrap();
+        let reader = dataset.reader();
+        let nodata = reader.header().full_resolution().and_then(|ifd| ifd.nodata);
+        assert!(nodata.is_some_and(|value| value < -1.0e38), "GDAL_NODATA not parsed: {nodata:?}");
+        // The LOD-10 tile around the Matterhorn straddles the Italian border,
+        // where the Swiss DEM stores its nodata sentinel.
+        let tile = target_tile(7.6586, 45.9763, 10);
+        let read = reader
+            .read_height_tile_covered(HeightTileRequest {
+                tile_id: tile,
+                output_width: 64,
+                output_height: 64,
+            })
+            .unwrap();
+        let covered = read.coverage.iter().filter(|value| **value == u8::MAX).count();
+        assert!(covered > 0 && covered < read.coverage.len(), "covered {covered}");
+        for (height, coverage) in read.heights.iter().zip(&read.coverage) {
+            if *coverage == u8::MAX {
+                assert!((0.0..5_000.0).contains(height), "covered height {height}");
+            }
+        }
+        assert!(read_covered_seed(&dataset, tile, MIN_OVERVIEW_SIZE).unwrap().is_none());
+    }
+
+    #[test]
+    fn context_tiles_cover_the_source_within_budget_nearest_first() {
+        let swiss = (5.955885, 45.818020, 10.492497, 47.808308);
+        let tiles = context_tiles(swiss, 7.985, 46.56, 13);
+        assert!(!tiles.is_empty() && tiles.len() <= CONTEXT_TILE_BUDGET);
+        let lod = tiles[0].lod;
+        assert!(lod <= 13 - CONTEXT_MIN_LOD_GAP);
+        assert!(tiles.iter().all(|tile| tile.lod == lod));
+        assert_eq!(tiles[0], target_tile(7.985, 46.56, lod));
+        for (lon, lat) in [(swiss.0, swiss.3), (swiss.2, swiss.1), (8.5, 47.0)] {
+            assert!(tiles.contains(&target_tile(lon, lat, lod)));
+        }
+        // One level finer would exceed the budget.
+        let finer_first = target_tile(swiss.0, swiss.3, lod + 1);
+        let finer_last = target_tile(swiss.2, swiss.1, lod + 1);
+        let finer = (finer_last.x - finer_first.x + 1) * (finer_last.y - finer_first.y + 1);
+        assert!(lod + 1 > 13 - CONTEXT_MIN_LOD_GAP || finer as usize > CONTEXT_TILE_BUDGET);
+        assert!(context_tiles((1.0, 0.0, 0.0, 1.0), 0.5, 0.5, 13).is_empty());
     }
 
     #[test]

@@ -2,6 +2,9 @@ use super::*;
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::terrain::render_params;
 
+/// Must match `ORBIS_GLOBE_FRAME_FLAG_OFFSET` in `terrain_pbr_pom.wgsl`.
+pub(super) const ORBIS_GLOBE_FRAME_FLAG_OFFSET: f32 = 10.0;
+
 impl TerrainScene {
     pub(super) fn extract_overlay_binding(
         &self,
@@ -94,7 +97,11 @@ impl TerrainScene {
                     ao_weight,
                     ao_fallback_enabled,
                     params.hue_variation_strength.clamp(0.0, 0.2),
-                    0.0,
+                    // ORBIS globe shading frame: 10 + anchor latitude
+                    // (radians) on the planetary path, 0 on flat paths.
+                    self.orbis_render_frame_latitude()
+                        .map(|latitude| ORBIS_GLOBE_FRAME_FLAG_OFFSET + latitude as f32)
+                        .unwrap_or(0.0),
                 ],
                 params4: [
                     detail_enabled,

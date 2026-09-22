@@ -8,6 +8,11 @@ use super::ClipmapConfig;
 use crate::terrain::tiling::TileId;
 use glam::{DVec3, Vec2};
 
+/// Globe footprint regions (centre plus the first four rings) that demand
+/// target-LOD leaf tiles; outer globe rings sample coarse context pages.
+#[cfg(feature = "enable-globe")]
+const GLOBE_FINE_FOOTPRINT_REGIONS: usize = 5;
+
 #[derive(Debug)]
 enum ClipmapFrame {
     Flat(Vec2),
@@ -197,13 +202,24 @@ impl ClipmapLevel {
                     self.config.morph_range,
                 ),
             };
-            let (skirt_verts, skirt_indices) = make_ring_skirts(
+            let (skirt_verts, mut skirt_indices) = make_ring_skirts(
                 &ring_verts,
                 &ring_indices,
                 self.config.skirt_depth,
                 ring_idx,
                 0,
             );
+            #[cfg(feature = "enable-globe")]
+            if matches!(self.frame, ClipmapFrame::Globe { .. })
+                && ring_idx + 1 == self.config.ring_count
+            {
+                super::ring::drop_outer_boundary_skirts(
+                    &ring_verts,
+                    &mut skirt_indices,
+                    ring_outer,
+                    self.base_cell_size * 2.0_f32.powi(ring_idx as i32 + 1),
+                );
+            }
             ring_verts.extend(skirt_verts);
             ring_indices.extend(skirt_indices);
 
@@ -519,11 +535,16 @@ impl ClipmapLevel {
         let center_y = ((0.5 - latitude / std::f64::consts::PI) * f64::from(axis))
             .floor()
             .clamp(0.0, f64::from(axis - 1)) as u32;
-        Ok(radii
-            .into_iter()
+        // Only the centre and the first rings carry target-LOD leaves; the
+        // outer rings sample coarse context pages. They reuse the outermost
+        // fine footprint so ring readiness keeps its meaning without
+        // demanding target-LOD tiles across the whole clipmap.
+        let fine_regions = radii.len().min(GLOBE_FINE_FOOTPRINT_REGIONS);
+        let mut footprints: Vec<Vec<TileId>> = radii[..fine_regions]
+            .iter()
             .map(|radius| {
                 let mut tiles = Vec::new();
-                self.append_globe_tiles(target_lod, f64::from(radius), &mut tiles);
+                self.append_globe_tiles(target_lod, f64::from(*radius), &mut tiles);
                 tiles.sort_by_key(|tile| {
                     let direct = tile.x.abs_diff(center_x);
                     let dx = direct.min(axis - direct);
@@ -532,7 +553,10 @@ impl ClipmapLevel {
                 });
                 tiles
             })
-            .collect())
+            .collect();
+        let outermost_fine = footprints.last().cloned().unwrap_or_default();
+        footprints.resize(radii.len(), outermost_fine);
+        Ok(footprints)
     }
 
     #[cfg(feature = "enable-globe")]

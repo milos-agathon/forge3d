@@ -20,6 +20,11 @@ const DEFAULT_START_ALTITUDE_M: f64 = 408_000.0;
 const MAX_SUPPORTED_ALTITUDE_M: f64 = DEFAULT_START_ALTITUDE_M;
 const DEFAULT_WAYPOINT_COUNT: usize = 25;
 const GPU_VISIBLE_BUDGET: u64 = 64 * 1024 * 1024;
+/// Globe clipmap rings. The target-LOD leaf footprint covers the centre and
+/// the first four rings; the outer rings reach across the source extent and
+/// sample the coarse context pages.
+const GLOBE_RING_COUNT: u32 = 7;
+const GLOBE_CAMERA_MODE: &str = "clipmap:7:32:32:10:0.3:zup";
 const MICRO_STEP_M: f64 = 0.002;
 const ORBIS_PROBE_BASE_ALTITUDE_M: f64 = 6_000.0;
 
@@ -186,7 +191,7 @@ impl GlobeScene {
         renderer.enable_height_streaming_cog_globe(
             &dataset,
             terrain_extent_m,
-            4,
+            GLOBE_RING_COUNT,
             32,
             source_lod,
             source::STREAM_TILE_RESOLUTION,
@@ -219,6 +224,22 @@ impl GlobeScene {
                     target_lon,
                     target_lat,
                     format!("initial overview activation failed: {error:#}"),
+                )
+            })?;
+        renderer
+            .set_height_streaming_context_tiles(source::context_tiles(
+                bounds,
+                target_lon,
+                target_lat,
+                source_lod,
+            ))
+            .map_err(|error| {
+                source_error(
+                    &cog_source,
+                    target_name,
+                    target_lon,
+                    target_lat,
+                    format!("context tile setup failed: {error:#}"),
                 )
             })?;
 
@@ -767,7 +788,7 @@ impl GlobeScene {
             PyValueError::new_err(self.waypoint_context(waypoint, "ECEF validation", error))
         })?;
         let mut params = self.params.borrow(py).clone();
-        params.camera_mode = "clipmap:4:32:32:10:0.3:zup".to_string();
+        params.camera_mode = GLOBE_CAMERA_MODE.to_string();
         params.terrain_span = self.terrain_extent_m;
         let target_sample = self
             .waypoint_height_source()?
@@ -962,7 +983,7 @@ impl GlobeScene {
                 camera_altitude
             };
             let mut params = self.params.borrow(py).clone();
-            params.camera_mode = "clipmap:4:32:32:10:0.3:zup".to_string();
+            params.camera_mode = GLOBE_CAMERA_MODE.to_string();
             params.terrain_span = self.terrain_extent_m;
             params.cam_phi_deg = 0.0;
             params.cam_theta_deg = 0.0;
