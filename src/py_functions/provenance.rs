@@ -13,14 +13,14 @@ use numpy::PyUntypedArrayMethods;
 
 #[cfg(feature = "extension-module")]
 use crate::core::provenance::{
-    encode_source_map_leaf, encode_tile_leaf, from_hex, merkle_root, sign_root, to_hex,
-    verify_root, ContributingTile, FAMILY_NAMES,
+    encode_image_leaf, encode_source_map_leaf, encode_tile_leaf, from_hex, merkle_root, sha256,
+    sign_root, to_hex, verify_root, ContributingTile, FAMILY_NAMES, SOURCE_ID_NONE,
 };
 
 /// Manifest schema version emitted by `seal_provenance` and accepted by
 /// `verify_provenance` / the offline verifier.
 #[cfg(feature = "extension-module")]
-pub(crate) const PROVENANCE_SCHEMA_VERSION: u64 = 1;
+pub(crate) const PROVENANCE_SCHEMA_VERSION: u64 = 2;
 
 /// SHA256 over the row-major little-endian u32 raster of the source map.
 #[cfg(feature = "extension-module")]
@@ -80,8 +80,9 @@ fn parse_tile_dict(index: usize, tile: &Bound<'_, PyAny>) -> PyResult<Contributi
 /// Seal a rendered frame's provenance.
 ///
 /// Builds the sorted SHA256 Merkle tree over the contributing-tile leaves
-/// plus one source-map leaf, signs the root with the Ed25519 32-byte seed
-/// `private_key`, and returns the `provenance.json` manifest bytes.
+/// plus the source-map leaf and the image leaf, signs the root with the
+/// Ed25519 32-byte seed `private_key`, and returns the `provenance.json`
+/// manifest bytes.
 ///
 /// Parameters
 /// ----------
@@ -91,14 +92,17 @@ fn parse_tile_dict(index: usize, tile: &Bound<'_, PyAny>) -> PyResult<Contributi
 ///     Records from `TerrainRenderer.read_contributing_tiles()`.
 /// private_key : bytes
 ///     32-byte Ed25519 seed.
+/// image_bytes : bytes
+///     Exact bytes of the published image the manifest seals.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (source_map, contributing_tiles, private_key))]
+#[pyo3(signature = (source_map, contributing_tiles, private_key, image_bytes))]
 pub(crate) fn seal_provenance(
     py: Python<'_>,
     source_map: numpy::PyReadonlyArray2<'_, u32>,
     contributing_tiles: &Bound<'_, PyAny>,
     private_key: Vec<u8>,
+    image_bytes: Vec<u8>,
 ) -> PyResult<Py<PyAny>> {
     use pyo3::types::PyBytes;
 
@@ -120,9 +124,32 @@ pub(crate) fn seal_provenance(
     tiles.sort_by_key(|t| encode_tile_leaf(t));
     tiles.dedup();
 
+    use std::collections::BTreeSet;
+    let covered_source_ids: BTreeSet<u32> = tiles
+        .iter()
+        .filter(|tile| tile.family_slot == 0)
+        .map(|tile| tile.source_id)
+        .collect();
+    let uncovered: Vec<u32> = source_map
+        .as_array()
+        .iter()
+        .copied()
+        .filter(|id| *id != SOURCE_ID_NONE)
+        .collect::<BTreeSet<u32>>()
+        .difference(&covered_source_ids)
+        .copied()
+        .collect();
+    if !uncovered.is_empty() {
+        return Err(PyValueError::new_err(format!(
+            "source ids without contributing albedo tiles: {uncovered:?}"
+        )));
+    }
+
     let map_digest = source_map_digest(&source_map);
+    let image_digest = sha256(&image_bytes);
     let mut leaves: Vec<Vec<u8>> = tiles.iter().map(|t| encode_tile_leaf(t).to_vec()).collect();
     leaves.push(encode_source_map_leaf(width, height, &map_digest).to_vec());
+    leaves.push(encode_image_leaf(&image_digest).to_vec());
     let root = merkle_root(&leaves);
     let (signature, public_key) = sign_root(&root, &seed);
 
@@ -146,6 +173,7 @@ pub(crate) fn seal_provenance(
         "signature": to_hex(&signature),
         "public_key": to_hex(&public_key),
         "image_dims": [width, height],
+        "image_sha256": to_hex(&image_digest),
         "albedo_family_index": 0,
         "source_map_encoding": "u32le-row-major",
         "source_map_sha256": to_hex(&map_digest),
@@ -175,19 +203,22 @@ pub(crate) fn seal_provenance(
     Ok(PyBytes::new_bound(py, &bytes).into_py(py))
 }
 
-/// Verify a provenance manifest against a source map.
+/// Verify a provenance manifest against a source map and image bytes.
 ///
 /// Rebuilds the Merkle root from the manifest's leaf records plus the
-/// source-map leaf recomputed from `source_map`, and checks it matches the
-/// signed root and that the Ed25519 signature verifies against the embedded
+/// source-map leaf recomputed from `source_map` and the image leaf
+/// recomputed from `image_bytes`, and checks it matches the signed root,
+/// that the manifest `image_sha256` equals the digest of the supplied image
+/// bytes, and that the Ed25519 signature verifies against the embedded
 /// public key. Returns `False` on any mismatch; raises `ValueError` only for
 /// a structurally malformed manifest.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (source_map, manifest))]
+#[pyo3(signature = (source_map, manifest, image_bytes))]
 pub(crate) fn verify_provenance(
     source_map: numpy::PyReadonlyArray2<'_, u32>,
     manifest: Vec<u8>,
+    image_bytes: Vec<u8>,
 ) -> PyResult<bool> {
     let manifest: serde_json::Value = serde_json::from_slice(&manifest)
         .map_err(|e| PyValueError::new_err(format!("malformed provenance manifest: {e}")))?;
@@ -219,6 +250,7 @@ pub(crate) fn verify_provenance(
     let signed_root: [u8; 32] = hex_field("merkle_root", 32)?.try_into().unwrap();
     let signature: [u8; 64] = hex_field("signature", 64)?.try_into().unwrap();
     let public_key: [u8; 32] = hex_field("public_key", 32)?.try_into().unwrap();
+    let manifest_image: [u8; 32] = hex_field("image_sha256", 32)?.try_into().unwrap();
 
     let dims = manifest
         .get("image_dims")
@@ -270,6 +302,12 @@ pub(crate) fn verify_provenance(
     }
     let map_digest = source_map_digest(&source_map);
     leaves.push(encode_source_map_leaf(width, height, &map_digest).to_vec());
+    // The image leaf binds the published image bytes to the root.
+    let image_digest = sha256(&image_bytes);
+    leaves.push(encode_image_leaf(&image_digest).to_vec());
+    if manifest_image != image_digest {
+        return Ok(false);
+    }
 
     let computed_root = merkle_root(&leaves);
     if computed_root != signed_root {

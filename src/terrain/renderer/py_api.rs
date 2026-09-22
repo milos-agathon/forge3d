@@ -937,6 +937,27 @@ impl TerrainRenderer {
         Ok(material_vt.get_stats())
     }
 
+    /// VERITAS test seam: pin the exact ordered tile list the next physical
+    /// render pages in, bypassing camera-driven request collection. Each
+    /// entry is ``(family, material_index, tile_x, tile_y, mip_level)``; an
+    /// empty list renders with no resident tiles. Setting the schedule
+    /// resets the VT runtime so the next render starts empty.
+    #[pyo3(text_signature = "(self, schedule)")]
+    fn set_material_vt_residency_schedule_for_test(
+        &self,
+        schedule: Vec<(String, u32, u32, u32, u32)>,
+    ) -> PyResult<()> {
+        let mut material_vt = self.scene.material_vt.lock().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to lock material_vt: {}",
+                e
+            ))
+        })?;
+        material_vt
+            .set_test_residency_schedule(schedule)
+            .map_err(PyRuntimeError::new_err)
+    }
+
     /// Test hook for the mandatory live feedback-retention acceptance gate.
     /// The request is inserted into the active renderer VT runtime, held while
     /// feedback is forced not-ready, then converges through the normal upload

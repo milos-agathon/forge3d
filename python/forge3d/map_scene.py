@@ -709,6 +709,41 @@ def _mapscene_shadow_settings(shadow_config: Any) -> Any:
     return settings
 
 
+def _mapscene_pom_settings(settings: Mapping[str, Any]) -> Any | None:
+    """Parallax occlusion mapping from ``lighting.settings["pom"]``.
+
+    Absent keeps the renderer default (POM on). ``False`` or ``{"enabled": False}``
+    disables it; a mapping overrides individual PomSettings fields.
+    """
+    config = settings.get("pom")
+    if config is None:
+        return None
+    from .terrain_params import PomSettings
+
+    fields = {
+        "enabled": True,
+        "mode": "Occlusion",
+        "scale": 0.04,
+        "min_steps": 12,
+        "max_steps": 40,
+        "refine_steps": 4,
+        "shadow": True,
+        "occlusion": True,
+    }
+    if isinstance(config, bool):
+        fields["enabled"] = config
+    elif isinstance(config, Mapping):
+        unknown = sorted(set(config) - set(fields))
+        if unknown:
+            raise ValueError(f"unknown pom settings: {unknown}")
+        fields.update(config)
+    else:
+        raise TypeError("lighting.settings['pom'] must be a bool or a mapping")
+    if not fields["enabled"]:
+        fields.update(scale=0.0, min_steps=1, max_steps=1, refine_steps=0, shadow=False, occlusion=False)
+    return PomSettings(**fields)
+
+
 def _mapscene_material_settings(recipe: "SceneRecipe") -> Any | None:
     from .terrain_params import MaterialLayerSettings
 
@@ -1292,6 +1327,9 @@ def _build_mapscene_terrain_params(
     clip_far = max(6000.0, terrain_span * 1.5)
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
+    configured_colormap_strength = settings.get("colormap_strength")
+    configured_hue_variation_strength = settings.get("hue_variation_strength")
+    configured_material_slope_bias = settings.get("material_slope_bias")
     camera_mode = str(cli_params.get("camera_mode") or camera.get("camera_mode") or "screen")
     if camera_mode == "screen":
         camera_mode = _mapscene_clipmap_camera_mode(_mapscene_clipmap_config(recipe)) or camera_mode
@@ -1304,7 +1342,19 @@ def _build_mapscene_terrain_params(
         exposure=float(renderer_config.lighting.exposure),
         domain=domain,
         albedo_mode=str(settings.get("albedo_mode") or preset_albedo),
-        colormap_strength=float(settings.get("colormap_strength") or preset_colormap_strength),
+        colormap_strength=float(
+            preset_colormap_strength
+            if configured_colormap_strength is None
+            else configured_colormap_strength
+        ),
+        hue_variation_strength=float(
+            0.08
+            if configured_hue_variation_strength is None
+            else configured_hue_variation_strength
+        ),
+        material_slope_bias=float(
+            1.0 if configured_material_slope_bias is None else configured_material_slope_bias
+        ),
         ibl_enabled="ibl" in renderer_config.gi.modes,
         light_azimuth_deg=azimuth,
         light_elevation_deg=elevation,
@@ -1330,6 +1380,7 @@ def _build_mapscene_terrain_params(
         water=_mapscene_water_settings(recipe),
         clouds=_mapscene_cloud_settings(recipe),
         materials=_mapscene_material_settings(recipe),
+        pom=_mapscene_pom_settings(settings),
         vt=_mapscene_vt_settings(recipe),
     )
     if emit_source_id:
@@ -5931,6 +5982,10 @@ class MapScene:
                     native_result.source_map,
                     native_result.contributing_tiles,
                     provenance_signing_key,
+                    # The exact published image bytes — target_path was
+                    # already written above, so the seal binds what a
+                    # verifier will read back from disk.
+                    target_path.read_bytes(),
                 )
             )
             source_map_path = target_path.with_name(f"{target_path.stem}.source_map.npy")

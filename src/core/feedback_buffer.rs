@@ -73,6 +73,13 @@ impl FeedbackLayout {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FeedbackEncoding {
+    #[default]
+    Append,
+    ProvenanceBitset,
+}
+
 /// GPU feedback buffer for collecting tile visibility information
 pub struct FeedbackBuffer {
     /// GPU buffer for collecting feedback data from shaders
@@ -288,15 +295,10 @@ impl FeedbackBuffer {
         Ok(entries)
     }
 
-    /// Read raw feedback entries, waiting for (or starting) the readback map.
-    ///
-    /// Unlike [`read_feedback_entries`], this cooperates with the
-    /// non-blocking [`try_read_feedback_entries`] path: if an async map is
-    /// already in flight it waits for that map instead of issuing a second
-    /// (invalid) `map_async` on the same buffer.
-    pub fn read_feedback_entries_blocking(
+    pub fn read_feedback_entries_blocking_with_encoding(
         &self,
         device: &Device,
+        encoding: FeedbackEncoding,
     ) -> Result<Vec<FeedbackEntry>, String> {
         let pending = { self.pending_readback.lock().unwrap().take() };
         let receiver = match pending {
@@ -320,7 +322,7 @@ impl FeedbackBuffer {
 
         let buffer_slice = self.readback_buffer.slice(..);
         let data = buffer_slice.get_mapped_range();
-        let entries = self.parse_feedback_entries(&data);
+        let entries = self.parse_feedback_entries_with_encoding(&data, encoding);
 
         drop(data);
         self.readback_buffer.unmap();
@@ -328,13 +330,23 @@ impl FeedbackBuffer {
         Ok(entries)
     }
 
-    /// Try to read raw feedback entries without blocking the frame.
+    /// Read raw feedback entries, waiting for (or starting) the readback map.
     ///
-    /// The first call starts a map operation and returns `Ok(None)`. Later calls
-    /// poll the device once and return entries only after the map callback fires.
-    pub fn try_read_feedback_entries(
+    /// Unlike [`read_feedback_entries`], this cooperates with the
+    /// non-blocking [`try_read_feedback_entries`] path: if an async map is
+    /// already in flight it waits for that map instead of issuing a second
+    /// (invalid) `map_async` on the same buffer.
+    pub fn read_feedback_entries_blocking(
         &self,
         device: &Device,
+    ) -> Result<Vec<FeedbackEntry>, String> {
+        self.read_feedback_entries_blocking_with_encoding(device, FeedbackEncoding::Append)
+    }
+
+    pub fn try_read_feedback_entries_with_encoding(
+        &self,
+        device: &Device,
+        encoding: FeedbackEncoding,
     ) -> Result<Option<Vec<FeedbackEntry>>, String> {
         self.start_readback_if_needed();
         if self
@@ -370,7 +382,7 @@ impl FeedbackBuffer {
 
         let buffer_slice = self.readback_buffer.slice(..);
         let data = buffer_slice.get_mapped_range();
-        let entries = self.parse_feedback_entries(&data);
+        let entries = self.parse_feedback_entries_with_encoding(&data, encoding);
 
         drop(data);
         self.readback_buffer.unmap();
@@ -378,13 +390,35 @@ impl FeedbackBuffer {
         Ok(Some(entries))
     }
 
+    /// Try to read raw feedback entries without blocking the frame.
+    ///
+    /// The first call starts a map operation and returns `Ok(None)`. Later calls
+    /// poll the device once and return entries only after the map callback fires.
+    pub fn try_read_feedback_entries(
+        &self,
+        device: &Device,
+    ) -> Result<Option<Vec<FeedbackEntry>>, String> {
+        self.try_read_feedback_entries_with_encoding(device, FeedbackEncoding::Append)
+    }
+
+    fn parse_feedback_entries(&self, data: &[u8]) -> Vec<FeedbackEntry> {
+        self.parse_feedback_entries_with_encoding(data, FeedbackEncoding::Append)
+    }
+
     /// Decode the bounded feedback set into deduplicated feedback entries.
     ///
-    /// Word 0 is the append count, word 1 is the explicit overflow header, and
-    /// every later non-zero word is a page key. The GPU uses a bounded append,
-    /// so duplicate samples are expected; the `HashSet` is the authoritative
-    /// CPU-side deduplication step.
-    fn parse_feedback_entries(&self, data: &[u8]) -> Vec<FeedbackEntry> {
+    /// Word 1 is the explicit overflow header in both encodings. `Append`
+    /// treats word 0 as the append count and every later non-zero word as a
+    /// `key_index + 1` page key; the GPU uses a bounded append, so duplicate
+    /// samples are expected and the `HashSet` is the authoritative CPU-side
+    /// deduplication step. `ProvenanceBitset` treats word 0 as the unique-key
+    /// count only -- it must not truncate the scan, because occupancy bits
+    /// can land in any payload word.
+    fn parse_feedback_entries_with_encoding(
+        &self,
+        data: &[u8],
+        encoding: FeedbackEncoding,
+    ) -> Vec<FeedbackEntry> {
         let mut unique_entries = HashSet::new();
 
         let mut words = data.chunks_exact(4);
@@ -408,30 +442,61 @@ impl FeedbackBuffer {
             );
         }
 
-        // Only the slots reserved by the append counter are valid. The clear
-        // command normally leaves the rest zero, but clamping here prevents a
-        // stale or malformed tail from becoming a request on readback.
-        let entry_limit = append_count.min(self.capacity) as usize;
-        for (slot, word) in (&mut words).enumerate() {
-            if slot >= entry_limit {
-                continue;
+        match encoding {
+            FeedbackEncoding::Append => {
+                // Only the slots reserved by the append counter are valid. The
+                // clear command normally leaves the rest zero, but clamping
+                // here prevents a stale or malformed tail from becoming a
+                // request on readback.
+                let entry_limit = append_count.min(self.capacity) as usize;
+                for (slot, word) in (&mut words).enumerate() {
+                    if slot >= entry_limit {
+                        continue;
+                    }
+                    let Ok(bytes) = <[u8; 4]>::try_from(word) else {
+                        continue;
+                    };
+                    let key = u32::from_le_bytes(bytes);
+                    if key == 0 {
+                        continue;
+                    }
+                    let Some(entry) = self.layout.decode(key) else {
+                        continue;
+                    };
+                    unique_entries.insert((
+                        entry.tile_x,
+                        entry.tile_y,
+                        entry.mip_level,
+                        entry.frame_number,
+                    ));
+                }
             }
-            let Ok(bytes) = <[u8; 4]>::try_from(word) else {
-                continue;
-            };
-            let key = u32::from_le_bytes(bytes);
-            if key == 0 {
-                continue;
+            FeedbackEncoding::ProvenanceBitset => {
+                for (word_index, word) in (&mut words).enumerate() {
+                    let Ok(bytes) = <[u8; 4]>::try_from(word) else {
+                        continue;
+                    };
+                    let bits = u32::from_le_bytes(bytes);
+                    if bits == 0 {
+                        continue;
+                    }
+                    for bit in 0..32u32 {
+                        if bits & (1u32 << bit) == 0 {
+                            continue;
+                        }
+                        let key_index = word_index as u32 * 32 + bit;
+                        let Some(entry) = self.layout.decode(key_index + 1) else {
+                            continue;
+                        };
+                        unique_entries.insert((
+                            entry.tile_x,
+                            entry.tile_y,
+                            entry.mip_level,
+                            entry.frame_number,
+                        ));
+                    }
+                }
             }
-            let Some(entry) = self.layout.decode(key) else {
-                continue;
-            };
-            unique_entries.insert((
-                entry.tile_x,
-                entry.tile_y,
-                entry.mip_level,
-                entry.frame_number,
-            ));
         }
 
         if !words.remainder().is_empty() {
@@ -557,6 +622,40 @@ mod tests {
         assert!(tiles
             .iter()
             .any(|id| id.x == 3 && id.y == 9 && id.mip_level == 1));
+    }
+
+    #[test]
+    fn provenance_bitset_decodes_each_page_key_once() {
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
+
+        let layout = test_layout();
+        let buffer = FeedbackBuffer::new(&device, 4, layout).unwrap();
+        let keys = [
+            gpu_key(layout, 0, 0, 0, 3, 1),
+            gpu_key(layout, 0, 0, 0, 4, 2),
+        ];
+        let mut payload = [0u32; 4];
+        for key in keys {
+            let index = key - 1;
+            payload[(index / 32) as usize] |= 1u32 << (index % 32);
+        }
+        let mut bytes = 2u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        for word in payload {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+
+        let entries =
+            buffer.parse_feedback_entries_with_encoding(&bytes, FeedbackEncoding::ProvenanceBitset);
+        assert_eq!(entries.len(), 2);
+        assert!(entries
+            .iter()
+            .any(|entry| entry.tile_x == 3 && entry.tile_y == 1));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.tile_x == 4 && entry.tile_y == 2));
     }
 
     /// The key alone must round-trip to the page it names, for every family and

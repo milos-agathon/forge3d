@@ -19,7 +19,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, BinaryIO, Iterable, Mapping
 
 from ._license import _check_pro_access
 from .diagnostics import ValidationReport
@@ -650,10 +650,14 @@ class BundleManifest:
         return manifest
 
 
-def _compute_sha256(path: Path) -> str:
+def _compute_sha256(source: Path | BinaryIO) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(8192), b""):
+    if isinstance(source, Path):
+        with source.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(8192), b""):
+                digest.update(chunk)
+    else:
+        for chunk in iter(lambda: source.read(8192), b""):
             digest.update(chunk)
     return digest.hexdigest()
 

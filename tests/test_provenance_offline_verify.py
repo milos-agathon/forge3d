@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 import json
+import struct
 import subprocess
 import sys
 import textwrap
+import zlib
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VERIFIER = REPO_ROOT / "tools" / "verify_provenance.py"
@@ -24,14 +25,15 @@ IMAGE = FIXTURE_DIR / "image.png"
 SOURCE_MAP = FIXTURE_DIR / "source_map.npy"
 MANIFEST = FIXTURE_DIR / "provenance.json"
 
-pytestmark = pytest.mark.skipif(
-    not (IMAGE.exists() and SOURCE_MAP.exists() and MANIFEST.exists()),
-    reason=(
-        "committed provenance fixture missing; regenerate on a GPU host with "
-        "FORGE3D_UPDATE_PROVENANCE_FIXTURE=1 python -m pytest "
-        "tests/test_provenance_veritas.py -k measurable_win"
-    ),
-)
+
+def _same_dimension_replacement_png(data: bytes) -> bytes:
+    iend = data.rfind(b"\x00\x00\x00\x00IEND")
+    assert iend >= 0
+    payload = b"Comment\x00replacement"
+    kind = b"tEXt"
+    chunk = struct.pack(">I", len(payload)) + kind + payload
+    chunk += struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+    return data[:iend] + chunk + data[iend:]
 
 # Bootstrap that masks the compiled extension before anything imports it,
 # then runs the standalone verifier exactly as a third party would.
@@ -92,6 +94,17 @@ def test_offline_verifier_detects_tampered_source_map(tmp_path) -> None:
     assert "verified: False" in result.stdout
 
 
+def test_offline_verifier_rejects_same_dimension_replacement_image(tmp_path) -> None:
+    replacement = tmp_path / "replacement.png"
+    replacement.write_bytes(_same_dimension_replacement_png(IMAGE.read_bytes()))
+
+    result = _run_verifier_without_native(replacement, SOURCE_MAP, MANIFEST)
+    assert result.returncode != 0
+    assert "image_dims_match: True" in result.stdout
+    assert "image_sha256_match: False" in result.stdout
+    assert "verified: False" in result.stdout
+
+
 def test_pure_python_report_on_fixture() -> None:
     """In-process check of the pure-Python path (no native calls involved)."""
     from forge3d import provenance as prov
@@ -100,10 +113,11 @@ def test_pure_python_report_on_fixture() -> None:
     assert manifest["schema_version"] == prov.SCHEMA_VERSION
     source_map = np.asarray(np.load(SOURCE_MAP), dtype=np.uint32)
 
-    report = prov.verify_provenance_offline(source_map, manifest)
+    report = prov.verify_provenance_offline(source_map, manifest, IMAGE.read_bytes())
     assert report["ok"] is True
     assert report["root_match"] is True
     assert report["signature_valid"] is True
+    assert report["image_sha256_match"] is True
     assert len(report["coverage"]) >= 2
     assert prov.SOURCE_ID_NONE not in report["coverage"]
     assert not report["unknown_source_ids"]
