@@ -2222,6 +2222,34 @@ fn orbis_source_coverage(uv: vec2<f32>) -> f32 {
     return overview_covered;
 }
 
+/// Depth of planetary seam skirts that border source nodata.
+const ORBIS_BORDER_SKIRT_DEPTH_M: f32 = 120.0;
+
+/// Planetary skirt vertices (clip_morph.x < 0, clip_morph.y < 0) probe the
+/// source coverage around their seam; any nodata there means the neighbouring
+/// surface is discarded and the skirt would be seen. A ring cell spans about
+/// 2^(ring + 1) target-LOD texels, so the 2^(ring + 4) texel step reaches four
+/// coarse cells beyond the seam.
+fn orbis_skirt_source_coverage(uv: vec2<f32>, clip_morph: vec2<f32>) -> f32 {
+    if (clip_morph.y >= 0.0 || clip_morph.x >= 0.0) {
+        return 1.0;
+    }
+    let ring = -clip_morph.y - 1.0;
+    let step = det_div2(
+        vec2<f32>(det_exp2(ring + 4.0)),
+        max(logical_height_dimensions(), vec2<f32>(1.0)),
+    );
+    for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let probe = uv + vec2<f32>(f32(dx), f32(dy)) * step;
+            if (orbis_source_coverage(probe) < 0.5) {
+                return 0.0;
+            }
+        }
+    }
+    return 1.0;
+}
+
 fn orbis_render_pole() -> vec3<f32> {
     let latitude = u_overlay.params3.w - ORBIS_GLOBE_FRAME_FLAG_OFFSET;
     return vec3<f32>(0.0, det_cos(latitude), det_sin(latitude));
@@ -5667,6 +5695,7 @@ fn clipmap_resolve_vertex(
     clip_morph: vec2<f32>,
     instance_transform: mat4x4<f32>,
     clip_normal_oct: vec2<f32>,
+    planetary_skirt_cap: f32,
 ) -> ClipmapResolvedVertex {
     let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
     let height_dims = logical_height_dimensions();
@@ -5689,7 +5718,7 @@ fn clipmap_resolve_vertex(
     let planetary_skirt_bound = det_fma(max(h_max - h_min, 0.0), h_exag, 64.0);
     let skirt_depth = select(
         u_terrain.camera_mode_params.y * 0.001,
-        min(-clip_morph.x, planetary_skirt_bound),
+        min(min(-clip_morph.x, planetary_skirt_bound), planetary_skirt_cap),
         clip_morph.y < 0.0,
     );
     let skirt_offset = select(0.0, skirt_depth, clip_morph.x < 0.0);
@@ -5752,12 +5781,21 @@ fn vs_clipmap_main(
         instance_col2,
         instance_col3,
     );
+    // Seam skirts next to source nodata are kept short: the surface beyond
+    // them is discarded, so a full-depth skirt would stand as a wall along the
+    // DEM border, while a short one still seals ordinary seam gaps.
+    let skirt_cap = select(
+        ORBIS_BORDER_SKIRT_DEPTH_M,
+        3.0e38,
+        orbis_skirt_source_coverage(clip_uv, clip_morph) > 0.5,
+    );
     let resolved = clipmap_resolve_vertex(
         clip_position,
         clip_uv,
         clip_morph,
         instance_transform,
         clip_normal_oct,
+        skirt_cap,
     );
     let raster_position = clipmap_raster_position(resolved, clip_morph);
 
@@ -5848,6 +5886,7 @@ fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
             vec4<f32>(0.0, 0.0, 0.0, 1.0),
         ),
         clip_normal_oct,
+        3.0e38,
     );
     let raster_position = clipmap_raster_position(resolved, clip_morph);
     // Deliberate control: transform the exact resolved ENU vertex into ECEF,

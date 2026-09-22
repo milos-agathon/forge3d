@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import os
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -19,8 +18,23 @@ JUNGFRAU_LON = 7.910
 JUNGFRAU_LAT = 46.494
 ORBIS_SELECTED = os.environ.get("FORGE3D_RUN_ORBIS_GPU") == "1"
 
-sys.path.insert(0, str(ROOT / "examples"))
-from orbis_swiss_alps_descent import descent_waypoints
+# Streamed-detail registration probe path: a nadir descent onto the Eiger /
+# Moench / Jungfrau wall, log-spaced in (altitude + 1.5 km) from ISS orbit to
+# 120 m. Kept local so retuning the demo flight cannot change this evidence.
+STREAM_PROBE_LONLAT = (7.985, 46.560)
+
+
+def _stream_probe_waypoints(
+    frame_count: int = 240, end_altitude_m: float = 120.0, knee_m: float = 1_500.0
+) -> list[tuple[float, float, float]]:
+    log_start = math.log(408_000.0 + knee_m)
+    log_end = math.log(end_altitude_m + knee_m)
+    altitudes = [
+        math.exp(log_start + (log_end - log_start) * index / (frame_count - 1)) - knee_m
+        for index in range(frame_count)
+    ]
+    altitudes[0], altitudes[-1] = 408_000.0, end_altitude_m
+    return [(*STREAM_PROBE_LONLAT, max(altitude, 0.0)) for altitude in altitudes]
 
 
 def _require_orbis_gpu() -> None:
@@ -99,7 +113,7 @@ def _mean_rgb_difference(first: np.ndarray, second: np.ndarray) -> float:
 @pytest.mark.offscreen
 def test_streamed_swiss_detail_is_registered_and_reaches_source_resolution() -> None:
     _require_orbis_gpu()
-    waypoints = descent_waypoints(240, end_altitude_m=120.0)
+    waypoints = _stream_probe_waypoints()
     streamed_scene = f3d.GlobeScene(SWISS_DEM, JUNGFRAU_LON, JUNGFRAU_LAT, "Jungfrau")
     streamed_frame = None
     for index, waypoint in enumerate(waypoints):
