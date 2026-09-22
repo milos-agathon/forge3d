@@ -541,6 +541,25 @@ impl TerrainScene {
         )
     }
 
+    #[cfg(feature = "enable-globe")]
+    pub(in crate::terrain::renderer) fn create_orbis_globe_background_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        Self::create_fullscreen_blit_pipeline(
+            device,
+            bind_group_layout,
+            color_format,
+            sample_count,
+            "orbis.globe.background.pipeline",
+            "orbis.globe.background.shader",
+            crate::shader_sources::orbis_globe_background(),
+            None,
+        )
+    }
+
     pub(super) fn create_aether_depth_blit_pipeline(
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,

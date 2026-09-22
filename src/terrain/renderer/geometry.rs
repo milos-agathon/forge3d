@@ -732,6 +732,12 @@ impl TerrainScene {
         let terrain_span = params.terrain_span.max(1.0);
         let readiness = (0..config.ring_count)
             .map(|ring_index| {
+                if matches!(self.height_detail_blend_override, Some(blend) if blend <= 0.0) {
+                    return crate::terrain::clipmap::geomorph::TileReadiness {
+                        fine_resident: false,
+                        coarse_resident: false,
+                    };
+                }
                 self.height_streaming
                     .as_ref()
                     .map(|streaming| streaming.streamer.ring_readiness(ring_index))

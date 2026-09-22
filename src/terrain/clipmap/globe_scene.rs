@@ -19,7 +19,6 @@ use source::{
 const DEFAULT_START_ALTITUDE_M: f64 = 408_000.0;
 const MAX_SUPPORTED_ALTITUDE_M: f64 = DEFAULT_START_ALTITUDE_M;
 const DEFAULT_WAYPOINT_COUNT: usize = 25;
-const OVERVIEW_SIZE: u32 = source::OVERVIEW_SIZE;
 const GPU_VISIBLE_BUDGET: u64 = 64 * 1024 * 1024;
 const MICRO_STEP_M: f64 = 0.002;
 const ORBIS_PROBE_BASE_ALTITUDE_M: f64 = 6_000.0;
@@ -29,6 +28,8 @@ struct Waypoint {
     lon: f64,
     lat: f64,
     altitude: f64,
+    heading: f64,
+    pitch: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -53,9 +54,12 @@ pub struct GlobeScene {
     env_maps: Py<crate::lighting::ibl_wrapper::IBL>,
     params: Py<crate::terrain::render_params::TerrainRenderParams>,
     overview_seeds: OverviewSeedCache,
+    legacy_ground_seeds: OverviewSeedCache,
+    ground_legacy_active: bool,
     active_overview_tile: crate::terrain::tiling::TileId,
     source_lod: u32,
-    overview_size: u32,
+    source_dimensions: (u32, u32),
+    source_sample_spacing_m: f32,
     terrain_extent_m: f32,
     source_bounds: (f64, f64, f64, f64),
     current: Option<Waypoint>,
@@ -112,12 +116,52 @@ impl GlobeScene {
                 bounds,
             ));
         }
-        let (overview, source_lod, tile) =
+        let (initial_seed, overview_lod) =
             load_covered_overview(&dataset, target_lon, target_lat).map_err(|error| {
                 source_error(&cog_source, target_name, target_lon, target_lat, error)
             })?;
-        let tile_bounds = global_tile_lonlat_bounds(tile).map_err(PyValueError::new_err)?;
+        let tile = initial_seed.tile;
+        let tile_bounds = initial_seed.bounds;
         let terrain_extent_m = tile_extent_m(tile_bounds, target_lat);
+        let source_lod = overview_lod.max(source::MIN_DETAIL_LOD);
+        let detail_tile = source::target_tile(target_lon, target_lat, source_lod);
+        let detail_bounds = global_tile_lonlat_bounds(detail_tile).map_err(PyValueError::new_err)?;
+        let source_sample_spacing_m = source::tile_sample_spacing_m(
+            detail_bounds,
+            target_lat,
+            source::STREAM_TILE_RESOLUTION,
+        );
+        let source_dimensions = dataset
+            .reader()
+            .header()
+            .full_resolution()
+            .map(|full| (full.width, full.height))
+            .ok_or_else(|| {
+                source_error(
+                    &cog_source,
+                    target_name,
+                    target_lon,
+                    target_lat,
+                    "COG contains no full-resolution image",
+                )
+            })?;
+        let initial_legacy_seed = if initial_seed.size == source::MIN_OVERVIEW_SIZE {
+            initial_seed.clone()
+        } else {
+            source::read_covered_seed(&dataset, tile, source::MIN_OVERVIEW_SIZE)
+                .map_err(|error| {
+                    source_error(&cog_source, target_name, target_lon, target_lat, error)
+                })?
+                .ok_or_else(|| {
+                    source_error(
+                        &cog_source,
+                        target_name,
+                        target_lon,
+                        target_lat,
+                        "legacy ground overview tile is not fully covered",
+                    )
+                })?
+        };
 
         // Source and target are fully validated before GPU initialization, so
         // diagnostic failures never get masked by hosted-adapter availability.
@@ -145,9 +189,9 @@ impl GlobeScene {
             4,
             32,
             source_lod,
+            source::STREAM_TILE_RESOLUTION,
             64,
             8,
-            2,
             true,
             Some(GPU_VISIBLE_BUDGET),
             Some(tile_bounds),
@@ -164,9 +208,9 @@ impl GlobeScene {
         renderer
             .activate_height_streaming_overview(
                 tile_bounds,
-                OVERVIEW_SIZE,
-                OVERVIEW_SIZE,
-                &overview,
+                initial_seed.size,
+                initial_seed.size,
+                &initial_seed.heights,
             )
             .map_err(|error| {
                 source_error(
@@ -194,17 +238,14 @@ impl GlobeScene {
             None => Py::new(py, default_render_params(py, terrain_extent_m)?)?,
         };
 
-        let initial_seed = OverviewSeed {
-            tile,
-            heights: overview,
-            bounds: tile_bounds,
-        };
         Ok(Self {
             source: cog_source,
             target: Waypoint {
                 lon: target_lon,
                 lat: target_lat,
                 altitude: 0.0,
+                heading: 0.0,
+                pitch: 0.0,
             },
             target_name: target_name.trim().to_string(),
             renderer,
@@ -213,9 +254,12 @@ impl GlobeScene {
             env_maps,
             params,
             overview_seeds: OverviewSeedCache::new(initial_seed),
+            legacy_ground_seeds: OverviewSeedCache::new(initial_legacy_seed),
+            ground_legacy_active: false,
             active_overview_tile: tile,
             source_lod,
-            overview_size: OVERVIEW_SIZE,
+            source_dimensions,
+            source_sample_spacing_m,
             terrain_extent_m,
             source_bounds: bounds,
             current: None,
@@ -232,18 +276,31 @@ impl GlobeScene {
         default_descent_altitudes()
     }
 
+    #[pyo3(signature = (lon, lat, altitude, heading=0.0, pitch=0.0))]
     fn fly_to(
         &mut self,
         py: Python<'_>,
         lon: f64,
         lat: f64,
         altitude: f64,
+        heading: f64,
+        pitch: f64,
     ) -> PyResult<Py<crate::Frame>> {
-        let waypoint = validate_waypoint(lon, lat, altitude).map_err(|error| {
-            self.waypoint_validation_error(lon, lat, altitude, "validation", error)
+        let waypoint = validate_waypoint(lon, lat, altitude, heading, pitch).map_err(|error| {
+            self.waypoint_validation_error(
+                Waypoint {
+                    lon,
+                    lat,
+                    altitude,
+                    heading,
+                    pitch,
+                },
+                "validation",
+                error,
+            )
         })?;
         self.validate_waypoint_coverage(waypoint).map_err(|error| {
-            self.waypoint_validation_error(lon, lat, altitude, "coverage validation", error)
+            self.waypoint_validation_error(waypoint, "coverage validation", error)
         })?;
         let tile = self.prepare_overview_seed(waypoint)?;
         self.render_waypoint_with_overview(py, waypoint, tile)
@@ -253,27 +310,31 @@ impl GlobeScene {
     fn scripted_descent(
         &mut self,
         py: Python<'_>,
-        waypoints: Option<Vec<(f64, f64, f64)>>,
+        waypoints: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<GlobeMetrics> {
         let path = match waypoints {
             Some(values) => {
-                if values.is_empty() {
+                let mut path = Vec::new();
+                let items = values.iter().map_err(|error| {
+                    PyValueError::new_err(format!(
+                        "ORBIS waypoint parsing failed for COG source {:?}, target {:?}: {error}",
+                        self.source, self.target_name,
+                    ))
+                })?;
+                for item in items {
+                    let item = item.map_err(|error| {
+                        PyValueError::new_err(format!(
+                            "ORBIS waypoint parsing failed for COG source {:?}, target {:?}: {error}",
+                            self.source, self.target_name,
+                        ))
+                    })?;
+                    path.push(parse_waypoint(&item).map_err(|error| {
+                        self.waypoint_parse_error(&item, error)
+                    })?);
+                }
+                if path.is_empty() {
                     return Err(PyValueError::new_err("waypoints must not be empty"));
                 }
-                let path = values
-                    .into_iter()
-                    .map(|(lon, lat, altitude)| {
-                        validate_waypoint(lon, lat, altitude).map_err(|error| {
-                            self.waypoint_validation_error(
-                                lon,
-                                lat,
-                                altitude,
-                                "validation",
-                                error,
-                            )
-                        })
-                    })
-                    .collect::<PyResult<Vec<_>>>()?;
                 path
             }
             None => default_descent_altitudes()
@@ -289,13 +350,7 @@ impl GlobeScene {
         // loop below performs only cached activation plus bounded GPU work.
         for waypoint in &path {
             self.validate_waypoint_coverage(*waypoint).map_err(|error| {
-                self.waypoint_validation_error(
-                    waypoint.lon,
-                    waypoint.lat,
-                    waypoint.altitude,
-                    "coverage validation",
-                    error,
-                )
+                self.waypoint_validation_error(*waypoint, "coverage validation", error)
             })?;
         }
         let prepared_path = path
@@ -386,6 +441,28 @@ impl GlobeScene {
     #[getter]
     fn rendered_waypoint_count(&self) -> usize {
         self.rendered_waypoints
+    }
+
+    #[getter]
+    fn source_bounds(&self) -> (f64, f64, f64, f64) {
+        self.source_bounds
+    }
+
+    #[getter]
+    fn source_dimensions(&self) -> (u32, u32) {
+        self.source_dimensions
+    }
+
+    fn streaming_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let stats = self.renderer.height_streaming_stats(py)?;
+        let dict = stats
+            .bind(py)
+            .downcast::<pyo3::types::PyDict>()
+            .map_err(|_| {
+                PyRuntimeError::new_err("ORBIS streaming stats were not a native dict")
+            })?;
+        dict.set_item("source_sample_spacing_m", self.source_sample_spacing_m)?;
+        Ok(stats)
     }
 
     fn __repr__(&self) -> String {
@@ -487,16 +564,45 @@ impl GlobeScene {
 
     fn waypoint_validation_error(
         &self,
-        lon: f64,
-        lat: f64,
-        altitude: f64,
+        waypoint: Waypoint,
         stage: &str,
         error: impl std::fmt::Display,
     ) -> PyErr {
-        PyValueError::new_err(self.waypoint_context(
-            Waypoint { lon, lat, altitude },
-            stage,
-            error,
+        PyValueError::new_err(self.waypoint_context(waypoint, stage, error))
+    }
+
+    fn waypoint_parse_error(&self, item: &Bound<'_, PyAny>, error: PyErr) -> PyErr {
+        if let Ok((lon, lat, altitude, heading, pitch)) =
+            item.extract::<(f64, f64, f64, f64, f64)>()
+        {
+            return PyValueError::new_err(self.waypoint_context(
+                Waypoint {
+                    lon,
+                    lat,
+                    altitude,
+                    heading,
+                    pitch,
+                },
+                "validation",
+                error,
+            ));
+        }
+        if let Ok((lon, lat, altitude)) = item.extract::<(f64, f64, f64)>() {
+            return PyValueError::new_err(self.waypoint_context(
+                Waypoint {
+                    lon,
+                    lat,
+                    altitude,
+                    heading: 0.0,
+                    pitch: 0.0,
+                },
+                "validation",
+                error,
+            ));
+        }
+        PyValueError::new_err(format!(
+            "ORBIS waypoint parsing failed for COG source {:?}, target {:?}: {error}",
+            self.source, self.target_name,
         ))
     }
 
@@ -522,39 +628,47 @@ impl GlobeScene {
         &mut self,
         waypoint: Waypoint,
     ) -> PyResult<crate::terrain::tiling::TileId> {
-        if let Some(tile) = self
+        let tile = if let Some(tile) = self
             .overview_seeds
             .find_covering(waypoint.lon, waypoint.lat)
         {
-            return Ok(tile);
-        }
+            tile
+        } else {
+            let dataset = &self.dataset;
+            let (seed, _overview_lod) = load_covered_overview(
+                dataset,
+                waypoint.lon,
+                waypoint.lat,
+            )
+            .map_err(|error| {
+                PyValueError::new_err(self.waypoint_context(
+                    waypoint,
+                    "overview seed preparation",
+                    error,
+                ))
+            })?;
+            let tile = seed.tile;
+            self.overview_seeds
+                .prepare_with(tile, || Ok(seed))
+                .map_err(|error| {
+                    PyValueError::new_err(self.waypoint_context(
+                        waypoint,
+                        "overview seed preparation",
+                        error,
+                    ))
+                })?;
+            tile
+        };
         let dataset = &self.dataset;
-        let (heights, _seed_lod, tile) = load_covered_overview(
-            dataset,
-            waypoint.lon,
-            waypoint.lat,
-        )
-        .map_err(|error| {
-            PyValueError::new_err(self.waypoint_context(
-                waypoint,
-                "overview seed preparation",
-                error,
-            ))
-        })?;
-        let bounds = global_tile_lonlat_bounds(tile).map_err(|error| {
-            PyValueError::new_err(self.waypoint_context(
-                waypoint,
-                "overview seed bounds",
-                error,
-            ))
-        })?;
-        self.overview_seeds
+        self.legacy_ground_seeds
             .prepare_with(tile, || {
-                Ok(OverviewSeed {
-                    tile,
-                    heights,
-                    bounds,
-                })
+                source::read_covered_seed(dataset, tile, source::MIN_OVERVIEW_SIZE).and_then(
+                    |seed| {
+                        seed.ok_or_else(|| {
+                            "legacy ground overview tile is not fully covered".to_string()
+                        })
+                    },
+                )
             })
             .map_err(|error| {
                 PyValueError::new_err(self.waypoint_context(
@@ -572,28 +686,34 @@ impl GlobeScene {
         waypoint: Waypoint,
         tile: crate::terrain::tiling::TileId,
     ) -> PyResult<Py<crate::Frame>> {
-        if tile == self.active_overview_tile {
+        let legacy = waypoint.altitude == 0.0;
+        if tile == self.active_overview_tile && self.ground_legacy_active == legacy {
             return self.render_waypoint(py, waypoint);
         }
         let previous_tile = self.active_overview_tile;
-        let seed = self
-            .overview_seeds
-            .get(tile)
-            .ok_or_else(|| {
+        let previous_legacy = self.ground_legacy_active;
+        let (bounds, size, heights) = if legacy {
+            let seed = self.legacy_ground_seeds.get(tile).ok_or_else(|| {
+                PyRuntimeError::new_err(self.waypoint_context(
+                    waypoint,
+                    "overview activation",
+                    "legacy ground overview seed is missing from the cache",
+                ))
+            })?;
+            (seed.bounds, seed.size, seed.heights.clone())
+        } else {
+            let seed = self.overview_seeds.get(tile).ok_or_else(|| {
                 PyRuntimeError::new_err(self.waypoint_context(
                     waypoint,
                     "overview activation",
                     "prepared overview seed is missing from the cache",
                 ))
             })?;
+            (seed.bounds, seed.size, seed.heights.clone())
+        };
         let activation = self
             .renderer
-            .begin_height_streaming_overview_activation(
-                seed.bounds,
-                self.overview_size,
-                self.overview_size,
-                &seed.heights,
-            )
+            .begin_height_streaming_overview_activation(bounds, size, size, &heights)
             .map_err(|error| {
                 PyRuntimeError::new_err(self.waypoint_context(
                     waypoint,
@@ -602,6 +722,7 @@ impl GlobeScene {
                 ))
             })?;
         self.active_overview_tile = tile;
+        self.ground_legacy_active = legacy;
         match self.render_waypoint(py, waypoint) {
             Ok(frame) => {
                 self.renderer
@@ -612,6 +733,7 @@ impl GlobeScene {
                 self.renderer
                     .rollback_height_streaming_overview_activation(activation);
                 self.active_overview_tile = previous_tile;
+                self.ground_legacy_active = previous_legacy;
                 Err(render_error)
             }
         }
@@ -621,6 +743,15 @@ impl GlobeScene {
         self.overview_seeds
             .get(self.active_overview_tile)
             .ok_or_else(|| PyRuntimeError::new_err("active ORBIS overview seed is missing"))
+    }
+
+    fn waypoint_height_source(&self) -> PyResult<&OverviewSeed> {
+        let active_tile = self.active_overview()?.tile;
+        self.legacy_ground_seeds.get(active_tile).ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "legacy ground overview seed is missing from the cache".to_string(),
+            )
+        })
     }
 
     fn render_waypoint(
@@ -638,9 +769,10 @@ impl GlobeScene {
         let mut params = self.params.borrow(py).clone();
         params.camera_mode = "clipmap:4:32:32:10:0.3:zup".to_string();
         params.terrain_span = self.terrain_extent_m;
-        let target_height = self
-            .active_overview()?
-            .sample_height(waypoint.lon, waypoint.lat)
+        let target_sample = self
+            .waypoint_height_source()?
+            .sample_height(waypoint.lon, waypoint.lat);
+        let target_height = target_sample
             .map_err(|error| {
                 PyValueError::new_err(self.waypoint_context(
                     waypoint,
@@ -667,8 +799,12 @@ impl GlobeScene {
                 error,
             ))
         })?;
-        let camera_ecef = seed
-            .lonlat_alt_to_ecef(waypoint.lon, waypoint.lat, anchor_altitude)
+        let target_ecef = seed
+            .lonlat_alt_to_ecef(
+                waypoint.lon,
+                waypoint.lat,
+                anchor_altitude - waypoint.altitude,
+            )
             .map_err(|error| {
                 PyValueError::new_err(self.waypoint_context(
                     waypoint,
@@ -676,35 +812,44 @@ impl GlobeScene {
                     error,
                 ))
             })?;
-        let pose = camera_pose(waypoint);
+        let camera_ecef = oriented_camera_ecef(target_ecef, waypoint).map_err(|error| {
+            PyValueError::new_err(self.waypoint_context(waypoint, "ECEF validation", error))
+        })?;
+        let camera_frame = super::globe::GlobeFrame::globe(
+            super::globe::GlobeFrame::WGS84_MEAN_RADIUS_M,
+            camera_ecef,
+        )
+        .map_err(|error| {
+            PyValueError::new_err(self.waypoint_context(waypoint, "ECEF validation", error))
+        })?;
+        let pose = camera_pose(camera_frame, target_ecef, waypoint).map_err(|error| {
+            PyValueError::new_err(self.waypoint_context(waypoint, "camera validation", error))
+        })?;
         params.cam_phi_deg = pose.phi_deg;
         params.cam_theta_deg = pose.theta_deg;
         params.cam_radius = pose.radius;
         params.cam_target = pose.target;
         params.clip = (
-            0.1,
-            (waypoint.altitude as f32 + self.terrain_extent_m * 4.0).max(10_000.0),
+            ((waypoint.altitude * 0.00025) as f32).max(0.05),
+            (pose.radius + self.terrain_extent_m * 4.0).max(10_000.0),
         );
         let (eye, view, projection) =
             crate::terrain::renderer::TerrainScene::build_camera_matrices(&params);
-        if !eye.is_finite()
-            || !view.is_finite()
-            || !projection.is_finite()
-            || eye != glam::Vec3::ZERO
-        {
+        if !eye.is_finite() || !view.is_finite() || !projection.is_finite() {
             return Err(PyValueError::new_err(self.waypoint_context(
                 waypoint,
                 "camera validation",
-                format!("camera eye/matrices must be finite and eye must equal local anchor; eye={eye:?}"),
+                format!("camera eye/matrices must be finite; eye={eye:?}"),
             )));
         }
 
         // Exactly one bounded poll/upload step per rendered waypoint. This is
         // intentionally not a convergence loop.
-        let stream_result = self.renderer.stream_height_tiles_globe(
+        let stream_result = self.renderer.stream_height_tiles_globe_focus(
             py,
-            (camera_ecef.x, camera_ecef.y, camera_ecef.z),
-            8,
+            camera_ecef,
+            target_ecef,
+            64,
         );
         let stream_stats = contextualize_waypoint_runtime(
             &self.source,
@@ -713,14 +858,22 @@ impl GlobeScene {
             "streaming",
             stream_result,
         )?;
-        let rows = self
-            .active_overview()?
-            .heights
-            .chunks_exact(self.overview_size as usize)
-            .map(|row| row.to_vec())
-            .collect::<Vec<_>>();
+        let rows = {
+            let source = self.waypoint_height_source()?;
+            source
+                .heights
+                .chunks_exact(source.size as usize)
+                .map(|row| row.to_vec())
+                .collect::<Vec<_>>()
+        };
         let heights = PyArray2::from_vec2_bound(py, &rows)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        self.renderer
+            .set_height_detail_blend_override(Some(if waypoint.altitude == 0.0 {
+                0.0
+            } else {
+                1.0
+            }));
         let render_result = self.renderer.render_terrain_pbr_pom(
             py,
             &self.material_set.borrow(py),
@@ -733,6 +886,7 @@ impl GlobeScene {
             None,
             None,
         );
+        self.renderer.set_height_detail_blend_override(None);
         let frame = contextualize_waypoint_runtime(
             &self.source,
             &self.target_name,
@@ -823,10 +977,10 @@ impl GlobeScene {
                 .map_err(|error| PyRuntimeError::new_err(format!(
                     "ORBIS physical frame {frame_index} setup failed: {error:#}"
                 )))?;
-            let rows = self
-                .active_overview()?
+            let overview = self.active_overview()?;
+            let rows = overview
                 .heights
-                .chunks_exact(self.overview_size as usize)
+                .chunks_exact(overview.size as usize)
                 .map(|row| row.to_vec())
                 .collect::<Vec<_>>();
             let heights = PyArray2::from_vec2_bound(py, &rows)
@@ -936,35 +1090,107 @@ fn validate_target(lon: f64, lat: f64, name: &str) -> PyResult<()> {
     Ok(())
 }
 
-fn validate_waypoint(lon: f64, lat: f64, altitude: f64) -> PyResult<Waypoint> {
+fn parse_waypoint(value: &Bound<'_, PyAny>) -> PyResult<Waypoint> {
+    if let Ok((lon, lat, altitude, heading, pitch)) =
+        value.extract::<(f64, f64, f64, f64, f64)>()
+    {
+        return validate_waypoint(lon, lat, altitude, heading, pitch);
+    }
+    if let Ok((lon, lat, altitude)) = value.extract::<(f64, f64, f64)>() {
+        return validate_waypoint(lon, lat, altitude, 0.0, 0.0);
+    }
+    Err(PyValueError::new_err(
+        "waypoints must contain (lon, lat, altitude) or (lon, lat, altitude, heading, pitch) tuples",
+    ))
+}
+
+fn validate_waypoint(
+    lon: f64,
+    lat: f64,
+    altitude: f64,
+    heading: f64,
+    pitch: f64,
+) -> PyResult<Waypoint> {
     validate_target(lon, lat, "waypoint")?;
     if !altitude.is_finite() || !(0.0..=MAX_SUPPORTED_ALTITUDE_M).contains(&altitude) {
         return Err(PyValueError::new_err(
             "waypoint altitude must be finite and in [0, 408000] metres",
         ));
     }
-    Ok(Waypoint { lon, lat, altitude })
+    if !heading.is_finite() {
+        return Err(PyValueError::new_err("waypoint heading must be finite"));
+    }
+    if !pitch.is_finite() || !(0.0..90.0).contains(&pitch) {
+        return Err(PyValueError::new_err(
+            "waypoint pitch must be finite and in [0, 90) degrees",
+        ));
+    }
+    Ok(Waypoint {
+        lon,
+        lat,
+        altitude,
+        heading: heading.rem_euclid(360.0),
+        pitch,
+    })
 }
 
-fn camera_pose(waypoint: Waypoint) -> CameraPose {
-    if waypoint.altitude > 0.0 {
-        CameraPose {
-            radius: waypoint.altitude as f32,
-            phi_deg: 0.0,
-            theta_deg: 0.0,
-            target: [0.0, 0.0, -(waypoint.altitude as f32)],
-        }
+fn oriented_camera_ecef(
+    target_ecef: glam::DVec3,
+    waypoint: Waypoint,
+) -> Result<glam::DVec3, String> {
+    let up = target_ecef
+        .try_normalize()
+        .ok_or_else(|| "camera target ECEF must be non-zero".to_string())?;
+    let lon = waypoint.lon.to_radians();
+    let lat = waypoint.lat.to_radians();
+    let east = glam::DVec3::new(-lon.sin(), lon.cos(), 0.0);
+    let north = glam::DVec3::new(
+        -lat.sin() * lon.cos(),
+        -lat.sin() * lon.sin(),
+        lat.cos(),
+    );
+    let heading = waypoint.heading.to_radians();
+    let forward = east * heading.sin() + north * heading.cos();
+    let horizontal = waypoint.altitude * waypoint.pitch.to_radians().tan();
+    let camera = target_ecef + up * waypoint.altitude - forward * horizontal;
+    if camera.is_finite() {
+        Ok(camera)
     } else {
+        Err("oriented camera ECEF is non-finite".to_string())
+    }
+}
+
+fn camera_pose(
+    frame: super::globe::GlobeFrame,
+    target_ecef: glam::DVec3,
+    waypoint: Waypoint,
+) -> Result<CameraPose, String> {
+    if waypoint.altitude == 0.0 {
         // At ground the exactly representable target and offset cancel
         // bit-for-bit. The vertical view uses the renderer's +Y fallback up
         // vector, so the look-at basis remains nondegenerate.
-        CameraPose {
+        return Ok(CameraPose {
             radius: 1.0,
             phi_deg: 0.0,
             theta_deg: 0.0,
             target: [0.0, 0.0, -1.0],
-        }
+        });
     }
+    let target = frame
+        .camera_relative(target_ecef)
+        .map_err(|error| format!("camera target rebase failed: {error}"))?
+        .position;
+    let offset = -target;
+    let radius = offset.length();
+    if !radius.is_finite() || radius <= 0.0 {
+        return Err("oriented camera radius must be finite and positive".to_string());
+    }
+    Ok(CameraPose {
+        radius,
+        phi_deg: offset.y.atan2(offset.x).to_degrees(),
+        theta_deg: (offset.z / radius).clamp(-1.0, 1.0).acos().to_degrees(),
+        target: target.to_array(),
+    })
 }
 
 fn camera_anchor_altitude(
@@ -1052,8 +1278,18 @@ mod tests {
 
     #[test]
     fn ground_camera_eye_is_exactly_local_anchor_with_nondegenerate_view() {
-        let waypoint = Waypoint { lon: -121.7603, lat: 46.8523, altitude: 0.0 };
-        let pose = camera_pose(waypoint);
+        let waypoint = Waypoint {
+            lon: -121.7603,
+            lat: 46.8523,
+            altitude: 0.0,
+            heading: 0.0,
+            pitch: 0.0,
+        };
+        let radius = crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
+        let frame =
+            crate::terrain::clipmap::globe::GlobeFrame::globe(radius, glam::DVec3::X * radius)
+                .unwrap();
+        let pose = camera_pose(frame, glam::DVec3::X * radius, waypoint).unwrap();
         let phi = pose.phi_deg.to_radians();
         let theta = pose.theta_deg.to_radians();
         let offset = glam::Vec3::new(
@@ -1094,6 +1330,8 @@ mod tests {
             lon: -121.7603,
             lat: 46.8523,
             altitude: 1_000.0,
+            heading: 0.0,
+            pitch: 0.0,
         };
         for stage in ["streaming", "render"] {
             let result: PyResult<()> = contextualize_waypoint_runtime(

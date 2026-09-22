@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 
 use super::DEFAULT_START_ALTITUDE_M;
 
-pub(super) const OVERVIEW_SIZE: u32 = 96;
+pub(super) const MIN_OVERVIEW_SIZE: u32 = 96;
+pub(super) const MIN_DETAIL_LOD: u32 = 13;
+pub(super) const TARGET_SAMPLE_SPACING_M: f32 = 60.0;
+pub(super) const STREAM_TILE_RESOLUTION: u32 = 64;
 const MIN_SOURCE_LOD: u32 = 10;
 const MAX_SOURCE_LOD: u32 = 14;
 
@@ -63,6 +66,7 @@ pub(super) fn target_tile(lon: f64, lat: f64, lod: u32) -> TileId {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct OverviewSeed {
     pub tile: TileId,
+    pub size: u32,
     pub heights: Vec<f32>,
     pub bounds: (f64, f64, f64, f64),
 }
@@ -82,7 +86,7 @@ impl OverviewSeed {
                 self.bounds
             ));
         }
-        let size = OVERVIEW_SIZE as usize;
+        let size = self.size as usize;
         if self.heights.len() != size * size || size < 2 {
             return Err("overview height dimensions are inconsistent".to_string());
         }
@@ -158,41 +162,70 @@ impl OverviewSeedCache {
 
 }
 
-fn read_covered_seed(
+pub(super) fn read_covered_seed(
     dataset: &PyCogDataset,
     tile: TileId,
+    size: u32,
 ) -> Result<Option<OverviewSeed>, String> {
     let read = dataset
         .reader()
         .read_height_tile_covered(HeightTileRequest {
             tile_id: tile,
-            output_width: OVERVIEW_SIZE,
-            output_height: OVERVIEW_SIZE,
+            output_width: size,
+            output_height: size,
         })
         .map_err(|error| format!("COG height read failed: {error:?}"))?;
     if !read.coverage.iter().all(|value| *value == u8::MAX)
-        || !read.heights.iter().all(|value| value.is_finite())
+        || !read
+            .heights
+            .iter()
+            .all(|value| value.is_finite() && value.abs() <= 65_536.0)
     {
         return Ok(None);
     }
     let bounds = crate::terrain::planetary_tiles::global_tile_lonlat_bounds(tile)?;
     Ok(Some(OverviewSeed {
         tile,
+        size,
         heights: read.heights,
         bounds,
     }))
+}
+
+pub(super) fn overview_size_for_extent(terrain_extent_m: f32) -> u32 {
+    ((terrain_extent_m / TARGET_SAMPLE_SPACING_M).ceil() as u32)
+        .saturating_add(1)
+        .max(MIN_OVERVIEW_SIZE)
+}
+
+pub(super) fn tile_sample_spacing_m(
+    bounds: (f64, f64, f64, f64),
+    latitude: f64,
+    samples: u32,
+) -> f32 {
+    tile_extent_m(bounds, latitude) / samples.saturating_sub(1).max(1) as f32
 }
 
 pub(super) fn load_covered_overview(
     dataset: &PyCogDataset,
     lon: f64,
     lat: f64,
-) -> Result<(Vec<f32>, u32, TileId), String> {
+) -> Result<(OverviewSeed, u32), String> {
     for lod in MIN_SOURCE_LOD..=MAX_SOURCE_LOD {
         let tile = target_tile(lon, lat, lod);
-        if let Some(seed) = read_covered_seed(dataset, tile)? {
-            return Ok((seed.heights, lod, tile));
-        }
+        let Some(probe) = read_covered_seed(dataset, tile, MIN_OVERVIEW_SIZE)? else {
+            continue;
+        };
+        let size = overview_size_for_extent(tile_extent_m(probe.bounds, lat));
+        let seed = if size > MIN_OVERVIEW_SIZE {
+            match read_covered_seed(dataset, tile, size)? {
+                Some(seed) => seed,
+                None => continue,
+            }
+        } else {
+            probe
+        };
+        return Ok((seed, lod));
     }
     Err(format!(
         "target ({lon:.6}, {lat:.6}) has no fully covered finite COG tile at LOD {MIN_SOURCE_LOD}..={MAX_SOURCE_LOD}; refusing to fabricate overview heights"
@@ -296,7 +329,8 @@ mod overview_seed_tests {
     fn seed(tile: TileId, value: f32) -> OverviewSeed {
         OverviewSeed {
             tile,
-            heights: vec![value; (OVERVIEW_SIZE * OVERVIEW_SIZE) as usize],
+            size: MIN_OVERVIEW_SIZE,
+            heights: vec![value; (MIN_OVERVIEW_SIZE * MIN_OVERVIEW_SIZE) as usize],
             bounds: crate::terrain::planetary_tiles::global_tile_lonlat_bounds(tile).unwrap(),
         }
     }
@@ -350,14 +384,15 @@ mod overview_seed_tests {
 
     #[test]
     fn overview_seed_bilinear_sample_uses_top_down_lonlat_registration() {
-        let mut heights = vec![0.0; (OVERVIEW_SIZE * OVERVIEW_SIZE) as usize];
-        for y in 0..OVERVIEW_SIZE as usize {
-            for x in 0..OVERVIEW_SIZE as usize {
-                heights[y * OVERVIEW_SIZE as usize + x] = x as f32 + 100.0 * y as f32;
+        let mut heights = vec![0.0; (MIN_OVERVIEW_SIZE * MIN_OVERVIEW_SIZE) as usize];
+        for y in 0..MIN_OVERVIEW_SIZE as usize {
+            for x in 0..MIN_OVERVIEW_SIZE as usize {
+                heights[y * MIN_OVERVIEW_SIZE as usize + x] = x as f32 + 100.0 * y as f32;
             }
         }
         let seed = OverviewSeed {
             tile: TileId::new(0, 0, 0),
+            size: MIN_OVERVIEW_SIZE,
             heights,
             bounds: (-122.0, 46.0, -121.0, 47.0),
         };

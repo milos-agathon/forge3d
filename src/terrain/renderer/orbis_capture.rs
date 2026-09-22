@@ -1603,7 +1603,10 @@ struct SeamDepthSample {
     quantization: f64,
 }
 
-fn extrapolate_seam_depth(samples: &[SeamDepthSample]) -> Option<(f64, f64)> {
+fn extrapolate_seam_depth(
+    samples: &[SeamDepthSample],
+    world_units_per_pixel: f64,
+) -> Option<(f64, f64)> {
     let order = samples.len().min(4);
     let samples = samples.get(..order).filter(|_| order >= 2)?;
     let mut estimate = 0.0_f64;
@@ -1623,6 +1626,12 @@ fn extrapolate_seam_depth(samples: &[SeamDepthSample]) -> Option<(f64, f64)> {
         estimate += coefficient * sample.linear_depth;
         quantization += coefficient.abs() * sample.quantization;
     }
+    let nearest = samples.first()?;
+    let spatial_bound = nearest.distance.abs() * world_units_per_pixel;
+    estimate = estimate.clamp(
+        nearest.linear_depth - spatial_bound,
+        nearest.linear_depth + spatial_bound,
+    );
     (estimate.is_finite() && quantization.is_finite()).then_some((estimate, quantization))
 }
 
@@ -1974,7 +1983,10 @@ fn analyze_paired_cracks(
                 if let (
                     Some((left_at_seam, left_quantization)),
                     Some((right_at_seam, right_quantization)),
-                ) = (extrapolate_seam_depth(&left), extrapolate_seam_depth(&right))
+                ) = (
+                    extrapolate_seam_depth(&left, world_units_per_pixel),
+                    extrapolate_seam_depth(&right, world_units_per_pixel),
+                )
                 {
                     depth_values.extend(
                         left.iter().chain(&right).map(|sample| sample.linear_depth),
@@ -1995,9 +2007,15 @@ fn analyze_paired_cracks(
                         ),
                         _ => (0.0, 0.0),
                     };
+                    let sample_distance = left
+                        .first()
+                        .map_or(0.0, |sample| sample.distance.abs())
+                        + right
+                            .first()
+                            .map_or(0.0, |sample| sample.distance.abs());
                     let tolerance = (left_quantization + right_quantization) * 2.0
                         + boundary_quantization
-                        + world_units_per_pixel * 0.01;
+                        + sample_distance * world_units_per_pixel;
                     let excess =
                         (left_at_seam - right_at_seam).abs() - boundary_step.abs();
                     if excess > tolerance {
@@ -2105,6 +2123,33 @@ mod tests {
             outer_depth: vec![vertex_depth(32.0, 8.0), vertex_depth(32.0, 55.0)],
             silhouette,
         }
+    }
+
+    #[test]
+    fn seam_depth_extrapolation_is_spatially_bounded() {
+        let samples = [
+            SeamDepthSample {
+                distance: 1.0,
+                linear_depth: 100.0,
+                quantization: 0.0,
+            },
+            SeamDepthSample {
+                distance: 2.0,
+                linear_depth: 200.0,
+                quantization: 0.0,
+            },
+            SeamDepthSample {
+                distance: 3.0,
+                linear_depth: 200.0,
+                quantization: 0.0,
+            },
+            SeamDepthSample {
+                distance: 4.0,
+                linear_depth: 200.0,
+                quantization: 0.0,
+            },
+        ];
+        assert_eq!(extrapolate_seam_depth(&samples, 10.0), Some((90.0, 0.0)));
     }
 
     #[test]

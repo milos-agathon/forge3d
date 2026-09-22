@@ -497,6 +497,42 @@ impl TerrainScene {
         let shadow_depth_pipeline =
             Self::create_shadow_depth_pipeline(device.as_ref(), &shadow_depth_bind_group_layout);
 
+        #[cfg(feature = "enable-globe")]
+        let orbis_globe_background_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("orbis.globe.background.layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        #[cfg(feature = "enable-globe")]
+        let orbis_globe_background_uniform = tracked_create_buffer(
+            &device,
+            &wgpu::BufferDescriptor {
+                label: Some("orbis.globe.background.uniform"),
+                size: std::mem::size_of::<super::orbis_globe_background::OrbisGlobeUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        #[cfg(feature = "enable-globe")]
+        let orbis_globe_background_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("orbis.globe.background.bind_group"),
+                layout: &orbis_globe_background_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: orbis_globe_background_uniform.as_entire_binding(),
+                }],
+            });
+
         let tracker = crate::core::memory_tracker::global_tracker();
         tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false)?;
         tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false)?;
@@ -656,6 +692,14 @@ impl TerrainScene {
             aov_pipeline_clipmap: Mutex::new(false),
             #[cfg(feature = "enable-globe")]
             orbis_coverage_pipeline: Mutex::new(None),
+            #[cfg(feature = "enable-globe")]
+            orbis_globe_background_layout,
+            #[cfg(feature = "enable-globe")]
+            orbis_globe_background_uniform,
+            #[cfg(feature = "enable-globe")]
+            orbis_globe_background_bind_group,
+            #[cfg(feature = "enable-globe")]
+            orbis_globe_background_pipeline: Mutex::new(None),
             _dof_renderer: Mutex::new(None),
             offline_state: Mutex::new(None),
             #[cfg(feature = "enable-gpu-instancing")]
@@ -675,6 +719,7 @@ impl TerrainScene {
             terrain_minmax_pyramid: None,
             culling_stats: crate::terrain::culling::two_phase::CullingStats::default(),
             height_streaming: None,
+            height_detail_blend_override: None,
             #[cfg(feature = "enable-globe")]
             orbis_capture_request: None,
             #[cfg(feature = "enable-globe")]

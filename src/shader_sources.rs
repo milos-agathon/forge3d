@@ -309,6 +309,11 @@ pub(crate) fn terrain() -> String {
     assemble_parts(terrain_parts())
 }
 
+#[cfg(feature = "enable-globe")]
+pub(crate) fn orbis_globe_background() -> &'static str {
+    include_str!("shaders/orbis_globe_background.wgsl")
+}
+
 pub(crate) fn terrain_shadow_depth_parts() -> &'static [SourcePart] {
     &[
         SourcePart {

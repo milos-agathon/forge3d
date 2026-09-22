@@ -300,9 +300,11 @@ impl TerrainScene {
         _terrain_height: f32,
     ) -> Result<Vec<f32>> {
         let (_eye, view, proj) = Self::build_camera_matrices(params);
-        Ok(Self::build_uniforms_with_matrices(
-            params, decoded, view, proj,
-        ))
+        let mut uniforms = Self::build_uniforms_with_matrices(params, decoded, view, proj);
+        if let Some(blend) = self.height_detail_blend_override {
+            uniforms[39] = -(blend.clamp(0.0, 1.0) + 1.0);
+        }
+        Ok(uniforms)
     }
 
     pub(super) fn build_uniforms_with_matrices(

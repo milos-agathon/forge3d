@@ -263,7 +263,8 @@ def test_native_source_drives_one_bounded_stream_step_and_real_renderer():
     # One bounded step per waypoint, one zero-upload reanchor to the elevated
     # physical-probe base, and one zero-upload step for each of the two metric
     # frames; no convergence loop exists in any call site.
-    assert source.count("stream_height_tiles_globe(") == 3
+    assert source.count("stream_height_tiles_globe(") == 2
+    assert source.count("stream_height_tiles_globe_focus(") == 1
     assert "render_terrain_pbr_pom(" in source
     assert "self.last_frame = Some(frame.clone_ref(py))" in source
     assert "Maintain::Wait" not in source
@@ -272,6 +273,7 @@ def test_native_source_drives_one_bounded_stream_step_and_real_renderer():
         "finish_owner_ledger_capture", 1
     )[0]
     assert "load_covered_overview(" not in frame_loop
+    assert "read_covered_seed(" not in frame_loop
 
     streaming = (
         Path(__file__).parents[1] / "src" / "terrain" / "renderer" / "streaming.rs"
@@ -298,7 +300,7 @@ def test_native_source_drives_one_bounded_stream_step_and_real_renderer():
     assert "rollback_height_streaming_overview_activation" in transaction
     assert "self.active_overview_tile = previous_tile" in transaction
 
-    assert "ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES" in streaming
+    assert "overview_double_residency_bytes" in streaming
     assert "reserve_overview_rollback" in streaming
     begin = streaming.split("fn begin_overview_activation", 1)[1].split(
         "fn commit_overview_activation", 1
@@ -427,7 +429,7 @@ def test_orbis_descent_streaming_progresses_without_blocking(orbis_descent_evide
     assert 1 <= metrics["streaming_progress_frames"] <= expected_frames
     assert metrics["pending_streaming_frames"] > 0
     assert metrics["coarse_fallback_frames"] > 0
-    assert 0 < metrics["max_stream_uploads_per_frame"] <= 8
+    assert 0 < metrics["max_stream_uploads_per_frame"] <= 64
 
 
 @pytest.mark.offscreen

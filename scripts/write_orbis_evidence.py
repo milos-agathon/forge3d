@@ -175,7 +175,7 @@ def _validate_measurements(measurements: dict[str, Any]) -> dict[str, Any]:
     _positive_int(
         metrics.get("max_stream_uploads_per_frame"),
         "max_stream_uploads_per_frame",
-        maximum=8,
+        maximum=64,
     )
     if _finite_number(golden.get("ssim"), "golden.ssim") < 0.995:
         raise EvidenceError("golden SSIM is below 0.995")

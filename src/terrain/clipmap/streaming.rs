@@ -81,8 +81,25 @@ impl ClipmapStreamer {
         if !camera_anchor.is_finite() || camera_anchor.length_squared() == 0.0 {
             return Err("globe streaming camera anchor must be finite and non-zero".to_string());
         }
-        let surface_radius = self.clipmap.center_ecef().length();
-        let surface_center = camera_anchor.normalize() * surface_radius;
+        let focus_ecef = camera_anchor.normalize() * self.clipmap.center_ecef().length();
+        self.update_globe_focus(camera_anchor, focus_ecef, target_lod, max_leaf_tiles)
+    }
+
+    #[cfg(feature = "enable-globe")]
+    pub fn update_globe_focus(
+        &mut self,
+        camera_anchor: DVec3,
+        focus_ecef: DVec3,
+        target_lod: u32,
+        max_leaf_tiles: usize,
+    ) -> Result<Vec<TileId>, String> {
+        if !camera_anchor.is_finite() || camera_anchor.length_squared() == 0.0 {
+            return Err("globe streaming camera anchor must be finite and non-zero".to_string());
+        }
+        if !focus_ecef.is_finite() || focus_ecef.length_squared() == 0.0 {
+            return Err("globe streaming focus must be finite and non-zero".to_string());
+        }
+        let surface_center = focus_ecef.normalize() * self.clipmap.center_ecef().length();
         // Build and validate the complete candidate demand before touching the
         // live camera frame, center, mesh cache, or residency bookkeeping. A
         // capacity error is therefore a rejected transaction, not a partial

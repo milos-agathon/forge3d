@@ -290,6 +290,13 @@ fn height_page_lookup(lod: u32, x: u32, y: u32) -> HeightPageTableEntry {
 
 fn height_target_lod() -> u32 {
     var target_lod = height_pages.header.target_lod;
+    if (u_terrain.spacing_h_exag.w < 0.0 && -u_terrain.spacing_h_exag.w - 1.0 <= 0.0) {
+        let overview_span = max(
+            height_pages.header.overview_u_max - height_pages.header.overview_u_min,
+            0.0000001,
+        );
+        target_lod = u32(clamp(i32(round(-det_log2(overview_span))), 0, 31));
+    }
     if (target_lod > 31u) {
         target_lod = 31u;
     }
@@ -380,11 +387,19 @@ fn height_page_sample_covered(entry: HeightPageTableEntry, uv: vec2<f32>) -> vec
     }
     let axis = 1u << entry_lod;
     let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
-    let local_uv = fract(bounded_uv * f32(axis));
+    let tile_origin = vec2<f32>(f32(entry.x), f32(entry.y));
+    let local_uv = clamp(
+        bounded_uv * f32(axis) - tile_origin,
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
     let atlas_texel_x = f32(atlas_min_x) + local_uv.x * f32(atlas_max_x - atlas_min_x);
     let atlas_texel_y = f32(atlas_min_y) + local_uv.y * f32(atlas_max_y - atlas_min_y);
     let atlas_0 = vec2<i32>(i32(floor(atlas_texel_x)), i32(floor(atlas_texel_y)));
-    let atlas_1 = atlas_0 + vec2<i32>(1);
+    let atlas_1 = vec2<i32>(
+        min(atlas_0.x + 1, i32(atlas_max_x)),
+        min(atlas_0.y + 1, i32(atlas_max_y)),
+    );
     let atlas_blend = clamp(
         vec2<f32>(atlas_texel_x - f32(atlas_0.x), atlas_texel_y - f32(atlas_0.y)),
         vec2<f32>(0.0),
@@ -493,6 +508,9 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
             requested_lod = target_lod - rounded_lod;
         }
         let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+        if (u_terrain.spacing_h_exag.w < 0.0 && -u_terrain.spacing_h_exag.w - 1.0 <= 0.0) {
+            requested_lod = 0u;
+        }
         var accumulated_height = 0.0;
         var remaining_weight = 1.0;
         for (var depth = 0u; depth <= target_lod; depth = depth + 1u) {
@@ -509,7 +527,18 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
             }
             requested_lod = requested_lod - 1u;
         }
-        return accumulated_height + remaining_weight * overview_height;
+        let detail_height = accumulated_height + remaining_weight * overview_height;
+        if (u_terrain.spacing_h_exag.w >= 0.0) {
+            return detail_height;
+        }
+        let detail_blend = clamp(-u_terrain.spacing_h_exag.w - 1.0, 0.0, 1.0);
+        if (detail_blend <= 0.0) {
+            return detail_height;
+        }
+        if (detail_blend >= 1.0) {
+            return detail_height;
+        }
+        return det_mix(overview_height, detail_height, detail_blend);
     }
     return overview_height;
 }

@@ -118,6 +118,15 @@ impl TerrainScene {
             self.blit_background_texture(encoder, render_targets, &sky.view, sky.linear_hdr)?;
             ts_end(timing, encoder, scope, 1);
         }
+        #[cfg(feature = "enable-globe")]
+        let globe_background = self.render_orbis_globe_background(
+            encoder,
+            params,
+            render_targets,
+            sky_texture.is_some(),
+        )?;
+        #[cfg(not(feature = "enable-globe"))]
+        let globe_background = false;
         let main_scope = ts_begin(timing, encoder, "terrain.main");
         let terrain_draw_calls = self.run_main_pass(
             encoder,
@@ -130,7 +139,7 @@ impl TerrainScene {
             &pass_bind_groups.fog,
             &water_reflection_bind_group,
             &pass_bind_groups.material_layer,
-            sky_texture.is_some(),
+            sky_texture.is_some() || globe_background,
             staged_lod_selection,
         )?;
         ts_end(timing, encoder, main_scope, terrain_draw_calls);

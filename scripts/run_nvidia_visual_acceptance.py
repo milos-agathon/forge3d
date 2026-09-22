@@ -22,7 +22,10 @@ VISUAL_TESTS = (
     "tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression",
     "tests/test_recipe_goldens.py::test_nvidia_vulkan_recipe_pixel_golden_render_and_match",
 )
-ORBIS_TESTS = ("tests/test_globe_floating_origin.py",)
+ORBIS_TESTS = (
+    "tests/test_globe_floating_origin.py",
+    "tests/test_orbis_globe_quality.py",
+)
 
 
 def main() -> int:

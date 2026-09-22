@@ -39,9 +39,6 @@ use glam::{Mat4, Vec2, Vec3};
 /// remaining byte makes the public limit strict even after integer rounding.
 const ORBIS_GPU_VISIBLE_CAP_BYTES: u64 = 512 * 1024 * 1024 - 1;
 const ORBIS_UPLOAD_RING_COUNT: usize = 3;
-const ORBIS_OVERVIEW_SIZE: u64 = 96;
-const ORBIS_OVERVIEW_TEXTURE_BYTES: u64 = ORBIS_OVERVIEW_SIZE * ORBIS_OVERVIEW_SIZE * 4;
-const ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES: u64 = ORBIS_OVERVIEW_TEXTURE_BYTES * 2;
 const ORBIS_MAX_IN_FLIGHT: usize = 1024;
 /// Flat clipmap demand can include a coarse root which must be expanded over
 /// the complete fixed-LOD mosaic. Keep that public operation bounded to at
@@ -61,13 +58,14 @@ pub(super) fn validate_flat_height_streaming_lod(lod: u32) -> Result<()> {
 fn validate_overview_double_residency_budget(
     existing_bytes: u64,
     budget_bytes: u64,
+    overview_double_residency_bytes: u64,
 ) -> Result<()> {
     let required = existing_bytes
-        .checked_add(ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES)
+        .checked_add(overview_double_residency_bytes)
         .ok_or_else(|| anyhow!("overview double-residency budget overflow"))?;
     ensure!(
         required <= budget_bytes,
-        "GPU-visible budget {budget_bytes} cannot reserve two ORBIS overview textures ({ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES} bytes) above existing {existing_bytes} bytes"
+        "GPU-visible budget {budget_bytes} cannot reserve two ORBIS overview textures ({overview_double_residency_bytes} bytes) above existing {existing_bytes} bytes"
     );
     Ok(())
 }
@@ -716,6 +714,8 @@ pub(in crate::terrain::renderer) struct HeightVtFamilyRuntime {
     retry: HashMap<TileId, RetryState>,
     globe_mode: bool,
     coarse_prefill_enabled: bool,
+    #[cfg(feature = "enable-globe")]
+    overview_reservation_size: u32,
 }
 
 #[cfg(feature = "enable-globe")]
@@ -729,7 +729,10 @@ pub(crate) struct HeightOverviewActivation {
 pub(in crate::terrain::renderer) enum HeightStreamingCamera {
     Flat(Vec3),
     #[cfg(feature = "enable-globe")]
-    Globe(DVec3),
+    Globe {
+        camera_anchor: DVec3,
+        focus_ecef: DVec3,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -793,11 +796,21 @@ impl HeightVtFamilyRuntime {
         let staging_height_bytes = padded_tile_row.saturating_mul(u64::from(tile_resolution));
         let staging_coverage_bytes =
             padded_coverage_row.saturating_mul(u64::from(tile_resolution));
+        let overview_reservation_size = if globe_mode {
+            ((terrain_extent / 60.0).ceil() as u32).saturating_add(1).max(96)
+        } else {
+            96
+        };
+        let overview_texture_bytes = u64::from(overview_reservation_size)
+            .saturating_mul(u64::from(overview_reservation_size))
+            .saturating_mul(4);
+        let overview_double_residency_bytes = overview_texture_bytes.saturating_mul(2);
         let existing_group_bytes = owner_group_report(&allocation_owner, "orbis.height")
             .current_total_bytes();
         validate_overview_double_residency_budget(
             existing_group_bytes,
             gpu_visible_budget_bytes,
+            overview_double_residency_bytes,
         )?;
         // The pinned root is fallback coverage, not one of the target-LOD
         // leaves. Budget a distinct slot so a comfortably sized cache can
@@ -812,6 +825,8 @@ impl HeightVtFamilyRuntime {
             .checked_div(tile_bytes.max(1))
             .unwrap_or(0)
             .max(1);
+        let overview_row_bytes =
+            (u64::from(overview_reservation_size) * 4).div_ceil(256) * 256;
         let mut slots = virtual_tiles
             .saturating_add(1)
             .min(max_slots_from_texels)
@@ -820,12 +835,16 @@ impl HeightVtFamilyRuntime {
             let tiles_x = (slots as f64).sqrt().ceil().max(1.0) as u32;
             let tiles_y = slots.div_ceil(tiles_x);
             let page_bytes = PageTable::allocation_bytes_for_capacity(slots as usize);
+            let overview_stage_bytes = overview_row_bytes
+                .saturating_mul(u64::from(overview_reservation_size))
+                .saturating_add(page_bytes);
             let upload_buffer_size = HeightUploadRing::required_capacity(
                 max_in_flight,
                 staging_height_bytes,
                 staging_coverage_bytes,
                 page_bytes,
-            )?;
+            )?
+            .max(overview_stage_bytes);
             let actual_bytes = existing_group_bytes
                 .saturating_add(
                     u64::from(tiles_x)
@@ -836,8 +855,8 @@ impl HeightVtFamilyRuntime {
                 .saturating_add(HeightUploadRing::prebudget_bytes(upload_buffer_size))
                 // An activation keeps the old overview alive until the
                 // candidate render commits, so strict peak budgeting must
-                // reserve both 96x96 R32 textures.
-                .saturating_add(ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES);
+                // reserve both overview R32 textures.
+                .saturating_add(overview_double_residency_bytes);
             if actual_bytes <= gpu_visible_budget_bytes {
                 break (tiles_x, tiles_y, upload_buffer_size, actual_bytes);
             }
@@ -894,11 +913,7 @@ impl HeightVtFamilyRuntime {
             max_in_flight,
             pool_size,
             reader,
-            if globe_mode {
-                CoalescePolicy::PreferCoarse
-            } else {
-                CoalescePolicy::PreferFine
-            },
+            CoalescePolicy::PreferFine,
         );
         let clipmap_config =
             ClipmapConfig::new(ring_count.clamp(1, 8), ring_resolution.clamp(4, 256));
@@ -966,6 +981,8 @@ impl HeightVtFamilyRuntime {
             retry: HashMap::new(),
             globe_mode,
             coarse_prefill_enabled: coarse_prefill,
+            #[cfg(feature = "enable-globe")]
+            overview_reservation_size,
         };
         // Coarse prefill controls only when root demand begins; startup I/O is
         // always asynchronous. Until the root completes, all render paths keep
@@ -1016,6 +1033,12 @@ impl HeightVtFamilyRuntime {
         heights: &[f32],
     ) -> Result<HeightOverviewActivation> {
         ensure!(self.globe_mode, "regional overview switching requires globe streaming");
+        ensure!(
+            width <= self.overview_reservation_size && height <= self.overview_reservation_size,
+            "height overview {width}x{height} exceeds the reserved {}x{} budget",
+            self.overview_reservation_size,
+            self.overview_reservation_size
+        );
         self.upload_ring.reserve_overview_rollback()?;
         let previous_overview = self.page_table.overview();
         // Prepare the only resource rollback needs before the candidate is
@@ -1096,9 +1119,11 @@ impl HeightVtFamilyRuntime {
 
     fn request_local_ancestors(&mut self, tile: TileId) {
         for ancestor in local_ancestor_chain(tile) {
-            self.touch_resident_or_ancestor(ancestor);
-            if self.loader.request(ancestor) {
-                self.tiles_requested += 1;
+            if self.mosaic.slot_of(&ancestor).is_none() {
+                self.touch_resident_or_ancestor(ancestor);
+                if self.loader.request(ancestor) {
+                    self.tiles_requested += 1;
+                }
             }
         }
     }
@@ -1188,10 +1213,13 @@ impl HeightVtFamilyRuntime {
                 )
             }
             #[cfg(feature = "enable-globe")]
-            HeightStreamingCamera::Globe(camera_anchor) if self.globe_mode => {
+            HeightStreamingCamera::Globe {
+                camera_anchor,
+                focus_ecef,
+            } if self.globe_mode => {
                 let max_leaf_tiles = globe_leaf_capacity(self.page_table.capacity, self.lod)?;
                 self.streamer
-                    .update_globe(camera_anchor, self.lod, max_leaf_tiles)
+                    .update_globe_focus(camera_anchor, focus_ecef, self.lod, max_leaf_tiles)
                     .map_err(|error| anyhow!(error))?
             }
             _ => Vec::new(),
@@ -1544,6 +1572,11 @@ impl TerrainRenderer {
         self.commit_height_streaming_overview_activation(activation);
         Ok(())
     }
+
+    #[cfg(feature = "enable-globe")]
+    pub(crate) fn set_height_detail_blend_override(&mut self, blend: Option<f32>) {
+        self.scene.height_detail_blend_override = blend;
+    }
 }
 
 impl TerrainScene {
@@ -1635,19 +1668,18 @@ mod tests {
 
     #[test]
     fn overview_switch_budget_reserves_old_and_candidate_textures() {
-        assert_eq!(ORBIS_OVERVIEW_TEXTURE_BYTES, 96 * 96 * 4);
-        assert_eq!(
-            ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES,
-            ORBIS_OVERVIEW_TEXTURE_BYTES * 2
-        );
+        let overview_texture_bytes = 96 * 96 * 4;
+        let overview_double_residency_bytes = overview_texture_bytes * 2;
         assert!(validate_overview_double_residency_budget(
             0,
-            ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES - 1,
+            overview_double_residency_bytes - 1,
+            overview_double_residency_bytes,
         )
         .is_err());
         validate_overview_double_residency_budget(
             0,
-            ORBIS_OVERVIEW_DOUBLE_RESIDENCY_BYTES,
+            overview_double_residency_bytes,
+            overview_double_residency_bytes,
         )
         .unwrap();
     }

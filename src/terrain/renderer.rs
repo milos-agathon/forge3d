@@ -38,6 +38,8 @@ mod geometry;
 mod height_ao;
 mod msaa;
 mod offline;
+#[cfg(feature = "enable-globe")]
+mod orbis_globe_background;
 #[cfg(all(feature = "enable-globe", feature = "extension-module"))]
 pub(crate) mod orbis_capture;
 mod pipeline_cache;

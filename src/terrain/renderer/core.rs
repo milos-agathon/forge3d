@@ -140,6 +140,14 @@ pub struct TerrainScene {
     pub(super) aov_pipeline_clipmap: Mutex<bool>,
     #[cfg(feature = "enable-globe")]
     pub(super) orbis_coverage_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_globe_background_layout: wgpu::BindGroupLayout,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_globe_background_uniform: TrackedBuffer,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_globe_background_bind_group: wgpu::BindGroup,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_globe_background_pipeline: Mutex<Option<(u32, wgpu::RenderPipeline)>>,
     pub(super) _dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
     pub(super) offline_state: Mutex<Option<OfflineAccumulationState>>,
     #[cfg(feature = "enable-gpu-instancing")]
@@ -162,6 +170,7 @@ pub struct TerrainScene {
         Option<crate::path_tracing::hybrid_compute::terrain_heightfield::TerrainMinMaxPyramid>,
     pub(super) culling_stats: crate::terrain::culling::two_phase::CullingStats,
     pub(super) height_streaming: Option<super::streaming::HeightVtFamilyRuntime>,
+    pub(super) height_detail_blend_override: Option<f32>,
     #[cfg(feature = "enable-globe")]
     pub(super) orbis_capture_request: Option<super::orbis_capture::OrbisCaptureRequest>,
     #[cfg(feature = "enable-globe")]

@@ -802,14 +802,36 @@ class GlobeScene:
     ) -> None: ...
     @staticmethod
     def default_descent_altitudes() -> list[float]: ...
-    def fly_to(self, lon: float, lat: float, altitude: float) -> Frame:
-        """Render one covered waypoint at 0..408,000 metres above local ground."""
+    def fly_to(
+        self,
+        lon: float,
+        lat: float,
+        altitude: float,
+        heading: float = ...,
+        pitch: float = ...,
+    ) -> Frame:
+        """Render one covered waypoint at 0..408,000 metres above local ground.
+
+        ``heading`` is the horizontal look direction clockwise from north in
+        degrees; ``pitch`` is degrees away from nadir in ``[0, 90)``.
+        """
         ...
     def scripted_descent(
         self,
-        waypoints: Optional[Sequence[Tuple[float, float, float]]] = ...,
+        waypoints: Optional[
+            Sequence[
+                Tuple[float, float, float]
+                | Tuple[float, float, float, float, float]
+            ]
+        ] = ...,
     ) -> GlobeMetrics:
-        """Render a prevalidated descent and return completed physical metrics."""
+        """Render a prevalidated descent and return completed physical metrics.
+
+        Each waypoint is ``(lon, lat, altitude)`` or oriented
+        ``(lon, lat, altitude, heading, pitch)`` where ``heading`` is the
+        horizontal look direction clockwise from north in degrees and
+        ``pitch`` is degrees away from nadir in ``[0, 90)``.
+        """
         ...
     def snapshot(self) -> Frame: ...
     def metrics(self) -> GlobeMetrics: ...
@@ -821,6 +843,11 @@ class GlobeScene:
     def current_position(self) -> Optional[Tuple[float, float, float]]: ...
     @property
     def rendered_waypoint_count(self) -> int: ...
+    def streaming_stats(self) -> Dict[str, Any]: ...
+    @property
+    def source_bounds(self) -> Tuple[float, float, float, float]: ...
+    @property
+    def source_dimensions(self) -> Tuple[int, int]: ...
 
 class TerrainRenderer:
     def __init__(self, session: "Session") -> None: ...

@@ -1347,6 +1347,40 @@ impl TerrainRenderer {
         camera_ecef: (f64, f64, f64),
         max_uploads: usize,
     ) -> PyResult<PyObject> {
+        let camera = glam::DVec3::new(camera_ecef.0, camera_ecef.1, camera_ecef.2);
+        if !camera.is_finite() || camera.length_squared() == 0.0 {
+            return Err(PyRuntimeError::new_err(
+                "globe streaming camera ECEF must be finite and non-zero",
+            ));
+        }
+        let focus = camera.normalize()
+            * crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
+        self.stream_height_tiles_globe_focus(py, camera, focus, max_uploads)
+    }
+
+    /// BOP-P2-02: current streaming stats without advancing the stream.
+    pub fn height_streaming_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let state = self.scene.height_streaming.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "height streaming not enabled; call enable_height_streaming() first",
+            )
+        })?;
+        let stats = state
+            .stats()
+            .map_err(|error| PyRuntimeError::new_err(format!("height streaming failed: {error:#}")))?;
+        height_streaming_stats_to_py(py, &stats)
+    }
+}
+
+#[cfg(feature = "enable-globe")]
+impl TerrainRenderer {
+    pub(crate) fn stream_height_tiles_globe_focus(
+        &mut self,
+        py: Python<'_>,
+        camera_ecef: glam::DVec3,
+        focus_ecef: glam::DVec3,
+        max_uploads: usize,
+    ) -> PyResult<PyObject> {
         let queue = self.scene.queue.clone();
         let feedback_uvs = self
             .scene
@@ -1366,11 +1400,10 @@ impl TerrainRenderer {
         }
         let stats = state.stream_step(
             queue.as_ref(),
-            super::streaming::HeightStreamingCamera::Globe(glam::DVec3::new(
-                camera_ecef.0,
-                camera_ecef.1,
-                camera_ecef.2,
-            )),
+            super::streaming::HeightStreamingCamera::Globe {
+                camera_anchor: camera_ecef,
+                focus_ecef,
+            },
             &feedback_uvs,
             max_uploads,
         )
@@ -1378,19 +1411,6 @@ impl TerrainRenderer {
         // Globe meshes encode a new camera-relative tangent frame after each
         // ECEF update, even when their local 2D center remains near zero.
         self.scene.geometry_provider = None;
-        height_streaming_stats_to_py(py, &stats)
-    }
-
-    /// BOP-P2-02: current streaming stats without advancing the stream.
-    pub fn height_streaming_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let state = self.scene.height_streaming.as_ref().ok_or_else(|| {
-            PyRuntimeError::new_err(
-                "height streaming not enabled; call enable_height_streaming() first",
-            )
-        })?;
-        let stats = state
-            .stats()
-            .map_err(|error| PyRuntimeError::new_err(format!("height streaming failed: {error:#}")))?;
         height_streaming_stats_to_py(py, &stats)
     }
 }
