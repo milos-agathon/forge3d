@@ -33,7 +33,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   from an equirectangular image (e.g. a global elevation map), lit by the same
   sun as the terrain, and the camera can now start up to 9,000 km out, far
   enough to frame the whole visible Earth. `examples/orbis_swiss_alps_descent.py`
-  opens on a whole-Earth view coloured with Crameri's *fes* palette (NOAA
+  opens on a whole-Earth view coloured with Crameri's *bukavu* palette (NOAA
   ETOPO 2022 outside Switzerland) and flies down onto the Eiger, Moench and
   Jungfrau. (#141)
 

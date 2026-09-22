@@ -8,13 +8,13 @@ the Alps and, once the Earth no longer fills the frame, swings around to the
 north side, so the final approach crosses the Swiss plateau onto the north
 faces of the Eiger, Moench and Jungfrau with Swiss terrain in the foreground.
 
-Two data sources, one palette (Crameri's *fes*, split at sea level):
+Two data sources, one palette (Crameri's *bukavu*, split at sea level):
 
 * ``assets/tif/switzerland_dem.tif`` streams into :class:`forge3d.GlobeScene`
   as real 3D terrain on the curved WGS84 Earth, with fine COG pages arriving
   at source resolution as the camera descends.
 * NOAA ETOPO 2022 (60 arc-second surface elevation, land + bathymetry) is baked
-  once into an equirectangular *fes* + hillshade image and passed as the
+  once into an equirectangular *bukavu* + hillshade image and passed as the
   scene's ``earth_texture``: the Earth everywhere outside the Swiss DEM.
   Download (478 MB, public domain) from
   https://www.ngdc.noaa.gov/thredds/fileServer/global/ETOPO2022/60s/60s_surface_elev_netcdf/ETOPO_2022_v1_60s_N90W180_surface.nc
@@ -95,20 +95,22 @@ SWING_END = 0.78
 # within 9,800 km, the terrain runtime contract's render-space bound.
 MAX_CAMERA_TARGET_DISTANCE_M = 9_800_000.0
 
-# Crameri "fes" (Scientific colour maps, https://www.fabiocrameri.ch/colourmaps/)
-# is split at its midpoint: greys for the sea floor, then dark green -> olive ->
-# tan -> white on land. Each half is sampled at 17 positions of the 256-entry
-# map, and the domain is symmetric around 0 m, so the jump sits exactly at sea
-# level (interpolating across it would paint continental shelves grey-green).
-FES_SEA_HEX = (
-    "#0d0d0d", "#1d1d1d", "#2b2b2b", "#393939", "#464646", "#535353", "#606060",
-    "#6b6b6b", "#777777", "#818181", "#8d8d8d", "#9a9a9a", "#a9a9a9", "#b9b9b9",
-    "#cacaca", "#dddddd", "#f1f1f1",
+# Crameri "bukavu" (Scientific colour maps, https://www.fabiocrameri.ch/colourmaps/)
+# is split at its midpoint: dark blue -> cyan -> pale aqua for the sea floor,
+# then dark green -> olive -> tan -> white on land. Each half is sampled at 17
+# positions of the 256-entry map, and the domain is symmetric around 0 m, so
+# the jump sits exactly at sea level (interpolating across it would paint
+# continental shelves in a blend of aqua and dark green).
+PALETTE_NAME = "bukavu"
+SEA_HEX = (
+    "#1a3333", "#1b3a43", "#1e4255", "#204b6b", "#235786", "#28669c", "#2d75af",
+    "#3283c0", "#3f92c8", "#4c9ec9", "#5babca", "#6ab8cb", "#78c5cc", "#8ed3d0",
+    "#ace2d7", "#c8f0de", "#e4fee5",
 )
-FES_LAND_HEX = (
-    "#024026", "#1b4921", "#345220", "#4a5922", "#5e5e26", "#716229", "#83672d",
-    "#976d32", "#ab773e", "#b88550", "#c19769", "#c8a882", "#d0ba9c", "#d7cab7",
-    "#dfd7cf", "#e6e2e5", "#ededfc",
+LAND_HEX = (
+    "#014026", "#094a1e", "#175616", "#2f6312", "#4b6d1a", "#647225", "#78762f",
+    "#8b7939", "#9c7e43", "#ac8652", "#bb9569", "#c5a782", "#ceb99c", "#d7cab7",
+    "#dfd7d0", "#e6e2e5", "#ededfc",
 )
 # The last sea stop sits this far below 0 m so the jump is effectively sharp.
 SEA_LEVEL_EPSILON_M = 0.5
@@ -128,19 +130,19 @@ def _hex_rgb(value: str) -> np.ndarray:
     return np.array([int(value[i:i + 2], 16) for i in (1, 3, 5)], dtype=np.float64)
 
 
-def fes_stops() -> list[tuple[float, str]]:
-    """(elevation m, hex) stops over ELEVATION_DOMAIN with the fes split at 0 m."""
+def palette_stops() -> list[tuple[float, str]]:
+    """(elevation m, hex) stops over ELEVATION_DOMAIN with the sea/land split at 0 m."""
     low, high = ELEVATION_DOMAIN
-    n = len(FES_SEA_HEX) - 1
-    sea = [(low + (-SEA_LEVEL_EPSILON_M - low) * i / n, c) for i, c in enumerate(FES_SEA_HEX)]
-    n = len(FES_LAND_HEX) - 1
-    land = [(high * i / n, c) for i, c in enumerate(FES_LAND_HEX)]
+    n = len(SEA_HEX) - 1
+    sea = [(low + (-SEA_LEVEL_EPSILON_M - low) * i / n, c) for i, c in enumerate(SEA_HEX)]
+    n = len(LAND_HEX) - 1
+    land = [(high * i / n, c) for i, c in enumerate(LAND_HEX)]
     return sea + land
 
 
-def fes_rgb(elevation_m: np.ndarray) -> np.ndarray:
-    """Interpolate fes colours (0-255 floats) for elevations in metres."""
-    stops = fes_stops()
+def palette_rgb(elevation_m: np.ndarray) -> np.ndarray:
+    """Interpolate palette colours (0-255 floats) for elevations in metres."""
+    stops = palette_stops()
     xs = np.array([s[0] for s in stops])
     rgb = np.stack([_hex_rgb(s[1]) for s in stops])
     z = np.clip(np.asarray(elevation_m, dtype=np.float64), xs[0], xs[-1])
@@ -153,21 +155,21 @@ def srgb_to_linear_255(value: np.ndarray) -> np.ndarray:
 
 
 def terrain_colormap_stops() -> list[tuple[float, str]]:
-    """fes stops for the terrain colormap, pre-linearised.
+    """Palette stops for the terrain colormap, pre-linearised.
 
     The terrain shader treats colormap values as linear albedo and encodes its
     lit result to sRGB, so display colours are decoded here first; otherwise
     the DEM renders visibly paler than the same palette on the Earth texture.
     """
     out = []
-    for elevation, color in fes_stops():
+    for elevation, color in palette_stops():
         r, g, b = np.round(srgb_to_linear_255(_hex_rgb(color))).astype(int)
         out.append((elevation, f"#{r:02x}{g:02x}{b:02x}"))
     return out
 
 
 def bake_earth_texture(elevation_m: np.ndarray, *, exaggeration: float = 8.0) -> np.ndarray:
-    """fes + hillshade RGB (uint8) for an equirectangular elevation grid.
+    """Palette + hillshade RGB (uint8) for an equirectangular elevation grid.
 
     ``elevation_m`` is (height, width) with row 0 at 90 N and column 0 at
     180 W. Hillshade uses a north-west light; east spacing shrinks with
@@ -185,7 +187,7 @@ def bake_earth_texture(elevation_m: np.ndarray, *, exaggeration: float = 8.0) ->
     light = (np.sin(azimuth) * np.cos(altitude), np.cos(azimuth) * np.cos(altitude), np.sin(altitude))
     shade = np.clip((nx * light[0] + ny * light[1] + light[2]) / norm, 0.0, 1.0)
     factor = np.clip(0.45 + 0.55 * shade / light[2], 0.0, 1.25)
-    return np.clip(fes_rgb(z) * factor[..., None], 0, 255).astype(np.uint8)
+    return np.clip(palette_rgb(z) * factor[..., None], 0, 255).astype(np.uint8)
 
 
 def load_earth_texture(etopo: Path | None, cache_dir: Path) -> np.ndarray | None:
@@ -201,8 +203,8 @@ def load_earth_texture(etopo: Path | None, cache_dir: Path) -> np.ndarray | None
     import hashlib
 
     # The cache key covers everything that shapes the bake.
-    key = hashlib.sha256(repr((FES_SEA_HEX, FES_LAND_HEX, ELEVATION_DOMAIN, EARTH_TEXTURE_WIDTH)).encode()).hexdigest()[:10]
-    cache = cache_dir / f"earth_fes_{EARTH_TEXTURE_WIDTH}_{key}.png"
+    key = hashlib.sha256(repr((SEA_HEX, LAND_HEX, ELEVATION_DOMAIN, EARTH_TEXTURE_WIDTH)).encode()).hexdigest()[:10]
+    cache = cache_dir / f"earth_{PALETTE_NAME}_{EARTH_TEXTURE_WIDTH}_{key}.png"
     if cache.is_file():
         return np.asarray(Image.open(cache).convert("RGB"))
     if rasterio is None:
@@ -276,7 +278,7 @@ def format_altitude(altitude_m: float) -> str:
 
 
 def build_render_params(size: tuple[int, int], *, msaa: int = 4, render_scale: float = 1.0):
-    """Look for the globe path: size, lighting and the fes elevation palette.
+    """Look for the globe path: size, lighting and the elevation palette.
 
     GlobeScene owns the camera (pose, clip planes, clipmap mode and span).
     ``render_scale`` supersamples the internal target and blit-resolves down

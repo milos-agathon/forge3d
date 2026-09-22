@@ -97,30 +97,32 @@ def test_descent_rejects_invalid_inputs(example, kwargs, message):
         example.descent_waypoints(frames, **kwargs)
 
 
-def test_fes_palette_splits_exactly_at_sea_level(example):
-    stops = example.fes_stops()
+def test_bukavu_palette_splits_exactly_at_sea_level(example):
+    assert example.PALETTE_NAME == "bukavu"
+    stops = example.palette_stops()
     assert len(stops) == 34
     assert (stops[0][0], stops[-1][0]) == example.ELEVATION_DOMAIN
-    assert stops[16] == (-example.SEA_LEVEL_EPSILON_M, "#f1f1f1")  # shallowest fes grey
-    assert stops[17] == (0.0, "#024026")  # first fes land colour
+    assert stops[16] == (-example.SEA_LEVEL_EPSILON_M, "#e4fee5")  # shallowest bukavu aqua
+    assert stops[17] == (0.0, "#014026")  # first bukavu land colour
     assert [s[0] for s in stops] == sorted(s[0] for s in stops)
-    shallow, land = example.fes_rgb(np.array([-1.0, 1.0]))
-    # No grey-green blend on continental shelves: grey just below 0 m, green above.
-    assert shallow[0] == shallow[1] == shallow[2] and shallow[0] > 230
-    assert land[1] > land[0]
+    deep, shallow, land = example.palette_rgb(np.array([-4000.0, -1.0, 1.0]))
+    # Blue sea floor, pale aqua just below 0 m, dark green just above: no
+    # aqua-green blend on continental shelves.
+    assert deep[2] > deep[0] + 40  # navy sea floor
+    assert shallow.min() > 220
+    assert land[1] > land[0] and land[1] > land[2] and land.max() < 80
 
 
-def test_terrain_stops_are_the_fes_palette_decoded_to_linear(example):
-    display = example.fes_stops()
+def test_terrain_stops_are_the_palette_decoded_to_linear(example):
+    display = example.palette_stops()
     linear = example.terrain_colormap_stops()
     assert [s[0] for s in linear] == [s[0] for s in display]
-    assert linear[0][1] == "#010101"  # #0d0d0d decoded
     assert linear[-1][1] == "#d8d8f8"  # #ededfc decoded
     for (_, d), (_, l) in zip(display, linear):
         assert all(int(l[i:i + 2], 16) <= int(d[i:i + 2], 16) for i in (1, 3, 5))
 
 
-def test_earth_texture_bake_is_north_up_fes_with_flat_ground_unshaded(example):
+def test_earth_texture_bake_is_north_up_with_flat_ground_unshaded(example):
     height, width = 32, 64
     z = np.full((height, width), -3000.0)
     z[: height // 2, : width // 2] = 800.0  # north-west quadrant is land
@@ -128,10 +130,11 @@ def test_earth_texture_bake_is_north_up_fes_with_flat_ground_unshaded(example):
     assert texture.shape == (height, width, 3) and texture.dtype == np.uint8
     land = texture[4, 4].astype(int)
     sea = texture[height - 4, width - 4].astype(int)
-    assert land[1] > land[0] and land[1] > land[2]  # fes green on land
-    assert sea[0] == sea[1] == sea[2]  # fes grey at sea
-    expected = example.fes_rgb(np.array([800.0]))[0]
-    assert np.abs(land - expected).max() <= 1  # flat ground keeps its colour
+    assert land[1] > land[0] and land[1] > land[2]  # green land
+    assert sea[2] > sea[0]  # blue sea floor
+    for sample, elevation in ((land, 800.0), (sea, -3000.0)):
+        expected = example.palette_rgb(np.array([elevation]))[0]
+        assert np.abs(sample - expected).max() <= 1  # flat ground keeps its colour
 
 
 @pytest.mark.parametrize(
