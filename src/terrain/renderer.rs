@@ -60,6 +60,8 @@ pub(crate) mod visibility_buffer;
 mod water_reflection;
 
 pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
+#[cfg(feature = "enable-globe")]
+pub(crate) use self::orbis_globe_background::ORBIS_EARTH_TEXTURE_MAX_WIDTH;
 
 use self::atmosphere::create_atmosphere_init_resources;
 use self::bind_groups::create_base_bind_group_layouts;

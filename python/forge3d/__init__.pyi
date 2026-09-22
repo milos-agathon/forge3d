@@ -799,7 +799,13 @@ class GlobeScene:
         material_set: Optional["MaterialSet"] = ...,
         env_maps: Optional["IBL"] = ...,
         params: Optional[TerrainRenderParams] = ...,
-    ) -> None: ...
+        earth_texture: Optional[np.ndarray] = ...,
+    ) -> None:
+        """``earth_texture`` optionally colours the Earth outside the terrain
+        source: a uint8 array shaped (height, width, 3|4), equirectangular with
+        width == 2 * height (row 0 = 90 N, column 0 = 180 W), width <= 8192.
+        """
+        ...
     @staticmethod
     def default_descent_altitudes() -> list[float]: ...
     def fly_to(
@@ -810,7 +816,8 @@ class GlobeScene:
         heading: float = ...,
         pitch: float = ...,
     ) -> Frame:
-        """Render one covered waypoint at 0..408,000 metres above local ground.
+        """Render one covered waypoint at 0..9,000,000 metres above local ground
+        (camera-to-target distance ``altitude / cos(pitch)`` at most 9,800 km).
 
         ``heading`` is the horizontal look direction clockwise from north in
         degrees; ``pitch`` is degrees away from nadir in ``[0, 90)``.

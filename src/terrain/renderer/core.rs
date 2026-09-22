@@ -146,6 +146,16 @@ pub struct TerrainScene {
     pub(super) orbis_globe_background_uniform: TrackedBuffer,
     #[cfg(feature = "enable-globe")]
     pub(super) orbis_globe_background_bind_group: wgpu::BindGroup,
+    /// Equirectangular Earth colour sampled by the globe background; a 1x1
+    /// placeholder until `set_orbis_earth_texture`.
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_earth_texture: TrackedTexture,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_earth_view: wgpu::TextureView,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_earth_sampler: wgpu::Sampler,
+    #[cfg(feature = "enable-globe")]
+    pub(super) orbis_earth_textured: bool,
     #[cfg(feature = "enable-globe")]
     pub(super) orbis_globe_background_pipeline: Mutex<Option<(u32, wgpu::RenderPipeline)>>,
     pub(super) _dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,

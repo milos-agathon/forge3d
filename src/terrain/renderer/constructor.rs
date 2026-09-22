@@ -501,16 +501,34 @@ impl TerrainScene {
         let orbis_globe_background_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("orbis.globe.background.layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
             });
         #[cfg(feature = "enable-globe")]
         let orbis_globe_background_uniform = tracked_create_buffer(
@@ -523,15 +541,35 @@ impl TerrainScene {
             },
         )?;
         #[cfg(feature = "enable-globe")]
+        let (orbis_earth_texture, orbis_earth_view) =
+            super::orbis_globe_background::create_orbis_earth_texture(
+                &device,
+                &queue,
+                1,
+                1,
+                &[9, 24, 31, 255],
+            )
+            ?;
+        #[cfg(feature = "enable-globe")]
+        let orbis_earth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("orbis.globe.earth-sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        #[cfg(feature = "enable-globe")]
         let orbis_globe_background_bind_group =
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("orbis.globe.background.bind_group"),
-                layout: &orbis_globe_background_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: orbis_globe_background_uniform.as_entire_binding(),
-                }],
-            });
+            super::orbis_globe_background::create_orbis_globe_background_bind_group(
+                &device,
+                &orbis_globe_background_layout,
+                &orbis_globe_background_uniform,
+                &orbis_earth_view,
+                &orbis_earth_sampler,
+            );
 
         let tracker = crate::core::memory_tracker::global_tracker();
         tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false)?;
@@ -698,6 +736,14 @@ impl TerrainScene {
             orbis_globe_background_uniform,
             #[cfg(feature = "enable-globe")]
             orbis_globe_background_bind_group,
+            #[cfg(feature = "enable-globe")]
+            orbis_earth_texture,
+            #[cfg(feature = "enable-globe")]
+            orbis_earth_view,
+            #[cfg(feature = "enable-globe")]
+            orbis_earth_sampler,
+            #[cfg(feature = "enable-globe")]
+            orbis_earth_textured: false,
             #[cfg(feature = "enable-globe")]
             orbis_globe_background_pipeline: Mutex::new(None),
             _dof_renderer: Mutex::new(None),

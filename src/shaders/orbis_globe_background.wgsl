@@ -8,8 +8,32 @@ struct OrbisGlobeUniforms {
     sun_direction: vec4<f32>,
     // Clear colour the atmosphere halo composites over when there is no sky.
     space_color: vec4<f32>,
+    // ECEF east/north/up of the render-frame anchor (render x/y/z axes).
+    earth_east: vec4<f32>,
+    earth_north: vec4<f32>,
+    earth_up: vec4<f32>,
+    // x = 1 when earth_texture (equirectangular, row 0 = 90 N, u 0 = 180 W)
+    // colours the sphere instead of base_color.
+    earth_flags: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globe: OrbisGlobeUniforms;
+@group(0) @binding(1) var earth_texture: texture_2d<f32>;
+@group(0) @binding(2) var earth_sampler: sampler;
+
+const PI: f32 = 3.14159265358979;
+
+fn earth_surface_color(normal: vec3<f32>) -> vec3<f32> {
+    if (globe.earth_flags.x < 0.5) {
+        return globe.base_color.rgb;
+    }
+    let ecef = globe.earth_east.xyz * normal.x
+        + globe.earth_north.xyz * normal.y
+        + globe.earth_up.xyz * normal.z;
+    let longitude = atan2(ecef.y, ecef.x);
+    let latitude = asin(clamp(ecef.z, -1.0, 1.0));
+    let uv = vec2<f32>(longitude / (2.0 * PI) + 0.5, 0.5 - latitude / PI);
+    return textureSampleLevel(earth_texture, earth_sampler, uv, 0.0).rgb;
+}
 
 struct FullscreenOutput {
     @builtin(position) position: vec4<f32>,
@@ -59,10 +83,14 @@ fn fs_main(input: FullscreenOutput) -> @location(0) vec4<f32> {
         // terrain, with a thin scattering rim towards the limb.
         let normal = normalize(ray * t - center);
         let sun_cos = dot(normal, sun);
-        let diffuse = 0.22 + 0.78 * max(sun_cos, 0.0);
-        let rim = pow(1.0 - max(dot(normal, -ray), 0.0), 3.0) * 0.45;
         let day = smoothstep(-0.15, 0.25, sun_cos);
-        return vec4<f32>(globe.base_color.rgb * diffuse + globe.rim_color.rgb * rim * (0.35 + 0.65 * day), 1.0);
+        let rim = pow(1.0 - max(dot(normal, -ray), 0.0), 3.0) * 0.45;
+        // A textured Earth already carries baked relief shading, so it keeps
+        // more ambient than the flat fallback colour.
+        let ambient = select(0.22, 0.45, globe.earth_flags.x > 0.5);
+        let diffuse = ambient + (1.0 - ambient) * max(sun_cos, 0.0);
+        let surface = earth_surface_color(normal);
+        return vec4<f32>(surface * diffuse + globe.rim_color.rgb * rim * (0.35 + 0.65 * day), 1.0);
     }
     if (globe.sun_direction.w > 0.5) {
         discard;

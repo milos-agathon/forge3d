@@ -17,7 +17,13 @@ use source::{
 };
 
 const DEFAULT_START_ALTITUDE_M: f64 = 408_000.0;
-const MAX_SUPPORTED_ALTITUDE_M: f64 = DEFAULT_START_ALTITUDE_M;
+/// Highest supported camera altitude: far enough to frame the whole visible
+/// Earth disc (it spans ~53 degrees at 8,000 km) for the opening of a descent.
+const MAX_SUPPORTED_ALTITUDE_M: f64 = 9_000_000.0;
+/// Oriented cameras sit `altitude / cos(pitch)` from their target. The terrain
+/// runtime contract bounds render-space distances and clip planes at
+/// 10,000 km, so the camera-to-target distance keeps a far-plane margin.
+const MAX_CAMERA_TARGET_DISTANCE_M: f64 = 9_800_000.0;
 const DEFAULT_WAYPOINT_COUNT: usize = 25;
 const GPU_VISIBLE_BUDGET: u64 = 64 * 1024 * 1024;
 /// Globe clipmap rings. The target-LOD leaf footprint covers the centre and
@@ -78,7 +84,7 @@ pub struct GlobeScene {
 #[pymethods]
 impl GlobeScene {
     #[new]
-    #[pyo3(signature = (cog_source, target_lon, target_lat, target_name, material_set=None, env_maps=None, params=None))]
+    #[pyo3(signature = (cog_source, target_lon, target_lat, target_name, material_set=None, env_maps=None, params=None, earth_texture=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
@@ -89,8 +95,10 @@ impl GlobeScene {
         material_set: Option<Py<crate::render::material_set::MaterialSet>>,
         env_maps: Option<Py<crate::lighting::ibl_wrapper::IBL>>,
         params: Option<Py<crate::terrain::render_params::TerrainRenderParams>>,
+        earth_texture: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         validate_target(target_lon, target_lat, target_name)?;
+        let earth_texture = earth_texture.map(extract_earth_texture).transpose()?;
         let cog_source = extract_source_path(py, cog_source)?;
         if cog_source.trim().is_empty() {
             return Err(PyValueError::new_err("cog_source must not be empty"));
@@ -188,6 +196,11 @@ impl GlobeScene {
                 format!("terrain renderer unavailable: {error}"),
             )
         })?;
+        if let Some((width, height, rgba)) = &earth_texture {
+            renderer
+                .set_orbis_earth_texture(*width, *height, rgba)
+                .map_err(|error| PyValueError::new_err(format!("earth_texture: {error:#}")))?;
+        }
         renderer.enable_height_streaming_cog_globe(
             &dataset,
             terrain_extent_m,
@@ -1125,6 +1138,57 @@ fn parse_waypoint(value: &Bound<'_, PyAny>) -> PyResult<Waypoint> {
     ))
 }
 
+/// Validate an equirectangular Earth texture before any GPU work: a C- or
+/// F-ordered uint8 array shaped (height, width, 3|4) with width == 2 * height
+/// (row 0 = 90 N, column 0 = 180 W). Returns RGBA8 bytes.
+fn extract_earth_texture(value: &Bound<'_, PyAny>) -> PyResult<(u32, u32, Vec<u8>)> {
+    let array = value
+        .extract::<numpy::PyReadonlyArray3<'_, u8>>()
+        .map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "earth_texture must be a uint8 numpy array shaped (height, width, 3 or 4)",
+            )
+        })?;
+    let view = array.as_array();
+    let (height, width, channels) = view.dim();
+    earth_texture_rgba(height, width, channels, |y, x, c| view[[y, x, c]])
+        .map_err(PyValueError::new_err)
+}
+
+fn earth_texture_rgba(
+    height: usize,
+    width: usize,
+    channels: usize,
+    sample: impl Fn(usize, usize, usize) -> u8,
+) -> Result<(u32, u32, Vec<u8>), String> {
+    if channels != 3 && channels != 4 {
+        return Err(format!(
+            "earth_texture must have 3 (RGB) or 4 (RGBA) channels, got {channels}"
+        ));
+    }
+    if height < 2 || width != height * 2 {
+        return Err(format!(
+            "earth_texture must be equirectangular with width == 2 * height, got {width}x{height}"
+        ));
+    }
+    let max_width = crate::terrain::renderer::ORBIS_EARTH_TEXTURE_MAX_WIDTH as usize;
+    if width > max_width {
+        return Err(format!(
+            "earth_texture width {width} exceeds the supported maximum {max_width}"
+        ));
+    }
+    let mut rgba = Vec::with_capacity(width * height * 4);
+    for y in 0..height {
+        for x in 0..width {
+            for c in 0..3 {
+                rgba.push(sample(y, x, c));
+            }
+            rgba.push(u8::MAX);
+        }
+    }
+    Ok((width as u32, height as u32, rgba))
+}
+
 fn validate_waypoint(
     lon: f64,
     lat: f64,
@@ -1135,7 +1199,7 @@ fn validate_waypoint(
     validate_target(lon, lat, "waypoint")?;
     if !altitude.is_finite() || !(0.0..=MAX_SUPPORTED_ALTITUDE_M).contains(&altitude) {
         return Err(PyValueError::new_err(
-            "waypoint altitude must be finite and in [0, 408000] metres",
+            "waypoint altitude must be finite and in [0, 9000000] metres",
         ));
     }
     if !heading.is_finite() {
@@ -1145,6 +1209,12 @@ fn validate_waypoint(
         return Err(PyValueError::new_err(
             "waypoint pitch must be finite and in [0, 90) degrees",
         ));
+    }
+    let camera_distance = altitude / pitch.to_radians().cos();
+    if camera_distance > MAX_CAMERA_TARGET_DISTANCE_M {
+        return Err(PyValueError::new_err(format!(
+            "waypoint camera sits {camera_distance:.0} m from its target (altitude / cos(pitch)); the maximum is {MAX_CAMERA_TARGET_DISTANCE_M:.0} m"
+        )));
     }
     Ok(Waypoint {
         lon,
@@ -1262,6 +1332,17 @@ pub fn register_globe_scene_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn earth_texture_validation_is_equirectangular_rgb_or_rgba() {
+        let (w, h, rgba) = earth_texture_rgba(2, 4, 3, |y, x, c| (y * 100 + x * 10 + c) as u8).unwrap();
+        assert_eq!((w, h), (4, 2));
+        assert_eq!(&rgba[..8], &[0, 1, 2, 255, 10, 11, 12, 255]);
+        assert!(earth_texture_rgba(2, 3, 3, |_, _, _| 0).unwrap_err().contains("width == 2 * height"));
+        assert!(earth_texture_rgba(1, 2, 4, |_, _, _| 0).is_err());
+        assert!(earth_texture_rgba(2, 4, 2, |_, _, _| 0).unwrap_err().contains("channels"));
+        assert!(earth_texture_rgba(8193, 16386, 3, |_, _, _| 0).unwrap_err().contains("maximum"));
+    }
 
     #[test]
     fn default_waypoints_are_exact_logarithmic_iss_to_ground() {

@@ -223,7 +223,7 @@ def test_entire_custom_path_is_validated_before_any_render():
 
 def test_extreme_altitude_rejects_without_mutating_scene():
     scene = f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier")
-    with pytest.raises(ValueError, match="altitude.*408000") as caught:
+    with pytest.raises(ValueError, match="altitude.*9000000") as caught:
         scene.fly_to(RAINIER_LON, RAINIER_LAT, 1.0e300)
     message = str(caught.value)
     assert RAINIER.name in message
@@ -236,6 +236,28 @@ def test_extreme_altitude_rejects_without_mutating_scene():
     assert scene.rendered_waypoint_count == 0
     with pytest.raises(RuntimeError, match="snapshot.*render"):
         scene.snapshot()
+
+
+@pytest.mark.parametrize(
+    ("texture", "error", "message"),
+    [
+        (np.zeros((4, 8), np.uint8), TypeError, "uint8 numpy array"),
+        (np.zeros((4, 8, 3), np.float32), TypeError, "uint8 numpy array"),
+        (np.zeros((4, 6, 3), np.uint8), ValueError, "width == 2 \* height"),
+        (np.zeros((4, 8, 2), np.uint8), ValueError, "channels"),
+    ],
+)
+def test_earth_texture_is_validated_before_gpu(texture, error, message):
+    with pytest.raises(error, match=message):
+        f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier", earth_texture=texture)
+
+
+def test_oblique_camera_distance_is_bounded_before_render():
+    scene = f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier")
+    with pytest.raises(ValueError, match="from its target.*maximum"):
+        scene.fly_to(RAINIER_LON, RAINIER_LAT, 8_000_000.0, 0.0, 60.0)
+    assert scene.current_position is None
+    assert scene.rendered_waypoint_count == 0
 
 
 def test_default_descent_contract_is_logarithmic_and_exact():

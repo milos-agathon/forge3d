@@ -293,3 +293,36 @@ def test_source_nodata_outline_replaces_the_bounding_box() -> None:
     # Switzerland fills well under 80% of its bounding box; nodata rendered
     # as terrain used to fill the whole DEM rectangle (or a world-tile blob).
     assert fill < 0.8
+
+
+@pytest.mark.offscreen
+def test_earth_texture_is_registered_to_longitude_and_latitude() -> None:
+    _require_orbis_gpu()
+    # Split at the prime meridian and at 30 N (row 0 = 90 N, column 0 = 180 W):
+    # north-west red, north-east green, south-west blue, south-east yellow.
+    texture = np.zeros((72, 144, 3), np.uint8)
+    split = 24  # 90 N - 24 * 2.5 degrees = 30 N
+    texture[:split, :72] = (255, 0, 0)
+    texture[:split, 72:] = (0, 255, 0)
+    texture[split:, :72] = (0, 0, 255)
+    texture[split:, 72:] = (255, 255, 0)
+    scene = f3d.GlobeScene(
+        SWISS_DEM, JUNGFRAU_LON, JUNGFRAU_LAT, "Jungfrau", earth_texture=texture
+    )
+    # North-up, straight down from 7,500 km over Switzerland (8.2 E, 46.8 N).
+    frame = scene.fly_to(8.2, 46.8, 7_500_000.0, 0.0, 0.0).to_numpy()[..., :3].astype(int)
+    height, width = frame.shape[:2]
+    cy, cx = height // 2, width // 2
+    radius = int(0.42 * height)  # the Earth disc half-height at 7,500 km
+
+    def dominant(y: int, x: int) -> str:
+        r, g, b = frame[y - 2 : y + 3, x - 2 : x + 3].reshape(-1, 3).mean(0)
+        if r > 1.5 * b and g > 1.5 * b:
+            return "yellow"
+        return ("red", "green", "blue")[int(np.argmax((r, g, b)))]
+
+    # West of the prime meridian (40+ degrees west of Switzerland) on the left,
+    # east of it on the right, south of 30 N (North Africa) at the bottom.
+    assert dominant(cy, cx - int(0.8 * radius)) == "red"
+    assert dominant(cy, cx + int(0.8 * radius)) == "green"
+    assert dominant(cy + int(0.9 * radius), cx) == "yellow"

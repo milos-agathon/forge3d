@@ -28,8 +28,14 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Globe views now reach across the whole source DEM: coarse context tiles
   fill the outer clipmap rings, and COG nodata (the `GDAL_NODATA` tag) is
   honoured, so a country-wide DEM shows its real outline on a sun-lit Earth
-  with an atmosphere rim instead of a filled rectangle. `examples/orbis_swiss_alps_descent.py`
-  flies from orbit to the Jungfrau wall. (#141)
+  with an atmosphere rim instead of a filled rectangle. (#141)
+- `GlobeScene(earth_texture=...)` colours the Earth outside the terrain source
+  from an equirectangular image (e.g. a global elevation map), lit by the same
+  sun as the terrain, and the camera can now start up to 9,000 km out, far
+  enough to frame the whole visible Earth. `examples/orbis_swiss_alps_descent.py`
+  opens on a whole-Earth view coloured with Crameri's *fes* palette (NOAA
+  ETOPO 2022 outside Switzerland) and flies down onto the Eiger, Moench and
+  Jungfrau. (#141)
 
 ### Fixed
 - Globe terrain shading: height normals are now built in each fragment's
