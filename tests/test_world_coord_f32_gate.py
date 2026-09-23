@@ -29,8 +29,6 @@ SANCTIONED_DD_SPLITS = {
     ),
 }
 
-# Updated only after reviewing the complete inventory printed by a failure.
-# The digest includes (file, function, operation, ordinal, normalized statement).
 # The db06b15f freeze below is the reviewed baseline the TERMINUS reader,
 # ANAMNESIS, and HELIOS records describe; LATER_REVIEWED_TRANSITIONS chains it
 # to the current EXPECTED_CONVERSION_COUNT/SHA256.
@@ -62,8 +60,17 @@ REVIEWED_BASELINE_COUNT = 1545
 REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132ba79d35ee065"
 
 # Current freeze: the baseline plus every LATER_REVIEWED_TRANSITIONS entry.
-EXPECTED_CONVERSION_COUNT = 1743
-EXPECTED_CONVERSION_SHA256 = "d160831b8a8d1b65b82582a1dd881c12077bbd2d49c6a3042fccca3d2407b477"
+# ORBIS (merged onto this tree) moves the two reviewed ring-index attribute
+# casts from `new`/`skirt` into `with_position`/`skirt_from`, and adds reviewed
+# conversions for its native globe scene, physical GPU probe boundary, and
+# crack/jitter metric surfaces. Those inputs are bounded render dimensions,
+# normalized overview UVs, telemetry, the validated 0..408 km camera altitude,
+# normalized crack-sampling ratios, or the deliberately naive f32 precision
+# control; ECEF world positions remain f64 until conversion through the active
+# Anchor, and Anchor remains the sole production world-position narrowing
+# owner.
+EXPECTED_CONVERSION_COUNT = 1797
+EXPECTED_CONVERSION_SHA256 = "e92ccc82c4453865d276659642a1aafdf79357a828325d5bcfbc490004eb3ed9"
 
 # The current tree adds the full-frame camera fields, the bounded inverse
 # edge-event certificate, and the accompanying runtime-contract observations.
@@ -74,12 +81,13 @@ EXPECTED_CONVERSION_SHA256 = "d160831b8a8d1b65b82582a1dd881c12077bbd2d49c6a3042f
 REVIEWED_CURRENT_TREE = {
     "count": EXPECTED_CONVERSION_COUNT,
     "digest": EXPECTED_CONVERSION_SHA256,
-    "added_count": 152,
-    "removed_count": 52,
+    "added_count": 225,
+    "removed_count": 71,
     "scopes": (
         "full-frame camera uniforms and runtime-contract telemetry",
         "AETHER TerrainStatistics layout",
         "DIFFERENTIA certified inverse edge events",
+        "ORBIS native globe scene and physical probe boundary",
     ),
 }
 
@@ -607,8 +615,8 @@ def test_historical_transition_ledger_and_current_freeze_are_consistent():
     current = REVIEWED_CURRENT_TREE
     assert current["count"] == EXPECTED_CONVERSION_COUNT
     assert current["digest"] == EXPECTED_CONVERSION_SHA256
-    assert current["added_count"] - current["removed_count"] == 100
-    assert len(current["scopes"]) == 3
+    assert current["added_count"] - current["removed_count"] == current["count"] - previous_count
+    assert len(current["scopes"]) == 4
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():

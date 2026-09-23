@@ -266,6 +266,39 @@ impl IBL {
 }
 
 impl IBL {
+    /// Deterministic in-memory environment used by native orchestration APIs
+    /// when callers do not supply an HDR. This is real radiance input uploaded
+    /// through the ordinary IBL pipeline, not a render-result fallback.
+    #[cfg(all(feature = "enable-globe", feature = "extension-module"))]
+    pub(crate) fn neutral_orbis() -> Self {
+        let width = 8;
+        let height = 4;
+        let mut data = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            let t = y as f32 / (height - 1) as f32;
+            let value = 0.08 + 0.22 * (1.0 - t);
+            for _ in 0..width {
+                data.extend_from_slice(&[value, value * 1.02, value * 1.08]);
+            }
+        }
+        let quality = crate::core::ibl::IBLQuality::Low;
+        Self {
+            environment_path: "<orbis-neutral-ibl>".to_string(),
+            intensity: 1.0,
+            rotation_deg: 0.0,
+            hdr_image: Some(Arc::new(crate::formats::hdr::HdrImage {
+                width,
+                height,
+                data,
+            })),
+            quality,
+            use_auto_quality: false,
+            gpu_state: Arc::new(Mutex::new(None)),
+            base_resolution: quality.base_environment_size(),
+            cache_dir: None,
+        }
+    }
+
     /// Get reference to HDR image
     pub fn hdr_image(&self) -> Option<&Arc<crate::formats::hdr::HdrImage>> {
         self.hdr_image.as_ref()

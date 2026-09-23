@@ -14,6 +14,10 @@ impl TerrainScene {
     ) -> Result<Self> {
         let allocation_owner = crate::core::resource_tracker::AllocationOwner::new();
         let _allocation_scope = allocation_owner.activate();
+        let height_page_table_fallback_buffer = {
+            let _height_scope = allocation_owner.activate_group("orbis.height");
+            crate::terrain::page_table::create_disabled_page_table(device.as_ref())?
+        };
         let base_layouts = create_base_bind_group_layouts(device.as_ref());
         let bind_group_layout = base_layouts.bind_group_layout;
         let ibl_bind_group_layout = base_layouts.ibl_bind_group_layout;
@@ -497,6 +501,80 @@ impl TerrainScene {
         let shadow_depth_pipeline =
             Self::create_shadow_depth_pipeline(device.as_ref(), &shadow_depth_bind_group_layout);
 
+        #[cfg(feature = "enable-globe")]
+        let orbis_globe_background_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("orbis.globe.background.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        #[cfg(feature = "enable-globe")]
+        let orbis_globe_background_uniform = tracked_create_buffer(
+            &device,
+            &wgpu::BufferDescriptor {
+                label: Some("orbis.globe.background.uniform"),
+                size: std::mem::size_of::<super::orbis_globe_background::OrbisGlobeUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        #[cfg(feature = "enable-globe")]
+        let (orbis_earth_texture, orbis_earth_view) =
+            super::orbis_globe_background::create_orbis_earth_texture(
+                &device,
+                &queue,
+                1,
+                1,
+                &[9, 24, 31, 255],
+            )
+            ?;
+        #[cfg(feature = "enable-globe")]
+        let orbis_earth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("orbis.globe.earth-sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        #[cfg(feature = "enable-globe")]
+        let orbis_globe_background_bind_group =
+            super::orbis_globe_background::create_orbis_globe_background_bind_group(
+                &device,
+                &orbis_globe_background_layout,
+                &orbis_globe_background_uniform,
+                &orbis_earth_view,
+                &orbis_earth_sampler,
+            );
+
         let tracker = crate::core::memory_tracker::global_tracker();
         tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false)?;
         tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false)?;
@@ -620,6 +698,7 @@ impl TerrainScene {
             _vt_page_table_fallback_texture: vt_page_table_fallback_texture,
             vt_page_table_fallback_view,
             vt_feedback_fallback_buffer,
+            height_page_table_fallback_buffer,
             vt_frame_counters_buffer,
             vt_atlas_sampler,
             probe_grid_uniform_buffer,
@@ -653,6 +732,24 @@ impl TerrainScene {
             aov_pipeline_output_mask: Mutex::new(0),
             aov_pipeline_source_id: Mutex::new(false),
             aov_pipeline_clipmap: Mutex::new(false),
+            #[cfg(feature = "enable-globe")]
+            orbis_coverage_pipeline: Mutex::new(None),
+            #[cfg(feature = "enable-globe")]
+            orbis_globe_background_layout,
+            #[cfg(feature = "enable-globe")]
+            orbis_globe_background_uniform,
+            #[cfg(feature = "enable-globe")]
+            orbis_globe_background_bind_group,
+            #[cfg(feature = "enable-globe")]
+            orbis_earth_texture,
+            #[cfg(feature = "enable-globe")]
+            orbis_earth_view,
+            #[cfg(feature = "enable-globe")]
+            orbis_earth_sampler,
+            #[cfg(feature = "enable-globe")]
+            orbis_earth_textured: false,
+            #[cfg(feature = "enable-globe")]
+            orbis_globe_background_pipeline: Mutex::new(None),
             _dof_renderer: Mutex::new(None),
             offline_state: Mutex::new(None),
             #[cfg(feature = "enable-gpu-instancing")]
@@ -672,6 +769,13 @@ impl TerrainScene {
             terrain_minmax_pyramid: None,
             culling_stats: crate::terrain::culling::two_phase::CullingStats::default(),
             height_streaming: None,
+            height_detail_blend_override: None,
+            #[cfg(feature = "enable-globe")]
+            orbis_capture_request: None,
+            #[cfg(feature = "enable-globe")]
+            orbis_pending_capture: None,
+            #[cfg(feature = "enable-globe")]
+            orbis_descent_active: false,
             gpu_timing: Mutex::new(None),
             _tracked_scene_textures: tracked_scene_textures,
         })

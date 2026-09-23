@@ -16,7 +16,7 @@ mod range_stats;
 pub mod py_bindings;
 
 pub use cache::{CogCacheStats, CogTileCache};
-pub use cog_reader::CogHeightReader;
+pub use cog_reader::{CogHeightReader, HeightTileRequest};
 pub use error::CogError;
 pub use ifd_parser::{parse_cog_header, CogHeader, IfdEntry};
 pub use range_reader::RangeReader;

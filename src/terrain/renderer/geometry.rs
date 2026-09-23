@@ -16,7 +16,7 @@ use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use crate::terrain::clipmap::{
     gpu_lod::{
         ClipmapDrawInstance, GpuLodConfig, GpuLodDrawResources, GpuLodSelector,
-        IndirectDrawTemplate, TileInfo,
+        IndirectDrawTemplate, LodSelectionProvenance, SelectionReadbackTicket, TileInfo,
     },
     ClipmapConfig,
 };
@@ -24,7 +24,7 @@ use crate::terrain::clipmap::{
 /// Cache key for the generated clipmap mesh. Regeneration only happens when
 /// the clipmap configuration, terrain span, or streaming center changes —
 /// not every frame.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(in crate::terrain::renderer) struct ClipmapGeometryKey {
     ring_count: u32,
     ring_resolution: u32,
@@ -41,6 +41,45 @@ pub(in crate::terrain::renderer) struct ClipmapGeometryKey {
     height_range_bits: (u32, u32),
     height_curve_hash: u64,
     z_scale_bits: u32,
+    readiness: Vec<u8>,
+    globe_center_anchor_bits: Option<([u64; 3], [u64; 3])>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::terrain::renderer) struct EncodedLodDraw<'a> {
+    pub(in crate::terrain::renderer) resources: &'a GpuLodDrawResources,
+    pub(in crate::terrain::renderer) selection: StagedLodSelection,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::terrain::renderer) struct StagedLodSelection {
+    pub(in crate::terrain::renderer) provenance: LodSelectionProvenance,
+    pub(in crate::terrain::renderer) ticket: Option<SelectionReadbackTicket>,
+}
+
+fn lod_selection_provenance(
+    cache_key: &ClipmapGeometryKey,
+    view_proj: glam::Mat4,
+    camera_pos: glam::Vec3,
+    height_bounds: (f32, f32),
+    frustum_culling: bool,
+) -> LodSelectionProvenance {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    cache_key.hash(&mut hasher);
+    view_proj
+        .to_cols_array()
+        .iter()
+        .for_each(|value| value.to_bits().hash(&mut hasher));
+    camera_pos
+        .to_array()
+        .iter()
+        .for_each(|value| value.to_bits().hash(&mut hasher));
+    height_bounds.0.to_bits().hash(&mut hasher);
+    height_bounds.1.to_bits().hash(&mut hasher);
+    frustum_culling.hash(&mut hasher);
+    LodSelectionProvenance(hasher.finish())
 }
 
 impl ClipmapGeometryKey {
@@ -56,6 +95,8 @@ impl ClipmapGeometryKey {
         height_range: (f32, f32),
         height_curve_hash: u64,
         z_scale: f32,
+        readiness: Vec<crate::terrain::clipmap::geomorph::TileReadiness>,
+        globe_identity: Option<(glam::DVec3, glam::DVec3)>,
     ) -> Self {
         Self {
             ring_count: config.ring_count,
@@ -73,6 +114,13 @@ impl ClipmapGeometryKey {
             height_range_bits: (height_range.0.to_bits(), height_range.1.to_bits()),
             height_curve_hash,
             z_scale_bits: z_scale.to_bits(),
+            readiness: readiness
+                .into_iter()
+                .map(|state| u8::from(state.fine_resident) | (u8::from(state.coarse_resident) << 1))
+                .collect(),
+            globe_center_anchor_bits: globe_identity.map(|(center, anchor)| {
+                (center.to_array().map(f64::to_bits), anchor.to_array().map(f64::to_bits))
+            }),
         }
     }
 }
@@ -95,12 +143,34 @@ pub(in crate::terrain::renderer) enum TerrainGeometryProvider {
         draw_templates: Vec<IndirectDrawTemplate>,
         variant_count: u32,
         cache_key: ClipmapGeometryKey,
+        #[cfg(feature = "enable-globe")]
+        globe_frame: Option<crate::terrain::clipmap::globe::GlobeFrame>,
     },
 }
 
 impl TerrainGeometryProvider {
     pub(in crate::terrain::renderer) fn is_clipmap(&self) -> bool {
         matches!(self, Self::Clipmap { .. })
+    }
+
+    pub(in crate::terrain::renderer) fn mark_lod_selection_submitted(
+        &self,
+        ticket: SelectionReadbackTicket,
+    ) -> bool {
+        match self {
+            Self::Clipmap { lod_resources, .. } => lod_resources.mark_selection_submitted(ticket),
+            Self::Grid { .. } => false,
+        }
+    }
+
+    pub(in crate::terrain::renderer) fn cancel_lod_selection(
+        &self,
+        ticket: SelectionReadbackTicket,
+    ) -> bool {
+        match self {
+            Self::Clipmap { lod_resources, .. } => lod_resources.cancel_selection(ticket),
+            Self::Grid { .. } => false,
+        }
     }
 
     /// Issue the draw for this geometry. The caller must have selected the
@@ -131,27 +201,47 @@ impl TerrainGeometryProvider {
         params: &crate::terrain::render_params::TerrainRenderParams,
         height_bounds: (f32, f32),
         first_instance: bool,
-    ) -> Option<&GpuLodDrawResources> {
+    ) -> Result<Option<EncodedLodDraw<'_>>> {
         let Self::Clipmap {
             lod_selector,
             lod_resources,
+            cache_key,
+            #[cfg(feature = "enable-globe")]
+            lod_tiles,
+            #[cfg(feature = "enable-globe")]
+            globe_frame,
             ..
         } = self
         else {
-            return None;
+            return Ok(None);
         };
         let (eye, view, proj) = TerrainScene::build_camera_matrices(params);
-        lod_selector.encode_indirect(
-            queue,
-            encoder,
-            lod_resources,
-            proj * view,
-            eye,
-            first_instance,
-            height_bounds,
-            params.culling != "none",
+        let view_proj = proj * view;
+        let frustum_culling = params.culling != "none";
+        let provenance =
+            lod_selection_provenance(cache_key, view_proj, eye, height_bounds, frustum_culling);
+        #[cfg(feature = "enable-globe")]
+        let ticket = if let Some(frame) = globe_frame.as_ref() {
+            lod_selector.encode_indirect_globe_tracked(
+                queue, encoder, lod_resources, lod_tiles, view_proj, frame,
+                first_instance, height_bounds, frustum_culling, provenance,
+            )
+            .map_err(|error| anyhow!("planetary GPU LOD setup failed: {error}"))?
+        } else {
+            lod_selector.encode_indirect_tracked(
+                queue, encoder, lod_resources, view_proj, eye, first_instance,
+                height_bounds, frustum_culling, provenance,
+            )
+        };
+        #[cfg(not(feature = "enable-globe"))]
+        let ticket = lod_selector.encode_indirect_tracked(
+            queue, encoder, lod_resources, view_proj, eye, first_instance,
+            height_bounds, frustum_culling, provenance,
         );
-        Some(lod_resources)
+        Ok(Some(EncodedLodDraw {
+            resources: lod_resources,
+            selection: StagedLodSelection { provenance, ticket },
+        }))
     }
 
     pub(in crate::terrain::renderer) fn draw_indirect<'p>(
@@ -322,7 +412,8 @@ fn append_clipmap_lod_variant(
     terrain_span: f32,
     region_index: usize,
     lod: u32,
-) -> crate::terrain::clipmap::level::MeshBounds {
+    globe_level: Option<&crate::terrain::clipmap::level::ClipmapLevel>,
+) -> Result<crate::terrain::clipmap::level::MeshBounds, String> {
     let resolution = if region_index == 0 {
         config.center_resolution
     } else {
@@ -332,7 +423,7 @@ fn append_clipmap_lod_variant(
     .unwrap_or(0)
     .max(2);
     let base_cell_size = terrain_span / (config.center_resolution.max(1) as f32 * 8.0);
-    let (vertices, mut indices) = if region_index == 0 {
+    let (mut vertices, mut indices) = if region_index == 0 {
         crate::terrain::clipmap::make_center_block(
             resolution,
             center,
@@ -341,16 +432,47 @@ fn append_clipmap_lod_variant(
         )
     } else {
         let ring_index = region_index as u32 - 1;
+        #[cfg(feature = "enable-globe")]
+        let (inner, outer) = if globe_level.is_some() {
+            crate::terrain::clipmap::ring::globe_ring_bounds(
+                ring_index,
+                base_cell_size,
+                config.center_resolution,
+                config.ring_resolution,
+            )?
+        } else {
+            config.ring_bounds(ring_index, base_cell_size, center)
+        };
+        #[cfg(not(feature = "enable-globe"))]
         let (inner, outer) = config.ring_bounds(ring_index, base_cell_size, center);
-        let (mut vertices, mut indices) = crate::terrain::clipmap::make_ring(
-            ring_index,
-            inner,
-            outer,
+        let (mut vertices, mut indices) = if globe_level.is_some() {
+            let lattice_lod = ring_index
+                .checked_add(lod)
+                .ok_or_else(|| "clipmap LOD variant lattice level overflow".to_string())?;
+            if lattice_lod >= 31 {
+                return Err("clipmap LOD variant lattice scale overflow".to_string());
+            }
+            crate::terrain::clipmap::ring::make_ring_with_cell_size(
+                ring_index,
+                inner,
+                outer,
+                resolution,
+                center,
+                terrain_span,
+                config.morph_range,
+                base_cell_size * 2.0_f32.powi(lattice_lod as i32 + 1),
+            )
+        } else {
+            crate::terrain::clipmap::make_ring(
+                ring_index,
+                inner,
+                outer,
             resolution,
             center,
-            terrain_span,
-            config.morph_range,
-        );
+                terrain_span,
+                config.morph_range,
+            )
+        };
         crate::terrain::clipmap::geomorph::correct_seam_vertices(
             &mut vertices,
             ring_index,
@@ -360,17 +482,30 @@ fn append_clipmap_lod_variant(
                 ..Default::default()
             },
         );
-        let (skirt_vertices, skirt_indices) = crate::terrain::clipmap::make_ring_skirts(
+        #[cfg_attr(not(feature = "enable-globe"), allow(unused_mut))]
+        let (skirt_vertices, mut skirt_indices) = crate::terrain::clipmap::make_ring_skirts(
             &vertices,
             &indices,
             config.skirt_depth,
             ring_index,
             resolution as usize + 1,
         );
+        #[cfg(feature = "enable-globe")]
+        if globe_level.is_some() && ring_index + 1 == config.ring_count {
+            crate::terrain::clipmap::ring::drop_outer_boundary_skirts(
+                &vertices,
+                &mut skirt_indices,
+                outer,
+                base_cell_size * 2.0_f32.powi(ring_index as i32 + 1),
+            );
+        }
         vertices.extend(skirt_vertices);
         indices.extend(skirt_indices);
         (vertices, indices)
     };
+    if let Some(level) = globe_level {
+        level.rebase_globe_vertices(&mut vertices)?;
+    }
     let vertex_start = mesh.vertices.len() as u32;
     let index_start = mesh.indices.len() as u32;
     for index in &mut indices {
@@ -384,7 +519,7 @@ fn append_clipmap_lod_variant(
     };
     mesh.vertices.extend(vertices);
     mesh.indices.extend(indices);
-    bounds
+    Ok(bounds)
 }
 
 const HZB_CHUNKS_PER_AXIS: u32 = 32;
@@ -399,7 +534,8 @@ fn partition_region_indices(
     let mut bounds_min = glam::Vec2::splat(f32::INFINITY);
     let mut bounds_max = glam::Vec2::splat(f32::NEG_INFINITY);
     for &index in &source {
-        let p = glam::Vec2::from(mesh.vertices[index as usize].position);
+        let position = mesh.vertices[index as usize].position;
+        let p = glam::Vec2::new(position[0], position[1]);
         bounds_min = bounds_min.min(p);
         bounds_max = bounds_max.max(p);
     }
@@ -408,7 +544,10 @@ fn partition_region_indices(
     for triangle in source.chunks_exact(3) {
         let center = triangle
             .iter()
-            .map(|&index| glam::Vec2::from(mesh.vertices[index as usize].position))
+            .map(|&index| {
+                let position = mesh.vertices[index as usize].position;
+                glam::Vec2::new(position[0], position[1])
+            })
             .sum::<glam::Vec2>()
             / 3.0;
         let cell = ((center - bounds_min) / extent * HZB_CHUNKS_PER_AXIS as f32)
@@ -438,11 +577,30 @@ fn indexed_bounds(
 ) -> (glam::Vec2, glam::Vec2) {
     mesh.indices[region.index_start as usize..(region.index_start + region.index_count) as usize]
         .iter()
-        .map(|&index| glam::Vec2::from(mesh.vertices[index as usize].position))
+        .map(|&index| {
+            let position = mesh.vertices[index as usize].position;
+            glam::Vec2::new(position[0], position[1])
+        })
         .fold(
             (
                 glam::Vec2::splat(f32::INFINITY),
                 glam::Vec2::splat(f32::NEG_INFINITY),
+            ),
+            |(min, max), p| (min.min(p), max.max(p)),
+        )
+}
+
+fn indexed_bounds_3d(
+    mesh: &crate::terrain::clipmap::ClipmapMesh,
+    region: crate::terrain::clipmap::level::MeshBounds,
+) -> (glam::Vec3, glam::Vec3) {
+    mesh.indices[region.index_start as usize..(region.index_start + region.index_count) as usize]
+        .iter()
+        .map(|&index| glam::Vec3::from(mesh.vertices[index as usize].position))
+        .fold(
+            (
+                glam::Vec3::splat(f32::INFINITY),
+                glam::Vec3::splat(f32::NEG_INFINITY),
             ),
             |(min, max), p| (min.min(p), max.max(p)),
         )
@@ -576,8 +734,29 @@ impl TerrainScene {
             return Ok(());
         };
 
-        let center = self.height_streaming_center();
+        let center = self.height_streaming_center()?;
+        #[cfg(feature = "enable-globe")]
+        let globe_identity = self.height_streaming_globe_identity();
+        #[cfg(not(feature = "enable-globe"))]
+        let globe_identity = None;
         let terrain_span = params.terrain_span.max(1.0);
+        let readiness = (0..config.ring_count)
+            .map(|ring_index| {
+                if matches!(self.height_detail_blend_override, Some(blend) if blend <= 0.0) {
+                    return crate::terrain::clipmap::geomorph::TileReadiness {
+                        fine_resident: false,
+                        coarse_resident: false,
+                    };
+                }
+                self.height_streaming
+                    .as_ref()
+                    .map(|streaming| streaming.streamer.ring_readiness(ring_index))
+                    .unwrap_or(crate::terrain::clipmap::geomorph::TileReadiness {
+                        fine_resident: true,
+                        coarse_resident: true,
+                    })
+            })
+            .collect::<Vec<_>>();
         let cache_key = ClipmapGeometryKey::new(
             &config,
             terrain_span,
@@ -590,6 +769,8 @@ impl TerrainScene {
             params.decoded().clamp.height_range,
             height_curve_hash(params),
             params.z_scale,
+            readiness.clone(),
+            globe_identity,
         );
         if let Some(TerrainGeometryProvider::Clipmap {
             cache_key: existing,
@@ -602,8 +783,15 @@ impl TerrainScene {
             }
         }
 
-        let mut mesh =
-            crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span);
+        let mut mesh = match self.height_streaming.as_mut() {
+            Some(streaming) if streaming.is_globe() => streaming
+                .streamer
+                .mesh()
+                .map_err(|error| anyhow!("globe clipmap mesh generation failed: {error}"))?
+                .clone(),
+            _ => crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span)
+                .map_err(|error| anyhow!("flat clipmap mesh generation failed: {error}"))?,
+        };
         let geomorph_config = crate::terrain::clipmap::geomorph::GeomorphConfig {
             morph_range: config.morph_range,
             max_seam_gap: (terrain_span * 1e-6).max(0.001),
@@ -613,10 +801,14 @@ impl TerrainScene {
             let range =
                 bounds.vertex_start as usize..(bounds.vertex_start + bounds.vertex_count) as usize;
             crate::terrain::clipmap::geomorph::correct_seam_vertices(
-                &mut mesh.vertices[range],
+                &mut mesh.vertices[range.clone()],
                 ring_index as u32,
                 config.ring_resolution << ((ring_index as u32 + 1).min(16)),
                 &geomorph_config,
+            );
+            crate::terrain::clipmap::geomorph::apply_tile_readiness(
+                &mut mesh.vertices[range],
+                readiness[ring_index],
             );
         }
         let seam_regions = std::iter::once(mesh.center_bounds)
@@ -692,18 +884,37 @@ impl TerrainScene {
         let chunked = minmax.is_some();
         let mut lod_tiles = Vec::new();
         let mut draw_templates = Vec::new();
+        let globe_level = self
+            .height_streaming
+            .as_ref()
+            .filter(|runtime| runtime.is_globe())
+            .map(|runtime| &runtime.streamer.clipmap);
+        // Globe variants are generated around the clipmap centre, exactly as
+        // `ClipmapLevel::generate` builds the base mesh, and
+        // `rebase_globe_vertices` places them from that centre. Passing the
+        // camera-relative render centre here would apply the centre offset
+        // twice and shift every coarse variant away from its base region.
+        let variant_center = if globe_level.is_some() {
+            glam::Vec2::ZERO
+        } else {
+            center
+        };
         for (region_index, region) in regions.iter().copied().enumerate() {
             let mut variants = vec![region];
             for variant in 0..variant_count {
                 if variant != 0 {
-                    variants.push(append_clipmap_lod_variant(
-                        &mut mesh,
-                        &config,
-                        center,
-                        terrain_span,
-                        region_index,
-                        variant,
-                    ));
+                    variants.push(
+                        append_clipmap_lod_variant(
+                            &mut mesh,
+                            &config,
+                            variant_center,
+                            terrain_span,
+                            region_index,
+                            variant,
+                            globe_level,
+                        )
+                        .map_err(|error| anyhow!("clipmap LOD variant generation failed: {error}"))?,
+                    );
                 }
             }
             let variant_chunks: Vec<Vec<_>> = if chunked {
@@ -720,6 +931,8 @@ impl TerrainScene {
                     continue;
                 }
                 let (mut bounds_min, mut bounds_max) = indexed_bounds(&mesh, base_chunk);
+                let (mut globe_bounds_min, mut globe_bounds_max) =
+                    indexed_bounds_3d(&mesh, base_chunk);
                 for chunks in &variant_chunks {
                     let selected = if chunks[chunk_index].index_count == 0 {
                         base_chunk
@@ -729,6 +942,9 @@ impl TerrainScene {
                     let (variant_min, variant_max) = indexed_bounds(&mesh, selected);
                     bounds_min = bounds_min.min(variant_min);
                     bounds_max = bounds_max.max(variant_max);
+                    let (variant_min_3d, variant_max_3d) = indexed_bounds_3d(&mesh, selected);
+                    globe_bounds_min = globe_bounds_min.min(variant_min_3d);
+                    globe_bounds_max = globe_bounds_max.max(variant_max_3d);
                 }
                 let lod = region_index.saturating_sub(1) as u32;
                 let mut tile = TileInfo::new(
@@ -739,7 +955,13 @@ impl TerrainScene {
                     bounds_max,
                 );
                 if let Some(minmax) = minmax.as_ref() {
-                    let skirt = config.ring_resolution as f32 * 0.001 * params.z_scale.abs();
+                    let legacy_skirt_depth = config.ring_resolution as f32 * 0.001;
+                    let skirt = mesh
+                        .vertices
+                        .iter()
+                        .map(|vertex| vertex.skirt_depth_or(legacy_skirt_depth))
+                        .fold(0.0_f32, f32::max)
+                        * params.z_scale.abs();
                     let bounds = local_height_bounds(
                         minmax,
                         bounds_min,
@@ -754,6 +976,21 @@ impl TerrainScene {
                         skirt,
                     );
                     tile = tile.with_height_bounds(bounds.0, bounds.1);
+                }
+                #[cfg(feature = "enable-globe")]
+                if let Some(frame) = self
+                    .height_streaming
+                    .as_ref()
+                    .filter(|runtime| runtime.is_globe())
+                    .and_then(|runtime| runtime.streamer.clipmap.globe_frame())
+                {
+                    let displacement = params.decoded().clamp.height_range;
+                    let scaled = [displacement.0 * params.z_scale, displacement.1 * params.z_scale];
+                    globe_bounds_min.z += scaled[0].min(scaled[1]);
+                    globe_bounds_max.z += scaled[0].max(scaled[1]);
+                    tile = tile
+                        .with_globe_bounds(&frame, globe_bounds_min, globe_bounds_max)
+                        .map_err(|error| anyhow!("globe tile visibility bounds failed: {error}"))?;
                 }
                 // Visibility IDs use a compact dense tile index so the
                 // full-screen pass can index draw metadata without a search.
@@ -780,7 +1017,10 @@ impl TerrainScene {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.clipmap.vertex_buffer"),
                 contents: bytemuck::cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
+                // ORBIS acceptance copies the exact submitted bytes into its
+                // physical projection probe; the render still consumes this
+                // same allocation as the vertex source.
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_SRC,
             },
         )?;
         let index_buffer = tracked_create_buffer_init(
@@ -788,7 +1028,9 @@ impl TerrainScene {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.clipmap.index_buffer"),
                 contents: bytemuck::cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
+                // ORBIS acceptance copies the exact submitted index stream so
+                // its compute probe dispatches only GPU-selected vertices.
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_SRC,
             },
         )?;
         let fallback_instance = ClipmapDrawInstance::identity(lod_tiles[0].tile_id, 0);
@@ -841,6 +1083,12 @@ impl TerrainScene {
             draw_templates,
             variant_count,
             cache_key,
+            #[cfg(feature = "enable-globe")]
+            globe_frame: self
+                .height_streaming
+                .as_ref()
+                .filter(|runtime| runtime.is_globe())
+                .and_then(|runtime| runtime.streamer.clipmap.globe_frame()),
         });
         self.refresh_cpu_visibility_oracle(params, heightmap, height_dims, None)?;
         Ok(())
@@ -901,15 +1149,35 @@ impl TerrainScene {
         params: &crate::terrain::render_params::TerrainRenderParams,
         heightmap: &[f32],
         height_dims: (u32, u32),
+        rendered_provenance: Option<LodSelectionProvenance>,
     ) -> Result<()> {
-        if params.shading != "visibility" || params.culling != "frustum" {
+        let expected = (params.shading == "visibility" && params.culling == "frustum")
+            .then_some(rendered_provenance)
+            .flatten();
+        let Some(TerrainGeometryProvider::Clipmap { lod_resources, .. }) =
+            self.geometry_provider.as_ref()
+        else {
             return Ok(());
-        }
-        let selection = match self.geometry_provider.as_ref() {
-            Some(TerrainGeometryProvider::Clipmap { lod_resources, .. }) => lod_resources
-                .read_selection_blocking(self.device.as_ref(), self.queue.as_ref())
-                .map_err(anyhow::Error::msg)?,
-            _ => return Ok(()),
+        };
+        let selection = loop {
+            let Some(completed) = lod_resources
+                .try_read_selection(self.device.as_ref())
+                .map_err(anyhow::Error::msg)?
+            else {
+                break None;
+            };
+            let Some(expected) = expected else {
+                continue;
+            };
+            if let Some(selection) = completed.into_selection_for(expected) {
+                break Some(selection);
+            }
+            // A completed selection from a different camera/geometry/height
+            // frame is drained explicitly and must never be rebuilt using the
+            // current frame's inputs.
+        };
+        let Some(selection) = selection else {
+            return Ok(());
         };
         self.refresh_cpu_visibility_oracle(
             params,
@@ -932,11 +1200,113 @@ impl TerrainScene {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "enable-globe")]
+    #[test]
+    fn production_globe_ring2_ring3_mating_boundary_is_bit_identical() {
+        let config = ClipmapConfig::new(4, 32);
+        // Rainier's first fully covered overview is a latitude tile at LOD 11.
+        // This is the exact f32 terrain span used by GlobeScene production.
+        let terrain_span = 9_773.004_882_812_5_f32;
+        let radius = crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
+        let surface = glam::DVec3::new(1.0, 2.0, 3.0).normalize() * radius;
+        let camera = surface.normalize() * (radius + 6_000.0);
+        let frame = crate::terrain::clipmap::globe::GlobeFrame::globe(radius, camera).unwrap();
+        let level = crate::terrain::clipmap::ClipmapLevel::new_globe(
+            config.clone(),
+            surface,
+            frame,
+            terrain_span,
+        )
+        .unwrap();
+        let empty = crate::terrain::clipmap::level::MeshBounds {
+            vertex_start: 0,
+            vertex_count: 0,
+            index_start: 0,
+            index_count: 0,
+        };
+        let mut mesh = crate::terrain::clipmap::ClipmapMesh {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            center_bounds: empty,
+            ring_bounds: Vec::new(),
+            triangle_count: 0,
+        };
+        let ring2 = append_clipmap_lod_variant(
+            &mut mesh,
+            &config,
+            glam::Vec2::ZERO,
+            terrain_span,
+            3,
+            1,
+            Some(&level),
+        )
+        .unwrap();
+        let ring3 = append_clipmap_lod_variant(
+            &mut mesh,
+            &config,
+            glam::Vec2::ZERO,
+            terrain_span,
+            4,
+            0,
+            Some(&level),
+        )
+        .unwrap();
+        let ring2_outer = mesh.vertices[ring2.vertex_start as usize
+            ..(ring2.vertex_start + ring2.vertex_count) as usize]
+            .iter()
+            .filter(|vertex| !vertex.is_skirt() && vertex.morph_weight() == 1.0)
+            .collect::<Vec<_>>();
+        let ring3_surface = mesh.vertices[ring3.vertex_start as usize
+            ..(ring3.vertex_start + ring3.vertex_count) as usize]
+            .iter()
+            .filter(|vertex| !vertex.is_skirt() && vertex.morph_weight() == 0.0)
+            .collect::<Vec<_>>();
+
+        assert!(
+            ring2_outer.len() >= 16,
+            "production ring 2 outer polyline was unexpectedly sparse"
+        );
+        let mut matched_coarse = std::collections::BTreeSet::new();
+        for (fine_index, fine) in ring2_outer.into_iter().enumerate() {
+            let Some((coarse_index, coarse)) = ring3_surface
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| {
+                    let a_distance = (glam::Vec2::from(a.uv) - glam::Vec2::from(fine.uv)).length();
+                    let b_distance = (glam::Vec2::from(b.uv) - glam::Vec2::from(fine.uv)).length();
+                    a_distance.total_cmp(&b_distance)
+                })
+            else {
+                panic!("production ring 3 inner polyline was empty");
+            };
+            let uv_distance =
+                (glam::Vec2::from(coarse.uv) - glam::Vec2::from(fine.uv)).length();
+            assert!(
+                uv_distance <= 1.0e-6,
+                "ring 2 outer sample {fine_index} had no ring 3 mate: nearest UV distance {uv_distance}"
+            );
+            assert!(
+                matched_coarse.insert(coarse_index),
+                "two ring 2 outer samples selected the same ring 3 mate {coarse_index}"
+            );
+            assert_eq!(fine.position.map(f32::to_bits), coarse.position.map(f32::to_bits));
+            assert_eq!(fine.uv.map(f32::to_bits), coarse.uv.map(f32::to_bits));
+            // Shader production sampling is level-aware: ring 2's fully
+            // morphed outer edge and ring 3's unmorphed inner edge both read
+            // height level 3 at this exact geographic identity.
+            assert_eq!(fine.ring_index() + 1, coarse.ring_index());
+        }
+    }
+
     #[test]
     fn hzb_chunking_preserves_every_source_triangle() {
         let config = ClipmapConfig::new(4, 32);
-        let mut mesh =
-            crate::terrain::clipmap::level::clipmap_generate(&config, glam::Vec2::ZERO, 1000.0);
+        let mut mesh = crate::terrain::clipmap::level::clipmap_generate(
+            &config,
+            glam::Vec2::ZERO,
+            1000.0,
+        )
+        .unwrap();
         let region = mesh.center_bounds;
         let mut expected = mesh.indices
             [region.index_start as usize..(region.index_start + region.index_count) as usize]

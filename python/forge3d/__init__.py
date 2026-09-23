@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.37.1"
+__version__ = "1.38.0"
 version = __version__
 
 import numpy as np
@@ -67,6 +67,8 @@ _NATIVE_ONLY_EXPORTS = (
         "OverlayLayer",
         "TerrainRenderParams",
         "TerrainRenderer",
+        "GlobeScene",
+        "GlobeMetrics",
         "Frame",
         "AovFrame",
         "HdrFrame",
@@ -731,6 +733,8 @@ __all__ = [
     "OverlayLayer",
     "TerrainRenderParams",
     "TerrainRenderer",
+    "GlobeScene",
+    "GlobeMetrics",
     "Frame",
     "AovFrame",
     "HdrFrame",

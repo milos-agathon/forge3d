@@ -45,9 +45,14 @@ impl CpuVisibilityOracle {
         let decoded = params.decoded();
         let (h_min, h_max) = decoded.clamp.height_range;
         let h_center = (h_min + h_max) * 0.5;
-        let skirt = super::core::clipmap_camera_config(&params.camera_mode)
+        let legacy_skirt_depth = super::core::clipmap_camera_config(&params.camera_mode)
             .map(|config| config.ring_resolution as f32 * 0.001)
             .unwrap_or(0.0);
+        let skirt = clipmap
+            .vertices
+            .iter()
+            .map(|vertex| vertex.skirt_depth_or(legacy_skirt_depth))
+            .fold(0.0_f32, f32::max);
         let vertices = clipmap
             .vertices
             .iter()
@@ -292,7 +297,7 @@ fn sample_clipmap_height(
     fine + (coarse - fine) * morph
 }
 
-fn apply_height_curve(
+pub(crate) fn apply_height_curve(
     raw: f32,
     height_range: (f32, f32),
     params: &crate::terrain::render_params::TerrainRenderParams,
@@ -971,6 +976,17 @@ impl TerrainVisibilityBuffer {
 
 #[cfg(feature = "extension-module")]
 impl super::TerrainScene {
+    /// ORBIS descent frames must remain submission-only. Visibility counters
+    /// are diagnostic data that the descent does not consume, so staging them
+    /// would only force the blocking `finish_frame` readback below.
+    pub(super) fn runtime_visibility_stats_enabled(&self) -> bool {
+        #[cfg(feature = "enable-globe")]
+        if self.orbis_descent_active {
+            return false;
+        }
+        true
+    }
+
     pub(super) fn create_visibility_resolve_bind_group_layout(
         device: &wgpu::Device,
     ) -> wgpu::BindGroupLayout {

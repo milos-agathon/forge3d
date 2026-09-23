@@ -8,7 +8,7 @@ use super::ifd_parser::{
     TIFF_PREDICTOR_HORIZONTAL, TIFF_PREDICTOR_NONE,
 };
 use super::range_reader::RangeReader;
-use crate::terrain::page_table::HeightReader;
+use crate::terrain::page_table::{HeightRead, HeightReader};
 use crate::terrain::tiling::TileBounds;
 use glam::Vec2;
 use std::path::PathBuf;
@@ -19,10 +19,173 @@ pub struct CogHeightReader {
     reader: Arc<RangeReader>,
     header: CogHeader,
     cache: Arc<CogTileCache>,
-    runtime: tokio::runtime::Handle,
+    runtime: Arc<tokio::runtime::Runtime>,
+    planetary_bounds: (f64, f64, f64, f64),
+    source_crs: crate::gis::raster_write::CrsSpec,
+    wgs84_crs: crate::gis::raster_write::CrsSpec,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeightTileRequest {
+    pub tile_id: crate::terrain::tiling::TileId,
+    pub output_width: u32,
+    pub output_height: u32,
+}
+
+fn local_file_url_path(url: &str) -> String {
+    let raw = url.strip_prefix("file://").unwrap_or(url);
+    #[cfg(windows)]
+    let raw = if raw.as_bytes().get(2) == Some(&b':') && raw.starts_with('/') {
+        &raw[1..]
+    } else {
+        raw
+    };
+    raw.to_string()
+}
+
+#[cfg(test)]
+mod local_path_tests {
+    use super::local_file_url_path;
+
+    #[test]
+    fn standard_windows_file_uri_becomes_drive_path() {
+        #[cfg(windows)]
+        assert_eq!(local_file_url_path("file:///D:/data/terrain.tif"), "D:/data/terrain.tif");
+        #[cfg(not(windows))]
+        assert_eq!(
+            local_file_url_path("file:///data/terrain.tif"),
+            "/data/terrain.tif"
+        );
+    }
+
+}
+
+fn validate_planetary_geography(
+    header: &CogHeader,
+) -> Result<
+    (
+        (f64, f64, f64, f64),
+        crate::gis::raster_write::CrsSpec,
+        crate::gis::raster_write::CrsSpec,
+    ),
+    CogError,
+> {
+    let ifd = header
+        .full_resolution()
+        .ok_or_else(|| CogError::InvalidIfd("COG contains no full-resolution IFD".to_string()))?;
+    let georef = header.geo_reference()?;
+    let source = crate::gis::raster_write::CrsSpec::from_string(format!("EPSG:{}", georef.epsg))
+        .map_err(|error| CogError::InvalidIfd(format!("unsupported COG CRS: {error}")))?;
+    let wgs84 = crate::gis::raster_write::CrsSpec::from_string("EPSG:4326".to_string())
+        .map_err(|error| CogError::InvalidIfd(error.to_string()))?;
+    crate::gis::crs::transform_pair_supported(&source, &wgs84)
+        .map_err(|error| CogError::InvalidIfd(format!("unsupported planetary COG CRS: {error}")))?;
+    let mut min_lon = f64::INFINITY;
+    let mut min_lat = f64::INFINITY;
+    let mut max_lon = f64::NEG_INFINITY;
+    let mut max_lat = f64::NEG_INFINITY;
+    // Projected image edges can curve in WGS84 and rotated affine datasets do
+    // not have axis-aligned model-space corners. Densify every image edge so
+    // the advertised planetary bounds retain interior extrema.
+    for step in 0..=32 {
+        let t = f64::from(step) / 32.0;
+        for (pixel_x, pixel_y) in [
+            (t * f64::from(ifd.width), 0.0),
+            (t * f64::from(ifd.width), f64::from(ifd.height)),
+            (0.0, t * f64::from(ifd.height)),
+            (f64::from(ifd.width), t * f64::from(ifd.height)),
+        ] {
+            let (model_x, model_y) = georef.pixel_to_model(pixel_x, pixel_y)?;
+            let (lon, lat) =
+                crate::gis::crs::transform_point(model_x, model_y, &source, &wgs84).map_err(
+                    |error| {
+                        CogError::InvalidIfd(format!(
+                            "COG georeference cannot map to WGS84: {error}"
+                        ))
+                    },
+                )?;
+            if !lon.is_finite() || !lat.is_finite() || !(-90.0..=90.0).contains(&lat) {
+                return Err(CogError::InvalidIfd(
+                    "COG georeference produced invalid planetary longitude/latitude".to_string(),
+                ));
+            }
+            min_lon = min_lon.min(lon);
+            min_lat = min_lat.min(lat);
+            max_lon = max_lon.max(lon);
+            max_lat = max_lat.max(lat);
+        }
+    }
+    Ok(((min_lon, min_lat, max_lon, max_lat), source, wgs84))
+}
+
+/// A stored height sample is usable when it is finite, within any physical
+/// planetary elevation, and not the dataset's GDAL_NODATA sentinel.
+fn is_valid_height_sample(height: f32, nodata: Option<f64>) -> bool {
+    if !height.is_finite() || height.abs() >= 1.0e6 {
+        return false;
+    }
+    match nodata {
+        Some(sentinel) if sentinel.is_nan() => true,
+        Some(sentinel) => f64::from(height) != sentinel && height != sentinel as f32,
+        None => true,
+    }
 }
 
 impl CogHeightReader {
+    fn full_resolution_pixel_bounds(
+        &self,
+        lonlat_bounds: (f64, f64, f64, f64),
+    ) -> Result<Option<(f64, f64, f64, f64)>, CogError> {
+        let (lon_min, lat_min, lon_max, lat_max) = lonlat_bounds;
+        let georef = self.header.geo_reference()?;
+        let mut min_px = f64::INFINITY;
+        let mut min_py = f64::INFINITY;
+        let mut max_px = f64::NEG_INFINITY;
+        let mut max_py = f64::NEG_INFINITY;
+        // Densify all edges so projected CRSs do not use corner-only extrema.
+        for step in 0..=32 {
+            let t = step as f64 / 32.0;
+            for (lon, lat) in [
+                (lon_min + (lon_max - lon_min) * t, lat_min),
+                (lon_min + (lon_max - lon_min) * t, lat_max),
+                (lon_min, lat_min + (lat_max - lat_min) * t),
+                (lon_max, lat_min + (lat_max - lat_min) * t),
+            ] {
+                let (model_x, model_y) = crate::gis::crs::transform_point(
+                    lon,
+                    lat,
+                    &self.wgs84_crs,
+                    &self.source_crs,
+                )
+                .map_err(|error| {
+                    CogError::InvalidIfd(format!(
+                        "global height tile cannot transform into source CRS: {error}"
+                    ))
+                })?;
+                let (pixel_x, pixel_y) = georef.model_to_pixel(model_x, model_y)?;
+                min_px = min_px.min(pixel_x);
+                min_py = min_py.min(pixel_y);
+                max_px = max_px.max(pixel_x);
+                max_py = max_py.max(pixel_y);
+            }
+        }
+        let full = self
+            .header
+            .full_resolution()
+            .ok_or_else(|| CogError::InvalidIfd("COG contains no image levels".to_string()))?;
+        let clipped = (
+            min_px.max(0.0),
+            min_py.max(0.0),
+            max_px.min(f64::from(full.width)),
+            max_py.min(f64::from(full.height)),
+        );
+        if clipped.0 >= clipped.2 || clipped.1 >= clipped.3 {
+            Ok(None)
+        } else {
+            Ok(Some(clipped))
+        }
+    }
+
     /// Create a new COG height reader from a URL.
     pub async fn new(url: &str, cache_size_mb: u32) -> Result<Self, CogError> {
         Self::new_with_cache_options(url, cache_size_mb, None, cache_size_mb).await
@@ -37,9 +200,9 @@ impl CogHeightReader {
     ) -> Result<Self, CogError> {
         let range_cache_budget_bytes = range_cache_budget_mb as u64 * 1024 * 1024;
         let reader = if url.starts_with("file://") {
-            let path = url.strip_prefix("file://").unwrap_or(url);
+            let path = local_file_url_path(url);
             RangeReader::new_local_with_cache_options(
-                path,
+                &path,
                 range_cache_budget_bytes,
                 cache_dir,
                 range_cache_budget_bytes,
@@ -56,15 +219,26 @@ impl CogHeightReader {
 
         let reader = Arc::new(reader);
         let header = parse_cog_header(&reader).await?;
+        let (planetary_bounds, source_crs, wgs84_crs) = validate_planetary_geography(&header)?;
         let cache = Arc::new(CogTileCache::new(cache_size_mb));
 
-        let runtime = tokio::runtime::Handle::current();
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("forge3d-cog-reader-io")
+                .enable_all()
+                .build()
+                .map_err(|error| CogError::HttpError(error.to_string()))?,
+        );
 
         Ok(Self {
             reader,
             header,
             cache,
             runtime,
+            planetary_bounds,
+            source_crs,
+            wgs84_crs,
         })
     }
 
@@ -72,7 +246,7 @@ impl CogHeightReader {
     pub async fn new_with_runtime(
         url: &str,
         cache_size_mb: u32,
-        runtime: tokio::runtime::Handle,
+        runtime: Arc<tokio::runtime::Runtime>,
     ) -> Result<Self, CogError> {
         Self::new_with_runtime_and_cache_options(url, cache_size_mb, runtime, None, cache_size_mb)
             .await
@@ -82,15 +256,15 @@ impl CogHeightReader {
     pub async fn new_with_runtime_and_cache_options(
         url: &str,
         cache_size_mb: u32,
-        runtime: tokio::runtime::Handle,
+        runtime: Arc<tokio::runtime::Runtime>,
         cache_dir: Option<PathBuf>,
         range_cache_budget_mb: u32,
     ) -> Result<Self, CogError> {
         let range_cache_budget_bytes = range_cache_budget_mb as u64 * 1024 * 1024;
         let reader = if url.starts_with("file://") {
-            let path = url.strip_prefix("file://").unwrap_or(url);
+            let path = local_file_url_path(url);
             RangeReader::new_local_with_cache_options(
-                path,
+                &path,
                 range_cache_budget_bytes,
                 cache_dir,
                 range_cache_budget_bytes,
@@ -107,6 +281,7 @@ impl CogHeightReader {
 
         let reader = Arc::new(reader);
         let header = parse_cog_header(&reader).await?;
+        let (planetary_bounds, source_crs, wgs84_crs) = validate_planetary_geography(&header)?;
         let cache = Arc::new(CogTileCache::new(cache_size_mb));
 
         Ok(Self {
@@ -114,16 +289,15 @@ impl CogHeightReader {
             header,
             cache,
             runtime,
+            planetary_bounds,
+            source_crs,
+            wgs84_crs,
         })
     }
 
     /// Get geographic bounds (from first IFD).
     pub fn bounds(&self) -> (f64, f64, f64, f64) {
-        if let Some(ifd) = self.header.full_resolution() {
-            (0.0, 0.0, ifd.width as f64, ifd.height as f64)
-        } else {
-            (0.0, 0.0, 1.0, 1.0)
-        }
+        self.planetary_bounds
     }
 
     /// Get number of overview levels.
@@ -150,7 +324,7 @@ impl CogHeightReader {
     pub fn read_tile(&self, tile_x: u32, tile_y: u32, lod: u32) -> Result<Vec<f32>, CogError> {
         let ifd = self.header.select_ifd_for_lod(lod)?;
 
-        let cache_key = (tile_x, tile_y, lod);
+        let cache_key = (ifd.overview_level, tile_x, tile_y);
         if let Some(cached) = self.cache.get(&cache_key) {
             return Ok(cached);
         }
@@ -227,7 +401,7 @@ impl CogHeightReader {
     ) -> Result<Vec<f32>, CogError> {
         let ifd = self.header.select_ifd_for_lod(lod)?;
 
-        let cache_key = (tile_x, tile_y, lod);
+        let cache_key = (ifd.overview_level, tile_x, tile_y);
         if let Some(cached) = self.cache.get(&cache_key) {
             return Ok(cached);
         }
@@ -287,30 +461,328 @@ impl CogHeightReader {
 
         Ok(heights)
     }
+
+    /// Read one ORBIS quadtree footprint. Quadtree LOD is a normalized
+    /// geographic subdivision of the dataset, never a TIFF overview index.
+    pub fn read_height_tile(&self, request: HeightTileRequest) -> Result<Vec<f32>, CogError> {
+        self.runtime.block_on(self.read_height_tile_async(request))
+    }
+
+    /// Synchronous construction-time read retaining the authoritative coverage
+    /// plane. Runtime frame streaming uses the bounded asynchronous loader;
+    /// this entry point is for validating and seeding a scene before it exists.
+    #[cfg(all(feature = "enable-globe", feature = "extension-module"))]
+    pub(crate) fn read_height_tile_covered(
+        &self,
+        request: HeightTileRequest,
+    ) -> Result<HeightRead, CogError> {
+        self.runtime
+            .block_on(self.read_height_tile_covered_async(request))
+    }
+
+    pub async fn read_height_tile_async(
+        &self,
+        request: HeightTileRequest,
+    ) -> Result<Vec<f32>, CogError> {
+        Ok(self.read_height_tile_covered_async(request).await?.heights)
+    }
+
+    pub async fn read_height_tile_covered_async(
+        &self,
+        request: HeightTileRequest,
+    ) -> Result<HeightRead, CogError> {
+        if request.output_width == 0 || request.output_height == 0 {
+            return Err(CogError::InvalidIfd(
+                "height tile output dimensions must be non-zero".to_string(),
+            ));
+        }
+        let tile_bounds = crate::terrain::planetary_tiles::global_tile_lonlat_bounds(
+            request.tile_id,
+        )
+        .map_err(CogError::InvalidIfd)?;
+        let covered_bounds = (
+            tile_bounds.0.max(self.planetary_bounds.0),
+            tile_bounds.1.max(self.planetary_bounds.1),
+            tile_bounds.2.min(self.planetary_bounds.2),
+            tile_bounds.3.min(self.planetary_bounds.3),
+        );
+        let output_len = (request.output_width as usize)
+            .checked_mul(request.output_height as usize)
+            .ok_or_else(|| CogError::InvalidIfd("height tile output size overflow".to_string()))?;
+        if covered_bounds.0 >= covered_bounds.2 || covered_bounds.1 >= covered_bounds.3 {
+            // Outside the dataset's geographic footprint is deliberate no-data, not
+            // a fabricated substitute for a failed source read.
+            return Ok(HeightRead {
+                heights: vec![0.0; output_len],
+                coverage: vec![0; output_len],
+            });
+        }
+        let Some((full_x0, full_y0, full_x1, full_y1)) =
+            self.full_resolution_pixel_bounds(covered_bounds)?
+        else {
+            return Ok(HeightRead {
+                heights: vec![0.0; output_len],
+                coverage: vec![0; output_len],
+            });
+        };
+        let full = self
+            .header
+            .full_resolution()
+            .ok_or_else(|| CogError::InvalidIfd("COG contains no image levels".to_string()))?;
+        let full_span_x = full_x1 - full_x0;
+        let full_span_y = full_y1 - full_y0;
+        let covered_output_width = ((covered_bounds.2 - covered_bounds.0)
+            / (tile_bounds.2 - tile_bounds.0)
+            * f64::from(request.output_width))
+        .ceil()
+        .max(1.0);
+        let covered_output_height = ((covered_bounds.3 - covered_bounds.1)
+            / (tile_bounds.3 - tile_bounds.1)
+            * f64::from(request.output_height))
+        .ceil()
+        .max(1.0);
+        let ifd = self
+            .header
+            .ifds
+            .iter()
+            .filter(|ifd| {
+                full_span_x * f64::from(ifd.width) / f64::from(full.width)
+                    >= covered_output_width
+                    && full_span_y * f64::from(ifd.height) / f64::from(full.height)
+                        >= covered_output_height
+            })
+            .min_by_key(|ifd| u64::from(ifd.width) * u64::from(ifd.height))
+            .or_else(|| self.header.ifds.iter().max_by_key(|ifd| ifd.width))
+            .ok_or_else(|| CogError::InvalidIfd("COG contains no image levels".to_string()))?
+            .clone();
+        let nodata = ifd.nodata.or(full.nodata);
+
+        let scale_x = f64::from(ifd.width) / f64::from(full.width);
+        let scale_y = f64::from(ifd.height) / f64::from(full.height);
+        let x0 = (full_x0 * scale_x).floor() as u32;
+        let y0 = (full_y0 * scale_y).floor() as u32;
+        let x1 = ((full_x1 * scale_x).ceil() as u32)
+            .clamp(x0 + 1, ifd.width);
+        let y1 = ((full_y1 * scale_y).ceil() as u32)
+            .clamp(y0 + 1, ifd.height);
+        let window_width = x1 - x0;
+        let window_height = y1 - y0;
+        let mut window = vec![0.0f32; (window_width * window_height) as usize];
+        let tile_x0 = x0 / ifd.tile_width;
+        let tile_y0 = y0 / ifd.tile_height;
+        let tile_x1 = (x1 - 1) / ifd.tile_width;
+        let tile_y1 = (y1 - 1) / ifd.tile_height;
+        for physical_y in tile_y0..=tile_y1 {
+            for physical_x in tile_x0..=tile_x1 {
+                let physical = self
+                    .read_physical_tile_async(ifd.overview_level, physical_x, physical_y)
+                    .await?;
+                let physical_origin_x = physical_x * ifd.tile_width;
+                let physical_origin_y = physical_y * ifd.tile_height;
+                let copy_x0 = x0.max(physical_origin_x);
+                let copy_y0 = y0.max(physical_origin_y);
+                let copy_x1 = x1.min((physical_origin_x + ifd.tile_width).min(ifd.width));
+                let copy_y1 = y1.min((physical_origin_y + ifd.tile_height).min(ifd.height));
+                for image_y in copy_y0..copy_y1 {
+                    let source_y = image_y - physical_origin_y;
+                    let destination_y = image_y - y0;
+                    for image_x in copy_x0..copy_x1 {
+                        let source_x = image_x - physical_origin_x;
+                        let destination_x = image_x - x0;
+                        window[(destination_y * window_width + destination_x) as usize] = physical
+                            [(source_y * ifd.tile_width + source_x) as usize];
+                    }
+                }
+            }
+        }
+        let georef = self.header.geo_reference()?;
+        let mut output = vec![0.0f32; output_len];
+        let mut coverage = vec![0u8; output_len];
+        for output_y in 0..request.output_height {
+            let y_fraction = if request.output_height > 1 {
+                f64::from(output_y) / f64::from(request.output_height - 1)
+            } else {
+                0.5
+            };
+            let lat = tile_bounds.3 - y_fraction * (tile_bounds.3 - tile_bounds.1);
+            for output_x in 0..request.output_width {
+                let x_fraction = if request.output_width > 1 {
+                    f64::from(output_x) / f64::from(request.output_width - 1)
+                } else {
+                    0.5
+                };
+                let lon = tile_bounds.0 + x_fraction * (tile_bounds.2 - tile_bounds.0);
+                if lon < self.planetary_bounds.0
+                    || lon > self.planetary_bounds.2
+                    || lat < self.planetary_bounds.1
+                    || lat > self.planetary_bounds.3
+                {
+                    continue;
+                }
+                let (model_x, model_y) = crate::gis::crs::transform_point(
+                    lon,
+                    lat,
+                    &self.wgs84_crs,
+                    &self.source_crs,
+                )
+                .map_err(|error| {
+                    CogError::InvalidIfd(format!(
+                        "global height sample cannot transform into source CRS: {error}"
+                    ))
+                })?;
+                let (full_pixel_x, full_pixel_y) = georef.model_to_pixel(model_x, model_y)?;
+                if !full_pixel_x.is_finite()
+                    || !full_pixel_y.is_finite()
+                    || full_pixel_x < -1.0e-6
+                    || full_pixel_y < -1.0e-6
+                    || full_pixel_x > f64::from(full.width) + 1.0e-6
+                    || full_pixel_y > f64::from(full.height) + 1.0e-6
+                {
+                    continue;
+                }
+                let image_x = (full_pixel_x * scale_x)
+                    .clamp(0.0, f64::from(ifd.width.saturating_sub(1)));
+                let image_y = (full_pixel_y * scale_y)
+                    .clamp(0.0, f64::from(ifd.height.saturating_sub(1)));
+                let local_x = (image_x - f64::from(x0))
+                    .clamp(0.0, f64::from(window_width.saturating_sub(1)));
+                let local_y = (image_y - f64::from(y0))
+                    .clamp(0.0, f64::from(window_height.saturating_sub(1)));
+                let sx0 = local_x.floor() as u32;
+                let sy0 = local_y.floor() as u32;
+                let sx1 = (sx0 + 1).min(window_width - 1);
+                let sy1 = (sy0 + 1).min(window_height - 1);
+                let tx = (local_x - f64::from(sx0)) as f32;
+                let ty = (local_y - f64::from(sy0)) as f32;
+                let h00 = window[(sy0 * window_width + sx0) as usize];
+                let h10 = window[(sy0 * window_width + sx1) as usize];
+                let h01 = window[(sy1 * window_width + sx0) as usize];
+                let h11 = window[(sy1 * window_width + sx1) as usize];
+                let valid = |height: f32| is_valid_height_sample(height, nodata);
+                let height = if valid(h00) && valid(h10) && valid(h01) && valid(h11) {
+                    (h00 * (1.0 - tx) + h10 * tx) * (1.0 - ty)
+                        + (h01 * (1.0 - tx) + h11 * tx) * ty
+                } else {
+                    // Blend only the valid neighbours; a footprint that is
+                    // mostly nodata is left uncovered rather than invented.
+                    let mut sum = 0.0_f32;
+                    let mut weight = 0.0_f32;
+                    for (sample, sample_weight) in [
+                        (h00, (1.0 - tx) * (1.0 - ty)),
+                        (h10, tx * (1.0 - ty)),
+                        (h01, (1.0 - tx) * ty),
+                        (h11, tx * ty),
+                    ] {
+                        if valid(sample) {
+                            sum += sample * sample_weight;
+                            weight += sample_weight;
+                        }
+                    }
+                    if weight < 0.5 {
+                        continue;
+                    }
+                    sum / weight
+                };
+                output[(output_y * request.output_width + output_x) as usize] = height;
+                coverage[(output_y * request.output_width + output_x) as usize] = u8::MAX;
+            }
+        }
+        Ok(HeightRead {
+            heights: output,
+            coverage,
+        })
+    }
+
+    async fn read_physical_tile_async(
+        &self,
+        overview_level: u32,
+        tile_x: u32,
+        tile_y: u32,
+    ) -> Result<Vec<f32>, CogError> {
+        let ifd = self
+            .header
+            .overview(overview_level)
+            .ok_or_else(|| CogError::InvalidIfd(format!("missing IFD {overview_level}")))?
+            .clone();
+        let cache_key = (overview_level, tile_x, tile_y);
+        if let Some(cached) = self.cache.get(&cache_key) {
+            return Ok(cached);
+        }
+        let index = ifd
+            .tile_index(tile_x, tile_y)
+            .ok_or(CogError::TileNotFound {
+                x: tile_x,
+                y: tile_y,
+                lod: overview_level,
+            })?;
+        let compressed = self
+            .reader
+            .read_range(ifd.tile_offsets[index], ifd.tile_byte_counts[index])
+            .await?;
+        let decompressed = decompress_tile(
+            &compressed,
+            ifd.compression,
+            Some((ifd.tile_width, ifd.tile_height)),
+        )?;
+        let heights = decode_heights(
+            &decompressed,
+            ifd.bits_per_sample,
+            ifd.sample_format,
+            ifd.tile_width,
+            ifd.tile_height,
+            if ifd.compression == COMPRESSION_F3DZ {
+                TIFF_PREDICTOR_NONE
+            } else {
+                ifd.predictor
+            },
+        )?;
+        self.cache.insert(
+            cache_key,
+            heights.clone(),
+            heights.len() * std::mem::size_of::<f32>(),
+        );
+        Ok(heights)
+    }
 }
 
 impl HeightReader for CogHeightReader {
-    fn read(
+    fn read_result(
         &self,
         _root_bounds: &TileBounds,
         _tile_size: Vec2,
         tile_id: crate::terrain::tiling::TileId,
         width: u32,
         height: u32,
-    ) -> Vec<f32> {
-        match self.read_tile(tile_id.x, tile_id.y, tile_id.lod) {
-            Ok(heights) => {
-                if heights.len() == (width * height) as usize {
-                    heights
-                } else {
-                    resample_tile(&heights, width, height)
-                }
-            }
-            Err(e) => {
-                log::warn!("COG tile read failed: {:?}", e);
-                vec![0.0f32; (width * height) as usize]
-            }
+    ) -> Result<Vec<f32>, String> {
+        let heights = self
+            .read_height_tile(HeightTileRequest {
+            tile_id,
+            output_width: width,
+            output_height: height,
+            })
+            .map_err(|error| error.to_string())?;
+        if heights.len() == (width * height) as usize {
+            Ok(heights)
+        } else {
+            Ok(resample_tile(&heights, width, height))
         }
+    }
+
+    fn read_covered_result(
+        &self,
+        _root_bounds: &TileBounds,
+        _tile_size: Vec2,
+        tile_id: crate::terrain::tiling::TileId,
+        width: u32,
+        height: u32,
+    ) -> Result<HeightRead, String> {
+        self.runtime
+            .block_on(self.read_height_tile_covered_async(HeightTileRequest {
+                tile_id,
+                output_width: width,
+                output_height: height,
+            }))
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -683,6 +1155,19 @@ fn read_le_bytes8(data: &[u8], offset: usize) -> [u8; 8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn height_sample_validity_rejects_nodata_sentinels() {
+        let sentinel = Some(-3.3999999521443642e38);
+        assert!(is_valid_height_sample(1_234.5, sentinel));
+        assert!(!is_valid_height_sample(-3.4e38, sentinel));
+        assert!(!is_valid_height_sample(-9_999.0, Some(-9_999.0)));
+        assert!(!is_valid_height_sample(f32::NAN, None));
+        assert!(!is_valid_height_sample(f32::INFINITY, None));
+        assert!(!is_valid_height_sample(-3.4e38, None));
+        assert!(is_valid_height_sample(-420.0, None));
+        assert!(is_valid_height_sample(0.0, Some(f64::NAN)));
+    }
 
     fn pack_msb_codes(codes: &[(u16, u8)]) -> Vec<u8> {
         let mut packed = Vec::new();

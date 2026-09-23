@@ -212,6 +212,8 @@ class TestCogRangeRead:
             compress="deflate",
             predictor=2,
             transform=from_origin(0, 16, 1, 1),
+            # The native reader requires GeoTIFF transform + CRS metadata.
+            crs="EPSG:4326",
         ) as dst:
             dst.write(expected, 1)
 

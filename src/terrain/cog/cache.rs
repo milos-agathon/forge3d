@@ -1,13 +1,11 @@
-//! P3.3: COG tile cache with memory budget enforcement.
+//! P3.3: TIFF physical-tile cache with atomic LRU/accounting state.
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
-/// Cache key for COG tiles: (tile_x, tile_y, lod).
+/// Stable physical identity: (IFD/overview index, physical tile x, tile y).
 pub type CogTileCacheKey = (u32, u32, u32);
 
-/// Statistics for COG tile cache.
 #[derive(Debug, Clone, Default)]
 pub struct CogCacheStats {
     pub hits: u64,
@@ -21,134 +19,92 @@ pub struct CogCacheStats {
     pub disk_cache_budget_bytes: u64,
 }
 
-/// LRU entry for cache.
 struct CacheEntry {
     data: Vec<f32>,
     memory_bytes: usize,
-    last_access: u64,
 }
 
-/// COG tile cache with LRU eviction and memory budget.
+#[derive(Default)]
+struct CacheState {
+    entries: HashMap<CogTileCacheKey, CacheEntry>,
+    /// Least recent at the front. Every key occurs exactly once.
+    lru: VecDeque<CogTileCacheKey>,
+    used_bytes: u64,
+    high_water_bytes: u64,
+    hits: u64,
+    misses: u64,
+    evictions: u64,
+}
+
 pub struct CogTileCache {
-    entries: Mutex<HashMap<CogTileCacheKey, CacheEntry>>,
-    lru_order: Mutex<Vec<CogTileCacheKey>>,
+    state: Mutex<CacheState>,
     memory_budget_bytes: u64,
-    current_memory: AtomicU64,
-    access_counter: AtomicU64,
-    hits: AtomicU64,
-    misses: AtomicU64,
-    evictions: AtomicU64,
 }
 
 impl CogTileCache {
-    /// Create a new cache with the given memory budget in MB.
     pub fn new(budget_mb: u32) -> Self {
-        let budget_bytes = (budget_mb as u64) * 1024 * 1024;
         Self {
-            entries: Mutex::new(HashMap::new()),
-            lru_order: Mutex::new(Vec::new()),
-            memory_budget_bytes: budget_bytes,
-            current_memory: AtomicU64::new(0),
-            access_counter: AtomicU64::new(0),
-            hits: AtomicU64::new(0),
-            misses: AtomicU64::new(0),
-            evictions: AtomicU64::new(0),
+            state: Mutex::new(CacheState::default()),
+            memory_budget_bytes: u64::from(budget_mb) * 1024 * 1024,
         }
     }
 
-    /// Get a tile from the cache if present.
     pub fn get(&self, key: &CogTileCacheKey) -> Option<Vec<f32>> {
-        let mut entries = self.entries.lock().ok()?;
-
-        if let Some(entry) = entries.get_mut(key) {
-            entry.last_access = self.access_counter.fetch_add(1, Ordering::Relaxed);
-            self.hits.fetch_add(1, Ordering::Relaxed);
-
-            if let Ok(mut lru) = self.lru_order.lock() {
-                if let Some(pos) = lru.iter().position(|k| k == key) {
-                    lru.remove(pos);
-                }
-                lru.push(*key);
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let data = match state.entries.get(key) {
+            Some(entry) => entry.data.clone(),
+            None => {
+                state.misses += 1;
+                return None;
             }
-
-            Some(entry.data.clone())
-        } else {
-            self.misses.fetch_add(1, Ordering::Relaxed);
-            None
-        }
+        };
+        state.hits += 1;
+        state.lru.retain(|candidate| candidate != key);
+        state.lru.push_back(*key);
+        Some(data)
     }
 
-    /// Insert a tile into the cache.
     pub fn insert(&self, key: CogTileCacheKey, data: Vec<f32>, memory_bytes: usize) {
-        self.evict_to_budget(memory_bytes);
-
-        let access = self.access_counter.fetch_add(1, Ordering::Relaxed);
-
-        if let Ok(mut entries) = self.entries.lock() {
-            if entries.contains_key(&key) {
+        let incoming = memory_bytes as u64;
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if incoming > self.memory_budget_bytes {
+            return;
+        }
+        if state.entries.contains_key(&key) {
+            state.lru.retain(|candidate| candidate != &key);
+            state.lru.push_back(key);
+            return;
+        }
+        while state.used_bytes.saturating_add(incoming) > self.memory_budget_bytes {
+            let Some(victim) = state.lru.pop_front() else {
                 return;
-            }
-
-            entries.insert(
-                key,
-                CacheEntry {
-                    data,
-                    memory_bytes,
-                    last_access: access,
-                },
-            );
-
-            self.current_memory
-                .fetch_add(memory_bytes as u64, Ordering::Relaxed);
-
-            if let Ok(mut lru) = self.lru_order.lock() {
-                lru.push(key);
-            }
-        }
-    }
-
-    /// Evict tiles until there's room for new_bytes.
-    fn evict_to_budget(&self, new_bytes: usize) {
-        let target = self.memory_budget_bytes.saturating_sub(new_bytes as u64);
-
-        while self.current_memory.load(Ordering::Relaxed) > target {
-            let key_to_evict = {
-                let lru = self.lru_order.lock().ok();
-                lru.and_then(|l| l.first().copied())
             };
-
-            if let Some(key) = key_to_evict {
-                self.evict(&key);
-            } else {
-                break;
+            if let Some(evicted) = state.entries.remove(&victim) {
+                state.used_bytes = state.used_bytes.saturating_sub(evicted.memory_bytes as u64);
+                state.evictions += 1;
             }
         }
+        state.entries.insert(key, CacheEntry { data, memory_bytes });
+        state.lru.push_back(key);
+        state.used_bytes += incoming;
+        state.high_water_bytes = state.high_water_bytes.max(state.used_bytes);
+        debug_assert_eq!(
+            state.used_bytes,
+            state
+                .entries
+                .values()
+                .map(|entry| entry.memory_bytes as u64)
+                .sum::<u64>()
+        );
     }
 
-    /// Evict a specific tile.
-    fn evict(&self, key: &CogTileCacheKey) {
-        if let Ok(mut entries) = self.entries.lock() {
-            if let Some(entry) = entries.remove(key) {
-                self.current_memory
-                    .fetch_sub(entry.memory_bytes as u64, Ordering::Relaxed);
-                self.evictions.fetch_add(1, Ordering::Relaxed);
-
-                if let Ok(mut lru) = self.lru_order.lock() {
-                    if let Some(pos) = lru.iter().position(|k| k == key) {
-                        lru.remove(pos);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Get cache statistics.
     pub fn stats(&self) -> CogCacheStats {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         CogCacheStats {
-            hits: self.hits.load(Ordering::Relaxed),
-            misses: self.misses.load(Ordering::Relaxed),
-            evictions: self.evictions.load(Ordering::Relaxed),
-            memory_used_bytes: self.current_memory.load(Ordering::Relaxed),
+            hits: state.hits,
+            misses: state.misses,
+            evictions: state.evictions,
+            memory_used_bytes: state.used_bytes,
             memory_budget_bytes: self.memory_budget_bytes,
             byte_cache_used_bytes: 0,
             byte_cache_budget_bytes: 0,
@@ -157,29 +113,90 @@ impl CogTileCache {
         }
     }
 
-    /// Clear all entries from the cache.
+    pub fn high_water_bytes(&self) -> u64 {
+        self.state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .high_water_bytes
+    }
+
     pub fn clear(&self) {
-        if let Ok(mut entries) = self.entries.lock() {
-            entries.clear();
-        }
-        if let Ok(mut lru) = self.lru_order.lock() {
-            lru.clear();
-        }
-        self.current_memory.store(0, Ordering::Relaxed);
+        *self.state.lock().unwrap_or_else(|p| p.into_inner()) = CacheState::default();
     }
 
-    /// Get current memory usage in bytes.
     pub fn memory_used(&self) -> u64 {
-        self.current_memory.load(Ordering::Relaxed)
+        self.state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .used_bytes
     }
 
-    /// Get memory budget in bytes.
     pub fn memory_budget(&self) -> u64 {
         self.memory_budget_bytes
     }
 
-    /// Get number of cached tiles.
     pub fn tile_count(&self) -> usize {
-        self.entries.lock().map(|e| e.len()).unwrap_or(0)
+        self.state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entries
+            .len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn duplicate_and_oversize_inserts_do_not_evict_resident_tiles() {
+        let cache = CogTileCache::new(1);
+        let a = (0, 0, 0);
+        let b = (0, 1, 0);
+        cache.insert(a, vec![1.0], 700 * 1024);
+        cache.insert(b, vec![2.0], 300 * 1024);
+        cache.insert(a, vec![9.0], 700 * 1024);
+        cache.insert((0, 2, 0), vec![3.0], 2 * 1024 * 1024);
+        assert_eq!(cache.get(&a), Some(vec![1.0]));
+        assert_eq!(cache.get(&b), Some(vec![2.0]));
+        assert_eq!(cache.memory_used(), 1000 * 1024);
+    }
+
+    #[test]
+    fn runtime_get_touch_drives_true_lru_eviction() {
+        let cache = CogTileCache::new(1);
+        let a = (0, 0, 0);
+        let b = (0, 1, 0);
+        let c = (1, 0, 0);
+        cache.insert(a, vec![1.0], 400 * 1024);
+        cache.insert(b, vec![2.0], 400 * 1024);
+        assert!(cache.get(&a).is_some());
+        cache.insert(c, vec![3.0], 400 * 1024);
+        assert!(cache.get(&a).is_some());
+        assert!(cache.get(&b).is_none());
+        assert!(cache.get(&c).is_some());
+    }
+
+    #[test]
+    fn concurrent_insert_accounting_is_atomic_and_bounded() {
+        let cache = Arc::new(CogTileCache::new(1));
+        let barrier = Arc::new(Barrier::new(9));
+        let mut threads = Vec::new();
+        for x in 0..8 {
+            let cache = cache.clone();
+            let barrier = barrier.clone();
+            threads.push(std::thread::spawn(move || {
+                barrier.wait();
+                cache.insert((0, x, 0), vec![x as f32], 256 * 1024);
+            }));
+        }
+        barrier.wait();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert!(cache.memory_used() <= cache.memory_budget());
+        assert!(cache.high_water_bytes() <= cache.memory_budget());
+        assert_eq!(cache.memory_used(), cache.tile_count() as u64 * 256 * 1024);
     }
 }

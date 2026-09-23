@@ -744,6 +744,118 @@ class CameraAnimation:
     def get_frame_count(self, fps: int) -> int: ...
     def evaluate(self, time: float) -> Optional[CameraState]: ...
 
+class GlobeMetrics:
+    @property
+    def max_vertex_jitter_px(self) -> float: ...
+    @property
+    def naive_max_vertex_jitter_px(self) -> float: ...
+    @property
+    def jitter_sample_count(self) -> int: ...
+    @property
+    def peak_gpu_visible_bytes(self) -> int: ...
+    @property
+    def lod_crack_pixels(self) -> int: ...
+    @property
+    def crack_boundary_samples(self) -> int: ...
+    @property
+    def crack_depth_variance(self) -> float: ...
+    @property
+    def rendered_frames(self) -> int: ...
+    @property
+    def bounded_poll_frames(self) -> int: ...
+    @property
+    def streaming_progress_frames(self) -> int: ...
+    @property
+    def pending_streaming_frames(self) -> int: ...
+    @property
+    def coarse_fallback_frames(self) -> int: ...
+    @property
+    def max_stream_uploads_per_frame(self) -> int: ...
+    @property
+    def adapter_name(self) -> str: ...
+    @property
+    def adapter_backend(self) -> str: ...
+    @property
+    def adapter_vendor(self) -> int: ...
+    @property
+    def adapter_device_type(self) -> str: ...
+    @property
+    def software_fallback(self) -> bool: ...
+    def __getitem__(self, key: str) -> float | int | str | bool: ...
+    def as_dict(self) -> Dict[str, float | int | str | bool]: ...
+
+class GlobeScene:
+    """Native COG-backed globe scene with cached regional overview seeds.
+
+    Waypoint longitude/latitude must remain inside finite source coverage.
+    Altitude is measured in metres above the rendered terrain at the waypoint.
+    """
+    def __init__(
+        self,
+        cog_source: PathLikeStr,
+        target_lon: float,
+        target_lat: float,
+        target_name: str,
+        material_set: Optional["MaterialSet"] = ...,
+        env_maps: Optional["IBL"] = ...,
+        params: Optional[TerrainRenderParams] = ...,
+        earth_texture: Optional[np.ndarray] = ...,
+    ) -> None:
+        """``earth_texture`` optionally colours the Earth outside the terrain
+        source: a uint8 array shaped (height, width, 3|4), equirectangular with
+        width == 2 * height (row 0 = 90 N, column 0 = 180 W), width <= 8192.
+        """
+        ...
+    @staticmethod
+    def default_descent_altitudes() -> list[float]: ...
+    def fly_to(
+        self,
+        lon: float,
+        lat: float,
+        altitude: float,
+        heading: float = ...,
+        pitch: float = ...,
+    ) -> Frame:
+        """Render one covered waypoint at 0..9,000,000 metres above local ground
+        (camera-to-target distance ``altitude / cos(pitch)`` at most 9,800 km).
+
+        ``heading`` is the horizontal look direction clockwise from north in
+        degrees; ``pitch`` is degrees away from nadir in ``[0, 90)``.
+        """
+        ...
+    def scripted_descent(
+        self,
+        waypoints: Optional[
+            Sequence[
+                Tuple[float, float, float]
+                | Tuple[float, float, float, float, float]
+            ]
+        ] = ...,
+    ) -> GlobeMetrics:
+        """Render a prevalidated descent and return completed physical metrics.
+
+        Each waypoint is ``(lon, lat, altitude)`` or oriented
+        ``(lon, lat, altitude, heading, pitch)`` where ``heading`` is the
+        horizontal look direction clockwise from north in degrees and
+        ``pitch`` is degrees away from nadir in ``[0, 90)``.
+        """
+        ...
+    def snapshot(self) -> Frame: ...
+    def metrics(self) -> GlobeMetrics: ...
+    @property
+    def source(self) -> str: ...
+    @property
+    def target_name(self) -> str: ...
+    @property
+    def current_position(self) -> Optional[Tuple[float, float, float]]: ...
+    @property
+    def rendered_waypoint_count(self) -> int: ...
+    def streaming_stats(self) -> Dict[str, Any]: ...
+    @property
+    def source_bounds(self) -> Tuple[float, float, float, float]: ...
+    @property
+    def source_dimensions(self) -> Tuple[int, int]: ...
+
 class TerrainRenderer:
     def __init__(self, session: "Session") -> None: ...
     @property
@@ -850,11 +962,31 @@ class TerrainRenderer:
         pool_size: int = ...,
         coarse_prefill: bool = ...,
         max_resident_bytes: Optional[int] = ...,
+        overview_lonlat_bounds: Optional[Tuple[float, float, float, float]] = ...,
+    ) -> None: ...
+    def enable_height_streaming_cog_globe(
+        self,
+        dataset: CogDataset,
+        terrain_extent_m: float,
+        ring_count: int = ...,
+        ring_resolution: int = ...,
+        lod: int = ...,
+        tile_resolution: int = ...,
+        max_in_flight: int = ...,
+        pool_size: int = ...,
+        coarse_prefill: bool = ...,
+        max_resident_bytes: Optional[int] = ...,
+        overview_lonlat_bounds: Optional[Tuple[float, float, float, float]] = ...,
     ) -> None: ...
     def disable_height_streaming(self) -> None: ...
     def stream_height_tiles(
         self,
         camera_pos: Tuple[float, float, float],
+        max_uploads: int = ...,
+    ) -> Dict[str, Any]: ...
+    def stream_height_tiles_globe(
+        self,
+        camera_ecef: Tuple[float, float, float],
         max_uploads: int = ...,
     ) -> Dict[str, Any]: ...
     def height_streaming_stats(self) -> Dict[str, Any]: ...

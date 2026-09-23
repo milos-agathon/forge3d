@@ -12,7 +12,7 @@ use super::cog_reader::CogHeightReader;
 #[pyclass(module = "forge3d._forge3d", name = "CogDataset")]
 pub struct PyCogDataset {
     reader: Arc<CogHeightReader>,
-    _runtime: tokio::runtime::Runtime,
+    _runtime: Arc<tokio::runtime::Runtime>,
     url: String,
 }
 
@@ -39,26 +39,35 @@ impl PyCogDataset {
         cache_dir: Option<String>,
         cache_budget_mb: Option<u32>,
     ) -> PyResult<Self> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e))
-            })?;
-
-        let handle = runtime.handle().clone();
+        // A driven worker is required because the bounded height-loader calls
+        // `Handle::block_on` from its own worker threads. A current-thread
+        // runtime would leave reqwest/range I/O futures without an executor
+        // once construction returned.
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("forge3d-cog-io")
+                .enable_all()
+                .build()
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e))
+                })?,
+        );
+        let reader_runtime = runtime.clone();
         let reader = runtime
             .block_on(async {
                 CogHeightReader::new_with_runtime_and_cache_options(
                     url,
                     cache_size_mb,
-                    handle,
+                    reader_runtime,
                     cache_dir.map(PathBuf::from),
                     cache_budget_mb.unwrap_or(cache_size_mb),
                 )
                 .await
             })
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to open COG: {:?}", e)))?;
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to open COG {url:?}: {e:?}"))
+            })?;
 
         Ok(Self {
             reader: Arc::new(reader),
@@ -130,6 +139,69 @@ impl PyCogDataset {
                 })?;
 
         Ok(arr)
+    }
+
+    /// Read one normalized ORBIS quadtree tile through the production COG
+    /// window/overview path.
+    #[pyo3(signature = (lod, x, y, width, height))]
+    pub fn read_height_tile<'py>(
+        &self,
+        py: Python<'py>,
+        lod: u32,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    ) -> PyResult<pyo3::Bound<'py, numpy::PyArray2<f32>>> {
+        let values = self
+            .reader
+            .read_height_tile(super::cog_reader::HeightTileRequest {
+                tile_id: crate::terrain::tiling::TileId::new(lod, x, y),
+                output_width: width,
+                output_height: height,
+            })
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("Failed to read COG height window: {error:?}"))
+            })?;
+        numpy::PyArray2::from_vec2_bound(
+            py,
+            &vec_to_2d(&values, height as usize, width as usize),
+        )
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    }
+
+    /// Read the coverage plane paired with `read_height_tile`. A value of 255
+    /// means the sample comes from the COG; zero means the renderer must keep
+    /// the overview fallback at that sample.
+    #[pyo3(signature = (lod, x, y, width, height))]
+    pub fn read_height_tile_coverage<'py>(
+        &self,
+        py: Python<'py>,
+        lod: u32,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    ) -> PyResult<pyo3::Bound<'py, numpy::PyArray2<u8>>> {
+        let covered = self
+            ._runtime
+            .block_on(self.reader.read_height_tile_covered_async(
+                super::cog_reader::HeightTileRequest {
+                    tile_id: crate::terrain::tiling::TileId::new(lod, x, y),
+                    output_width: width,
+                    output_height: height,
+                },
+            ))
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("Failed to read COG coverage window: {error:?}"))
+            })?;
+        let rows = covered
+            .coverage
+            .chunks_exact(width as usize)
+            .map(|row| row.to_vec())
+            .collect::<Vec<_>>();
+        numpy::PyArray2::from_vec2_bound(py, &rows)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     }
 
     /// Get cache statistics.

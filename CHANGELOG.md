@@ -6,6 +6,60 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-09-20
+
+### Added
+- ORBIS: whole-Earth globe rendering. Forge3D can now draw the entire planet,
+  not just flat local scenes — real Earth curvature, a horizon that bends away
+  correctly, and a camera that can descend smoothly from 408 km altitude down
+  to 1 m above the ground. Adds Python `GlobeScene` and `GlobeMetrics` with
+  `fly_to`, scripted descent, and snapshot calls; the native globe path sits
+  behind the `enable-globe` feature. (#141)
+- Globe terrain data streams in bounded pieces over the network as the camera
+  descends — locally and in the browser (WebAssembly) — without stalling
+  frames, with coarse stand-in imagery while detail arrives, and a hard
+  GPU-memory ceiling (~450 MB observed) so large datasets stay safe on modest
+  hardware. (#141)
+- Positions stay stable at planetary scale: the engine re-anchors arithmetic
+  around the camera so geometry does not jitter, and ring geometry is joined
+  without cracks between detail levels. On a physical NVIDIA Vulkan adapter
+  the audited descent measured ~0.00004 px of vertex jitter, zero crack
+  pixels, and 25/25 nonblocking streaming frames. (#141)
+- Globe views now reach across the whole source DEM: coarse context tiles
+  fill the outer clipmap rings, and COG nodata (the `GDAL_NODATA` tag) is
+  honoured, so a country-wide DEM shows its real outline on a sun-lit Earth
+  with an atmosphere rim instead of a filled rectangle. (#141)
+- `GlobeScene(earth_texture=...)` colours the Earth outside the terrain source
+  from an equirectangular image (e.g. a global elevation map), lit by the same
+  sun as the terrain, and the camera can now start up to 9,000 km out, far
+  enough to frame the whole visible Earth. `examples/orbis_swiss_alps_descent.py`
+  opens on a whole-Earth view coloured with Crameri's *bukavu* palette (NOAA
+  ETOPO 2022 outside Switzerland) and flies down onto the Eiger, Moench and
+  Jungfrau. (#141)
+
+### Fixed
+- Globe terrain shading: height normals are now built in each fragment's
+  east/north/up frame at metric scale (they were Y-up and ~1000x too steep,
+  which left slopes unlit and "crumbly"), slope-based materials use the real
+  terrain slope, and parallax mapping no longer shifts the global UV off the
+  loaded tiles (which collapsed elevation colormaps to one colour). (#141)
+- Globe geometry: coarse clipmap LOD variants were offset by the camera's
+  distance from the clipmap centre, so oblique and orbital views lost the
+  terrain; skirts no longer hang altitude-sized curtains below the terrain
+  edge. (#141)
+
+### Changed
+- Environment lighting now follows the corrected upstream IBL math (Karis
+  separable-Smith split-sum and cosine-weighted irradiance). Scenes lit mainly
+  by the environment can render modestly dimmer but more physically correct;
+  the ORBIS ground golden was regenerated against the corrected lighting.
+  (#141)
+- Bumped the package and PyPI version to `1.38.0`.
+
+### Compatibility
+- Existing flat-terrain maps, viewers, and rendering calls are unchanged; the
+  globe path is opt-in via `GlobeScene`. No existing public API was altered.
+
 ## [1.37.1] - 2026-09-20
 
 ### Fixed

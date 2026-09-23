@@ -101,6 +101,8 @@ class TestNativeModuleSymbols:
         "ClipmapConfig",
         "ClipmapMesh",
         "CogDataset",
+        "GlobeScene",
+        "GlobeMetrics",
         "SunPosition",
         "AtmosphereLutHandle",
         # P0.3: Previously-orphaned classes now registered

@@ -12,6 +12,8 @@ struct LodSelectParams {
     lod_params: vec4<f32>,    // x=pixel_error_budget, y=viewport_height, z=fov_y, w=max_lod
     terrain_params: vec4<f32>, // x=tile_size, y=num_tiles, z=variant_count, w=first_instance
     height_params: vec4<f32>,  // x=min world height, y=max world height, z=frustum enabled
+    planet_params: vec4<f32>,  // x=radius, y=camera altitude, z=globe enabled
+    camera_up: vec4<f32>,
 }
 
 struct TileInfo {
@@ -23,6 +25,8 @@ struct TileInfo {
     selected_lod: u32,
     visible: u32,       // 0 = culled, 1 = visible
     height_max: f32,
+    camera_relative_center: array<f32, 3>,
+    angular_radius: f32,
 }
 
 struct OutputHeader {
@@ -99,6 +103,37 @@ fn frustum_cull_aabb(bounds_min: vec2<f32>, bounds_max: vec2<f32>, height_min: f
     return true;
 }
 
+fn tile_center_relative(tile: TileInfo) -> vec3<f32> {
+    return vec3<f32>(
+        tile.camera_relative_center[0],
+        tile.camera_relative_center[1],
+        tile.camera_relative_center[2],
+    );
+}
+
+fn horizon_visible(tile: TileInfo) -> bool {
+    if params.planet_params.z < 0.5 {
+        return true;
+    }
+    let radius = params.planet_params.x;
+    let altitude = max(params.planet_params.y, 0.0);
+    let camera_up = normalize(params.camera_up.xyz);
+    let center_from_planet =
+        tile_center_relative(tile) + camera_up * (radius + altitude);
+    if radius <= 0.0 || dot(center_from_planet, center_from_planet) == 0.0 {
+        return true;
+    }
+
+    let tangent_cos = clamp(radius / (radius + altitude), 0.0, 1.0);
+    let angular_radius = clamp(tile.angular_radius, 0.0, 3.141592653589793);
+    let expanded_horizon = min(
+        acos(tangent_cos) + angular_radius,
+        3.141592653589793,
+    );
+    let conservative_threshold = cos(expanded_horizon);
+    return dot(camera_up, normalize(center_from_planet)) >= conservative_threshold;
+}
+
 // Calculate projected geometric error for a candidate LOD.
 fn calculate_screen_space_error(distance: f32, tile_size: f32, lod: u32) -> f32 {
     let viewport_height = params.lod_params.y;
@@ -138,20 +173,37 @@ fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var tile = input_tiles[tile_index];
     
     // Calculate tile center and distance to camera
-    let tile_center = (tile.bounds_min + tile.bounds_max) * 0.5;
+    let tile_center = tile_center_relative(tile);
     let camera_pos_2d = params.camera_pos.xy;
-    let distance = length(tile_center - camera_pos_2d);
+    let distance = select(
+        length(tile_center.xy - camera_pos_2d),
+        length(tile_center),
+        params.planet_params.z > 0.5,
+    );
     tile.distance = distance;
     
     let has_local_heights = tile.height_min <= tile.height_max;
     let height_min = select(params.height_params.x, tile.height_min, has_local_heights);
     let height_max = select(params.height_params.y, tile.height_max, has_local_heights);
-    let visible = params.height_params.z < 0.5 || frustum_cull_aabb(
-            tile.bounds_min,
-            tile.bounds_max,
-            height_min,
-            height_max,
+    var frustum_min = tile.bounds_min;
+    var frustum_max = tile.bounds_max;
+    var frustum_height_min = height_min;
+    var frustum_height_max = height_max;
+    if params.planet_params.z > 0.5 {
+        let half_xy = abs(tile.bounds_max - tile.bounds_min) * 0.5;
+        let half_z = abs(height_max - height_min) * 0.5;
+        frustum_min = tile_center.xy - half_xy;
+        frustum_max = tile_center.xy + half_xy;
+        frustum_height_min = tile_center.z - half_z;
+        frustum_height_max = tile_center.z + half_z;
+    }
+    let frustum_visible = params.height_params.z < 0.5 || frustum_cull_aabb(
+            frustum_min,
+            frustum_max,
+            frustum_height_min,
+            frustum_height_max,
         );
+    let visible = frustum_visible && horizon_visible(tile);
     tile.visible = select(0u, 1u, visible);
     
         if visible {
