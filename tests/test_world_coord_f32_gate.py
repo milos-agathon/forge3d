@@ -38,7 +38,7 @@ SANCTIONED_DD_SPLITS = {
 # earlier AEQUITAS raster-twin transition (+22/-7 in
 # src/offscreen/adjudication_raster.rs) remains recorded below.
 EXPECTED_CONVERSION_COUNT = 1391
-EXPECTED_CONVERSION_SHA256 = "ae37f4b7a2fe587dab04f13a6a45dc53c058874c76d87e5a1f3bcc0cea8e29cc"
+EXPECTED_CONVERSION_SHA256 = "7004a672e7f47be0f5259d4d14bca17e0aa376621a43f51340b96301029dad18"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
@@ -108,6 +108,26 @@ REVIEWED_AEQUITAS_RASTER_TRANSITION = {
         ("render", 2, "let projection = Mat4::perspective_rh(desc.fov_y_rad(), width as f32 / height as f32, near, far)"),
         ("render", 3, "let weights: Vec<f32> = (0..SSAA) .map(|k| 1.0 - (((k as f32 + 0.5) / SSAA as f32 - 0.5).abs() / 0.5)) .collect()"),
         ("render", 4, "let weights: Vec<f32> = (0..SSAA) .map(|k| 1.0 - (((k as f32 + 0.5) / SSAA as f32 - 0.5).abs() / 0.5)) .collect()"),
+    ),
+}
+
+
+# AEQUITAS repair split render_pt_reference into a per-frame ReferenceWavefront
+# driver (so tests can observe the wavefront active-ray counts). The same three
+# integer-to-f32 casts moved verbatim into ReferenceWavefront::new (camera
+# aspect) and read_mean_hdr (1/frames); the count is unchanged (base digest
+# ae37f4b7...8e29cc).
+REVIEWED_AEQUITAS_PT_DRIVER_TRANSITION = {
+    "path": "src/path_tracing/adjudication.rs",
+    "removed": (
+        ("render_pt_reference", 1, "width, height, frame_index: 0, spp: 1, cam_origin: origin.into(), cam_fov_y: desc.fov_y_rad(), cam_right: right.into(), cam_aspect: width as f32 / height as f32, cam_up: up.into(), cam_exposure: desc.exposure, cam_forward: forward.into(), seed_hi: desc.seed_hi, seed_lo: desc.seed_lo, _pad_end: [0"),
+        ("render_pt_reference", 2, "width, height, frame_index: 0, spp: 1, cam_origin: origin.into(), cam_fov_y: desc.fov_y_rad(), cam_right: right.into(), cam_aspect: width as f32 / height as f32, cam_up: up.into(), cam_exposure: desc.exposure, cam_forward: forward.into(), seed_hi: desc.seed_hi, seed_lo: desc.seed_lo, _pad_end: [0"),
+        ("render_pt_reference", 3, "let inv = 1.0 / spp_frames as f32"),
+    ),
+    "added": (
+        ("new", 1, "width, height, frame_index: 0, spp: 1, cam_origin: origin.into(), cam_fov_y: desc.fov_y_rad(), cam_right: right.into(), cam_aspect: width as f32 / height as f32, cam_up: up.into(), cam_exposure: desc.exposure, cam_forward: forward.into(), seed_hi: desc.seed_hi, seed_lo: desc.seed_lo, _pad_end: [0"),
+        ("new", 2, "width, height, frame_index: 0, spp: 1, cam_origin: origin.into(), cam_fov_y: desc.fov_y_rad(), cam_right: right.into(), cam_aspect: width as f32 / height as f32, cam_up: up.into(), cam_exposure: desc.exposure, cam_forward: forward.into(), seed_hi: desc.seed_hi, seed_lo: desc.seed_lo, _pad_end: [0"),
+        ("read_mean_hdr", 1, "let inv = 1.0 / frames as f32"),
     ),
 }
 
@@ -286,6 +306,19 @@ def test_reviewed_aequitas_raster_transition_is_exact():
     assert len(transition["added"]) - len(transition["removed"]) == (
         transition["result_count"] - transition["base_count"]
     )
+
+
+def test_reviewed_aequitas_pt_driver_transition_is_exact():
+    sites = conversion_inventory()
+    transition = REVIEWED_AEQUITAS_PT_DRIVER_TRANSITION
+    assert len(sites) == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
+    path = transition["path"]
+    for function, ordinal, statement in transition["removed"]:
+        assert (path, function, "as_f32", ordinal, statement) not in sites
+    for function, ordinal, statement in transition["added"]:
+        assert (path, function, "as_f32", ordinal, statement) in sites
+    assert len(transition["added"]) == len(transition["removed"])
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():
