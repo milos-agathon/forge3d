@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, paris-eiffel-day-pt]
   workflow_dispatch:
     inputs:
       update_recipe_certificates:
@@ -686,6 +686,11 @@ jobs:
       RUN_LIMES_GPU_CI: '1'
       FORGE3D_VIEWER_BINARY: ${{ github.workspace }}/target/release/interactive_viewer.exe
       FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
+      # Self-hosted runners inherit machine-level CARGO_TARGET_DIR, which would
+      # redirect the release viewer away from FORGE3D_VIEWER_BINARY. Pin the
+      # target dir to the workspace so the build output lands where the
+      # acceptance tests look.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
 
     steps:
       - name: Initialize persistent M-06 evidence before checkout

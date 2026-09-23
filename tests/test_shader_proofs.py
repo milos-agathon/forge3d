@@ -114,6 +114,14 @@ def test_runtime_contract_asserts_observed_gpu_inputs():
     } <= names
     assert all(binding["status"] == "passed" for binding in brdf["checked_bindings"])
 
+    from _terrain_runtime import terrain_rendering_available
+
+    if not terrain_rendering_available():
+        pytest.skip(
+            "hybrid PT ReSTIR render requires a physical adapter; "
+            "software rasterizers produce no valid reservoirs"
+        )
+
     from forge3d.path_tracing import hybrid_render_terrain_reference
 
     hybrid_render_terrain_reference(
