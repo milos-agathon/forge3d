@@ -470,6 +470,117 @@ def _native_declutter_optimal() -> Any | None:
     return getattr(native, "declutter_optimal", None)
 
 
+def _native_layout_label_candidates() -> Any | None:
+    """Return the native geometry-authority producer, or ``None``."""
+    try:
+        from ._native import get_native_module
+
+        native = get_native_module()
+    except Exception:
+        return None
+    if native is None:
+        return None
+    return getattr(native, "layout_label_candidates", None)
+
+
+def _produce_geometry_authority(
+    record: Mapping[str, Any],
+    *,
+    kind: str,
+    label_id: str,
+    text: str,
+    shaping_details: Mapping[str, Any],
+    typography: Mapping[str, Any] | None,
+    camera: Any,
+    viewport_size: tuple[float, float],
+) -> Mapping[str, Any] | None:
+    """Produce a ``geometry_authority`` payload for a line/curved label.
+
+    Projects the label's polyline to screen space (via the declared camera
+    projector when available, otherwise treating the serialized coordinates
+    as already-screen-space, matching the point-label anchor convention) and
+    asks the native authority to lay the shaped glyph stream along it. The
+    returned payload is validated by the normal ``_authority_candidates``
+    decode path, so produced geometry meets the same contract as a
+    caller-supplied authority. Returns ``None`` when production is not
+    possible; the caller then keeps the standard rejection path.
+    """
+    producer = _native_layout_label_candidates()
+    if producer is None:
+        return None
+    if record.get("repeat_distance") is not None:
+        # Repeat placements are caller-defined authority (line_repeat
+        # candidates); a single-run authority would silently change the
+        # label's meaning, so production declines and the record keeps the
+        # standard missing-authority rejection.
+        return None
+    geometry = record.get("geometry") if isinstance(record.get("geometry"), Mapping) else {}
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, Sequence) or isinstance(coordinates, (str, bytes)):
+        return None
+    projector = getattr(camera, "project", None)
+    projector_declared = str(getattr(camera, "projection_authority", "")).lower() in {
+        "deterministic",
+        "authoritative",
+    }
+    screen_path: list[tuple[float, float, float]] = []
+    for point in coordinates:
+        coords = _coordinates(point)
+        if coords is None:
+            return None
+        if callable(projector) and projector_declared:
+            try:
+                try:
+                    projected = projector(
+                        (float(coords[0]), float(coords[1]), float(coords[2])),
+                        viewport=viewport_size,
+                    )
+                except TypeError:
+                    projected = projector(
+                        (float(coords[0]), float(coords[1]), float(coords[2]))
+                    )
+            except Exception:
+                return None
+            anchor = _strict_projected_anchor(projected)
+            if anchor is None:
+                return None
+            screen_path.append((anchor[0], anchor[1], anchor[2]))
+        else:
+            screen_path.append((float(coords[0]), float(coords[1]), float(coords[2])))
+    if len(screen_path) < 2:
+        return None
+    positioned = shaping_details.get("positioned_glyphs")
+    if (
+        not isinstance(positioned, Sequence)
+        or isinstance(positioned, (str, bytes))
+        or not positioned
+    ):
+        return None
+    normalized = _normalize_typography(typography or record.get("typography") or {})
+    font_size = _number(
+        normalized.get("font_size", normalized.get("size", normalized.get("text_size", 12.0))),
+        default=12.0,
+    )
+    if not math.isfinite(font_size) or font_size <= 0.0:
+        font_size = 12.0
+    tracking = _number(normalized.get("tracking", 0.0), default=0.0)
+    if not math.isfinite(tracking):
+        tracking = 0.0
+    try:
+        payload = producer(
+            kind=kind,
+            label_id=label_id,
+            text=text,
+            screen_path=screen_path,
+            positioned_glyphs=[dict(glyph) for glyph in positioned],
+            font_size=font_size,
+            tracking=tracking,
+        )
+    except Exception:
+        return None
+    return payload if isinstance(payload, Mapping) else None
+
+
 _SUPPORTED_DEPTH_CONVENTIONS = frozenset(
     {
         "normalized_device_depth",
@@ -1707,6 +1818,36 @@ class LabelPlan:
                 if isinstance(authority_payload, Mapping)
                 else ""
             )
+            if (
+                (is_line or is_curved)
+                and authority is None
+                and record.get("geometry_authority") is None
+            ):
+                # Omitted authority: derive it from the native geometry
+                # authorities. A caller-supplied payload that is present but
+                # malformed or mismatched still rejects below — production
+                # never masks a caller error.
+                produced = _produce_geometry_authority(
+                    record,
+                    kind="curved" if is_curved else "line",
+                    label_id=label_id,
+                    text=text,
+                    shaping_details=shaping_details,
+                    typography=typography,
+                    camera=camera,
+                    viewport_size=viewport_size,
+                )
+                if produced is not None:
+                    record["geometry_authority"] = produced
+                    authority = _authority_candidates(
+                        record,
+                        label_id=label_id,
+                        score=score,
+                        ordering_key=ordering_key,
+                        terrain_sample=terrain_sample,
+                    )
+                    authority_payload = produced
+                    authority_source = str(produced.get("source", ""))
             if (is_line or is_curved) and (
                 authority is None or authority_source != required_authority
             ):

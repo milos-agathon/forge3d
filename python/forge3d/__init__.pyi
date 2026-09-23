@@ -1613,6 +1613,17 @@ def declutter(
     margin: float = ...,
 ) -> Tuple[List[Tuple[int, int]], float, LabelRationale]: ...
 
+def layout_label_candidates(
+    kind: Literal["line", "curved"],
+    label_id: str,
+    text: str,
+    screen_path: Sequence[Tuple[float, float, float]],
+    positioned_glyphs: Sequence[Dict[str, Any]],
+    font_size: float,
+    arc_fractions: Sequence[float] | None = ...,
+    tracking: float = ...,
+) -> Dict[str, Any] | None: ...
+
 # AEQUITAS: PT-vs-raster perceptual adjudication pair
 def render_adjudication_pair(
     width: int,
