@@ -600,11 +600,14 @@ class TestFlythroughPhysical:
             pytest.skip("CHRONOS physical render requires GPU-backed native module")
         import forge3d.chronos as chronos_module
         from forge3d import certificate
+        from forge3d.diagnostics import capabilities
 
         source_scene = _synthetic_scene()
         camera_path = {index: source_scene for index in range(2)}
         cache_dir = tmp_path / "cache"
 
+        caps = capabilities()
+        absent_caps = set(caps["requested"]) - set(caps["granted"])
         certified = render_flythrough(
             camera_path, base_seed=11, samples=1, out_dir=tmp_path / "cert", certificate=True
         )
@@ -613,7 +616,13 @@ class TestFlythroughPhysical:
             cert_path = tmp_path / "cert" / name
             cert = json.loads(cert_path.read_text("utf-8"))
             assert certificate.verify(cert_path, cert["signature"]["pubkey"]) is True
-            assert cert["degradations"] == []
+            # Adapter-honest: only capabilities this adapter lacks may degrade
+            # (hosted Metal has no timestamp/pipeline-statistics queries). With
+            # every requested feature granted this stays an empty-list check.
+            assert all(
+                item["kind"] == "capability_absent" for item in cert["degradations"]
+            ), cert["degradations"]
+            assert {item["name"] for item in cert["degradations"]} <= absent_caps
             assert cert["passes"], "certificate must record the frame's executed passes"
 
         cold = render_flythrough(
