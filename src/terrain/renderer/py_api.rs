@@ -958,6 +958,20 @@ impl TerrainRenderer {
         Ok(out.into())
     }
 
+    /// Pin the ordered VT residency list for the next physical test render.
+    #[pyo3(text_signature = "(self, schedule)")]
+    fn set_material_vt_residency_schedule_for_test(
+        &self,
+        schedule: Vec<(String, u32, u32, u32, u32)>,
+    ) -> PyResult<()> {
+        let mut material_vt = self.scene.material_vt.lock().map_err(|e| {
+            PyRuntimeError::new_err(format!("Failed to lock material_vt: {e}"))
+        })?;
+        material_vt
+            .set_test_residency_schedule(schedule)
+            .map_err(PyRuntimeError::new_err)
+    }
+
     #[cfg(feature = "enable-renderer-config")]
     pub fn get_config(&self) -> PyResult<String> {
         let config = self
