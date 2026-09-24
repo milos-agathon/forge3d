@@ -34,7 +34,15 @@ def _write_test_hdr(path: str, width: int = 8, height: int = 4) -> None:
                 handle.write(bytes([r, g, 180, 128]))
 
 
-def _build_test_ibl(*, rotation_deg: float = 0.0, intensity: float = 1.0):
+# The split-sum BRDF LUT (Karis/Smith visibility, shared with pt_shade) makes
+# rough terrain specular physically small; at unit intensity the synthetic
+# environment's probe signal sat below 1 LSB in the specular-only debug view.
+# A brighter environment (no clipping, measured) keeps every threshold below
+# unchanged while the probe contribution stays clearly measurable.
+PROBE_TEST_IBL_INTENSITY = 3.0
+
+
+def _build_test_ibl(*, rotation_deg: float = 0.0, intensity: float = PROBE_TEST_IBL_INTENSITY):
     with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
         hdr_path = tmp.name
     _write_test_hdr(hdr_path)
