@@ -29,7 +29,9 @@ pub struct WavefrontPipelines {
 
 impl WavefrontPipelines {
     /// Compile the exact shadow stage used by wavefront rendering before a
-    /// capability-limited adjudication test attempts any rendering.
+    /// capability-limited adjudication test attempts any rendering. Only the
+    /// Python probe and the adjudication tests call it.
+    #[cfg(any(test, feature = "extension-module"))]
     pub(crate) fn probe_shadow_kernel(device: &Device) -> Result<(), String> {
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
