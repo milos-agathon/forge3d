@@ -31,15 +31,13 @@ from forge3d._map_scene_validation import (
 )
 
 from _sutura_recipes import RECIPE_NAMES, _write_raster_overlay, build_scene
+from _terrain_runtime import terrain_rendering_available
 
 PACKAGE_ROOT = Path(f3d.__file__).resolve().parent
 
 
 def _native_terrain_available() -> bool:
-    try:
-        return bool(f3d.has_gpu()) and probe_native_capability("terrain")
-    except Exception:
-        return False
+    return terrain_rendering_available()
 
 
 def _ssim(image_a: np.ndarray, image_b: np.ndarray, *, block: int = 8) -> float:
@@ -260,8 +258,8 @@ def test_render_recompiles_stale_plan_after_recipe_mutation(tmp_path, monkeypatc
     assert compiled.recipe_hash != stale_hash
 
 
-def test_raster_overlay_metadata_reports_python_compositor(tmp_path, monkeypatch):
-    """Raster overlays are honestly reported as the deterministic CPU compositor."""
+def test_raster_overlay_reports_python_compositor_or_blocks(tmp_path, monkeypatch):
+    """Loaded rasters name the CPU compositor; missing data blocks."""
     def fake_terrain(_recipe, _heightmap, **_kwargs):
         rgba = np.zeros((64, 96, 4), dtype=np.uint8)
         rgba[..., 3] = 255
@@ -287,9 +285,17 @@ def test_raster_overlay_metadata_reports_python_compositor(tmp_path, monkeypatch
             )
         ],
     )
-    missing_report = missing_overlay_scene.render(str(tmp_path / "raster_missing.png"))
-    assert "raster_overlay_backend" not in missing_overlay_scene.last_render_metadata
-    assert "mapscene.raster_overlay_composite" not in missing_report.supported_features
+    # An unloadable overlay must block the whole render with a structured
+    # diagnostic instead of writing a placeholder PNG.
+    missing_png = tmp_path / "raster_missing.png"
+    with pytest.raises(map_scene.MapSceneNativeUnavailable) as excinfo:
+        missing_overlay_scene.render(str(missing_png))
+    ortho_blocks = [
+        block for block in excinfo.value.diagnostics if block.get("layer") == "ortho"
+    ]
+    assert ortho_blocks, f"expected a diagnostic block for layer 'ortho': {excinfo.value.diagnostics}"
+    assert ortho_blocks[0]["required_native"] == "readable RasterOverlay source"
+    assert not missing_png.exists(), "a blocked render must not write pixels"
 
     scene = f3d.MapScene(
         terrain=f3d.TerrainSource(
