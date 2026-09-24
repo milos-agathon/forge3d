@@ -550,12 +550,8 @@ mod tests {
                 &settings,
             )
             .unwrap();
-        for value in &mut volume.temperature {
-            *value = 0.0;
-        }
-        for value in &mut volume.emission_rate {
-            *value = 0.0;
-        }
+        volume.temperature.fill(0.0);
+        volume.emission_rate.fill(0.0);
         let without_emission = volume
             .raymarch_rgba(
                 32,
