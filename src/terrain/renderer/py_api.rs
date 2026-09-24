@@ -964,9 +964,11 @@ impl TerrainRenderer {
         &self,
         schedule: Vec<(String, u32, u32, u32, u32)>,
     ) -> PyResult<()> {
-        let mut material_vt = self.scene.material_vt.lock().map_err(|e| {
-            PyRuntimeError::new_err(format!("Failed to lock material_vt: {e}"))
-        })?;
+        let mut material_vt = self
+            .scene
+            .material_vt
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock material_vt: {e}")))?;
         material_vt
             .set_test_residency_schedule(schedule)
             .map_err(PyRuntimeError::new_err)
