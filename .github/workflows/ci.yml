@@ -986,6 +986,7 @@ jobs:
     env:
       WGPU_BACKEND: vulkan
       FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
 
     steps:
       - uses: actions/checkout@v4
