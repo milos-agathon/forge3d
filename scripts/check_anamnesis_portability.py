@@ -241,8 +241,26 @@ def main() -> int:
         or report["graph_command_submissions"] != 6
     ):
         raise SystemExit(f"native compatibility mismatch served stale terrain passes: {report}")
-    hashes_match = hashlib.sha256(rgba).hexdigest() == record["rgba_sha256"]
+    # Capability isolation must not change the frame this backend renders.
+    # Reference: a fresh render at the portable profile into an empty cache on
+    # this same backend (it cannot hit). The producer RGBA is an additional
+    # reference only when the producer ran on this backend: cross-backend byte
+    # identity is a separate claim (TERRA-DET-VULKAN-01), not assumed here.
+    from forge3d._native import get_native_module
+
+    backend = str(dict(get_native_module().engine_info()).get("backend", "")).lower()
+    producer_backend = str(record["producer_adapter"].get("backend", "")).lower()
+    with tempfile.TemporaryDirectory(prefix="forge3d-anamnesis-reference-") as empty:
+        reference, reference_report = _native_render(empty)
+    if reference_report["hits"]:
+        raise SystemExit(f"reference render hit an empty cache: {reference_report}")
+    rgba_sha = hashlib.sha256(rgba).hexdigest()
+    hashes_match = rgba_sha == hashlib.sha256(reference).hexdigest()
     if not hashes_match:
+        raise SystemExit(
+            "capability-isolation render changed this backend's canonical native RGBA"
+        )
+    if backend == producer_backend and rgba_sha != record["rgba_sha256"]:
         raise SystemExit("capability-isolation render changed canonical native RGBA")
     print(
         json.dumps(
@@ -252,6 +270,8 @@ def main() -> int:
                 "misses": len(report["misses"]),
                 "hit_rate": report["hit_rate"],
                 "hashes_match": hashes_match,
+                "reference_backend": backend,
+                "producer_rgba_compared": backend == producer_backend,
                 "mismatch_dimension": "compatibility_profile",
             },
             sort_keys=True,
