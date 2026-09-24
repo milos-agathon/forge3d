@@ -30,24 +30,17 @@ SANCTIONED_DD_SPLITS = {
 }
 
 # Updated only after reviewing the complete inventory printed by a failure.
-# The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1327
-# Re-frozen when ANAMNESIS merged with main. The site COUNT is unchanged, and a
-# site-by-site diff against main shows exactly five added and five removed --
-# the same five `as_f32` statements in src/offscreen/adjudication_raster.rs,
-# moved from `render_raster_reference` to `render_raster_reference_incremental`
-# by the incremental-render rename. A site record is
-# (file, function, operation, nth, statement) with no line numbers, so the
-# digest moved only because the enclosing function was renamed. No new
-# narrowing conversion was introduced by this merge.
-EXPECTED_CONVERSION_SHA256 = "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817"
+# The digest includes (file, function, operation, ordinal, normalized statement)
+# over files ordered by their POSIX repository path, so it is identical on every
+# OS (a case-insensitive Windows ``sorted(Path)`` order once made it host-bound).
+EXPECTED_CONVERSION_COUNT = 1394
+EXPECTED_CONVERSION_SHA256 = "7d6327ee898c15c0d9e0d83b3e15ba682c17ac5f5bb5970b594affb28c82332b"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": 1327,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -64,26 +57,26 @@ REVIEWED_INVENTORY_TRANSITION = {
     ),
 }
 
-# ANAMNESIS retained the exact five adjudication conversions and moved them
-# into the incremental implementation beneath the compatibility wrapper. This
-# transition records that function-only ownership change without relaxing the
-# occurrence count or any normalized conversion statement.
-REVIEWED_ANAMNESIS_INVENTORY_TRANSITION = {
-    # Re-based on main at the merge: the pre-transition tree is now main rather
-    # than this branch's original base, so the count and digest are main's.
-    "base_count": 1327,
-    "base_digest": "9850587e94805c6d45e321cc54f5ea40dc54e6efa7facbcc45f17b00925283d4",
-    "result_digest": EXPECTED_CONVERSION_SHA256,
-    "path": "src/offscreen/adjudication_raster.rs",
-    "removed_function": "render_raster_reference",
-    "added_function": "render_raster_reference_incremental",
-    "statements": (
-        "let aspect = width as f32 / height as f32",
-        "let aspect = width as f32 / height as f32",
-        "u.misc = [desc.plane_half_extent, i as f32, 1.0, 0.0]",
-        "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5",
-        "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5",
-    ),
+# Reviewed re-freeze from 1327 sites (1c688dd4) to 1394 (+92 / -25), all in the
+# four files below and none a world-coordinate narrowing:
+# - hybrid_compute/render_terrain.rs (PROMETHEUS): integer counts, dims, frame
+#   indices and flags lifted to f32 for runtime-contract observations, the
+#   estimator variance, and the per-frame mean divide.
+# - offscreen/adjudication_raster.rs (AEQUITAS routed through production PBR):
+#   bake-grid and ray indices on the local unit plane, aspect ratio, and SSAA
+#   tap weights. The ANAMNESIS `render_raster_reference_incremental` owner of
+#   the former five sites no longer exists.
+# - lighting/ephemeris.rs: f64 unit sun-direction vectors narrowed to f32.
+# - terrain/accumulation.rs (CHRONOS): R2 jitter `fract()` values in [0, 1).
+REVIEWED_PROMETHEUS_CHRONOS_FILE_COUNTS = {
+    "src/path_tracing/hybrid_compute/render_terrain.rs": 62,
+    "src/offscreen/adjudication_raster.rs": 25,
+    "src/lighting/ephemeris.rs": 6,
+    "src/terrain/accumulation.rs": 7,
+}
+RETIRED_CONVERSION_OWNERS = {
+    ("src/offscreen/adjudication_raster.rs", "render_raster_reference"),
+    ("src/offscreen/adjudication_raster.rs", "render_raster_reference_incremental"),
 }
 
 
@@ -171,8 +164,8 @@ def _conversion_inventory_text(rel: str, raw: str):
 
 def _complete_conversion_inventory():
     sites = []
-    for path in sorted((ROOT / "src").rglob("*.rs")):
-        rel = path.relative_to(ROOT).as_posix()
+    paths = {path.relative_to(ROOT).as_posix(): path for path in (ROOT / "src").rglob("*.rs")}
+    for rel, path in sorted(paths.items()):
         sites.extend(_conversion_inventory_text(rel, path.read_text(encoding="utf-8")))
     return sites
 
@@ -237,34 +230,26 @@ def test_dd_encode_has_exactly_the_two_reviewed_split_casts():
 def test_reviewed_checked_reader_inventory_transition_is_exact():
     sites = conversion_inventory()
     transition = REVIEWED_INVENTORY_TRANSITION
-    assert len(sites) == transition["current_count"] == EXPECTED_CONVERSION_COUNT
+    assert len(sites) == EXPECTED_CONVERSION_COUNT
     assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
     assert transition["added"] in sites
     assert transition["removed"] not in sites
 
 
-def test_reviewed_anamnesis_function_ownership_transition_is_exact():
+def test_reviewed_prometheus_chronos_transition_is_exact():
     sites = conversion_inventory()
-    transition = REVIEWED_ANAMNESIS_INVENTORY_TRANSITION
-    assert len(sites) == transition["base_count"] == EXPECTED_CONVERSION_COUNT
-    assert _inventory_digest(sites) == transition["result_digest"]
-    for ordinal, statement in enumerate(transition["statements"], start=1):
-        removed = (
-            transition["path"],
-            transition["removed_function"],
-            "as_f32",
-            ordinal,
-            statement,
-        )
-        added = (
-            transition["path"],
-            transition["added_function"],
-            "as_f32",
-            ordinal,
-            statement,
-        )
-        assert removed not in sites
-        assert added in sites
+    assert len(sites) == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
+    for path, count in REVIEWED_PROMETHEUS_CHRONOS_FILE_COUNTS.items():
+        assert sum(1 for site in sites if site[0] == path) == count, path
+    assert not {(site[0], site[1]) for site in sites} & RETIRED_CONVERSION_OWNERS
+
+
+def test_inventory_order_is_host_independent():
+    sites = conversion_inventory()
+    files = [site[0] for site in sites]
+    first_seen = list(dict.fromkeys(files))
+    assert first_seen == sorted(first_seen)
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():
