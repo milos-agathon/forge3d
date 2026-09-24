@@ -31,11 +31,11 @@ def sha256(path):
 
 
 def provenance_sha256(path):
-    # The committed reference recorded this text file with Windows CRLF bytes.
-    # Canonicalize line endings before hashing so an LF checkout checks the
-    # same provenance without changing the recorded reference value.
+    # The reference records the LF form of this text file (.gitattributes pins
+    # eol=lf). Canonicalize to LF before hashing so a checkout that still holds
+    # CRLF bytes (autocrlf, or a pre-rule working tree) checks the same value.
     text = Path(path).read_text(encoding="utf-8")
-    return hashlib.sha256(text.replace("\n", "\r\n").encode("utf-8")).hexdigest()
+    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
 
 
 def real_dem():
