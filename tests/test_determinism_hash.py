@@ -2,9 +2,10 @@
 # TERRA-DETERMINATA: hash-diff harness for the deterministic reference render.
 # Renders the canonical terrain+CSM+IBL scene, asserts intra-backend
 # bit-identity (fast local proxy for the cross-vendor claim) and equality with
-# the committed golden SHA-256.
+# the committed golden SHA-256 of the local backend (per-backend golden record;
+# cross-backend identity is tracked separately and may be ABSENT).
 # RELEVANT FILES: python/forge3d/determinism.py, src/core/gpu.rs,
-# tests/goldens/determinism/terra_determinata_v1.sha256,
+# tests/goldens/determinism/terra_determinata_v1.json, scripts/_determinism_golden.py,
 # .github/workflows/determinism-matrix.yml
 from __future__ import annotations
 
@@ -26,7 +27,9 @@ if not terrain_rendering_available():
         allow_module_level=True,
     )
 
-GOLDEN_PATH = Path(__file__).parent / "goldens" / "determinism" / f"{CANONICAL_SCENE}.sha256"
+GOLDEN_PATH = Path(__file__).parent / "goldens" / "determinism" / f"{CANONICAL_SCENE}.json"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from _determinism_golden import golden_sha256, load_golden  # noqa: E402
 
 
 def _local_backend() -> str:
@@ -96,22 +99,27 @@ def test_dupla_dd_demo_is_backend_pinned_and_byte_identical():
 
 
 def test_matches_committed_golden(tmp_path):
-    """The canonical render must equal the committed golden hash, byte-exact."""
+    """The canonical render must equal the local backend's committed golden, byte-exact."""
     assert GOLDEN_PATH.exists(), (
-        f"missing golden hash file {GOLDEN_PATH}; generate it with\n"
-        f"  python -m forge3d.determinism --out-png ref.png\n"
-        f"under FORGE3D_DETERMINISTIC=1 + a pinned WGPU_BACKENDS and commit the hash"
+        f"missing golden record {GOLDEN_PATH}; record each backend's hash from an "
+        f"attributable CI render (python -m forge3d.determinism --out-png ref.png "
+        f"under FORGE3D_DETERMINISTIC=1 + a pinned WGPU_BACKENDS)"
     )
-    golden = GOLDEN_PATH.read_text().split()[0].strip()
+    backend = _local_backend()
+    golden = golden_sha256(load_golden(GOLDEN_PATH, CANONICAL_SCENE), backend)
+    assert golden is not None, (
+        f"ABSENT: no committed {backend} golden in {GOLDEN_PATH.name}; record one "
+        f"from an attributable CI render before claiming this backend"
+    )
     actual = render_reference(
         CANONICAL_SCENE,
         width=512,
         height=512,
-        backend=_local_backend(),
+        backend=backend,
         out_png=tmp_path / "render_golden_check.png",
     )
     assert actual == golden, (
-        f"determinism hash mismatch against committed golden\n"
+        f"determinism hash mismatch against committed {backend} golden\n"
         f"  golden: {golden}\n  actual: {actual}\n"
         f"Zero-byte tolerance: if this diverges the pipeline picked up a "
         f"nondeterminism source (or the scene changed; regenerate the golden "
