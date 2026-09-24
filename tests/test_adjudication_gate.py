@@ -319,6 +319,12 @@ def test_adjudication_gate():
         pytest.skip(
             "Adjudication gate requires a terrain-capable hardware-backed forge3d runtime"
         )
+    if str(f3d.device_probe(os.environ.get("WGPU_BACKEND")).get("backend", "")).lower() == "metal":
+        # Legitimate unavailable support, decided before rendering: naga 0.19's
+        # MSL backend does not implement atomicCompareExchange, which the
+        # wavefront shadow kernel's float accumulation needs. CI runs this gate
+        # on the NVIDIA Vulkan lane instead.
+        pytest.skip("wavefront PT reference is unsupported on Metal (naga 0.19 MSL lacks atomicCompareExchange)")
 
     pt_rgba, raster_rgba, meta = f3d.render_adjudication_pair(
         GATE_WIDTH, GATE_HEIGHT, GATE_SPP

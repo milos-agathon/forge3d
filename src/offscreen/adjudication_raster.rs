@@ -759,7 +759,9 @@ mod tests {
     ))]
     #[test]
     fn raster_capture_executes_production_shader() {
-        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+        let Some((device, queue)) =
+            crate::path_tracing::adjudication::adjudication_test_device(false)
+        else {
             return;
         };
         crate::core::degradation::begin_degradation_capture();
@@ -797,12 +799,12 @@ mod tests {
     fn both_paths_consume_scene_sky_and_ambient() {
         use crate::path_tracing::adjudication::render_pt_reference;
         use crate::path_tracing::reference_scene::{adjudication_scene, ReferenceSceneDesc};
-        use std::sync::Arc;
 
-        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+        let Some((device, queue)) =
+            crate::path_tracing::adjudication::adjudication_test_device(true)
+        else {
             return;
         };
-        let (device, queue) = (Arc::new(device), Arc::new(queue));
         const N: u32 = 32;
         // Sun off: the plane is lit by the constant ambient alone, so its
         // radiance is linear in ambient_color on both paths.
@@ -868,12 +870,12 @@ mod tests {
         use crate::core::tonemap::resolve_reference_hdr_to_rgba8;
         use crate::path_tracing::adjudication::render_pt_reference;
         use crate::path_tracing::reference_scene::{adjudication_scene, ReferenceSceneDesc};
-        use std::sync::Arc;
 
-        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+        let Some((device, queue)) =
+            crate::path_tracing::adjudication::adjudication_test_device(true)
+        else {
             return;
         };
-        let (device, queue) = (Arc::new(device), Arc::new(queue));
         const N: u32 = 64;
         let mean_rgb = |hdr: &[f32], exposure: f32| -> [f64; 3] {
             let mut sum = [0.0f64; 3];
@@ -946,7 +948,9 @@ mod tests {
         use crate::render::mesh_instanced::{MeshInstancedRenderer, VertexPN};
         use glam::{Mat4, Vec3};
 
-        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+        let Some((device, queue)) =
+            crate::path_tracing::adjudication::adjudication_test_device(false)
+        else {
             return;
         };
         let desc = crate::path_tracing::reference_scene::adjudication_scene();

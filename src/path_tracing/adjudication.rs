@@ -390,6 +390,43 @@ pub fn render_pt_reference(
     reference.read_mean_hdr(device, queue, spp_frames)
 }
 
+/// Device for the AEQUITAS GPU unit tests, or `None` (with the reason on
+/// stderr) when this host cannot meaningfully run them — the same
+/// hardware-only convention the Python adjudication gate follows:
+/// - software adapters (WARP, lavapipe, llvmpipe, SwiftShader) are declined;
+/// - with `wavefront`, Metal is declined: naga 0.19's MSL backend does not
+///   implement `atomicCompareExchange`, which pt_shadow.wgsl's float
+///   accumulation needs, so the wavefront shadow pipeline cannot be built.
+#[cfg(test)]
+pub(crate) fn adjudication_test_device(wavefront: bool) -> Option<(Arc<Device>, Arc<Queue>)> {
+    let (device, queue, info) = crate::core::gpu::create_device_queue_and_info_for_test()?;
+    let name = info.name.to_lowercase();
+    let software = info.device_type == wgpu::DeviceType::Cpu
+        || [
+            "basic render driver",
+            "warp",
+            "lavapipe",
+            "llvmpipe",
+            "swiftshader",
+        ]
+        .iter()
+        .any(|token| name.contains(token));
+    if software {
+        eprintln!(
+            "skipping AEQUITAS GPU test: software adapter '{}'",
+            info.name
+        );
+        return None;
+    }
+    if wavefront && info.backend == wgpu::Backend::Metal {
+        eprintln!(
+            "skipping AEQUITAS wavefront test on Metal: naga 0.19 MSL lacks atomicCompareExchange"
+        );
+        return None;
+    }
+    Some((Arc::new(device), Arc::new(queue)))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -705,23 +742,9 @@ fn transport_probe() {
         // Fails if the adjudication PT path is ever rewired as a
         // one-iteration/direct-lighting shortcut: render_pt_reference errors
         // when any frame executes fewer than two wavefront iterations.
-        let instance = wgpu::Instance::default();
-        let Some(adapter) =
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-        else {
-            return; // no GPU on this host: same silent-skip convention as queues/types.rs
-        };
-        let Ok((device, queue)) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("adjudication-multibounce-test"),
-                required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-            },
-            None,
-        )) else {
+        let Some((device, queue)) = super::adjudication_test_device(true) else {
             return;
         };
-        let (device, queue) = (std::sync::Arc::new(device), std::sync::Arc::new(queue));
         let desc = crate::path_tracing::reference_scene::adjudication_scene();
         // timing = None: this test drives a standalone device, and a timing
         // manager from the global context would live on a different device.
