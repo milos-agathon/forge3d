@@ -110,6 +110,8 @@ jobs:
               - 'tests/test_terrain_tv10_goldens.py'
               - 'tests/test_terrain_vt_pbr_families.py'
               - 'tests/test_recipe_goldens.py'
+              - 'tests/test_mapscene_sutura_integrity.py'
+              - 'tests/test_chronos_flythrough.py'
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
               - 'tests/test_prometheus_dem_reference.py'
@@ -555,6 +557,28 @@ jobs:
             echo "::error::terrain probe crashed on a CI-safe adapter (exit $code); failing the golden job instead of recording ABSENT"
             exit "$code"
           fi
+
+      # Run before the visual-golden catalog: SUTURA remains executable even
+      # when an independently governed pixel golden or certificate is stale.
+      - name: Run SUTURA MapScene integrity gate
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          python -m pytest tests/test_mapscene_sutura_integrity.py -v --tb=short --junitxml=tests/artifacts/sutura/junit.xml
+          python scripts/assert_junit_zero_skips.py tests/artifacts/sutura/junit.xml
+
+      # CHRONOS GPU cases (repeat-run cache, per-frame certificates, physical
+      # pixel-hash replay) skip in the hosted default lane; this is their only
+      # executing lane.
+      - name: Run CHRONOS flythrough gate
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+        run: |
+          python -m pytest tests/test_chronos_flythrough.py -v --tb=short --junitxml=tests/artifacts/chronos/junit.xml
+          python scripts/assert_junit_zero_skips.py tests/artifacts/chronos/junit.xml
 
       - name: Run visual golden tests
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'

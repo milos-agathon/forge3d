@@ -43,25 +43,30 @@ from ._map_scene_labels import (
     _valid_geometry,
 )
 from ._map_scene_render import (
-    MapSceneRenderLayerTypes,
     _building_features as _render_building_features,
     _building_fill_color as _render_building_fill_color,
     _building_height as _render_building_height,
     _building_properties as _render_building_properties,
     _building_rings as _render_building_rings,
     _building_roof_type as _render_building_roof_type,
+    _compose_furniture,
     _dash_segments as _render_dash_segments,
+    _draw_pixel_block as _render_draw_pixel_block,
+    _draw_polygon_fill as _render_draw_polygon_fill,
+    _draw_polyline as _render_draw_polyline,
     _color as _render_color,
-    _composite_recipe_layers,
     _feature_color as _render_feature_color,
     _feature_number as _render_feature_number,
     _geometry_polygon_rings as _render_geometry_polygon_rings,
     _geometry_points as _render_geometry_points,
+    _is_style_expression as _render_is_style_expression,
     _label_anchor as _render_label_anchor,
     _layout as _render_layout,
     _number as _render_number,
     _paint as _render_paint,
     _point_to_pixel as _render_point_to_pixel,
+    _properties as _render_properties,
+    _resolve_line_width_px as _render_resolve_line_width_px,
     _rgb as _render_rgb,
 )
 from ._map_scene_validation import (
@@ -115,16 +120,6 @@ from .diagnostics import (
 
 if TYPE_CHECKING:
     from .graticule import GraticuleSpec
-
-
-def _render_layer_types() -> MapSceneRenderLayerTypes:
-    return MapSceneRenderLayerTypes(
-        raster_overlay=RasterOverlay,
-        vector_overlay=VectorOverlay,
-        label_layer=LabelLayer,
-        point_cloud_layer=PointCloudLayer,
-        building_layer=BuildingLayer,
-    )
 
 
 def _path_to_str(value: Any | None) -> str | None:
@@ -400,6 +395,71 @@ def _load_native_raster_overlay(
             with rasterio.open(path) as src:
                 overlay = _raster_to_rgba8(src.read())
     return _resize_nearest_rgba(overlay, target_shape)
+
+
+def _load_python_raster_overlays(
+    recipe: "SceneRecipe",
+    *,
+    target_grid: Mapping[str, Any] | None,
+) -> tuple[list[tuple["RasterOverlay", Any]], list[dict[str, Any]]]:
+    """Load RasterOverlay payloads for the deterministic Python compositor.
+
+    Returns (loaded (layer, rgba) pairs in recipe order, diagnostic blocks).
+    A missing or unreadable source is a fatal diagnostic: the compositor is an
+    honest CPU implementation for loaded pixels, never a placeholder source.
+    """
+
+    raster_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)]
+    if not raster_layers:
+        return [], []
+    overlays: list[tuple["RasterOverlay", Any]] = []
+    blocks: list[dict[str, Any]] = []
+    for layer in raster_layers:
+        layer_id = _layer_id(layer, "layer")
+        overlay = _load_native_raster_overlay(layer, target_grid=target_grid)
+        if overlay is None:
+            blocks.append(
+                diagnostic_block(
+                    layer=layer_id,
+                    reason=(
+                        "raster overlay data is unavailable (missing path, unreadable "
+                        "file, or unsupported format); no placeholder pixels are permitted"
+                    ),
+                    required_native="readable RasterOverlay source",
+                )
+            )
+            continue
+        overlays.append((layer, overlay))
+    return overlays, blocks
+
+
+def _composite_python_raster_overlays(
+    base: Any,
+    raster_overlays: list[tuple["RasterOverlay", Any]],
+) -> Any:
+    """Composite loaded overlays deterministically in Python, in recipe order."""
+    if not raster_overlays:
+        return base
+
+    import numpy as np
+
+    out = np.ascontiguousarray(base.copy())
+    height, width = out.shape[:2]
+    yy, xx = np.mgrid[0:height, 0:width]
+    for layer, overlay in raster_overlays:
+        source = np.asarray(overlay, dtype=np.uint8)
+        source_height, source_width = source.shape[:2]
+        sample_y = np.clip((yy * source_height // max(height, 1)), 0, source_height - 1)
+        sample_x = np.clip((xx * source_width // max(width, 1)), 0, source_width - 1)
+        sampled = source[sample_y, sample_x]
+        alpha = max(0.0, min(1.0, float(layer.opacity)))
+        sampled_alpha = (sampled[..., 3:4].astype(np.float32) / 255.0) * alpha
+        blended = (
+            out[..., :3].astype(np.float32) * (1.0 - sampled_alpha)
+            + sampled[..., :3].astype(np.float32) * sampled_alpha
+        )
+        out[..., :3] = np.clip(blended, 0.0, 255.0).astype(np.uint8)
+    return out
 
 
 def _numpy_to_exr_writer() -> Any | None:
@@ -1577,6 +1637,12 @@ def _pixel_to_ndc(point: tuple[int, int], width: int, height: int) -> tuple[floa
 
 
 def _vector_layer_requires_precise_raster(layer: "VectorOverlay") -> bool:
+    """Return True when the layer needs the deterministic Python stroke path.
+
+    Dash arrays, non-round joins, and explicit miter limits are beyond the
+    native OIT vector bridge. SUTURA permits the existing precise Python
+    compositor when its backend is identified explicitly in render metadata.
+    """
     line_paint = _render_paint(layer, "line")
     line_layout = _render_layout(layer, "line")
     dash_array = getattr(layer, "dash_array", None) or line_paint.get("line-dasharray")
@@ -1768,6 +1834,158 @@ def _native_polygon_payload_for_layers(
     return exteriors, holes, fill_rgba
 
 
+def _composite_python_precise_vector_layers(
+    base: Any,
+    recipe: "SceneRecipe",
+    vector_layers: list["VectorOverlay"],
+) -> tuple[Any, bool]:
+    """Composite precise vector styles with the deterministic Python rasterizer."""
+
+    import numpy as np
+
+    out = np.ascontiguousarray(base.copy())
+    height, width = out.shape[:2]
+    for layer in vector_layers:
+        line_paint = _render_paint(layer, "line")
+        line_layout = _render_layout(layer, "line")
+        fill_paint = _render_paint(layer, "fill")
+        fallback_rgb = _render_rgb(layer.to_dict(), salt="vector")
+        line_color_value = line_paint.get("line-color")
+        line_color = (
+            (*fallback_rgb, 255)
+            if _render_is_style_expression(line_color_value)
+            else _render_color(line_color_value, (*fallback_rgb, 255))
+        )
+        line_opacity_value = line_paint.get("line-opacity")
+        line_opacity = (
+            line_color[3] / 255.0
+            if _render_is_style_expression(line_opacity_value)
+            else _render_number(line_opacity_value, line_color[3] / 255.0)
+        )
+        line_color = (
+            line_color[0],
+            line_color[1],
+            line_color[2],
+            max(0, min(255, int(round(line_opacity * 255.0)))),
+        )
+        line_width = _render_resolve_line_width_px(layer, line_paint, recipe, width, height)
+        line_cap = str(
+            line_layout.get("line-cap") or getattr(layer, "line_cap", "butt") or "butt"
+        ).lower()
+        line_join = str(
+            line_layout.get("line-join") or getattr(layer, "line_join", "miter") or "miter"
+        ).lower()
+        miter_limit = _render_number(line_layout.get("line-miter-limit"), 4.0)
+        dash_array = getattr(layer, "dash_array", None) or line_paint.get("line-dasharray")
+        fill_color_value = fill_paint.get("fill-color")
+        fill_color = (
+            (*fallback_rgb, 160)
+            if _render_is_style_expression(fill_color_value)
+            else _render_color(fill_color_value, (*fallback_rgb, 160))
+        )
+        fill_opacity_value = fill_paint.get("fill-opacity")
+        fill_opacity = (
+            fill_color[3] / 255.0
+            if _render_is_style_expression(fill_opacity_value)
+            else _render_number(fill_opacity_value, fill_color[3] / 255.0)
+        )
+        fill_color = (
+            fill_color[0],
+            fill_color[1],
+            fill_color[2],
+            max(0, min(255, int(round(fill_opacity * 255.0)))),
+        )
+        for feature in layer.features or ():
+            geometry = feature.get("geometry") if isinstance(feature, Mapping) else None
+            if not isinstance(geometry, Mapping):
+                continue
+            properties = _render_properties(feature)
+            feature_line_color = _render_feature_color(
+                line_color_value, properties, line_color
+            )
+            feature_line_opacity = _render_feature_number(
+                line_opacity_value, properties, feature_line_color[3] / 255.0
+            )
+            feature_line_color = (
+                feature_line_color[0],
+                feature_line_color[1],
+                feature_line_color[2],
+                max(0, min(255, int(round(feature_line_opacity * 255.0)))),
+            )
+            feature_line_width = line_width
+            if getattr(layer, "width_px", None) is None and _render_is_style_expression(
+                line_paint.get("line-width")
+            ):
+                feature_line_width = max(
+                    1.0,
+                    _render_feature_number(
+                        line_paint.get("line-width"), properties, line_width
+                    ),
+                )
+            feature_fill_color = _render_feature_color(
+                fill_color_value, properties, fill_color
+            )
+            feature_fill_opacity = _render_feature_number(
+                fill_opacity_value, properties, feature_fill_color[3] / 255.0
+            )
+            feature_fill_color = (
+                feature_fill_color[0],
+                feature_fill_color[1],
+                feature_fill_color[2],
+                max(0, min(255, int(round(feature_fill_opacity * 255.0)))),
+            )
+            geometry_type = str(geometry.get("type", "")).lower()
+            if geometry_type in {"polygon", "multipolygon"}:
+                for polygon_rings in _render_geometry_polygon_rings(geometry):
+                    pixel_rings = [
+                        [_render_point_to_pixel(point, width, height) for point in ring]
+                        for ring in polygon_rings
+                        if len(ring) >= 3
+                    ]
+                    if not pixel_rings:
+                        continue
+                    _render_draw_polygon_fill(out, pixel_rings, feature_fill_color)
+                    for ring_points in pixel_rings:
+                        if ring_points and ring_points[0] != ring_points[-1]:
+                            ring_points = [*ring_points, ring_points[0]]
+                        if len(ring_points) >= 2:
+                            _render_draw_polyline(
+                                out,
+                                ring_points,
+                                feature_line_color,
+                                width_px=feature_line_width,
+                                cap=line_cap,
+                                join=line_join,
+                                dash_array=dash_array,
+                                miter_limit=miter_limit,
+                            )
+                continue
+            points = [
+                _render_point_to_pixel(point, width, height)
+                for point in _render_geometry_points(geometry)
+            ]
+            if len(points) == 1:
+                _render_draw_pixel_block(
+                    out,
+                    points[0][0],
+                    points[0][1],
+                    feature_line_color,
+                    radius=max(1, int(round(feature_line_width))),
+                )
+            elif len(points) >= 2:
+                _render_draw_polyline(
+                    out,
+                    points,
+                    feature_line_color,
+                    width_px=feature_line_width,
+                    cap=line_cap,
+                    join=line_join,
+                    dash_array=dash_array,
+                    miter_limit=miter_limit,
+                )
+    return out, True
+
+
 def _composite_native_vector_layers(base: Any, recipe: "SceneRecipe") -> tuple[Any, bool]:
     vector_layers = [layer for layer in recipe.layers if isinstance(layer, VectorOverlay)]
     if not vector_layers:
@@ -1776,19 +1994,7 @@ def _composite_native_vector_layers(base: Any, recipe: "SceneRecipe") -> tuple[A
     import numpy as np
 
     if any(_vector_layer_requires_precise_raster(layer) for layer in vector_layers):
-        rgba = _composite_recipe_layers(
-            np.ascontiguousarray(base.copy()),
-            recipe,
-            {},
-            layer_types=_render_layer_types(),
-            load_raster_overlay=lambda _layer: None,
-            include_raster=False,
-            include_vectors=True,
-            include_labels=False,
-            include_buildings=False,
-            include_point_cloud=False,
-        )
-        return np.ascontiguousarray(rgba.astype(np.uint8, copy=False)), True
+        return _composite_python_precise_vector_layers(base, recipe, vector_layers)
 
     try:
         import forge3d as f3d
@@ -3367,6 +3573,14 @@ def _render_native_offscreen_result(
     base, native_labels = _composite_native_label_layers(base, recipe, plans)
     base, native_vectors = _composite_native_vector_layers(base, recipe)
     base, native_point_clouds, point_tile_metadata = _composite_native_point_cloud_layers(base, recipe)
+    target_grid = _terrain_alignment_grid(
+        recipe.terrain,
+        target_crs=recipe.target_crs or recipe.terrain.crs,
+        fallback_shape=heightmap.shape,
+    )
+    raster_overlays, raster_blocks = _load_python_raster_overlays(
+        recipe, target_grid=target_grid
+    )
     blocks = _native_composite_blocks(
         recipe,
         native_labels=native_labels,
@@ -3375,34 +3589,16 @@ def _render_native_offscreen_result(
         native_point_clouds=native_point_clouds,
         plans=plans,
     )
+    blocks.extend(raster_blocks)
     if blocks:
         raise MapSceneNativeUnavailable(blocks)
-    target_grid = _terrain_alignment_grid(
-        recipe.terrain,
-        target_crs=recipe.target_crs or recipe.terrain.crs,
-        fallback_shape=heightmap.shape,
-    )
 
-    raster_overlay_layers: list["RasterOverlay"] = []
-
-    def load_raster_overlay(layer: "RasterOverlay") -> Any | None:
-        overlay = _load_native_raster_overlay(layer, target_grid=target_grid)
-        if overlay is not None:
-            raster_overlay_layers.append(layer)
-        return overlay
-
-    composited = _composite_recipe_layers(
-        base,
-        recipe,
-        plans,
-        layer_types=_render_layer_types(),
-        load_raster_overlay=load_raster_overlay,
-        include_raster=True,
-        include_vectors=False,
-        include_labels=False,
-        include_buildings=False,
-        include_point_cloud=False,
-    )
+    # Loaded raster overlays are an explicit deterministic Python compositor
+    # exception. Missing sources were blocked above; no placeholder is drawn.
+    composited = _composite_python_raster_overlays(base, raster_overlays)
+    # Map furniture (graticule, scale bar, north arrow, title) draws over
+    # everything, matching the old compositor's final step.
+    _compose_furniture(composited, recipe)
     metadata = dict(result.metadata)
     metadata.update(cloud_shadow_metadata)
     metadata.update(screen_space_metadata)
@@ -3412,17 +3608,13 @@ def _render_native_offscreen_result(
         metadata.update(textured_metadata)
     if native_point_clouds:
         metadata.update(point_tile_metadata)
-    if raster_overlay_layers:
-        # Honest contract: loaded raster overlays are composited by the
-        # deterministic CPU resample compositor, not a native-only path.
+    if raster_overlays:
         metadata["raster_overlay_backend"] = "python_resample_composite"
-        metadata["raster_overlay_layer_count"] = len(raster_overlay_layers)
+        metadata["raster_overlay_layer_count"] = len(raster_overlays)
     vector_layers = [layer for layer in recipe.layers if isinstance(layer, VectorOverlay)]
     if vector_layers and any(
         _vector_layer_requires_precise_raster(layer) for layer in vector_layers
     ):
-        # Dashed/mitered precise vectors route through the deterministic CPU
-        # raster path, not native OIT.
         metadata["vector_backend"] = "python_precise_raster"
     elif native_vectors:
         metadata["vector_backend"] = "native_oit"
@@ -5750,6 +5942,7 @@ class MapScene:
         certificate: "bool | str | os.PathLike[str]" = False,
         cache: "str | os.PathLike[str] | None" = None,
     ) -> ValidationReport:
+        """Render the scene; ``cache`` holds path-free per-scene subfolders."""
         output = self.recipe.output
         target = path or (output.path if output is not None else None)
         cache_eligible = bool(
@@ -5769,6 +5962,23 @@ class MapScene:
             from ._canonical_json import canonical_json_bytes
 
             rendered: dict[str, ValidationReport] = {}
+            key_scene = copy.deepcopy(self.to_dict())
+            # Match ANAMNESIS's destination-only output fields while the
+            # MapScene output is nested under recipe.
+            for name in ("path", "directory", "filename"):
+                key_scene["recipe"]["output"].pop(name, None)
+            frame = self._compiled_plan_for_current_recipe().frame
+            render_frame_context = canonical_json_bytes(
+                (
+                    {"scene": key_scene, "chronos_frame": frame.to_json()}
+                    if frame is not None
+                    else key_scene
+                ),
+                error_context="MapScene ANAMNESIS callback context",
+            )
+            # A short folder-name collision only changes the previous-manifest
+            # prediction and forces recomputation; full Merkle keys guard blobs.
+            scene_root = Path(cache) / hashlib.sha256(render_frame_context).hexdigest()[:16]
 
             def render_frame(_recipe: Mapping[str, Any], _frame: int) -> bytes:
                 report = self._render_impl(
@@ -5780,15 +5990,12 @@ class MapScene:
                 return Path(str(target)).read_bytes()
 
             sequence = render_sequence(
-                self.to_dict(),
+                key_scene,
                 frames=[0],
-                cache=cache,
+                cache=scene_root,
                 render_frame=render_frame,
                 render_frame_fingerprint=b"forge3d.python.mapscene.render/v1",
-                render_frame_context=canonical_json_bytes(
-                    self.to_dict(),
-                    error_context="MapScene ANAMNESIS callback context",
-                ),
+                render_frame_context=render_frame_context,
             )
             report = rendered.get("report")
             if report is None:

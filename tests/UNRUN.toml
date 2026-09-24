@@ -52,8 +52,3 @@ reason = "requires_hardware_adapter: MapScene native terrain/screen-space render
 owner = "milos"
 expires = "2026-10-10"
 
-[[entries]]
-file = "tests/test_mapscene_sutura_integrity.py"
-reason = "requires_hardware_adapter: save/load re-render SSIM needs native terrain adapter; raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
-owner = "milos"
-expires = "2026-10-10"
