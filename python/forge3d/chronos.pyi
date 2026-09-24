@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -36,4 +37,6 @@ def render_flythrough(
     base_seed: int,
     samples: int,
     out_dir: str | Path,
+    certificate: bool = ...,
+    cache: str | os.PathLike[str] | None = ...,
 ) -> FlythroughManifest: ...

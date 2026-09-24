@@ -111,6 +111,11 @@ pub(crate) fn compile_frame(
     Ok(CompiledFrame { inner })
 }
 
+/// Hash an already-rendered RGBA frame into its CHRONOS provenance record.
+///
+/// Outside CENSOR's render-certificate scope: this executes no rendering; it
+/// binds pixels produced by a certified render (`MapScene.render`) to the
+/// compiled frame that drove them.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn render_compiled_frame(

@@ -56,6 +56,9 @@ DOCUMENTED_EXCLUSIONS = {
     # Certificate-report getter: returns the last render's execution report,
     # renders nothing itself.
     "render_execution_report": "execution-report getter, produces no pixels",
+    # CHRONOS provenance record over pixels already rendered by a certified
+    # MapScene.render; hashes, renders nothing.
+    "render_compiled_frame": "provenance hash of an already-rendered frame, no render",
 }
 
 
@@ -74,6 +77,7 @@ RENDER_ENTRYPOINTS = {
     "Renderer.render_triangle_png": f3d.Renderer.render_triangle_png,
     "MapScene.render": MapScene.render,
     "render_offline": render_offline,
+    "render_flythrough": f3d.render_flythrough,
     "determinism.render_reference": determinism.render_reference,
     "PathTracer.render_rgba": path_tracing.PathTracer.render_rgba,
     "PathTracer.render_progressive": path_tracing.PathTracer.render_progressive,
@@ -276,6 +280,7 @@ def test_documented_exclusions_explain_their_certificate_scope() -> None:
         "export_svg": export_svg,
         "export_pdf": export_pdf,
         "run_benchmark": run_benchmark,
+        "render_compiled_frame": f3d.render_compiled_frame,
     }
     for name, entrypoint in exclusions.items():
         assert name in DOCUMENTED_EXCLUSIONS
