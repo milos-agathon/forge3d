@@ -394,9 +394,7 @@ pub fn render_pt_reference(
 /// stderr) when this host cannot meaningfully run them — the same
 /// hardware-only convention the Python adjudication gate follows:
 /// - software adapters (WARP, lavapipe, llvmpipe, SwiftShader) are declined;
-/// - with `wavefront`, Metal is declined: naga 0.19's MSL backend does not
-///   implement `atomicCompareExchange`, which pt_shadow.wgsl's float
-///   accumulation needs, so the wavefront shadow pipeline cannot be built.
+/// - with `wavefront`, the actual shadow pipeline must compile on this device.
 #[cfg(test)]
 pub(crate) fn adjudication_test_device(wavefront: bool) -> Option<(Arc<Device>, Arc<Queue>)> {
     let (device, queue, info) = crate::core::gpu::create_device_queue_and_info_for_test()?;
@@ -418,11 +416,13 @@ pub(crate) fn adjudication_test_device(wavefront: bool) -> Option<(Arc<Device>, 
         );
         return None;
     }
-    if wavefront && info.backend == wgpu::Backend::Metal {
-        eprintln!(
-            "skipping AEQUITAS wavefront test on Metal: naga 0.19 MSL lacks atomicCompareExchange"
-        );
-        return None;
+    if wavefront {
+        if let Err(error) =
+            super::wavefront::pipeline::WavefrontPipelines::probe_shadow_kernel(&device)
+        {
+            eprintln!("skipping AEQUITAS wavefront test: shadow kernel did not compile: {error}");
+            return None;
+        }
     }
     Some((Arc::new(device), Arc::new(queue)))
 }

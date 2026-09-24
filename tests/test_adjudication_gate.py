@@ -331,7 +331,7 @@ def test_adjudication_availability_does_not_run_terrain_probe(monkeypatch):
 
 def test_adjudication_render_failure_is_not_skipped(monkeypatch):
     monkeypatch.setattr(_terrain_runtime, "adjudication_rendering_available", lambda: True)
-    monkeypatch.setattr(f3d, "device_probe", lambda *_: {"backend": "Vulkan"})
+    monkeypatch.setattr(_terrain_runtime, "adjudication_shadow_kernel_compiles", lambda: (True, None))
 
     def fail_render(*_args):
         raise RuntimeError("adjudication render failed")
@@ -341,17 +341,30 @@ def test_adjudication_render_failure_is_not_skipped(monkeypatch):
         test_adjudication_gate()
 
 
+def test_shadow_kernel_compile_failure_skips_before_render(monkeypatch):
+    monkeypatch.setattr(_terrain_runtime, "adjudication_rendering_available", lambda: True)
+    monkeypatch.setattr(
+        _terrain_runtime,
+        "adjudication_shadow_kernel_compiles",
+        lambda: (False, "unsupported atomic operation"),
+    )
+
+    def fail_render(*_args):
+        raise AssertionError("adjudication rendered after a failed shadow probe")
+
+    monkeypatch.setattr(f3d, "render_adjudication_pair", fail_render)
+    with pytest.raises(pytest.skip.Exception, match="unsupported atomic operation"):
+        test_adjudication_gate()
+
+
 def test_adjudication_gate():
     if not _terrain_runtime.adjudication_rendering_available():
         pytest.skip(
             "Adjudication gate requires a hardware-backed forge3d runtime with the capture API"
         )
-    if str(f3d.device_probe(os.environ.get("WGPU_BACKEND")).get("backend", "")).lower() == "metal":
-        # Legitimate unavailable support, decided before rendering: naga 0.19's
-        # MSL backend does not implement atomicCompareExchange, which the
-        # wavefront shadow kernel's float accumulation needs. CI runs this gate
-        # on the NVIDIA Vulkan lane instead.
-        pytest.skip("wavefront PT reference is unsupported on Metal (naga 0.19 MSL lacks atomicCompareExchange)")
+    shadow_kernel_compiles, reason = _terrain_runtime.adjudication_shadow_kernel_compiles()
+    if not shadow_kernel_compiles:
+        pytest.skip(f"wavefront shadow kernel did not compile: {reason}")
 
     pt_rgba, raster_rgba, meta = f3d.render_adjudication_pair(
         GATE_WIDTH, GATE_HEIGHT, GATE_SPP

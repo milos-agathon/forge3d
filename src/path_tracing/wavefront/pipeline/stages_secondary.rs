@@ -18,7 +18,7 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            crate::core::shader_registry::create_compute_pipeline_scoped(
+            crate::core::shader_registry::try_create_compute_pipeline_scoped(
                 device,
                 &wgpu::ComputePipelineDescriptor {
                     label: Some("shadow-pipeline"),
@@ -26,7 +26,7 @@ impl WavefrontPipelines {
                     module: shader,
                     entry_point: "main",
                 },
-            ),
+            )?,
         )
     }
 
