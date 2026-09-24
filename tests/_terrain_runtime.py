@@ -103,6 +103,13 @@ def adjudication_rendering_available() -> bool:
     return _adapter_is_terrain_safe(f3d.device_probe(os.environ.get("WGPU_BACKEND")))
 
 
+def adjudication_shadow_kernel_compiles() -> tuple[bool, str | None]:
+    """Ask the native runtime to compile the actual wavefront shadow stage."""
+    from forge3d._native import get_native_module
+
+    return get_native_module()._adjudication_shadow_kernel_probe()
+
+
 @lru_cache(maxsize=1)
 def terrain_rendering_available() -> bool:
     if _running_on_unsupported_hosted_macos_ci() or _running_on_unsupported_hosted_windows_ci():
