@@ -94,6 +94,15 @@ def _running_on_unsupported_hosted_windows_ci() -> bool:
     )
 
 
+def adjudication_rendering_available() -> bool:
+    """Check support without hiding a render failure behind an availability skip."""
+    if _running_on_unsupported_hosted_macos_ci() or _running_on_unsupported_hosted_windows_ci():
+        return False
+    if not f3d.has_gpu() or not hasattr(f3d, "render_adjudication_pair"):
+        return False
+    return _adapter_is_terrain_safe(f3d.device_probe(os.environ.get("WGPU_BACKEND")))
+
+
 @lru_cache(maxsize=1)
 def terrain_rendering_available() -> bool:
     if _running_on_unsupported_hosted_macos_ci() or _running_on_unsupported_hosted_windows_ci():

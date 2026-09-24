@@ -8,7 +8,7 @@ the active Anchor inside the producing function.
 
 import hashlib
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[1]
 SANCTIONED = "src/camera/anchor.rs"
@@ -30,11 +30,12 @@ SANCTIONED_DD_SPLITS = {
 }
 
 # Updated only after reviewing the complete inventory printed by a failure.
-# The digest includes (file, function, operation, ordinal, normalized statement)
-# over files ordered by their POSIX repository path, so it is identical on every
-# OS (a case-insensitive Windows ``sorted(Path)`` order once made it host-bound).
+# The digest includes (file, function, operation, ordinal, normalized statement).
 EXPECTED_CONVERSION_COUNT = 1394
-EXPECTED_CONVERSION_SHA256 = "7d6327ee898c15c0d9e0d83b3e15ba682c17ac5f5bb5970b594affb28c82332b"
+# Three existing AEQUITAS casts moved from render_pt_reference to
+# ReferenceWavefront::new/read_mean_hdr in the merged branch. The reviewed
+# transition below locks each old and new site; sorted(Path) fixes the order.
+EXPECTED_CONVERSION_SHA256 = "0724231a6229c563df1c1737ce0182575b6460bf512b804fcb4e6bd2d214007a"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
@@ -77,6 +78,76 @@ REVIEWED_PROMETHEUS_CHRONOS_FILE_COUNTS = {
 RETIRED_CONVERSION_OWNERS = {
     ("src/offscreen/adjudication_raster.rs", "render_raster_reference"),
     ("src/offscreen/adjudication_raster.rs", "render_raster_reference_incremental"),
+}
+
+
+# AEQUITAS replaced the adjudication raster twin's CPU supersampler
+# (render_raster_reference_incremental, base_uniforms) with the production
+# instanced-PBR path plus an analytic ground-GI bake. Every added site is an
+# integer-index-to-f32 normalization cast in adjudication_raster.rs; the full
+# removed/added site lists are frozen here so the digest bump is auditable.
+REVIEWED_AEQUITAS_RASTER_TRANSITION = {
+    "base_count": 1327,
+    "base_digest": "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817",
+    "result_count": 1345,
+    "result_digest": "5ba005a550bdbb994b5a8dbfb36fd691d08bd05cecce6bd58919ed59ac5596c2",
+    "path": "src/offscreen/adjudication_raster.rs",
+    "removed": (
+        ("base_uniforms", 1, "cam_origin_fovy: [origin.x, origin.y, origin.z, desc.fov_y_rad()], cam_right_aspect: [right.x, right.y, right.z, aspect], cam_up_w: [up.x, up.y, up.z, rw as f32], cam_forward_h: [forward.x, forward.y, forward.z, rh as f32], sun_dir_intensity: [sun.x, sun.y, sun.z, desc.sun_intensity], sun_color_pad: [desc.sun_color[0], desc.sun_color[1], desc.sun_color[2], 0.0], environment: { let e = desc.environment_raw()"),
+        ("base_uniforms", 2, "cam_origin_fovy: [origin.x, origin.y, origin.z, desc.fov_y_rad()], cam_right_aspect: [right.x, right.y, right.z, aspect], cam_up_w: [up.x, up.y, up.z, rw as f32], cam_forward_h: [forward.x, forward.y, forward.z, rh as f32], sun_dir_intensity: [sun.x, sun.y, sun.z, desc.sun_intensity], sun_color_pad: [desc.sun_color[0], desc.sun_color[1], desc.sun_color[2], 0.0], environment: { let e = desc.environment_raw()"),
+        ("render_raster_reference_incremental", 1, "let aspect = width as f32 / height as f32"),
+        ("render_raster_reference_incremental", 2, "let aspect = width as f32 / height as f32"),
+        ("render_raster_reference_incremental", 3, "u.misc = [desc.plane_half_extent, i as f32, 1.0, 0.0]"),
+        ("render_raster_reference_incremental", 4, "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5"),
+        ("render_raster_reference_incremental", 5, "let o = (k as f32 + 0.5) / SSAA as f32 - 0.5"),
+    ),
+    "added": (
+        ("bake_plane_indirect", 1, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 2, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 3, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 4, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 5, "let ct = 1.0 - (k as f32 + 0.5) / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 6, "let ct = 1.0 - (k as f32 + 0.5) / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 7, "let phi = k as f32 * 2.399_963_2"),
+        ("bake_plane_indirect", 8, "let occ = 2.0 * w_sky / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 9, "let v_sun = ray_hit_sphere(desc, p + Vec3::Y * 1e-3, light, None).is_none() as i32 as f32"),
+        ("bake_plane_indirect", 10, "let u = ((p.x - PLANE_UV_MIN) / PLANE_UV_EXTENT * BAKE_RES as f32) .clamp(0.0, BAKE_RES as f32 - 1.0) as usize"),
+        ("bake_plane_indirect", 11, "let u = ((p.x - PLANE_UV_MIN) / PLANE_UV_EXTENT * BAKE_RES as f32) .clamp(0.0, BAKE_RES as f32 - 1.0) as usize"),
+        ("bake_plane_indirect", 12, "let v = ((p.z - PLANE_UV_MIN) / PLANE_UV_EXTENT * BAKE_RES as f32) .clamp(0.0, BAKE_RES as f32 - 1.0) as usize"),
+        ("bake_plane_indirect", 13, "let v = ((p.z - PLANE_UV_MIN) / PLANE_UV_EXTENT * BAKE_RES as f32) .clamp(0.0, BAKE_RES as f32 - 1.0) as usize"),
+        ("bake_plane_indirect", 14, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 15, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 16, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 17, "let p = Vec3::new( PLANE_UV_MIN + (i as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, 0.0, PLANE_UV_MIN + (j as f32 + 0.5) / BAKE_RES as f32 * PLANE_UV_EXTENT, )"),
+        ("bake_plane_indirect", 18, "let ct = 1.0 - (k as f32 + 0.5) / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 19, "let ct = 1.0 - (k as f32 + 0.5) / BAKE_RAYS as f32"),
+        ("bake_plane_indirect", 20, "let phi = k as f32 * 2.399_963_2"),
+        ("bake_plane_indirect", 21, "} } let em = a_plane * e_bounce * (2.0 / BAKE_RAYS as f32)"),
+        ("render", 1, "let projection = Mat4::perspective_rh(desc.fov_y_rad(), width as f32 / height as f32, near, far)"),
+        ("render", 2, "let projection = Mat4::perspective_rh(desc.fov_y_rad(), width as f32 / height as f32, near, far)"),
+        ("render", 3, "let weights: Vec<f32> = (0..SSAA) .map(|k| 1.0 - (((k as f32 + 0.5) / SSAA as f32 - 0.5).abs() / 0.5)) .collect()"),
+        ("render", 4, "let weights: Vec<f32> = (0..SSAA) .map(|k| 1.0 - (((k as f32 + 0.5) / SSAA as f32 - 0.5).abs() / 0.5)) .collect()"),
+    ),
+}
+
+
+# AEQUITAS repair split render_pt_reference into a per-frame ReferenceWavefront
+# driver (so tests can observe the wavefront active-ray counts). The same three
+# integer-to-f32 casts moved verbatim into ReferenceWavefront::new (camera
+# aspect) and read_mean_hdr (1/frames); the count is unchanged (base digest
+# ae37f4b7...8e29cc).
+REVIEWED_AEQUITAS_PT_DRIVER_TRANSITION = {
+    "path": "src/path_tracing/adjudication.rs",
+    "removed": (
+        ("render_pt_reference", 1, "width, height, frame_index: 0, spp: 1, cam_origin: origin.into(), cam_fov_y: desc.fov_y_rad(), cam_right: right.into(), cam_aspect: width as f32 / height as f32, cam_up: up.into(), cam_exposure: desc.exposure, cam_forward: forward.into(), seed_hi: desc.seed_hi, seed_lo: desc.seed_lo, _pad_end: [0"),
+        ("render_pt_reference", 2, "width, height, frame_index: 0, spp: 1, cam_origin: origin.into(), cam_fov_y: desc.fov_y_rad(), cam_right: right.into(), cam_aspect: width as f32 / height as f32, cam_up: up.into(), cam_exposure: desc.exposure, cam_forward: forward.into(), seed_hi: desc.seed_hi, seed_lo: desc.seed_lo, _pad_end: [0"),
+        ("render_pt_reference", 3, "let inv = 1.0 / spp_frames as f32"),
+    ),
+    "added": (
+        ("new", 1, "width, height, frame_index: 0, spp: 1, cam_origin: origin.into(), cam_fov_y: desc.fov_y_rad(), cam_right: right.into(), cam_aspect: width as f32 / height as f32, cam_up: up.into(), cam_exposure: desc.exposure, cam_forward: forward.into(), seed_hi: desc.seed_hi, seed_lo: desc.seed_lo, _pad_end: [0"),
+        ("new", 2, "width, height, frame_index: 0, spp: 1, cam_origin: origin.into(), cam_fov_y: desc.fov_y_rad(), cam_right: right.into(), cam_aspect: width as f32 / height as f32, cam_up: up.into(), cam_exposure: desc.exposure, cam_forward: forward.into(), seed_hi: desc.seed_hi, seed_lo: desc.seed_lo, _pad_end: [0"),
+        ("read_mean_hdr", 1, "let inv = 1.0 / frames as f32"),
+    ),
 }
 
 
@@ -164,8 +235,8 @@ def _conversion_inventory_text(rel: str, raw: str):
 
 def _complete_conversion_inventory():
     sites = []
-    paths = {path.relative_to(ROOT).as_posix(): path for path in (ROOT / "src").rglob("*.rs")}
-    for rel, path in sorted(paths.items()):
+    for path in sorted((ROOT / "src").rglob("*.rs")):
+        rel = path.relative_to(ROOT).as_posix()
         sites.extend(_conversion_inventory_text(rel, path.read_text(encoding="utf-8")))
     return sites
 
@@ -249,7 +320,41 @@ def test_inventory_order_is_host_independent():
     sites = conversion_inventory()
     files = [site[0] for site in sites]
     first_seen = list(dict.fromkeys(files))
-    assert first_seen == sorted(first_seen)
+    assert first_seen == sorted(first_seen, key=PurePosixPath)
+    assert first_seen == sorted(first_seen, key=PureWindowsPath)
+
+
+def test_reviewed_aequitas_raster_transition_is_exact():
+    sites = conversion_inventory()
+    transition = REVIEWED_AEQUITAS_RASTER_TRANSITION
+    assert len(sites) == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
+    path = transition["path"]
+    for function, ordinal, statement in transition["removed"]:
+        assert (path, function, "as_f32", ordinal, statement) not in sites
+    for function, ordinal, statement in transition["added"]:
+        assert (path, function, "as_f32", ordinal, statement) in sites
+    # The transition bridges its own base/result counts; the current
+    # EXPECTED_CONVERSION_COUNT additionally includes the +46 as_f32 sites the
+    # paris-eiffel-day-pt merge carries in
+    # src/path_tracing/hybrid_compute/render_terrain.rs (same sanctioned
+    # integer-to-f32 class; identical inventory at the base tip and HEAD).
+    assert len(transition["added"]) - len(transition["removed"]) == (
+        transition["result_count"] - transition["base_count"]
+    )
+
+
+def test_reviewed_aequitas_pt_driver_transition_is_exact():
+    sites = conversion_inventory()
+    transition = REVIEWED_AEQUITAS_PT_DRIVER_TRANSITION
+    assert len(sites) == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
+    path = transition["path"]
+    for function, ordinal, statement in transition["removed"]:
+        assert (path, function, "as_f32", ordinal, statement) not in sites
+    for function, ordinal, statement in transition["added"]:
+        assert (path, function, "as_f32", ordinal, statement) in sites
+    assert len(transition["added"]) == len(transition["removed"])
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():

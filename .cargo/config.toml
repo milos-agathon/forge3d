@@ -2,13 +2,10 @@
 # Canonical Rust lint gate used by local hooks and CI.
 # This mirrors the supported feature matrix without requiring optional
 # system dependencies from `--all-features` such as PROJ.
-forge3d-clippy = [
-    "clippy",
-    "--workspace",
-    "--all-targets",
-    "--features",
-    "extension-module,default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts",
-    "--",
-    "-D",
-    "warnings",
-]
+# The `!` form runs through the shell: cargo 1.97 mis-expands a `--` inside a
+# list alias, forwarding `--workspace` to clippy-driver ("Unrecognized option:
+# 'workspace'"). The shell form preserves the exact gate semantics.
+# Keep the string form: cargo 1.97 mis-expands `--` inside a list alias,
+# forwarding `--workspace` to clippy-driver ("Unrecognized option:
+# 'workspace'"). The string form preserves the exact gate semantics.
+forge3d-clippy = "clippy --workspace --all-targets --features extension-module,default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts -- -D warnings"

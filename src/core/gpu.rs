@@ -446,6 +446,13 @@ pub fn create_device_for_test() -> Option<wgpu::Device> {
 ///
 /// Returns `None` when no GPU adapter is available (e.g. headless CI runners).
 pub fn create_device_and_queue_for_test() -> Option<(wgpu::Device, wgpu::Queue)> {
+    create_device_queue_and_info_for_test().map(|(device, queue, _)| (device, queue))
+}
+
+/// Like [`create_device_and_queue_for_test`], but also reports the adapter so
+/// a test can decline adapters it cannot meaningfully exercise.
+pub fn create_device_queue_and_info_for_test(
+) -> Option<(wgpu::Device, wgpu::Queue, wgpu::AdapterInfo)> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         ..Default::default()
@@ -485,7 +492,7 @@ pub fn create_device_and_queue_for_test() -> Option<(wgpu::Device, wgpu::Queue)>
             .ok()?
         }
     };
-    Some((device, queue))
+    Some((device, queue, adapter.get_info()))
 }
 
 #[cfg(test)]
