@@ -346,7 +346,7 @@ impl ReferenceWavefront {
 ///
 /// `timing` (CENSOR F-04): when supplied, the first frame's primary wavefront
 /// wave is timed under the "adjudication.path_trace" certificate label (see
-/// `render_frame_simple` â€” a whole frame cannot be bracketed on one encoder).
+/// `render_frame_simple` — a whole frame cannot be bracketed on one encoder).
 /// The `OneShotTiming` MUST live on the same wgpu device as `device`; pass
 /// `None` when driving a standalone device (tests).
 pub fn render_pt_reference(

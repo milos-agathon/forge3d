@@ -85,7 +85,8 @@ impl WavefrontScheduler {
             }
             if header.out_count != consumed_rays {
                 return Err(format!(
-                    "wavefront ray queue accounting drifted: out_count {} != {} rays                      consumed by completed waves",
+                    "wavefront ray queue accounting drifted: out_count {} != {} rays \
+                     consumed by completed waves",
                     header.out_count, consumed_rays
                 )
                 .into());
@@ -97,7 +98,8 @@ impl WavefrontScheduler {
                     // active rays here means the queue state or the readback
                     // is broken. Fail loudly instead of hiding it behind a
                     // one-iteration fallback.
-                    return Err("wavefront raygen produced zero active rays;                                 queue state or active-count readback is broken"
+                    return Err("wavefront raygen produced zero active rays; \
+                                queue state or active-count readback is broken"
                         .into());
                 }
                 break;
