@@ -1095,7 +1095,7 @@ jobs:
             --cache anamnesis-portable-store `
             --record anamnesis-portable-record.json `
             --frame-blob anamnesis-portable-producer.png `
-            --golden tests/goldens/determinism/terra_determinata_v1.sha256 `
+            --golden tests/goldens/determinism/terra_determinata_v1.json `
             --adapter-record anamnesis-portable-producer.jsonl `
             --machine-id-file anamnesis-portability-producer-machine-id.txt `
             --runner-name '${{ runner.name }}' `
@@ -1174,6 +1174,7 @@ jobs:
             --record seeded/anamnesis-portable-record.json `
             --consumer-frame-blob anamnesis-portable-consumer.png `
             --consumer-adapter-record anamnesis-portable-consumer.jsonl `
+            --golden tests/goldens/determinism/terra_determinata_v1.json `
             --machine-id-file anamnesis-portability-consumer-machine-id.txt `
             --runner-name '${{ runner.name }}' `
             --producer-backend vulkan --consumer-backend dx12 `

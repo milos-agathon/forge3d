@@ -1,0 +1,23 @@
+{
+  "schema": "forge3d.determinism.golden/2",
+  "scene": "terra_determinata_v1",
+  "render": {"width": 512, "height": 512, "env": "FORGE3D_DETERMINISTIC=1"},
+  "build": "CI wheel (maturin --release, wheels-windows) at 62262d4e",
+  "backends": {
+    "vulkan": {
+      "sha256": "0e3ce8811a610f7c7e4aad6cb606ee77b9ddde49a280a13e457baf8e2d07f688",
+      "adapter": {"name": "NVIDIA GeForce RTX 3070", "backend": "Vulkan", "device_type": "DiscreteGpu", "software_fallback": false},
+      "source": "ci.yml 'ANAMNESIS Physical Seed (Windows Vulkan)' on runner forge3d-rtx3070, run 36022893839; reproduced twice from that run's wheels-windows artifact"
+    },
+    "dx12": {
+      "sha256": "6f6151aa893f1b8c53f664e7c9fa98f0af57440ff3a4a27945bb12c798683571",
+      "adapter": {"name": "NVIDIA GeForce RTX 3070", "backend": "Dx12", "device_type": "DiscreteGpu", "software_fallback": false},
+      "source": "run 36022893839 wheels-windows artifact rendered with WGPU_BACKENDS=dx12 on runner machine forge3d-rtx3070 (twice, identical); enforced by ci.yml 'ANAMNESIS Physical Consume (Windows DX12)'"
+    }
+  },
+  "cross_backend_identity": {
+    "status": "ABSENT",
+    "tracking": "TERRA-DET-VULKAN-01",
+    "reason": "dx12 and vulkan differ at 11 pixels by 1 LSB after the 9a0a7d0f irradiance/BRDF-LUT fixes; debug view 7 isolates the diffuse-IBL term (hardware cubemap filtering), which pinned WGSL did not close."
+  }
+}

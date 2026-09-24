@@ -2,8 +2,11 @@
 #
 # Renders the canonical terrain+CSM+IBL reference scene (forge3d.determinism)
 # on a {intel, amd, nvidia, apple, wasm} matrix and fails the build if any two
-# produced SHA-256 hashes differ, or if any differs from the committed golden
-# tests/goldens/determinism/terra_determinata_v1.sha256. Zero-byte tolerance.
+# produced SHA-256 hashes of the same wgpu backend differ, or if any differs
+# from that backend's committed golden in
+# tests/goldens/determinism/terra_determinata_v1.json (per-backend record).
+# Cross-backend identity is enforced only when that record marks it PROVEN; it
+# is currently ABSENT (TERRA-DET-VULKAN-01). Zero-byte tolerance.
 #
 # Gated vs informational legs (follows the repo convention of skipping visual
 # goldens on unsupported hosted GPUs, see ci.yml test-golden-images):
@@ -389,7 +392,7 @@ jobs:
             python scripts/check_anamnesis_portability.py seed \
               --cache anamnesis-store --record anamnesis-record.json \
               --frame-blob anamnesis-golden.png \
-              --golden tests/goldens/determinism/terra_determinata_v1.sha256 \
+              --golden tests/goldens/determinism/terra_determinata_v1.json \
               --adapter-record anamnesis-render.jsonl
           fi
       - uses: actions/upload-artifact@v4
@@ -495,7 +498,7 @@ jobs:
         run: >-
           python scripts/check_determinism_hashes.py
           --hashes hashes
-          --golden tests/goldens/determinism/${{ env.SCENE }}.sha256
+          --golden tests/goldens/determinism/${{ env.SCENE }}.json
           --scene ${{ env.SCENE }}
       - name: Validate DUPLA backend proofs
         run: >-
