@@ -5942,6 +5942,7 @@ class MapScene:
         certificate: "bool | str | os.PathLike[str]" = False,
         cache: "str | os.PathLike[str] | None" = None,
     ) -> ValidationReport:
+        """Render the scene; ``cache`` holds path-free per-scene subfolders."""
         output = self.recipe.output
         target = path or (output.path if output is not None else None)
         cache_eligible = bool(
@@ -5961,6 +5962,23 @@ class MapScene:
             from ._canonical_json import canonical_json_bytes
 
             rendered: dict[str, ValidationReport] = {}
+            key_scene = copy.deepcopy(self.to_dict())
+            # Match ANAMNESIS's destination-only output fields while the
+            # MapScene output is nested under recipe.
+            for name in ("path", "directory", "filename"):
+                key_scene["recipe"]["output"].pop(name, None)
+            frame = self._compiled_plan_for_current_recipe().frame
+            render_frame_context = canonical_json_bytes(
+                (
+                    {"scene": key_scene, "chronos_frame": frame.to_json()}
+                    if frame is not None
+                    else key_scene
+                ),
+                error_context="MapScene ANAMNESIS callback context",
+            )
+            # A short folder-name collision only changes the previous-manifest
+            # prediction and forces recomputation; full Merkle keys guard blobs.
+            scene_root = Path(cache) / hashlib.sha256(render_frame_context).hexdigest()[:16]
 
             def render_frame(_recipe: Mapping[str, Any], _frame: int) -> bytes:
                 report = self._render_impl(
@@ -5972,15 +5990,12 @@ class MapScene:
                 return Path(str(target)).read_bytes()
 
             sequence = render_sequence(
-                self.to_dict(),
+                key_scene,
                 frames=[0],
-                cache=cache,
+                cache=scene_root,
                 render_frame=render_frame,
                 render_frame_fingerprint=b"forge3d.python.mapscene.render/v1",
-                render_frame_context=canonical_json_bytes(
-                    self.to_dict(),
-                    error_context="MapScene ANAMNESIS callback context",
-                ),
+                render_frame_context=render_frame_context,
             )
             report = rendered.get("report")
             if report is None:
