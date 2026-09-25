@@ -4,12 +4,18 @@
 // (src/path_tracing/adjudication.rs) and the raster twin
 // (src/viewer/pbr_scene/reference.rs). Every numeric constant is a
 // hard-coded literal: no RNG, no time, no environment lookups.
-// RELEVANT FILES: src/shaders/pt_shade.wgsl, src/shaders/adjudication_raster.wgsl
+// RELEVANT FILES: src/shaders/pt_shade.wgsl, src/shaders/pt_scatter.wgsl, src/viewer/pbr_scene/reference.rs
 
 use crate::accel::cpu_bvh::MeshCPU;
 use crate::path_tracing::lighting::{GpuAreaLight, GpuDirectionalLight};
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
+
+/// Normal-incidence Fresnel reflectance of every reference material (all are
+/// non-metallic dielectrics). pt_shade's BSDF and the production PBR shader
+/// both use F0 = 0.04 for metallic = 0; the raster bake's Fresnel-weighted
+/// diffuse lobe and the analytic PT transport test read it from here.
+pub const REFERENCE_DIELECTRIC_F0: f32 = 0.04;
 
 /// One analytic sphere (also used as a material slot for the ground plane:
 /// a radius-0 sphere can never be intersected — `disc = b^2 - |oc|^2 <= 0` —
@@ -37,10 +43,10 @@ pub struct ReferenceSceneDesc {
     pub sun_intensity: f32,
     pub sun_color: [f32; 3],
     /// Constant ambient/environment radiance (the env-NEE term in pt_shade and
-    /// the raster twin). LITERAL CONSTANT CONTRACT: the environment is flat —
+    /// the raster PBR ambient term). LITERAL CONSTANT CONTRACT: the environment is flat —
     /// no gradient, no directional variation.
     pub ambient_color: [f32; 3],
-    /// Constant primary-miss background (pt_scatter miss + raster sky pass).
+    /// Constant primary-miss background (pt_scatter miss + raster clear colour).
     pub sky_color: [f32; 3],
     /// Ground plane at y = 0 spans x/z in [-half_extent, +half_extent].
     pub plane_half_extent: f32,
@@ -115,7 +121,8 @@ pub struct WavefrontGpuSphere {
     pub _pad1: [f32; 3],
 }
 
-/// GPU environment layout for wavefront binding 21 and the raster uniform tail.
+/// GPU environment layout for wavefront binding 21; the raster path reads the
+/// same values back out of it (ambient = env_sky, clear colour = miss_sky).
 /// Four vec4s keep WGSL uniform alignment boring; `.w` lanes are unused.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -177,8 +184,8 @@ impl ReferenceSceneDesc {
     }
 
     /// The single environment uniform BOTH renderers consume. The 4-slot
-    /// gradient layout is a GPU ABI shared with pt_shade/pt_scatter and
-    /// adjudication_raster.wgsl; duplicating each constant into both mix()
+    /// gradient layout is a GPU ABI shared with pt_shade/pt_scatter;
+    /// duplicating each constant into both mix()
     /// endpoints collapses the shader-side gradient to the literal constant
     /// without touching WGSL, and makes it impossible for the two slots of one
     /// term to diverge.

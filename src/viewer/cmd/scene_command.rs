@@ -348,6 +348,22 @@ fn handle_load_reference_scene(viewer: &mut Viewer, name: &str) {
         ));
         return;
     }
+    load_reference_scene_desc(
+        viewer,
+        name,
+        crate::path_tracing::reference_scene::adjudication_scene(),
+    );
+}
+
+/// Load an explicit `ReferenceSceneDesc` into the viewer PBR-scene subsystem
+/// under the same guards as `:load_reference_scene`. The IPC command always
+/// passes the committed adjudication scene; tests pass perturbed descs to
+/// check the raster route follows every scene input.
+pub(crate) fn load_reference_scene_desc(
+    viewer: &mut Viewer,
+    name: &str,
+    scene_desc: crate::path_tracing::reference_scene::ReferenceSceneDesc,
+) {
     if viewer
         .terrain_viewer
         .as_ref()
@@ -367,7 +383,6 @@ fn handle_load_reference_scene(viewer: &mut Viewer, name: &str) {
         return;
     }
 
-    let scene_desc = crate::path_tracing::reference_scene::adjudication_scene();
     // Reuse the shared metadata contract as the finiteness check the
     // former offscreen adapter enforced before allocating GPU resources.
     if scene_desc

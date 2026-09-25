@@ -233,7 +233,7 @@ fn bake_plane_indirect(desc: &ReferenceSceneDesc) -> (Vec<u8>, Vec<u8>, Vec<u8>)
 
     // The reference BRDF's diffuse lobe is Fresnel-weighted by the
     // view-dependent half-vector: f_diffuse = a/π·(1 - F(v·h)) with
-    // F0 = 0.04. Ambient arriving at grazing incidence — the only light
+    // F0 = REFERENCE_DIELECTRIC_F0. Ambient arriving at grazing incidence — the only light
     // that reaches deep pool points — is attenuated, so weight every bake
     // ray by (1 - F(v·h)) with v the camera direction at the texel.
     let cam = Vec3::from(desc.cam_origin);
@@ -241,7 +241,8 @@ fn bake_plane_indirect(desc: &ReferenceSceneDesc) -> (Vec<u8>, Vec<u8>, Vec<u8>)
         let v = (cam - p).normalize();
         let h = (wi + v).normalize();
         let vh = v.dot(h).clamp(0.0, 1.0);
-        1.0 - (0.04 + 0.96 * (1.0 - vh).powi(5))
+        let f0 = crate::path_tracing::reference_scene::REFERENCE_DIELECTRIC_F0;
+        1.0 - (f0 + (1.0 - f0) * (1.0 - vh).powi(5))
     };
 
     let mut occ_f = vec![0f32; (BAKE_RES * BAKE_RES) as usize];
@@ -558,12 +559,17 @@ mod tests {
 
     /// Instance/adapter/device/queue triple for headless-viewer tests; the
     /// device+queue request mirrors `create_device_and_queue_for_test`.
+    /// Follows `adjudication_test_device`'s hardware-only convention:
+    /// software adapters are declined, and with `wavefront` the PT shadow
+    /// kernel must compile on this device.
     #[cfg(all(
         feature = "enable-gpu-instancing",
         feature = "enable-pbr",
         feature = "enable-tbn"
     ))]
-    fn headless_gpu() -> Option<(
+    fn headless_gpu(
+        wavefront: bool,
+    ) -> Option<(
         std::sync::Arc<wgpu::Device>,
         std::sync::Arc<wgpu::Queue>,
         std::sync::Arc<wgpu::Adapter>,
@@ -577,6 +583,25 @@ mod tests {
             compatible_surface: None,
             force_fallback_adapter: false,
         }))?;
+        let info = adapter.get_info();
+        let name = info.name.to_lowercase();
+        if info.device_type == wgpu::DeviceType::Cpu
+            || [
+                "basic render driver",
+                "warp",
+                "lavapipe",
+                "llvmpipe",
+                "swiftshader",
+            ]
+            .iter()
+            .any(|token| name.contains(token))
+        {
+            eprintln!(
+                "skipping AEQUITAS GPU test: software adapter '{}'",
+                info.name
+            );
+            return None;
+        }
         let mut limits = adapter.limits();
         limits.max_storage_buffers_per_shader_stage =
             limits.max_storage_buffers_per_shader_stage.max(8);
@@ -600,6 +625,18 @@ mod tests {
             ))
             .ok()?,
         };
+        if wavefront {
+            if let Err(error) =
+                crate::path_tracing::wavefront::pipeline::WavefrontPipelines::probe_shadow_kernel(
+                    &device,
+                )
+            {
+                eprintln!(
+                    "skipping AEQUITAS wavefront test: shadow kernel did not compile: {error}"
+                );
+                return None;
+            }
+        }
         Some((
             std::sync::Arc::new(device),
             std::sync::Arc::new(queue),
@@ -614,7 +651,7 @@ mod tests {
     ))]
     #[test]
     fn raster_capture_executes_production_shader() {
-        let Some((device, queue, adapter)) = headless_gpu() else {
+        let Some((device, queue, adapter)) = headless_gpu(false) else {
             return;
         };
         crate::core::degradation::begin_degradation_capture();
@@ -648,6 +685,190 @@ mod tests {
         assert!(pixels.chunks_exact(4).any(|pixel| pixel[0] > 0.0));
     }
 
+    /// Raster half of the adjudication pair for an explicit scene desc: a
+    /// headless viewer loads `desc` through the same guarded path as
+    /// `:load_reference_scene` and returns the resolved linear HDR frame.
+    #[cfg(all(
+        feature = "enable-gpu-instancing",
+        feature = "enable-pbr",
+        feature = "enable-tbn"
+    ))]
+    fn render_viewer_raster(
+        gpu: &(
+            std::sync::Arc<wgpu::Device>,
+            std::sync::Arc<wgpu::Queue>,
+            std::sync::Arc<wgpu::Adapter>,
+        ),
+        desc: &ReferenceSceneDesc,
+        size: u32,
+    ) -> Vec<f32> {
+        let mut viewer = crate::viewer::Viewer::new_headless(
+            gpu.0.clone(),
+            gpu.1.clone(),
+            gpu.2.clone(),
+            size,
+            size,
+            crate::viewer::viewer_config::ViewerConfig {
+                width: size,
+                height: size,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::viewer::cmd::scene_command::load_reference_scene_desc(
+            &mut viewer,
+            "adjudication-test",
+            desc.clone(),
+        );
+        assert!(
+            viewer.pbr_scene.is_some(),
+            "reference scene load was rejected: {:?}",
+            viewer.command_error
+        );
+        viewer.render_headless_frame(None).unwrap();
+        viewer.read_pbr_scene_hdr().unwrap()
+    }
+
+    /// Behavioral half of the constant sky/ambient contract (the source-string
+    /// half lives in reference_scene.rs): perturbing `sky_color` and
+    /// `ambient_color` on the ReferenceSceneDesc must move BOTH renders. A path
+    /// that hardcodes its own sky or ambient literal keeps its old output and
+    /// fails here.
+    #[cfg(all(
+        feature = "enable-gpu-instancing",
+        feature = "enable-pbr",
+        feature = "enable-tbn"
+    ))]
+    #[test]
+    fn both_paths_consume_scene_sky_and_ambient() {
+        use crate::path_tracing::adjudication::render_pt_reference;
+
+        let Some(gpu) = headless_gpu(true) else {
+            return;
+        };
+        const N: u32 = 32;
+        // Sun off: the plane is lit by the constant ambient alone, so its
+        // radiance is linear in ambient_color on both paths.
+        let mut base = adjudication_scene();
+        base.sun_intensity = 0.0;
+        let mut tinted = base.clone();
+        tinted.sky_color = [0.9, 0.1, 0.2];
+        tinted.ambient_color = base.ambient_color.map(|c| c * 2.0);
+
+        let pt = |desc: &ReferenceSceneDesc| {
+            render_pt_reference(&gpu.0, &gpu.1, desc, N, N, 64, None).unwrap()
+        };
+        let raster = |desc: &ReferenceSceneDesc| render_viewer_raster(&gpu, desc, N);
+        // Top-left pixel is a primary miss (camera pitches ~11 deg down, fov 40).
+        let sky_px = |hdr: &[f32]| [hdr[0], hdr[1], hdr[2]];
+        // Mean over the bottom quarter of the frame: open plane, no spheres.
+        let plane_mean = |hdr: &[f32]| {
+            let px = ((N * 3 / 4)..N).flat_map(|y| (0..N).map(move |x| ((y * N + x) * 4) as usize));
+            let (sum, count) = px.fold((0.0f64, 0u32), |(s, c), i| {
+                (s + f64::from(hdr[i] + hdr[i + 1] + hdr[i + 2]), c + 1)
+            });
+            sum / f64::from(count)
+        };
+
+        for (name, base_hdr, tinted_hdr) in [
+            ("pt", pt(&base), pt(&tinted)),
+            ("raster", raster(&base), raster(&tinted)),
+        ] {
+            for (hdr, desc) in [(&base_hdr, &base), (&tinted_hdr, &tinted)] {
+                let got = sky_px(hdr);
+                for c in 0..3 {
+                    assert!(
+                        (got[c] - desc.sky_color[c]).abs() < 1e-3,
+                        "{name}: sky pixel {got:?} != scene sky_color {:?}",
+                        desc.sky_color
+                    );
+                }
+            }
+            let ratio = plane_mean(&tinted_hdr) / plane_mean(&base_hdr);
+            assert!(
+                (1.6..=2.4).contains(&ratio),
+                "{name}: doubling ambient_color scaled the plane by {ratio:.3}, expected ~2"
+            );
+        }
+    }
+
+    /// Behavioural lock on the remaining ReferenceSceneDesc inputs (sun,
+    /// materials, exposure; sky/ambient are covered above): perturb each on
+    /// the committed scene and require the raster path to follow the change
+    /// the way the path-traced reference does. A raster path that hardcodes
+    /// one of them, or resolves with a different tonemap/exposure, keeps its
+    /// old colour while PT moves, so its per-channel bias against PT grows by
+    /// the size of the perturbation.
+    #[cfg(all(
+        feature = "enable-gpu-instancing",
+        feature = "enable-pbr",
+        feature = "enable-tbn"
+    ))]
+    #[test]
+    fn raster_tracks_sun_material_and_exposure_like_pt() {
+        use crate::core::tonemap::resolve_reference_hdr_to_rgba8;
+        use crate::path_tracing::adjudication::render_pt_reference;
+
+        let Some(gpu) = headless_gpu(true) else {
+            return;
+        };
+        const N: u32 = 64;
+        let mean_rgb = |hdr: &[f32], exposure: f32| -> [f64; 3] {
+            let mut sum = [0.0f64; 3];
+            for px in resolve_reference_hdr_to_rgba8(hdr, exposure).chunks_exact(4) {
+                for c in 0..3 {
+                    sum[c] += f64::from(px[c]);
+                }
+            }
+            sum.map(|s| s / f64::from(N * N))
+        };
+        let render = |desc: &ReferenceSceneDesc| {
+            let pt = render_pt_reference(&gpu.0, &gpu.1, desc, N, N, 512, None).unwrap();
+            let raster = render_viewer_raster(&gpu, desc, N);
+            (
+                mean_rgb(&pt, desc.exposure),
+                mean_rgb(&raster, desc.exposure),
+            )
+        };
+        let max_abs_diff =
+            |a: [f64; 3], b: [f64; 3]| (0..3).map(|c| (a[c] - b[c]).abs()).fold(0.0, f64::max);
+
+        let base = adjudication_scene();
+        let (base_pt, base_raster) = render(&base);
+        let base_bias = max_abs_diff(base_pt, base_raster);
+
+        let mut sun = base.clone();
+        sun.sun_color = [0.80, 0.90, 1.00];
+        sun.sun_intensity = 2.4;
+        let mut materials = base.clone();
+        materials.spheres[0].albedo = [0.25, 0.55, 0.30];
+        materials.spheres[1].roughness = 0.30;
+        materials.spheres[3].albedo = [0.55, 0.48, 0.36];
+        let mut exposure = base.clone();
+        exposure.exposure = 1.6;
+
+        for (name, desc) in [
+            ("sun", sun),
+            ("materials", materials),
+            ("exposure", exposure),
+        ] {
+            let (pt, raster) = render(&desc);
+            let shift = max_abs_diff(pt, base_pt);
+            let bias = max_abs_diff(pt, raster);
+            eprintln!(
+                "{name}: PT shift {shift:.3}, PT-raster bias {bias:.3} (base {base_bias:.3})"
+            );
+            // The perturbation must visibly move the PT reference, or the
+            // variant proves nothing.
+            assert!(shift > 4.0, "{name}: perturbation too small ({shift:.3})");
+            assert!(
+                bias <= base_bias + 0.25 * shift,
+                "{name}: raster did not follow the ReferenceSceneDesc change \
+                 (bias {bias:.3} vs base {base_bias:.3}, PT shift {shift:.3})"
+            );
+        }
+    }
+
     /// Renders the adjudication scene's shadow pass into receiver[0]'s CSM
     /// map and dumps layer 0 to `target/adjudication_shadow_layer0.bin`
     /// (f32, row-major, `shadow_map_size` square). Diagnostic for the
@@ -663,7 +884,9 @@ mod tests {
         use crate::render::mesh_instanced::{MeshInstancedRenderer, VertexPN};
         use glam::{Mat4, Vec3};
 
-        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+        let Some((device, queue)) =
+            crate::path_tracing::adjudication::adjudication_test_device(false)
+        else {
             return;
         };
         let desc = adjudication_scene();

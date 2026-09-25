@@ -36,20 +36,20 @@ var target_cube: texture_storage_2d_array<rgba16float, write>;
 fn uv_to_direction(uv: vec2<f32>, face: u32) -> vec3<f32> {
     let coord = uv * 2.0 - vec2<f32>(1.0, 1.0);
     switch face {
-        case 0u: { return normalize(vec3<f32>(1.0, -coord.y, -coord.x)); }   // +X
-        case 1u: { return normalize(vec3<f32>(-1.0, -coord.y, coord.x)); }   // -X
-        case 2u: { return normalize(vec3<f32>(coord.x, 1.0, coord.y)); }     // +Y
-        case 3u: { return normalize(vec3<f32>(coord.x, -1.0, -coord.y)); }  // -Y
-        case 4u: { return normalize(vec3<f32>(coord.x, -coord.y, 1.0)); }   // +Z
-        case 5u: { return normalize(vec3<f32>(-coord.x, -coord.y, -1.0)); } // -Z
+        case 0u: { return det_normalize3(vec3<f32>(1.0, -coord.y, -coord.x)); }   // +X
+        case 1u: { return det_normalize3(vec3<f32>(-1.0, -coord.y, coord.x)); }   // -X
+        case 2u: { return det_normalize3(vec3<f32>(coord.x, 1.0, coord.y)); }     // +Y
+        case 3u: { return det_normalize3(vec3<f32>(coord.x, -1.0, -coord.y)); }  // -Y
+        case 4u: { return det_normalize3(vec3<f32>(coord.x, -coord.y, 1.0)); }   // +Z
+        case 5u: { return det_normalize3(vec3<f32>(-coord.x, -coord.y, -1.0)); } // -Z
         default: { return vec3<f32>(0.0, 0.0, 1.0); }
     }
 }
 
 fn direction_to_equirect(dir: vec3<f32>) -> vec2<f32> {
-    let d = normalize(dir);
-    let u = det_atan2(d.z, d.x) / TWO_PI + 0.5;
-    let v = det_acos(clamp(d.y, -1.0, 1.0)) / PI;
+    let d = det_normalize3(dir);
+    let u = det_atan2(d.z, d.x) * det_rcp(TWO_PI) + 0.5;
+    let v = det_acos(clamp(d.y, -1.0, 1.0)) * det_rcp(PI);
     return vec2<f32>(fract(u), clamp(v, 0.0, 1.0));
 }
 
@@ -65,7 +65,7 @@ fn cs_equirect_to_cubemap(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let pixel = vec2<f32>(f32(gid.x) + 0.5, f32(gid.y) + 0.5) / f32(size);
+    let pixel = (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) * det_rcp(f32(size));
     let world_dir = uv_to_direction(pixel, face);
     let uv = direction_to_equirect(world_dir);
 

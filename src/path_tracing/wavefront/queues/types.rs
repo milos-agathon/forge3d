@@ -144,6 +144,11 @@ impl QueueBuffers {
         queue.write_buffer(&self.shadow_queue_header, 0, header_data);
     }
 
+    /// Number of rays pushed into the ray queue that no intersect pass has
+    /// consumed yet (`in_count - out_count`), valid at any point between
+    /// wavefront dispatches. Exact because every pop kernel returns its
+    /// failed ticket (`atomicSub` on the drain path), so a consume pass ends
+    /// with `out_count == in_count` instead of `in_count + launched threads`.
     pub fn get_active_ray_count(
         &self,
         device: &Device,
@@ -157,12 +162,7 @@ impl QueueBuffers {
 
     /// Read back the full ray-queue header (submits all pending encoder work
     /// and stalls until the copy completes; `encoder` is replaced with a fresh
-    /// one). The caller owns interpreting `in_count`/`out_count`: after an
-    /// iteration the persistent-thread pop pattern leaves `out_count`
-    /// over-incremented past `in_count` (every launched thread's final failed
-    /// pop still bumps the counter), so `active_count()` is only meaningful
-    /// straight after raygen — mid-frame accounting must be reconstructed on
-    /// the CPU (see `WavefrontScheduler::render_frame_simple`).
+    /// one).
     pub fn read_ray_queue_header(
         &self,
         device: &Device,
@@ -212,27 +212,19 @@ impl QueueBuffers {
     /// Prepare the queues for one wavefront iteration.
     ///
     /// The ray queue is append-only within a frame: raygen and the scatter
-    /// stage push at monotonically increasing `in_count` indices, while the
-    /// persistent-thread pop pattern over-increments `out_count` once a wave
-    /// drains. Rewriting `out_count` to the exact number of rays consumed in
-    /// completed iterations makes both the active count and the next wave's
-    /// pop indices correct.
+    /// stage push at monotonically increasing `in_count` indices and the
+    /// intersect pass advances `out_count` over exactly the rays it consumed,
+    /// so its header is left untouched here.
     ///
     /// The hit/scatter/shadow/miss queues are strictly intra-iteration
     /// (produced and consumed inside a single wave), so their headers are
-    /// reset to empty each iteration; this also keeps them from accumulating
-    /// the same out-count corruption and from overflowing across bounces.
+    /// reset to empty each iteration to keep them from overflowing across
+    /// bounces.
     ///
     /// Must be called after all previously submitted GPU work has completed
     /// (i.e. after `read_ray_queue_header`, which stalls) and before the
     /// iteration's dispatches are submitted.
-    pub fn begin_iteration(&self, queue: &Queue, consumed_rays: u32) {
-        // QueueHeader layout: in_count @0, out_count @4, capacity @8.
-        queue.write_buffer(
-            &self.ray_queue_header,
-            4,
-            bytemuck::bytes_of(&consumed_rays),
-        );
+    pub fn begin_iteration(&self, queue: &Queue) {
         let empty: [u32; 2] = [0, 0];
         for header in [
             &self.hit_queue_header,

@@ -14,7 +14,10 @@ SCENE = "terra_determinata_v1"
 SHA = "d" * 64
 
 
-def _artifact(root, leg, *, sha=None, adapter=True, marker=None):
+COMMITTED_GOLDEN = Path(__file__).parent / "goldens" / "determinism" / f"{SCENE}.json"
+
+
+def _artifact(root, leg, *, sha=None, adapter=True, marker=None, backend="Vulkan"):
     path = root / f"determinism-hash-{leg}"
     path.mkdir(parents=True)
     if sha:
@@ -25,7 +28,7 @@ def _artifact(root, leg, *, sha=None, adapter=True, marker=None):
                     {
                         "adapter": {
                             "name": "hardware",
-                            "backend": "Vulkan",
+                            "backend": backend,
                             "device_type": "DiscreteGpu",
                             "software_fallback": False,
                         }
@@ -36,10 +39,28 @@ def _artifact(root, leg, *, sha=None, adapter=True, marker=None):
         (path / f"{SCENE}.{marker}").write_text(f"{leg} {marker.lower()}\n")
 
 
-def _run(tmp_path, golden=SHA):
-    golden_file = tmp_path / "golden.sha256"
-    if golden is not None:
-        golden_file.write_text(golden + "\n")
+def _golden_record(backends, status="ABSENT"):
+    return {
+        "schema": "forge3d.determinism.golden/2",
+        "scene": SCENE,
+        "backends": {
+            key: {
+                "sha256": sha,
+                "adapter": {"name": "hardware", "backend": key.capitalize()},
+                "source": "test fixture",
+            }
+            for key, sha in backends.items()
+        },
+        "cross_backend_identity": {"status": status, "tracking": "TERRA-DET-VULKAN-01"},
+    }
+
+
+def _run(tmp_path, golden=SHA, *, record=None):
+    golden_file = tmp_path / "golden.json"
+    if record is not None:
+        golden_file.write_text(json.dumps(record))
+    elif golden is not None:
+        golden_file.write_text(json.dumps(_golden_record({"vulkan": golden})))
     return subprocess.run(
         [
             sys.executable,
@@ -138,6 +159,64 @@ def test_matrix_rejects_golden_or_pairwise_mismatch(tmp_path, actual):
     result = _run(tmp_path)
     assert result.returncode == 1
     assert "mismatch" in result.stderr
+
+
+def test_matrix_compares_each_backend_with_its_own_golden(tmp_path):
+    dx12 = "a" * 64
+    _artifact(tmp_path / "hashes", "nvidia", sha=SHA)
+    _artifact(tmp_path / "hashes", "nvidia-dx12", sha=dx12, backend="Dx12")
+    result = _run(tmp_path, record=_golden_record({"vulkan": SHA, "dx12": dx12}))
+    assert result.returncode == 0, result.stderr
+    assert "cross-backend identity: ABSENT (TERRA-DET-VULKAN-01)" in result.stdout
+
+
+def test_matrix_rejects_mismatch_against_the_leg_backend_golden(tmp_path):
+    _artifact(tmp_path / "hashes", "nvidia-dx12", sha=SHA, backend="Dx12")
+    result = _run(tmp_path, record=_golden_record({"vulkan": SHA, "dx12": "a" * 64}))
+    assert result.returncode == 1
+    assert "mismatch against committed dx12 golden" in result.stderr
+
+
+def test_matrix_rejects_proven_identity_with_differing_hashes(tmp_path):
+    _artifact(tmp_path / "hashes", "nvidia", sha=SHA)
+    record = _golden_record({"vulkan": SHA, "dx12": "a" * 64}, status="PROVEN")
+    result = _run(tmp_path, record=record)
+    assert result.returncode == 1
+    assert "PROVEN cross-backend identity with differing hashes" in result.stderr
+
+
+def test_matrix_reports_backend_without_golden_as_absent(tmp_path):
+    _artifact(tmp_path / "hashes", "apple-metal", sha=SHA, backend="Metal")
+    result = _run(tmp_path, record=_golden_record({"vulkan": SHA}))
+    assert result.returncode == 0, result.stderr
+    assert "ABSENT: no committed metal golden" in result.stdout
+
+
+def test_matrix_rejects_legacy_single_hash_golden(tmp_path):
+    _artifact(tmp_path / "hashes", "nvidia", sha=SHA)
+    (tmp_path / "golden.json").write_text(SHA + "\n")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--hashes", str(tmp_path / "hashes"),
+         "--golden", str(tmp_path / "golden.json"), "--scene", SCENE],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "invalid committed golden" in result.stderr
+
+
+def test_committed_golden_is_per_backend_with_absent_cross_backend_identity():
+    sys.path.insert(0, str(SCRIPT.parent))
+    from _determinism_golden import golden_sha256, load_golden
+
+    golden = load_golden(COMMITTED_GOLDEN, SCENE)
+    assert set(golden["backends"]) == {"dx12", "vulkan"}
+    assert golden_sha256(golden, "Vulkan") != golden_sha256(golden, "Dx12")
+    assert golden["cross_backend_identity"]["status"] == "ABSENT"
+    assert golden["cross_backend_identity"]["tracking"] == "TERRA-DET-VULKAN-01"
+    for entry in golden["backends"].values():
+        assert entry["adapter"]["software_fallback"] is False
+    assert not COMMITTED_GOLDEN.with_suffix(".sha256").exists()
 
 
 def test_f3dz_stream_hashes_run_on_two_hosted_platforms():

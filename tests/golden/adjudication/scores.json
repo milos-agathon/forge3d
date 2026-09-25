@@ -3,6 +3,6 @@
   "height": 512,
   "spp": 4096,
   "ssim_region": "shadow_boundary_pixels",
-  "lit_pass_fraction": 0.9706205133248107,
-  "shadow_band_ssim": 0.9726321668255761
+  "lit_pass_fraction": 0.970612646,
+  "shadow_band_ssim": 0.97262525
 }

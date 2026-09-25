@@ -83,6 +83,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     loop {
         let scatter_idx = atomicAdd(&scatter_queue_header.out_count, 1u);
         if scatter_idx >= scatter_queue_header.in_count {
+            atomicSub(&scatter_queue_header.out_count, 1u); // return failed ticket
             break; // No more scatter rays to process
         }
         
@@ -116,6 +117,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     loop {
         let miss_idx = atomicAdd(&miss_queue_header.out_count, 1u);
         if miss_idx >= miss_queue_header.in_count {
+            atomicSub(&miss_queue_header.out_count, 1u); // return failed ticket
             break; // No more miss rays to process
         }
         

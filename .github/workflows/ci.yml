@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, paris-eiffel-day-pt]
   workflow_dispatch:
     inputs:
       update_recipe_certificates:
@@ -594,15 +594,6 @@ jobs:
           FORGE3D_RECIPE_GOLDEN_VARIANT: metal
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression 'tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]' -v --tb=short
 
-      - name: Run AEQUITAS adjudication gate
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
-        env:
-          FORGE3D_NO_BOOTSTRAP: '1'
-          FORGE3D_ADJUDICATION_ARTIFACT_DIR: tests/artifacts/adjudication
-        run: |
-          python -m pytest tests/test_adjudication_gate.py -v --tb=short --junitxml=tests/artifacts/adjudication/junit.xml
-          python scripts/assert_junit_zero_skips.py tests/artifacts/adjudication/junit.xml
-
       - name: Run PROMETHEUS terrain reference gate
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
         env:
@@ -710,6 +701,11 @@ jobs:
       RUN_LIMES_GPU_CI: '1'
       FORGE3D_VIEWER_BINARY: ${{ github.workspace }}/target/release/interactive_viewer.exe
       FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
+      # Self-hosted runners inherit machine-level CARGO_TARGET_DIR, which would
+      # redirect the release viewer away from FORGE3D_VIEWER_BINARY. Pin the
+      # target dir to the workspace so the build output lands where the
+      # acceptance tests look.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
 
     steps:
       - name: Initialize persistent M-06 evidence before checkout
@@ -997,6 +993,70 @@ jobs:
           if-no-files-found: error
 
   # ============================================================================
+  # AEQUITAS adjudication gate (physical NVIDIA GPU)
+  #
+  # The wavefront PT reference cannot run on the hosted macOS Metal lane:
+  # naga 0.19's MSL backend does not implement atomicCompareExchange, which
+  # pt_shadow.wgsl uses for float accumulation. The committed adjudication
+  # goldens were produced on this NVIDIA Vulkan runner, so the gate runs here
+  # with zero skips allowed.
+  # ============================================================================
+  test-adjudication-gate:
+    name: AEQUITAS Adjudication Gate (NVIDIA Vulkan)
+    needs: [build-wheels, terrain-golden-paths]
+    if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.terrain_goldens == 'true'
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 30
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Initialize evidence directory
+        shell: pwsh
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "forge3d-adjudication-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "FORGE3D_ADJUDICATION_ARTIFACT_DIR=$artifactDir" | Add-Content $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force $artifactDir | Out-Null
+          git rev-parse HEAD | Set-Content "$artifactDir/checked-out-head.txt"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install exact-head wheel and test dependencies
+        shell: pwsh
+        run: |
+          python scripts/install_compatible_wheel.py dist *>&1 | Tee-Object "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/wheel-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install pytest numpy *>&1 | Tee-Object "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/dependency-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Require the exact NVIDIA Vulkan adapter
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/adapter-probe.log"
+          exit $LASTEXITCODE
+      - name: Run AEQUITAS adjudication gate
+        shell: pwsh
+        run: |
+          python -m pytest tests/test_adjudication_gate.py -v --tb=short --junitxml="$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/pytest.log"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_ADJUDICATION_ARTIFACT_DIR/junit-verifier.log"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          exit $verifyCode
+      - name: Upload AEQUITAS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adjudication-gate-evidence
+          path: ${{ runner.temp }}/forge3d-adjudication-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+
+  # ============================================================================
   # ANAMNESIS physical cross-backend portability
   #
   # The protected NVIDIA runner seeds through Vulkan, then restores the same
@@ -1059,7 +1119,7 @@ jobs:
             --cache anamnesis-portable-store `
             --record anamnesis-portable-record.json `
             --frame-blob anamnesis-portable-producer.png `
-            --golden tests/goldens/determinism/terra_determinata_v1.sha256 `
+            --golden tests/goldens/determinism/terra_determinata_v1.json `
             --adapter-record anamnesis-portable-producer.jsonl `
             --machine-id-file anamnesis-portability-producer-machine-id.txt `
             --runner-name '${{ runner.name }}' `
@@ -1138,6 +1198,7 @@ jobs:
             --record seeded/anamnesis-portable-record.json `
             --consumer-frame-blob anamnesis-portable-consumer.png `
             --consumer-adapter-record anamnesis-portable-consumer.jsonl `
+            --golden tests/goldens/determinism/terra_determinata_v1.json `
             --machine-id-file anamnesis-portability-consumer-machine-id.txt `
             --runner-name '${{ runner.name }}' `
             --producer-backend vulkan --consumer-backend dx12 `
@@ -1286,7 +1347,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
+    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-adjudication-gate, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -1312,7 +1373,7 @@ jobs:
              { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
              { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
              [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
-             { [ "${{ needs.test-f3dz-gpu.result }}" != "success" ] && [ "${{ needs.test-f3dz-gpu.result }}" != "skipped" ]; } || \
+             { [ "${{ needs.test-f3dz-gpu.result }}" != "success" ] && [ "${{ needs.test-f3dz-gpu.result }}" != "skipped" ]; } ||              { [ "${{ needs.test-adjudication-gate.result }}" != "success" ] && [ "${{ needs.test-adjudication-gate.result }}" != "skipped" ]; } || \
              [ "${{ needs.test-anamnesis-portability-seed.result }}" != "success" ] || \
              [ "${{ needs.test-anamnesis-portability.result }}" != "success" ] || \
              [ "${{ needs.test-anamnesis-production.result }}" != "success" ] || \

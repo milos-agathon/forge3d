@@ -51,11 +51,23 @@ pub(super) fn build_observation(
         -1.0,
         65_536.0,
     );
+    // Lanes x/y carry the grid spacing, which is the full terrain span in
+    // metres for mesh/clipmap camera modes; the contract bounds them like
+    // world positions. Lanes z/w (exaggeration, render scale/palette) keep the
+    // scalar bound.
     check_slice(
         &mut observation,
-        "u_terrain.spacing_h_exag",
+        "u_terrain.spacing_h_exag.xy",
         0,
-        &terrain[36..40],
+        &terrain[36..38],
+        0.0,
+        10_000_000.0,
+    );
+    check_slice(
+        &mut observation,
+        "u_terrain.spacing_h_exag.zw",
+        0,
+        &terrain[38..40],
         0.0,
         65_536.0,
     );
@@ -190,6 +202,69 @@ fn check_slice(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn observe_spacing(spacing_h_exag: [f32; 4]) -> RuntimeContractObservation {
+        let mut terrain = vec![0.0; 44];
+        terrain[32..36].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
+        terrain[36..40].copy_from_slice(&spacing_h_exag);
+        terrain[40..44].copy_from_slice(&[1.0, 64.0, 0.1, 150_000.0]);
+        build_observation(
+            "terrain.render_internal",
+            &terrain,
+            &valid_shading(),
+            &zero_overlay(),
+            &[0.0, 0.5, 1.0, 0.25],
+            2,
+            2,
+        )
+        .unwrap()
+    }
+
+    fn valid_shading() -> Vec<f32> {
+        let mut shading = vec![0.0; 44];
+        shading[0..4].copy_from_slice(&[1.0, 4.0, 1.0, 0.0]);
+        shading[8..12].copy_from_slice(&[0.0, 0.33, 0.66, 1.0]);
+        shading[12..16].fill(0.5);
+        shading[20..24].copy_from_slice(&[4.0, 0.125, 0.0, 0.0]);
+        shading[24..28].copy_from_slice(&[1.0, 1.0, 1.0, 1.0]);
+        shading[28..32].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
+        shading[32..36].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
+        shading[36..40].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
+        shading[40..44].copy_from_slice(&[0.0, 1.0, 1.0, 0.5]);
+        shading
+    }
+
+    fn zero_overlay() -> OverlayUniforms {
+        OverlayUniforms {
+            params0: [0.0; 4],
+            params1: [0.0; 4],
+            params2: [0.0; 4],
+            params3: [0.0; 4],
+            params4: [0.0; 4],
+            params5: [0.0; 4],
+        }
+    }
+
+    #[test]
+    fn clipmap_terrain_span_spacing_is_inside_the_contract() {
+        // Clipmap/mesh camera modes upload the full terrain span (metres) as
+        // the grid spacing; a 100 km large-region clipmap is in contract.
+        let observation = observe_spacing([100_000.0, 100_000.0, 1.2, 1.0]);
+        assert_eq!(observation.status, "passed");
+    }
+
+    #[test]
+    fn spacing_lanes_stay_bounded() {
+        assert_ne!(
+            observe_spacing([20_000_000.0, 1.0, 1.0, 1.0]).status,
+            "passed"
+        );
+        assert_ne!(
+            observe_spacing([1.0, 1.0, 100_000.0, 1.0]).status,
+            "passed",
+            "exaggeration/scale lanes keep the scalar bound"
+        );
+    }
 
     #[test]
     fn terrain_runtime_observation_checks_uploaded_uniforms_and_height_texture() {

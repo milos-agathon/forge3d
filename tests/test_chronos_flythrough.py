@@ -642,12 +642,14 @@ def test_flythrough_repeat_run_hits_cache_and_preserves_pixel_hashes(
     output = tmp_path / "output"
     cache = tmp_path / "cache"
     original_render = f3d.MapScene.render
-    hits: list[tuple[int, bool | None]] = []
+    rendered: list[int] = []
 
+    # The flythrough cache is one ANAMNESIS sequence: a hit replays stored
+    # frame bytes without calling MapScene.render at all.
     def record_render(self, *args, **kwargs):
         report = original_render(self, *args, **kwargs)
         frame = json.loads(self.compiled_plan.frame.to_json())
-        hits.append((frame["frame_index"], self.last_render_metadata.get("cache_hit")))
+        rendered.append(frame["frame_index"])
         return report
 
     monkeypatch.setattr(f3d.MapScene, "render", record_render)
@@ -662,9 +664,8 @@ def test_flythrough_repeat_run_hits_cache_and_preserves_pixel_hashes(
     third = render_flythrough(
         camera_path, base_seed=7, samples=1, out_dir=moved_output, cache=cache
     )
-    assert hits == [
-        (0, False), (1, False), (0, True), (1, True), (0, True), (1, True)
-    ]
+    # Only the first run renders; the repeat and moved-output runs hit.
+    assert rendered == [0, 1]
     assert (output / "flythrough_manifest.json").read_bytes() == first_manifest
     for manifest, directory in ((second, output), (third, moved_output)):
         for record in manifest.frames:
@@ -765,6 +766,67 @@ class TestFlythroughPhysical:
         provenance = loaded.replay_frame(source_scene, replay_index, replay_path)
         record = loaded.frame_record(replay_index)
         assert provenance["pixel_hash"] == record["pixel_hash"]
+
+    def test_certificate_and_cache_contracts(self, tmp_path, monkeypatch):
+        if not _physical_render_available():
+            pytest.skip("CHRONOS physical render requires GPU-backed native module")
+        import forge3d.chronos as chronos_module
+        from forge3d import certificate
+        from forge3d.diagnostics import capabilities
+
+        source_scene = _synthetic_scene()
+        camera_path = {index: source_scene for index in range(2)}
+        cache_dir = tmp_path / "cache"
+
+        caps = capabilities()
+        absent_caps = set(caps["requested"]) - set(caps["granted"])
+        certified = render_flythrough(
+            camera_path, base_seed=11, samples=1, out_dir=tmp_path / "cert", certificate=True
+        )
+        for record in certified.frames:
+            name = f"frame_{int(record['frame_index']):08d}.certificate.json"
+            cert_path = tmp_path / "cert" / name
+            cert = json.loads(cert_path.read_text("utf-8"))
+            assert certificate.verify(cert_path, cert["signature"]["pubkey"]) is True
+            # Adapter-honest: only capabilities this adapter lacks may degrade
+            # (hosted Metal has no timestamp/pipeline-statistics queries). With
+            # every requested feature granted this stays an empty-list check.
+            assert all(
+                item["kind"] == "capability_absent" for item in cert["degradations"]
+            ), cert["degradations"]
+            assert {item["name"] for item in cert["degradations"]} <= absent_caps
+            assert cert["passes"], "certificate must record the frame's executed passes"
+
+        cold = render_flythrough(
+            camera_path, base_seed=11, samples=1, out_dir=tmp_path / "cold", cache=cache_dir
+        )
+        fresh_renders = []
+        original = chronos_module.MapScene.render
+
+        def counting_render(self, *args, **kwargs):
+            fresh_renders.append(args)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(chronos_module.MapScene, "render", counting_render)
+        warm = render_flythrough(
+            camera_path, base_seed=11, samples=1, out_dir=tmp_path / "warm", cache=cache_dir
+        )
+        assert fresh_renders == [], "identical compiled frames must replay from the cache"
+        assert [r["pixel_hash"] for r in warm.frames] == [r["pixel_hash"] for r in cold.frames]
+        assert [r["pixel_hash"] for r in cold.frames] == [
+            r["pixel_hash"] for r in certified.frames
+        ]
+
+        # A different base seed compiles different frames: no stale cache hit.
+        render_flythrough(
+            camera_path, base_seed=12, samples=1, out_dir=tmp_path / "reseeded", cache=cache_dir
+        )
+        assert len(fresh_renders) == 2
+
+        with pytest.raises(TypeError, match="certificate"):
+            render_flythrough(
+                camera_path, base_seed=11, samples=1, out_dir=tmp_path / "bad", certificate="x"
+            )
 
     def test_vt_required_residency_render(self, tmp_path):
         if not _physical_render_available():

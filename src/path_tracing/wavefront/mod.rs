@@ -45,6 +45,9 @@ pub struct WavefrontScheduler {
     restir_spatial_enabled: bool,
     restir_temporal_enabled: bool,
     restir_spatial_dispatches: u32,
+    /// Active-ray count of each wave executed by the last
+    /// `render_frame_simple` call (index 0 = primary wave).
+    last_frame_wave_sizes: Vec<u32>,
     restir_reservoirs: TrackedBuffer,
     restir_light_samples: TrackedBuffer,
     restir_alias_entries: TrackedBuffer,
@@ -243,6 +246,7 @@ impl WavefrontScheduler {
             restir_spatial_enabled: false,
             restir_temporal_enabled: true,
             restir_spatial_dispatches: 0,
+            last_frame_wave_sizes: Vec::new(),
             restir_reservoirs,
             restir_light_samples,
             restir_alias_entries,

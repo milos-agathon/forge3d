@@ -75,6 +75,11 @@ def _build_config_with_phi(phi_deg: float, overlay):
         gamma=2.2,
         albedo_mode="colormap",
         colormap_strength=1.0,
+        # "screen" mode draws the terrain as a fullscreen triangle, so the
+        # orbit only reaches view-dependent shading and two azimuths can
+        # quantize to identical bytes. The perspective mesh grid makes the
+        # camera orbit the actual geometry, which is what this guards.
+        camera_mode="mesh",
     )
 
 

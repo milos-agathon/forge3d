@@ -53,6 +53,30 @@ def test_portability_driver_requires_distinct_backends_not_distinct_machines():
     assert "render_sequence" not in source
 
 
+def _golden_record(path: Path, backends: dict[str, str]) -> Path:
+    """Write a per-backend determinism golden (forge3d.determinism.golden/2)."""
+    labels = {"vulkan": "Vulkan", "dx12": "Dx12"}
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "forge3d.determinism.golden/2",
+                "scene": "terra_determinata_v1",
+                "backends": {
+                    key: {
+                        "sha256": sha,
+                        "adapter": {"name": "physical-test-adapter", "backend": labels[key]},
+                        "source": "test fixture",
+                    }
+                    for key, sha in backends.items()
+                },
+                "cross_backend_identity": {"status": "ABSENT", "tracking": "TERRA-DET-VULKAN-01"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _run(*arguments: str) -> dict:
     completed = subprocess.run(
         [sys.executable, str(DRIVER), *arguments],
@@ -91,11 +115,8 @@ def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
     rgba[..., 2] = 127
     rgba[..., 3] = 255
     f3d.numpy_to_png(frame_blob, rgba)
-    golden = tmp_path / "terra.sha256"
-    golden.write_text(
-        hashlib.sha256(frame_blob.read_bytes()).hexdigest() + "  terra.png\n",
-        encoding="utf-8",
-    )
+    frame_sha = hashlib.sha256(frame_blob.read_bytes()).hexdigest()
+    golden = _golden_record(tmp_path / "terra.json", {"vulkan": frame_sha, "dx12": frame_sha})
     adapter_record = tmp_path / "adapter.jsonl"
     adapter_record.write_text(
         json.dumps(
@@ -164,6 +185,8 @@ def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
         str(consumer_blob),
         "--consumer-adapter-record",
         str(consumer_adapter),
+        "--golden",
+        str(golden),
         "--machine-id-file",
         str(consumer_machine),
         "--runner-name",
@@ -183,11 +206,12 @@ def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
 def test_seed_rejects_blob_that_differs_from_committed_golden(tmp_path):
     frame_blob = tmp_path / "terra.png"
     frame_blob.write_bytes(b"wrong pixels")
-    golden = tmp_path / "terra.sha256"
-    golden.write_text(hashlib.sha256(b"golden pixels").hexdigest() + "\n", encoding="utf-8")
+    golden = _golden_record(
+        tmp_path / "terra.json", {"vulkan": hashlib.sha256(b"golden pixels").hexdigest()}
+    )
     adapter_record = tmp_path / "adapter.jsonl"
     adapter_record.write_text(
-        json.dumps({"adapter": {"software_fallback": False}}) + "\n",
+        json.dumps({"adapter": {"backend": "Vulkan", "software_fallback": False}}) + "\n",
         encoding="utf-8",
     )
     completed = subprocess.run(
@@ -211,4 +235,60 @@ def test_seed_rejects_blob_that_differs_from_committed_golden(tmp_path):
         text=True,
     )
     assert completed.returncode != 0
-    assert "differs from committed golden" in completed.stderr
+    assert "seed render differs from committed Vulkan golden" in completed.stderr
+
+
+def test_consumer_is_held_to_its_own_backend_golden(tmp_path):
+    """A DX12 consumer matching only the Vulkan golden must be rejected."""
+    vulkan_pixels = b"vulkan canonical pixels"
+    consumer_blob = tmp_path / "consumer.png"
+    consumer_blob.write_bytes(vulkan_pixels)
+    golden = _golden_record(
+        tmp_path / "terra.json",
+        {
+            "vulkan": hashlib.sha256(vulkan_pixels).hexdigest(),
+            "dx12": hashlib.sha256(b"dx12 canonical pixels").hexdigest(),
+        },
+    )
+    record = tmp_path / "record.json"
+    record.write_text(
+        json.dumps(
+            {
+                "schema": "forge3d.anamnesis.native-portability/1",
+                "compatibility_profile": "terra-determinata-native-portable-v1",
+                "engine_fingerprint": json.loads(f3d.anamnesis_engine_fingerprint()),
+                "golden_sha256": hashlib.sha256(vulkan_pixels).hexdigest(),
+                "producer_adapter": {"backend": "vulkan", "software_fallback": False},
+                "producer_machine_id": "11111111-1111-1111-1111-111111111111",
+            }
+        ),
+        encoding="utf-8",
+    )
+    consumer_adapter = tmp_path / "consumer.jsonl"
+    consumer_adapter.write_text(
+        json.dumps({"adapter": {"backend": "Dx12", "name": "gpu", "software_fallback": False}})
+        + "\n",
+        encoding="utf-8",
+    )
+    machine = tmp_path / "machine.txt"
+    machine.write_text("11111111-1111-1111-1111-111111111111\n", encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable, str(DRIVER), "check",
+            "--cache", str(tmp_path / "cache"),
+            "--record", str(record),
+            "--consumer-frame-blob", str(consumer_blob),
+            "--consumer-adapter-record", str(consumer_adapter),
+            "--golden", str(golden),
+            "--machine-id-file", str(machine),
+            "--runner-name", "consumer-runner",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        # Same forge3d as this process, so the engine fingerprint matches and
+        # the golden comparison (not the fingerprint check) decides.
+        env={**os.environ, "PYTHONPATH": str(Path(f3d.__file__).resolve().parents[1])},
+    )
+    assert completed.returncode != 0
+    assert "consumer render differs from committed Dx12 golden" in completed.stderr
