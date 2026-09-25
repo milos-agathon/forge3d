@@ -42,12 +42,14 @@ def test_label_plan_quickstart_scenario_is_executable_and_reproducible():
             "text": "Capital",
             "geometry": {"type": "Point", "coordinates": (40.0, 40.0, 0.0)},
             "priority_class": "capital",
+            "candidate_policy": {"radial_count": 0, "offset_px": 0.0},
         },
         {
             "id": "local",
             "text": "Local",
             "geometry": {"type": "Point", "coordinates": (40.0, 40.0, 0.0)},
             "priority_class": "local",
+            "candidate_policy": {"radial_count": 0, "offset_px": 0.0},
         },
         {
             "id": "legend-hit",

@@ -147,7 +147,7 @@ pub struct OptimalOutcome {
     pub upper_bound_q: i64,
     /// Certified optimality gap: `(upper_bound - objective) / upper_bound`.
     pub gap: f64,
-    /// True when the search space was exhausted within the node budget.
+    /// True when the node budget did not interrupt the optimality-gap proof.
     /// False means the budget was hit and the gap is an honest bound, not
     /// an optimality claim.
     pub certified: bool,
@@ -244,7 +244,6 @@ pub fn declutter_optimal(
         suffix_max[k] = suffix_max[k + 1] + groups[k].max_weight;
     }
     let root_bound = suffix_max[0];
-    let tol_abs = ((config.gap_tolerance.max(0.0)) * root_bound as f64).floor() as i64;
     let margin_q = quantize_coord(config.margin.max(0.0));
 
     // Greedy incumbent: weight desc, then (label_id, candidate_index).
@@ -343,7 +342,8 @@ pub fn declutter_optimal(
             continue;
         }
         let bound = committed + gain + suffix_max[depth + 1];
-        if bound <= best_objective + tol_abs {
+        let tolerance_abs = ((config.gap_tolerance.max(0.0)) * bound.max(0) as f64).floor() as i64;
+        if bound <= best_objective || bound - best_objective <= tolerance_abs {
             max_pruned_bound = max_pruned_bound.max(bound);
             continue;
         }
@@ -788,6 +788,21 @@ mod tests {
         for candidates in &instances {
             assert_within_gap(candidates);
         }
+    }
+
+    #[test]
+    fn test_completed_gap_respects_tolerance_with_loose_root_bound() {
+        let mut candidates = Vec::new();
+        for label in 0..10 {
+            candidates.push(cand(label, 0, [0.0, 0.0, 10.0, 10.0], 100.0));
+        }
+        for label in 10..20 {
+            candidates.push(cand(label, 0, [0.0, 0.0, 10.0, 10.0], 2.0));
+        }
+        let cfg = config();
+        let outcome = declutter_optimal(&candidates, &cfg);
+        assert!(outcome.certified);
+        assert!(outcome.gap <= cfg.gap_tolerance);
     }
 
     #[test]

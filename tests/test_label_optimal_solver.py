@@ -245,6 +245,19 @@ class TestOptimalSolverGap:
         assert solver_records[0]["certified"] is False
         assert placements, "incumbent (greedy) solution must still be returned"
 
+    def test_completed_solve_gap_respects_tolerance_with_loose_root_bound(self):
+        candidates = [
+            *[(index, 0, (0.0, 0.0, 10.0, 10.0), 100.0, True) for index in range(10)],
+            *[(index, 0, (0.0, 0.0, 10.0, 10.0), 2.0, True) for index in range(10, 20)],
+        ]
+        _placements, gap, rationale = _native.declutter_optimal(
+            candidates, gap_tolerance=GAP_TOLERANCE
+        )
+        solver = next(record for record in rationale.records() if record["kind"] == "solver")
+        assert solver["certified"] is True
+        assert gap <= GAP_TOLERANCE
+        assert solver["gap"] <= solver["gap_tolerance"]
+
     def test_deterministic_across_repeated_calls(self):
         first = _native.declutter_optimal(SOLVER_INSTANCES[2])
         for _ in range(5):
@@ -291,6 +304,30 @@ class TestCompileTimeOcclusion:
         )
         assert center.details.get("visible") is not False
 
+    def test_occluded_primary_uses_visible_alternative(self):
+        from forge3d.label_plan import LabelPlan
+
+        plan = LabelPlan.compile(
+            labels=[{
+                "id": "cross-ridge",
+                "text": "Cross",
+                "geometry": {"type": "Point", "coordinates": [50.0, 40.0, 8.0]},
+                "priority": 1,
+                "requires_terrain": True,
+                "terrain_mode": "terrain",
+                "candidate_policy": {"radial_count": 0, "offset_px": 12.0},
+            }],
+            camera={},
+            viewport=(100, 100),
+            terrain=RidgelineDepthSampler(),
+        )
+
+        assert [label.label_id for label in plan.accepted] == ["cross-ridge"]
+        assert plan.accepted[0].candidate.candidate_id == "cross-ridge:below"
+        center = next(candidate for candidate in plan.accepted[0].candidates if candidate.candidate_id == "cross-ridge:center")
+        assert center.details["visible"] is False
+        assert center.terrain_sample["visible"] is False
+
     def test_rationale_cites_occluded_anchors_with_depths(self):
         plan = _compile_ridgeline_plan()
         occluded = [
@@ -317,6 +354,76 @@ class TestCompileTimeOcclusion:
         assert _stable_hash(first.to_dict()) == _stable_hash(second.to_dict())
 
 
+class TestOptimalCandidateIntegration:
+    def test_compile_chooses_among_all_visible_candidates(self):
+        from forge3d.label_plan import LabelPlan
+
+        labels = [
+            {
+                "id": label_id,
+                "text": label_id,
+                "geometry": {"type": "Point", "coordinates": [50.0, 50.0]},
+                "priority": 5,
+                "candidate_policy": {"offset_px": 20.0, "radial_count": 0},
+            }
+            for label_id in ("alpha", "beta")
+        ]
+        plan = LabelPlan.compile(labels=labels, camera={}, viewport=(100, 100))
+
+        assert {label.label_id for label in plan.accepted} == {"alpha", "beta"}
+        assert len({label.candidate.anchor for label in plan.accepted}) == 2
+        assert any(not label.candidate.candidate_id.endswith(":center") for label in plan.accepted)
+        for label in plan.accepted:
+            assert label.screen_bounds == label.candidate.bounds
+            placed = next(
+                record
+                for record in plan.rationale
+                if record["kind"] == "placed" and record["label_id"] == label.label_id
+            )
+            assert placed["candidate_id"] == label.candidate.candidate_id
+
+    def test_compile_uses_line_and_curved_geometry_authorities(self):
+        from forge3d.label_plan import LabelPlan
+
+        plan = LabelPlan.compile(
+            labels=[
+                {
+                    "id": "road",
+                    "text": "Road",
+                    "geometry": {"type": "LineString", "coordinates": [[10.0, 20.0], [170.0, 20.0]]},
+                    "repeat_distance": 80.0,
+                },
+                {
+                    "id": "river",
+                    "text": "River",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[10.0, 80.0], [90.0, 90.0], [170.0, 80.0]],
+                    },
+                    "curved_text": True,
+                },
+            ],
+            camera={},
+            viewport=(200, 120),
+        )
+
+        assert {label.label_id for label in plan.accepted} == {"road", "river"}
+        road = next(label for label in plan.accepted if label.label_id == "road")
+        river = next(label for label in plan.accepted if label.label_id == "river")
+        assert len(road.candidates) == 3
+        assert {candidate.details["geometry_authority"] for candidate in road.candidates} == {
+            "compute_line_label_placement"
+        }
+        assert {candidate.details["geometry_authority"] for candidate in river.candidates} == {
+            "layout_curved_text"
+        }
+        for label in (road, river):
+            assert label.screen_bounds == label.candidate.bounds
+            assert all(candidate.bounds[0] < candidate.bounds[2] for candidate in label.candidates)
+            assert all(candidate.bounds[1] < candidate.bounds[3] for candidate in label.candidates)
+            assert all(candidate.details["glyph_placements"] for candidate in label.candidates)
+
+
 class TestRationaleGrounding:
     def _colliding_plan(self):
         from forge3d.label_plan import LabelPlan
@@ -327,14 +434,14 @@ class TestRationaleGrounding:
                 "text": "Winner",
                 "geometry": {"type": "Point", "coordinates": [40.0, 40.0]},
                 "priority": 9,
-                "candidate_policy": {"radial_count": 0},
+                "candidate_policy": {"radial_count": 0, "offset_px": 0.0},
             },
             {
                 "id": "loser",
                 "text": "Loser",
                 "geometry": {"type": "Point", "coordinates": [40.0, 40.0]},
                 "priority": 2,
-                "candidate_policy": {"radial_count": 0},
+                "candidate_policy": {"radial_count": 0, "offset_px": 0.0},
             },
         ]
         return LabelPlan.compile(labels=labels, camera={}, viewport=(100, 100))
@@ -346,7 +453,7 @@ class TestRationaleGrounding:
             for record in plan.rationale
             if record["kind"] == "placed" and record["label_id"] == "winner"
         )
-        assert [entry["label_id"] for entry in placed["displaced"]] == ["loser"]
+        assert {entry["label_id"] for entry in placed["displaced"]} == {"loser"}
         dropped = next(
             record
             for record in plan.rationale

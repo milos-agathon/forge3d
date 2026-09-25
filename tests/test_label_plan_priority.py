@@ -5,6 +5,7 @@ def _point(label_id, priority_class, *, priority=0):
         "geometry": {"type": "Point", "coordinates": (40.0, 40.0, 0.0)},
         "priority": priority,
         "priority_class": priority_class,
+        "candidate_policy": {"radial_count": 0, "offset_px": 0.0},
     }
 
 
