@@ -89,7 +89,7 @@ def test_advanced_label_diagnostics_are_deterministic_not_silent_success():
         {
             "id": "curved",
             "text": "River",
-            "geometry": {"type": "LineString", "coordinates": [[0, 0], [20, 5]]},
+            "geometry": {"type": "LineString", "coordinates": [[0, 0], [80, 20]]},
             "curved_text": True,
         },
         {
@@ -104,5 +104,5 @@ def test_advanced_label_diagnostics_are_deterministic_not_silent_success():
     second = f3d.LabelPlan.compile(labels=labels, camera={}, viewport=(100, 100), seed=9)
 
     assert first.to_dict() == second.to_dict()
-    assert [label.label_id for label in first.accepted] == ["repeat"]
-    assert any(diagnostic.code == "experimental_feature" for diagnostic in first.diagnostics)
+    assert [label.label_id for label in first.accepted] == ["curved", "repeat"]
+    assert not any(diagnostic.code == "experimental_feature" for diagnostic in first.diagnostics)

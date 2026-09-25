@@ -234,6 +234,45 @@ class TestDirectionVector:
             assert y < 0.0, "Below-horizon sun should have negative Y"
 
 
+class TestSceneDirectionConvention:
+    """to_scene_direction() must match MapScene's sun_direction convention."""
+
+    def test_matches_azimuth_elevation_formula(self):
+        """Scene direction = (sin(az)cos(el), sin(el), cos(az)cos(el))."""
+        pos = sun_position(45.0, -122.0, "2024-06-21T20:00:00")
+        x, y, z = pos.to_scene_direction()
+        az = math.radians(pos.azimuth)
+        el = math.radians(pos.elevation)
+        assert x == pytest.approx(math.sin(az) * math.cos(el), abs=1e-6)
+        assert y == pytest.approx(math.sin(el), abs=1e-6)
+        assert z == pytest.approx(math.cos(az) * math.cos(el), abs=1e-6)
+
+    def test_is_xz_mirror_of_to_direction(self):
+        """to_scene_direction() == (-x, y, -z) of to_direction()."""
+        pos = sun_position(45.52, -122.68, "2024-06-21T14:00:00")
+        dx, dy, dz = pos.to_direction()
+        sx, sy, sz = pos.to_scene_direction()
+        assert sx == pytest.approx(-dx, abs=1e-6)
+        assert sy == pytest.approx(dy, abs=1e-6)
+        assert sz == pytest.approx(-dz, abs=1e-6)
+
+    def test_round_trips_through_mapscene_sun_angles(self):
+        """MapScene._sun_angles_from_direction must recover azimuth/elevation."""
+        from forge3d.map_scene import _sun_angles_from_direction
+
+        for dt in ("2024-06-21T14:00:00", "2024-12-21T20:00:00"):
+            pos = sun_position(45.52, -122.68, dt)
+            az, el = _sun_angles_from_direction(pos.to_scene_direction())
+            assert az % 360.0 == pytest.approx(pos.azimuth % 360.0, abs=1e-3)
+            assert el == pytest.approx(pos.elevation, abs=1e-3)
+
+    def test_normalized(self):
+        pos = sun_position(45.0, -122.0, "2024-06-21T12:00:00")
+        x, y, z = pos.to_scene_direction()
+        length = math.sqrt(x * x + y * y + z * z)
+        assert abs(length - 1.0) < 0.001
+
+
 class TestInputValidation:
     """Tests for input validation and error handling."""
 

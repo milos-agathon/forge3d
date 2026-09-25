@@ -8,45 +8,50 @@
 
 """Offline verification of forge3d per-pixel provenance.
 
-This module intentionally depends only on :mod:`hashlib`, :mod:`json`,
-:mod:`struct`, :mod:`numpy`, and the pure-Python Ed25519 fallback in
+This module intentionally depends only on :mod:`io`, :mod:`json`,
+:mod:`struct`, :mod:`numpy`, the shared SHA256 helper in
+``forge3d.bundle``, and the pure-Python Ed25519 fallback in
 ``forge3d._ed25519`` so third parties can re-verify a rendered
 ``(image, source_map, provenance.json)`` triple WITHOUT the compiled
 ``_forge3d`` extension.
 
-Encoding contract (schema_version 1):
+Encoding contract (schema_version 2):
 
 - Tile leaf (56 bytes): ``b"VTLF" || family_slot:u32le || source_id:u32le ||
   tile_x:u32le || tile_y:u32le || mip_level:u32le || content_hash[32]``.
 - Source-map leaf (44 bytes): ``b"VTSM" || width:u32le || height:u32le ||
   sha256(row-major little-endian u32 raster)[32]``.
+- Image leaf (36 bytes): ``b"VTIM" || sha256(rendered image bytes)[32]``.
 - Leaf hash = SHA256(encoding); leaves sorted ascending by raw encoding.
 - Interior node = SHA256(left || right); an odd trailing node is promoted
   unchanged.
-- Empty leaf set: root = SHA256(b"forge3d.provenance.v1.empty").
-- Signature message = ``b"forge3d.provenance.v1" || root`` (Ed25519).
+- Empty leaf set: root = SHA256(b"forge3d.provenance.v2.empty").
+- Signature message = ``b"forge3d.provenance.v2" || root`` (Ed25519).
 
-SHA256 semantics match :func:`forge3d.bundle._compute_sha256` (the bundle
-integrity helper); use that helper directly whenever a *file* is hashed.
+All SHA256 hashing routes through :func:`forge3d.bundle._compute_sha256`
+(the bundle-integrity helper), which also hashes *files* directly.
 """
 
 from __future__ import annotations
 
-import hashlib
+import io
 import json
 import struct
 from typing import Any, Dict, Iterable, Mapping, Sequence, Tuple
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+from .bundle import _compute_sha256
+
+SCHEMA_VERSION = 2
 SOURCE_ID_NONE = 0
 FAMILY_NAMES = ("albedo", "normal", "mask")
-SIGN_CONTEXT = b"forge3d.provenance.v1"
+SIGN_CONTEXT = b"forge3d.provenance.v2"
 
-_EMPTY_ROOT_PREIMAGE = b"forge3d.provenance.v1.empty"
+_EMPTY_ROOT_PREIMAGE = b"forge3d.provenance.v2.empty"
 _TILE_LEAF_TAG = b"VTLF"
 _SOURCE_MAP_LEAF_TAG = b"VTSM"
+_IMAGE_LEAF_TAG = b"VTIM"
 _TILE_LEAF_STRUCT = struct.Struct("<5I")
 _SOURCE_MAP_LEAF_STRUCT = struct.Struct("<2I")
 
@@ -58,6 +63,7 @@ __all__ = [
     "encode_tile_leaf",
     "decode_tile_leaf",
     "encode_source_map_leaf",
+    "encode_image_leaf",
     "source_map_digest",
     "manifest_leaf_encodings",
     "seal_provenance_offline",
@@ -66,7 +72,7 @@ __all__ = [
 
 
 def _sha256(data: bytes) -> bytes:
-    return hashlib.sha256(data).digest()
+    return bytes.fromhex(_compute_sha256(io.BytesIO(data)))
 
 
 def encode_tile_leaf(
@@ -109,6 +115,13 @@ def encode_source_map_leaf(width: int, height: int, digest: bytes) -> bytes:
     if len(digest) != 32:
         raise ValueError("digest must be 32 bytes")
     return _SOURCE_MAP_LEAF_TAG + _SOURCE_MAP_LEAF_STRUCT.pack(width, height) + digest
+
+
+def encode_image_leaf(image_sha256: bytes) -> bytes:
+    """Canonical 36-byte image-leaf preimage (``b"VTIM" || digest[32]``)."""
+    if len(image_sha256) != 32:
+        raise ValueError("image_sha256 must be 32 bytes")
+    return _IMAGE_LEAF_TAG + image_sha256
 
 
 def source_map_digest(source_map: np.ndarray) -> bytes:
@@ -155,16 +168,18 @@ def _tile_leaf_from_record(index: int, record: Mapping[str, Any]) -> bytes:
 
 
 def manifest_leaf_encodings(
-    manifest: Mapping[str, Any], source_map: np.ndarray
+    manifest: Mapping[str, Any], source_map: np.ndarray, image_bytes: bytes
 ) -> Tuple[bytes, ...]:
-    """Rebuild all leaf preimages: manifest tile records + the source-map leaf
-    recomputed from the actual ``source_map`` array."""
+    """Rebuild all leaf preimages: manifest tile records, the source-map leaf
+    recomputed from the actual ``source_map`` array, and the image leaf
+    recomputed from the actual ``image_bytes``."""
     leaves = [
         _tile_leaf_from_record(index, record)
         for index, record in enumerate(manifest.get("leaves", ()))
     ]
     height, width = np.asarray(source_map).shape
     leaves.append(encode_source_map_leaf(int(width), int(height), source_map_digest(source_map)))
+    leaves.append(encode_image_leaf(_sha256(bytes(image_bytes))))
     return tuple(leaves)
 
 
@@ -172,6 +187,7 @@ def seal_provenance_offline(
     source_map: np.ndarray,
     contributing_tiles: Sequence[Mapping[str, Any]],
     private_key: bytes,
+    image_bytes: bytes,
 ) -> bytes:
     """Pure-Python twin of the native ``forge3d.seal_provenance``.
 
@@ -200,8 +216,10 @@ def seal_provenance_offline(
             deduped.append((leaf, decoded))
 
     digest = source_map_digest(arr)
+    image_digest = _sha256(bytes(image_bytes))
     leaves = [leaf for leaf, _ in deduped]
     leaves.append(encode_source_map_leaf(int(width), int(height), digest))
+    leaves.append(encode_image_leaf(image_digest))
     root = build_merkle_root(leaves)
     signature = _ed25519.sign(private_key, SIGN_CONTEXT + root)
     public_key = _ed25519.public_key_from_private(private_key)
@@ -225,6 +243,7 @@ def seal_provenance_offline(
         "signature": signature.hex(),
         "public_key": public_key.hex(),
         "image_dims": [int(width), int(height)],
+        "image_sha256": image_digest.hex(),
         "albedo_family_index": 0,
         "source_map_encoding": "u32le-row-major",
         "source_map_sha256": digest.hex(),
@@ -253,17 +272,21 @@ def seal_provenance_offline(
 
 
 def verify_provenance_offline(
-    source_map: np.ndarray, manifest: Mapping[str, Any] | bytes | str
+    source_map: np.ndarray,
+    manifest: Mapping[str, Any] | bytes | str,
+    image_bytes: bytes,
 ) -> Dict[str, Any]:
-    """Re-verify a provenance manifest with only numpy + hashlib + _ed25519.
+    """Re-verify a provenance manifest with only numpy + stdlib + _ed25519.
 
     Returns a report dict::
 
         {
             "ok": bool,                # root_match AND signature_valid AND dims
+                                       # AND image_sha256_match
             "root_match": bool,
             "signature_valid": bool,
             "dims_match": bool,
+            "image_sha256_match": bool,
             "computed_root": "<hex>",
             "signed_root": "<hex>",
             "coverage": {source_id: pixel_count},   # SOURCE_ID_NONE excluded
@@ -285,7 +308,16 @@ def verify_provenance_offline(
     dims = manifest.get("image_dims", [None, None])
     dims_match = [int(dims[0]), int(dims[1])] == [int(width), int(height)]
 
-    computed_root = build_merkle_root(manifest_leaf_encodings(manifest, arr))
+    image_digest = _sha256(bytes(image_bytes))
+    try:
+        manifest_image = bytes.fromhex(str(manifest.get("image_sha256", "")))
+    except ValueError:
+        manifest_image = b""
+    image_sha256_match = manifest_image == image_digest
+
+    computed_root = build_merkle_root(
+        manifest_leaf_encodings(manifest, arr, image_bytes)
+    )
     signed_root = bytes.fromhex(str(manifest["merkle_root"]))
     root_match = computed_root == signed_root
 
@@ -305,10 +337,13 @@ def verify_provenance_offline(
     unknown_source_ids = sorted(set(coverage) - known_ids)
 
     return {
-        "ok": bool(root_match and signature_valid and dims_match),
+        "ok": bool(
+            root_match and signature_valid and dims_match and image_sha256_match
+        ),
         "root_match": bool(root_match),
         "signature_valid": bool(signature_valid),
         "dims_match": bool(dims_match),
+        "image_sha256_match": bool(image_sha256_match),
         "computed_root": computed_root.hex(),
         "signed_root": signed_root.hex(),
         "coverage": coverage,

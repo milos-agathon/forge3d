@@ -55,6 +55,13 @@ def _to_float_array(x: Union[float, np.ndarray]) -> np.ndarray:
 
 
 def sun_direction_from_angles(azimuth_deg: float, elevation_deg: float) -> Tuple[float, float, float]:
+    """Unit direction for azimuth/elevation in degrees (Y-up).
+
+    Convention: azimuth 0 maps to +X, azimuth 90 to +Z. This differs from the
+    ``MapScene`` ``sun_direction`` convention (azimuth 0 = +Z/north) and from
+    ``SunPosition.to_direction()`` (azimuth 0 = -Z); prefer
+    ``SunPosition.to_scene_direction()`` for MapScene lighting.
+    """
     az = math.radians(float(azimuth_deg))
     el = math.radians(float(elevation_deg))
     x = math.cos(el) * math.cos(az)

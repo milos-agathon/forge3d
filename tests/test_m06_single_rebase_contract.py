@@ -28,7 +28,7 @@ EXPECTED_ANCHOR_INVENTORY = {
     ("src/viewer/camera_controller.rs", "prospective_anchor", "rebase_call", 1),
     ("src/viewer/event_loop/command_preflight.rs", "preflight_command_batch", "anchor_copy", 1),
     ("src/viewer/event_loop/command_preflight.rs", "preflight_command_batch", "rebase_call", 1),
-    ("src/viewer/init/viewer_new.rs", "new", "constructor", 1),
+    ("src/viewer/init/viewer_new.rs", "assemble", "constructor", 1),
     ("src/viewer/input/viewer_input.rs", "handle_input", "anchor_copy", 1),
     ("src/viewer/input/viewer_input.rs", "handle_input", "anchor_copy", 2),
     ("src/viewer/input/viewer_input.rs", "handle_input", "anchor_copy", 3),

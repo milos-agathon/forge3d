@@ -11,7 +11,6 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .diagnostics import (
     Diagnostic,
-    experimental_feature_diagnostic,
     label_rejection_summary_diagnostic,
     missing_glyphs_diagnostic,
     placeholder_fallback_diagnostic,
@@ -227,7 +226,7 @@ def _native_shape_label_glyphs(
         "glyph_ids": [glyph["glyph_id"] for glyph in glyph_records],
         "font_indices": [glyph["font_index"] for glyph in glyph_records],
         "clusters": [glyph["cluster"] for glyph in glyph_records],
-        "advances": [glyph["x_advance"] for glyph in glyph_records],
+        "advances": [float(glyph["advance"][0]) for glyph in positioned],
         "line_ranges": line_ranges,
         "positioned_glyphs": positioned,
         "render_mapping": "positioned_glyphs_by_id",
@@ -376,6 +375,18 @@ def _native_declutter_optimal() -> Any | None:
     return getattr(native, "declutter_optimal", None)
 
 
+def _native_layout_label_candidate() -> Any | None:
+    try:
+        from ._native import get_native_module
+
+        native = get_native_module()
+    except Exception:
+        return None
+    if native is None:
+        return None
+    return getattr(native, "layout_label_candidate", None)
+
+
 def _candidate_visibility_records(
     record: Mapping[str, Any],
     terrain: Any,
@@ -390,10 +401,17 @@ def _candidate_visibility_records(
     citing the sampled depth versus the anchor depth.
     """
     records: list[dict[str, Any]] = []
-    if terrain is None or not _requires_terrain(record):
-        return records
+    geometry = record.get("geometry") if isinstance(record.get("geometry"), Mapping) else {}
+    world_anchor = _coordinates(
+        geometry.get("coordinates", record.get("position", record.get("world_pos")))
+    )
     for candidate in candidates:
-        sample = _terrain_sample(record, terrain, label_id, candidate.anchor)
+        sample_anchor = list(candidate.anchor)
+        if world_anchor is not None:
+            sample_anchor[2] = world_anchor[2]
+        sample = _terrain_sample(record, terrain, label_id, sample_anchor)
+        if isinstance(sample, Mapping):
+            candidate.terrain_sample = _json_safe(dict(sample))
         if sample.get("visible") is not False:
             continue
         details = dict(candidate.details or {})
@@ -569,6 +587,12 @@ def _line_label_candidates(
     ordering_key: str,
     record: Mapping[str, Any],
     terrain_sample: Mapping[str, Any],
+    text: str,
+    font_size: float,
+    glyph_advances: Sequence[float] | None,
+    viewport_size: tuple[float, float] | None,
+    geometry_adapter: Any | None,
+    curved: bool,
 ) -> tuple[LabelCandidate, list[LabelCandidate]] | None:
     points = _line_points(geometry)
     if points is None:
@@ -582,27 +606,66 @@ def _line_label_candidates(
     else:
         count = max(1, int(math.floor(length / repeat_distance)) + 1)
         distances = [index * repeat_distance for index in range(count)]
+    policy = _candidate_policy(record)
+    tracking = _number(
+        policy.get("tracking", record.get("tracking", 0.0)), default=0.0
+    )
+    if geometry_adapter is not None and viewport_size is None:
+        return None
     candidates: list[LabelCandidate] = []
-    preset = str(record.get("placement_preset", "line"))
+    preset = str(record.get("placement_preset", "curved" if curved else "line"))
+    candidate_kind = "curved" if curved else "line"
+    candidate_suffix = "curved" if curved else "repeat"
+    candidate_type = "curved_layout" if curved else "line_repeat"
     for index, distance in enumerate(distances):
         anchor = _interpolate_line(points, distance)
+        details: dict[str, Any] = {
+            "repeat_distance": repeat_distance,
+            "distance_along": round(distance, 6),
+            "line_length": round(length, 6),
+            "placement_preset": preset,
+        }
+        if geometry_adapter is not None:
+            payload = geometry_adapter(
+                kind=candidate_kind,
+                label_id=0,
+                candidate_index=index,
+                path=[(point[0], point[1], point[2]) for point in points],
+                text=text,
+                font_size=font_size,
+                priority=int(score),
+                viewport=viewport_size,
+                glyph_advances=glyph_advances,
+                target_anchor=(anchor[0], anchor[1]),
+                tracking=tracking,
+            )
+            if payload is None:
+                continue
+            position = payload["position"]
+            anchor = [float(position[0]), float(position[1]), anchor[2]]
+            bounds = [float(value) for value in payload["bounds"]]
+            details["geometry_authority"] = str(payload["geometry_authority"])
+            details["glyph_placements"] = _json_safe(
+                [dict(glyph) for glyph in payload["glyph_placements"]]
+            )
+        else:
+            if curved:
+                return None
+            bounds = [anchor[0], anchor[1], anchor[0], anchor[1]]
         candidates.append(
             LabelCandidate(
-                candidate_id=f"{label_id}:repeat-{index}",
-                candidate_type="line_repeat",
+                candidate_id=f"{label_id}:{candidate_suffix}-{index}",
+                candidate_type=candidate_type,
                 anchor=anchor,
                 score=score - (index * 0.001),
-                bounds=[anchor[0], anchor[1], anchor[0], anchor[1]],
+                bounds=bounds,
                 terrain_sample=terrain_sample,
-                details={
-                    "repeat_distance": repeat_distance,
-                    "distance_along": round(distance, 6),
-                    "line_length": round(length, 6),
-                    "placement_preset": preset,
-                },
-                ordering_key=f"{ordering_key}:{index:02d}:line-repeat",
+                details=details,
+                ordering_key=f"{ordering_key}:{index:02d}:{candidate_kind}",
             )
         )
+    if not candidates:
+        return None
     return candidates[0], candidates
 
 
@@ -712,7 +775,11 @@ def _polygon_label_candidates(
         score=score,
         bounds=[centroid[0], centroid[1], centroid[0], centroid[1]],
         terrain_sample=terrain_sample,
-        details={"area": abs(area), "inside_polygon": centroid_inside},
+        details={
+            "area": abs(area),
+            "inside_polygon": centroid_inside,
+            "visible": centroid_inside,
+        },
         ordering_key=f"{ordering_key}:00:centroid",
     )
     visual_candidate = LabelCandidate(
@@ -1065,6 +1132,7 @@ class LabelPlan:
         diagnostics: list[Diagnostic] = []
         missing_by_label: dict[str, list[str]] = {}
         rationale_records: list[dict[str, Any]] = []
+        geometry_adapter = _native_layout_label_candidate()
 
         records = sorted(_iter_label_records(labels), key=lambda item: _label_sort_key(item[1], item[0]))
         for fallback_key, record in records:
@@ -1127,21 +1195,24 @@ class LabelPlan:
             geometry_type = str(geometry.get("type", record.get("geometry_type", "Point")))
             geometry_type_key = geometry_type.lower()
             terrain_sample = _terrain_sample(record, terrain, label_id)
+            is_curved = bool(record.get("curved_text")) or str(
+                record.get("placement_preset", "")
+            ).lower() == "curved"
+            label_typography = _normalize_typography(
+                typography or record.get("typography") or {}
+            )
+            font_size = 12.0
+            for font_key in ("font_size", "size", "text_size"):
+                if font_key in label_typography:
+                    font_size = _number(label_typography[font_key], default=12.0)
+                    break
 
-            if bool(record.get("curved_text")) or str(record.get("placement_preset", "")).lower() == "curved":
-                diagnostics.append(
-                    experimental_feature_diagnostic(
-                        "advanced curved labels",
-                        layer_id="labels",
-                        object_id=label_id,
-                    )
-                )
+            if is_curved and geometry_type_key != "linestring":
                 rejected.append(
                     RejectedLabel(
                         label_id=label_id,
                         source_id=source_id,
                         reason="unsupported_geometry_type",
-                        diagnostic_refs=["experimental_feature"],
                         ordering_key=ordering_key,
                         details={"placement": "curved_text"},
                     )
@@ -1180,7 +1251,7 @@ class LabelPlan:
                 candidate = candidates[0]
             elif geometry_type_key == "linestring":
                 preset = str(record.get("placement_preset", "")).lower()
-                if "repeat_distance" not in record and preset not in {"road", "river", "line"}:
+                if not is_curved and "repeat_distance" not in record and preset not in {"road", "river", "line"}:
                     rejected.append(
                         RejectedLabel(
                             label_id=label_id,
@@ -1198,16 +1269,41 @@ class LabelPlan:
                     ordering_key=ordering_key,
                     record=record,
                     terrain_sample=terrain_sample,
+                    text=text,
+                    font_size=font_size,
+                    glyph_advances=shaping_details.get("advances"),
+                    viewport_size=viewport_size,
+                    geometry_adapter=geometry_adapter,
+                    curved=is_curved,
                 )
                 if line_candidates is None:
-                    rejected.append(
-                        RejectedLabel(
-                            label_id=label_id,
-                            source_id=source_id,
-                            reason="invalid_geometry",
-                            ordering_key=ordering_key,
+                    if is_curved and geometry_adapter is None:
+                        diagnostics.append(
+                            placeholder_fallback_diagnostic(
+                                "label_geometry_candidate",
+                                layer_id="labels",
+                                object_id=label_id,
+                            )
                         )
-                    )
+                        rejected.append(
+                            RejectedLabel(
+                                label_id=label_id,
+                                source_id=source_id,
+                                reason="unsupported_geometry_type",
+                                diagnostic_refs=["placeholder_fallback"],
+                                ordering_key=ordering_key,
+                                details={"placement": "curved_text"},
+                            )
+                        )
+                    else:
+                        rejected.append(
+                            RejectedLabel(
+                                label_id=label_id,
+                                source_id=source_id,
+                                reason="invalid_geometry",
+                                ordering_key=ordering_key,
+                            )
+                        )
                     continue
                 candidate, candidates = line_candidates
                 x, y, z = candidate.anchor
@@ -1263,17 +1359,15 @@ class LabelPlan:
                     )
                     continue
 
-            if terrain_sample.get("visible") is False:
-                rationale_records.append(
-                    {
-                        "kind": "occluded_anchor",
-                        "label_id": label_id,
-                        "candidate_id": candidate.candidate_id,
-                        "terrain_sample": _json_safe(dict(terrain_sample)),
-                    }
-                )
+            rationale_records.extend(
+                _candidate_visibility_records(record, terrain, label_id, candidates)
+            )
+            if candidates and all(
+                (item.details or {}).get("visible") is False for item in candidates
+            ):
+                primary_sample = dict(candidate.terrain_sample or {})
                 diagnostic_refs = ["label_rejection_summary"]
-                if terrain_sample.get("unavailable") is True:
+                if primary_sample.get("unavailable") is True:
                     diagnostics.append(
                         placeholder_fallback_diagnostic(
                             "terrain_sampler",
@@ -1290,7 +1384,7 @@ class LabelPlan:
                         candidate_id=candidate.candidate_id,
                         diagnostic_refs=diagnostic_refs,
                         ordering_key=ordering_key,
-                        details={"terrain_sample": terrain_sample},
+                        details={"terrain_sample": primary_sample},
                     )
                 )
                 continue
@@ -1320,9 +1414,6 @@ class LabelPlan:
                 )
                 continue
 
-            rationale_records.extend(
-                _candidate_visibility_records(record, terrain, label_id, candidates)
-            )
             accepted.append(
                 AcceptedLabel(
                     label_id=label_id,
@@ -1335,7 +1426,7 @@ class LabelPlan:
                     screen_bounds=screen_bounds,
                     world_bounds=world_bounds,
                     typography={
-                        **_normalize_typography(typography or record.get("typography") or {}),
+                        **label_typography,
                         **{
                             key: value
                             for key, value in shaping_details.items()
@@ -1554,27 +1645,35 @@ def _collision_rejection(label: AcceptedLabel, winner: AcceptedLabel) -> Rejecte
     )
 
 
-def _translate_native_rationale(native_rationale: Any, ordered: Sequence[AcceptedLabel]) -> list[dict[str, Any]]:
+def _translate_native_rationale(
+    native_records: Sequence[Mapping[str, Any]],
+    ordered: Sequence[AcceptedLabel],
+) -> list[dict[str, Any]]:
     """Map native solver records (index-keyed) back to plan label ids."""
     records: list[dict[str, Any]] = []
-    for raw in native_rationale.records():
+    for raw in native_records:
         record = dict(raw)
         kind = str(record.get("kind", ""))
         if kind in {"placed", "dropped", "occluded_candidate"}:
-            label = ordered[int(record.pop("label_id"))]
-            record.pop("candidate_index", None)
+            label_index = int(record.pop("label_id"))
+            candidate_index = int(record.pop("candidate_index", 0))
+            label = ordered[label_index]
             record["label_id"] = label.label_id
-            record["candidate_id"] = label.candidate.candidate_id
+            record["candidate_id"] = label.candidates[candidate_index].candidate_id
             for key in ("displaced", "blocking"):
                 if key not in record:
                     continue
                 entries = []
                 for entry in record[key]:
-                    other = ordered[int(entry["label_id"])]
+                    other_label_index = int(entry["label_id"])
+                    other_candidate_index = int(entry.get("candidate_index", 0))
+                    other = ordered[other_label_index]
                     entries.append(
                         {
                             "label_id": other.label_id,
-                            "candidate_id": other.candidate.candidate_id,
+                            "candidate_id": other.candidates[
+                                other_candidate_index
+                            ].candidate_id,
                             "overlap_area_px": float(entry.get("overlap_area_px", 0.0)),
                         }
                     )
@@ -1594,56 +1693,83 @@ def _resolve_label_placements_optimal(
 ) -> tuple[list[AcceptedLabel], list[RejectedLabel], list[dict[str, Any]]]:
     """Bounded-optimal select-or-drop placement over the compiled candidates.
 
-    Each label contributes its compiled primary candidate box; the native
-    branch-and-bound solver maximizes total placed priority weight under
-    pairwise non-overlap, with deterministic quantized arithmetic.
+    Every compiled candidate is forwarded to the native branch-and-bound
+    solver with its own bounds, score, and visibility gate; the returned
+    ``(label_index, candidate_index)`` choices are applied back onto the
+    accepted labels, and dropped labels cite the candidate the solver
+    actually rejected.
     """
     ordered = sorted(
         accepted,
         key=lambda label: (label.ordering_key or label.label_id, label.label_id),
     )
     solver_input = []
-    for index, label in enumerate(ordered):
-        bounds = _rect_bounds(label.screen_bounds)
-        if bounds is None:
-            anchor = label.candidate.anchor
-            bounds = [anchor[0], anchor[1], anchor[0], anchor[1]]
-        solver_input.append(
-            (
-                index,
-                0,
-                (float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])),
-                float(label.candidate.score),
-                True,
+    for label_index, label in enumerate(ordered):
+        for candidate_index, candidate in enumerate(label.candidates):
+            bounds = _rect_bounds(candidate.bounds)
+            if bounds is None:
+                anchor = candidate.anchor
+                bounds = [anchor[0], anchor[1], anchor[0], anchor[1]]
+            solver_input.append(
+                (
+                    label_index,
+                    candidate_index,
+                    tuple(float(value) for value in bounds),
+                    float(candidate.score),
+                    (candidate.details or {}).get("visible") is not False,
+                )
             )
-        )
     placements, _gap, native_rationale = solver(
         solver_input,
         gap_tolerance=float(gap_tolerance),
         node_budget=int(node_budget),
         margin=0.0,
     )
-    placed_indices = {int(index) for index, _candidate in placements}
+    native_records = [dict(record) for record in native_rationale.records()]
+    placed = {
+        (int(label_index), int(candidate_index))
+        for label_index, candidate_index in placements
+    }
+    placed_label_indices = {label_index for label_index, _index in placed}
+    placed_labels: list[AcceptedLabel] = []
+    for label_index, candidate_index in sorted(placed):
+        label = ordered[label_index]
+        candidate = label.candidates[candidate_index]
+        label.candidate = candidate
+        label.screen_bounds = candidate.bounds
+        placed_labels.append(label)
+
+    dropped_records = {
+        int(record["label_id"]): record
+        for record in native_records
+        if str(record.get("kind")) == "dropped"
+    }
 
     winners: list[AcceptedLabel] = []
     rejections: list[RejectedLabel] = []
-    placed_labels = [ordered[index] for index in sorted(placed_indices)]
     for index, label in enumerate(ordered):
-        if index in placed_indices:
+        if index in placed_label_indices:
             winners.append(label)
             continue
-        blockers = sorted(
-            (
+        drop_record = dropped_records.get(index)
+        drop_candidate_index = (
+            int(drop_record["candidate_index"]) if drop_record is not None else 0
+        )
+        candidate = label.candidates[drop_candidate_index]
+        label.candidate = candidate
+        label.screen_bounds = candidate.bounds
+        blockers: list[AcceptedLabel] = []
+        if drop_record is not None:
+            for entry in drop_record.get("blocking") or ():
+                blocker_index = int(entry["label_id"])
+                if blocker_index in placed_label_indices:
+                    blockers.append(ordered[blocker_index])
+        if not blockers:
+            blockers = [
                 placed
                 for placed in placed_labels
                 if _rects_intersect(label.screen_bounds, placed.screen_bounds)
-            ),
-            key=lambda placed: (
-                -float(placed.candidate.score),
-                placed.ordering_key or placed.label_id,
-                placed.label_id,
-            ),
-        )
+            ]
         if not blockers:
             # The solve only drops a conflict-free label when its weight is
             # negative; keep the greedy place-everything-that-fits contract.
@@ -1652,7 +1778,7 @@ def _resolve_label_placements_optimal(
             continue
         rejections.append(_collision_rejection(label, blockers[0]))
 
-    return winners, rejections, _translate_native_rationale(native_rationale, ordered)
+    return winners, rejections, _translate_native_rationale(native_records, ordered)
 
 
 def _resolve_label_placements(

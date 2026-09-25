@@ -58,7 +58,10 @@ pub use analysis::{
 
 // M1: Accumulation AA infrastructure for offline rendering
 pub mod accumulation;
-pub use accumulation::{AccumulationBuffer, AccumulationConfig, JitterSequence};
+pub use accumulation::{frame_seed, AccumulationBuffer, AccumulationConfig, JitterSequence};
+
+pub mod frame_compiler;
+pub use frame_compiler::{CompiledFrame, FrameCompiler, FrozenLabelSet, LABEL_FADE_FRAMES};
 
 // M2: Bloom post-processing for terrain offline rendering
 pub mod bloom_processor;

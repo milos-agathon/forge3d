@@ -5,6 +5,9 @@ pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResu
     #[cfg(feature = "cog_streaming")]
     crate::terrain::cog::py_bindings::register_cog_bindings(m)?;
 
+    m.add_function(wrap_pyfunction!(frame_seed, m)?)?;
+    m.add_function(wrap_pyfunction!(compile_frame, m)?)?;
+    m.add_function(wrap_pyfunction!(render_compiled_frame, m)?)?;
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
     m.add_function(wrap_pyfunction!(hybrid_render_terrain_reference, m)?)?;
     m.add_function(wrap_pyfunction!(render_adjudication_pair, m)?)?;

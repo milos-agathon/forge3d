@@ -1,3 +1,4 @@
+use super::frame_setup::FrameOutput;
 use crate::viewer::viewer_enums::{CaptureKind, VizMode};
 use crate::viewer::Viewer;
 
@@ -5,7 +6,7 @@ impl Viewer {
     pub(super) fn finish_render_frame(
         &mut self,
         encoder: wgpu::CommandEncoder,
-        output: wgpu::SurfaceTexture,
+        output: FrameOutput,
     ) {
         // Submit rendering
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -37,7 +38,9 @@ impl Viewer {
             // If no offscreen texture yet, keep the request and don't write any file.
             // This forces the waiting script to continue waiting while we retry.
         }
-        output.present();
+        if let FrameOutput::Surface(output) = output {
+            output.present();
+        }
         self.rendered_frame_revision = self.applied_command_revision;
         crate::viewer::event_loop::update_ipc_revision_stats(
             self.applied_command_revision,
@@ -60,13 +63,15 @@ impl Viewer {
                 VizMode::Gi => "gi",
                 VizMode::Lit => "lit",
             };
-            self.window.set_title(&format!(
-                "{} | FPS: {:.1} | Mode: {:?} | Viz: {}",
-                self.view_config.title,
-                fps,
-                self.camera.mode(),
-                viz
-            ));
+            if let Some(window) = self.window() {
+                window.set_title(&format!(
+                    "{} | FPS: {:.1} | Mode: {:?} | Viz: {}",
+                    self.view_config.title,
+                    fps,
+                    self.camera.mode(),
+                    viz
+                ));
+            }
         }
 
         // Process any pending P5 capture requests using current frame data.

@@ -186,7 +186,7 @@ def test_depth_aov_occlusion_tests_projected_depth_without_explicit_z() -> None:
     assert sample["label_depth"] == 0.75
 
 
-def test_curved_label_depth_occlusion_is_documented_unsupported_substitution() -> None:
+def test_curved_label_depth_occlusion_uses_compiled_geometry() -> None:
     scene = f3d.MapScene(
         terrain=f3d.TerrainSource(
             data=np.zeros((4, 4), dtype=np.float32),
@@ -226,16 +226,12 @@ def test_curved_label_depth_occlusion_is_documented_unsupported_substitution() -
     scene.validate()
     plan = scene.compiled_label_plans["labels"]
 
-    assert plan.accepted == []
-    assert [(label.label_id, label.reason) for label in plan.rejected] == [
-        ("curved-ridge", "unsupported_geometry_type")
-    ]
-    assert plan.rejected[0].details == {"placement": "curved_text"}
-    assert plan.rejected[0].diagnostic_refs == ("experimental_feature",)
-    assert any(
-        diagnostic.code == "experimental_feature" and diagnostic.object_id == "curved-ridge"
-        for diagnostic in plan.diagnostics
-    )
+    assert [label.label_id for label in plan.accepted] == ["curved-ridge"]
+    candidate = plan.accepted[0].candidate
+    assert candidate.candidate_type == "curved_layout"
+    assert candidate.details["geometry_authority"] == "layout_curved_text"
+    assert candidate.terrain_sample["visible"] is True
+    assert not plan.rejected
 
 
 def test_mapscene_render_reads_frozen_compile_phase_label_plan(tmp_path, monkeypatch) -> None:

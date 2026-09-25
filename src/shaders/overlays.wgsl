@@ -1,5 +1,8 @@
 // src/shaders/overlays.wgsl
-// Fullscreen overlay compositor: drape overlay (RGBA8 sRGB) and optional altitude ramp from height texture.
+// Fullscreen overlay compositor: drape overlay (RGBA8) and optional altitude ramp from height texture.
+// Contract: the bound overlay texture's storage encoding must match the render
+// target's (unorm target -> unorm texture, srgb target -> srgb texture) so
+// sampled colors pass through without a one-sided sRGB round-trip.
 // M5: Extended with depth-correct vector overlay support and halo rendering.
 
 struct OverlayUniforms {

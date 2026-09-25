@@ -34,6 +34,7 @@ from ._native import (
     get_native_module as _get_native_module,
     native_import_error,
 )
+from . import astro, sky
 from ._gpu import (
     enumerate_adapters,
     device_probe,
@@ -112,6 +113,7 @@ _NATIVE_ONLY_EXPORTS = (
         "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
         "verify_provenance",  # VERITAS: native manifest verification
         "declutter_optimal",  # CARTOGRAPHER-PRIME: bounded-optimal label solve
+        "layout_label_candidate",  # CARTOGRAPHER-PRIME: native candidate geometry authority
         "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
@@ -137,6 +139,10 @@ _NATIVE_ONLY_EXPORTS = (
         "dd_selftest",  # DUPLA: GPU DD exactness canary
         "dd_harness",  # DUPLA: GPU DD bounds proof
         "dd_jitter_demo",  # DUPLA: Everest absolute-coordinate demo
+        "CompiledFrame",
+        "frame_seed",
+        "compile_frame",
+        "render_compiled_frame",
 )
 
 if _NATIVE_MODULE is not None:
@@ -626,6 +632,7 @@ from .map_scene import (
     VectorOverlay,
 )
 from . import recipe_manifest
+from .chronos import FlythroughManifest, render_flythrough
 from .alignment import (
     alignment_report,
     alignment_residual,
@@ -657,6 +664,8 @@ __all__ = [
     "verify",
     "codec",
     "precision",
+    "astro",
+    "sky",
     "dd_selftest",
     "dd_harness",
     "dd_jitter_demo",
@@ -696,6 +705,7 @@ __all__ = [
     "verify_provenance",
     # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
     "declutter_optimal",
+    "layout_label_candidate",
     "LabelRationale",
     # CENSOR: global degradation sink
     "native_degradations",
@@ -934,6 +944,12 @@ __all__ = [
     "LightingPreset",
     "OutputSpec",
     "ReproducibilityProfile",
+    "CompiledFrame",
+    "frame_seed",
+    "compile_frame",
+    "render_compiled_frame",
+    "FlythroughManifest",
+    "render_flythrough",
     "recipe_manifest",
     "alignment_report",
     "alignment_residual",

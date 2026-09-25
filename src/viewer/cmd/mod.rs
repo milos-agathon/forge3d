@@ -12,7 +12,7 @@ mod ipc_command;
 mod labels_command;
 mod legacy_handler;
 mod pointcloud_command;
-mod scene_command;
+pub(super) mod scene_command;
 mod scene_review_command;
 mod terrain_command;
 mod vector_overlay_command;

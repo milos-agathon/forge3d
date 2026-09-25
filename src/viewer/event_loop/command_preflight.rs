@@ -180,7 +180,8 @@ impl Viewer {
             // from the rebased anchor — a legitimate *relative* camera
             // distance, not an unsafe absolute residual. Allow it up to the
             // span scale while keeping the M-06 absolute floor for the target.
-            let eye_bound = radius.max(crate::viewer::camera_controller::VIEWER_RENDER_FRAME_MAX_COORD);
+            let eye_bound =
+                radius.max(crate::viewer::camera_controller::VIEWER_RENDER_FRAME_MAX_COORD);
             validate_points_with_bound(&anchor, CoordRole::Eye, eye_bound, [target + offset])?;
             validate_points(&anchor, CoordRole::Target, [target])?;
         } else if point_present {

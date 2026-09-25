@@ -28,9 +28,15 @@ def test_production_renderers_consume_real_framegraph_barriers():
     assert "pub fn run_pass" in framegraph
     assert "pub fn encoder(&mut self)" in framegraph
     assert "queue.submit" in framegraph
-    assert 'execute_with_barriers("offscreen.forward"' in forward
-    assert 'execute_with_barriers("offscreen.readback"' in forward
-    assert "offscreen readback lost its compiled color transition" in forward
+    # The offscreen forward harness and the viewer PBR-scene capture share
+    # one graph executor; it runs both labelled passes through real barriers.
+    hdr_graph = (ROOT / "src/core/anamnesis/hdr_graph.rs").read_text(encoding="utf-8")
+    assert 'graphics: "offscreen.forward"' in forward
+    assert 'readback: "offscreen.readback"' in forward
+    assert "crate::core::anamnesis::render_hdr_graph(" in forward
+    assert "graph.execute_with_barriers(labels.graphics" in hdr_graph
+    assert "graph.execute_with_barriers(labels.readback" in hdr_graph
+    assert "hdr graph readback lost its compiled color transition" in hdr_graph
     assert ".begin_execution(self.device.clone(), self.queue.clone())" in terrain
     assert 'execution.run_pass("terrain.forward"' in terrain
     assert 'execution.run_pass("terrain.resolve"' in terrain
@@ -153,10 +159,18 @@ def test_public_gpu_graph_cache_restores_intermediate_texture(tmp_path):
 
     cold_cache = dict(cold_meta["cache"])
     warm_cache = dict(warm_meta["cache"])
+    # The adjudication raster renders through the viewer frame pipeline, so
+    # the cached graphics pass is the viewer PBR-scene pass.
+    assert cold_meta["raster_route"] == warm_meta["raster_route"] == "viewer.pbr_scene"
     assert cold_cache["hits"] == []
-    assert cold_cache["misses"] == ["offscreen.forward", "offscreen.readback"]
-    assert warm_cache["hits"] == ["offscreen.forward"]
-    assert warm_cache["misses"] == ["offscreen.readback"]
+    assert cold_cache["misses"] == ["viewer.pbr_scene", "viewer.readback"]
+    assert warm_cache["hits"] == ["viewer.pbr_scene"]
+    assert warm_cache["misses"] == ["viewer.readback"]
+    # A hit restores the image instead of rendering; its raster metadata is
+    # then the keyed description of that image, identical to the cold frame.
+    assert cold_meta["raster_metadata_source"] == "rendered_frame"
+    assert warm_meta["raster_metadata_source"] == "cache_key"
+    assert dict(warm_meta["raster"]) == dict(cold_meta["raster"])
     assert warm_cache["bytes_read"] > 0
     assert warm_cache["wall_ms_saved"] > 0.0
     np.testing.assert_array_equal(

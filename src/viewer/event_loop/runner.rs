@@ -162,7 +162,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             } if window_id == window.id() => {
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if pending_scale_factor_resize {
-                        let size = viewer.window.inner_size();
+                        let size = window.inner_size();
                         if size.width != viewer.config.width || size.height != viewer.config.height
                         {
                             viewer.resize(size);
@@ -177,7 +177,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     match viewer.render() {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            viewer.resize(viewer.window.inner_size())
+                            viewer.resize(window.inner_size())
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => {
                             eprintln!("Out of memory!");
@@ -412,7 +412,7 @@ pub fn run_viewer_with_ipc(
             } if window_id == window.id() => {
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if pending_scale_factor_resize {
-                        let size = viewer.window.inner_size();
+                        let size = window.inner_size();
                         if size.width != viewer.config.width || size.height != viewer.config.height
                         {
                             viewer.resize(size);
@@ -427,7 +427,7 @@ pub fn run_viewer_with_ipc(
                     match viewer.render() {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            viewer.resize(viewer.window.inner_size())
+                            viewer.resize(window.inner_size())
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => {
                             eprintln!("Out of memory!");

@@ -14,7 +14,10 @@ pub struct SunPosition {
 
 impl SunPosition {
     /// Convert azimuth/elevation to a normalized direction vector (Y-up coordinate system)
-    /// Returns [x, y, z] where y is up
+    /// Returns [x, y, z] where y is up and azimuth 0 (north) maps to -Z.
+    ///
+    /// Note: `MapScene`/`TerrainRenderer` `sun_direction` uses a different
+    /// convention (azimuth 0 = +Z); use [`Self::to_scene_direction`] for those.
     pub fn to_direction(&self) -> [f32; 3] {
         let az_rad = self.azimuth.to_radians();
         let el_rad = self.elevation.to_radians();
@@ -23,6 +26,22 @@ impl SunPosition {
         let x = -az_rad.sin() * cos_el;
         let y = el_rad.sin();
         let z = -az_rad.cos() * cos_el;
+
+        [x as f32, y as f32, z as f32]
+    }
+
+    /// Direction toward the sun in the `MapScene` `sun_direction` convention:
+    /// azimuth 0 (north) maps to +Z and azimuth 90 (east) to +X, matching
+    /// `map_scene._sun_direction_from_preset`/`_sun_angles_from_direction`.
+    /// Equal to `to_direction()` mirrored on the X/Z axes (-x, y, -z).
+    pub fn to_scene_direction(&self) -> [f32; 3] {
+        let az_rad = self.azimuth.to_radians();
+        let el_rad = self.elevation.to_radians();
+
+        let cos_el = el_rad.cos();
+        let x = az_rad.sin() * cos_el;
+        let y = el_rad.sin();
+        let z = az_rad.cos() * cos_el;
 
         [x as f32, y as f32, z as f32]
     }
@@ -326,6 +345,42 @@ mod tests {
             pos.elevation < 0.0,
             "Sun should be below horizon at North Pole in December"
         );
+    }
+
+    #[test]
+    fn test_to_scene_direction_mapscene_convention() {
+        // MapScene sun_direction convention: azimuth 0 (north) -> +Z.
+        let pos = SunPosition {
+            azimuth: 0.0,
+            elevation: 30.0,
+        };
+        let d = pos.to_scene_direction();
+        assert!((d[0] - 0.0).abs() < 1e-6, "az 0 x: {}", d[0]);
+        assert!((d[1] - 0.5).abs() < 1e-6, "el 30 y: {}", d[1]);
+        assert!(
+            (d[2] - 30.0f64.to_radians().cos() as f32).abs() < 1e-6,
+            "az 0 z: {}",
+            d[2]
+        );
+
+        // Azimuth 90 (east) -> +X.
+        let pos = SunPosition {
+            azimuth: 90.0,
+            elevation: 0.0,
+        };
+        let d = pos.to_scene_direction();
+        assert!((d[0] - 1.0).abs() < 1e-6, "az 90 x: {}", d[0]);
+
+        // Scene direction is the X/Z mirror of the ephemeris direction.
+        let pos = SunPosition {
+            azimuth: 123.0,
+            elevation: 45.0,
+        };
+        let a = pos.to_direction();
+        let b = pos.to_scene_direction();
+        assert!((a[0] + b[0]).abs() < 1e-6);
+        assert!((a[1] - b[1]).abs() < 1e-6);
+        assert!((a[2] + b[2]).abs() < 1e-6);
     }
 
     #[test]

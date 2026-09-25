@@ -11,13 +11,14 @@ use crate::core::error::RenderResult;
 use crate::core::gpu_timing::{
     create_default_config as create_gpu_timing_config, GpuTimingManager,
 };
-use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture, TrackedBuffer};
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::render::params::SsrParams;
 
 use super::super::camera_controller::CameraController;
 use super::super::viewer_config::{FpsCounter, ViewerConfig};
 use super::super::viewer_enums::{FogMode, VizMode};
+use super::super::viewer_struct::ViewerOutput;
 use super::super::viewer_types::SkyUniforms;
 use super::super::Viewer;
 use super::{
@@ -37,14 +38,91 @@ impl Viewer {
         // Device and surface initialization
         let dev_res = create_device_and_surface(Arc::clone(&window), config.vsync).await?;
         let surface = dev_res.surface;
-        let device = dev_res.device;
-        let queue = dev_res.queue;
-        #[cfg(feature = "extension-module")]
-        let adapter = dev_res.adapter;
-        #[cfg(not(feature = "extension-module"))]
-        let _adapter = dev_res.adapter;
-        let surface_config = dev_res.config;
-        let adapter_info = dev_res.adapter_info;
+        let auto_snapshot_path = std::env::var("FORGE3D_AUTO_SNAPSHOT_PATH").ok();
+        Self::assemble(
+            ViewerOutput::Window { window, surface },
+            dev_res.device,
+            dev_res.queue,
+            dev_res.adapter,
+            dev_res.config,
+            dev_res.adapter_info,
+            config,
+            auto_snapshot_path,
+        )
+    }
+
+    /// Create a headless Viewer on an existing device/queue/adapter. The frame
+    /// output is a tracked Rgba8Unorm color texture (RENDER_ATTACHMENT |
+    /// COPY_SRC | TEXTURE_BINDING) driven by `render_headless_frame`; no
+    /// window, surface or swapchain is involved and the auto-snapshot env var
+    /// is ignored.
+    pub fn new_headless(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        adapter: Arc<wgpu::Adapter>,
+        width: u32,
+        height: u32,
+        config: ViewerConfig,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        if width == 0 || height == 0 {
+            return Err("headless viewer requires non-zero width/height".into());
+        }
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        let color = tracked_create_texture(
+            &device,
+            &wgpu::TextureDescriptor {
+                label: Some("viewer.headless.color"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: surface_config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+        )?;
+        let adapter_info = adapter.get_info();
+        Self::assemble(
+            ViewerOutput::Headless { color },
+            device,
+            queue,
+            adapter,
+            surface_config,
+            adapter_info,
+            config,
+            None,
+        )
+    }
+
+    /// Shared assembler for windowed and headless viewers: every factory is
+    /// identical; only the frame output differs.
+    fn assemble(
+        output: ViewerOutput,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        #[cfg_attr(not(feature = "extension-module"), allow(unused_variables))] adapter: Arc<
+            wgpu::Adapter,
+        >,
+        surface_config: wgpu::SurfaceConfiguration,
+        adapter_info: wgpu::AdapterInfo,
+        config: ViewerConfig,
+        auto_snapshot_path: Option<String>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let adapter_name = adapter_info.name.clone();
         let adapter_vendor = adapter_info.vendor;
         let adapter_device = adapter_info.device;
@@ -99,7 +177,7 @@ impl Viewer {
         let gi_base = create_gi_baseline_resources(&device, width, height)?;
 
         // Sky resources
-        let sky = create_sky_resources(&device, width, height)?;
+        let sky = create_sky_resources(&device, &queue, width, height)?;
 
         // Fog resources
         let fog = create_fog_resources(&device, width, height)?;
@@ -139,8 +217,7 @@ impl Viewer {
         queue.write_buffer(&sky.sky_params, 0, bytemuck::bytes_of(&sky_params_init));
 
         let mut viewer = Self {
-            window,
-            surface,
+            output,
             device: device.clone(),
             queue: queue.clone(),
             #[cfg(feature = "extension-module")]
@@ -243,7 +320,7 @@ impl Viewer {
             ibl_cache_dir: None,
             ibl_base_resolution: None,
             viz_depth_max_override: None,
-            auto_snapshot_path: std::env::var("FORGE3D_AUTO_SNAPSHOT_PATH").ok(),
+            auto_snapshot_path,
             auto_snapshot_done: false,
             dump_p5_requested: false,
             adapter_name,
@@ -258,6 +335,14 @@ impl Viewer {
             sky_bind_group_layout0: sky.sky_bind_group_layout0,
             sky_bind_group_layout1: sky.sky_bind_group_layout1,
             sky_pipeline: sky.sky_pipeline,
+            celestial_pipeline: sky.celestial_pipeline,
+            _moon_albedo: sky.moon_albedo,
+            moon_bind_group: sky.moon_bind_group,
+            celestial_instances: None,
+            celestial_instance_count: 0,
+            observation_sky_sun_direction: None,
+            observation_night_params: None,
+            observation_day_sun_intensity: None,
             sky_params: sky.sky_params,
             sky_camera: sky.sky_camera,
             sky_output: sky.sky_output,
@@ -326,6 +411,7 @@ impl Viewer {
             sky_ground_albedo: sky_params_init.ground_albedo_sun_size_sun_intensity_exposure[0],
             sky_exposure: sky_params_init.ground_albedo_sun_size_sun_intensity_exposure[3],
             sky_sun_intensity: sky_params_init.ground_albedo_sun_size_sun_intensity_exposure[2],
+            observation_sun_direction: None,
             // HUD
             hud_enabled: true,
             hud,
@@ -359,6 +445,7 @@ impl Viewer {
             scene_review_registry: crate::viewer::scene_review::ViewerSceneReviewRegistry::default(
             ),
             command_error: None,
+            pbr_scene: None,
         };
 
         viewer.sync_ssr_params_to_gi();

@@ -1458,6 +1458,8 @@ def open_viewer_async(
             cleanup_paths=cleanup_paths,
         )
         handle._stdout_drain_thread = stdout_thread
+        from .sky import _register_viewer
+        _register_viewer(handle)
         return handle
     except Exception:
         _cleanup_paths(cleanup_paths)

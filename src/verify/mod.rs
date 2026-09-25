@@ -90,6 +90,13 @@ const PROVEN_TARGETS: &[Target] = &[
         kind: "entry",
     },
     Target {
+        module: "stars",
+        path: "src/shaders/stars.wgsl",
+        entry: "fs_celestial",
+        contract: "shaders/contracts/stars.toml",
+        kind: "entry",
+    },
+    Target {
         module: "overlays",
         path: "src/shaders/overlays.wgsl",
         entry: "fs_overlay",
@@ -414,6 +421,7 @@ fn embedded_contract(path: &str) -> Option<&'static str> {
         "shaders/contracts/polygon_fill.toml" => {
             include_str!("../../shaders/contracts/polygon_fill.toml")
         }
+        "shaders/contracts/stars.toml" => include_str!("../../shaders/contracts/stars.toml"),
         "shaders/contracts/pt_shade.toml" => include_str!("../../shaders/contracts/pt_shade.toml"),
         "shaders/contracts/pt_shade_guard.toml" => {
             include_str!("../../shaders/contracts/pt_shade_guard.toml")
@@ -444,6 +452,7 @@ fn embedded_shader(path: &str) -> Option<&'static str> {
         "src/shaders/line_aa.wgsl" => include_str!("../shaders/line_aa.wgsl"),
         "src/shaders/overlays.wgsl" => include_str!("../shaders/overlays.wgsl"),
         "src/shaders/polygon_fill.wgsl" => include_str!("../shaders/polygon_fill.wgsl"),
+        "src/shaders/stars.wgsl" => include_str!("../shaders/stars.wgsl"),
         "src/shaders/water_surface.wgsl" => include_str!("../shaders/water_surface.wgsl"),
         _ => return None,
     })

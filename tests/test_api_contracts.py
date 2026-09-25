@@ -100,6 +100,7 @@ class TestNativeModuleSymbols:
         "TransformFailed",
         # LITTERA: immutable native shaping result
         "ShapedText",
+        "CompiledFrame",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)
@@ -123,6 +124,11 @@ class TestNativeModuleSymbols:
         "device_probe",
         "sun_position",
         "sun_position_utc",
+        "astro_body_position",
+        "astro_body_position_refracted",
+        "astro_moon_phase",
+        "astro_moon_phase_at",
+        "astro_validation_metrics",
         "clipmap_generate_py",
         "engine_info",
         "hybrid_render",
@@ -157,6 +163,7 @@ class TestNativeModuleSymbols:
         "mesh_generate_plane_tbn",
         # CARTOGRAPHER-PRIME: bounded-optimal label declutter
         "declutter_optimal",
+        "layout_label_candidate",
         "anamnesis_leaf_key",
         "anamnesis_pass_key",
         "anamnesis_engine_fingerprint",
@@ -290,6 +297,9 @@ class TestNativeModuleSymbols:
         "compress_dem",
         "decompress_dem",
         "verify_dem",
+        "frame_seed",
+        "compile_frame",
+        "render_compiled_frame",
     ]
 
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)
@@ -777,6 +787,7 @@ class TestPackageLevelApiContracts:
         "CompiledScenePlan",
         # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
         "declutter_optimal",
+        "layout_label_candidate",
         "LabelRationale",
         # CENSOR: native Ed25519 certificate signer
         "sign_render_certificate_digest",
@@ -791,6 +802,14 @@ class TestPackageLevelApiContracts:
         "dd_selftest",
         "dd_harness",
         "dd_jitter_demo",
+        "CompiledFrame",
+        "frame_seed",
+        "compile_frame",
+        "render_compiled_frame",
+        "FlythroughManifest",
+        "astro",
+        "sky",
+        "render_flythrough",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)

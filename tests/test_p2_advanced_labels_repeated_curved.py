@@ -30,7 +30,7 @@ def test_repeated_line_labels_are_deterministic_with_repeat_distance():
     assert accepted.candidate.details["repeat_distance"] == 40.0
 
 
-def test_curved_line_labels_are_explicitly_experimental_not_silent_success():
+def test_curved_line_labels_use_native_geometry_authority():
     plan = f3d.LabelPlan.compile(
         labels=[
             {
@@ -44,8 +44,8 @@ def test_curved_line_labels_are_explicitly_experimental_not_silent_success():
         viewport=(100, 100),
     )
 
-    assert not plan.accepted
-    assert plan.rejected[0].reason == "unsupported_geometry_type"
-    diagnostic = next(d for d in plan.diagnostics if d.code == "experimental_feature")
-    assert diagnostic.object_id == "river-curve"
-    assert diagnostic.details["feature"] == "advanced curved labels"
+    assert [label.label_id for label in plan.accepted] == ["river-curve"]
+    candidate = plan.accepted[0].candidate
+    assert candidate.candidate_type == "curved_layout"
+    assert candidate.details["geometry_authority"] == "layout_curved_text"
+    assert candidate.details["glyph_placements"]

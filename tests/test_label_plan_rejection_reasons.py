@@ -47,10 +47,10 @@ def _reason_fixture_labels():
             40.0,
             terrain_sample={"visible": False, "elevation": 10.0, "source": "fixture"},
         ),
-        _point("collision-a", "One", 50.0, 50.0, priority=5),
-        _point("collision-b", "Two", 50.0, 50.0, priority=5),
-        _point("priority-high", "High", 60.0, 60.0, priority=20),
-        _point("priority-low", "Low", 60.0, 60.0, priority=1),
+        _point("collision-a", "One", 50.0, 50.0, priority=5, candidate_policy={"radial_count": 0, "offset_px": 0.0}),
+        _point("collision-b", "Two", 50.0, 50.0, priority=5, candidate_policy={"radial_count": 0, "offset_px": 0.0}),
+        _point("priority-high", "High", 60.0, 60.0, priority=20, candidate_policy={"radial_count": 0, "offset_px": 0.0}),
+        _point("priority-low", "Low", 60.0, 60.0, priority=1, candidate_policy={"radial_count": 0, "offset_px": 0.0}),
     ]
 
 

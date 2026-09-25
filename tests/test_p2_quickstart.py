@@ -75,5 +75,5 @@ def test_p2_quickstart_advanced_labels_compile_or_diagnose():
         viewport=(120, 80),
     )
 
-    assert [label.label_id for label in plan.accepted] == ["road"]
-    assert any(diagnostic.code == "experimental_feature" for diagnostic in plan.diagnostics)
+    assert [label.label_id for label in plan.accepted] == ["curved", "road"]
+    assert not any(diagnostic.code == "experimental_feature" for diagnostic in plan.diagnostics)

@@ -35,9 +35,20 @@ use super::viewer_config::{FpsCounter, ViewerConfig};
 use super::viewer_enums::{CaptureKind, FogMode, VizMode};
 use super::viewer_types::FrameCamera;
 
+/// Frame output target: either a platform window surface or a tracked
+/// offscreen color texture for headless rendering.
+pub(crate) enum ViewerOutput {
+    Window {
+        window: Arc<Window>,
+        surface: Surface<'static>,
+    },
+    Headless {
+        color: TrackedTexture,
+    },
+}
+
 pub struct Viewer {
-    pub(crate) window: Arc<Window>,
-    pub(crate) surface: Surface<'static>,
+    pub(crate) output: ViewerOutput,
     pub(crate) device: Arc<Device>,
     pub(crate) queue: Arc<Queue>,
     #[cfg(feature = "extension-module")]
@@ -178,6 +189,14 @@ pub struct Viewer {
     pub(crate) sky_bind_group_layout0: BindGroupLayout,
     pub(crate) sky_bind_group_layout1: BindGroupLayout,
     pub(crate) sky_pipeline: ComputePipeline,
+    pub(crate) celestial_pipeline: wgpu::RenderPipeline,
+    pub(crate) _moon_albedo: TrackedTexture,
+    pub(crate) moon_bind_group: BindGroup,
+    pub(crate) celestial_instances: Option<TrackedBuffer>,
+    pub(crate) celestial_instance_count: u32,
+    pub(crate) observation_sky_sun_direction: Option<[f32; 3]>,
+    pub(crate) observation_night_params: Option<[f32; 4]>,
+    pub(crate) observation_day_sun_intensity: Option<f32>,
     pub(crate) sky_params: TrackedBuffer,
     pub(crate) sky_camera: TrackedBuffer,
     pub(crate) sky_output: TrackedTexture,
@@ -254,6 +273,9 @@ pub struct Viewer {
     pub(crate) sky_ground_albedo: f32,
     pub(crate) sky_exposure: f32,
     pub(crate) sky_sun_intensity: f32,
+    /// World-space direction set by the sun IPC command. None retains the
+    /// historic camera-relative default until the user supplies an angle.
+    pub(crate) observation_sun_direction: Option<[f32; 3]>,
 
     // HUD overlay renderer
     pub(crate) hud_enabled: bool,
@@ -292,4 +314,17 @@ pub struct Viewer {
     /// Per-command execution outcome consumed by the dispatcher and correlated
     /// IPC completion channel.
     pub(crate) command_error: Option<String>,
+    /// Optional PBR scene rendered through the shared frame pipeline
+    /// (LoadReferenceScene). When present it owns all frame geometry work.
+    pub(crate) pbr_scene: Option<super::pbr_scene::ViewerPbrScene>,
+}
+
+impl Viewer {
+    /// The platform window, when this viewer renders to a surface.
+    pub(crate) fn window(&self) -> Option<&Arc<Window>> {
+        match &self.output {
+            ViewerOutput::Window { window, .. } => Some(window),
+            ViewerOutput::Headless { .. } => None,
+        }
+    }
 }

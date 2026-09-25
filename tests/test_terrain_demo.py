@@ -215,7 +215,10 @@ def test_terrain_demo_synthetic_render(tmp_path: Path) -> None:
 
     hdr_path = _create_hdr_fixture(tmp_path)
     try:
-        ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
+        # The irradiance convolution no longer double-counts cos/pi (normalized
+        # irradiance shared with the PT reference), so the synthetic sky is lit
+        # at 2x to keep the demo's ambient fill at its former level.
+        ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=2.0)
     finally:
         hdr_path.unlink(missing_ok=True)
 
@@ -293,7 +296,9 @@ def _build_params() -> TerrainRenderParamsConfig:
         sampling=SamplingSettings("Linear", "Linear", "Linear", 8, "Repeat", "Repeat", "Repeat"),
         clamp=ClampSettings((0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0)),
         overlays=[overlay],
-        exposure=1.08,
+        # Measured: 1.08 left the dramatic, sun-dominated scene at 0.148 mean
+        # luminance after the irradiance fix; 1.5 sits mid-window (~0.19).
+        exposure=1.5,
         gamma=2.2,
         albedo_mode="mix",
         colormap_strength=0.5,

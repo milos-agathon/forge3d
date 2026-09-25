@@ -4,11 +4,13 @@
 //! participation is opt-in; callers that pass no store execute exactly the
 //! pre-ANAMNESIS renderer path.
 
+pub mod hdr_graph;
 pub mod key;
 pub mod report;
 pub mod scheduler;
 pub mod store;
 
+pub use hdr_graph::{render_hdr_graph, ForwardCacheDeclaration, HdrGraphLabels, HdrGraphTarget};
 pub use key::{
     leaf_key, pass_key, reconstruct_pass_key, CapabilityFingerprint, EngineFingerprint, InputKey,
     PassKey, PassKeyMaterial,

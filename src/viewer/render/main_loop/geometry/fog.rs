@@ -50,9 +50,12 @@ impl Viewer {
         self.queue
             .write_buffer(&self.fog_camera, 0, bytemuck::bytes_of(&fog_cam));
 
-        let sun_dir_ws = (inv_view * glam::Vec4::new(0.3, 0.6, -1.0, 0.0))
+        let default_sun_dir_ws = (inv_view * glam::Vec4::new(0.3, 0.6, -1.0, 0.0))
             .truncate()
             .normalize();
+        let sun_dir_ws = self
+            .observation_sun_direction
+            .map_or(default_sun_dir_ws, glam::Vec3::from);
         let steps = if self.fog_half_res_enabled {
             (self.fog_steps.max(1) / 2).max(16)
         } else {

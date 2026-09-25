@@ -15,7 +15,8 @@ pub enum ViewerCmd {
     GiToggle(&'static str, bool), SetGiSeed(u32), Snapshot(Option<String>), DumpGbuffer, Quit,
     SaveBundle { path: String, name: Option<String> },
     LoadBundle { path: String },
-    LoadObj(String), LoadGltf(String), SetViz(String), SetGiViz(GiVizMode), QueryGiViz,
+    LoadObj(String), LoadGltf(String), LoadReferenceScene { name: String },
+    SetViz(String), SetGiViz(GiVizMode), QueryGiViz,
     LoadSsrPreset, LoadIbl(String), IblToggle(bool), IblIntensity(f32), IblRotate(f32),
     IblCache(Option<String>), IblRes(u32),
     SetSsaoRadius(f32),
@@ -59,6 +60,7 @@ pub enum ViewerCmd {
     CaptureP53SsrThickness, CaptureP54GiStack, QueryGiSeed, GiStatus,
 
     SetSunDirection { azimuth_deg: f32, elevation_deg: f32 },
+    SetSkyObservation { utc: String, latitude_deg: f64, longitude_deg: f64 },
     SetIbl { path: String, intensity: f32 },
     SetZScale(f32),
     SnapshotWithSize { path: String, width: Option<u32>, height: Option<u32> },

@@ -64,7 +64,12 @@ impl Scene {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                // The scene color target (TEXTURE_FORMAT) is Rgba8Unorm and
+                // stores display-encoded sRGB bytes. Keeping this texture
+                // unorm makes fs_overlay a byte-exact passthrough; an sRGB
+                // view would hardware-decode to linear and then store raw
+                // into the unorm target, darkening the drape by ~gamma 2.2.
+                format: wgpu::TextureFormat::Rgba8Unorm,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },

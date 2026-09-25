@@ -8,7 +8,7 @@ the active Anchor inside the producing function.
 
 import hashlib
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[1]
 SANCTIONED = "src/camera/anchor.rs"
@@ -31,21 +31,17 @@ SANCTIONED_DD_SPLITS = {
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-# Re-frozen at the paris-eiffel-day-pt tip (9a0a7d0f) after merging it into
-# this branch: the merged prometheus line carries the +46 sites over the
-# AEQUITAS-era 1345 freeze, and this branch adds zero conversion sites on top
-# -- inventory and digest are identical at the merge base tip and HEAD. The
-# earlier AEQUITAS raster-twin transition (+22/-7 in
-# src/offscreen/adjudication_raster.rs) remains recorded below.
-EXPECTED_CONVERSION_COUNT = 1391
-EXPECTED_CONVERSION_SHA256 = "7004a672e7f47be0f5259d4d14bca17e0aa376621a43f51340b96301029dad18"
+EXPECTED_CONVERSION_COUNT = 1394
+# Three existing AEQUITAS casts moved from render_pt_reference to
+# ReferenceWavefront::new/read_mean_hdr in the merged branch. The reviewed
+# transition below locks each old and new site; sorted(Path) fixes the order.
+EXPECTED_CONVERSION_SHA256 = "0724231a6229c563df1c1737ce0182575b6460bf512b804fcb4e6bd2d214007a"
 
 # The reviewed TERMINUS reader transition remains locked below. COMPENDIUM adds
 # four integer-to-f32 reconstruction conversions in predict.rs; those are
 # included in the current count and digest above without weakening the reader
 # transition assertion.
 REVIEWED_INVENTORY_TRANSITION = {
-    "current_count": EXPECTED_CONVERSION_COUNT,
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",
@@ -61,6 +57,29 @@ REVIEWED_INVENTORY_TRANSITION = {
         "heights.push(f64::from_le_bytes(read_le_bytes8(data, i * 8)) as f32)",
     ),
 }
+
+# Reviewed re-freeze from 1327 sites (1c688dd4) to 1394 (+92 / -25), all in the
+# four files below and none a world-coordinate narrowing:
+# - hybrid_compute/render_terrain.rs (PROMETHEUS): integer counts, dims, frame
+#   indices and flags lifted to f32 for runtime-contract observations, the
+#   estimator variance, and the per-frame mean divide.
+# - offscreen/adjudication_raster.rs (AEQUITAS routed through production PBR):
+#   bake-grid and ray indices on the local unit plane, aspect ratio, and SSAA
+#   tap weights. The ANAMNESIS `render_raster_reference_incremental` owner of
+#   the former five sites no longer exists.
+# - lighting/ephemeris.rs: f64 unit sun-direction vectors narrowed to f32.
+# - terrain/accumulation.rs (CHRONOS): R2 jitter `fract()` values in [0, 1).
+REVIEWED_PROMETHEUS_CHRONOS_FILE_COUNTS = {
+    "src/path_tracing/hybrid_compute/render_terrain.rs": 62,
+    "src/offscreen/adjudication_raster.rs": 25,
+    "src/lighting/ephemeris.rs": 6,
+    "src/terrain/accumulation.rs": 7,
+}
+RETIRED_CONVERSION_OWNERS = {
+    ("src/offscreen/adjudication_raster.rs", "render_raster_reference"),
+    ("src/offscreen/adjudication_raster.rs", "render_raster_reference_incremental"),
+}
+
 
 # AEQUITAS replaced the adjudication raster twin's CPU supersampler
 # (render_raster_reference_incremental, base_uniforms) with the production
@@ -282,10 +301,27 @@ def test_dd_encode_has_exactly_the_two_reviewed_split_casts():
 def test_reviewed_checked_reader_inventory_transition_is_exact():
     sites = conversion_inventory()
     transition = REVIEWED_INVENTORY_TRANSITION
-    assert len(sites) == transition["current_count"] == EXPECTED_CONVERSION_COUNT
+    assert len(sites) == EXPECTED_CONVERSION_COUNT
     assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
     assert transition["added"] in sites
     assert transition["removed"] not in sites
+
+
+def test_reviewed_prometheus_chronos_transition_is_exact():
+    sites = conversion_inventory()
+    assert len(sites) == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
+    for path, count in REVIEWED_PROMETHEUS_CHRONOS_FILE_COUNTS.items():
+        assert sum(1 for site in sites if site[0] == path) == count, path
+    assert not {(site[0], site[1]) for site in sites} & RETIRED_CONVERSION_OWNERS
+
+
+def test_inventory_order_is_host_independent():
+    sites = conversion_inventory()
+    files = [site[0] for site in sites]
+    first_seen = list(dict.fromkeys(files))
+    assert first_seen == sorted(first_seen, key=PurePosixPath)
+    assert first_seen == sorted(first_seen, key=PureWindowsPath)
 
 
 def test_reviewed_aequitas_raster_transition_is_exact():

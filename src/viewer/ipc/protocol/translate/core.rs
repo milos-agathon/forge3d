@@ -33,6 +33,9 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
         }),
         IpcRequest::LoadObj { path } => Some(ViewerCmd::LoadObj(path.clone())),
         IpcRequest::LoadGltf { path } => Some(ViewerCmd::LoadGltf(path.clone())),
+        IpcRequest::LoadReferenceScene { name } => {
+            Some(ViewerCmd::LoadReferenceScene { name: name.clone() })
+        }
         IpcRequest::SetTransform {
             translation,
             rotation_quat,
@@ -54,6 +57,15 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
         } => Some(ViewerCmd::SetSunDirection {
             azimuth_deg: *azimuth_deg,
             elevation_deg: *elevation_deg,
+        }),
+        IpcRequest::SetSkyObservation {
+            utc,
+            latitude_deg,
+            longitude_deg,
+        } => Some(ViewerCmd::SetSkyObservation {
+            utc: utc.clone(),
+            latitude_deg: *latitude_deg,
+            longitude_deg: *longitude_deg,
         }),
         IpcRequest::LitIbl { path, intensity } => Some(ViewerCmd::SetIbl {
             path: path.clone(),

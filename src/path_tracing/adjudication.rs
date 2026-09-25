@@ -478,7 +478,7 @@ fn stress_accumulation() {
             label: Some("shadow-accumulation-stress"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
-        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        let pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
             device,
             &wgpu::ComputePipelineDescriptor {
                 label: Some("shadow-accumulation-stress"),
@@ -486,7 +486,8 @@ fn stress_accumulation() {
                 module: &shader,
                 entry_point: "stress_accumulation",
             },
-        );
+        )
+        .expect("shadow accumulation stress pipeline");
         let result = tracked_create_buffer(
             device,
             &wgpu::BufferDescriptor {
@@ -572,7 +573,7 @@ fn transport_probe() {
                 label: Some("adjudication-transport-probe"),
                 source: wgpu::ShaderSource::Wgsl(source.into()),
             });
-            let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            let pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
                 device,
                 &wgpu::ComputePipelineDescriptor {
                     label: Some("adjudication-transport-probe"),
@@ -580,7 +581,8 @@ fn transport_probe() {
                     module: &shader,
                     entry_point: "transport_probe",
                 },
-            );
+            )
+            .expect("adjudication transport probe pipeline");
             let output = super::tracked_create_buffer(
                 device,
                 &wgpu::BufferDescriptor {

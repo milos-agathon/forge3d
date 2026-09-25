@@ -1065,6 +1065,32 @@ def test_native_label_compositor_rejects_invalid_atlas_uv_before_any_append(
     assert calls["appends"] == 0
 
 
+def test_native_scene_raster_overlay_preserves_display_luma():
+    """set_raster_overlay must be a byte-exact passthrough into the unorm
+    color target — an sRGB-decoded sample written raw would darken ~gamma 2.2
+    (regression: label composite measured 0.114 vs 0.352 mean luma)."""
+    try:
+        scene = f3d.Scene(64, 48)
+    except Exception as exc:
+        pytest.skip(f"native Scene unavailable: {exc}")
+
+    scene.disable_terrain()
+    overlay = np.zeros((48, 64, 4), dtype=np.uint8)
+    overlay[..., 0] = 120
+    overlay[..., 1] = 140
+    overlay[..., 2] = 160
+    overlay[..., 3] = 255
+    scene.set_raster_overlay(overlay, 1.0, None, None)
+
+    rgba = np.asarray(scene.render_rgba())
+    for channel, expected in enumerate((120, 140, 160)):
+        mean = float(rgba[..., channel].mean())
+        assert abs(mean - expected) <= 2.0, (
+            f"channel {channel} mean {mean:.1f} vs expected {expected}: "
+            "raster overlay is not display-luma preserving"
+        )
+
+
 def test_native_scene_render_rgba_draws_raster_overlay_and_sdf_text():
     try:
         scene = f3d.Scene(80, 64)

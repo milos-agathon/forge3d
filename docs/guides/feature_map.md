@@ -14,6 +14,7 @@ organized by workflow rather than by Rust module layout.
 | Picking and selection | `viewer_ipc` picking helpers | `picking_demo.py`, `picking_test_interactive.py` |
 | Point clouds | `ViewerHandle.load_point_cloud`, `forge3d.pointcloud` | `pointcloud_viewer_interactive.py` |
 | Camera automation | `forge3d.animation`, `forge3d.camera_rigs` | `camera_animation_demo.py`, `terrain_camera_rigs_demo.py` |
+| Observation-driven night sky | `forge3d.astro.body_position`, `forge3d.astro.moon_phase`, `forge3d.sky.set_observation` | `docs/guides/sidera.md` |
 | Terrain quality controls | `terrain_params`, `presets`, `terrain_scatter` | `terrain_atmosphere_path_demo.py`, `pnoa_river_showcase_video.py` |
 | Native/offscreen rendering | `Scene`, `Session`, `TerrainRenderer`, `render_offline` | `terrain_atmosphere_path_demo.py`, `triangle_png.py` |
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |

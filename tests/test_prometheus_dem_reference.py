@@ -30,6 +30,14 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def provenance_sha256(path):
+    # The reference records the LF form of this text file (.gitattributes pins
+    # eol=lf). Canonicalize to LF before hashing so a checkout that still holds
+    # CRLF bytes (autocrlf, or a pre-rule working tree) checks the same value.
+    text = Path(path).read_text(encoding="utf-8")
+    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+
+
 def real_dem():
     provenance = json.loads(PROVENANCE_PATH.read_text(encoding="utf-8"))
     assert provenance["source_sha256"] == SOURCE_SHA256
@@ -194,7 +202,7 @@ def raster_metrics_in_subprocess(out, capture_path=None):
 def load_reference_files():
     scores = json.loads((GOLDEN_DIR / "gore_range_scores.json").read_text(encoding="utf-8"))
     assert scores["fixture_sha256"] == sha256(DEM_PATH)
-    assert scores["provenance_sha256"] == sha256(PROVENANCE_PATH)
+    assert scores["provenance_sha256"] == provenance_sha256(PROVENANCE_PATH)
     assert scores["scene"] == json.loads(json.dumps(scene_metadata()))
     assert scores["convergence_metric"] == "frame_mean_estimator_variance"
     assert scores["variance"] < VARIANCE_THRESHOLD

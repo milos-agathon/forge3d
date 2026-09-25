@@ -54,6 +54,29 @@ impl TerrainRenderParams {
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;
 
+        let chronos_frame = match core.chronos_frame_json.as_deref() {
+            Some(json) => {
+                let compiled = crate::terrain::frame_compiler::CompiledFrame::from_canonical(json)
+                    .map_err(PyValueError::new_err)?;
+                if core.aa_seed != Some(compiled.frame_seed()) {
+                    return Err(PyValueError::new_err(format!(
+                        "chronos frame mismatch: aa_seed {:?} != compiled frame_seed {}",
+                        core.aa_seed,
+                        compiled.frame_seed()
+                    )));
+                }
+                if core.aa_samples != compiled.samples() {
+                    return Err(PyValueError::new_err(format!(
+                        "chronos frame mismatch: aa_samples {} != compiled samples {}",
+                        core.aa_samples,
+                        compiled.samples()
+                    )));
+                }
+                Some(Arc::new(compiled))
+            }
+            None => None,
+        };
+
         Ok(Self {
             size_px: core.size_px,
             render_scale: core.render_scale,
@@ -84,6 +107,7 @@ impl TerrainRenderParams {
             aa_samples: core.aa_samples,
             aa_seed: core.aa_seed,
             terrain_data_revision: core.terrain_data_revision,
+            chronos_frame,
             height_curve_lut: core.height_curve_lut,
             overlays,
             light: light.unbind(),

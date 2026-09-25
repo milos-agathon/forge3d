@@ -118,7 +118,7 @@ fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32) -> f32 {
     let biased_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
     
     // Sample shadow map with comparison
-    return textureSampleCompareLevel(shadow_maps, shadow_sampler, 
+    return textureSampleCompareLevel(shadow_maps, shadow_sampler,
                                shadow_coords.xy, cascade_idx, biased_depth);
 }
 
@@ -178,7 +178,7 @@ fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world_normal:
             if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 && 
                 sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
                 
-                shadow_factor += textureSampleCompareLevel(shadow_maps, shadow_sampler, 
+                shadow_factor += textureSampleCompareLevel(shadow_maps, shadow_sampler,
                                                     sample_coords, cascade_idx, biased_depth);
                 sample_count += 1.0;
             }
@@ -253,7 +253,7 @@ fn sample_shadow_poisson_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world
         if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 && 
             sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
             
-            shadow_factor += textureSampleCompareLevel(shadow_maps, shadow_sampler, 
+            shadow_factor += textureSampleCompareLevel(shadow_maps, shadow_sampler,
                                                 sample_coords, cascade_idx, biased_depth);
         } else {
             shadow_factor += 1.0; // Outside bounds - not shadowed
