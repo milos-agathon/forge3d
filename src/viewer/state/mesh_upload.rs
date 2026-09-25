@@ -19,6 +19,9 @@ impl Viewer {
             anyhow::bail!("Mesh is empty (no vertices or indices)");
         }
 
+        // Loading user geometry returns the viewer to the normal pipeline.
+        self.pbr_scene = None;
+
         // Reset transform when new mesh is loaded
         self.object_translation = glam::DVec3::ZERO;
         self.object_rotation = glam::Quat::IDENTITY;

@@ -1,23 +1,39 @@
 use glam::Mat4;
 
+use crate::viewer::viewer_struct::ViewerOutput;
 use crate::viewer::{SkyUniforms, Viewer, VIEWER_SNAPSHOT_MAX_MEGAPIXELS};
+
+/// Per-frame output handle: presents only for a real surface.
+pub(super) enum FrameOutput {
+    Surface(wgpu::SurfaceTexture),
+    Headless,
+}
 
 impl Viewer {
     pub(super) fn prepare_render_frame(
         &mut self,
     ) -> Result<
         (
-            wgpu::SurfaceTexture,
+            FrameOutput,
             wgpu::TextureView,
             Option<(u32, u32)>,
             wgpu::CommandEncoder,
         ),
         wgpu::SurfaceError,
     > {
-        let output = self.surface.get_current_texture()?;
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let (output, view) = match &self.output {
+            ViewerOutput::Window { surface, .. } => {
+                let output = surface.get_current_texture()?;
+                let view = output
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                (FrameOutput::Surface(output), view)
+            }
+            ViewerOutput::Headless { color } => (
+                FrameOutput::Headless,
+                color.create_view(&wgpu::TextureViewDescriptor::default()),
+            ),
+        };
 
         if self.frame_count == 0 {
             eprintln!("[viewer-debug] entering render loop (first frame)");
@@ -81,8 +97,9 @@ impl Viewer {
         let frame = self.current_frame_camera();
         self.update_labels_for_frame(frame);
 
-        // Render sky background (compute) before opaques
-        if self.sky_enabled {
+        // Render sky background (compute) before opaques. A loaded PBR scene
+        // owns the frame's background via its own sky clear + present pass.
+        if self.sky_enabled && self.pbr_scene.is_none() {
             // Build camera matrices (view, proj, inv_view, inv_proj) and eye
             let frame = self.current_frame_camera();
             let proj = frame.projection(self.config.width, self.config.height);

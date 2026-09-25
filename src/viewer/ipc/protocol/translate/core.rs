@@ -33,6 +33,9 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
         }),
         IpcRequest::LoadObj { path } => Some(ViewerCmd::LoadObj(path.clone())),
         IpcRequest::LoadGltf { path } => Some(ViewerCmd::LoadGltf(path.clone())),
+        IpcRequest::LoadReferenceScene { name } => {
+            Some(ViewerCmd::LoadReferenceScene { name: name.clone() })
+        }
         IpcRequest::SetTransform {
             translation,
             rotation_quat,

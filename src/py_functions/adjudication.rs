@@ -2,8 +2,11 @@
 // AEQUITAS ground-truth capture API: renders the committed adjudication
 // reference scene through BOTH the wavefront path tracer and the raster twin
 // on the same device/queue, resolves both through the single shared tonemap
-// operator, and returns (pt_rgba, raster_rgba, metadata).
-// RELEVANT FILES: src/path_tracing/adjudication.rs, src/offscreen/adjudication_raster.rs
+// operator, and returns (pt_rgba, raster_rgba, metadata). The raster side is
+// a headless interactive viewer executing its PBR scene through the shared
+// Viewer::render frame pipeline.
+// RELEVANT FILES: src/path_tracing/adjudication.rs,
+// src/viewer/pbr_scene/reference.rs, src/core/anamnesis/hdr_graph.rs
 
 use super::super::*;
 
@@ -99,27 +102,79 @@ pub(crate) fn render_adjudication_pair(
                         env!("FORGE3D_NAGA_VERSION")
                     )],
                 };
-                Ok(crate::offscreen::adjudication_raster::RasterCacheOptions {
-                    root: path,
-                    max_bytes: 512 * 1024 * 1024,
-                    verify_reads: true,
-                    capability_fingerprint_bytes: capability.canonical_bytes(),
-                    engine_fingerprint_bytes: crate::core::anamnesis::EngineFingerprint::current()
-                        .canonical_bytes(),
-                })
+                Ok((
+                    path,
+                    capability.canonical_bytes(),
+                    crate::core::anamnesis::EngineFingerprint::current().canonical_bytes(),
+                ))
             })
             .transpose()?
     };
-    let (raster_hdr, cache_report) =
-        crate::offscreen::adjudication_raster::render_raster_reference_incremental(
-            g.device.as_ref(),
-            g.queue.as_ref(),
-            &desc,
+
+    // Raster twin: a headless interactive viewer loads the shared reference
+    // scene and renders it through the same Viewer::render frame pipeline
+    // the windowed viewer uses.
+    let mut viewer = crate::viewer::Viewer::new_headless(
+        g.device.clone(),
+        g.queue.clone(),
+        g.adapter.clone(),
+        width,
+        height,
+        crate::viewer::viewer_config::ViewerConfig {
             width,
             height,
-            Some(&mut timing),
-            cache_options.as_ref(),
-        )?;
+            ..Default::default()
+        },
+    )
+    .map_err(|error| PyRuntimeError::new_err(format!("headless viewer init: {error}")))?;
+    viewer
+        .handle_cmd(crate::viewer::viewer_enums::ViewerCmd::LoadReferenceScene {
+            name: "adjudication".into(),
+        })
+        .map_err(PyRuntimeError::new_err)?;
+
+    let frame_camera = viewer.current_frame_camera();
+    let cache_declaration = cache_options
+        .map(|(root, capability_bytes, engine_bytes)| {
+            let (descriptor, uniforms, inputs) = viewer
+                .pbr_scene_cache_key_parts(frame_camera)
+                .ok_or_else(|| PyRuntimeError::new_err("pbr scene missing after load"))?;
+            Ok::<_, PyErr>(crate::core::anamnesis::ForwardCacheDeclaration {
+                root,
+                max_bytes: 512 * 1024 * 1024,
+                verify_reads: true,
+                pipeline_descriptor_bytes: descriptor,
+                uniform_bytes: uniforms,
+                external_input_bytes: inputs,
+                capability_fingerprint_bytes: capability_bytes,
+                engine_fingerprint_bytes: engine_bytes,
+            })
+        })
+        .transpose()?;
+    let hdr_target = viewer
+        .pbr_scene_hdr_target()
+        .ok_or_else(|| PyRuntimeError::new_err("pbr scene HDR target missing"))?;
+    let target = crate::core::anamnesis::HdrGraphTarget {
+        texture: &hdr_target,
+        width,
+        height,
+        format: wgpu::TextureFormat::Rgba32Float,
+    };
+    let labels = crate::core::anamnesis::HdrGraphLabels {
+        graphics: "viewer.pbr_scene",
+        readback: "viewer.readback",
+    };
+    let mut render = || -> crate::core::error::RenderResult<()> {
+        viewer.render_headless_frame(Some((&mut timing, "adjudication.raster")))
+    };
+    let (raster_hdr, cache_report) = crate::core::anamnesis::render_hdr_graph(
+        &g.device,
+        &g.queue,
+        &target,
+        &labels,
+        cache_declaration.as_ref(),
+        &mut render,
+    )?;
 
     // Tonemap parity by construction: one shared operator (Reinhard, see
     // core::tonemap::resolve_reference_hdr_to_rgba8), same exposure, both paths.
@@ -135,17 +190,33 @@ pub(crate) fn render_adjudication_pair(
     let pt_arr = to_array(pt_rgba)?;
     let raster_arr = to_array(raster_rgba)?;
 
-    // Both metadata dicts come from the same metadata_fields() call so the
-    // gate can assert byte-identical camera/light descriptions per path.
-    let fields = desc.metadata_fields(width, height, spp);
+    // meta["raster"] carries only the values the viewer PBR scene actually
+    // consumed this frame; the gate compares the shared keys against
+    // meta["pt"] (which additionally carries "spp").
     let meta = pyo3::types::PyDict::new_bound(py);
-    for key in ["pt", "raster"] {
-        let sub = pyo3::types::PyDict::new_bound(py);
-        for (name, value) in &fields {
-            sub.set_item(name, value)?;
-        }
-        meta.set_item(key, sub)?;
+    let pt_sub = pyo3::types::PyDict::new_bound(py);
+    for (name, value) in desc.metadata_fields(width, height, spp) {
+        pt_sub.set_item(name, value)?;
     }
+    meta.set_item("pt", pt_sub)?;
+    let mut raster_consumed = viewer.pbr_scene_consumed_metadata();
+    let metadata_source = if raster_consumed.is_empty() {
+        // ANAMNESIS hit: no frame rendered. The restored image's cache key
+        // describes exactly the desc + this frame camera, so record that
+        // keyed metadata as what the image consumed.
+        viewer.pbr_scene_record_keyed_metadata(frame_camera);
+        raster_consumed = viewer.pbr_scene_consumed_metadata();
+        "cache_key"
+    } else {
+        "rendered_frame"
+    };
+    let raster_sub = pyo3::types::PyDict::new_bound(py);
+    for (name, value) in raster_consumed {
+        raster_sub.set_item(name, value)?;
+    }
+    meta.set_item("raster", raster_sub)?;
+    meta.set_item("raster_metadata_source", metadata_source)?;
+    meta.set_item("raster_route", crate::viewer::pbr_scene::PBR_SCENE_ROUTE)?;
     let cache_meta = pyo3::types::PyDict::new_bound(py);
     cache_meta.set_item("hits", cache_report.hits)?;
     cache_meta.set_item("misses", cache_report.misses)?;

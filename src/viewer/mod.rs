@@ -13,6 +13,7 @@ mod init;
 mod input;
 pub mod ipc;
 mod p5;
+pub(crate) mod pbr_scene;
 pub mod pointcloud;
 mod render;
 mod scene_review;

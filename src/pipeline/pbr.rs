@@ -6,8 +6,7 @@
 use crate::core::error::RenderResult;
 use crate::core::material::{texture_flags, PbrLighting, PbrMaterial};
 use crate::core::resource_tracker::{
-    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer,
-    TrackedTexture,
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
 };
 use crate::lighting::types::{MaterialShading, ShadowTechnique};
 use crate::lighting::LightBuffer;
@@ -18,9 +17,9 @@ use glam::Mat4;
 use std::collections::HashMap;
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource,
-    BufferUsages, Device, Extent3d, FilterMode, ImageCopyTexture,
-    ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
+    BufferUsages, Device, Extent3d, FilterMode, ImageCopyTexture, ImageDataLayout, Origin3d, Queue,
+    Sampler, SamplerDescriptor, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    TextureView, TextureViewDescriptor,
 };
 
 // P2-06: Use centralized MaterialShading from lighting::types instead of duplicate definition

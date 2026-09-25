@@ -333,17 +333,29 @@ def test_adjudication_gate():
             "memory": memory,
         }, indent=2))
 
-    # Both renders must come from the single ReferenceSceneDesc: identical
-    # camera/light metadata for both paths.
-    assert meta["pt"] == meta["raster"], (
-        f"camera/light metadata mismatch between PT and raster paths: {meta}"
+    # Strict routing: the raster image is rendered by the interactive
+    # viewer's frame pipeline (headless), not by a private offscreen fork,
+    # and its metadata is what that viewer frame actually consumed.
+    assert meta["raster_route"] == "viewer.pbr_scene"
+    assert meta["raster_metadata_source"] == "rendered_frame"
+
+    # Both renders must come from the single ReferenceSceneDesc: the raster
+    # metadata (viewer-consumed values) must be byte-identical to the PT
+    # metadata for every shared key. `spp` is PT-only.
+    pt_meta, raster_meta = dict(meta["pt"]), dict(meta["raster"])
+    assert pt_meta.pop("spp") == GATE_SPP
+    assert set(raster_meta) == set(pt_meta), (
+        f"shared metadata keys differ: pt={sorted(pt_meta)} raster={sorted(raster_meta)}"
     )
+    for key, value in pt_meta.items():
+        assert np.float64(raster_meta[key]).tobytes() == np.float64(value).tobytes(), (
+            f"metadata {key} differs: pt={value!r} raster={raster_meta[key]!r}"
+        )
 
     # Constant sky/ambient contract: both paths must report the literal
     # constants from the single ReferenceSceneDesc (no gradient fields).
     for key in ("ambient_r", "ambient_g", "ambient_b", "sky_r", "sky_g", "sky_b"):
-        assert key in meta["pt"], f"missing constant ambient/sky metadata key {key}"
-        assert meta["pt"][key] == meta["raster"][key]
+        assert key in pt_meta, f"missing constant ambient/sky metadata key {key}"
 
     # --- Metric 1: dE2000 over lit pixels of the PT reference ---
     lit = lit_mask(pt_rgba)

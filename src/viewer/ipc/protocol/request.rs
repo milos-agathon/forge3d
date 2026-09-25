@@ -20,6 +20,7 @@ pub enum IpcRequest {
     GetStats,
     LoadObj { path: String },
     LoadGltf { path: String },
+    LoadReferenceScene { name: String },
     SetTransform { #[serde(default)] translation: Option<[f64; 3]>, #[serde(default)] rotation_quat: Option<[f32; 4]>, #[serde(default)] scale: Option<[f32; 3]> },
     CamLookat { eye: [f64; 3], target: [f64; 3], #[serde(default = "default_up")] up: [f32; 3] },
     SetFov { deg: f32 },

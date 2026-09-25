@@ -63,6 +63,15 @@ fn parse_p5_command(line: &str) -> Option<Vec<ViewerCmd>> {
 }
 
 fn parse_asset_command(line: &str) -> Option<Vec<ViewerCmd>> {
+    if line.starts_with(":load_reference_scene") || line.starts_with("load_reference_scene ") {
+        if let Some(name) = line.split_whitespace().nth(1) {
+            return Some(vec![ViewerCmd::LoadReferenceScene {
+                name: name.to_string(),
+            }]);
+        }
+        println!("Usage: :load_reference_scene <adjudication>");
+        return Some(vec![]);
+    }
     if line.starts_with(":obj") || line.starts_with("obj ") {
         if let Some(path) = line.split_whitespace().nth(1) {
             return Some(vec![ViewerCmd::LoadObj(path.to_string())]);

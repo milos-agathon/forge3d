@@ -13,9 +13,52 @@ impl Viewer {
         if new_size.width > 0 && new_size.height > 0 {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
-            self.surface.configure(&self.device, &self.config);
+            match &mut self.output {
+                crate::viewer::viewer_struct::ViewerOutput::Window { surface, .. } => {
+                    surface.configure(&self.device, &self.config);
+                }
+                crate::viewer::viewer_struct::ViewerOutput::Headless { color } => {
+                    match tracked_create_texture(
+                        &self.device,
+                        &wgpu::TextureDescriptor {
+                            label: Some("viewer.headless.color"),
+                            size: wgpu::Extent3d {
+                                width: new_size.width,
+                                height: new_size.height,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: self.config.format,
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::COPY_SRC
+                                | wgpu::TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
+                        },
+                    ) {
+                        Ok(texture) => *color = texture,
+                        Err(e) => {
+                            eprintln!("Failed to resize headless color target: {}", e);
+                            return;
+                        }
+                    }
+                }
+            }
             if let Err(e) = self.resize_render_targets(new_size.width, new_size.height) {
                 eprintln!("Failed to resize render targets: {}", e);
+            }
+            if let Some(scene) = self.pbr_scene.as_mut() {
+                if let Err(e) = scene.resize(
+                    &self.device,
+                    &self.queue,
+                    self.config.width,
+                    self.config.height,
+                    self.config.format,
+                ) {
+                    eprintln!("Failed to rebuild pbr scene after resize: {}", e);
+                    self.pbr_scene = None;
+                }
             }
         }
     }

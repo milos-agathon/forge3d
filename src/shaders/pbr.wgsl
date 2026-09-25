@@ -68,14 +68,18 @@ struct PbrLighting {
     ibl_rotation: f32,
     exposure: f32,
     gamma: f32,
-    ground_bounce: vec3<f32>,
+    // Constant ambient radiance for the instanced path's hemisphere-GI
+    // integral (miss term and each occluder's sky term). Unused for the
+    // general path.
+    gi_ambient: vec3<f32>,
     _padding3: f32,
-    // Ground-GI occluders for the instanced path: the scene spheres
-    // (center.xyz, radius) a down-hemisphere ray can hit before the plane,
-    // and their approximate dark-side exit radiance. Zero-radius entries are
+    // GI occluders for the instanced path: the scene spheres
+    // (center.xyz, radius) a hemisphere ray can hit, and their Lambertian
+    // albedo — each occluder's exit radiance is derived in-shader from
+    // sun + ambient + plane-bounce transport. Zero-radius entries are
     // inert (no hit). Unused for the general path.
     gi_sph: array<vec4<f32>, 3>,
-    gi_sph_exit: array<vec4<f32>, 3>,
+    gi_sph_albedo: array<vec4<f32>, 3>,
 }
 
 // Note: ShadingParamsGPU and BRDF constants are defined in lighting.wgsl
@@ -312,48 +316,28 @@ fn shade_pbr(input: VertexOutput) -> vec4<f32> {
     
     // Check if we have IBL enabled
     let has_ibl = lighting.ibl_intensity > 0.0;
-    
-    if has_ibl {
-        // eval_ibl returns diffuse + specular IBL in linear HDR units
-        indirect_lighting = eval_ibl(world_normal, view_dir, base_color.rgb, metallic, roughness, f0);
-        indirect_lighting = indirect_lighting * lighting.ibl_intensity;
-        if (material.texture_flags & FLAG_GROUND_RADIANCE) != 0u {
-            // The sphere's diffuse GI is supplied by the ground-bounce term;
-            // drop the flat env's constant specular, which the PT reference
-            // does not add to a diffuse-dominated dark side.
-            let irradiance = textureSampleLevel(envIrradiance, envSampler, world_normal, 0.0).rgb;
-            let f_ibl = fresnel_schlick_roughness(saturate(dot(world_normal, view_dir)), f0, saturate(roughness));
-            indirect_lighting = (vec3<f32>(1.0) - f_ibl) * (1.0 - metallic) * base_color.rgb * irradiance * lighting.ibl_intensity;
-        }
-    } else {
-        // Simple ambient lighting fallback (treated as part of L_diffuse_base)
-        let ambient = vec3<f32>(0.03) * base_color.rgb;
-        indirect_lighting = ambient;
-    }
-    
-    // Apply ambient occlusion to indirect (diffuse) term. Specular is unaffected here; any
-    // future GI composition pass must ensure AO only modulates the diffuse component.
-    indirect_lighting = indirect_lighting * occlusion;
-    
-    // Ground-plane bounce. With FLAG_GROUND_RADIANCE the emissive texture
-    // carries the ground plane's exit radiance field (bake domain xz in
-    // [-16,16]); a surface samples it at the point its down-facing normal
-    // projects to and takes the delta over the flat ambient baseline
-    // (lighting.ground_bounce = ambient radiance). The (0.5 - 0.5·n.y) weight
-    // is the plane's solid-angle fill of the lower hemisphere.
-    var ground_gi = vec3<f32>(0.0);
+
     if (material.texture_flags & FLAG_GROUND_RADIANCE) != 0u {
-        // The surface's lower hemisphere sees the ground plane over a region,
-        // not a point. Integrate the plane's exit-radiance field over the
-        // down-facing directions the fragment actually sees: sample golden-
-        // spiral rays in the hemisphere about n, project the down-hemisphere
-        // ones to the plane, and take the cosine-weighted irradiance. This is
-        // the same ambient transport the path tracer integrates.
-        var e_plane = vec3<f32>(0.0);
+        // Full-hemisphere GI integral for the instanced path: replaces the
+        // flat-IBL diffuse AND the former ground-bounce term with one
+        // transport sum. Every golden-spiral direction d about n (uniform
+        // solid angle, cosine weight ct) resolves its radiance L(d):
+        //   - nearest scene-sphere hit: that sphere's surface exit radiance
+        //     (its own sun + sky + plane-bounce model, shadowed vs the
+        //     other spheres)
+        //   - plane hit (d.y < 0): the baked plane exit-radiance map at the
+        //     projected hit (bake domain xz in [-16,16])
+        //   - miss: the constant ambient radiance
+        // The constant IBL specular stays dropped for these materials, as
+        // the PT reference adds no specular lobe to a diffuse dark side.
+        var e_env = vec3<f32>(0.0);
         var n_up = vec3<f32>(0.0, 1.0, 0.0);
         if (abs(world_normal.y) > 0.95) { n_up = vec3<f32>(1.0, 0.0, 0.0); }
         let tangent = normalize(cross(n_up, world_normal));
         let bitan = cross(world_normal, tangent);
+        let l_sun = lighting.light_color * lighting.light_intensity;
+        let l = normalize(-lighting.light_direction);
+        let PI: f32 = 3.141592653589793;
         let N: u32 = 128u;
         for (var k: u32 = 0u; k < N; k = k + 1u) {
             let ct = 1.0 - (f32(k) + 0.5) / f32(N);
@@ -362,47 +346,131 @@ fn shade_pbr(input: VertexOutput) -> vec4<f32> {
             // local dir in hemisphere about n (z up)
             let dl = vec3<f32>(st * cos(phi), st * sin(phi), ct);
             let d = tangent * dl.x + bitan * dl.y + world_normal * dl.z;
+            // Nearest hit among the scene spheres (all directions) and the
+            // ground plane (down directions). Whichever is hit first
+            // supplies the exit radiance for that direction.
+            var t_hit = 1e30;
+            var hit_sph = 3u;
+            for (var s: u32 = 0u; s < 3u; s = s + 1u) {
+                let rad = lighting.gi_sph[s].w;
+                if (rad <= 0.0) { continue; }
+                let oc = input.world_position - lighting.gi_sph[s].xyz;
+                let b = dot(oc, d);
+                let disc = b * b - (dot(oc, oc) - rad * rad);
+                if (disc > 0.0) {
+                    let th = -b - sqrt(disc);
+                    if (th > 1e-3 && th < t_hit) {
+                        t_hit = th;
+                        hit_sph = s;
+                    }
+                }
+            }
+            var hit_plane = false;
             if (d.y < -1e-4) {
                 let t_plane = input.world_position.y / -d.y;
-                // Nearest occluder along the ray: the plane or one of the
-                // scene spheres (a neighbor's dark side). Whichever is hit
-                // first supplies the exit radiance for that direction.
-                var t_hit = t_plane;
-                var exit_r = vec3<f32>(-1.0);
-                for (var s: u32 = 0u; s < 3u; s = s + 1u) {
-                    let rad = lighting.gi_sph[s].w;
-                    if (rad <= 0.0) { continue; }
-                    let oc = input.world_position - lighting.gi_sph[s].xyz;
-                    let b = dot(oc, d);
-                    let disc = b * b - (dot(oc, oc) - rad * rad);
-                    if (disc > 0.0) {
-                        let th = -b - sqrt(disc);
-                        if (th > 1e-3 && th < t_hit) {
-                            t_hit = th;
-                            exit_r = lighting.gi_sph_exit[s].rgb;
+                if (t_plane < t_hit) {
+                    t_hit = t_plane;
+                    hit_sph = 3u;
+                    hit_plane = true;
+                }
+            }
+            var l_dir = vec3<f32>(0.0);
+            if (hit_sph < 3u) {
+                // Sphere occluder exit radiance at h:
+                //   a_s/π · ( L_sun·max(n_h·l,0)·V_sun(h)
+                //             + π·L_amb·(0.5+0.5·n_h.y)
+                //             + E_plane(h,n_h) )
+                // where the (0.5±0.5·n.y) factor is the cosine-weighted
+                // sky share of the hemisphere about n_h, and E_plane is
+                // the cosine-weighted irradiance the down-facing
+                // directions about n_h receive from the plane's
+                // exit-radiance map — integrated by the same golden-spiral
+                // tap set the bake uses (a single projection lands inside
+                // the sphere's own shadow pool too often).
+                let h = input.world_position + d * t_hit;
+                let n_h = normalize(h - lighting.gi_sph[hit_sph].xyz);
+                // V_sun(h): sun ray from just off the surface, occluded by
+                // the other two spheres (self excluded — the ray starts
+                // on it).
+                var v_sun = 1.0;
+                if (dot(n_h, l) > 0.0) {
+                    let ro = h + n_h * 1e-3;
+                    for (var s: u32 = 0u; s < 3u; s = s + 1u) {
+                        if (s == hit_sph) { continue; }
+                        let rad = lighting.gi_sph[s].w;
+                        if (rad <= 0.0) { continue; }
+                        let oc = ro - lighting.gi_sph[s].xyz;
+                        let b = dot(oc, l);
+                        let disc = b * b - (dot(oc, oc) - rad * rad);
+                        if (disc > 0.0 && (-b - sqrt(disc)) > 1e-3) {
+                            v_sun = 0.0;
                         }
                     }
                 }
-                if (exit_r.x < 0.0) {
-                    let gp = input.world_position.xz + d.xz * t_plane;
-                    let guv = (gp + vec2<f32>(16.0)) / 32.0;
-                    exit_r = textureSampleLevel(emissive_texture, material_sampler, guv, 0.0).rgb;
+                var e_plane = vec3<f32>(0.0);
+                var s_up = vec3<f32>(0.0, 1.0, 0.0);
+                if (abs(n_h.y) > 0.95) { s_up = vec3<f32>(1.0, 0.0, 0.0); }
+                let s_tan = normalize(cross(s_up, n_h));
+                let s_bit = cross(n_h, s_tan);
+                let M: u32 = 16u;
+                for (var m: u32 = 0u; m < M; m = m + 1u) {
+                    let mct = 1.0 - (f32(m) + 0.5) / f32(M);
+                    let mph = f32(m) * 2.3999632;
+                    let mst = sqrt(max(0.0, 1.0 - mct * mct));
+                    let md = s_tan * (mst * cos(mph))
+                             + s_bit * (mst * sin(mph)) + n_h * mct;
+                    if (md.y < -1e-4) {
+                        let mt = h.y / -md.y;
+                        let mgp = h + md * mt;
+                        let mguv = (mgp.xz + vec2<f32>(16.0)) / 32.0;
+                        e_plane += textureSampleLevel(emissive_texture,
+                            material_sampler, mguv, 0.0).rgb * mct;
+                    }
                 }
-                e_plane += exit_r * ct;
+                let a_s = lighting.gi_sph_albedo[hit_sph].rgb;
+                l_dir = a_s * (l_sun * max(dot(n_h, l), 0.0) * v_sun
+                    + PI * lighting.gi_ambient * (0.5 + 0.5 * n_h.y)
+                    + e_plane * (2.0 * PI / f32(M))) / PI;
+            } else if (hit_plane) {
+                let gp = input.world_position.xz + d.xz * t_hit;
+                let guv = (gp + vec2<f32>(16.0)) / 32.0;
+                l_dir = textureSampleLevel(emissive_texture, material_sampler, guv, 0.0).rgb;
+            } else {
+                l_dir = lighting.gi_ambient;
             }
+            // The reference BRDF's diffuse lobe is Fresnel-weighted per
+            // direction: f_diffuse = a/π·(1−F(v·h)) with h the half-vector
+            // of d and the view. A fragment-level (1−F(n·v)) gate would
+            // zero the integral at grazing view angles (limbs); per-
+            // direction weighting keeps the near-n taps' diffuse response
+            // — identical to the weight the plane bake applies per ray.
+            let h_d = normalize(d + view_dir);
+            let vdh = saturate(dot(view_dir, h_d));
+            let f_d = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
+            e_env += l_dir * ct * (vec3<f32>(1.0) - f_d);
         }
-        // delta = a·E_plane/π - a·amb·(0.5-0.5·n.y) : replace the flat ambient's
-        // lower-hemisphere share with the real plane irradiance.
-        ground_gi = base_color.rgb
-            * (e_plane * (2.0 / f32(N))
-               - lighting.ground_bounce * (0.5 - 0.5 * world_normal.y) * 0.85);
+        // Cosine-weighted hemisphere irradiance under uniform-in-solid-
+        // angle sampling: diffuse out = a·(2/N)·Σ L·ct·(1−F).
+        indirect_lighting = (1.0 - metallic) * base_color.rgb * e_env * (2.0 / f32(N));
+    } else if has_ibl {
+        // eval_ibl returns diffuse + specular IBL in linear HDR units
+        indirect_lighting = eval_ibl(world_normal, view_dir, base_color.rgb, metallic, roughness, f0);
+        indirect_lighting = indirect_lighting * lighting.ibl_intensity;
+    } else {
+        // Simple ambient lighting fallback (treated as part of L_diffuse_base)
+        let ambient = vec3<f32>(0.03) * base_color.rgb;
+        indirect_lighting = ambient;
     }
+
+    // Apply ambient occlusion to indirect (diffuse) term. Specular is unaffected here; any
+    // future GI composition pass must ensure AO only modulates the diffuse component.
+    indirect_lighting = indirect_lighting * occlusion;
 
     // At this stage the fragment output color can be viewed as:
     //   color = L_diffuse_base + L_spec_base + emissive
     // where direct_lighting contains the BRDF-evaluated direct diffuse+spec, and
     // indirect_lighting contains the diffuse+spec IBL contribution.
-    var color = direct_lighting + indirect_lighting + emissive + ground_gi;
+    var color = direct_lighting + indirect_lighting + emissive;
 
     return vec4<f32>(color, base_color.a);
 }

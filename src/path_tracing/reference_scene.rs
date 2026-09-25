@@ -2,7 +2,7 @@
 // AEQUITAS deterministic adjudication reference scene.
 // Single source of truth consumed by BOTH the wavefront PT reference
 // (src/path_tracing/adjudication.rs) and the raster twin
-// (src/offscreen/adjudication_raster.rs). Every numeric constant is a
+// (src/viewer/pbr_scene/reference.rs). Every numeric constant is a
 // hard-coded literal: no RNG, no time, no environment lookups.
 // RELEVANT FILES: src/shaders/pt_shade.wgsl, src/shaders/adjudication_raster.wgsl
 
@@ -328,22 +328,34 @@ mod tests {
         // sky/ambient uniforms from ReferenceSceneDesc::environment_raw() —
         // never from local literals.
         let pt = include_str!("adjudication.rs");
-        let raster = include_str!("../offscreen/adjudication_raster.rs");
+        let raster = include_str!("../viewer/pbr_scene/reference.rs");
         assert!(pt.contains("set_environment_params(&desc.environment_raw())"));
         assert!(raster.contains("desc.environment_raw()"));
     }
 
     #[test]
     fn both_render_paths_consume_shared_camera_and_exposure() {
-        // Source contract: camera basis, vertical fov, and tonemap exposure
+        // Source contract: camera pose, vertical fov, and tonemap exposure
         // must flow from the single ReferenceSceneDesc into BOTH paths —
-        // never from divergent hardcoded constants.
+        // never from divergent hardcoded constants. The raster loader hands
+        // the literal pose/fov to the viewer camera; the viewer's frame
+        // camera then produces view/projection (checked at runtime by
+        // viewer_consumed_metadata_matches_reference_scene).
         let pt = include_str!("adjudication.rs");
-        let raster = include_str!("../offscreen/adjudication_raster.rs");
+        let raster = production_source(include_str!("../viewer/pbr_scene/reference.rs"));
         let capture = include_str!("../py_functions/adjudication.rs");
-        for src in [pt, raster] {
-            assert!(src.contains("desc.camera_basis()"));
-            assert!(src.contains("desc.fov_y_rad()"));
+        assert!(pt.contains("desc.camera_basis()"));
+        assert!(pt.contains("desc.fov_y_rad()"));
+        for needle in [
+            "desc.cam_origin[0]",
+            "desc.cam_look_at[0]",
+            "fov_deg: desc.fov_y_deg",
+            "exposure: desc.exposure",
+            "sun_direction: desc.sun_direction",
+            "sun_intensity: desc.sun_intensity",
+            "sun_color: desc.sun_color",
+        ] {
+            assert!(raster.contains(needle), "raster loader lacks `{needle}`");
         }
         assert!(pt.contains("cam_exposure: desc.exposure"));
         // The capture API resolves BOTH HDR buffers with desc.exposure.
@@ -351,6 +363,167 @@ mod tests {
             capture.matches("desc.exposure").count() >= 2,
             "both tonemap resolves must use ReferenceSceneDesc::exposure"
         );
+    }
+
+    /// Source text before the first `#[cfg(test)]` (production code only).
+    fn production_source(source: &str) -> &str {
+        source.split("#[cfg(test)]").next().unwrap()
+    }
+
+    #[test]
+    fn raster_adjudication_routes_through_the_viewer_frame_pipeline() {
+        // AEQUITAS strict routing contract: the raster image must come from
+        // the interactive viewer's frame pipeline, never from a private
+        // offscreen fork. Fails if the capture drifts back to src/offscreen.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(
+            !root.join("src/offscreen/adjudication_raster.rs").exists(),
+            "the private offscreen adjudication raster must not exist"
+        );
+        assert!(!include_str!("../offscreen/mod.rs").contains("adjudication_raster"));
+
+        let capture = production_source(include_str!("../py_functions/adjudication.rs"));
+        for needle in [
+            "Viewer::new_headless(",
+            "ViewerCmd::LoadReferenceScene",
+            "render_headless_frame(",
+            "pbr_scene_consumed_metadata()",
+            "PBR_SCENE_ROUTE",
+        ] {
+            assert!(capture.contains(needle), "capture API lacks `{needle}`");
+        }
+        assert!(
+            !capture.contains("crate::offscreen"),
+            "capture API must not route through src/offscreen"
+        );
+
+        // The viewer scene subsystem must not delegate to the offscreen
+        // forward harness; the only offscreen item it may use is the UV
+        // sphere mesh generator.
+        for (name, source) in [
+            (
+                "pbr_scene/mod.rs",
+                include_str!("../viewer/pbr_scene/mod.rs"),
+            ),
+            (
+                "pbr_scene/reference.rs",
+                include_str!("../viewer/pbr_scene/reference.rs"),
+            ),
+        ] {
+            let source = production_source(source);
+            for banned in ["offscreen::forward", "ForwardTargets", "render_forward_hdr"] {
+                assert!(!source.contains(banned), "{name} uses `{banned}`");
+            }
+            let offscreen_uses = source.matches("crate::offscreen::").count();
+            let sphere_uses = source
+                .matches("crate::offscreen::sphere::generate_uv_sphere")
+                .count();
+            assert_eq!(
+                offscreen_uses, sphere_uses,
+                "{name} reaches into src/offscreen"
+            );
+        }
+
+        // Viewer::render_frame dispatches the scene stage on the shared
+        // frame encoder for both windowed and headless viewers.
+        let main_loop = include_str!("../viewer/render/main_loop.rs");
+        assert!(main_loop.contains("self.render_pbr_scene_stage("));
+        assert!(main_loop.contains("self.render_frame(timing)"));
+        assert!(main_loop.contains("self.render_frame(None)"));
+    }
+
+    #[test]
+    fn viewer_scene_consumes_ambient_and_sky_from_the_scene() {
+        // ambient_color/sky_color reach the raster through the viewer scene:
+        // ambient feeds the production PBR environment, sky is the clear.
+        let raster = production_source(include_str!("../viewer/pbr_scene/reference.rs"));
+        assert!(raster.contains("env.env_sky[0]"));
+        assert!(raster.contains("env.miss_sky[0]"));
+        let scene = production_source(include_str!("../viewer/pbr_scene/mod.rs"));
+        assert!(scene.contains("desc.ambient, desc.sun_color)"));
+        assert!(scene.contains("let sky = self.desc.sky;"));
+    }
+
+    /// Adapter/device/queue for headless-viewer tests; None without a GPU.
+    #[cfg(all(
+        feature = "enable-gpu-instancing",
+        feature = "enable-pbr",
+        feature = "enable-tbn"
+    ))]
+    fn headless_gpu() -> Option<(
+        std::sync::Arc<wgpu::Device>,
+        std::sync::Arc<wgpu::Queue>,
+        std::sync::Arc<wgpu::Adapter>,
+    )> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
+        let mut limits = adapter.limits();
+        limits.max_storage_buffers_per_shader_stage =
+            limits.max_storage_buffers_per_shader_stage.max(8);
+        let capabilities = crate::core::capabilities::CapabilitySet::negotiate(adapter.features());
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                required_features: capabilities.granted,
+                required_limits: limits,
+                label: Some("reference-scene-metadata-test"),
+            },
+            None,
+        ))
+        .ok()?;
+        Some((
+            std::sync::Arc::new(device),
+            std::sync::Arc::new(queue),
+            std::sync::Arc::new(adapter),
+        ))
+    }
+
+    #[cfg(all(
+        feature = "enable-gpu-instancing",
+        feature = "enable-pbr",
+        feature = "enable-tbn"
+    ))]
+    #[test]
+    fn viewer_consumed_metadata_matches_reference_scene() {
+        // Runtime metadata parity: the values the headless viewer's frame
+        // actually consumed (frame camera pose/fov, sun, ambient, sky,
+        // exposure, size) must be byte-identical to the scene description
+        // the PT path consumes, for every shared key.
+        let Some((device, queue, adapter)) = headless_gpu() else {
+            return;
+        };
+        let (width, height) = (24, 16);
+        let mut viewer = crate::viewer::Viewer::new_headless(
+            device,
+            queue,
+            adapter,
+            width,
+            height,
+            crate::viewer::viewer_config::ViewerConfig::default(),
+        )
+        .unwrap();
+        viewer
+            .handle_cmd(crate::viewer::viewer_enums::ViewerCmd::LoadReferenceScene {
+                name: "adjudication".into(),
+            })
+            .unwrap();
+        assert!(viewer.pbr_scene_consumed_metadata().is_empty());
+        viewer.render_headless_frame(None).unwrap();
+        let consumed = viewer.pbr_scene_consumed_metadata();
+        let expected: Vec<_> = adjudication_scene()
+            .metadata_fields(width, height, 1)
+            .into_iter()
+            .filter(|(name, _)| *name != "spp")
+            .collect();
+        assert_eq!(consumed.len(), expected.len());
+        for ((got_name, got), (want_name, want)) in consumed.iter().zip(&expected) {
+            assert_eq!(got_name, want_name);
+            assert_eq!(
+                got.to_bits(),
+                want.to_bits(),
+                "{got_name}: viewer consumed {got}, scene declares {want}"
+            );
+        }
     }
 
     #[test]

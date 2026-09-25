@@ -93,17 +93,18 @@ pub struct PbrLighting {
     pub exposure: f32,
     pub gamma: f32,
 
-    /// Ground-plane bounce radiance for the instanced path — the exit
-    /// radiance a down-facing hemisphere receives from the ground plane.
-    /// Zero for the general path (no ground GI contribution).
-    pub ground_bounce: [f32; 3],
+    /// Constant ambient radiance for the instanced path's hemisphere-GI
+    /// integral (the miss term and each occluder's sky term). Zero for the
+    /// general path (no GI contribution).
+    pub gi_ambient: [f32; 3],
     pub _padding3: f32,
-    /// Scene spheres (center.xyz, radius) a down-hemisphere ray can occlude
-    /// before the ground plane, for ground-GI self/neighbor shadowing in the
+    /// Scene spheres (center.xyz, radius) a hemisphere ray can hit before
+    /// the environment/plane, for GI self/neighbor occlusion in the
     /// instanced path. Zero-radius entries are inert.
     pub gi_sph: [[f32; 4]; 3],
-    /// Approximate dark-side exit radiance of each `gi_sph` occluder.
-    pub gi_sph_exit: [[f32; 4]; 3],
+    /// Lambertian albedo of each `gi_sph` occluder; its exit radiance is
+    /// derived in-shader from sun + ambient + plane-bounce transport.
+    pub gi_sph_albedo: [[f32; 4]; 3],
 }
 
 impl Default for PbrLighting {
@@ -119,10 +120,10 @@ impl Default for PbrLighting {
             ibl_rotation: 0.0,
             exposure: 1.0,
             gamma: 2.2,
-            ground_bounce: [0.0; 3],
+            gi_ambient: [0.0; 3],
             _padding3: 0.0,
             gi_sph: [[0.0; 4]; 3],
-            gi_sph_exit: [[0.0; 4]; 3],
+            gi_sph_albedo: [[0.0; 4]; 3],
         }
     }
 }

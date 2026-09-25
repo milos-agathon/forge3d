@@ -1477,7 +1477,7 @@ def render_adjudication_pair(
     spp: int,
     certificate: bool | str | PathLikeStr | None = ...,
     cache: str | PathLikeStr | None = ...,
-) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]: ...
 
 # PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
 def hybrid_render_terrain_reference(

@@ -4,15 +4,17 @@
 // This is the shared offscreen mesh raster harness: consumers supply their
 // own pipelines/bind groups (shading is caller-defined) while target
 // creation, pass encoding, submission, and HDR readback are owned here and
-// routed through core::hdr_readback + the global memory tracker.
-// RELEVANT FILES: src/offscreen/adjudication_raster.rs, src/core/hdr_readback.rs
+// routed through core::hdr_readback + the global memory tracker. The
+// ANAMNESIS graph executor lives in src/core/anamnesis/hdr_graph.rs.
+// RELEVANT FILES: src/viewer/pbr_scene/mod.rs, src/core/hdr_readback.rs,
+// src/core/anamnesis/hdr_graph.rs
 
 use crate::core::error::RenderError;
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
-use std::collections::BTreeMap;
 use std::ops::Range;
-use std::path::PathBuf;
 use wgpu::{BindGroup, Buffer, CommandEncoder, Device, Queue, RenderPipeline, TextureView};
+
+pub use crate::core::anamnesis::ForwardCacheDeclaration;
 
 /// HDR color + depth attachment pair for one offscreen forward pass.
 pub struct ForwardTargets {
@@ -82,46 +84,6 @@ impl ForwardTargets {
             depth_view,
         })
     }
-
-    fn restore_tight_bytes(&self, queue: &Queue, bytes: &[u8]) -> Result<(), RenderError> {
-        let bytes_per_pixel = match self.color_format {
-            wgpu::TextureFormat::Rgba32Float => 16usize,
-            wgpu::TextureFormat::Rgba16Float => 8usize,
-            other => {
-                return Err(RenderError::Render(format!(
-                    "offscreen forward cache cannot restore {other:?}"
-                )))
-            }
-        };
-        let expected = self.width as usize * self.height as usize * bytes_per_pixel;
-        if bytes.len() != expected {
-            return Err(RenderError::Render(format!(
-                "offscreen forward cached byte length mismatch: got {}, expected {}",
-                bytes.len(),
-                expected
-            )));
-        }
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &self.color,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            bytes,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(self.width * bytes_per_pixel as u32),
-                rows_per_image: Some(self.height),
-            },
-            wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
-        );
-        Ok(())
-    }
 }
 
 /// One draw in an offscreen forward pass, executed in slice order.
@@ -170,24 +132,6 @@ impl ForwardRecorder for [ForwardDraw<'_>] {
             }
         }
     }
-}
-
-/// Complete key material for cacheable caller-owned forward draws.
-///
-/// `RenderPipeline` and `BindGroup` are intentionally opaque in wgpu, so the
-/// shared harness cannot reconstruct their descriptors. A caller that wants
-/// caching must supply the exact canonical pipeline descriptor, uploaded
-/// uniform bytes, and every external draw input. Omitting this declaration
-/// leaves the pass conservatively uncacheable.
-pub struct ForwardCacheDeclaration {
-    pub root: PathBuf,
-    pub max_bytes: u64,
-    pub verify_reads: bool,
-    pub pipeline_descriptor_bytes: Vec<u8>,
-    pub uniform_bytes: Vec<u8>,
-    pub external_input_bytes: Vec<u8>,
-    pub capability_fingerprint_bytes: Vec<u8>,
-    pub engine_fingerprint_bytes: Vec<u8>,
 }
 
 /// Encode one depth-tested forward pass over `draws` (in order), clearing the
@@ -272,6 +216,10 @@ pub fn render_forward_hdr_incremental(
     render_forward_hdr_recorded(device, queue, targets, clear, draws, timing, cache)
 }
 
+/// Thin caller over the shared ANAMNESIS HDR graph executor
+/// (`core::anamnesis::render_hdr_graph`). The graph shape, pass labels,
+/// cache behavior, timing bracketing, and readback semantics are unchanged
+/// from the former inline implementation.
 pub fn render_forward_hdr_recorded<R: ForwardRecorder + ?Sized>(
     device: &Device,
     queue: &Queue,
@@ -281,240 +229,32 @@ pub fn render_forward_hdr_recorded<R: ForwardRecorder + ?Sized>(
     mut timing: Option<(&mut crate::core::gpu_timing::OneShotTiming, &str)>,
     cache: Option<&ForwardCacheDeclaration>,
 ) -> Result<(Vec<f32>, crate::core::anamnesis::CacheReport), RenderError> {
-    use crate::core::framegraph_impl::{
-        PassType, RendererGraphBuilder, ResourceDesc, ResourceType,
-    };
-    let extent = wgpu::Extent3d {
+    let target = crate::core::anamnesis::HdrGraphTarget {
+        texture: &targets.color,
         width: targets.width,
         height: targets.height,
-        depth_or_array_layers: 1,
+        format: targets.color_format,
     };
-    let mut builder = RendererGraphBuilder::new();
-    let external_input_resource = builder.add_resource(ResourceDesc {
-        name: "offscreen.forward.external_inputs".into(),
-        resource_type: ResourceType::StorageBuffer,
-        format: None,
-        extent: None,
-        size: Some(
-            cache
-                .map(|declaration| declaration.external_input_bytes.len())
-                .unwrap_or(1)
-                .max(1) as u64,
-        ),
-        usage: None,
-        can_alias: false,
-        is_transient: false,
-    });
-    let color_resource = builder.add_resource(ResourceDesc {
-        name: "offscreen.forward.color".into(),
-        resource_type: ResourceType::ColorAttachment,
-        format: Some(targets.color_format),
-        extent: Some(extent),
-        size: None,
-        usage: Some(
-            wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-        ),
-        can_alias: false,
-        is_transient: false,
-    });
-    let depth_resource = builder.add_resource(ResourceDesc {
-        name: "offscreen.forward.depth".into(),
-        resource_type: ResourceType::DepthStencilAttachment,
-        format: Some(wgpu::TextureFormat::Depth32Float),
-        extent: Some(extent),
-        size: None,
-        usage: Some(wgpu::TextureUsages::RENDER_ATTACHMENT),
-        can_alias: false,
-        is_transient: false,
-    });
-    let readback_resource = builder.add_resource(ResourceDesc {
-        name: "offscreen.forward.readback".into(),
-        resource_type: ResourceType::StorageBuffer,
-        format: None,
-        extent: None,
-        size: Some(targets.width as u64 * targets.height as u64 * 16),
-        usage: None,
-        can_alias: false,
-        is_transient: true,
-    });
-    let forward_descriptor = cache
-        .map(|declaration| declaration.pipeline_descriptor_bytes.clone())
-        .unwrap_or_else(|| {
-            let mut descriptor = Vec::new();
-            descriptor.extend_from_slice(b"forge3d.offscreen.forward/incomplete-v1\0");
-            descriptor.extend_from_slice(format!("{:?}", targets.color_format).as_bytes());
-            descriptor.extend_from_slice(&(draws.len() as u64).to_le_bytes());
-            descriptor
+    let labels = crate::core::anamnesis::HdrGraphLabels {
+        graphics: "offscreen.forward",
+        readback: "offscreen.readback",
+    };
+    let mut render = || -> Result<(), RenderError> {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("offscreen-forward-encoder"),
         });
-    let forward_uniforms = cache
-        .map(|declaration| declaration.uniform_bytes.clone())
-        .unwrap_or_else(|| {
-            let mut uniforms = Vec::with_capacity(40);
-            for value in [clear.r, clear.g, clear.b, clear.a, 1.0] {
-                uniforms.extend_from_slice(&value.to_bits().to_le_bytes());
-            }
-            uniforms
-        });
-    builder.add_pass("offscreen.forward", PassType::Graphics, |pass| {
-        pass.read(external_input_resource)
-            .write(color_resource)
-            .write(depth_resource)
-            .pipeline_descriptor(forward_descriptor)
-            .uniform_bytes(forward_uniforms);
-        if cache.is_none() {
-            pass.disable_cache(
-                "wgpu render-pipeline descriptors are borrowed without reconstructible state",
-            );
-        }
-        Ok(())
-    })?;
-    let mut readback_descriptor = Vec::new();
-    readback_descriptor.extend_from_slice(b"forge3d.offscreen.readback/v1\0");
-    readback_descriptor.extend_from_slice(format!("{:?}", targets.color_format).as_bytes());
-    let mut readback_uniforms = Vec::new();
-    readback_uniforms.extend_from_slice(&targets.width.to_le_bytes());
-    readback_uniforms.extend_from_slice(&targets.height.to_le_bytes());
-    builder.add_pass("offscreen.readback", PassType::Transfer, |pass| {
-        pass.read(color_resource)
-            .write(readback_resource)
-            .pipeline_descriptor(readback_descriptor)
-            .uniform_bytes(readback_uniforms)
-            .disable_cache("GPU resource restore is owned by the ANAMNESIS scheduler");
-        Ok(())
-    })?;
-    let mut graph = builder.compile()?;
-    debug_assert_eq!(graph.labels, ["offscreen.forward", "offscreen.readback"]);
-    match targets.color_format {
-        wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::Rgba16Float => {}
-        other => {
-            return Err(RenderError::Render(format!(
-                "offscreen forward HDR readback: unsupported color format {other:?}"
-            )))
-        }
-    }
-    if let Some(declaration) = cache {
-        use crate::core::anamnesis::{leaf_key, ContentStore, GraphScheduler};
-        let store = ContentStore::new(
-            &declaration.root,
-            declaration.max_bytes.max(1),
-            declaration.verify_reads,
-        )
-        .map_err(|error| RenderError::Render(error.to_string()))?;
-        let leaf_keys = BTreeMap::from([(
-            external_input_resource,
-            leaf_key(&declaration.external_input_bytes),
-        )]);
-        let mut scheduler = GraphScheduler::new(
-            store,
-            declaration.capability_fingerprint_bytes.clone(),
-            declaration.engine_fingerprint_bytes.clone(),
-        );
-        let mut result = None;
-        scheduler
-            .execute_graph(
-                &graph,
-                &leaf_keys,
-                |pass, barriers| match pass.name.as_str() {
-                    "offscreen.forward" => {
-                        let mut encoder =
-                            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("offscreen-forward-encoder"),
-                            });
-                        let timing_scope = timing
-                            .as_mut()
-                            .and_then(|(t, label)| t.begin(&mut encoder, label));
-                        encode_forward_recorded(&mut encoder, targets, clear, draws);
-                        if let Some((t, _)) = timing.as_mut() {
-                            t.end(&mut encoder, timing_scope, draws.len() as u32);
-                            t.resolve(&mut encoder);
-                        }
-                        queue.submit(std::iter::once(encoder.finish()));
-                        let pixels = crate::core::hdr::read_hdr_texture(
-                            device,
-                            queue,
-                            &targets.color,
-                            targets.width,
-                            targets.height,
-                            targets.color_format,
-                        )
-                        .map_err(std::io::Error::other)?;
-                        Ok(bytemuck::cast_slice(&pixels).to_vec())
-                    }
-                    "offscreen.readback" => {
-                        if barriers.is_empty() {
-                            return Err(std::io::Error::other(
-                                "offscreen readback lost its compiled color transition",
-                            ));
-                        }
-                        result = Some(
-                            crate::core::hdr::read_hdr_texture(
-                                device,
-                                queue,
-                                &targets.color,
-                                targets.width,
-                                targets.height,
-                                targets.color_format,
-                            )
-                            .map_err(std::io::Error::other)?,
-                        );
-                        Ok(Vec::new())
-                    }
-                    label => Err(std::io::Error::other(format!(
-                        "unknown offscreen graph pass {label:?}"
-                    ))),
-                },
-                |pass, bytes, _barriers| match pass.name.as_str() {
-                    "offscreen.forward" => targets
-                        .restore_tight_bytes(queue, bytes)
-                        .map_err(|error| std::io::Error::other(error.to_string())),
-                    label => Err(std::io::Error::other(format!(
-                        "uncacheable pass {label:?} unexpectedly requested restoration"
-                    ))),
-                },
-            )
-            .map_err(|error| RenderError::Render(error.to_string()))?;
-        let report = scheduler.into_report();
-        let pixels = result.ok_or_else(|| {
-            RenderError::Render("offscreen readback pass did not produce pixels".into())
-        })?;
-        return Ok((pixels, report));
-    }
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("offscreen-forward-encoder"),
-    });
-    let timing_scope = timing
-        .as_mut()
-        .and_then(|(t, label)| t.begin(&mut encoder, label));
-    graph.execute_with_barriers("offscreen.forward", |_barriers| {
+        let timing_scope = timing
+            .as_mut()
+            .and_then(|(t, label)| t.begin(&mut encoder, label));
         encode_forward_recorded(&mut encoder, targets, clear, draws);
-        Ok::<(), RenderError>(())
-    })?;
-    if let Some((t, _)) = timing.as_mut() {
-        t.end(&mut encoder, timing_scope, draws.len() as u32);
-        t.resolve(&mut encoder);
-    }
-    queue.submit(std::iter::once(encoder.finish()));
-    let result = graph.execute_with_barriers("offscreen.readback", |barriers| {
-        if barriers.is_empty() {
-            return Err(RenderError::Render(
-                "offscreen readback lost its compiled color transition".into(),
-            ));
+        if let Some((t, _)) = timing.as_mut() {
+            t.end(&mut encoder, timing_scope, draws.len() as u32);
+            t.resolve(&mut encoder);
         }
-        crate::core::hdr::read_hdr_texture(
-            device,
-            queue,
-            &targets.color,
-            targets.width,
-            targets.height,
-            targets.color_format,
-        )
-        .map_err(RenderError::Readback)
-    })?;
-    graph.finish()?;
-    Ok((result, crate::core::anamnesis::CacheReport::default()))
+        queue.submit(std::iter::once(encoder.finish()));
+        Ok(())
+    };
+    crate::core::anamnesis::render_hdr_graph(device, queue, &target, &labels, cache, &mut render)
 }
 
 #[cfg(test)]

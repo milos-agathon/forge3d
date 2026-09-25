@@ -19,6 +19,13 @@ EXPECTED = {
     ("src/viewer/input/viewer_input.rs", "pick_at_screen", "frame_view", 1),
     ("src/viewer/input/viewer_input.rs", "pick_at_screen", "matrix_compose", 1),
     ("src/viewer/input/viewer_input.rs", "pick_at_screen", "matrix_inverse", 1),
+    # Viewer PBR scene (AEQUITAS raster route): view/projection come from the
+    # frozen frame camera; the CSM light projection is rebuilt in render space
+    # around anchor-converted shadow-focus points.
+    ("src/viewer/pbr_scene/mod.rs", "render_stage", "frame_projection", 1),
+    ("src/viewer/pbr_scene/mod.rs", "render_stage", "frame_view", 1),
+    ("src/viewer/pbr_scene/mod.rs", "tighten_shadow_bounds", "matrix_compose", 1),
+    ("src/viewer/pbr_scene/mod.rs", "tighten_shadow_bounds", "projection_ctor", 1),
     ("src/viewer/render/main_loop/frame_anchor.rs", "refresh_after_rebase", "frame_projection", 1),
     ("src/viewer/render/main_loop/frame_anchor.rs", "refresh_after_rebase", "frame_view", 1),
     ("src/viewer/render/main_loop/frame_anchor.rs", "refresh_after_rebase", "matrix_compose", 1),
@@ -277,6 +284,8 @@ def test_each_matrix_producer_uses_the_frozen_frame_or_explicit_delegate():
         ("src/viewer/terrain/render/offscreen/effects.rs", "apply_snapshot_effects"): "state.view_proj",
         ("src/shadows/csm_renderer.rs", "update_cascades"): "camera_view: Mat4",
         ("src/shadows/csm_renderer.rs", "compute_cascade"): "inv_view_proj: Mat4",
+        ("src/viewer/pbr_scene/mod.rs", "render_stage"): "frame: FrameCamera",
+        ("src/viewer/pbr_scene/mod.rs", "tighten_shadow_bounds"): "anchor: &crate::camera::Anchor",
     }
     inventoried = {(rel, function) for rel, function, _operation, _ordinal in EXPECTED}
     assert inventoried == set(required), f"unclassified producers: {sorted(inventoried - set(required))}"

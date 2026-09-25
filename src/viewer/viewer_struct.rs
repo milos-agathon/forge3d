@@ -35,9 +35,20 @@ use super::viewer_config::{FpsCounter, ViewerConfig};
 use super::viewer_enums::{CaptureKind, FogMode, VizMode};
 use super::viewer_types::FrameCamera;
 
+/// Frame output target: either a platform window surface or a tracked
+/// offscreen color texture for headless rendering.
+pub(crate) enum ViewerOutput {
+    Window {
+        window: Arc<Window>,
+        surface: Surface<'static>,
+    },
+    Headless {
+        color: TrackedTexture,
+    },
+}
+
 pub struct Viewer {
-    pub(crate) window: Arc<Window>,
-    pub(crate) surface: Surface<'static>,
+    pub(crate) output: ViewerOutput,
     pub(crate) device: Arc<Device>,
     pub(crate) queue: Arc<Queue>,
     #[cfg(feature = "extension-module")]
@@ -301,4 +312,17 @@ pub struct Viewer {
     /// Per-command execution outcome consumed by the dispatcher and correlated
     /// IPC completion channel.
     pub(crate) command_error: Option<String>,
+    /// Optional PBR scene rendered through the shared frame pipeline
+    /// (LoadReferenceScene). When present it owns all frame geometry work.
+    pub(crate) pbr_scene: Option<super::pbr_scene::ViewerPbrScene>,
+}
+
+impl Viewer {
+    /// The platform window, when this viewer renders to a surface.
+    pub(crate) fn window(&self) -> Option<&Arc<Window>> {
+        match &self.output {
+            ViewerOutput::Window { window, .. } => Some(window),
+            ViewerOutput::Headless { .. } => None,
+        }
+    }
 }

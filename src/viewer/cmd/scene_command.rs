@@ -42,6 +42,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             }
             true
         }
+        ViewerCmd::LoadReferenceScene { name } => {
+            handle_load_reference_scene(viewer, name);
+            true
+        }
         ViewerCmd::SetViz(mode) => {
             let next = match mode.as_str() {
                 "material" | "mat" => crate::viewer::viewer_enums::VizMode::Material,
@@ -330,6 +334,100 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         _ => false,
+    }
+}
+
+/// `:load_reference_scene adjudication` — loads the shared AEQUITAS
+/// reference scene into the viewer PBR-scene subsystem and adopts its
+/// camera. Rejected while a terrain or an active point cloud owns the
+/// frame camera (their scene-owned poses cannot describe the PBR scene).
+fn handle_load_reference_scene(viewer: &mut Viewer, name: &str) {
+    if name != "adjudication" {
+        viewer.reject_command(format!(
+            "unknown reference scene '{name}' (expected 'adjudication')"
+        ));
+        return;
+    }
+    if viewer
+        .terrain_viewer
+        .as_ref()
+        .and_then(|scene| scene.terrain.as_ref())
+        .is_some()
+    {
+        viewer.reject_command(
+            "load_reference_scene rejected: a terrain scene owns the frame camera".to_string(),
+        );
+        return;
+    }
+    if viewer.point_cloud_active() {
+        viewer.reject_command(
+            "load_reference_scene rejected: an active point cloud owns the frame camera"
+                .to_string(),
+        );
+        return;
+    }
+
+    let scene_desc = crate::path_tracing::reference_scene::adjudication_scene();
+    // Reuse the shared metadata contract as the finiteness check the
+    // former offscreen adapter enforced before allocating GPU resources.
+    if scene_desc
+        .metadata_fields(viewer.config.width, viewer.config.height, 1)
+        .iter()
+        .any(|(_, v)| !v.is_finite())
+    {
+        viewer.reject_command(
+            "reference scene rejected: metadata contains a non-finite value".to_string(),
+        );
+        return;
+    }
+
+    let (pbr_desc, camera) = crate::viewer::pbr_scene::reference::reference_pbr_scene(&scene_desc);
+    match crate::viewer::pbr_scene::ViewerPbrScene::load(
+        &viewer.device,
+        &viewer.queue,
+        pbr_desc,
+        viewer.config.width,
+        viewer.config.height,
+        viewer.config.format,
+    ) {
+        Ok(scene) => {
+            viewer.pbr_scene = Some(scene);
+            let anchor = viewer.camera_anchor;
+            // OrbitCamera::eye() reconstructs the pose as
+            // target + distance * (cos p * sin y, sin p, cos p * cos y);
+            // derive yaw/pitch from that same convention so the realized eye
+            // lands exactly on the reference camera position.
+            let offset = crate::camera::Anchor::direction_to_render(camera.eye - camera.target);
+            let distance = offset.length().max(0.01);
+            let dir = offset / distance;
+            let yaw = dir.x.atan2(dir.z);
+            let pitch = dir.y.asin();
+            // OrbitCamera keeps its own up (the product path has no setter);
+            // the reference contract is world-up, matching the orbit default.
+            if !camera.up.is_finite() || camera.up.length_squared() == 0.0 {
+                viewer.pbr_scene = None;
+                viewer.reject_command(
+                    "load_reference_scene rejected a degenerate camera up".to_string(),
+                );
+                return;
+            }
+            if let Err(err) =
+                viewer
+                    .camera
+                    .set_orbit_pose_target(&anchor, camera.target, distance, yaw, pitch)
+            {
+                viewer.pbr_scene = None;
+                viewer.reject_command(format!("load_reference_scene rejected camera pose: {err}"));
+                return;
+            }
+            viewer.view_config.fov_deg = camera.fov_deg;
+            viewer.view_config.znear = camera.near;
+            viewer.view_config.zfar = camera.far;
+            println!("Loaded reference scene: {name}");
+        }
+        Err(err) => {
+            viewer.reject_command(format!("load_reference_scene failed: {err}"));
+        }
     }
 }
 
