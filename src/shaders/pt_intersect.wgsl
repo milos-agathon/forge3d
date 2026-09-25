@@ -437,6 +437,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     loop {
         let ray_idx = atomicAdd(&ray_queue_header.out_count, 1u);
         if ray_idx >= ray_queue_header.in_count {
+            // Return the failed ticket so out_count ends the pass exactly at
+            // in_count: the host's active count (in_count - out_count) must
+            // stay exact between dispatches.
+            atomicSub(&ray_queue_header.out_count, 1u);
             break; // No more rays to process
         }
         

@@ -28,6 +28,24 @@ pub struct WavefrontPipelines {
 }
 
 impl WavefrontPipelines {
+    /// Compile the exact shadow stage used by wavefront rendering before a
+    /// capability-limited adjudication test attempts any rendering. Only the
+    /// Python probe and the adjudication tests call it.
+    #[cfg(any(test, feature = "extension-module"))]
+    pub(crate) fn probe_shadow_kernel(device: &Device) -> Result<(), String> {
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-shadow-shader",
+            include_str!("../../shaders/pt_shadow.wgsl"),
+        );
+        let uniforms = Self::create_uniforms_bind_group_layout(device);
+        let scene = Self::create_scene_bind_group_layout(device);
+        let accum = Self::create_accum_bind_group_layout(device);
+        Self::create_shadow_pipeline(device, &shader, &uniforms, &scene, &accum)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     pub fn new(device: &Device) -> Result<Self, Box<dyn std::error::Error>> {
         let raygen_shader = crate::core::shader_registry::create_labeled_shader_module(
             device,

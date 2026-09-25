@@ -118,11 +118,16 @@ fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32) -> f32 {
     let biased_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
     
     // Sample shadow map with comparison
-    return textureSampleCompare(shadow_maps, shadow_sampler, 
+    return textureSampleCompareLevel(shadow_maps, shadow_sampler, 
                                shadow_coords.xy, cascade_idx, biased_depth);
 }
 
 // PCF (Percentage-Closer Filtering) implementation
+// Comparison samples use textureSampleCompareLevel (level 0): the CSM depth
+// array has a single mip, so it is identical to textureSampleCompare, and it
+// needs no derivatives inside the dynamic-bound PCF loops. FXC (every DX12
+// adapter) crashes with an access violation compiling the derivative-based
+// form in those loops.
 fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world_normal: vec3<f32>) -> f32 {
     // Perspective divide and convert to texture coordinates
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
@@ -173,7 +178,7 @@ fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world_normal:
             if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 && 
                 sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
                 
-                shadow_factor += textureSampleCompare(shadow_maps, shadow_sampler, 
+                shadow_factor += textureSampleCompareLevel(shadow_maps, shadow_sampler, 
                                                     sample_coords, cascade_idx, biased_depth);
                 sample_count += 1.0;
             }
@@ -248,7 +253,7 @@ fn sample_shadow_poisson_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world
         if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 && 
             sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
             
-            shadow_factor += textureSampleCompare(shadow_maps, shadow_sampler, 
+            shadow_factor += textureSampleCompareLevel(shadow_maps, shadow_sampler, 
                                                 sample_coords, cascade_idx, biased_depth);
         } else {
             shadow_factor += 1.0; // Outside bounds - not shadowed
@@ -426,7 +431,7 @@ fn sample_shadow_pcss(
         if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
             sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
             
-            shadow_factor += textureSampleCompare(
+            shadow_factor += textureSampleCompareLevel(
                 shadow_maps,
                 shadow_sampler,
                 sample_coords,

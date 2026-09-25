@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 
 import numpy as np
@@ -18,6 +19,9 @@ from forge3d.determinism import (
     write_canonical_hdr,
 )
 
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _determinism_golden import golden_sha256, load_golden  # noqa: E402
 
 _PORTABLE_PROFILE = "terra-determinata-native-portable-v1"
 _PASS_LABELS = [
@@ -34,6 +38,23 @@ def _adapter(path: str) -> dict:
     if not adapter or adapter.get("software_fallback") is not False:
         raise SystemExit("render lacks attributable physical-adapter metadata")
     return dict(adapter)
+
+
+def _backend_golden(golden_path: str, adapter: dict, role: str) -> str:
+    """The committed golden of ``adapter``'s own backend (per-backend record).
+
+    Cross-backend byte identity is not assumed: a Vulkan producer and a DX12
+    consumer are each held to their own backend's golden. A backend without a
+    committed golden is ABSENT and fails closed here, because both portability
+    roles require an enforced golden.
+    """
+    expected = golden_sha256(load_golden(golden_path), adapter.get("backend"))
+    if expected is None:
+        raise SystemExit(
+            f"ABSENT: no committed golden for the {role} backend "
+            f"{adapter.get('backend')!r} in {golden_path}"
+        )
+    return expected
 
 
 def _machine_id(path: str | None) -> str:
@@ -93,14 +114,14 @@ def main() -> int:
     if args.mode == "seed":
         if not args.frame_blob or not args.golden or not args.adapter_record:
             parser.error("seed requires --frame-blob, --golden, and --adapter-record")
-        png_sha256 = hashlib.sha256(Path(args.frame_blob).read_bytes()).hexdigest()
-        golden_sha256 = Path(args.golden).read_text(encoding="utf-8").split()[0]
-        if png_sha256 != golden_sha256:
-            raise SystemExit(
-                f"seed render differs from committed golden: actual={png_sha256} "
-                f"golden={golden_sha256}"
-            )
         adapter = _adapter(args.adapter_record)
+        png_sha256 = hashlib.sha256(Path(args.frame_blob).read_bytes()).hexdigest()
+        seed_golden = _backend_golden(args.golden, adapter, "seed")
+        if png_sha256 != seed_golden:
+            raise SystemExit(
+                f"seed render differs from committed {adapter.get('backend')} golden: "
+                f"actual={png_sha256} golden={seed_golden}"
+            )
         machine_id = _machine_id(args.machine_id_file)
         runner_name = _runner_name(args.runner_name)
         rgba, report = _native_render(args.cache)
@@ -113,7 +134,7 @@ def main() -> int:
         record_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "schema": "forge3d.anamnesis.native-portability/1",
-            "golden_sha256": golden_sha256,
+            "golden_sha256": seed_golden,
             "rgba_sha256": hashlib.sha256(rgba).hexdigest(),
             "producer_adapter": adapter,
             "producer_machine_id": machine_id,
@@ -152,21 +173,28 @@ def main() -> int:
         raise SystemExit("portability record was not produced by this exact engine head")
 
     if args.mode == "check":
-        if not args.consumer_frame_blob or not args.consumer_adapter_record:
+        if (
+            not args.consumer_frame_blob
+            or not args.consumer_adapter_record
+            or not args.golden
+        ):
             parser.error(
-                "check requires --consumer-frame-blob and --consumer-adapter-record"
+                "check requires --consumer-frame-blob, --consumer-adapter-record "
+                "and --golden"
             )
         machine_id = _machine_id(args.machine_id_file)
         runner_name = _runner_name(args.runner_name)
+        consumer_adapter = _adapter(args.consumer_adapter_record)
         consumer_png_sha = hashlib.sha256(
             Path(args.consumer_frame_blob).read_bytes()
         ).hexdigest()
-        if consumer_png_sha != record["golden_sha256"]:
+        consumer_golden = _backend_golden(args.golden, consumer_adapter, "consumer")
+        if consumer_png_sha != consumer_golden:
             raise SystemExit(
-                "consumer render differs from committed golden: "
-                f"actual={consumer_png_sha} golden={record['golden_sha256']}"
+                f"consumer render differs from committed "
+                f"{consumer_adapter.get('backend')} golden: "
+                f"actual={consumer_png_sha} golden={consumer_golden}"
             )
-        consumer_adapter = _adapter(args.consumer_adapter_record)
         producer_backend = str(record["producer_adapter"].get("backend", "")).lower()
         consumer_backend = str(consumer_adapter.get("backend", "")).lower()
         if (
@@ -213,8 +241,26 @@ def main() -> int:
         or report["graph_command_submissions"] != 6
     ):
         raise SystemExit(f"native compatibility mismatch served stale terrain passes: {report}")
-    hashes_match = hashlib.sha256(rgba).hexdigest() == record["rgba_sha256"]
+    # Capability isolation must not change the frame this backend renders.
+    # Reference: a fresh render at the portable profile into an empty cache on
+    # this same backend (it cannot hit). The producer RGBA is an additional
+    # reference only when the producer ran on this backend: cross-backend byte
+    # identity is a separate claim (TERRA-DET-VULKAN-01), not assumed here.
+    from forge3d._native import get_native_module
+
+    backend = str(dict(get_native_module().engine_info()).get("backend", "")).lower()
+    producer_backend = str(record["producer_adapter"].get("backend", "")).lower()
+    with tempfile.TemporaryDirectory(prefix="forge3d-anamnesis-reference-") as empty:
+        reference, reference_report = _native_render(empty)
+    if reference_report["hits"]:
+        raise SystemExit(f"reference render hit an empty cache: {reference_report}")
+    rgba_sha = hashlib.sha256(rgba).hexdigest()
+    hashes_match = rgba_sha == hashlib.sha256(reference).hexdigest()
     if not hashes_match:
+        raise SystemExit(
+            "capability-isolation render changed this backend's canonical native RGBA"
+        )
+    if backend == producer_backend and rgba_sha != record["rgba_sha256"]:
         raise SystemExit("capability-isolation render changed canonical native RGBA")
     print(
         json.dumps(
@@ -224,6 +270,8 @@ def main() -> int:
                 "misses": len(report["misses"]),
                 "hit_rate": report["hit_rate"],
                 "hashes_match": hashes_match,
+                "reference_backend": backend,
+                "producer_rgba_compared": backend == producer_backend,
                 "mismatch_dimension": "compatibility_profile",
             },
             sort_keys=True,

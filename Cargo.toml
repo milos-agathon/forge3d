@@ -127,6 +127,7 @@ harness = false
 # can fail on newly introduced lints instead of the historical baseline.
 assign_op_pattern = "allow"
 bind_instead_of_map = "allow"
+chunks_exact_to_as_chunks = "allow"
 clone_on_copy = "allow"
 collapsible_else_if = "allow"
 collapsible_if = "allow"

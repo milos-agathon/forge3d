@@ -18,6 +18,23 @@ impl WavefrontScheduler {
         self.restir_spatial_dispatches
     }
 
+    /// Active rays at the start of each wave of the last
+    /// `render_frame_simple` frame, as reported by the ray-queue header.
+    pub fn last_frame_wave_sizes(&self) -> &[u32] {
+        &self.last_frame_wave_sizes
+    }
+
+    /// Stall on all submitted work and read back the ray-queue header.
+    pub fn read_ray_queue_header(&self) -> Result<QueueHeader, Box<dyn std::error::Error>> {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("wavefront-ray-queue-header"),
+            });
+        self.queue_buffers
+            .read_ray_queue_header(&self.device, &self.queue, &mut encoder)
+    }
+
     pub fn set_restir_spatial_enabled(&mut self, enabled: bool) {
         self.restir_spatial_enabled = enabled;
     }

@@ -263,7 +263,7 @@ def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
     root = Path(__file__).resolve().parents[1]
     exact_ref = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
     expected_counts = {
-        "ci.yml": 16,
+        "ci.yml": 17,
         "determinism-matrix.yml": 6,
     }
 

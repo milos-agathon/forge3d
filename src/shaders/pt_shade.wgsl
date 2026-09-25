@@ -466,7 +466,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Persistent threads: pop hits until queue is empty
     loop {
         let hit_idx = atomicAdd(&hit_queue_header.out_count, 1u);
-        if hit_idx >= hit_queue_header.in_count { break; }
+        if hit_idx >= hit_queue_header.in_count {
+            atomicSub(&hit_queue_header.out_count, 1u); // return failed ticket
+            break;
+        }
         if hit_idx >= hit_queue_header.capacity { break; }
 
         let h = hit_queue[hit_idx];

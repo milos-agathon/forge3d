@@ -29,7 +29,7 @@ from _deltae import (
     srgb_to_linear,
 )
 from _ssim import ssim
-from _terrain_runtime import terrain_rendering_available
+import _terrain_runtime
 
 import forge3d as f3d
 
@@ -291,7 +291,7 @@ def test_invalid_numeric_reference_is_rejected(value):
 
 
 def test_production_instanced_mesh_pbr_mode():
-    if not terrain_rendering_available():
+    if not _terrain_runtime.adjudication_rendering_available():
         pytest.skip("PBR mesh rendering requires a hardware-backed runtime")
     from forge3d.geometry import primitive_mesh, instance_mesh_gpu_render
 
@@ -314,11 +314,57 @@ def test_production_instanced_mesh_pbr_mode():
         instance_mesh_gpu_render(mesh, transforms, pbr={"unknown": 0.0})
 
 
+def test_adjudication_availability_does_not_run_terrain_probe(monkeypatch):
+    monkeypatch.setattr(_terrain_runtime, "_running_on_unsupported_hosted_macos_ci", lambda: False)
+    monkeypatch.setattr(_terrain_runtime, "_running_on_unsupported_hosted_windows_ci", lambda: False)
+
+    def fail_terrain_probe():
+        raise AssertionError("adjudication availability ran a terrain render")
+
+    monkeypatch.setattr(_terrain_runtime, "terrain_rendering_available", fail_terrain_probe)
+    monkeypatch.setattr(f3d, "has_gpu", lambda: True)
+    monkeypatch.setattr(f3d, "device_probe", lambda *_: {
+        "status": "ok", "device_type": "DiscreteGpu", "name": "test GPU",
+    })
+    assert _terrain_runtime.adjudication_rendering_available()
+
+
+def test_adjudication_render_failure_is_not_skipped(monkeypatch):
+    monkeypatch.setattr(_terrain_runtime, "adjudication_rendering_available", lambda: True)
+    monkeypatch.setattr(_terrain_runtime, "adjudication_shadow_kernel_compiles", lambda: (True, None))
+
+    def fail_render(*_args):
+        raise RuntimeError("adjudication render failed")
+
+    monkeypatch.setattr(f3d, "render_adjudication_pair", fail_render)
+    with pytest.raises(RuntimeError, match="adjudication render failed"):
+        test_adjudication_gate()
+
+
+def test_shadow_kernel_compile_failure_skips_before_render(monkeypatch):
+    monkeypatch.setattr(_terrain_runtime, "adjudication_rendering_available", lambda: True)
+    monkeypatch.setattr(
+        _terrain_runtime,
+        "adjudication_shadow_kernel_compiles",
+        lambda: (False, "unsupported atomic operation"),
+    )
+
+    def fail_render(*_args):
+        raise AssertionError("adjudication rendered after a failed shadow probe")
+
+    monkeypatch.setattr(f3d, "render_adjudication_pair", fail_render)
+    with pytest.raises(pytest.skip.Exception, match="unsupported atomic operation"):
+        test_adjudication_gate()
+
+
 def test_adjudication_gate():
-    if not terrain_rendering_available():
+    if not _terrain_runtime.adjudication_rendering_available():
         pytest.skip(
-            "Adjudication gate requires a terrain-capable hardware-backed forge3d runtime"
+            "Adjudication gate requires a hardware-backed forge3d runtime with the capture API"
         )
+    shadow_kernel_compiles, reason = _terrain_runtime.adjudication_shadow_kernel_compiles()
+    if not shadow_kernel_compiles:
+        pytest.skip(f"wavefront shadow kernel did not compile: {reason}")
 
     pt_rgba, raster_rgba, meta = f3d.render_adjudication_pair(
         GATE_WIDTH, GATE_HEIGHT, GATE_SPP

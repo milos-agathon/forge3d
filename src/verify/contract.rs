@@ -301,7 +301,7 @@ fn known_symbol_type(
     root: &naga::Function,
     name: &str,
 ) -> Option<naga::Handle<naga::Type>> {
-    let (head, tail) = name.split_once('.').map_or((name, ""), |parts| parts);
+    let (head, tail) = name.split_once('.').unwrap_or((name, ""));
     if let Some(argument) = root
         .arguments
         .iter()
