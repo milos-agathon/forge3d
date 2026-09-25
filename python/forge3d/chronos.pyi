@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -30,10 +31,13 @@ class FlythroughManifest:
         self, scene: MapScene, frame_index: int, out_path: str | Path
     ) -> Mapping[str, Any]: ...
 
+# A cache path uses a separate frame_<index:08d> subfolder per frame.
 def render_flythrough(
     camera_path: Sequence[MapScene] | Mapping[int, MapScene],
     *,
     base_seed: int,
     samples: int,
     out_dir: str | Path,
+    certificate: bool | str | os.PathLike[str] = ...,
+    cache: str | os.PathLike[str] | None = ...,
 ) -> FlythroughManifest: ...

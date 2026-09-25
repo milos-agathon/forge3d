@@ -10,6 +10,7 @@ from the stored compiled data alone.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -464,6 +465,8 @@ def render_flythrough(
     base_seed: int,
     samples: int,
     out_dir: str | Path,
+    certificate: bool | str | os.PathLike[str] = False,
+    cache: str | os.PathLike[str] | None = None,
 ) -> FlythroughManifest:
     """Render a deterministic CHRONOS flythrough to ``out_dir``.
 
@@ -472,6 +475,10 @@ def render_flythrough(
     ``MapScene``. Each frame writes ``frame_<index:08d>.png`` plus a canonical
     ``frame_<index:08d>.provenance.json`` sidecar, and the run writes a
     deterministic ``flythrough_manifest.json``.
+    When ``certificate`` is requested, each frame also writes its own
+    ``frame_<index:08d>.certificate.json`` sidecar in ``out_dir``. ``cache``
+    uses a ``frame_<index:08d>`` subfolder for each frame's ANAMNESIS store;
+    certificates disable cache eligibility.
 
     The whole run shares one native ``Session``/``TerrainRenderer``/IBL set;
     determinism lives in each frame's compiled inputs (seed, camera, scene
@@ -533,7 +540,15 @@ def render_flythrough(
             plan = frame_scene.compiled_plan
             frame_scene.compiled_plan = replace(plan, frame=compiled)
             png_path = out_dir / _frame_png_name(index)
-            frame_scene.render(str(png_path))
+            certificate_path = (
+                out_dir / f"frame_{index:08d}.certificate.json"
+                if certificate
+                else False
+            )
+            frame_cache = Path(cache) / f"frame_{index:08d}" if cache is not None else None
+            frame_scene.render(
+                str(png_path), certificate=certificate_path, cache=frame_cache
+            )
             rgba = _decode_png_rgba(png_path)
             provenance_json = f3d.render_compiled_frame(compiled, rgba)
             provenance = json.loads(provenance_json)

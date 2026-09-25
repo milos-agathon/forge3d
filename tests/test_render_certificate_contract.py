@@ -56,6 +56,7 @@ DOCUMENTED_EXCLUSIONS = {
     # Certificate-report getter: returns the last render's execution report,
     # renders nothing itself.
     "render_execution_report": "execution-report getter, produces no pixels",
+    "render_compiled_frame": "hashes caller-supplied RGBA into a CHRONOS provenance record; no rendering executes (owner-approved 2026-09-24)",
 }
 
 

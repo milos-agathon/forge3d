@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 import forge3d as f3d
 from forge3d.chronos import FlythroughManifest, render_flythrough
+from _terrain_runtime import terrain_rendering_available
 
 CHRONOS_NATIVE_SYMBOLS = (
     "frame_seed",
@@ -525,6 +528,174 @@ def _load_rgba(path: Path) -> np.ndarray:
     from forge3d._png import load_png_rgba
 
     return np.ascontiguousarray(load_png_rgba(path))
+
+
+def _require_terrain_rendering() -> None:
+    if not terrain_rendering_available():
+        pytest.skip("CHRONOS flythrough requires a hardware terrain renderer")
+
+
+def _capture_cache_context(monkeypatch, scene: "f3d.MapScene", output: Path) -> bytes:
+    import forge3d.anamnesis as anamnesis
+
+    class ContextCaptured(Exception):
+        pass
+
+    captured: list[bytes] = []
+
+    def capture_sequence(*_args, **kwargs):
+        captured.append(kwargs["render_frame_context"])
+        raise ContextCaptured
+
+    with monkeypatch.context() as patch:
+        patch.setattr(anamnesis, "render_sequence", capture_sequence)
+        with pytest.raises(ContextCaptured):
+            scene.render(str(output), cache=output.parent / "cache")
+    assert len(captured) == 1
+    return captured[0]
+
+
+def _path_free_scene(scene: "f3d.MapScene") -> dict:
+    value = scene.to_dict()
+    for name in ("path", "directory", "filename"):
+        value["recipe"]["output"].pop(name, None)
+    return value
+
+
+def test_frame_free_cache_context_preserves_existing_bytes(monkeypatch, tmp_path):
+    from forge3d._canonical_json import canonical_json_bytes
+
+    scene = _synthetic_scene()
+    context = _capture_cache_context(monkeypatch, scene, tmp_path / "frame.png")
+    assert context == canonical_json_bytes(
+        _path_free_scene(scene), error_context="MapScene ANAMNESIS callback context"
+    )
+
+
+def test_compiled_frame_changes_cache_context_for_same_recipe(monkeypatch, tmp_path):
+    scene = _synthetic_scene()
+    plan = scene.compile_plan()
+    output = tmp_path / "frame.png"
+    contexts = []
+    for frame_json in ('{"frame":0}', '{"frame":1}'):
+        scene.compiled_plan = replace(
+            plan, frame=SimpleNamespace(to_json=lambda value=frame_json: value)
+        )
+        contexts.append(_capture_cache_context(monkeypatch, scene, output))
+    assert contexts[0] != contexts[1]
+    assert json.loads(contexts[0]) == {
+        "scene": _path_free_scene(scene),
+        "chronos_frame": '{"frame":0}',
+    }
+
+
+def test_flythrough_default_keywords_preserve_artifact_bytes(tmp_path):
+    _require_terrain_rendering()
+    scene = _synthetic_scene()
+    camera_path = {0: scene, 1: scene}
+    omitted = tmp_path / "omitted"
+    explicit = tmp_path / "explicit"
+    render_flythrough(camera_path, base_seed=7, samples=1, out_dir=omitted)
+    render_flythrough(
+        camera_path,
+        base_seed=7,
+        samples=1,
+        out_dir=explicit,
+        certificate=False,
+        cache=None,
+    )
+    names = sorted(path.name for path in omitted.iterdir())
+    assert names == sorted(path.name for path in explicit.iterdir())
+    assert "flythrough_manifest.json" in names
+    assert any(name.endswith(".provenance.json") for name in names)
+    assert any(name.endswith(".png") for name in names)
+    for name in names:
+        assert (omitted / name).read_bytes() == (explicit / name).read_bytes(), name
+
+
+def test_flythrough_certificate_writes_one_sidecar_per_frame(tmp_path):
+    _require_terrain_rendering()
+    scene = _synthetic_scene()
+    camera_path = {0: scene, 1: scene}
+    plain = tmp_path / "plain"
+    certified = tmp_path / "certified"
+    render_flythrough(camera_path, base_seed=7, samples=1, out_dir=plain)
+    render_flythrough(
+        camera_path, base_seed=7, samples=1, out_dir=certified, certificate=True
+    )
+    assert (plain / "flythrough_manifest.json").read_bytes() == (
+        certified / "flythrough_manifest.json"
+    ).read_bytes()
+    expected = {f"frame_{index:08d}.certificate.json" for index in camera_path}
+    observed = {path.name for path in certified.glob("*.certificate.json")}
+    assert observed == expected
+    for name in expected:
+        assert json.loads((certified / name).read_text("utf-8"))
+
+
+def test_flythrough_repeat_run_hits_cache_and_preserves_pixel_hashes(
+    monkeypatch, tmp_path
+):
+    _require_terrain_rendering()
+    scene = _synthetic_scene()
+    camera_path = {0: scene, 1: scene}
+    output = tmp_path / "output"
+    cache = tmp_path / "cache"
+    original_render = f3d.MapScene.render
+    hits: list[tuple[int, bool | None]] = []
+
+    def record_render(self, *args, **kwargs):
+        report = original_render(self, *args, **kwargs)
+        frame = json.loads(self.compiled_plan.frame.to_json())
+        hits.append((frame["frame_index"], self.last_render_metadata.get("cache_hit")))
+        return report
+
+    monkeypatch.setattr(f3d.MapScene, "render", record_render)
+    first = render_flythrough(
+        camera_path, base_seed=7, samples=1, out_dir=output, cache=cache
+    )
+    first_manifest = (output / "flythrough_manifest.json").read_bytes()
+    second = render_flythrough(
+        camera_path, base_seed=7, samples=1, out_dir=output, cache=cache
+    )
+    moved_output = tmp_path / "moved-output"
+    third = render_flythrough(
+        camera_path, base_seed=7, samples=1, out_dir=moved_output, cache=cache
+    )
+    assert hits == [
+        (0, False), (1, False), (0, True), (1, True), (0, True), (1, True)
+    ]
+    assert (output / "flythrough_manifest.json").read_bytes() == first_manifest
+    for manifest, directory in ((second, output), (third, moved_output)):
+        for record in manifest.frames:
+            index = int(record["frame_index"])
+            compiled = f3d.CompiledFrame.from_json(record["compiled_frame"])
+            rgba = _load_rgba(directory / record["image"])
+            provenance = json.loads(f3d.render_compiled_frame(compiled, rgba))
+            assert provenance["pixel_hash"] == first.frame_record(index)["pixel_hash"]
+
+
+def test_different_cameras_do_not_share_cache_entry(tmp_path):
+    from forge3d.chronos import _camera_json, _prepare_frame_scene, _scene_json
+
+    _require_terrain_rendering()
+    first = _synthetic_scene()
+    second = f3d.MapScene(
+        replace(first.recipe, camera=replace(first.recipe.camera, azimuth_deg=73.0))
+    )
+    output = tmp_path / "shared.png"
+    cache = tmp_path / "cache"
+    camera_hashes = []
+    for source in (first, second):
+        frame_scene = _prepare_frame_scene(source, 0, 7, 1, output)
+        compiled = f3d.compile_frame(
+            0, 7, 1, _camera_json(frame_scene), _scene_json(frame_scene, [])
+        )
+        frame_scene.compiled_plan = replace(frame_scene.compiled_plan, frame=compiled)
+        frame_scene.render(str(output), cache=cache)
+        assert frame_scene.last_render_metadata["cache_hit"] is False
+        camera_hashes.append(json.loads(compiled.to_json())["camera_hash"])
+    assert camera_hashes[0] != camera_hashes[1]
 
 
 @pytest.mark.skipif(
