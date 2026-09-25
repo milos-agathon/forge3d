@@ -6,14 +6,42 @@
 // `anchor_epsilon` (default 1 km) away from it; the view matrix is built from
 // anchor-relative positions and per-object model matrices carry the
 // anchor-relative object origin. Narrowing happens in exactly ONE place —
-// `Anchor::narrow`, used only by `to_render_*` — and that single `as f32`
-// site is grep-gated by tests/test_world_coord_f32_gate.py.
+// `Anchor::to_render_f32`, which accepts only a typed `Coord` — and that
+// single `as f32` site is grep-gated by tests/test_world_coord_f32_gate.py.
 // RELEVANT FILES: src/geo/units.rs, src/scene/py_api/base.rs, src/camera/mod.rs
+//
+//! An untyped `DVec3` cannot be narrowed: it must first be tagged as a
+//! position (`SceneCoord::scene`) or a displacement (`SceneOffset::scene`).
+//!
+//! ```
+//! use forge3d::camera::Anchor;
+//! use forge3d::geo::units::{SceneCoord, SceneOffset};
+//! use glam::DVec3;
+//! let anchor = Anchor::new();
+//! let p = anchor.to_render_f32(SceneCoord::scene(DVec3::new(1.0, 2.0, 3.0)));
+//! let d = Anchor::offset_to_render(SceneOffset::scene(DVec3::X));
+//! assert_eq!((p.x, d.x), (1.0, 1.0));
+//! ```
+//!
+//! ```compile_fail
+//! use forge3d::camera::Anchor;
+//! use glam::DVec3;
+//! // ERROR: expected `Coord<_, _>`, found `DVec3`.
+//! let _ = Anchor::new().to_render_f32(DVec3::new(1.0, 2.0, 3.0));
+//! ```
+//!
+//! ```compile_fail
+//! use forge3d::camera::Anchor;
+//! use forge3d::geo::units::SceneOffset;
+//! use glam::DVec3;
+//! // ERROR: a displacement is not a position; it cannot be anchored.
+//! let _ = Anchor::new().to_render_f32(SceneOffset::scene(DVec3::X));
+//! ```
 
 use glam::{DVec3, Mat4, Vec3};
 
 use crate::core::dd::DDVec3;
-use crate::geo::units::{Coord, CrsTag, EpochTag};
+use crate::geo::units::{Coord, CoordOffset, CrsTag, EpochTag, Unreferenced};
 
 /// An f64 world-space origin that render-space f32 values are measured from.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,59 +109,39 @@ impl Anchor {
         }
     }
 
-    /// The ONLY sanctioned f64→f32 narrowing of a world coordinate in the
-    /// codebase (single textual `as f32`, enforced at source level).
-    #[inline]
-    fn narrow(value: f64) -> f32 {
-        value as f32
-    }
-
-    /// Narrow an anchor-relative world position to render-space f32.
-    pub fn to_render_vec3(&self, p: DVec3) -> Vec3 {
-        let rel = p - self.origin;
-        Vec3::new(
-            Self::narrow(rel.x),
-            Self::narrow(rel.y),
-            Self::narrow(rel.z),
-        )
-    }
-
-    /// Narrow a unitless direction at the render boundary. Directions are not
-    /// world positions, so they are not rebased; they still use the one
-    /// sanctioned narrowing implementation.
-    pub fn to_render_direction(&self, direction: DVec3) -> Vec3 {
-        Self::direction_to_render(direction)
-    }
-
-    /// Narrow a non-position direction or dimension without constructing a
-    /// throwaway anchor. Viewer code must use the active frame anchor for
-    /// positions; this associated helper exists only for translation-invariant
-    /// quantities such as colors, UVs, normals, and physical spans.
-    pub fn direction_to_render(direction: DVec3) -> Vec3 {
-        Vec3::new(
-            Self::narrow(direction.x),
-            Self::narrow(direction.y),
-            Self::narrow(direction.z),
-        )
-    }
-
-    /// Typed entry point: the single named function where a `Coord` leaves
-    /// the f64 world and becomes a render-space `Vec3`.
+    /// The single f64→f32 crossing for world coordinates in the codebase: a
+    /// typed `Coord` leaves the f64 world as an anchor-relative render-space
+    /// `Vec3`. The subtraction runs in f64; only the small relative vector is
+    /// narrowed. This body holds the only textual `as f32` in this module,
+    /// enforced by tests/test_world_coord_f32_gate.py.
     pub fn to_render_f32<C: CrsTag, E: EpochTag>(&self, p: Coord<C, E>) -> Vec3 {
-        self.to_render_vec3(p.raw())
+        let rel = p.raw() - self.origin;
+        Vec3::from_array(rel.to_array().map(|component| component as f32))
+    }
+
+    /// Narrow a translation-invariant displacement or direction (spans,
+    /// normals, view directions). It reuses the one crossing above relative to
+    /// an anchor at the frame origin, so `offset - 0.0` is exact and no second
+    /// narrowing implementation exists.
+    pub fn offset_to_render<C: CrsTag>(offset: CoordOffset<C>) -> Vec3 {
+        Self::new().to_render_f32(Coord::<C, Unreferenced>::from_raw(offset.raw()))
     }
 
     /// Right-handed look-at view matrix built from anchor-relative eye and
-    /// target. The subtraction happens in f64; only the small relative
-    /// vectors are narrowed.
-    pub fn view_look_at(&self, eye: DVec3, target: DVec3, up: Vec3) -> Mat4 {
-        Mat4::look_at_rh(self.to_render_vec3(eye), self.to_render_vec3(target), up)
+    /// target positions.
+    pub fn view_look_at<C: CrsTag, E: EpochTag>(
+        &self,
+        eye: Coord<C, E>,
+        target: Coord<C, E>,
+        up: Vec3,
+    ) -> Mat4 {
+        Mat4::look_at_rh(self.to_render_f32(eye), self.to_render_f32(target), up)
     }
 
     /// Anchor-relative translation an object's model matrix must carry for
     /// geometry authored relative to `object_origin`.
-    pub fn model_offset(&self, object_origin: DVec3) -> Vec3 {
-        self.to_render_vec3(object_origin)
+    pub fn model_offset<C: CrsTag, E: EpochTag>(&self, object_origin: Coord<C, E>) -> Vec3 {
+        self.to_render_f32(object_origin)
     }
 
     /// Split an absolute f64 world position into a normalized double-float
@@ -152,13 +160,17 @@ impl Anchor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geo::units::{Coord, Ecef, Itrf2014};
+    use crate::geo::units::{Coord, Ecef, Itrf2014, SceneCoord, SceneOffset};
 
     #[test]
     fn anchor_defaults_to_world_origin_and_identity_behaviour() {
         let anchor = Anchor::new();
         let eye = DVec3::new(3.0, 2.0, 3.0);
-        let view = anchor.view_look_at(eye, DVec3::ZERO, Vec3::Y);
+        let view = anchor.view_look_at(
+            SceneCoord::scene(eye),
+            SceneCoord::scene(DVec3::ZERO),
+            Vec3::Y,
+        );
         let legacy = Mat4::look_at_rh(Vec3::new(3.0, 2.0, 3.0), Vec3::ZERO, Vec3::Y);
         assert!(
             (view
@@ -228,11 +240,11 @@ mod tests {
         let object = DVec3::new(6_378_137.0 + 3.0, 100.0, -50.0);
         let mut anchor = Anchor::new();
         anchor.rebase_if_needed(DVec3::new(6_378_137.0, 0.0, 0.0));
-        let before = anchor.to_render_vec3(object);
+        let before = anchor.to_render_f32(SceneCoord::scene(object));
         assert!((before.as_dvec3() - (object - anchor.origin())).length() < 1e-3);
 
         assert!(anchor.rebase_if_needed(DVec3::new(6_378_137.0 + 1_500.0, 0.0, 0.0)));
-        let after = anchor.to_render_vec3(object);
+        let after = anchor.to_render_f32(SceneCoord::scene(object));
         assert!((after.as_dvec3() - (object - anchor.origin())).length() < 1e-3);
     }
 
@@ -247,7 +259,7 @@ mod tests {
             cam += DVec3::new(1_100.0, 0.0, 0.0);
             anchor.rebase_if_needed(cam);
             let near = cam + DVec3::new(2.0, -1.0, 0.5);
-            let rel = anchor.to_render_vec3(near);
+            let rel = anchor.to_render_f32(SceneCoord::scene(near));
             let truth = near - anchor.origin();
             assert!((rel.as_dvec3() - truth).length() < 1e-3, "drift too large");
         }
@@ -267,5 +279,28 @@ mod tests {
         // entirely (~0.5 m quantization at this magnitude).
         let unanchored = Anchor::new().to_render_f32(p);
         assert_eq!(unanchored.x, 6_378_137.0f32);
+    }
+
+    #[test]
+    fn offset_narrowing_is_translation_invariant_and_exact_at_zero_origin() {
+        let mut anchor = Anchor::new();
+        anchor.rebase_if_needed(DVec3::new(6_378_137.0, 0.0, 0.0));
+        let span = DVec3::new(1_234.5, -0.0, 7.25);
+        let narrowed = Anchor::offset_to_render(SceneOffset::scene(span));
+        assert_eq!(narrowed.to_array(), [1_234.5f32, -0.0, 7.25]);
+        assert!(narrowed.y.is_sign_negative());
+    }
+
+    #[test]
+    fn typed_crossing_matches_componentwise_f64_subtraction() {
+        let mut anchor = Anchor::new();
+        anchor.rebase_if_needed(DVec3::new(500_000.25, 4_649_776.5, 1_000.0));
+        let p = DVec3::new(500_123.125, 4_649_700.75, 987.5);
+        let rel = p - anchor.origin();
+        let render = anchor.to_render_f32(SceneCoord::scene(p));
+        assert_eq!(
+            render.to_array(),
+            [rel.x as f32, rel.y as f32, rel.z as f32]
+        );
     }
 }

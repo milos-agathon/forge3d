@@ -6,6 +6,7 @@ Separate positive contracts prove that each viewer world-position route calls
 the active Anchor inside the producing function.
 """
 
+import collections
 import hashlib
 import re
 from pathlib import Path
@@ -69,25 +70,29 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # control; ECEF world positions remain f64 until conversion through the active
 # Anchor, and Anchor remains the sole production world-position narrowing
 # owner.
-EXPECTED_CONVERSION_COUNT = 1797
-EXPECTED_CONVERSION_SHA256 = "e92ccc82c4453865d276659642a1aafdf79357a828325d5bcfbc490004eb3ed9"
+EXPECTED_CONVERSION_COUNT = 1812
+EXPECTED_CONVERSION_SHA256 = "6b668d254136b037c7cbdc3c00b1afb8229468cc8ba91f058f672aa7ccf4b73f"
+LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
+MENSURA_RECORDED_COUNT = 1403
+MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
 
-# The current tree adds the full-frame camera fields, the bounded inverse
-# edge-event certificate, and the accompanying runtime-contract observations.
-# The complete inventory below remains fail-closed: every production narrowing
-# primitive is still covered by this exact count and digest.  The older
-# transition records retain their review provenance, but their statement
-# fingerprints are intentionally not replayed against later refactors.
+# The current tree includes the prior main history and MENSURA's typed anchor
+# exit. Main's ORBIS merge was already six sites beyond its frozen count; the
+# integration record in LEDGER_PATH captures the exact 1803 -> 1812 delta.
+# Every production narrowing primitive remains locked by count and digest.
 REVIEWED_CURRENT_TREE = {
     "count": EXPECTED_CONVERSION_COUNT,
     "digest": EXPECTED_CONVERSION_SHA256,
-    "added_count": 225,
-    "removed_count": 71,
+    "base_count": 1803,
+    "base_digest": "66068ae811b2670291434b7d1fcb9c1cb173e2cfb8c580acd87cef03e67a41ae",
+    "added_count": 16,
+    "removed_count": 7,
     "scopes": (
         "full-frame camera uniforms and runtime-contract telemetry",
         "AETHER TerrainStatistics layout",
         "DIFFERENTIA certified inverse edge events",
         "ORBIS native globe scene and physical probe boundary",
+        "MENSURA typed anchor exit and bounded render scalars",
     ),
 }
 
@@ -578,10 +583,25 @@ def test_dd_encode_has_exactly_the_two_reviewed_split_casts():
     assert actual == SANCTIONED_DD_SPLITS
 
 
+def _ledger_data():
+    import json
+
+    ledger = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
+    assert ledger["schema"] == "forge3d.world_coord_f32_ledger/1"
+    return ledger
+
+
+def _ledger():
+    return _ledger_data()["transitions"]
+
+
 def test_reviewed_checked_reader_inventory_transition_is_exact():
     reader = _read("src/terrain/cog/cog_reader.rs")
     assert "read_le_bytes8(data, i * 8)" in reader
     assert "f64::from_le_bytes(bytes)" not in reader
+    sites = conversion_inventory()
+    assert REVIEWED_INVENTORY_TRANSITION["added"] in sites
+    assert REVIEWED_INVENTORY_TRANSITION["removed"] not in sites
 
 
 def test_reviewed_anamnesis_function_ownership_transition_is_exact():
@@ -590,6 +610,17 @@ def test_reviewed_anamnesis_function_ownership_transition_is_exact():
     assert "render_raster_reference_incremental" in _function_body(
         "src/offscreen/adjudication_raster.rs", "render_raster_reference"
     )
+    sites = conversion_inventory()
+    transition = REVIEWED_ANAMNESIS_INVENTORY_TRANSITION
+    for ordinal, statement in enumerate(transition["statements"], start=1):
+        removed = (
+            transition["path"],
+            transition["removed_function"],
+            "as_f32",
+            ordinal,
+            statement,
+        )
+        assert removed not in sites
 
 
 def test_reviewed_helios_inventory_transition_is_exact():
@@ -615,22 +646,109 @@ def test_historical_transition_ledger_and_current_freeze_are_consistent():
     current = REVIEWED_CURRENT_TREE
     assert current["count"] == EXPECTED_CONVERSION_COUNT
     assert current["digest"] == EXPECTED_CONVERSION_SHA256
-    assert current["added_count"] - current["removed_count"] == current["count"] - previous_count
-    assert len(current["scopes"]) == 4
+    assert current["added_count"] - current["removed_count"] == current["count"] - current["base_count"]
+    assert len(current["scopes"]) == 5
 
 
-def test_anchor_narrow_is_the_only_world_conversion_implementation():
+def test_mensura_historical_ledger_chain_is_exact():
+    transitions = _ledger()
+    assert (transitions[0]["base_count"], transitions[0]["base_digest"]) == (
+        1327,
+        "d6368abc90af4f03c5d1a9f573e4d9efebd38767d9927098cdcc418fb0e42817",
+    )
+    for previous, current in zip(transitions, transitions[1:]):
+        assert (current["base_count"], current["base_digest"]) == (
+            previous["result_count"],
+            previous["result_digest"],
+        ), current["name"]
+    for transition in transitions:
+        assert transition["review"], transition["name"]
+        assert transition["result_count"] == (
+            transition["base_count"] - len(transition["removed"]) + len(transition["added"])
+        ), transition["name"]
+    latest = transitions[-1]
+    assert (latest["result_count"], latest["result_digest"]) == (
+        MENSURA_RECORDED_COUNT,
+        MENSURA_RECORDED_SHA256,
+    )
+    remaining = collections.Counter(conversion_inventory())
+    for site in map(tuple, latest["added"]):
+        assert remaining[site] > 0, f"recorded addition missing: {site}"
+        remaining[site] -= 1
+    current = set(conversion_inventory())
+    for site in map(tuple, latest["removed"]):
+        assert site not in current, f"recorded removal still present: {site}"
+
+
+def test_mensura_main_integration_inventory_transition_is_exact():
+    integration = _ledger_data()["main_integration"]
+    current = REVIEWED_CURRENT_TREE
+    assert (integration["base_count"], integration["base_digest"]) == (
+        current["base_count"],
+        current["base_digest"],
+    )
+    assert (integration["result_count"], integration["result_digest"]) == (
+        EXPECTED_CONVERSION_COUNT,
+        EXPECTED_CONVERSION_SHA256,
+    )
+    assert integration["review"]
+    added = list(map(tuple, integration["added"]))
+    removed = list(map(tuple, integration["removed"]))
+    assert len(added) == current["added_count"]
+    assert len(removed) == current["removed_count"]
+    assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
+    assert not set(added) & set(removed)
+    assert integration["base_count"] + len(added) - len(removed) == EXPECTED_CONVERSION_COUNT
+    inventory = collections.Counter(conversion_inventory())
+    for site in added:
+        assert inventory[site] > 0, f"recorded addition missing: {site}"
+        inventory[site] -= 1
+    for site in removed:
+        assert site not in inventory, f"recorded removal still present: {site}"
+
+
+def test_mensura_transition_leaves_one_world_cast_in_the_typed_anchor_exit():
+    latest = _ledger()[-1]
+    assert latest["name"] == "MENSURA typed anchor exit"
+    anchor_added = [site for site in latest["added"] if site[0] == SANCTIONED]
+    assert anchor_added == [
+        [
+            SANCTIONED,
+            "to_render_f32",
+            "as_f32",
+            1,
+            "Vec3::from_array(rel.to_array().map(|component| component as f32))",
+        ]
+    ]
+    removed_functions = {site[1] for site in latest["removed"] if site[0] == SANCTIONED}
+    assert removed_functions == {
+        "narrow",
+        "to_render_vec3",
+        "to_render_direction",
+        "direction_to_render",
+        "model_offset",
+    }
+
+
+def test_to_render_f32_is_the_only_world_conversion_implementation():
     anchor = _remove_cfg_test_modules(_read(SANCTIONED))
-    narrow = _function_body(SANCTIONED, "narrow")
-    assert len(re.findall(r"\bas\s+f32\b", narrow)) == 1
-    assert "value as f32" in re.sub(r"\s+", " ", narrow)
-    assert anchor.count("Self::narrow(") == 6
+    assert len(re.findall(r"\bas\s+f32\b", anchor)) == 1
+    crossing = re.sub(r"\s+", " ", _function_body(SANCTIONED, "to_render_f32"))
+    assert "fn to_render_f32<C: CrsTag, E: EpochTag>(&self, p: Coord<C, E>) -> Vec3" in crossing
+    assert "let rel = p.raw() - self.origin" in crossing
+    assert len(re.findall(r"\bas\s+f32\b", crossing)) == 1
 
-    position = _function_body(SANCTIONED, "to_render_vec3")
-    assert "p - self.origin" in re.sub(r"\s+", " ", position)
-    assert position.count("Self::narrow(") == 3
-    direction = _function_body(SANCTIONED, "direction_to_render")
-    assert direction.count("Self::narrow(") == 3
+    assert not [site for site in _conversion_inventory_text(SANCTIONED, _read(SANCTIONED))
+                if site[2] != "as_f32" or site[1] != "to_render_f32"]
+    for removed in ("narrow", "to_render_vec3", "to_render_direction", "direction_to_render"):
+        assert not re.search(rf"\bfn\s+{removed}\b", anchor), f"untyped route {removed} returned"
+
+    for route in ("offset_to_render", "view_look_at", "model_offset"):
+        body = _function_body(SANCTIONED, route)
+        assert "self.to_render_f32(" in body or "Self::new().to_render_f32(" in body, route
+        assert not re.search(r"\bas\s+f32\b", body), route
+    offset = re.sub(r"\s+", " ", _function_body(SANCTIONED, "offset_to_render"))
+    assert "offset: CoordOffset<C>" in offset
 
 
 def test_anchor_dd_split_is_a_named_non_narrowing_crossing():
@@ -643,13 +761,13 @@ def test_anchor_dd_split_is_a_named_non_narrowing_crossing():
 def test_each_viewer_world_route_calls_its_active_anchor_in_the_same_function():
     routes = {
         ("src/viewer/viewer_types.rs", "view"): "self.anchor.view_look_at(",
-        ("src/viewer/viewer_types.rs", "render_eye"): "self.anchor.to_render_vec3(",
+        ("src/viewer/viewer_types.rs", "render_eye"): "self.anchor.to_render_f32(",
         ("src/viewer/render/main_loop/frame_anchor.rs", "anchored_object_model"): "frame.anchor.model_offset(",
-        ("src/viewer/pointcloud/state.rs", "packed_point"): "anchor.to_render_vec3(",
-        ("src/viewer/terrain/vector_overlay.rs", "repack_source_vertices"): "anchor.to_render_vec3(",
-        ("src/labels/mod.rs", "update_with_camera_anchored"): "anchor.to_render_vec3(",
-        ("src/viewer/terrain/render/screen/setup.rs", "build_screen_render_state"): "frame.anchor.to_render_vec3(",
-        ("src/viewer/terrain/render/offscreen/setup.rs", "build_snapshot_render_state"): "frame.anchor.to_render_vec3(",
+        ("src/viewer/pointcloud/state.rs", "packed_point"): "anchor.to_render_f32(",
+        ("src/viewer/terrain/vector_overlay.rs", "repack_source_vertices"): "anchor.to_render_f32(",
+        ("src/labels/mod.rs", "update_with_camera_anchored"): "anchor.to_render_f32(",
+        ("src/viewer/terrain/render/screen/setup.rs", "build_screen_render_state"): "frame.anchor.to_render_f32(",
+        ("src/viewer/terrain/render/offscreen/setup.rs", "build_snapshot_render_state"): "frame.anchor.to_render_f32(",
         ("src/viewer/input/viewer_input.rs", "pick_at_screen"): ".to_world_from_render_f64(",
     }
     for (rel, function), required_call in routes.items():

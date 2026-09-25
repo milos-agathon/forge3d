@@ -123,7 +123,11 @@ impl Viewer {
         Mat4::from_scale_rotation_translation(
             self.object_scale,
             self.object_rotation,
-            frame.anchor.model_offset(self.object_translation),
+            frame
+                .anchor
+                .model_offset(crate::geo::units::SceneCoord::scene(
+                    self.object_translation,
+                )),
         )
     }
 

@@ -201,7 +201,11 @@ impl GlobeFrame {
             }
         }
         let local = self.ecef_to_local_vector(ecef - self.anchor.origin())?;
-        let position = self.anchor.to_render_vec3(self.anchor.origin() + local);
+        let position = self
+            .anchor
+            .to_render_f32(crate::geo::units::SceneCoord::scene(
+                self.anchor.origin() + local,
+            ));
         if !local.is_finite() || !position.is_finite() {
             return Err(GlobeFrameError::EcefOutOfRange);
         }
@@ -209,7 +213,8 @@ impl GlobeFrame {
             GlobeMode::Flat => Vec3::Z,
             GlobeMode::Globe => {
                 let local_up = self.ecef_to_local_vector(ecef.normalize())?;
-                Anchor::direction_to_render(local_up).normalize()
+                Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(local_up))
+                    .normalize()
             }
         };
         if !up.is_finite() {

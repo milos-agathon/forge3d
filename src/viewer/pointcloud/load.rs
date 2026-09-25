@@ -33,9 +33,10 @@ pub(crate) fn preflight_laz_bounds(path: &str) -> Result<PointCloudPathPreflight
         return Err("point-cloud header contains invalid bounds".to_string());
     }
     let center = (min + max) * 0.5;
-    let extent_render = crate::camera::Anchor::direction_to_render(max - min)
-        .max_element()
-        .max(100.0);
+    let extent_render =
+        crate::camera::Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(max - min))
+            .max_element()
+            .max(100.0);
     Ok(PointCloudPathPreflight {
         min,
         max,

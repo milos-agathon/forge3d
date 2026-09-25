@@ -453,31 +453,75 @@ mod py {
         } else {
             to_f32_array(&source.array)?
         };
+        let mut datum_warnings = Vec::new();
         if source.height_system == DemHeightSystem::OrthometricEgm96 {
-            let (left, bottom, right, top) = source.info.bounds.ok_or_else(|| {
-                GisError::InvalidArgument(
-                    "invalid_argument: orthometric_egm96 DEM requires EPSG:4326 bounds".to_string(),
-                )
-            })?;
             let is_wgs84 = source.info.crs_authority.as_ref().is_some_and(|crs| {
                 crs.get("name")
                     .is_some_and(|name| name.eq_ignore_ascii_case("EPSG"))
                     && crs.get("code").is_some_and(|code| code == "4326")
             });
-            if !is_wgs84 {
-                return Err(GisError::InvalidArgument(
-                    "invalid_argument: orthometric_egm96 DEM requires EPSG:4326 coordinates"
-                        .to_string(),
-                )
-                .into());
-            }
+            // Pixel-centre geodetic lon/lat for the EGM96 lookup. EPSG:4326
+            // samples its bounds directly; a built-in projected CRS inverts
+            // each affine pixel centre through the pure-Rust engine and
+            // reports any datum operation that inversion applies.
+            let lon_lat: Box<dyn Fn(usize, usize) -> Result<(f64, f64), GisError>> = if is_wgs84 {
+                let (left, bottom, right, top) = source.info.bounds.ok_or_else(|| {
+                    GisError::InvalidArgument(
+                        "invalid_argument: orthometric_egm96 DEM requires EPSG:4326 bounds"
+                            .to_string(),
+                    )
+                })?;
+                let (height, width) = (array.height as f64, array.width as f64);
+                Box::new(move |row, col| {
+                    Ok((
+                        left + (col as f64 + 0.5) * (right - left) / width,
+                        top - (row as f64 + 0.5) * (top - bottom) / height,
+                    ))
+                })
+            } else {
+                let unsupported = || {
+                    GisError::InvalidArgument(
+                        "invalid_argument: orthometric_egm96 DEM requires EPSG:4326 or a \
+                         built-in projected CRS with an affine transform"
+                            .to_string(),
+                    )
+                };
+                let has_supported_projected_epsg =
+                    source.info.crs_authority.as_ref().is_some_and(|authority| {
+                        authority
+                            .get("name")
+                            .is_some_and(|name| name.eq_ignore_ascii_case("EPSG"))
+                            && authority
+                                .get("code")
+                                .and_then(|code| code.parse::<u32>().ok())
+                                .is_some_and(|code| {
+                                    crate::geo::projections::epsg_projection_definition(code)
+                                        .is_some()
+                                })
+                    });
+                if !has_supported_projected_epsg {
+                    return Err(unsupported().into());
+                }
+                let src_crs = crate::gis::raster_write::CrsSpec::from_raster_info(&source.info)
+                    .ok_or_else(unsupported)?;
+                let wgs84 = crate::gis::raster_write::CrsSpec::from_string("EPSG:4326".into())?;
+                if crate::gis::crs::transform_pair_supported(&src_crs, &wgs84).is_err() {
+                    return Err(unsupported().into());
+                }
+                let t = source.info.transform.ok_or_else(unsupported)?;
+                let transform = AffineTransform::new([t.0, t.1, t.2, t.3, t.4, t.5])?;
+                datum_warnings = crate::gis::crs::datum_step_warnings(&src_crs, &wgs84)?;
+                Box::new(move |row, col| {
+                    let (x, y) = transform.apply(col as f64 + 0.5, row as f64 + 0.5);
+                    crate::gis::crs::transform_point(x, y, &src_crs, &wgs84)
+                })
+            };
             let RasterData::F64(values) = &mut array.data else {
                 unreachable!("EGM96 conversion preserves f64 samples")
             };
             for row in 0..array.height {
-                let lat = top - (row as f64 + 0.5) * (top - bottom) / array.height as f64;
                 for col in 0..array.width {
-                    let lon = left + (col as f64 + 0.5) * (right - left) / array.width as f64;
+                    let (lon, lat) = lon_lat(row, col)?;
                     let index = row * array.width + col;
                     values[index] = crate::geo::geoid::orthometric_to_ellipsoidal(
                         crate::geo::units::Height::<
@@ -502,6 +546,7 @@ mod py {
             .into());
         }
         let mut info = source.info.clone();
+        info.warnings.extend(datum_warnings);
         info.dtype_per_band = vec![match array.dtype() {
             crate::gis::types::RasterDType::Float64 => "float64",
             _ => "float32",

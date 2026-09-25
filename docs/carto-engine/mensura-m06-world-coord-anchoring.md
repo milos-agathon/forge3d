@@ -22,8 +22,14 @@ the anchor and supplies view, projection, screen render, snapshot, motion blur,
 labels, point clouds, fog, GI, sky, objects, and picking for that frame.
 
 Absolute world positions remain `f64` until subtraction from the copied anchor.
-`Anchor::narrow` in `src/camera/anchor.rs` is the only world-coordinate
-`f64 -> f32` implementation. Render vertices, colors, normalized UV extents,
+`Anchor::to_render_f32(Coord<C, E>)` in `src/camera/anchor.rs` is the only
+world-coordinate `f64 -> f32` implementation and holds the only world `as f32`.
+It accepts only a typed coordinate: scene positions cross into the typed algebra
+through `SceneCoord::scene`, and translation-invariant spans, normals, and view
+directions narrow through `Anchor::offset_to_render(SceneOffset::scene(..))`,
+which delegates to the same crossing. `view_look_at` and `model_offset` also
+take typed coordinates. No anchor method accepts a bare `DVec3` and returns
+`f32`. Render vertices, colors, normalized UV extents,
 local density-volume coordinates, and local scatter transforms remain `f32`
 because they are not absolute world coordinates.
 
@@ -170,7 +176,7 @@ and locally admissible proof are complete. NVIDIA/Vulkan-only rows remain
 
 | ID | Requirement / original audit gap | Status | Production and test evidence | Remaining deficiency |
 |---|---|---|---|---|
-| A01 | Exact world-coordinate f64-to-f32 inventory | FULL | `test_world_coord_f32_gate.py` inventories operations and rejecting probes; `Anchor::narrow` is the sole sanctioned implementation. | None. |
+| A01 | Exact world-coordinate f64-to-f32 inventory | FULL | `test_world_coord_f32_gate.py` inventories operations and rejecting probes, and chains every re-freeze through `tests/data/world_coord_f32_ledger.json`; `Anchor::to_render_f32(Coord)` is the sole sanctioned implementation. | None. |
 | A02 | Exact matrix-producer inventory | FULL | `test_m06_viewer_matrix_contract.py` keys file/function/operation/ordinal and rejects multiline, alias, inverse, duplicate, and previous-VP probes. | None. |
 | A03 | One persistent viewer anchor and one frame-start rebase | FULL | `test_m06_single_rebase_contract.py` inventories storage, construction, aliases, delegates, and the sole mutation. | None. |
 | A04 | Object transform applies translation/rotation/scale exactly once | FULL | Absolute translation remains f64; vertices stay local; `anchored_object_model` is the sole render transform and is shared by visible, fog-shadow, and pick paths. | None. |

@@ -67,7 +67,8 @@ pub(super) fn compute_normals(positions: &[f64], indices: &[u32]) -> Vec<f32> {
             } else {
                 glam::DVec3::Z
             };
-            crate::camera::Anchor::direction_to_render(normal).to_array()
+            crate::camera::Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(normal))
+                .to_array()
         })
         .collect()
 }
@@ -247,8 +248,9 @@ impl SurfaceProjection {
     }
 
     fn project(&self, point: [f64; 3]) -> [f32; 2] {
-        let local =
-            crate::camera::Anchor::direction_to_render(glam::DVec3::from(sub(point, self.origin)));
+        let local = crate::camera::Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(
+            glam::DVec3::from(sub(point, self.origin)),
+        ));
         match self.drop_axis {
             0 => [local.y, local.z],
             1 => [local.x, local.z],

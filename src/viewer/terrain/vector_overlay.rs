@@ -361,16 +361,15 @@ pub fn repack_source_vertices(
             if let Some(terrain) = terrain {
                 let u = (world.x - terrain.world_origin_xz.x) / terrain.world_span_xz.x;
                 let v = (world.z - terrain.world_origin_xz.y) / terrain.world_span_xz.y;
-                let uv = crate::camera::Anchor::direction_to_render(DVec3::new(u, v, 0.0));
+                let uv = DVec3::new(u, v, 0.0).as_vec3();
                 let height =
                     sample_heightmap_bilinear(&terrain.heightmap, terrain.dimensions, uv.x, uv.y);
                 world.y +=
                     f64::from((height - terrain.domain.0) * terrain.z_scale + layer.drape_offset);
-                let span = crate::camera::Anchor::direction_to_render(DVec3::new(
-                    terrain.world_span_xz.x,
-                    terrain.world_span_xz.y,
-                    0.0,
-                ));
+                let span =
+                    crate::camera::Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(
+                        DVec3::new(terrain.world_span_xz.x, terrain.world_span_xz.y, 0.0),
+                    ));
                 normal = compute_terrain_normal(
                     &terrain.heightmap,
                     terrain.dimensions,
@@ -380,7 +379,9 @@ pub fn repack_source_vertices(
                 );
             }
         }
-        render.position = anchor.to_render_vec3(world).to_array();
+        render.position = anchor
+            .to_render_f32(crate::geo::units::SceneCoord::scene(world))
+            .to_array();
         render.color = source.color;
         render.normal = normal;
         render.feature_id = source.feature_id;

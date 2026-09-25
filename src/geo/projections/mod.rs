@@ -369,10 +369,13 @@ fn utm(zone: u8, north: bool) -> tmerc::TransverseMercator {
 /// This is the single authoritative EPSG → projection table consumed by
 /// `src/gis/crs.rs`. It is a deliberately small *curated* set — one or a few
 /// authoritative codes per method — not a claim to ship the full EPSG registry.
-/// Every entry uses the WGS84/GRS80 datum family; ETRS89/RGF93/NAD83 codes are
-/// treated as WGS84-equivalent within their published alignment, because
-/// MENSURA ships no NTv2/NADCON grid shift. Unknown codes return `None`, and
-/// the caller raises rather than passing coordinates through.
+/// Every entry uses the WGS84/GRS80 datum family. The RGF93 v1 (2154) and NAD83
+/// (5070) entries reach WGS 84 only through the published EPSG null
+/// transformations named by [`epsg_geodetic_datum`] and
+/// [`GeodeticDatum::operation_to_wgs84`] (EPSG:1671, 1 m; EPSG:1188, 4 m),
+/// because MENSURA ships no NTv2/NADCON grid shift. Callers report those
+/// operations; see `crate::gis::crs::datum_steps`. Unknown codes return
+/// `None`, and the caller raises rather than passing coordinates through.
 ///
 /// | EPSG | CRS | Method |
 /// |------|-----|--------|
@@ -439,6 +442,114 @@ pub fn epsg_projection_definition(code: u32) -> Option<ProjectionDefinition> {
     })
 }
 
+/// Geodetic datum a built-in EPSG CRS is referenced to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GeodeticDatum {
+    /// World Geodetic System 1984 (the engine's pivot datum).
+    Wgs84,
+    /// Reseau Geodesique Francais 1993 v1 (EPSG datum 6171), an ETRS89
+    /// realization.
+    Rgf93v1,
+    /// North American Datum 1983 (EPSG datum 6269).
+    Nad83,
+}
+
+impl GeodeticDatum {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Wgs84 => "WGS 84",
+            Self::Rgf93v1 => "RGF93 v1",
+            Self::Nad83 => "NAD83",
+        }
+    }
+
+    /// The published EPSG operation from this datum to WGS 84, or `None` for
+    /// WGS 84 itself. Both shipped operations are EPSG "Geocentric
+    /// translations (geog2D domain)" (method 9603) with all-zero parameters:
+    /// EPSG:1671 (RGF93 v1 to WGS 84 (1), accuracy 1 m) and EPSG:1188 (NAD83
+    /// to WGS 84 (1), accuracy 4 m). They are null transformations, so they
+    /// leave coordinate values unchanged, but they are named and reported
+    /// rather than applied silently.
+    pub const fn operation_to_wgs84(self) -> Option<DatumOperation> {
+        match self {
+            Self::Wgs84 => None,
+            Self::Rgf93v1 => Some(DatumOperation {
+                epsg_code: 1671,
+                name: "RGF93 v1 to WGS 84 (1)",
+                datum: self,
+                method: "Geocentric translations (geog2D domain)",
+                method_epsg_code: 9603,
+                translation_m: [0.0, 0.0, 0.0],
+                accuracy_m: 1.0,
+            }),
+            Self::Nad83 => Some(DatumOperation {
+                epsg_code: 1188,
+                name: "NAD83 to WGS 84 (1)",
+                datum: self,
+                method: "Geocentric translations (geog2D domain)",
+                method_epsg_code: 9603,
+                translation_m: [0.0, 0.0, 0.0],
+                accuracy_m: 4.0,
+            }),
+        }
+    }
+}
+
+/// A published EPSG coordinate operation between `datum` and WGS 84.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DatumOperation {
+    pub epsg_code: u32,
+    pub name: &'static str,
+    /// The non-WGS 84 datum; the operation's target is WGS 84.
+    pub datum: GeodeticDatum,
+    pub method: &'static str,
+    pub method_epsg_code: u32,
+    /// Geocentric X/Y/Z translation parameters in metres.
+    pub translation_m: [f64; 3],
+    /// EPSG-published operation accuracy in metres.
+    pub accuracy_m: f64,
+}
+
+/// One datum operation applied while routing a transform through WGS 84.
+/// `reverse` is true when the operation runs WGS 84 → `operation.datum`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DatumStep {
+    pub operation: DatumOperation,
+    pub reverse: bool,
+}
+
+impl DatumStep {
+    pub const fn source_datum(&self) -> GeodeticDatum {
+        if self.reverse {
+            GeodeticDatum::Wgs84
+        } else {
+            self.operation.datum
+        }
+    }
+
+    pub const fn target_datum(&self) -> GeodeticDatum {
+        if self.reverse {
+            self.operation.datum
+        } else {
+            GeodeticDatum::Wgs84
+        }
+    }
+}
+
+/// Geodetic datum of an EPSG code the built-in engine can transform: the WGS 84
+/// geographic 2D/3D and geocentric codes (4326, 4979, 4978) plus every code in
+/// [`epsg_projection_definition`]. Kept beside that table so the two cannot
+/// drift; `None` means the engine has no path for the code.
+pub fn epsg_geodetic_datum(code: u32) -> Option<GeodeticDatum> {
+    match code {
+        2154 => Some(GeodeticDatum::Rgf93v1),
+        5070 => Some(GeodeticDatum::Nad83),
+        4326 | 4978 | 4979 => Some(GeodeticDatum::Wgs84),
+        code if epsg_projection_definition(code).is_some() => Some(GeodeticDatum::Wgs84),
+        _ => None,
+    }
+}
+
 /// Forward-project WGS84 lon/lat degrees into a supported EPSG projected CRS.
 /// Delegates to the authoritative [`epsg_projection_definition`] table.
 pub fn epsg_forward(code: u32, lon_deg: f64, lat_deg: f64) -> Option<ProjResult<(f64, f64)>> {
@@ -471,5 +582,43 @@ mod tests {
         let (x, y) = polar.forward(10.0, 80.0).unwrap();
         assert!((x - 102_584.234_327_933_29).abs() < 1e-6);
         assert!((y + 581_784.103_123_411_1).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod datum_tests {
+    use super::*;
+
+    #[test]
+    fn every_projection_table_code_has_a_datum_and_only_2154_5070_leave_wgs84() {
+        let mut non_wgs84 = Vec::new();
+        for code in 1..100_000u32 {
+            if epsg_projection_definition(code).is_some() {
+                let datum = epsg_geodetic_datum(code).expect("table code without a datum");
+                if datum != GeodeticDatum::Wgs84 {
+                    non_wgs84.push((code, datum));
+                }
+            }
+        }
+        assert_eq!(
+            non_wgs84,
+            vec![(2154, GeodeticDatum::Rgf93v1), (5070, GeodeticDatum::Nad83)]
+        );
+        assert_eq!(epsg_geodetic_datum(4269), None);
+    }
+
+    #[test]
+    fn shipped_datum_operations_are_the_published_epsg_null_transformations() {
+        assert_eq!(GeodeticDatum::Wgs84.operation_to_wgs84(), None);
+        for (datum, code, accuracy) in [
+            (GeodeticDatum::Rgf93v1, 1671, 1.0),
+            (GeodeticDatum::Nad83, 1188, 4.0),
+        ] {
+            let op = datum.operation_to_wgs84().unwrap();
+            assert_eq!((op.epsg_code, op.method_epsg_code), (code, 9603));
+            assert_eq!(op.translation_m, [0.0; 3]);
+            assert_eq!(op.accuracy_m, accuracy);
+            assert_eq!(op.datum, datum);
+        }
     }
 }

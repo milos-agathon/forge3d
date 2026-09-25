@@ -338,7 +338,11 @@ impl BuildingRenderData {
             self.positions
                 .extend(building.positions.chunks_exact(3).flat_map(|position| {
                     anchor
-                        .to_render_vec3(DVec3::new(position[0], position[1], position[2]))
+                        .to_render_f32(crate::geo::units::SceneCoord::scene(DVec3::new(
+                            position[0],
+                            position[1],
+                            position[2],
+                        )))
                         .to_array()
                 }));
 
