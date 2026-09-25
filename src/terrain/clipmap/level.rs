@@ -353,11 +353,13 @@ impl ClipmapLevel {
                     .camera_relative(world)
                     .map_err(|error| format!("globe clipmap vertex rebase failed: {error}"))?;
                 let direction = world.normalize();
-                let uv = crate::camera::Anchor::direction_to_render(DVec3::new(
-                    (direction.y.atan2(direction.x) / std::f64::consts::TAU + 0.5).rem_euclid(1.0),
-                    (0.5 - direction.z.asin() / std::f64::consts::PI).clamp(0.0, 1.0),
-                    0.0,
-                ));
+                let uv = crate::camera::Anchor::offset_to_render(
+                    crate::geo::units::SceneOffset::scene(DVec3::new(
+                        (direction.y.atan2(direction.x) / std::f64::consts::TAU + 0.5).rem_euclid(1.0),
+                        (0.5 - direction.z.asin() / std::f64::consts::PI).clamp(0.0, 1.0),
+                        0.0,
+                    )),
+                );
                 vertex.uv = [uv.x, uv.y];
                 vertex.set_globe_position(render.position, render.up);
                 if vertex.is_skirt() {
@@ -1127,11 +1129,13 @@ mod tests {
             .vertices
             .iter()
             .all(|vertex| glam::Vec3::from(vertex.position).is_finite()));
-        let expected_uv = crate::camera::Anchor::direction_to_render(DVec3::new(
-            (-121.7603 / 360.0 + 0.5_f64).rem_euclid(1.0),
-            0.5 - 46.8523 / 180.0,
-            0.0,
-        ));
+        let expected_uv = crate::camera::Anchor::offset_to_render(
+            crate::geo::units::SceneOffset::scene(DVec3::new(
+                (-121.7603 / 360.0 + 0.5_f64).rem_euclid(1.0),
+                0.5 - 46.8523 / 180.0,
+                0.0,
+            )),
+        );
         assert!((mesh.vertices[4].uv[0] - expected_uv.x).abs() < 1.0e-6);
         assert!((mesh.vertices[4].uv[1] - expected_uv.y).abs() < 1.0e-6);
         assert!(

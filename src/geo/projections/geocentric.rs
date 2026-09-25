@@ -6,14 +6,18 @@
 use glam::DVec3;
 
 use super::{Ellipsoid, ProjError, ProjResult, WGS84};
+use crate::geo::units::{Ellipsoidal, Height};
 
-/// Geodetic (degrees, ellipsoidal height metres) → geocentric ECEF metres.
+/// Geodetic (degrees, height above `ellipsoid`) → geocentric ECEF metres.
+/// The height is typed: an orthometric DEM height must first go through
+/// `crate::geo::geoid::orthometric_to_ellipsoidal`.
 pub fn geodetic_to_ecef(
     ellipsoid: &Ellipsoid,
     lon_deg: f64,
     lat_deg: f64,
-    h_m: f64,
+    h: Height<Ellipsoidal>,
 ) -> ProjResult<DVec3> {
+    let h_m = h.metres();
     if !(-90.0..=90.0).contains(&lat_deg) || !lon_deg.is_finite() || !h_m.is_finite() {
         return Err(ProjError::Domain(format!(
             "geodetic input out of range: lon={lon_deg}, lat={lat_deg}, h={h_m}"
@@ -31,10 +35,13 @@ pub fn geodetic_to_ecef(
     ))
 }
 
-/// Geocentric ECEF metres → geodetic (lon degrees, lat degrees, ellipsoidal
-/// height metres). Bowring's first approximation refined by fixed-point
+/// Geocentric ECEF metres → geodetic (lon degrees, lat degrees, typed
+/// ellipsoidal height). Bowring's first approximation refined by fixed-point
 /// iteration to machine precision (≪ 1e-9 m everywhere on and near the surface).
-pub fn ecef_to_geodetic(ellipsoid: &Ellipsoid, ecef: DVec3) -> ProjResult<(f64, f64, f64)> {
+pub fn ecef_to_geodetic(
+    ellipsoid: &Ellipsoid,
+    ecef: DVec3,
+) -> ProjResult<(f64, f64, Height<Ellipsoidal>)> {
     if !ecef.is_finite() {
         return Err(ProjError::Domain("ECEF input must be finite".to_string()));
     }
@@ -44,7 +51,7 @@ pub fn ecef_to_geodetic(ellipsoid: &Ellipsoid, ecef: DVec3) -> ProjResult<(f64, 
         // On the polar axis the longitude is arbitrary; use 0.
         let lat = if ecef.z >= 0.0 { 90.0 } else { -90.0 };
         let h = ecef.z.abs() - ellipsoid.b();
-        return Ok((0.0, lat, h));
+        return Ok((0.0, lat, Height::new(h)));
     }
     let lon = ecef.y.atan2(ecef.x);
 
@@ -72,7 +79,7 @@ pub fn ecef_to_geodetic(ellipsoid: &Ellipsoid, ecef: DVec3) -> ProjResult<(f64, 
     } else {
         p / lat.cos() - nu
     };
-    Ok((lon.to_degrees(), lat.to_degrees(), h))
+    Ok((lon.to_degrees(), lat.to_degrees(), Height::new(h)))
 }
 
 fn planetocentric_surface_radius(ellipsoid: &Ellipsoid, lat: f64) -> f64 {
@@ -124,11 +131,15 @@ pub fn ecef_to_planetocentric(ellipsoid: &Ellipsoid, ecef: DVec3) -> ProjResult<
 }
 
 /// WGS84 convenience wrappers (the common case across the tree).
-pub fn wgs84_geodetic_to_ecef(lon_deg: f64, lat_deg: f64, h_m: f64) -> ProjResult<DVec3> {
-    geodetic_to_ecef(&WGS84, lon_deg, lat_deg, h_m)
+pub fn wgs84_geodetic_to_ecef(
+    lon_deg: f64,
+    lat_deg: f64,
+    h: Height<Ellipsoidal>,
+) -> ProjResult<DVec3> {
+    geodetic_to_ecef(&WGS84, lon_deg, lat_deg, h)
 }
 
-pub fn wgs84_ecef_to_geodetic(ecef: DVec3) -> ProjResult<(f64, f64, f64)> {
+pub fn wgs84_ecef_to_geodetic(ecef: DVec3) -> ProjResult<(f64, f64, Height<Ellipsoidal>)> {
     ecef_to_geodetic(&WGS84, ecef)
 }
 
@@ -154,7 +165,7 @@ mod tests {
             (lon - dms(2.0, 7.0, 46.380)).abs() < 9e-9,
             "lon residual {lon}"
         );
-        assert!((h - 73.0).abs() < 1e-3, "height residual {h}");
+        assert!((h.metres() - 73.0).abs() < 1e-3, "height residual {h:?}");
     }
 
     #[test]
@@ -177,7 +188,7 @@ mod tests {
         for lat in [-89.9, -60.0, -30.0, 0.0, 15.0, 45.0, 75.0, 89.9] {
             for lon in [-179.5, -90.0, 0.0, 44.0, 120.0, 179.5] {
                 for h in [-100.0, 0.0, 8848.0] {
-                    let ecef = wgs84_geodetic_to_ecef(lon, lat, h).unwrap();
+                    let ecef = wgs84_geodetic_to_ecef(lon, lat, Height::new(h)).unwrap();
                     let (lon2, lat2, h2) = wgs84_ecef_to_geodetic(ecef).unwrap();
                     let back = wgs84_geodetic_to_ecef(lon2, lat2, h2).unwrap();
                     worst = worst.max((back - ecef).length());

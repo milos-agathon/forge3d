@@ -39,14 +39,11 @@ impl<'de> serde::Deserialize<'de> for ViewerVectorVertex {
                 "vector feature ID must be an integer in [0, u32::MAX]",
             ));
         }
-        let rgb = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
-            lanes[3], lanes[4], lanes[5],
-        ));
-        let alpha =
-            crate::camera::Anchor::direction_to_render(glam::DVec3::new(lanes[6], 0.0, 0.0));
+        let rgb = glam::DVec3::new(lanes[3], lanes[4], lanes[5]).as_vec3();
+        let alpha = lanes[6] as f32;
         Ok(Self {
             position: [lanes[0], lanes[1], lanes[2]],
-            color: [rgb.x, rgb.y, rgb.z, alpha.x],
+            color: [rgb.x, rgb.y, rgb.z, alpha],
             feature_id: id as u32,
         })
     }

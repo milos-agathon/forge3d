@@ -205,13 +205,12 @@ impl ViewerTerrainScene {
         )?;
 
         let terrain_width = width as f32;
-        let terrain_span = crate::camera::Anchor::direction_to_render(DVec3::new(
-            footprint.world_span_xz.x,
-            0.0,
-            footprint.world_span_xz.y,
-        ))
-        .abs()
-        .max_element();
+        let terrain_span =
+            crate::camera::Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(
+                DVec3::new(footprint.world_span_xz.x, 0.0, footprint.world_span_xz.y),
+            ))
+            .abs()
+            .max_element();
         let cam_radius = terrain_span * 1.5;
 
         let uniforms = TerrainUniforms {

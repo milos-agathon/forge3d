@@ -43,8 +43,12 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 let second_world = glam::DVec3::from(second.position);
                 Some((
                     (second_world - first_world).to_array(),
-                    (frame.anchor.to_render_vec3(second_world)
-                        - frame.anchor.to_render_vec3(first_world))
+                    (frame
+                        .anchor
+                        .to_render_f32(crate::geo::units::SceneCoord::scene(second_world))
+                        - frame
+                            .anchor
+                            .to_render_f32(crate::geo::units::SceneCoord::scene(first_world)))
                     .to_array(),
                 ))
             } else {

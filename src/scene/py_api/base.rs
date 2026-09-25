@@ -34,9 +34,9 @@ impl Scene {
         // legacy path. Projection stays f32.
         let eye_d = glam::DVec3::new(eye.0, eye.1, eye.2);
         let target_d = glam::DVec3::new(target.0, target.1, target.2);
-        let up_v = self
-            .camera_anchor
-            .to_render_direction(glam::DVec3::new(up.0, up.1, up.2));
+        let up_v = crate::camera::Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(
+            glam::DVec3::new(up.0, up.1, up.2),
+        ));
         self.camera_anchor.rebase_if_needed(eye_d);
         for inst in &mut self.text3d_instances {
             inst.model = crate::scene::types::anchored_model(
@@ -45,10 +45,16 @@ impl Scene {
                 inst.local_model,
             );
         }
-        let eye_v = self.camera_anchor.to_render_vec3(eye_d);
-        let target_v = self.camera_anchor.to_render_vec3(target_d);
+        let eye_v = self
+            .camera_anchor
+            .to_render_f32(crate::geo::units::SceneCoord::scene(eye_d));
+        let target_v = self
+            .camera_anchor
+            .to_render_f32(crate::geo::units::SceneCoord::scene(target_d));
         camera::validate_camera_params(eye_v, target_v, up_v, fovy_deg, znear, zfar)?;
-        let world_origin_offset = self.camera_anchor.model_offset(glam::DVec3::ZERO);
+        let world_origin_offset = self
+            .camera_anchor
+            .model_offset(crate::geo::units::SceneCoord::scene(glam::DVec3::ZERO));
         self.scene.view = glam::Mat4::look_at_rh(eye_v, target_v, up_v)
             * glam::Mat4::from_translation(world_origin_offset);
         self.scene.proj = camera::perspective_wgpu(fovy_deg.to_radians(), aspect, znear, zfar);

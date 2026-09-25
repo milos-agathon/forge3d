@@ -1,5 +1,6 @@
 """Option-2 absolute-world boundary and historical-contract regression gates."""
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +55,7 @@ def test_absolute_sources_remain_f64_until_anchor_packing():
     city = _read("src/import/cityjson/types.rs")
     assert "pub positions: Vec<f64>" in city
     city_geometry = _read("src/import/cityjson/geometry.rs")
-    assert "direction_to_render" in city_geometry
+    assert "offset_to_render(crate::geo::units::SceneOffset::scene(" in city_geometry
     assert "point[0] as f32" not in city_geometry
 
 
@@ -66,7 +67,8 @@ def test_object_vertices_stay_local_and_translation_is_anchored_once():
     assert "transformed_positions" not in command
     assert "transform_point3" not in command
     frame = _read("src/viewer/render/main_loop/frame_anchor.rs")
-    assert "frame.anchor.model_offset(self.object_translation)" in frame
+    body = re.sub(r"\s+", "", frame.split("fn anchored_object_model", 1)[1].split("fn ", 1)[0])
+    assert "frame.anchor.model_offset(crate::geo::units::SceneCoord::scene(self.object_translation,))" in body
     geometry = _read("src/viewer/render/main_loop/geometry/pass.rs")
     geometry_pass = geometry.split(
         "pub(in crate::viewer::render::main_loop) fn render_object_overlay",

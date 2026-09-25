@@ -68,7 +68,7 @@ impl PointBuffer {
                 self.positions.get(pi + 1).copied().unwrap_or(0.0),
                 self.positions.get(pi + 2).copied().unwrap_or(0.0),
             );
-            let render = anchor.to_render_vec3(point);
+            let render = anchor.to_render_f32(crate::geo::units::SceneCoord::scene(point));
             out.push(render.x);
             out.push(render.y);
             out.push(render.z);
@@ -128,7 +128,7 @@ impl PointBuffer {
                 self.positions.get(pi + 1).copied().unwrap_or(0.0),
                 self.positions.get(pi + 2).copied().unwrap_or(0.0),
             );
-            let render = anchor.to_render_vec3(point);
+            let render = anchor.to_render_f32(crate::geo::units::SceneCoord::scene(point));
             let elev_norm = ((point.y - bounds_min[1]) / elev_range).clamp(0.0, 1.0) as f32;
 
             let (r, g, b) = if let Some(cols) = colors {

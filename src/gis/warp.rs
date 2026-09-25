@@ -369,7 +369,12 @@ pub fn reproject_raster(
             }
         }
     }
-    let mut diagnostics = Vec::new();
+    // An unsupported pair has no datum operation; its per-pixel failures are
+    // handled by the policy below.
+    let mut diagnostics = match crate::gis::crs::datum_step_warnings(&src_crs, &dst_crs) {
+        Err(GisError::BackendUnavailable(_)) => Vec::new(),
+        other => other?,
+    };
     if failure_count > 0 {
         let (row, col) = first_pixel.expect("failure recorded");
         match on_transform_error {

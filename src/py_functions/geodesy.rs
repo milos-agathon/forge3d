@@ -827,6 +827,9 @@ pub(crate) fn geodesic_direct(
 #[pyfunction]
 #[pyo3(signature = (lon, lat, h = 0.0))]
 pub(crate) fn wgs84_to_ecef(lon: f64, lat: f64, h: f64) -> PyResult<(f64, f64, f64)> {
+    // The Python contract documents `h` as ellipsoidal; this is the named
+    // declaration point where the untyped float enters the typed algebra.
+    let h = crate::geo::units::Height::<crate::geo::units::Ellipsoidal>::new(h);
     let v = crate::geo::projections::geocentric::wgs84_geodetic_to_ecef(lon, lat, h)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok((v.x, v.y, v.z))
@@ -839,6 +842,7 @@ pub(crate) fn wgs84_to_ecef(lon: f64, lat: f64, h: f64) -> PyResult<(f64, f64, f
 #[pyo3(signature = (x, y, z))]
 pub(crate) fn ecef_to_wgs84(x: f64, y: f64, z: f64) -> PyResult<(f64, f64, f64)> {
     crate::geo::projections::geocentric::wgs84_ecef_to_geodetic(glam::DVec3::new(x, y, z))
+        .map(|(lon, lat, h)| (lon, lat, h.metres()))
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 

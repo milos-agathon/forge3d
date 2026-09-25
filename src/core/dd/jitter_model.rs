@@ -48,11 +48,21 @@ pub(super) struct JitterModel {
 }
 
 pub(super) fn build_model(frames: u32) -> RenderResult<JitterModel> {
-    let base =
-        crate::geo::projections::geocentric::wgs84_geodetic_to_ecef(86.9250, 27.9881, 8_848.86)
-            .map_err(|error| {
-                RenderError::render(format!("Everest ECEF conversion failed: {error}"))
-            })?;
+    // 8,848.86 m is the summit's orthometric (above-geoid) height; ECEF needs
+    // the ellipsoidal height, so it goes through the EGM96 undulation.
+    let summit_height = crate::geo::geoid::orthometric_to_ellipsoidal(
+        crate::geo::units::Height::<crate::geo::units::Orthometric<crate::geo::units::Egm96>>::new(
+            8_848.86,
+        ),
+        crate::geo::units::Angle::new(27.9881),
+        crate::geo::units::Angle::new(86.9250),
+    );
+    let base = crate::geo::projections::geocentric::wgs84_geodetic_to_ecef(
+        86.9250,
+        27.9881,
+        summit_height,
+    )
+    .map_err(|error| RenderError::render(format!("Everest ECEF conversion failed: {error}")))?;
     let original_points = [
         base + DVec3::new(0.0, -0.1, 0.0),
         base + DVec3::new(0.2, 0.1, 0.0),

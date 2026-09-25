@@ -638,7 +638,8 @@ impl LabelManager {
         sorted_labels.sort_by_key(|label| std::cmp::Reverse(label.style.priority));
 
         for label in sorted_labels {
-            let render_pos = anchor.to_render_vec3(label.world_pos);
+            let render_pos =
+                anchor.to_render_f32(crate::geo::units::SceneCoord::scene(label.world_pos));
             // Skip if we've reached max visible
             if visible_count >= self.max_visible_labels {
                 continue;
@@ -835,7 +836,7 @@ impl LabelManager {
                 .polyline
                 .iter()
                 .copied()
-                .map(|world| anchor.to_render_vec3(world))
+                .map(|world| anchor.to_render_f32(crate::geo::units::SceneCoord::scene(world)))
                 .collect::<Vec<_>>();
             let is_curved = line_label.placement == LineLabelPlacement::Along;
             let geometry_kind = if is_curved { "curved" } else { "line" };

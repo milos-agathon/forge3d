@@ -31,8 +31,11 @@ pub(crate) struct FrameCamera {
 
 impl FrameCamera {
     pub fn view(self) -> Mat4 {
-        self.anchor
-            .view_look_at(self.eye_world, self.target_world, self.up)
+        self.anchor.view_look_at(
+            crate::geo::units::SceneCoord::scene(self.eye_world),
+            crate::geo::units::SceneCoord::scene(self.target_world),
+            self.up,
+        )
     }
 
     pub fn projection(self, width: u32, height: u32) -> Mat4 {
@@ -49,7 +52,8 @@ impl FrameCamera {
     }
 
     pub fn render_eye(self) -> Vec3 {
-        self.anchor.to_render_vec3(self.eye_world)
+        self.anchor
+            .to_render_f32(crate::geo::units::SceneCoord::scene(self.eye_world))
     }
 
     pub fn with_pose(mut self, eye_world: DVec3, target_world: DVec3) -> Self {
