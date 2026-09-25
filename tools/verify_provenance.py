@@ -16,14 +16,16 @@ Usage::
 Checks, in order:
 
 1. reconstructs the per-pixel source map from ``source_map.npy``;
-2. recomputes every contributing-tile leaf and the source-map leaf;
+2. recomputes every contributing-tile leaf, the source-map leaf, and the
+   image leaf (from the actual image bytes);
 3. rebuilds the SHA256 Merkle root and compares it to the signed root;
 4. verifies the Ed25519 signature against the embedded public key;
 5. reports per-source pixel coverage;
 6. runs a single-texel tamper probe (in memory) and confirms the root breaks.
 
 Exit code 0 iff the root matches, the signature verifies, the image/source-map
-dimensions agree, and the tamper probe is detected.
+dimensions agree, the manifest ``image_sha256`` matches the actual image
+bytes, and the tamper probe is detected.
 """
 
 from __future__ import annotations
@@ -40,9 +42,8 @@ if _REPO_PYTHON.exists() and str(_REPO_PYTHON) not in sys.path:
     sys.path.insert(0, str(_REPO_PYTHON))
 
 
-def _read_png_dims(path: Path) -> tuple[int, int]:
+def _read_png_dims(path: Path, data: bytes) -> tuple[int, int]:
     """Width/height from the PNG IHDR chunk — no image decoder needed."""
-    data = path.read_bytes()
     signature = b"\x89PNG\r\n\x1a\n"
     if not data.startswith(signature) or len(data) < 33:
         raise ValueError(f"{path} is not a PNG file")
@@ -75,9 +76,10 @@ def main(argv: list[str] | None = None) -> int:
 
     source_map = np.asarray(np.load(args.source_map), dtype=np.uint32)
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    report = verify_provenance_offline(source_map, manifest)
+    image_bytes = args.image.read_bytes()
+    report = verify_provenance_offline(source_map, manifest, image_bytes)
 
-    image_width, image_height = _read_png_dims(args.image)
+    image_width, image_height = _read_png_dims(args.image, image_bytes)
     map_height, map_width = source_map.shape
     image_dims_match = (image_width, image_height) == (map_width, map_height)
 
@@ -110,13 +112,16 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"merkle_root_match: {report['root_match']}")
     print(f"signature_valid: {report['signature_valid']}")
+    print(f"image_sha256_match: {report['image_sha256_match']}")
 
     # Single-texel tamper probe: flipping one source-map texel must break the
     # recomputed root. SOURCE_ID_NONE never gains attribution — the probe uses
     # an XOR so the sentinel flips to a nonzero id and vice versa.
     tampered = source_map.copy()
     tampered[0, 0] ^= 1
-    tampered_root = build_merkle_root(manifest_leaf_encodings(manifest, tampered))
+    tampered_root = build_merkle_root(
+        manifest_leaf_encodings(manifest, tampered, image_bytes)
+    )
     tamper_detected = tampered_root.hex() != report["signed_root"]
     print(f"tamper_probe_single_texel_detected: {tamper_detected}")
 
@@ -124,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         report["root_match"]
         and report["signature_valid"]
         and report["dims_match"]
+        and report["image_sha256_match"]
         and image_dims_match
         and not report["unknown_source_ids"]
         and tamper_detected
