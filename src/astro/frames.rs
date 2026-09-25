@@ -117,6 +117,8 @@ pub fn ecliptic_j2000_to_true_equatorial(v: DVec3, jd_tt: f64) -> Result<DVec3> 
 
 pub fn annual_aberration(unit_direction: DVec3, earth_velocity_au_per_day: DVec3) -> DVec3 {
     // First-order Lorentz aberration: u + beta - (u·beta)u, with beta=v/c.
+    // See ERFA eraAb and Explanatory Supplement (Urban & Seidelmann 2013),
+    // Eq. 7.40; higher-order terms are outside this reduction's model.
     let beta = earth_velocity_au_per_day / C_AU_PER_DAY;
     (unit_direction + beta - unit_direction.dot(beta) * unit_direction).normalize()
 }
@@ -141,6 +143,40 @@ pub fn observer_equatorial_km(latitude_rad: f64, local_sidereal_rad: f64, height
         (normal + height_km) * cos_lat * sin_theta,
         (normal * (1.0 - e2) + height_km) * sin_lat,
     )
+}
+
+/// Rotate a true-equatorial direction into the renderer's local horizon axes:
+/// +x east, +y up, +z south.
+pub fn true_equatorial_direction_to_render_horizon(
+    direction: DVec3,
+    utc: UtcDateTime,
+    latitude_rad: f64,
+    longitude_rad: f64,
+) -> Result<DVec3> {
+    ensure!(
+        direction.is_finite() && direction.length_squared() > 0.0,
+        "invalid equatorial direction"
+    );
+    ensure!(
+        latitude_rad.is_finite()
+            && longitude_rad.is_finite()
+            && latitude_rad.abs() <= std::f64::consts::FRAC_PI_2
+            && longitude_rad.abs() <= std::f64::consts::PI,
+        "invalid observer angles"
+    );
+    let jd_tt = utc.jd_tt()?;
+    let (dpsi, deps) = nutation_iau2000b(jd_tt)?;
+    let theta = gast_utc(utc, dpsi, mean_obliquity_iau2006(jd_tt) + deps)? + longitude_rad;
+    let direction = direction.normalize();
+    let (sin_theta, cos_theta) = theta.sin_cos();
+    let (sin_latitude, cos_latitude) = latitude_rad.sin_cos();
+    let east = -sin_theta * direction.x + cos_theta * direction.y;
+    let north = -sin_latitude * cos_theta * direction.x - sin_latitude * sin_theta * direction.y
+        + cos_latitude * direction.z;
+    let up = cos_latitude * cos_theta * direction.x
+        + cos_latitude * sin_theta * direction.y
+        + sin_latitude * direction.z;
+    Ok(DVec3::new(east, up, -north).normalize())
 }
 
 pub fn topocentric(

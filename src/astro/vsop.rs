@@ -1,8 +1,7 @@
 //! VSOP87D heliocentric L/B/R series from IMCCE's published coefficients.
 //!
-//! The binary is a byte-exact representation of all 25,766 source terms;
-//! precision is limited by the source theory and subsequent frame reductions,
-//! not by a hidden term cutoff. T is Julian millennia of TDB from J2000. For
+//! The binary retains all 25,659 published terms for the six included bodies.
+//! T is Julian millennia of TDB from J2000. For
 //! this interval we use TT as TDB; their periodic offset is below 2 ms.
 
 use anyhow::{ensure, Result};

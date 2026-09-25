@@ -177,7 +177,7 @@ impl Viewer {
         let gi_base = create_gi_baseline_resources(&device, width, height)?;
 
         // Sky resources
-        let sky = create_sky_resources(&device, width, height)?;
+        let sky = create_sky_resources(&device, &queue, width, height)?;
 
         // Fog resources
         let fog = create_fog_resources(&device, width, height)?;
@@ -336,6 +336,8 @@ impl Viewer {
             sky_bind_group_layout1: sky.sky_bind_group_layout1,
             sky_pipeline: sky.sky_pipeline,
             celestial_pipeline: sky.celestial_pipeline,
+            _moon_albedo: sky.moon_albedo,
+            moon_bind_group: sky.moon_bind_group,
             celestial_instances: None,
             celestial_instance_count: 0,
             observation_sky_sun_direction: None,

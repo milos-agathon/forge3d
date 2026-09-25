@@ -2,6 +2,8 @@
 //!
 //! The compact file contains 9,096 records with usable J2000 position and V
 //! magnitude. Source and epoch are recorded in `data/sidera/MANIFEST.md`.
+//! Relative flux uses the V=0 reference (about 3630 Jy in the UKIRT zero-point
+//! table); the renderer does not claim an absolute radiometric calibration.
 
 use anyhow::{ensure, Result};
 use glam::DVec3;
@@ -79,10 +81,11 @@ pub fn visible_stars(
         let north =
             -sl * ct * true_direction.x - sl * st * true_direction.y + cl * true_direction.z;
         let up = cl * ct * true_direction.x + cl * st * true_direction.y + sl * true_direction.z;
-        if up > 0.0 {
+        let refracted_altitude = frames::refraction_saemundsson(up.atan2(east.hypot(north)));
+        if refracted_altitude > 0.0 {
             out.push(VisibleStar {
                 azimuth_rad: east.atan2(north).rem_euclid(std::f64::consts::TAU),
-                altitude_rad: up.atan2(east.hypot(north)),
+                altitude_rad: refracted_altitude,
                 relative_irradiance: 10.0_f32.powf(-0.4 * star.v_magnitude),
                 b_minus_v: star.b_minus_v,
             });

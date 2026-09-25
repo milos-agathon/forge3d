@@ -5,10 +5,11 @@
   "height": 1024,
   "latitude_deg": 52.37,
   "longitude_deg": 4.9,
-  "moonlight_model": "Krisciunas & Schaefer (1991) Eq. 9 phase magnitude, 0.172 V-mag/airmass clear-sky extinction, relative directional display gain 0.12",
-  "rgba_sha256": "91cd9f172d652a91e86b2b432f50131fcdeb39597b13f3bcc20c356f061afbeb",
-  "theories": "VSOP87D and ELP2000-82B; IAU 2006/2000B frames",
-  "twilight_model": "civil-to-astronomical solar-depression visual ramp (-6 to -18 degrees)",
+  "moon_texture": "NASA SVS Moon Mosaic 5001 (LRO NAC); 256x256 relative grayscale with mip levels, IAU WGCCRE lunar pole orientation, fixed nearside markings without libration",
+  "moonlight_model": "Krisciunas & Schaefer (1991) Eq. 9 phase magnitude and Eq. 3 air mass, 0.172 V-mag/airmass clear-sky extinction, relative directional display gain 0.12",
+  "rgba_sha256": "ed7762147c3f2116ff9bba43854c936710b13f547686a122fa7a1f788f54b547",
+  "theories": "Complete VSOP87D (25,659 terms) and ELP2000-82B (37,872 terms); IAU 2006/2000B frames; IERS C04 UT1 to 2026-08-25 with forecast thereafter",
+  "twilight_model": "civil-to-astronomical solar-depression smoothstep ramp (-6 to -18 degrees)",
   "utc": "2026-09-25T22:00:00Z",
   "width": 1024
 }

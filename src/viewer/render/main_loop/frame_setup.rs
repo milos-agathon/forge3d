@@ -194,6 +194,7 @@ impl Viewer {
                 });
                 pass.set_pipeline(&self.celestial_pipeline);
                 pass.set_bind_group(0, sky_bg1.as_ref().unwrap(), &[]);
+                pass.set_bind_group(1, &self.moon_bind_group, &[]);
                 pass.set_vertex_buffer(0, instances.slice(..));
                 pass.draw(0..6, 0..self.celestial_instance_count);
             }

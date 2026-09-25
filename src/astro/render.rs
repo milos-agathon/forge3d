@@ -4,11 +4,12 @@
 //! through Ballesteros' color-temperature approximation, then sampled as a
 //! three-wavelength Planck emitter for a display RGB approximation. The
 //! color-temperature relation is Ballesteros (2012), arXiv:1201.1809.
-//! twilight ramp is an explicitly visual civil-to-astronomical (-6° to -18°)
+//! Twilight ramp is an explicitly visual civil-to-astronomical (-6° to -18°)
 //! fade, not a radiative-transfer or sky-glow prediction. Lunar directional
 //! strength uses Krisciunas & Schaefer (1991), Eq. 9 phase-magnitude fit,
 //! PASP 103, 1033 (NASA ADS 1991PASP..103.1033K),
-//! with standard-atmosphere extinction; it is a relative lighting term.
+//! with that paper's Eq. 3 air mass and a declared V-band extinction setting;
+//! it is a relative lighting term.
 
 use anyhow::Result;
 
@@ -22,6 +23,9 @@ pub struct SkyInstance {
     pub color_flux: [f32; 4],
     /// xyz: direction to Sun for lunar terminator; w: 0 star, 1 planet, 2 Moon.
     pub sun_kind: [f32; 4],
+    /// xyz: IAU lunar north pole in renderer horizon axes (+x east, +y up,
+    /// +z south); unused otherwise.
+    pub moon_pole: [f32; 4],
 }
 
 pub struct Observation {
@@ -34,7 +38,7 @@ pub struct Observation {
 fn direction(azimuth: f64, altitude: f64) -> [f32; 3] {
     let (sa, ca) = azimuth.sin_cos();
     let (sh, ch) = altitude.sin_cos();
-    [(ch * sa) as f32, sh as f32, (ch * ca) as f32]
+    [(ch * sa) as f32, sh as f32, (-ch * ca) as f32]
 }
 
 fn planck(wavelength_nm: f64, temperature_k: f64) -> f64 {
@@ -63,7 +67,8 @@ pub fn moonlight_relative(illuminated_fraction: f64, altitude_rad: f64) -> f32 {
     let magnitude = -12.73 + 0.026 * phase_deg + 4e-9 * phase_deg.powi(4);
     let flux = 10.0_f64.powf(-0.4 * (magnitude + 12.73));
     let zenith = std::f64::consts::FRAC_PI_2 - altitude_rad;
-    let air_mass = 1.0 / (zenith.cos() + 0.025 * (-11.0 * zenith.cos()).exp());
+    // Krisciunas & Schaefer (1991), Eq. 3: X(Z)=(1-0.96 sin² Z)^(-1/2).
+    let air_mass = (1.0 - 0.96 * zenith.sin().powi(2)).powf(-0.5);
     // KS91's V-band extinction parameter is site dependent. 0.172 mag per
     // air mass is a declared representative clear-sky display setting.
     (flux * 10.0_f64.powf(-0.4 * 0.172 * air_mass) * altitude_rad.sin()) as f32
@@ -76,8 +81,11 @@ pub fn prepare(
 ) -> Result<Observation> {
     let sun = body_position(Body::Sun, utc, latitude, longitude)?;
     let moon = body_position(Body::Moon, utc, latitude, longitude)?;
-    let sun_dir = direction(sun.azimuth.radians(), sun.altitude.radians());
-    let twilight = ((-sun.altitude.value() - 6.0) / 12.0).clamp(0.0, 1.0) as f32;
+    let sun_dir = direction(sun.azimuth.radians(), sun.refracted_altitude.radians());
+    // Match the smoothstep ramp in sky.wgsl, evaluated on solar depression.
+    let depression = (-sun.altitude.value() - 6.0) / 12.0;
+    let t = depression.clamp(0.0, 1.0) as f32;
+    let twilight = t * t * (3.0 - 2.0 * t);
     let mut instances = Vec::new();
     for star in catalog::visible_stars(utc, latitude.radians(), longitude.radians())? {
         let dir = direction(star.azimuth_rad, star.altitude_rad);
@@ -86,6 +94,7 @@ pub fn prepare(
             direction_radius: [dir[0], dir[1], dir[2], 0.000_55],
             color_flux: [rgb[0], rgb[1], rgb[2], star.relative_irradiance * twilight],
             sun_kind: [sun_dir[0], sun_dir[1], sun_dir[2], 0.0],
+            moon_pole: [0.0; 4],
         });
     }
     for (body, color, magnitude) in [
@@ -96,8 +105,8 @@ pub fn prepare(
         (Body::Saturn, [0.94, 0.84, 0.66], 0.8),
     ] {
         let p = body_position(body, utc, latitude, longitude)?;
-        if p.altitude.value() > 0.0 {
-            let dir = direction(p.azimuth.radians(), p.altitude.radians());
+        if p.refracted_altitude.value() > 0.0 {
+            let dir = direction(p.azimuth.radians(), p.refracted_altitude.radians());
             instances.push(SkyInstance {
                 direction_radius: [dir[0], dir[1], dir[2], 0.000_7],
                 color_flux: [
@@ -107,11 +116,21 @@ pub fn prepare(
                     10.0_f32.powf(-0.4 * magnitude) * twilight,
                 ],
                 sun_kind: [sun_dir[0], sun_dir[1], sun_dir[2], 1.0],
+                moon_pole: [0.0; 4],
             });
         }
     }
-    if moon.altitude.value() > 0.0 {
-        let dir = direction(moon.azimuth.radians(), moon.altitude.radians());
+    if moon.refracted_altitude.value() > 0.0 {
+        let dir = direction(moon.azimuth.radians(), moon.refracted_altitude.radians());
+        let jd_tt = utc.jd_tt()?;
+        let pole_true_equatorial = super::frames::precession_nutation_iau2006(jd_tt)?
+            * super::moon::north_pole_icrf(jd_tt)?;
+        let pole = super::frames::true_equatorial_direction_to_render_horizon(
+            pole_true_equatorial,
+            utc,
+            latitude.radians(),
+            longitude.radians(),
+        )?;
         instances.push(SkyInstance {
             direction_radius: [
                 dir[0],
@@ -121,6 +140,7 @@ pub fn prepare(
             ],
             color_flux: [1.0, 0.96, 0.86, twilight],
             sun_kind: [sun_dir[0], sun_dir[1], sun_dir[2], 2.0],
+            moon_pole: [pole.x as f32, pole.y as f32, pole.z as f32, 0.0],
         });
     }
     Ok(Observation {
@@ -128,7 +148,7 @@ pub fn prepare(
         moon,
         moonlight_relative: moonlight_relative(
             moon.illuminated_fraction.expect("Moon phase"),
-            moon.altitude.radians(),
+            moon.refracted_altitude.radians(),
         ),
         instances,
     })

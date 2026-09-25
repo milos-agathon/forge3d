@@ -1,4 +1,5 @@
-//! ELP2000-82B lunar theory, using IMCCE's complete published term set.
+//! ELP2000-82B lunar theory, retaining all 2,645 main and 35,227 secondary
+//! terms from IMCCE's published set.
 //!
 //! The source's 36 tables are deterministically compiled to `elp82b.bin` by
 //! `tools/sidera_assets.py`. This evaluator follows IMCCE's `elp82b_1`
@@ -12,6 +13,46 @@ const DATA: &[u8] = include_bytes!("../../data/sidera/elp82b.bin");
 const MAIN_WIDTH: usize = 49;
 const SECONDARY_WIDTH: usize = 26;
 const RAD: f64 = 648_000.0 / std::f64::consts::PI;
+
+/// IAU WGCCRE lunar north-pole direction in the fixed J2000 equatorial frame.
+///
+/// The periodic orientation terms are from Table 2 of the 2009 WGCCRE report.
+/// That model is specified in TDB; SIDERA uses TT here, whose millisecond-scale
+/// difference is immaterial for the displayed pole direction.
+pub fn north_pole_icrf(jd_tt: f64) -> Result<DVec3> {
+    ensure!(jd_tt.is_finite(), "invalid lunar pole epoch");
+    let days = jd_tt - 2_451_545.0;
+    let centuries = days / 36_525.0;
+    let angle = |offset_deg: f64, rate_deg_per_day: f64| {
+        (offset_deg + rate_deg_per_day * days).to_radians()
+    };
+    let e1 = angle(125.045, -0.052_992_1);
+    let e2 = angle(250.089, -0.105_984_2);
+    let e3 = angle(260.008, 13.012_000_9);
+    let e4 = angle(176.625, 13.340_715_4);
+    let e6 = angle(311.589, 26.405_708_4);
+    let e7 = angle(134.963, 13.064_993_0);
+    let e10 = angle(15.134, -0.158_976_3);
+    let e13 = angle(25.053, 12.959_008_8);
+    let right_ascension = (269.9949 + 0.0031 * centuries - 3.8787 * e1.sin() - 0.1204 * e2.sin()
+        + 0.0700 * e3.sin()
+        - 0.0172 * e4.sin()
+        + 0.0072 * e6.sin()
+        - 0.0052 * e10.sin()
+        + 0.0043 * e13.sin())
+    .to_radians();
+    let declination = (66.5392 + 0.0130 * centuries + 1.5419 * e1.cos() + 0.0239 * e2.cos()
+        - 0.0278 * e3.cos()
+        + 0.0068 * e4.cos()
+        - 0.0029 * e6.cos()
+        + 0.0009 * e7.cos()
+        + 0.0008 * e10.cos()
+        - 0.0009 * e13.cos())
+    .to_radians();
+    let (sin_ra, cos_ra) = right_ascension.sin_cos();
+    let (sin_dec, cos_dec) = declination.sin_cos();
+    Ok(DVec3::new(cos_dec * cos_ra, cos_dec * sin_ra, sin_dec))
+}
 
 fn read_f64(offset: usize) -> f64 {
     f64::from_le_bytes(
@@ -120,5 +161,15 @@ mod tests {
         let v = geocentric_ecliptic_j2000(2_451_545.0).unwrap();
         assert!(v.is_finite());
         assert!((350_000.0..420_000.0).contains(&v.length()));
+    }
+
+    #[test]
+    fn lunar_pole_matches_wgccre_j2000_reference() {
+        let pole = north_pole_icrf(2_451_545.0).unwrap();
+        let right_ascension = pole.y.atan2(pole.x).to_degrees().rem_euclid(360.0);
+        let declination = pole.z.asin().to_degrees();
+        assert!((right_ascension - 266.857_733_444_951).abs() < 1e-8);
+        assert!((declination - 65.641_102_747_845).abs() < 1e-8);
+        assert!((pole.length() - 1.0).abs() < 1e-12);
     }
 }

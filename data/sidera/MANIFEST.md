@@ -1,18 +1,28 @@
 # SIDERA source-asset manifest
 
 Runtime validity: UTC 2000-01-01 through 2050-12-31. Positions outside this interval are rejected.
-The coefficient sets are complete for the included bodies, with zero term truncation. The 40-site/epoch Horizons oracle measured maxima of Sun 7.88", Moon 7.02", planets 7.95", phase 0.000023 and lunar semidiameter 0.091". These are empirical maxima for the frozen vectors, not a global error guarantee.
+Catalog V magnitudes map to relative flux as `10^(-0.4 V)` with the V=0
+reference (about 3630 Jy in the [UKIRT zero-magnitude table](https://about.ifa.hawaii.edu/ukirt/calibration-and-standards/astronomical-utilities/zero-mag-fluxes-and-conversions/)).
+The display renderer has no absolute radiometric calibration. Catalogue records
+without B−V use a declared display-colour default of 0.65 in `tools/sidera_assets.py`.
+The coefficient sets are complete for the included bodies, with zero term truncation. `tools/sidera_assets.py` packs the published source terms without using the Horizons acceptance gates as a cutoff. The 280-row, 40-site/epoch Horizons oracle with the corrected historical UT1 model measured maxima of Sun 1.868", Moon 1.773", Mercury 1.853", Venus 1.775", Mars 1.645", Jupiter 1.377", Saturn 1.386", phase 0.0000225 and lunar semidiameter 0.090". These are empirical maxima for the frozen vectors, not global error guarantees. Future UTC uses the declared constant-DUT1 projection below.
+
+Earth-rotation time uses [IERS EOP 20u24 C04 daily UT1−UTC](https://datacenter.iers.org/data/254/eopc04_20u24.1962-now.txt) from 2000-01-01 through 2026-08-25. `tools/sidera_ut1.py` stores monthly TT−UT1 knots and the final daily point; all 9,734 source days reconstruct UT1−UTC within 0.005776 s. Beyond the final measured day, the runtime holds its final UT1−UTC at +0.0070542 s as an explicitly unbounded compatibility projection through 2050. Future leap seconds and Earth-rotation drift are unknown, so the 1 s residual is established for the historical interval only. The pinned source SHA-256 was `7e39bb43bd1e1920517ed9316d3c5b14f898fe68afe9e0891bf18c4180b9d272` when the asset was generated.
 
 | Runtime asset | Bytes | SHA-256 | Description |
 | --- | ---: | --- | --- |
-| `vsop87d.bin` | 692801 | `366f2d95fa86c403d02ce4698a3d30a67194c672ceb48f08a156e86cddc1962b` | IMCCE VSOP87D; 25,659 heliocentric ecliptic terms for Earth, Mercury, Venus, Mars, Jupiter and Saturn |
-| `elp82b.bin` | 1045519 | `9cc28d677a028284e59dd65095eb3dff52ceeea3869882a860c9958228f88b1a` | IMCCE ELP2000-82B; 2,645 main and 35,227 secondary lunar terms |
+| `vsop87d.bin` | 692801 | `366f2d95fa86c403d02ce4698a3d30a67194c672ceb48f08a156e86cddc1962b` | IMCCE VSOP87D; all 25,659 heliocentric ecliptic terms for Earth, Mercury, Venus, Mars, Jupiter and Saturn |
+| `elp82b.bin` | 1045519 | `9cc28d677a028284e59dd65095eb3dff52ceeea3869882a860c9958228f88b1a` | IMCCE ELP2000-82B; all 2,645 main and 35,227 secondary lunar terms |
 | `ybsc5.bin` | 145544 | `146b5dafdeff15c248f14420f5098ea816024ddf67b9b57af0335c2648cbd889` | CDS V/50 Yale Bright Star Catalogue, 5th edition; 9,096 J2000 RA/Dec, V, B−V records, no proper motion |
 | `nut00b.bin` | 4089 | `ea3b092df130cd248a2d4760b483bc24d7666a6538d993bff087374b702ec547` | ERFA IAU 2000B; 77 lunisolar terms, BSD license copied as ERFA-LICENSE |
-| `delta_t.bin` | 19592 | `c241075067d5aec29312cf7cb9a0bf66c13a2114b2d9b420d23091e17eabedb3` | Monthly cubic fit of NASA/JPL Horizons TDB−UT1, five-day training samples; maximum sampled residual 1.1 microseconds and seven-day holdout residual 4.0 microseconds (2,662 samples); TT−TDB adds about 2 ms |
+| `ut1_utc.bin` | 1300 | `62a749513dd53139e8e006a40a7db86b85b6d4ec7818bc7ab1675c8414f7141f` | IERS C04 historical UT1−UTC represented as monthly TT−UT1 knots, plus declared constant-DUT1 projection |
+| `moon_albedo.bin` | 65536 | `5b5dc8adb6a2e6636f392a40b21ee5d8c31053a5b87c014dcb281e51a5527f25` | 256×256 single-channel relative display albedo from NASA SVS Moon Mosaic 5001; IAU lunar pole orientation, no libration model |
+
+The Moon texture comes from [NASA SVS Moon Mosaic 5001](https://svs.gsfc.nasa.gov/5001/), a 1,231-image LRO NAC nearside mosaic. NASA SVS requests credit to NASA's Scientific Visualization Studio. `tools/sidera_moon_texture.py` verifies source JPEG SHA-256 `36fbe604043f1403acbc4db6fbd36d04db1db1c8a3749aa81d1e6ffea072a5fa` before generating the packed display texture. The generator maps source radius 0.96 to the disc edge, excluding the dark photographic rim while keeping the outer surface. It uses a shoulder tone curve to preserve highlights; the viewer generates mip levels for minification. Its lunar pole follows the IAU WGCCRE model, but its fixed nearside markings do not model libration or measured reflectance.
 
 | Source file | SHA-256 | Source |
 | --- | --- | --- |
+| `moon_mosaic_print.jpg` | `36fbe604043f1403acbc4db6fbd36d04db1db1c8a3749aa81d1e6ffea072a5fa` | https://svs.gsfc.nasa.gov/vis/a000000/a005000/a005001/moon_mosaic_print.jpg |
 | `catalog.gz` | `3dc44b1e90be8fbe5bcc7656032560f51275f985c7e3f783c9028e1838ec7bed` | https://cdsarc.cds.unistra.fr/ftp/V/50/catalog.gz |
 | `catalog_ReadMe` | `44fd9c73e2eecad0beb47bdfa3f01c60fd43f93d6964198e31fcd48732de5b33` | https://cdsarc.cds.unistra.fr/ftp/V/50/ReadMe |
 | `ee00b.c` | `93f5977283fc78e9b9253d48b038900a4e7bf6b3f7a70fd16c0ae2d6725d0f65` | https://raw.githubusercontent.com/liberfa/erfa/master/src/ee00b.c |
@@ -68,7 +78,7 @@ The coefficient sets are complete for the included bodies, with zero term trunca
 | `VSOP87D.sat` | `2e49e19396f24c17298f0b667e7763ee5c28b60d549c89d72a17dfd5f8d46b05` | https://ftp.imcce.fr/pub/ephem/planets/vsop87/VSOP87D.sat |
 | `VSOP87D.ven` | `cb2f3a738289ed45f69fec1845e480baf4b32d481eccc21b8629a2d0d10e8261` | https://ftp.imcce.fr/pub/ephem/planets/vsop87/VSOP87D.ven |
 
-The disposable source cache is regenerated by `tools/sidera_fetch_sources.py`; `tools/sidera_assets.py` compacts it. `tools/sidera_delta_t.py` and `tools/sidera_horizons.py` generate the independent Horizons assets.
+The disposable source cache is regenerated by `tools/sidera_fetch_sources.py`; `tools/sidera_assets.py` packs the complete theory and catalogue tables. `tools/sidera_horizons.py` generates the independent Horizons oracle. The old `tools/sidera_delta_t.py` output is no longer shipped or used for Earth rotation.
 JPL oracle settings and the aggregate raw response digest are stored in `tests/data/horizons_vectors.dat`. The runtime assets do not call the network.
 
 References: [IMCCE VSOP87](https://ftp.imcce.fr/pub/ephem/planets/vsop87/), [IMCCE ELP82B](https://ftp.imcce.fr/pub/ephem/moon/elp82b/), [CDS Yale V/50](https://cdsarc.cds.unistra.fr/ftp/V/50/ReadMe), [ERFA](https://github.com/liberfa/erfa), [JPL Horizons](https://ssd.jpl.nasa.gov/horizons/).

@@ -190,6 +190,8 @@ pub struct Viewer {
     pub(crate) sky_bind_group_layout1: BindGroupLayout,
     pub(crate) sky_pipeline: ComputePipeline,
     pub(crate) celestial_pipeline: wgpu::RenderPipeline,
+    pub(crate) _moon_albedo: TrackedTexture,
+    pub(crate) moon_bind_group: BindGroup,
     pub(crate) celestial_instances: Option<TrackedBuffer>,
     pub(crate) celestial_instance_count: u32,
     pub(crate) observation_sky_sun_direction: Option<[f32; 3]>,

@@ -10,10 +10,9 @@ from pathlib import Path
 import re
 
 import pytest
-
-pytest.importorskip("forge3d._forge3d")
-
 from forge3d import astro, sky, sun_position_utc
+
+native = pytest.importorskip("forge3d._forge3d")
 
 ORACLE = Path(__file__).resolve().parent / "data/horizons_vectors.dat"
 ROOT = Path(__file__).resolve().parent.parent
@@ -69,6 +68,23 @@ def test_utc_window_and_timezone_contract() -> None:
         astro.body_position("Pluto", datetime(2026, 9, 25, tzinfo=timezone.utc), 0.0, 0.0)
 
 
+def test_sidereal_refraction_and_reduction_ablations() -> None:
+    # ERFA gmst06 at the official IERS C04 2000-01-01 DUT1 (+0.3554724 s).
+    gmst, correction, _, _ = native.astro_validation_metrics(
+        "2000-01-01T00:00:00Z", 52.37, 4.9
+    )
+    gmst_error_s = abs(gmst - 1.7447931555881933) * 86400 / math.tau
+    assert gmst_error_s < 0.1
+    # Saemundsson at true 5° is within 0.2 arcmin of inverted Bennett.
+    assert abs(correction - 9.674) < 0.2
+
+    _, _, precession_arcmin, parallax_arcmin = native.astro_validation_metrics(
+        "2026-09-25T22:00:00Z", 52.37, 4.9
+    )
+    assert precession_arcmin > 20.0
+    assert parallax_arcmin > 30.0
+
+
 def test_one_call_observation_payload() -> None:
     class Viewer:
         def __init__(self) -> None:
@@ -85,16 +101,28 @@ def test_one_call_observation_payload() -> None:
     }
 
 
+def test_refracted_position_keeps_airless_oracle_separate() -> None:
+    when = datetime(2026, 9, 25, 22, tzinfo=timezone.utc)
+    az, airless_alt, distance = astro.body_position("Moon", when, 52.37, 4.9)
+    apparent_az, apparent_alt, apparent_distance = astro.body_position_refracted(
+        "Moon", when, 52.37, 4.9
+    )
+    assert apparent_az == az
+    assert apparent_distance == distance
+    assert apparent_alt > airless_alt
+
+
 def test_sourced_assets_match_manifest_and_budget() -> None:
     source = ROOT / "data/sidera"
     manifest = (source / "MANIFEST.md").read_text(encoding="utf-8")
     pinned = re.findall(r"^\| `([^`]+\.bin)` \| (\d+) \| `([0-9a-f]{64})` \|", manifest, re.M)
-    assert len(pinned) == 5
+    assert len(pinned) == 6
     for filename, length, digest in pinned:
         contents = (source / filename).read_bytes()
         assert len(contents) == int(length)
         assert hashlib.sha256(contents).hexdigest() == digest
     assert (source / "ybsc5.bin").stat().st_size <= 1024 * 1024
+    assert not (source / "delta_t.bin").exists()
     fixtures = [*(source.glob("*.bin")), source / "MANIFEST.md", source / "ERFA-LICENSE",
                 ORACLE, ROOT / "tests/golden/sidera/night.png",
                 ROOT / "tests/golden/sidera/night_certificate.json"]

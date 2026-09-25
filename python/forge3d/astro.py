@@ -29,6 +29,11 @@ def body_position(body: str, datetime_utc: datetime, lat: float, lon: float) -> 
     return _native_astro().astro_body_position(body, _utc_text(datetime_utc), float(lat), float(lon))
 
 
+def body_position_refracted(body: str, datetime_utc: datetime, lat: float, lon: float) -> tuple[float, float, float]:
+    """Return topocentric position with standard-atmosphere apparent altitude."""
+    return _native_astro().astro_body_position_refracted(body, _utc_text(datetime_utc), float(lat), float(lon))
+
+
 def moon_phase(datetime_utc: datetime, lat: float | None = None, lon: float | None = None) -> float:
     """Return illuminated fraction; pass both site angles for topocentric phase."""
     utc = _utc_text(datetime_utc)
@@ -39,4 +44,4 @@ def moon_phase(datetime_utc: datetime, lat: float | None = None, lon: float | No
     return _native_astro().astro_moon_phase_at(utc, float(lat), float(lon))
 
 
-__all__ = ["body_position", "moon_phase"]
+__all__ = ["body_position", "body_position_refracted", "moon_phase"]
