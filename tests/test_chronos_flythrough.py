@@ -595,6 +595,67 @@ class TestFlythroughPhysical:
         record = loaded.frame_record(replay_index)
         assert provenance["pixel_hash"] == record["pixel_hash"]
 
+    def test_certificate_and_cache_contracts(self, tmp_path, monkeypatch):
+        if not _physical_render_available():
+            pytest.skip("CHRONOS physical render requires GPU-backed native module")
+        import forge3d.chronos as chronos_module
+        from forge3d import certificate
+        from forge3d.diagnostics import capabilities
+
+        source_scene = _synthetic_scene()
+        camera_path = {index: source_scene for index in range(2)}
+        cache_dir = tmp_path / "cache"
+
+        caps = capabilities()
+        absent_caps = set(caps["requested"]) - set(caps["granted"])
+        certified = render_flythrough(
+            camera_path, base_seed=11, samples=1, out_dir=tmp_path / "cert", certificate=True
+        )
+        for record in certified.frames:
+            name = f"frame_{int(record['frame_index']):08d}.certificate.json"
+            cert_path = tmp_path / "cert" / name
+            cert = json.loads(cert_path.read_text("utf-8"))
+            assert certificate.verify(cert_path, cert["signature"]["pubkey"]) is True
+            # Adapter-honest: only capabilities this adapter lacks may degrade
+            # (hosted Metal has no timestamp/pipeline-statistics queries). With
+            # every requested feature granted this stays an empty-list check.
+            assert all(
+                item["kind"] == "capability_absent" for item in cert["degradations"]
+            ), cert["degradations"]
+            assert {item["name"] for item in cert["degradations"]} <= absent_caps
+            assert cert["passes"], "certificate must record the frame's executed passes"
+
+        cold = render_flythrough(
+            camera_path, base_seed=11, samples=1, out_dir=tmp_path / "cold", cache=cache_dir
+        )
+        fresh_renders = []
+        original = chronos_module.MapScene.render
+
+        def counting_render(self, *args, **kwargs):
+            fresh_renders.append(args)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(chronos_module.MapScene, "render", counting_render)
+        warm = render_flythrough(
+            camera_path, base_seed=11, samples=1, out_dir=tmp_path / "warm", cache=cache_dir
+        )
+        assert fresh_renders == [], "identical compiled frames must replay from the cache"
+        assert [r["pixel_hash"] for r in warm.frames] == [r["pixel_hash"] for r in cold.frames]
+        assert [r["pixel_hash"] for r in cold.frames] == [
+            r["pixel_hash"] for r in certified.frames
+        ]
+
+        # A different base seed compiles different frames: no stale cache hit.
+        render_flythrough(
+            camera_path, base_seed=12, samples=1, out_dir=tmp_path / "reseeded", cache=cache_dir
+        )
+        assert len(fresh_renders) == 2
+
+        with pytest.raises(TypeError, match="certificate"):
+            render_flythrough(
+                camera_path, base_seed=11, samples=1, out_dir=tmp_path / "bad", certificate="x"
+            )
+
     def test_vt_required_residency_render(self, tmp_path):
         if not _physical_render_available():
             pytest.skip("CHRONOS physical render requires GPU-backed native module")

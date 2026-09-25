@@ -1023,15 +1023,13 @@ impl Geodesic {
             let b42 = sin_cos_series(false, ssig2, csig2, &c4a, GEODESIC_ORDER);
             s12_area = a4 * (b42 - b41);
         }
-        let alp12;
         debug_assert!(meridian || somg12 != 2.0, "omg12 sentinel not resolved");
-        if !meridian && comg12 > -0.7071 && sbet2 - sbet1 < 1.75 {
+        let alp12 = if !meridian && comg12 > -0.7071 && sbet2 - sbet1 < 1.75 {
             let domg12x = 1.0 + comg12;
             let dbet1 = 1.0 + cbet1;
             let dbet2 = 1.0 + cbet2;
-            alp12 = 2.0
-                * (somg12 * (sbet1 * dbet2 + sbet2 * dbet1))
-                    .atan2(domg12x * (sbet1 * sbet2 + dbet1 * dbet2));
+            2.0 * (somg12 * (sbet1 * dbet2 + sbet2 * dbet1))
+                .atan2(domg12x * (sbet1 * sbet2 + dbet1 * dbet2))
         } else {
             let mut salp12 = salp2 * calp1 - calp2 * salp1;
             let mut calp12 = calp2 * calp1 + salp2 * salp1;
@@ -1039,8 +1037,8 @@ impl Geodesic {
                 salp12 = TINY * calp1;
                 calp12 = -1.0;
             }
-            alp12 = salp12.atan2(calp12);
-        }
+            salp12.atan2(calp12)
+        };
         s12_area += self.c2 * alp12;
         s12_area *= swapp * lonsign * latsign;
 

@@ -7,6 +7,21 @@
 
 use super::super::*;
 
+/// Probe the exact wavefront shadow pipeline on the current GPU before the
+/// adjudication gate renders. A compiler failure is a capability result;
+/// device initialization errors remain hard failures.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn _adjudication_shadow_kernel_probe() -> PyResult<(bool, Option<String>)> {
+    let context = crate::core::gpu::try_ctx()?;
+    match crate::path_tracing::wavefront::pipeline::WavefrontPipelines::probe_shadow_kernel(
+        &context.device,
+    ) {
+        Ok(()) => Ok((true, None)),
+        Err(error) => Ok((false, Some(error))),
+    }
+}
+
 /// Render the adjudication pair: high-spp path-traced ground truth and the
 /// raster render of the same ReferenceSceneDesc.
 ///

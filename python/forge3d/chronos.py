@@ -10,6 +10,7 @@ from the stored compiled data alone.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -233,6 +234,67 @@ def _camera_json(frame_scene: MapScene) -> str:
 
 def _frame_png_name(frame_index: int) -> str:
     return f"frame_{int(frame_index):08d}.png"
+
+
+def _frame_certificate_name(frame_index: int) -> str:
+    return f"frame_{int(frame_index):08d}.certificate.json"
+
+
+def _render_frames(
+    frame_scenes: Mapping[int, MapScene],
+    compiled_frames: Mapping[int, Any],
+    png_paths: Mapping[int, Path],
+    *,
+    certificate_paths: Mapping[int, Path] | None,
+    cache: "str | os.PathLike[str] | None",
+) -> None:
+    """Render every compiled frame of one flythrough to its PNG path.
+
+    ``certificate_paths`` receives each frame's signed render certificate from
+    that frame's own native render. ``cache`` renders the run as ONE ANAMNESIS
+    sequence: the frame index keys each ``frame.output`` slot and the context
+    is every canonical compiled frame (label ramps, seeds, residency), which
+    ``MapScene.to_dict`` alone does not carry, so any compiled change
+    invalidates the run. Per-frame sequences of the same recipe would prune
+    each other's entries. As in ``MapScene.render``, a certificate needs fresh
+    renders and bypasses the cache.
+    """
+    indices = sorted(frame_scenes)
+    if certificate_paths is not None or cache is None:
+        for index in indices:
+            certificate = certificate_paths[index] if certificate_paths is not None else False
+            frame_scenes[index].render(str(png_paths[index]), certificate=certificate)
+        return
+
+    from .anamnesis import render_sequence
+
+    fresh: set[int] = set()
+
+    def render_frame(_recipe: Mapping[str, Any], frame: int) -> bytes:
+        path = png_paths[int(frame)]
+        frame_scenes[int(frame)].render(str(path))
+        fresh.add(int(frame))
+        return path.read_bytes()
+
+    # Destination paths are where bytes land, not what is rendered.
+    cache_recipe = frame_scenes[indices[0]].to_dict()
+    cache_recipe["recipe"]["output"]["path"] = None
+    context = canonical_json_bytes(
+        {str(index): compiled_frames[index].to_json() for index in indices},
+        error_context="CHRONOS cache context",
+    )
+    sequence = render_sequence(
+        cache_recipe,
+        frames=indices,
+        cache=cache,
+        render_frame=render_frame,
+        render_frame_fingerprint=b"forge3d.python.chronos.render_flythrough/v1",
+        render_frame_context=context,
+    )
+    for index, blob in zip(indices, sequence.frame_blobs):
+        if index not in fresh:
+            png_paths[index].parent.mkdir(parents=True, exist_ok=True)
+            png_paths[index].write_bytes(blob)
 
 
 def _frame_provenance_name(frame_index: int) -> str:
@@ -464,6 +526,8 @@ def render_flythrough(
     base_seed: int,
     samples: int,
     out_dir: str | Path,
+    certificate: bool = False,
+    cache: "str | os.PathLike[str] | None" = None,
 ) -> FlythroughManifest:
     """Render a deterministic CHRONOS flythrough to ``out_dir``.
 
@@ -477,7 +541,15 @@ def render_flythrough(
     determinism lives in each frame's compiled inputs (seed, camera, scene
     JSON), not in the renderer instance, so reuse preserves the pixel-hash
     contract while avoiding per-frame pipeline construction.
+
+    ``certificate=True`` writes ``frame_<index:08d>.certificate.json`` beside
+    each frame from that frame's own native render. ``cache`` names an
+    ANAMNESIS cache directory; a hit replays the stored frame bytes for the
+    identical compiled frame, and the pixel hash is still recomputed from the
+    written PNG. ``certificate=True`` always renders fresh.
     """
+    if not isinstance(certificate, bool):
+        raise TypeError("render_flythrough certificate= must be a bool")
     f3d = _native()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -511,57 +583,73 @@ def render_flythrough(
     events = _label_timeline_events(per_frame_keys, sorted_indices)
     all_keys = sorted({key for keys in per_frame_keys.values() for key in keys})
 
+    compiled_by_index: dict[int, Any] = {}
+    for index in sorted_indices:
+        frame_scene = frame_scenes[index]
+
+        def events_for(layer_id: str, label_id: str, visible: bool, _i: int = index):
+            if not visible:
+                return (None, None)
+            return events.get((layer_id, label_id), {}).get(_i, (None, None))
+
+        label_records = _label_records(all_keys, accepted_maps[index], events_for)
+        compiled = f3d.compile_frame(
+            index,
+            int(base_seed),
+            int(samples),
+            _camera_json(frame_scene),
+            _scene_json(frame_scene, label_records),
+        )
+        plan = frame_scene.compiled_plan
+        frame_scene.compiled_plan = replace(plan, frame=compiled)
+        compiled_by_index[index] = compiled
+
+    png_paths = {index: out_dir / _frame_png_name(index) for index in sorted_indices}
+    with _shared_terrain_render_context():
+        _render_frames(
+            frame_scenes,
+            compiled_by_index,
+            png_paths,
+            certificate_paths=(
+                {index: out_dir / _frame_certificate_name(index) for index in sorted_indices}
+                if certificate
+                else None
+            ),
+            cache=cache,
+        )
+
     records: list[dict[str, Any]] = []
     compiled_frames: list[Any] = []
-    with _shared_terrain_render_context():
-        for index in sorted_indices:
-            frame_scene = frame_scenes[index]
-
-            def events_for(layer_id: str, label_id: str, visible: bool, _i: int = index):
-                if not visible:
-                    return (None, None)
-                return events.get((layer_id, label_id), {}).get(_i, (None, None))
-
-            label_records = _label_records(all_keys, accepted_maps[index], events_for)
-            compiled = f3d.compile_frame(
-                index,
-                int(base_seed),
-                int(samples),
-                _camera_json(frame_scene),
-                _scene_json(frame_scene, label_records),
-            )
-            plan = frame_scene.compiled_plan
-            frame_scene.compiled_plan = replace(plan, frame=compiled)
-            png_path = out_dir / _frame_png_name(index)
-            frame_scene.render(str(png_path))
-            rgba = _decode_png_rgba(png_path)
-            provenance_json = f3d.render_compiled_frame(compiled, rgba)
-            provenance = json.loads(provenance_json)
-            provenance_path = out_dir / _frame_provenance_name(index)
-            provenance_path.write_bytes(provenance_json.encode("utf-8"))
-            record = {
-                "frame_index": index,
-                "image": _frame_png_name(index),
-                "provenance": _frame_provenance_name(index),
-                "pixel_hash": provenance["pixel_hash"],
-                "width": int(rgba.shape[1]),
-                "height": int(rgba.shape[0]),
-                "compiled_frame": compiled.to_json(),
-            }
-            for field_name in (
-                "base_seed",
-                "frame_seed",
-                "samples",
-                "residency_hash",
-                "label_set_hash",
-                "lod_hash",
-                "engine_revision",
-                "camera_hash",
-                "scene_hash",
-            ):
-                record[field_name] = provenance[field_name]
-            records.append(record)
-            compiled_frames.append(compiled)
+    for index in sorted_indices:
+        compiled = compiled_by_index[index]
+        rgba = _decode_png_rgba(png_paths[index])
+        provenance_json = f3d.render_compiled_frame(compiled, rgba)
+        provenance = json.loads(provenance_json)
+        provenance_path = out_dir / _frame_provenance_name(index)
+        provenance_path.write_bytes(provenance_json.encode("utf-8"))
+        record = {
+            "frame_index": index,
+            "image": _frame_png_name(index),
+            "provenance": _frame_provenance_name(index),
+            "pixel_hash": provenance["pixel_hash"],
+            "width": int(rgba.shape[1]),
+            "height": int(rgba.shape[0]),
+            "compiled_frame": compiled.to_json(),
+        }
+        for field_name in (
+            "base_seed",
+            "frame_seed",
+            "samples",
+            "residency_hash",
+            "label_set_hash",
+            "lod_hash",
+            "engine_revision",
+            "camera_hash",
+            "scene_hash",
+        ):
+            record[field_name] = provenance[field_name]
+        records.append(record)
+        compiled_frames.append(compiled)
 
     manifest = FlythroughManifest(
         base_seed=int(base_seed),

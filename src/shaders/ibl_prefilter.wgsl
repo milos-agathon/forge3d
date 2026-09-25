@@ -36,12 +36,12 @@ var target_cube: texture_storage_2d_array<rgba16float, write>;
 fn uv_to_direction(uv: vec2<f32>, face: u32) -> vec3<f32> {
     let coord = uv * 2.0 - vec2<f32>(1.0, 1.0);
     switch face {
-        case 0u: { return normalize(vec3<f32>(1.0, -coord.y, -coord.x)); }
-        case 1u: { return normalize(vec3<f32>(-1.0, -coord.y, coord.x)); }
-        case 2u: { return normalize(vec3<f32>(coord.x, 1.0, coord.y)); }
-        case 3u: { return normalize(vec3<f32>(coord.x, -1.0, -coord.y)); }
-        case 4u: { return normalize(vec3<f32>(coord.x, -coord.y, 1.0)); }
-        default: { return normalize(vec3<f32>(-coord.x, -coord.y, -1.0)); }
+        case 0u: { return det_normalize3(vec3<f32>(1.0, -coord.y, -coord.x)); }
+        case 1u: { return det_normalize3(vec3<f32>(-1.0, -coord.y, coord.x)); }
+        case 2u: { return det_normalize3(vec3<f32>(coord.x, 1.0, coord.y)); }
+        case 3u: { return det_normalize3(vec3<f32>(coord.x, -1.0, -coord.y)); }
+        case 4u: { return det_normalize3(vec3<f32>(coord.x, -coord.y, 1.0)); }
+        default: { return det_normalize3(vec3<f32>(-coord.x, -coord.y, -1.0)); }
     }
 }
 
@@ -63,8 +63,8 @@ fn hemisphere_sample_uniform(xi: vec2<f32>) -> vec3<f32> {
 fn importance_sample_ggx(xi: vec2<f32>, normal: vec3<f32>, roughness: f32) -> vec3<f32> {
     let a = roughness * roughness;
     let phi = TWO_PI * xi.x;
-    let cos_theta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
-    let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+    let cos_theta = det_sqrt(det_div(1.0 - xi.y, 1.0 + (a * a - 1.0) * xi.y));
+    let sin_theta = det_sqrt(1.0 - cos_theta * cos_theta);
 
     let h = vec3<f32>(
         det_cos(phi) * sin_theta,
@@ -73,9 +73,11 @@ fn importance_sample_ggx(xi: vec2<f32>, normal: vec3<f32>, roughness: f32) -> ve
     );
 
     let up = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(normal.z) < 0.999);
-    let tangent = normalize(cross(up, normal));
-    let bitangent = cross(normal, tangent);
-    return normalize(tangent * h.x + bitangent * h.y + normal * h.z);
+    let tangent = det_normalize3(det_cross3(up, normal));
+    let bitangent = det_cross3(normal, tangent);
+    return det_normalize3(
+        det_barrier3(tangent * h.x) + det_barrier3(bitangent * h.y) + det_barrier3(normal * h.z)
+    );
 }
 
 fn hammersley_2d(i: u32, n: u32) -> vec2<f32> {
@@ -85,7 +87,7 @@ fn hammersley_2d(i: u32, n: u32) -> vec2<f32> {
     bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
     bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
     bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-    return vec2<f32>(f32(i) / f32(n), f32(bits) * 2.3283064365386963e-10);
+    return vec2<f32>(f32(i) * det_rcp(f32(n)), f32(bits) * 2.3283064365386963e-10);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -99,7 +101,7 @@ fn cs_irradiance_convolve(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let uv = (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) / f32(size);
+    let uv = (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) * det_rcp(f32(size));
     let normal = uv_to_direction(uv, face);
 
     var irradiance = vec3<f32>(0.0);
@@ -109,8 +111,8 @@ fn cs_irradiance_convolve(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Stratified hemisphere sampling (cos-weighted)
         let xi = hammersley_2d(i, sample_count);
         let phi = TWO_PI * xi.x;
-        let cos_theta = sqrt(1.0 - xi.y); // cos-weighted distribution
-        let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+        let cos_theta = det_sqrt(1.0 - xi.y); // cos-weighted distribution
+        let sin_theta = det_sqrt(1.0 - cos_theta * cos_theta);
         let sample_dir_local = vec3<f32>(
             det_cos(phi) * sin_theta,
             det_sin(phi) * sin_theta,
@@ -118,12 +120,12 @@ fn cs_irradiance_convolve(@builtin(global_invocation_id) gid: vec3<u32>) {
         );
 
         let up = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(normal.z) < 0.999);
-        let tangent = normalize(cross(up, normal));
-        let bitangent = cross(normal, tangent);
-        let sample_dir = normalize(
-            tangent * sample_dir_local.x +
-            bitangent * sample_dir_local.y +
-            normal * sample_dir_local.z
+        let tangent = det_normalize3(det_cross3(up, normal));
+        let bitangent = det_cross3(normal, tangent);
+        let sample_dir = det_normalize3(
+            det_barrier3(tangent * sample_dir_local.x) +
+            det_barrier3(bitangent * sample_dir_local.y) +
+            det_barrier3(normal * sample_dir_local.z)
         );
 
         irradiance += sample_environment(sample_dir);
@@ -133,7 +135,7 @@ fn cs_irradiance_convolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     // factor: mean(L_i) estimates (1/pi) * integral(L * cos) — the normalized
     // irradiance convention shared with fs_irradiance_convolution and the
     // albedo * irradiance IBL consumers.
-    irradiance = irradiance / f32(sample_count);
+    irradiance = irradiance * det_rcp(f32(sample_count));
     // Clamp to prevent NaNs/inf and ensure no pixel > 1.0 for unit-intensity HDR (spec requirement)
     irradiance = saturate(irradiance);
     textureStore(
@@ -155,7 +157,7 @@ fn cs_specular_prefilter(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let uv = (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) / f32(size);
+    let uv = (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) * det_rcp(f32(size));
     let normal = uv_to_direction(uv, face);
     let view_dir = normal;
 
@@ -167,28 +169,30 @@ fn cs_specular_prefilter(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var i = 0u; i < sample_count; i = i + 1u) {
         let xi = hammersley_2d(i, sample_count);
         let half_dir = importance_sample_ggx(xi, normal, roughness);
-        let light_dir = normalize(2.0 * dot(view_dir, half_dir) * half_dir - view_dir);
+        let light_dir = det_normalize3(
+            det_barrier3(half_dir * (2.0 * det_dot3(view_dir, half_dir))) - view_dir
+        );
 
-        let n_dot_l = max(dot(normal, light_dir), 0.0);
+        let n_dot_l = max(det_dot3(normal, light_dir), 0.0);
         if n_dot_l > 0.0 {
-            let n_dot_h = max(dot(normal, half_dir), 0.0);
-            let v_dot_h = max(dot(view_dir, half_dir), 0.0);
+            let n_dot_h = max(det_dot3(normal, half_dir), 0.0);
+            let v_dot_h = max(det_dot3(view_dir, half_dir), 0.0);
             let d = roughness * roughness;
-            let pdf = (d * d * n_dot_h) / max(4.0 * v_dot_h, 1e-4) + 1e-4;
+            let pdf = det_div(d * d * n_dot_h, max(4.0 * v_dot_h, 1e-4)) + 1e-4;
 
             let resolution = f32(params.env_size);
-            let sa_texel = 4.0 * PI / (6.0 * resolution * resolution);
-            let sa_sample = 1.0 / (f32(sample_count) * pdf);
-            let lod = 0.5 * log2(sa_sample / sa_texel);
+            let sa_texel = det_div(4.0 * PI, 6.0 * resolution * resolution);
+            let sa_sample = det_rcp(f32(sample_count) * pdf);
+            let lod = 0.5 * det_log2(det_div(sa_sample, sa_texel));
             let mip = clamp(lod, 0.0, f32(params.max_mip_levels - 1u));
 
             let color = textureSampleLevel(env_cubemap, env_sampler, light_dir, mip);
-            prefiltered += color.rgb * n_dot_l;
+            prefiltered += det_barrier3(color.rgb * n_dot_l);
             total_weight += n_dot_l;
         }
     }
 
-    prefiltered = prefiltered / max(total_weight, 1e-3);
+    prefiltered = prefiltered * det_rcp(max(total_weight, 1e-3));
     // Clamp to prevent NaNs/inf and ensure no pixel > 1.0 for unit-intensity HDR (spec requirement)
     prefiltered = saturate(prefiltered);
     textureStore(

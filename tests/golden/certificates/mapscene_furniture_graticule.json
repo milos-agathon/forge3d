@@ -2,7 +2,7 @@
   "adapter": {
     "backend": "vulkan",
     "device": "NVIDIA GeForce RTX 3070",
-    "driver_info": "595.95",
+    "driver_info": "610.60",
     "vendor": "4318"
   },
   "allocations": {
@@ -124,14 +124,22 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "942a8d430423",
-    "version": "1.33.1",
+    "git_sha": "0f73fd104ff5",
+    "version": "1.34.0",
     "wgsl_module_hashes": {
+      "ibl.precompute.shader.brdf": "e032a889ca72fd90d726085196f0227e730ceb12535eabfeb3c0baa0909268b0",
+      "ibl.precompute.shader.equirect": "4ba5f69ba730e33088813e7c5ecdc68bc72b64de38440ba51a3ee2357c18338a",
+      "ibl.precompute.shader.prefilter": "aea86f91c8567b30b3908127a3ee49acba2e8143fc84bdf9402e7b5dea0266d8",
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.shader": "622e56edce3439cbb0170a46b854b2c5d0465eee8980ac6d644d23ccbd82bb4e"
+      "terrain_pbr_pom.shader": "5f8229c00c41d6b74e77edf7f58c083ca164457cfe7c1449d455550d29f4343b"
     }
   },
   "passes": [
+    {
+      "draw_calls": 0,
+      "gpu_ms": 3.229696035385132,
+      "label": "terrain.shadow"
+    },
     {
       "draw_calls": 0,
       "gpu_ms": 0.0030720001086592674,
@@ -139,7 +147,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.004095999989658594,
+      "gpu_ms": 0.0030720001086592674,
       "label": "terrain.height_ao"
     },
     {
@@ -149,22 +157,17 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 9.583616256713867,
-      "label": "terrain.shadow"
-    },
-    {
-      "draw_calls": 0,
       "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.3317759931087494,
+      "gpu_ms": 0.13926400244235992,
       "label": "terrain.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.resolve"
     },
     {
@@ -177,7 +180,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "59a408132bfa0c4ca377ac6f902aff3af0f50ebc1f15f4a42ebe4d92ac7a01e304fb4d43595bf784a0c790e66e618efb524878840651f57b588cf4ab1cf18e0b",
+    "sig": "6c8a9306624d4825dbebe347935ba765634674c7e15d81dc49965008afc8ade6c14deba1d78d486db9520b3bba440ad4e275ee28be35a06dee27dc13caca9b0f",
     "signed_fields": [
       "adapter",
       "allocations",

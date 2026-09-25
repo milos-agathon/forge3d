@@ -266,7 +266,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Persistent threads loop: consume shadow rays
     loop {
         let idx = atomicAdd(&shadow_queue_header.out_count, 1u);
-        if (idx >= shadow_queue_header.in_count) { break; }
+        if (idx >= shadow_queue_header.in_count) {
+            atomicSub(&shadow_queue_header.out_count, 1u); // return failed ticket
+            break;
+        }
         if (idx >= shadow_queue_header.capacity) { break; }
         let sr = shadow_queue[idx];
         let ro = sr.o;
