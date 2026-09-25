@@ -124,6 +124,9 @@ class TestNativeModuleSymbols:
         "device_probe",
         "sun_position",
         "sun_position_utc",
+        "astro_body_position",
+        "astro_moon_phase",
+        "astro_moon_phase_at",
         "clipmap_generate_py",
         "engine_info",
         "hybrid_render",
@@ -802,6 +805,8 @@ class TestPackageLevelApiContracts:
         "compile_frame",
         "render_compiled_frame",
         "FlythroughManifest",
+        "astro",
+        "sky",
         "render_flythrough",
     ]
 

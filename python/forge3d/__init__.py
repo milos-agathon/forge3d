@@ -34,6 +34,7 @@ from ._native import (
     get_native_module as _get_native_module,
     native_import_error,
 )
+from . import astro, sky
 from ._gpu import (
     enumerate_adapters,
     device_probe,
@@ -663,6 +664,8 @@ __all__ = [
     "verify",
     "codec",
     "precision",
+    "astro",
+    "sky",
     "dd_selftest",
     "dd_harness",
     "dd_jitter_demo",

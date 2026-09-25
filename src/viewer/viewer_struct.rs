@@ -178,6 +178,12 @@ pub struct Viewer {
     pub(crate) sky_bind_group_layout0: BindGroupLayout,
     pub(crate) sky_bind_group_layout1: BindGroupLayout,
     pub(crate) sky_pipeline: ComputePipeline,
+    pub(crate) celestial_pipeline: wgpu::RenderPipeline,
+    pub(crate) celestial_instances: Option<TrackedBuffer>,
+    pub(crate) celestial_instance_count: u32,
+    pub(crate) observation_sky_sun_direction: Option<[f32; 3]>,
+    pub(crate) observation_night_params: Option<[f32; 4]>,
+    pub(crate) observation_day_sun_intensity: Option<f32>,
     pub(crate) sky_params: TrackedBuffer,
     pub(crate) sky_camera: TrackedBuffer,
     pub(crate) sky_output: TrackedTexture,
@@ -254,6 +260,9 @@ pub struct Viewer {
     pub(crate) sky_ground_albedo: f32,
     pub(crate) sky_exposure: f32,
     pub(crate) sky_sun_intensity: f32,
+    /// World-space direction set by the sun IPC command. None retains the
+    /// historic camera-relative default until the user supplies an angle.
+    pub(crate) observation_sun_direction: Option<[f32; 3]>,
 
     // HUD overlay renderer
     pub(crate) hud_enabled: bool,

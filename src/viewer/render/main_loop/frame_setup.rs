@@ -109,24 +109,28 @@ impl Viewer {
             self.queue
                 .write_buffer(&self.sky_camera, 0, bytemuck::cast_slice(&cam_buf));
             // Write eye position (vec4 packed)
-            let eye4: [f32; 4] = [eye.x, eye.y, eye.z, 0.0];
+            let eye4: [f32; 4] = [eye.x, eye.y, eye.z, self.config.height as f32];
             let base = (std::mem::size_of::<[[f32; 4]; 4]>() * 4) as u64;
             self.queue
                 .write_buffer(&self.sky_camera, base, bytemuck::cast_slice(&eye4));
 
             // Update sky params each frame based on viewer-set fields
             let sun_dir_vs = glam::Vec3::new(0.3, 0.6, -1.0).normalize();
-            let sun_dir_ws = (inv_view
+            let default_sun_dir_ws = (inv_view
                 * glam::Vec4::new(sun_dir_vs.x, sun_dir_vs.y, sun_dir_vs.z, 0.0))
             .truncate()
             .normalize();
+            let sun_dir_ws = self
+                .observation_sky_sun_direction
+                .or(self.observation_sun_direction)
+                .map_or(default_sun_dir_ws, glam::Vec3::from);
             let model_id: u32 = self.sky_model_id;
             let turb: f32 = self.sky_turbidity.clamp(1.0, 10.0);
             let ground: f32 = self.sky_ground_albedo.clamp(0.0, 1.0);
             let expose: f32 = self.sky_exposure.max(0.0);
             let sun_i: f32 = self.sky_sun_intensity.max(0.0);
 
-            let sky_params_frame = SkyUniforms::new(
+            let mut sky_params_frame = SkyUniforms::new(
                 [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
                 turb,
                 ground,
@@ -135,6 +139,9 @@ impl Viewer {
                 expose,
                 model_id,
             );
+            if let Some(night) = self.observation_night_params {
+                sky_params_frame.night_params = night;
+            }
             self.queue
                 .write_buffer(&self.sky_params, 0, bytemuck::bytes_of(&sky_params_frame));
 
@@ -152,6 +159,26 @@ impl Viewer {
                 cpass.set_bind_group(0, sky_bg0.as_ref().unwrap(), &[]);
                 cpass.set_bind_group(1, sky_bg1.as_ref().unwrap(), &[]);
                 cpass.dispatch_workgroups(gx, gy, 1);
+            }
+            if let Some(instances) = &self.celestial_instances {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.celestial.pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.sky_output_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(&self.celestial_pipeline);
+                pass.set_bind_group(0, sky_bg1.as_ref().unwrap(), &[]);
+                pass.set_vertex_buffer(0, instances.slice(..));
+                pass.draw(0..6, 0..self.celestial_instance_count);
             }
         }
 

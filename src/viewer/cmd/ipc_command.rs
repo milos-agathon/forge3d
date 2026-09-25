@@ -13,15 +13,116 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         } => {
             let az_rad = azimuth_deg.to_radians();
             let el_rad = elevation_deg.to_radians();
-            let _dir = glam::Vec3::new(
+            let dir = glam::Vec3::new(
                 el_rad.cos() * az_rad.sin(),
                 el_rad.sin(),
                 el_rad.cos() * az_rad.cos(),
             );
-            println!(
-                "Sun direction: azimuth={:.1}° elevation={:.1}°",
-                azimuth_deg, elevation_deg
+            if !azimuth_deg.is_finite()
+                || !elevation_deg.is_finite()
+                || !(-90.0..=90.0).contains(elevation_deg)
+            {
+                viewer.reject_command(
+                    "sun angles must be finite and elevation within [-90, 90]".to_string(),
+                );
+                return true;
+            }
+            viewer.observation_sun_direction = Some(dir.to_array());
+            viewer.observation_sky_sun_direction = None;
+            viewer.observation_night_params = None;
+            viewer.celestial_instances = None;
+            viewer.celestial_instance_count = 0;
+            if let Some(day_intensity) = viewer.observation_day_sun_intensity.take() {
+                viewer.lit_sun_intensity = day_intensity;
+            }
+            viewer.update_lit_uniform();
+            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+                terrain_viewer.set_sun(*azimuth_deg, *elevation_deg, viewer.lit_sun_intensity);
+            }
+            true
+        }
+        ViewerCmd::SetSkyObservation {
+            utc,
+            latitude_deg,
+            longitude_deg,
+        } => {
+            use crate::geo::units::{Angle, Degree};
+            let observation = crate::astro::time::UtcDateTime::parse(utc).and_then(|time| {
+                crate::astro::render::prepare(
+                    time,
+                    Angle::<Degree>::new(*latitude_deg),
+                    Angle::<Degree>::new(*longitude_deg),
+                )
+            });
+            let observation = match observation {
+                Ok(value) => value,
+                Err(error) => {
+                    viewer.reject_command(error.to_string());
+                    return true;
+                }
+            };
+            let buffer = crate::core::resource_tracker::tracked_create_buffer_init(
+                &viewer.device,
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("viewer.celestial.instances"),
+                    contents: bytemuck::cast_slice(&observation.instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                },
             );
+            let buffer = match buffer {
+                Ok(value) => value,
+                Err(error) => {
+                    viewer.reject_command(error.to_string());
+                    return true;
+                }
+            };
+            let direction = |azimuth_deg: f64, altitude_deg: f64| {
+                let (sa, ca) = azimuth_deg.to_radians().sin_cos();
+                let (sh, ch) = altitude_deg.to_radians().sin_cos();
+                [(ch * sa) as f32, sh as f32, (ch * ca) as f32]
+            };
+            let sun = direction(
+                observation.sun.azimuth.value(),
+                observation.sun.altitude.value(),
+            );
+            let moon = direction(
+                observation.moon.azimuth.value(),
+                observation.moon.altitude.value(),
+            );
+            let day_intensity = *viewer
+                .observation_day_sun_intensity
+                .get_or_insert(viewer.lit_sun_intensity);
+            let moonlit =
+                observation.sun.altitude.value() < -6.0 && observation.moon.altitude.value() > 0.0;
+            let lit_direction = if moonlit { moon } else { sun };
+            let lit_intensity = if moonlit {
+                observation.moonlight_relative * 0.12
+            } else if observation.sun.altitude.value() > 0.0 {
+                day_intensity
+            } else {
+                0.0
+            };
+            viewer.observation_sun_direction = Some(lit_direction);
+            viewer.observation_sky_sun_direction = Some(sun);
+            viewer.observation_night_params =
+                Some([moon[0], moon[1], moon[2], observation.moonlight_relative]);
+            viewer.lit_sun_intensity = lit_intensity;
+            viewer.celestial_instance_count = observation.instances.len() as u32;
+            viewer.celestial_instances = Some(buffer);
+            viewer.sky_enabled = true;
+            viewer.update_lit_uniform();
+            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+                let target = if moonlit {
+                    &observation.moon
+                } else {
+                    &observation.sun
+                };
+                terrain_viewer.set_sun(
+                    target.azimuth.value() as f32,
+                    target.altitude.value() as f32,
+                    lit_intensity,
+                );
+            }
             true
         }
         ViewerCmd::SetIbl { path, intensity } => {

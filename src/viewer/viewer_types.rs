@@ -70,6 +70,8 @@ pub struct SkyUniforms {
     pub hosek_coeffs_e_h: [[f32; 4]; 3],
     pub hosek_coeff_i: [f32; 4],
     pub hosek_radiance: [f32; 4],
+    /// xyz Moon direction; w relative KS91 moonlight, -1 when unobserved.
+    pub night_params: [f32; 4],
 }
 
 impl SkyUniforms {
@@ -109,6 +111,7 @@ impl SkyUniforms {
             hosek_coeffs_e_h: hosek.uniform_e_h(),
             hosek_coeff_i: hosek.uniform_i(),
             hosek_radiance: hosek.uniform_radiance(),
+            night_params: [0.0, 0.0, 0.0, -1.0],
         }
     }
 }
@@ -119,7 +122,7 @@ mod sky_tests {
 
     #[test]
     fn sky_uniforms_match_wgsl_size() {
-        assert_eq!(std::mem::size_of::<SkyUniforms>(), 176);
+        assert_eq!(std::mem::size_of::<SkyUniforms>(), 192);
     }
 }
 

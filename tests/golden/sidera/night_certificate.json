@@ -1,0 +1,14 @@
+{
+  "adapter": "NVIDIA GeForce RTX 3070",
+  "backend": "Vulkan",
+  "catalog": "Yale Bright Star Catalogue V/50, J2000, 9096 stars",
+  "height": 1024,
+  "latitude_deg": 52.37,
+  "longitude_deg": 4.9,
+  "moonlight_model": "Krisciunas & Schaefer (1991) Eq. 9 phase magnitude, 0.172 V-mag/airmass clear-sky extinction, relative directional display gain 0.12",
+  "rgba_sha256": "91cd9f172d652a91e86b2b432f50131fcdeb39597b13f3bcc20c356f061afbeb",
+  "theories": "VSOP87D and ELP2000-82B; IAU 2006/2000B frames",
+  "twilight_model": "civil-to-astronomical solar-depression visual ramp (-6 to -18 degrees)",
+  "utc": "2026-09-25T22:00:00Z",
+  "width": 1024
+}

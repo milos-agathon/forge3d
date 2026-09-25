@@ -9,6 +9,7 @@ struct SkyParams {
     hosek_coeffs_e_h: array<vec4<f32>, 3>,
     hosek_coeff_i: vec4<f32>,
     hosek_radiance: vec4<f32>,
+    night_params: vec4<f32>,
 }
 
 const PI: f32 = 3.14159265359;
@@ -358,6 +359,19 @@ fn render_solar_scattering(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> 
 fn eval_sky(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
     let normalized_view = normalize(view_dir);
 
+    if (params.night_params.w >= 0.0 && sky_sun_direction(params).y < 0.0) {
+        // Declared visual twilight ramp: civil -6° to astronomical -18°.
+        // The daytime analytic fits have no night-domain validity.
+        let depression = degrees(asin(clamp(-sky_sun_direction(params).y, 0.0, 1.0)));
+        let twilight = 1.0 - smoothstep(6.0, 18.0, depression);
+        let horizon = 1.0 - clamp(normalized_view.y, 0.0, 1.0);
+        let moon_focus = pow(max(0.0, dot(normalized_view, params.night_params.xyz)), 8.0);
+        let dark = vec3<f32>(0.002, 0.004, 0.011) + horizon * vec3<f32>(0.003, 0.004, 0.008);
+        let twilight_color = vec3<f32>(0.12, 0.17, 0.29) * (0.25 + horizon * 0.75);
+        let moon_glow = params.night_params.w * moon_focus * vec3<f32>(0.025, 0.027, 0.031);
+        return dark + twilight * twilight_color + moon_glow;
+    }
+
     var sky_color: vec3<f32>;
 
     if (sky_model(params) == 1u) {
@@ -399,7 +413,7 @@ struct CameraUniforms {
     inv_view: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
     eye_position: vec3<f32>,
-    _pad0: f32,
+    viewport_height: f32,
 }
 
 @group(1) @binding(0) var<uniform> camera: CameraUniforms;

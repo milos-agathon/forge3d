@@ -24,6 +24,7 @@ pub enum IpcRequest {
     CamLookat { eye: [f64; 3], target: [f64; 3], #[serde(default = "default_up")] up: [f32; 3] },
     SetFov { deg: f32 },
     LitSun { azimuth_deg: f32, elevation_deg: f32 },
+    SetSkyObservation { utc: String, latitude_deg: f64, longitude_deg: f64 },
     LitIbl { path: String, #[serde(default = "default_intensity")] intensity: f32 },
     SetZScale { value: f32 },
     Snapshot { path: String, #[serde(default)] width: Option<u32>, #[serde(default)] height: Option<u32> },

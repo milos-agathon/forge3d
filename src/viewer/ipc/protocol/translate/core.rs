@@ -55,6 +55,15 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             azimuth_deg: *azimuth_deg,
             elevation_deg: *elevation_deg,
         }),
+        IpcRequest::SetSkyObservation {
+            utc,
+            latitude_deg,
+            longitude_deg,
+        } => Some(ViewerCmd::SetSkyObservation {
+            utc: utc.clone(),
+            latitude_deg: *latitude_deg,
+            longitude_deg: *longitude_deg,
+        }),
         IpcRequest::LitIbl { path, intensity } => Some(ViewerCmd::SetIbl {
             path: path.clone(),
             intensity: *intensity,

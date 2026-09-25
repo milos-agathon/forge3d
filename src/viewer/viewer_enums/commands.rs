@@ -59,6 +59,7 @@ pub enum ViewerCmd {
     CaptureP53SsrThickness, CaptureP54GiStack, QueryGiSeed, GiStatus,
 
     SetSunDirection { azimuth_deg: f32, elevation_deg: f32 },
+    SetSkyObservation { utc: String, latitude_deg: f64, longitude_deg: f64 },
     SetIbl { path: String, intensity: f32 },
     SetZScale(f32),
     SnapshotWithSize { path: String, width: Option<u32>, height: Option<u32> },

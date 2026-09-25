@@ -30,7 +30,9 @@ impl Viewer {
     }
 
     pub(crate) fn update_lit_uniform(&mut self) {
-        let sun_dir = [0.3f32, 0.6, -1.0];
+        let sun_dir = self
+            .observation_sun_direction
+            .unwrap_or([0.3f32, 0.6, -1.0]);
         let params: [f32; 12] = [
             sun_dir[0],
             sun_dir[1],
