@@ -6,11 +6,11 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 ### Added
-- Terrain material bands can be placed where you want them: the `material_layer_centers` lighting setting (and `TerrainRenderParams.material_layer_centers`) sets each texture layer's centre as a fraction of the height range, instead of spacing the layers evenly.
-- Heightmap cells without data (NaN) now render as holes in `MapScene`: they are not drawn, not shaded, and credited to no source in VERITAS provenance. `TerrainRenderParams.nodata_height_below` exposes the same cut-off for direct renderer use.
+- Terrain material bands can be placed where you want them: the `material_layer_centers` lighting setting (and `TerrainRenderParams.material_layer_centers`) sets each texture layer's centre as a fraction of the height range, instead of spacing the layers evenly. (#194)
+- Heightmap cells without data (NaN) now render as holes in `MapScene`: they are not drawn, not shaded, and credited to no source in VERITAS provenance. `TerrainRenderParams.nodata_height_below` exposes the same cut-off for direct renderer use. (#194)
 
 ### Changed
-- The VERITAS demo (`examples/provenance_demo.py`) uses the *batlow* palette, places its four bands at 800 m, 1,800 m and 3,000 m so every legend entry covers real terrain, and leaves the area outside Switzerland empty and unattributed.
+- The VERITAS demo (`examples/provenance_demo.py`) uses the *batlow* palette, places its four bands at 800 m, 1,800 m and 3,000 m so every legend entry covers real terrain, and leaves the area outside Switzerland empty and unattributed. (#194)
 
 ## [1.39.0] - 2026-09-28
 ### Added
