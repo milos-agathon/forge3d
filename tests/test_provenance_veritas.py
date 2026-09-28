@@ -218,6 +218,30 @@ def test_offline_seal_is_deterministic() -> None:
     assert a == b, "seal must be independent of contributing-tile order"
 
 
+def test_offline_legacy_calls_warn_and_verify() -> None:
+    source_map = np.ones((4, 5), dtype=np.uint32)
+
+    with pytest.warns(DeprecationWarning):
+        legacy_manifest = prov.seal_provenance_offline(
+            source_map, _sample_tiles(), TEST_PRIVATE_KEY
+        )
+    decoded = json.loads(legacy_manifest)
+    assert decoded["schema_version"] == 1
+    assert "image_sha256" not in decoded
+
+    with pytest.warns(DeprecationWarning):
+        report = prov.verify_provenance_offline(source_map, legacy_manifest)
+    assert report["ok"] is True
+    assert report["root_match"] is True
+    assert report["signature_valid"] is True
+
+    new_manifest = prov.seal_provenance_offline(
+        source_map, _sample_tiles(), TEST_PRIVATE_KEY, TEST_IMAGE_BYTES
+    )
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="image_bytes"):
+        prov.verify_provenance_offline(source_map, new_manifest)
+
+
 @pytest.mark.skipif(
     not hasattr(f3d, "seal_provenance"), reason="native forge3d extension not available"
 )
