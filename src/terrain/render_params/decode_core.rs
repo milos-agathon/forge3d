@@ -20,6 +20,8 @@ pub(super) struct CoreTerrainParams {
     pub colormap_strength: f32,
     pub hue_variation_strength: f32,
     pub material_slope_bias: f32,
+    pub material_layer_centers: Option<Vec<f32>>,
+    pub nodata_height_below: Option<f32>,
     pub ao_weight: f32,
     pub height_curve_mode: String,
     pub height_curve_strength: f32,
@@ -126,6 +128,22 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         Err(_) => 1.0,
     }
     .clamp(0.0, 1.0);
+    let material_layer_centers = match params.getattr("material_layer_centers").ok() {
+        Some(value) if !value.is_none() => {
+            let centers: Vec<f32> = value.extract().map_err(|_| {
+                PyValueError::new_err("material_layer_centers must be a sequence of floats")
+            })?;
+            validate_material_layer_centers(&centers)?;
+            Some(centers)
+        }
+        _ => None,
+    };
+    let nodata_height_below = match params.getattr("nodata_height_below").ok() {
+        Some(value) if !value.is_none() => {
+            Some(to_finite_f32(value.as_gil_ref(), "nodata_height_below")?)
+        }
+        _ => None,
+    };
 
     let ao_weight = params
         .getattr("ao_weight")
@@ -301,6 +319,8 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         colormap_strength,
         hue_variation_strength,
         material_slope_bias,
+        material_layer_centers,
+        nodata_height_below,
         ao_weight,
         height_curve_mode,
         height_curve_strength,
@@ -320,4 +340,28 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         terrain_data_revision,
         height_curve_lut,
     })
+}
+
+/// One centre per material layer (at most four), each finite and inside
+/// `[0, 1]`, strictly increasing so every layer owns a distinct height band.
+fn validate_material_layer_centers(centers: &[f32]) -> PyResult<()> {
+    if centers.is_empty() || centers.len() > 4 {
+        return Err(PyValueError::new_err(
+            "material_layer_centers must hold 1 to 4 values",
+        ));
+    }
+    if centers
+        .iter()
+        .any(|c| !c.is_finite() || !(0.0..=1.0).contains(c))
+    {
+        return Err(PyValueError::new_err(
+            "material_layer_centers values must be finite and within [0, 1]",
+        ));
+    }
+    if centers.windows(2).any(|pair| pair[1] <= pair[0]) {
+        return Err(PyValueError::new_err(
+            "material_layer_centers must be strictly increasing",
+        ));
+    }
+    Ok(())
 }
