@@ -127,6 +127,7 @@ pub(super) fn build_observation(
         overlay.params3,
         overlay.params4,
         overlay.params5,
+        overlay.params6,
     ]
     .iter()
     .enumerate()
@@ -239,6 +240,7 @@ mod tests {
                 params3: [0.0; 4],
                 params4: [0.0; 4],
                 params5: [0.0; 4],
+                params6: [0.0; 4],
             },
             &[0.0, 0.5, 1.0, 0.25],
             2,
@@ -282,6 +284,7 @@ mod tests {
                 params3: [0.0; 4],
                 params4: [0.0; 4],
                 params5: [0.0; 4],
+                params6: [0.0; 4],
             },
             &[0.0, 0.5, 1.0, 0.25],
             2,

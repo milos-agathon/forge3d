@@ -19,6 +19,7 @@ pub(super) struct CoreTerrainParams {
     pub albedo_mode: String,
     pub colormap_strength: f32,
     pub hue_variation_strength: f32,
+    pub material_slope_bias: f32,
     pub ao_weight: f32,
     pub height_curve_mode: String,
     pub height_curve_strength: f32,
@@ -120,6 +121,11 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         Err(_) => 0.08,
     }
     .clamp(0.0, 0.2);
+    let material_slope_bias = match params.getattr("material_slope_bias") {
+        Ok(value) => to_finite_f32(value.as_gil_ref(), "material_slope_bias")?,
+        Err(_) => 1.0,
+    }
+    .clamp(0.0, 1.0);
 
     let ao_weight = params
         .getattr("ao_weight")
@@ -294,6 +300,7 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         albedo_mode,
         colormap_strength,
         hue_variation_strength,
+        material_slope_bias,
         ao_weight,
         height_curve_mode,
         height_curve_strength,

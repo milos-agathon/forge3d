@@ -115,6 +115,7 @@ impl TerrainScene {
                     output_srgb_eotf,
                     offline_hdr_flag,
                 ],
+                params6: [params.material_slope_bias.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
             },
             lut: None,
         };

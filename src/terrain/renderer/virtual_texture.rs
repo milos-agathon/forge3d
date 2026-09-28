@@ -7,7 +7,7 @@ use std::time::Instant;
 use super::*;
 
 #[cfg(feature = "extension-module")]
-use crate::core::feedback_buffer::FeedbackBuffer;
+use crate::core::feedback_buffer::{FeedbackBuffer, FeedbackEncoding};
 #[cfg(feature = "extension-module")]
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 #[cfg(feature = "enable-staging-rings")]
@@ -45,6 +45,17 @@ fn feedback_key_in_bounds(key: TileKey, material_count: u32, max_mip_levels: u32
     key.family_slot < TERRAIN_VT_FAMILY_COUNT
         && key.material_index < material_count
         && key.mip_level < max_mip_levels
+}
+
+#[cfg(feature = "extension-module")]
+fn ensure_complete_provenance_feedback(overflow: u32) -> Result<(), String> {
+    if overflow == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "terrain VT provenance feedback overflowed by {overflow} samples; capture is incomplete"
+        ))
+    }
 }
 
 #[cfg(feature = "extension-module")]
@@ -109,8 +120,9 @@ struct TerrainVTUniformsGpu {
     /// `prepare_frame`.
     family_info: [TerrainVtFamilyInfoGpu; TERRAIN_VT_FAMILY_COUNT as usize],
     /// Bounded feedback append (TESSELLA win 1). x = slot capacity (power of
-    /// two), y/z = physical page-table base width/height, w reserved. Matches
-    /// `config3` in `terrain_pbr_pom.wgsl`.
+    /// two), y/z = physical page-table base width/height, w = VERITAS
+    /// provenance bitset-capture flag. Matches `config3` in
+    /// `terrain_pbr_pom.wgsl`.
     config3: [u32; 4],
 }
 
@@ -303,6 +315,8 @@ struct TerrainMaterialVTRuntime {
     /// retention seeds by construction.
     latest_shader_feedback: Vec<TileKey>,
     feedback_staged: bool,
+    provenance_capture: bool,
+    feedback_staged_encoding: FeedbackEncoding,
     budget_pages: u32,
     residency_budget_mb: f32,
     source_generation: u64,
@@ -383,6 +397,9 @@ pub(super) struct TerrainMaterialVT {
     source_generation: u64,
     last_stats: TerrainMaterialVTStats,
     bound_store_path: Option<String>,
+    /// VERITAS test seam: when set, `prepare_frame` pages in exactly this
+    /// ordered tile list instead of camera-driven request collection.
+    test_residency_schedule: Option<Vec<TileKey>>,
 }
 
 #[cfg(feature = "extension-module")]
@@ -394,6 +411,7 @@ impl TerrainMaterialVT {
             source_generation: 0,
             last_stats: TerrainMaterialVTStats::default(),
             bound_store_path: None,
+            test_residency_schedule: None,
         }
     }
 
@@ -510,7 +528,45 @@ impl TerrainMaterialVT {
         self.source_generation = self.source_generation.wrapping_add(1);
         self.last_stats = TerrainMaterialVTStats::default();
         self.bound_store_path = None;
+        self.test_residency_schedule = None;
         let _ = self.get_stats();
+    }
+
+    /// VERITAS test seam: pin the exact ordered tile residency list that
+    /// `prepare_frame` pages in (family, material_index, tile_x, tile_y,
+    /// mip_level). Rejects unsupported families and `(family, material)`
+    /// pairs with no registered source. Setting the schedule drops the
+    /// runtime so the next physical render starts from an empty atlas and
+    /// page table.
+    pub fn set_test_residency_schedule(
+        &mut self,
+        schedule: Vec<(String, u32, u32, u32, u32)>,
+    ) -> Result<(), String> {
+        let mut keys = Vec::with_capacity(schedule.len());
+        for (index, (family, material_index, tile_x, tile_y, mip_level)) in
+            schedule.into_iter().enumerate()
+        {
+            let Some(family_slot) = Self::family_slot(&family) else {
+                return Err(format!(
+                    "terrain VT residency schedule entry {index}: unsupported family '{family}'"
+                ));
+            };
+            if !self.sources.contains_key(&(material_index, family.clone())) {
+                return Err(format!(
+                    "terrain VT residency schedule entry {index}: no source registered for family '{family}' material {material_index}"
+                ));
+            }
+            keys.push(TileKey {
+                family_slot,
+                material_index,
+                x: tile_x,
+                y: tile_y,
+                mip_level,
+            });
+        }
+        self.test_residency_schedule = Some(keys);
+        self.runtime = None;
+        Ok(())
     }
 
     pub fn get_stats(&self) -> HashMap<String, f32> {
@@ -912,18 +968,68 @@ impl TerrainMaterialVT {
             &decoded.vt,
         )?;
         let runtime = self.runtime.as_mut().unwrap();
+        let provenance_capture = decoded.aov.enabled && decoded.aov.source_id;
+        if provenance_capture && runtime.feedback_staged {
+            if let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() {
+                let entries = feedback_buffer.read_feedback_entries_blocking_with_encoding(
+                    device.as_ref(),
+                    runtime.feedback_staged_encoding,
+                )?;
+                runtime.ingest_shader_feedback(entries);
+            }
+            runtime.feedback_staged = false;
+        }
+        runtime.provenance_capture = provenance_capture;
         runtime.reset_frame_stats(decoded.vt.residency_budget_mb);
 
         let fallback_colors = runtime.fallback_colors();
-        Self::write_uniforms(queue.as_ref(), vt_uniform_buffer, runtime, true);
+        Self::write_uniforms(
+            queue.as_ref(),
+            vt_uniform_buffer,
+            runtime,
+            true,
+            provenance_capture,
+        );
         queue.write_buffer(
             vt_fallback_uniform_buffer,
             0,
             bytemuck::cast_slice(&fallback_colors),
         );
 
-        let (requests, feedback_admissions) =
-            runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback);
+        let (requests, feedback_admissions) = if let Some(schedule) =
+            self.test_residency_schedule.as_ref()
+        {
+            // Authored test schedule: page in exactly this ordered list —
+            // no request collection, no sorting, no ancestor fill — so the
+            // physical render starts from a known residency set.
+            for (index, key) in schedule.iter().enumerate() {
+                if !runtime
+                    .sources
+                    .contains_key(&(key.family_slot, key.material_index))
+                {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: no prepared source for family slot {} material {}",
+                        key.family_slot, key.material_index
+                    ));
+                }
+                if key.mip_level >= runtime.max_mip_levels {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: mip {} out of range (max_mip_levels {})",
+                        key.mip_level, runtime.max_mip_levels
+                    ));
+                }
+                let (pages_x, pages_y) = runtime.pages_at_mip(key.mip_level);
+                if key.x >= pages_x || key.y >= pages_y {
+                    return Err(format!(
+                        "terrain VT residency schedule entry {index}: page ({}, {}) outside {}x{} pages at mip {}",
+                        key.x, key.y, pages_x, pages_y, key.mip_level
+                    ));
+                }
+            }
+            (schedule.clone(), HashSet::new())
+        } else {
+            runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback)
+        };
         // Keep VT uploads separate from the 4K terrain draw. `queue.write_*`
         // copies are deferred until submit, so a single encoder can both trip
         // the Windows Vulkan watchdog and reuse staging-ring offsets before
@@ -939,12 +1045,12 @@ impl TerrainMaterialVT {
         let upload_batch_tiles = (8 * 1024 * 1024 / max_staging_tile_bytes.max(1))
             .max(1)
             .min(512);
-        for request_batch in requests.chunks(upload_batch_tiles) {
+        for request_batch in requests.rchunks(upload_batch_tiles) {
             let mut vt_upload_encoder =
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("terrain.material_vt.uploads"),
                 });
-            for &key in request_batch {
+            for &key in request_batch.iter().rev() {
                 let streamed = runtime.ensure_tile_resident(
                     &mut vt_upload_encoder,
                     device.as_ref(),
@@ -985,6 +1091,11 @@ impl TerrainMaterialVT {
             return Ok(());
         }
         feedback_buffer.prepare_readback(encoder);
+        runtime.feedback_staged_encoding = if runtime.provenance_capture {
+            FeedbackEncoding::ProvenanceBitset
+        } else {
+            FeedbackEncoding::Append
+        };
         runtime.feedback_staged = true;
         Ok(())
     }
@@ -1002,7 +1113,11 @@ impl TerrainMaterialVT {
         }
 
         if let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() {
-            let Some(entries) = feedback_buffer.try_read_feedback_entries(device)? else {
+            let Some(entries) = feedback_buffer.try_read_feedback_entries_with_encoding(
+                device,
+                runtime.feedback_staged_encoding,
+            )?
+            else {
                 runtime.pending_feedback.on_not_ready();
                 runtime.stats.retained_requests = runtime
                     .pending_feedback
@@ -1033,7 +1148,10 @@ impl TerrainMaterialVT {
         };
         if runtime.feedback_staged {
             if let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() {
-                let entries = feedback_buffer.read_feedback_entries_blocking(device)?;
+                let entries = feedback_buffer.read_feedback_entries_blocking_with_encoding(
+                    device,
+                    runtime.feedback_staged_encoding,
+                )?;
                 runtime.ingest_shader_feedback(entries);
             }
             runtime.feedback_staged = false;
@@ -1069,18 +1187,45 @@ impl TerrainMaterialVT {
         let Some(runtime) = self.runtime.as_mut() else {
             return Ok(Vec::new());
         };
-        let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() else {
-            return Ok(Vec::new());
-        };
         // `finish_frame` normally consumes the async readback first. Reuse
         // the exact decoded snapshot it retained; otherwise a second read of
         // the already-consumed staging buffer makes an active feedback frame
         // appear empty. If the async map is still pending, finish it here and
         // populate that same snapshot.
-        if runtime.feedback_staged {
-            let entries = feedback_buffer.read_feedback_entries_blocking(device)?;
+        let feedback_encoding = runtime.feedback_staged_encoding;
+        let overflow = if runtime.feedback_staged {
+            let (entries, overflow) = match runtime.feedback_buffer.as_ref() {
+                Some(feedback_buffer) => {
+                    let entries = feedback_buffer
+                        .read_feedback_entries_blocking_with_encoding(device, feedback_encoding)?;
+                    (entries, feedback_buffer.last_overflow())
+                }
+                None => (Vec::new(), 0),
+            };
             runtime.ingest_shader_feedback(entries);
             runtime.feedback_staged = false;
+            overflow
+        } else {
+            runtime
+                .feedback_buffer
+                .as_ref()
+                .map_or(0, |feedback_buffer| feedback_buffer.last_overflow())
+        };
+        // A truncated capture must never surface as a partial provenance set.
+        // Ordinary append-mode overflow remains a streaming miss, not a fatal
+        // provenance error.
+        if feedback_encoding == FeedbackEncoding::ProvenanceBitset {
+            ensure_complete_provenance_feedback(overflow)?;
+        }
+        // Scheduled test residency: the contributing set is exactly the
+        // authored resident list. Pages resident at their desired mip emit
+        // no shader-demand record, so the bounded feedback stream alone
+        // cannot name them.
+        if let Some(schedule) = self.test_residency_schedule.as_ref() {
+            return Ok(runtime.resolve_feedback_keys_to_tiles(schedule));
+        }
+        if runtime.feedback_buffer.is_none() {
+            return Ok(Vec::new());
         }
 
         Ok(runtime.resolve_feedback_keys_to_tiles(&runtime.latest_shader_feedback))
@@ -1135,6 +1280,7 @@ impl TerrainMaterialVT {
         vt_uniform_buffer: &wgpu::Buffer,
         runtime: &TerrainMaterialVTRuntime,
         enabled: bool,
+        provenance_capture: bool,
     ) {
         let mut family_info = [TerrainVtFamilyInfoGpu::zeroed(); TERRAIN_VT_FAMILY_COUNT as usize];
         for (slot, info) in family_info.iter_mut().enumerate() {
@@ -1190,7 +1336,7 @@ impl TerrainMaterialVT {
                 runtime.feedback_capacity,
                 runtime.page_table_width,
                 runtime.page_table_height,
-                0,
+                u32::from(provenance_capture),
             ],
         };
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -1535,6 +1681,8 @@ impl TerrainMaterialVTRuntime {
             latest_feedback_uvs: Vec::new(),
             latest_shader_feedback: Vec::new(),
             feedback_staged: false,
+            provenance_capture: false,
+            feedback_staged_encoding: FeedbackEncoding::Append,
             budget_pages,
             residency_budget_mb,
             source_generation,
@@ -2856,6 +3004,15 @@ mod bounded_feedback_tests {
             std::mem::size_of::<TerrainVTUniformsGpu>()
         );
         assert_eq!(VT_UNIFORM_BUFFER_BYTES % 16, 0, "std140 vec4 alignment");
+    }
+
+    #[test]
+    fn provenance_feedback_overflow_fails_closed() {
+        assert!(ensure_complete_provenance_feedback(0).is_ok());
+        let error = ensure_complete_provenance_feedback(1)
+            .expect_err("overflowed provenance feedback must be rejected");
+        assert!(error.contains("overflow"));
+        assert!(error.contains("incomplete"));
     }
 
     #[test]

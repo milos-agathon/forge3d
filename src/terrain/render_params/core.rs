@@ -54,6 +54,7 @@ pub struct TerrainRenderParams {
     pub colormap_strength: f32,
     /// Slope/elevation hue rotation strength, clamped to [0.0, 0.2].
     pub hue_variation_strength: f32,
+    pub material_slope_bias: f32,
     /// P5: AO weight/multiplier (0.0 = no AO effect, 1.0 = full AO). Default 0.0 for P4 compatibility.
     pub ao_weight: f32,
     pub height_curve_mode: String,

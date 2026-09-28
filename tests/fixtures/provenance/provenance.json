@@ -4,9 +4,19 @@
     256,
     192
   ],
+  "image_sha256": "4d46c7273f6ae81420570b1b3afd91126a60977a4ef983e9565eff531078f0c8",
   "leaves": [
     {
-      "content_hash": "7abe557240c5a002ce41e0dbc8bd926393b01b2c67c1dcac7682666b29a3ed85",
+      "content_hash": "387507ed37bd7b5e591bb156cc601d5e5bdcbe2fe9f6484895c4244d0f3b8891",
+      "family": "albedo",
+      "family_slot": 0,
+      "mip_level": 0,
+      "source_id": 1,
+      "tile_x": 0,
+      "tile_y": 0
+    },
+    {
+      "content_hash": "387507ed37bd7b5e591bb156cc601d5e5bdcbe2fe9f6484895c4244d0f3b8891",
       "family": "albedo",
       "family_slot": 0,
       "mip_level": 1,
@@ -15,34 +25,16 @@
       "tile_y": 0
     },
     {
-      "content_hash": "7abe557240c5a002ce41e0dbc8bd926393b01b2c67c1dcac7682666b29a3ed85",
+      "content_hash": "387507ed37bd7b5e591bb156cc601d5e5bdcbe2fe9f6484895c4244d0f3b8891",
       "family": "albedo",
       "family_slot": 0,
-      "mip_level": 1,
+      "mip_level": 0,
       "source_id": 1,
       "tile_x": 0,
       "tile_y": 1
     },
     {
-      "content_hash": "7abe557240c5a002ce41e0dbc8bd926393b01b2c67c1dcac7682666b29a3ed85",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 1,
-      "tile_x": 1,
-      "tile_y": 0
-    },
-    {
-      "content_hash": "7abe557240c5a002ce41e0dbc8bd926393b01b2c67c1dcac7682666b29a3ed85",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 1,
-      "tile_x": 1,
-      "tile_y": 1
-    },
-    {
-      "content_hash": "e4147553c20d8739464522da9f2c270152971a82094764d04cdadc4757f5266f",
+      "content_hash": "3bac1cd29843b2d78803c21716de8465d58082d81008da4da13a24332cbfabbe",
       "family": "albedo",
       "family_slot": 0,
       "mip_level": 1,
@@ -51,34 +43,25 @@
       "tile_y": 0
     },
     {
-      "content_hash": "e4147553c20d8739464522da9f2c270152971a82094764d04cdadc4757f5266f",
+      "content_hash": "3bac1cd29843b2d78803c21716de8465d58082d81008da4da13a24332cbfabbe",
       "family": "albedo",
       "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 2,
-      "tile_x": 0,
-      "tile_y": 1
-    },
-    {
-      "content_hash": "e4147553c20d8739464522da9f2c270152971a82094764d04cdadc4757f5266f",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
+      "mip_level": 0,
       "source_id": 2,
       "tile_x": 1,
       "tile_y": 0
     },
     {
-      "content_hash": "e4147553c20d8739464522da9f2c270152971a82094764d04cdadc4757f5266f",
+      "content_hash": "3bac1cd29843b2d78803c21716de8465d58082d81008da4da13a24332cbfabbe",
       "family": "albedo",
       "family_slot": 0,
-      "mip_level": 1,
+      "mip_level": 0,
       "source_id": 2,
       "tile_x": 1,
       "tile_y": 1
     },
     {
-      "content_hash": "76a33c2916d4324167a17acf81e4cf6308001aa2491888613ad88785f8715825",
+      "content_hash": "98cb446f6a464f71694025404dd56319fc17967880447311b4f70ce116039653",
       "family": "albedo",
       "family_slot": 0,
       "mip_level": 1,
@@ -87,93 +70,39 @@
       "tile_y": 0
     },
     {
-      "content_hash": "76a33c2916d4324167a17acf81e4cf6308001aa2491888613ad88785f8715825",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 3,
-      "tile_x": 0,
-      "tile_y": 1
-    },
-    {
-      "content_hash": "76a33c2916d4324167a17acf81e4cf6308001aa2491888613ad88785f8715825",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 3,
-      "tile_x": 1,
-      "tile_y": 0
-    },
-    {
-      "content_hash": "76a33c2916d4324167a17acf81e4cf6308001aa2491888613ad88785f8715825",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 3,
-      "tile_x": 1,
-      "tile_y": 1
-    },
-    {
-      "content_hash": "a4396bf3c44da5de59d56572908d94238e91d2d45adfb38d4c4926794a114168",
+      "content_hash": "42fb15285f3d7e898ad69f6663eca0e45b6403eb1b8eba1993be3de8a0ed8c1c",
       "family": "albedo",
       "family_slot": 0,
       "mip_level": 1,
       "source_id": 4,
       "tile_x": 0,
       "tile_y": 0
-    },
-    {
-      "content_hash": "a4396bf3c44da5de59d56572908d94238e91d2d45adfb38d4c4926794a114168",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 4,
-      "tile_x": 0,
-      "tile_y": 1
-    },
-    {
-      "content_hash": "a4396bf3c44da5de59d56572908d94238e91d2d45adfb38d4c4926794a114168",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 4,
-      "tile_x": 1,
-      "tile_y": 0
-    },
-    {
-      "content_hash": "a4396bf3c44da5de59d56572908d94238e91d2d45adfb38d4c4926794a114168",
-      "family": "albedo",
-      "family_slot": 0,
-      "mip_level": 1,
-      "source_id": 4,
-      "tile_x": 1,
-      "tile_y": 1
     }
   ],
-  "merkle_root": "14d2147094267ac377b0d29e2a14e285e29bacb42b167477394810fa74f2a861",
+  "merkle_root": "7d7a2c38f79868b226674c05ca128be51d9fd3e542946d5e975429f188eafe79",
   "public_key": "913d77b059b1818522420cc92ea0ee09f2d3a113a44e24f5401ed88a914a91df",
-  "schema_version": 1,
-  "signature": "71daadb945215945e5ec7b04590b2daa3abf6b146af036cc5c3a91a5a7f0b50f113ad238f55d755d67556dad79327e00d4bdd75d4089da37fd5dc58872c2140f",
+  "schema_version": 2,
+  "signature": "7aa52259c0ea1a7b6f360ae1d057b61638cccce967c5f6a0c20c1549c3968cb6a4751d22493e39f6f4e3a2d406e6588a971d787edddbe06a0cb5a6c419077a09",
   "source_map_encoding": "u32le-row-major",
-  "source_map_sha256": "5cd73d577457704a6bbb36688332a15b650cf6511d178047bd6ef6fc7fab2b46",
+  "source_map_sha256": "b45e309fa09c02bcc8fad2c17c43342195625ab3c6be274cbf70bab72cd00781",
   "source_table": [
     {
-      "content_hash": "7abe557240c5a002ce41e0dbc8bd926393b01b2c67c1dcac7682666b29a3ed85",
+      "content_hash": "387507ed37bd7b5e591bb156cc601d5e5bdcbe2fe9f6484895c4244d0f3b8891",
       "family": "albedo",
       "source_id": 1
     },
     {
-      "content_hash": "e4147553c20d8739464522da9f2c270152971a82094764d04cdadc4757f5266f",
+      "content_hash": "3bac1cd29843b2d78803c21716de8465d58082d81008da4da13a24332cbfabbe",
       "family": "albedo",
       "source_id": 2
     },
     {
-      "content_hash": "76a33c2916d4324167a17acf81e4cf6308001aa2491888613ad88785f8715825",
+      "content_hash": "98cb446f6a464f71694025404dd56319fc17967880447311b4f70ce116039653",
       "family": "albedo",
       "source_id": 3
     },
     {
-      "content_hash": "a4396bf3c44da5de59d56572908d94238e91d2d45adfb38d4c4926794a114168",
+      "content_hash": "42fb15285f3d7e898ad69f6663eca0e45b6403eb1b8eba1993be3de8a0ed8c1c",
       "family": "albedo",
       "source_id": 4
     }

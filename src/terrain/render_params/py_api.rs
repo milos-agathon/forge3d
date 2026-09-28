@@ -88,6 +88,11 @@ impl TerrainRenderParams {
         self.hue_variation_strength
     }
 
+    #[getter]
+    pub fn material_slope_bias(&self) -> f32 {
+        self.material_slope_bias
+    }
+
     /// P5: Get AO weight (0.0 = no AO, 1.0 = full AO)
     #[getter]
     pub fn ao_weight(&self) -> f32 {
