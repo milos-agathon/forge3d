@@ -6,7 +6,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 ### Added
-- MENSURA: `CrsTransform.datum_operations` names each EPSG datum operation a transform applies. RGF93 v1 (EPSG:2154) and NAD83 (EPSG:5070) reach WGS 84 only through the published null transformations EPSG:1671 (1 m) and EPSG:1188 (4 m). `reproject_raster`, `reproject_vector`, and `prepare_dem` report them with a `datum_null_transformation` diagnostic instead of treating the datums as silently equivalent. Coordinate values are unchanged.
+- MENSURA: `CrsTransform.datum_operations` names each EPSG datum operation a transform applies. RGF93 v1 (EPSG:2154) and NAD83 (EPSG:5070) reach WGS 84 only through the published null transformations EPSG:1671 (1 m) and EPSG:1188 (4 m). `reproject_raster`, `reproject_vector`, and `prepare_dem` report them with a `datum_null_transformation` diagnostic instead of treating the datums as silently equivalent. Coordinate values are unchanged. (#192)
 - MENSURA: `prepare_dem` converts a declared `orthometric_egm96` DEM stored in any built-in projected CRS, not only EPSG:4326. Each affine pixel centre is inverted to WGS 84, and the per-pixel H + N residual measures below 1e-6 m. Other CRSs still raise.
 
 ### Changed
