@@ -132,12 +132,19 @@ impl Frame {
                 Ok(())
             }
             wgpu::TextureFormat::Rgba16Float => {
-                if let Some(ext) = path_obj.extension().and_then(|ext| ext.to_str()) {
-                    if !ext.eq_ignore_ascii_case("exr") {
-                        return Err(PyValueError::new_err(format!(
-                            "expected .exr extension for RGBA16F frame save, got .{}",
-                            ext
-                        )));
+                let save_png = crate::core::gpu::deterministic_mode()
+                    && path_obj
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
+                if !save_png {
+                    if let Some(ext) = path_obj.extension().and_then(|ext| ext.to_str()) {
+                        if !ext.eq_ignore_ascii_case("exr") {
+                            return Err(PyValueError::new_err(format!(
+                                "expected .exr extension for RGBA16F frame save, got .{}",
+                                ext
+                            )));
+                        }
                     }
                 }
                 #[cfg(feature = "images")]
@@ -154,16 +161,31 @@ impl Frame {
                         PyRuntimeError::new_err(format!("HDR readback failed: {err}"))
                     })?;
 
-                    exr_write::write_exr_rgba_f32(
-                        path_obj,
-                        self.width,
-                        self.height,
-                        &data,
-                        "beauty",
-                    )
-                    .map_err(|err| {
-                        PyRuntimeError::new_err(format!("failed to write EXR: {err:#}"))
-                    })?;
+                    if save_png {
+                        let mut rgba8 = Vec::with_capacity(data.len());
+                        for px in data.chunks_exact(4) {
+                            for channel in &px[..3] {
+                                let code = (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+                                rgba8.push(if code == 0 { 0 } else { (code - 1) | 1 });
+                            }
+                            rgba8.push(255);
+                        }
+                        image_write::write_png_rgba8(path_obj, &rgba8, self.width, self.height)
+                            .map_err(|err| {
+                                PyRuntimeError::new_err(format!("failed to write PNG: {err:#}"))
+                            })?;
+                    } else {
+                        exr_write::write_exr_rgba_f32(
+                            path_obj,
+                            self.width,
+                            self.height,
+                            &data,
+                            "beauty",
+                        )
+                        .map_err(|err| {
+                            PyRuntimeError::new_err(format!("failed to write EXR: {err:#}"))
+                        })?;
+                    }
                     Ok(())
                 }
                 #[cfg(not(feature = "images"))]

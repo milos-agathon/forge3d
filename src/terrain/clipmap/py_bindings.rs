@@ -188,7 +188,8 @@ pub fn clipmap_generate_py(
         ));
     }
     let center_vec = Vec2::new(center.0, center.1);
-    let mesh = clipmap_generate(&config.inner, center_vec, terrain_extent);
+    let mesh = clipmap_generate(&config.inner, center_vec, terrain_extent)
+        .map_err(|error| PyValueError::new_err(format!("clipmap generation failed: {error}")))?;
 
     // Calculate full-res triangle count for comparison
     let full_res_triangles = super::level::full_resolution_triangle_count(&config.inner);
@@ -214,5 +215,7 @@ pub fn register_clipmap_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyClipmapMesh>()?;
     m.add_function(wrap_pyfunction!(clipmap_generate_py, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_triangle_reduction_py, m)?)?;
+    #[cfg(feature = "enable-globe")]
+    super::globe_scene::register_globe_scene_bindings(m)?;
     Ok(())
 }

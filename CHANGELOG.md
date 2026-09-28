@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+### Added
+- VERITAS: signed render provenance binds the image and per-pixel source map to the contributing terrain tiles. Offline calls without image bytes warn and remain compatible with 1.38.0 manifests. (#187)
+- Labels now compile line and curved text geometry into the scene plan, so placement and rendering use the same glyph positions. (#184)
+- MENSURA: `CrsTransform.datum_operations` names each EPSG datum operation a transform applies. RGF93 v1 (EPSG:2154) and NAD83 (EPSG:5070) reach WGS 84 only through the published null transformations EPSG:1671 (1 m) and EPSG:1188 (4 m). `reproject_raster`, `reproject_vector`, and `prepare_dem` report them with a `datum_null_transformation` diagnostic instead of treating the datums as silently equivalent. Coordinate values are unchanged. (#192)
+- MENSURA: `prepare_dem` converts a declared `orthometric_egm96` DEM stored in any built-in projected CRS, not only EPSG:4326. Each affine pixel centre is inverted to WGS 84, and the per-pixel H + N residual measures below 1e-6 m. Other CRSs still raise.
+
+### Changed
+- MENSURA: `Anchor::to_render_f32(Coord)` is now the only world-coordinate f64-to-f32 crossing and holds the only world `as f32`. The untyped `Anchor::to_render_vec3`, `to_render_direction`, and `direction_to_render` Rust helpers are removed: positions are tagged `SceneCoord::scene`, and spans and directions narrow through `Anchor::offset_to_render(SceneOffset::scene(..))`. `view_look_at` and `model_offset` take typed coordinates. Rendered values are bit-identical.
+- MENSURA: the geocentric entry points `geo::projections::geocentric::{geodetic_to_ecef, wgs84_geodetic_to_ecef}` accept only `Height<Ellipsoidal>` and return a typed height, so an orthometric or bare-float height no longer compiles into ECEF math. The DUPLA Everest jitter scene now converts the summit's 8,848.86 m orthometric height through EGM96 instead of using it as an ellipsoidal height.
+- `tests/test_world_coord_f32_gate.py` re-freezes the narrowing inventory at 1,403 sites. Every re-freeze is now chained through `tests/data/world_coord_f32_ledger.json`. The ledger records the site-level drift that landed after the ANAMNESIS freeze, reviewed to contain no world-position narrowing, and the MENSURA transition.
+
+## [1.38.0] - 2026-09-20
+
+### Added
+- ORBIS: whole-Earth globe rendering. Forge3D can now draw the entire planet,
+  not just flat local scenes — real Earth curvature, a horizon that bends away
+  correctly, and a camera that can descend smoothly from 408 km altitude down
+  to 1 m above the ground. Adds Python `GlobeScene` and `GlobeMetrics` with
+  `fly_to`, scripted descent, and snapshot calls; the native globe path sits
+  behind the `enable-globe` feature. (#141)
+- Globe terrain data streams in bounded pieces over the network as the camera
+  descends — locally and in the browser (WebAssembly) — without stalling
+  frames, with coarse stand-in imagery while detail arrives, and a hard
+  GPU-memory ceiling (~450 MB observed) so large datasets stay safe on modest
+  hardware. (#141)
+- Positions stay stable at planetary scale: the engine re-anchors arithmetic
+  around the camera so geometry does not jitter, and ring geometry is joined
+  without cracks between detail levels. On a physical NVIDIA Vulkan adapter
+  the audited descent measured ~0.00004 px of vertex jitter, zero crack
+  pixels, and 25/25 nonblocking streaming frames. (#141)
+- Globe views now reach across the whole source DEM: coarse context tiles
+  fill the outer clipmap rings, and COG nodata (the `GDAL_NODATA` tag) is
+  honoured, so a country-wide DEM shows its real outline on a sun-lit Earth
+  with an atmosphere rim instead of a filled rectangle. (#141)
+- `GlobeScene(earth_texture=...)` colours the Earth outside the terrain source
+  from an equirectangular image (e.g. a global elevation map), lit by the same
+  sun as the terrain, and the camera can now start up to 9,000 km out, far
+  enough to frame the whole visible Earth. `examples/orbis_swiss_alps_descent.py`
+  opens on a whole-Earth view coloured with Crameri's *bukavu* palette (NOAA
+  ETOPO 2022 outside Switzerland) and flies down onto the Eiger, Moench and
+  Jungfrau. (#141)
+
+### Fixed
+- Globe terrain shading: height normals are now built in each fragment's
+  east/north/up frame at metric scale (they were Y-up and ~1000x too steep,
+  which left slopes unlit and "crumbly"), slope-based materials use the real
+  terrain slope, and parallax mapping no longer shifts the global UV off the
+  loaded tiles (which collapsed elevation colormaps to one colour). (#141)
+- Globe geometry: coarse clipmap LOD variants were offset by the camera's
+  distance from the clipmap centre, so oblique and orbital views lost the
+  terrain; skirts no longer hang altitude-sized curtains below the terrain
+  edge. (#141)
+
+### Changed
+- Environment lighting now follows the corrected upstream IBL math (Karis
+  separable-Smith split-sum and cosine-weighted irradiance). Scenes lit mainly
+  by the environment can render modestly dimmer but more physically correct;
+  the ORBIS ground golden was regenerated against the corrected lighting.
+  (#141)
+- Bumped the package and PyPI version to `1.38.0`.
+
+### Compatibility
+- Existing flat-terrain maps, viewers, and rendering calls are unchanged; the
+  globe path is opt-in via `GlobeScene`. No existing public API was altered.
 
 ## [1.37.1] - 2026-09-20
 

@@ -280,9 +280,11 @@ impl PointCloudState {
             )
             .map_err(|err| err.to_string())?;
         }
-        let extent_render = crate::camera::Anchor::direction_to_render(max - min)
-            .max_element()
-            .max(100.0);
+        let extent_render = crate::camera::Anchor::offset_to_render(
+            crate::geo::units::SceneOffset::scene(max - min),
+        )
+        .max_element()
+        .max(100.0);
 
         eprintln!(
             "[pointcloud] Original center: ({:.1}, {:.1}, {:.1})",
@@ -298,7 +300,9 @@ impl PointCloudState {
         let render_points = points
             .iter()
             .map(|point| PointInstance3D {
-                position: candidate_anchor.to_render_vec3(point.position).to_array(),
+                position: candidate_anchor
+                    .to_render_f32(crate::geo::units::SceneCoord::scene(point.position))
+                    .to_array(),
                 elevation_norm: point.elevation_norm,
                 rgb: point.rgb,
                 intensity: point.intensity,
@@ -338,7 +342,9 @@ impl PointCloudState {
 
     fn packed_point(point: &PointSource3D, anchor: &crate::camera::Anchor) -> PointInstance3D {
         PointInstance3D {
-            position: anchor.to_render_vec3(point.position).to_array(),
+            position: anchor
+                .to_render_f32(crate::geo::units::SceneCoord::scene(point.position))
+                .to_array(),
             elevation_norm: point.elevation_norm,
             rgb: point.rgb,
             intensity: point.intensity,

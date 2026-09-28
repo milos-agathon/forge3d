@@ -251,6 +251,8 @@ impl TerrainScene {
         let mut timing_needs_resolve = false;
         let mut hzb_frame_staged = false;
         let mut visibility_frame_staged = false;
+        let mut staged_lod_selection = None;
+        let mut submitted_lod_provenance = None;
 
         scheduler
             .execute_graph_with(&scheduler_plan, &leaf_keys, |pass, action| {
@@ -406,7 +408,7 @@ impl TerrainScene {
                         let setup = shadow_setup.as_ref().ok_or_else(|| {
                             anyhow!("terrain.forward has no materialized shadow state")
                         })?;
-                        execution.run_pass("terrain.forward", |context| {
+                        let forward_submission = execution.run_pass("terrain.forward", |context| {
                             let encoder = context.encoder();
                             let vt_scope = ts_begin(&mut timing, encoder, "terrain.material_vt");
                             let material_vt_ready = self.prepare_material_vt_frame(
@@ -460,14 +462,42 @@ impl TerrainScene {
                                 sun_vis,
                                 time_seconds,
                                 &mut timing,
+                                &mut staged_lod_selection,
                             )?;
                             hzb_frame_staged = params.culling == "hzb_two_phase"
                                 && render_targets.sample_count == 1
                                 && self.two_phase_culler.is_some();
                             visibility_frame_staged = is_clipmap_camera_mode(&params.camera_mode)
-                                && render_targets.sample_count == 1;
+                                && render_targets.sample_count == 1
+                                && self.runtime_visibility_stats_enabled();
                             Ok::<_, anyhow::Error>(())
-                        })?;
+                        });
+                        match forward_submission {
+                            Ok(()) => {
+                                if let Some(selection) = staged_lod_selection.take() {
+                                    submitted_lod_provenance = Some(selection.provenance);
+                                    if let Some(ticket) = selection.ticket {
+                                        if !self
+                                            .geometry_provider()?
+                                            .mark_lod_selection_submitted(ticket)
+                                        {
+                                            return Err(anyhow!(
+                                                "submitted terrain LOD command buffer lost its exact readback ticket"
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                if let Some(ticket) = staged_lod_selection
+                                    .take()
+                                    .and_then(|selection| selection.ticket)
+                                {
+                                    self.geometry_provider()?.cancel_lod_selection(ticket);
+                                }
+                                return Err(error);
+                            }
+                        }
                         timing_needs_resolve = true;
                         Ok(GraphPassOutcome::Executed(if capture_output {
                             let payload = execution.read_texture_tight(
@@ -600,18 +630,21 @@ impl TerrainScene {
             })
             .map_err(io_error)?;
         let submitted = execution.finish()?;
+        #[cfg(feature = "enable-globe")]
+        self.mark_orbis_capture_submitted();
         debug_assert!(
             cache.is_none() || !scheduler.report().hits.is_empty() || submitted > 0,
             "cold native terrain graph must submit production work"
         );
-        if visibility_frame_staged && params.shading == "visibility" && params.culling == "frustum"
-        {
-            self.refresh_cpu_visibility_oracle_from_gpu_selection(
-                params,
-                &height_inputs.heightmap_data,
-                (height_inputs.width, height_inputs.height),
-            )?;
-        }
+        // Start mapping the exact selection copied by this submitted frame,
+        // and consume only a previously completed result. Pending GPU work is
+        // never replaced by a CPU selection and never blocks this frame.
+        self.refresh_cpu_visibility_oracle_from_gpu_selection(
+            params,
+            &height_inputs.heightmap_data,
+            (height_inputs.width, height_inputs.height),
+            submitted_lod_provenance,
+        )?;
         if material_vt_started {
             self.finish_material_vt_frame()?;
         }

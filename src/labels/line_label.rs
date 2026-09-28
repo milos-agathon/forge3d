@@ -101,7 +101,7 @@ fn compute_along_placement(
 }
 
 /// Place glyphs along a path starting at a given offset.
-fn place_glyphs_along_path(
+pub(crate) fn place_glyphs_along_path(
     points: &[[f32; 2]],
     glyph_advances: &[f32],
     font_size: f32,

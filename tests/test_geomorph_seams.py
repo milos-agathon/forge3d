@@ -200,6 +200,22 @@ class TestMorphRangeConfiguration:
 class TestSkirtVertices:
     """Test skirt vertex handling for seam hiding."""
 
+    def test_skirt_vertices_marked_correctly(self):
+        """Skirt vertices should have negative morph weight."""
+        from forge3d import ClipmapConfig, clipmap_generate_py
+
+        config = ClipmapConfig(ring_count=4, ring_resolution=32, skirt_depth=10.0)
+        mesh = clipmap_generate_py(config, (0.0, 0.0), 1000.0)
+
+        morph_data = mesh.morph_data()
+        morph_weights = morph_data[:, 0]
+
+        skirt_count = np.sum(morph_weights < 0)
+        assert skirt_count > 0, "indexed ring boundaries must emit skirts"
+        # The flat clipmap's historical ABI uses -1 as the skirt marker; globe
+        # curvature depth is carried only by globe-rebased vertices.
+        assert np.all(morph_weights[morph_weights < 0] == -1.0)
+
     def test_skirt_depth_configuration(self):
         """Skirt depth should be configurable."""
         from forge3d import ClipmapConfig

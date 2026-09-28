@@ -109,6 +109,7 @@ PORTABLE_CI_CARGO_FEATURES = {
     # portable CI check/test/doc lane.
     "enable-inverse-pt",
     "shader-contract-asserts",
+    "enable-globe",
 }
 DEDICATED_SYSTEM_FEATURES = {"proj"}
 DEDICATED_ACCEPTANCE_FEATURES = {"atmosphere-bake"}
@@ -278,6 +279,7 @@ WHEEL_REQUIRED_FEATURES = {
     "enable-staging-rings",
     "copc_laz",
     "cog_streaming",
+    "enable-globe",
     "gis-remote",
     # MENSURA ships real topology ops (pure-Rust `geo` crate) as a wheel
     # feature; the public forge3d.gis topology surface requires it.
@@ -452,6 +454,7 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
         "tests/test_determinism_matrix.py",
         "tests/test_no_silent_degradation.py",
         "tests/test_substratia_evidence_report.py",
+        "tests/test_orbis_task6_contracts.py",
     }
     assert fast_lane == expected_fast, (
         "fast profile changed without updating the architectural-contract lock: "
@@ -471,10 +474,10 @@ def test_e_slow_lane_is_marker_selected_and_accounted():
         "full", [ci_pytest_lane.SLOW_LANE_SELECTOR]
     )
     assert default_args[default_args.index("-m") + 1] == (
-        "not slow and not interactive_viewer"
+        "not slow and not interactive_viewer and not wasm"
     )
     assert slow_args[slow_args.index("-m") + 1] == (
-        "slow and not interactive_viewer"
+        "slow and not interactive_viewer and not wasm"
     )
     assert ci_pytest_lane.SLOW_LANE_SELECTOR not in slow_args
 

@@ -297,6 +297,74 @@ impl TerrainScene {
         )
     }
 
+    #[cfg(feature = "enable-globe")]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn create_orbis_coverage_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        light_buffer_layout: &wgpu::BindGroupLayout,
+        ibl_bind_group_layout: &wgpu::BindGroupLayout,
+        shadow_bind_group_layout: &wgpu::BindGroupLayout,
+        fog_bind_group_layout: &wgpu::BindGroupLayout,
+        water_reflection_bind_group_layout: &wgpu::BindGroupLayout,
+        material_layer_bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+    ) -> wgpu::RenderPipeline {
+        let source = Self::preprocess_terrain_shader(device, false);
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "orbis.terrain_coverage.shader",
+            &source,
+        );
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("orbis.terrain_coverage.pipeline_layout"),
+            bind_group_layouts: &[
+                bind_group_layout,
+                light_buffer_layout,
+                ibl_bind_group_layout,
+                shadow_bind_group_layout,
+                fog_bind_group_layout,
+                water_reflection_bind_group_layout,
+                material_layer_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+        let targets = [
+            Some(wgpu::ColorTargetState { format: color_format, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+            None,
+            None,
+            None,
+            None,
+            Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::R8Unorm, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+        ];
+        crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("orbis.terrain_coverage.pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_clipmap_main",
+                    buffers: &[
+                        crate::terrain::clipmap::ClipmapVertex::desc(),
+                        crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::desc(),
+                    ],
+                },
+                fragment: Some(wgpu::FragmentState { module: &shader, entry_point: "fs_orbis_coverage", targets: &targets }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: TERRAIN_DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            },
+        )
+    }
+
     pub(super) fn create_clipmap_visibility_write_pipeline(
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
@@ -470,6 +538,25 @@ impl TerrainScene {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
+        )
+    }
+
+    #[cfg(feature = "enable-globe")]
+    pub(in crate::terrain::renderer) fn create_orbis_globe_background_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        Self::create_fullscreen_blit_pipeline(
+            device,
+            bind_group_layout,
+            color_format,
+            sample_count,
+            "orbis.globe.background.pipeline",
+            "orbis.globe.background.shader",
+            crate::shader_sources::orbis_globe_background(),
+            None,
         )
     }
 

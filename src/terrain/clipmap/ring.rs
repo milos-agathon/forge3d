@@ -7,6 +7,11 @@ use super::vertex::ClipmapVertex;
 use glam::Vec2;
 use std::collections::BTreeMap;
 
+#[cfg(test)]
+fn position_xz(vertex: &ClipmapVertex) -> Vec2 {
+    Vec2::new(vertex.position[0], vertex.position[1])
+}
+
 /// Generate the center block mesh (solid grid at finest LOD).
 pub fn make_center_block(
     resolution: u32,
@@ -70,6 +75,83 @@ pub fn make_ring(
     let ring_width = outer_extent - inner_extent;
     // Ring vertices are intentionally one LOD coarser than the region inside.
     let cell_size = 2.0 * ring_width / resolution as f32;
+    make_ring_impl(
+        ring_index,
+        inner_extent,
+        outer_extent,
+        resolution,
+        center,
+        terrain_extent,
+        morph_range,
+        cell_size,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn make_ring_with_cell_size(
+    ring_index: u32,
+    inner_extent: f32,
+    outer_extent: f32,
+    resolution: u32,
+    center: Vec2,
+    terrain_extent: f32,
+    morph_range: f32,
+    cell_size: f32,
+) -> (Vec<ClipmapVertex>, Vec<u32>) {
+    make_ring_impl(
+        ring_index,
+        inner_extent,
+        outer_extent,
+        resolution,
+        center,
+        terrain_extent,
+        morph_range,
+        cell_size,
+        true,
+    )
+}
+
+/// Closed-form globe ring bounds. Adjacent regions call this with the same
+/// boundary level, so an outer edge and its mating inner edge are bit-identical
+/// instead of depending on separate f32 accumulation histories.
+#[cfg(feature = "enable-globe")]
+pub(crate) fn globe_ring_bounds(
+    ring_index: u32,
+    base_cell_size: f32,
+    center_resolution: u32,
+    ring_resolution: u32,
+) -> Result<(f32, f32), String> {
+    let boundary = |level: u32| -> Result<f32, String> {
+        let scale = 1_u32
+            .checked_shl(level)
+            .ok_or_else(|| "globe ring boundary scale overflow".to_string())?;
+        let units = center_resolution as f32 * 0.5
+            + ring_resolution as f32 * scale.saturating_sub(1) as f32;
+        let extent = base_cell_size * units;
+        if !extent.is_finite() || extent <= 0.0 {
+            return Err("globe ring boundary extent is invalid".to_string());
+        }
+        Ok(extent)
+    };
+    Ok((boundary(ring_index)?, boundary(ring_index + 1)?))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make_ring_impl(
+    ring_index: u32,
+    inner_extent: f32,
+    outer_extent: f32,
+    resolution: u32,
+    center: Vec2,
+    terrain_extent: f32,
+    morph_range: f32,
+    cell_size: f32,
+    preserve_boundaries: bool,
+) -> (Vec<ClipmapVertex>, Vec<u32>) {
+    assert!(outer_extent > inner_extent);
+    assert!(resolution > 0);
+    let ring_width = outer_extent - inner_extent;
     assert!(cell_size.is_finite() && cell_size > 0.0);
 
     // Never derive the lattice from `center - outer_extent`: that changes its
@@ -81,6 +163,7 @@ pub fn make_ring(
         center.x - inner_extent,
         center.x + inner_extent,
         cell_size,
+        preserve_boundaries,
     );
     let y_coords = anchored_coordinates(
         center.y - outer_extent,
@@ -88,6 +171,7 @@ pub fn make_ring(
         center.y - inner_extent,
         center.y + inner_extent,
         cell_size,
+        preserve_boundaries,
     );
     let mut vertices = Vec::with_capacity(x_coords.len() * y_coords.len());
     let mut indices = Vec::new();
@@ -160,6 +244,7 @@ fn anchored_coordinates(
     inner_min: f32,
     inner_max: f32,
     spacing: f32,
+    preserve_boundaries: bool,
 ) -> Vec<f32> {
     debug_assert!(min < max);
     debug_assert!(spacing.is_finite() && spacing > 0.0);
@@ -167,9 +252,18 @@ fn anchored_coordinates(
     let first = (min / spacing).ceil() as i64;
     let last = (max / spacing).floor() as i64;
     let mut coordinates = Vec::with_capacity((last - first + 5).max(5) as usize);
-    coordinates.extend([min, inner_min, inner_max, max]);
+    let boundaries = [min, inner_min, inner_max, max];
+    coordinates.extend(boundaries);
     for index in first..=last {
-        coordinates.push(index as f32 * spacing);
+        let coordinate = index as f32 * spacing;
+        if preserve_boundaries
+            && boundaries
+                .iter()
+                .any(|boundary| (coordinate - boundary).abs() <= spacing.abs() * 1e-6)
+        {
+            continue;
+        }
+        coordinates.push(coordinate);
     }
     coordinates.sort_by(|a, b| a.total_cmp(b));
     coordinates.dedup_by(|a, b| (*a - *b).abs() <= spacing.abs() * 1e-6);
@@ -213,13 +307,7 @@ pub fn make_ring_skirts(
         *skirt_for.entry(source).or_insert_with(|| {
             let v = vertices[source as usize];
             let index = base_idx + skirt_verts.len() as u32;
-            skirt_verts.push(ClipmapVertex::skirt(
-                v.position[0],
-                v.position[1],
-                v.uv[0],
-                v.uv[1],
-                ring_index,
-            ));
+            skirt_verts.push(ClipmapVertex::skirt_from(&v, ring_index));
             index
         })
     };
@@ -229,8 +317,72 @@ pub fn make_ring_skirts(
         skirt_indices.extend_from_slice(&[a, b, skirt_a, b, skirt_b, skirt_a]);
     }
 
-    let _ = skirt_depth; // Used in shader for the vertical offset.
+    let _ = skirt_depth;
     (skirt_verts, skirt_indices)
+}
+
+/// Remove the skirt quads that hang from the outer boundary of the outermost
+/// globe ring. Skirts seal seams between adjacent LOD rings; the outermost
+/// edge has no neighbour, so its skirt is only a curtain hanging below the
+/// terrain edge when seen from altitude. `skirt_indices` holds the six-index
+/// quads emitted by [`make_ring_skirts`], whose first two indices are the
+/// ring edge; `ring_vertices` are the generator-local ring vertices.
+pub fn drop_outer_boundary_skirts(
+    ring_vertices: &[ClipmapVertex],
+    skirt_indices: &mut Vec<u32>,
+    outer_extent: f32,
+    cell_size: f32,
+) {
+    let tolerance = (cell_size * 0.01).max(1.0e-3);
+    let on_outer_boundary = |index: u32| {
+        ring_vertices.get(index as usize).is_some_and(|vertex| {
+            vertex.position[0].abs().max(vertex.position[1].abs()) >= outer_extent - tolerance
+        })
+    };
+    let kept = skirt_indices
+        .chunks_exact(6)
+        .filter(|quad| !(on_outer_boundary(quad[0]) && on_outer_boundary(quad[1])))
+        .flatten()
+        .copied()
+        .collect();
+    *skirt_indices = kept;
+}
+
+/// Minimum depth that hides a curved globe patch's chord-to-surface sagitta
+/// plus its altitude allowance. Invalid inputs fail closed to the configured
+/// depth, and the f64 intermediate avoids cancellation at planet scale.
+pub fn curvature_safe_skirt_depth(
+    configured_depth: f32,
+    curvature_radius: f32,
+    patch_chord: f32,
+    altitude_allowance: f32,
+) -> f32 {
+    let configured_depth = if configured_depth.is_finite() {
+        configured_depth.max(0.0)
+    } else {
+        0.0
+    };
+    if !curvature_radius.is_finite()
+        || !patch_chord.is_finite()
+        || curvature_radius <= 0.0
+        || patch_chord < 0.0
+    {
+        return configured_depth;
+    }
+    let radius = f64::from(curvature_radius);
+    let half_chord = (f64::from(patch_chord) * 0.5).min(radius);
+    let sagitta = radius - (radius * radius - half_chord * half_chord).max(0.0).sqrt();
+    let allowance = if altitude_allowance.is_finite() {
+        f64::from(altitude_allowance.max(0.0))
+    } else {
+        0.0
+    };
+    let safe = (sagitta + allowance) as f32;
+    if safe.is_finite() {
+        configured_depth.max(safe)
+    } else {
+        configured_depth
+    }
 }
 
 #[cfg(test)]
@@ -251,9 +403,9 @@ mod tests {
         let i0 = indices[0] as usize;
         let i1 = indices[1] as usize;
         let i2 = indices[2] as usize;
-        let v0 = Vec2::from(verts[i0].position);
-        let v1 = Vec2::from(verts[i1].position);
-        let v2 = Vec2::from(verts[i2].position);
+        let v0 = position_xz(&verts[i0]);
+        let v1 = position_xz(&verts[i1]);
+        let v2 = position_xz(&verts[i2]);
         // CCW check: cross product should be positive
         let cross = (v1 - v0).perp_dot(v2 - v0);
         assert!(cross > 0.0, "First triangle should be CCW");
@@ -322,9 +474,9 @@ mod tests {
         let covered_area: f32 = indices
             .chunks_exact(3)
             .map(|triangle| {
-                let a = Vec2::from(vertices[triangle[0] as usize].position);
-                let b = Vec2::from(vertices[triangle[1] as usize].position);
-                let c = Vec2::from(vertices[triangle[2] as usize].position);
+                let a = position_xz(&vertices[triangle[0] as usize]);
+                let b = position_xz(&vertices[triangle[1] as usize]);
+                let c = position_xz(&vertices[triangle[2] as usize]);
                 (b - a).perp_dot(c - a).abs() * 0.5
             })
             .sum();
@@ -359,8 +511,8 @@ mod tests {
         let mut max_edge = 0.0f32;
         for tri in skirt_indices.chunks(3) {
             for k in 0..3 {
-                let a = Vec2::from(all[tri[k] as usize].position);
-                let b = Vec2::from(all[tri[(k + 1) % 3] as usize].position);
+                let a = position_xz(&all[tri[k] as usize]);
+                let b = position_xz(&all[tri[(k + 1) % 3] as usize]);
                 max_edge = max_edge.max(a.distance(b));
             }
         }
@@ -372,5 +524,35 @@ mod tests {
             max_edge,
             adjacent_spacing
         );
+    }
+
+    #[test]
+    fn curvature_safe_skirt_depth_is_finite_and_monotonic() {
+        // This catches a shallow or non-finite globe skirt calculation that
+        // exposes the horizon seam as patch span or altitude increases.
+        let configured = 10.0;
+        let short = curvature_safe_skirt_depth(configured, 6_371_000.0, 1_000.0, 5.0);
+        let wide = curvature_safe_skirt_depth(configured, 6_371_000.0, 10_000.0, 5.0);
+        let higher = curvature_safe_skirt_depth(configured, 6_371_000.0, 10_000.0, 50.0);
+
+        assert!(short.is_finite() && wide.is_finite() && higher.is_finite());
+        assert!(short >= configured);
+        assert!(wide >= short);
+        assert!(higher >= wide);
+        assert_eq!(
+            curvature_safe_skirt_depth(configured, 0.0, f32::INFINITY, f32::NAN),
+            configured
+        );
+    }
+
+    #[test]
+    fn curvature_safe_skirt_depth_sanitizes_non_finite_configured_depth() {
+        // This catches returning an infinite configured depth unchanged, which
+        // leaks non-finite bounds into globe skirts and culling.
+        for configured in [f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
+            let depth = curvature_safe_skirt_depth(configured, 6_371_000.0, 0.0, 0.0);
+            assert!(depth.is_finite());
+            assert_eq!(depth, 0.0);
+        }
     }
 }

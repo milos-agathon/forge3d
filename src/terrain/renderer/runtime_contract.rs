@@ -65,10 +65,18 @@ pub(super) fn build_observation(
     );
     check_slice(
         &mut observation,
-        "u_terrain.spacing_h_exag.zw",
+        "u_terrain.spacing_h_exag.z",
         0,
-        &terrain[38..40],
+        &terrain[38..39],
         0.0,
+        65_536.0,
+    );
+    check_slice(
+        &mut observation,
+        "u_terrain.spacing_h_exag.w",
+        0,
+        &terrain[39..40],
+        -2.0,
         65_536.0,
     );
     check_slice(
@@ -119,6 +127,7 @@ pub(super) fn build_observation(
         overlay.params3,
         overlay.params4,
         overlay.params5,
+        overlay.params6,
     ]
     .iter()
     .enumerate()
@@ -231,6 +240,7 @@ mod tests {
                 params3: [0.0; 4],
                 params4: [0.0; 4],
                 params5: [0.0; 4],
+                params6: [0.0; 4],
             },
             &[0.0, 0.5, 1.0, 0.25],
             2,
@@ -274,6 +284,7 @@ mod tests {
                 params3: [0.0; 4],
                 params4: [0.0; 4],
                 params5: [0.0; 4],
+                params6: [0.0; 4],
             },
             &[0.0, 0.5, 1.0, 0.25],
             2,
@@ -298,5 +309,13 @@ mod tests {
         );
         assert_eq!(observe_spacing([1.0, 1.0, 100_000.0, 1.0]).status, "failed");
         assert_eq!(observe_spacing([1.0, 1.0, 1.0, 100_000.0]).status, "failed");
+    }
+
+    #[test]
+    fn detail_blend_encoding_is_bounded_but_exaggeration_stays_nonnegative() {
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -1.0]).status, "passed");
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -2.0]).status, "passed");
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -2.5]).status, "failed");
+        assert_eq!(observe_spacing([1.0, 1.0, -1.0, 1.0]).status, "failed");
     }
 }

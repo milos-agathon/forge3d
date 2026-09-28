@@ -32,6 +32,8 @@ struct TileInfo {
     selected_lod: u32,
     visible: u32,
     height_max: f32,
+    camera_relative_center: array<f32, 3>,
+    angular_radius: f32,
 }
 
 struct DrawIndexedIndirectArgs {

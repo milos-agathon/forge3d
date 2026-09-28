@@ -309,6 +309,11 @@ pub(crate) fn terrain() -> String {
     assemble_parts(terrain_parts())
 }
 
+#[cfg(feature = "enable-globe")]
+pub(crate) fn orbis_globe_background() -> &'static str {
+    include_str!("shaders/orbis_globe_background.wgsl")
+}
+
 pub(crate) fn terrain_shadow_depth_parts() -> &'static [SourcePart] {
     &[
         SourcePart {
@@ -968,12 +973,14 @@ mod tests {
         // Both the ordinary geometry path and every clipmap morph lookup must
         // share the same reconstruction instead of drifting by callsite.
         assert!(source.contains("let h_raw = det_barrier(sample_height_bilinear(uv));"));
-        assert!(source.contains("let h_fine = sample_height_bilinear(uv);"));
-        // The three offset taps barrier `coarse_base` before the add.
+        assert!(source.contains(
+            "let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"
+        ));
+        // The three offset taps barrier `level_base` before the add.
         assert_eq!(
-            source.matches("sample_height_bilinear(coarse_base").count()
+            source.matches("sample_height_bilinear(level_base").count()
                 + source
-                    .matches("sample_height_bilinear(det_barrier2(coarse_base)")
+                    .matches("sample_height_bilinear(det_barrier2(level_base)")
                     .count(),
             4
         );
@@ -985,7 +992,9 @@ mod tests {
         assert!(!resolve.contains("textureSample(height_tex"));
         assert!(!resolve.contains("textureSampleLevel(height_tex"));
         assert_eq!(resolve.matches("textureLoad(height_tex").count(), 4);
-        assert!(resolve.contains("let h_fine = sample_height_bilinear(uv);"));
+        assert!(resolve.contains(
+            "let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"
+        ));
 
         // The CSM caster and visible surface must agree between texel centres.
         let shadow = terrain_shadow_depth();

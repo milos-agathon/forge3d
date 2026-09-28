@@ -178,7 +178,11 @@ impl OrbitCamera {
     }
 
     pub fn view_matrix(&self, anchor: &Anchor) -> Mat4 {
-        anchor.view_look_at(self.eye(), self.target, self.up)
+        anchor.view_look_at(
+            crate::geo::units::SceneCoord::scene(self.eye()),
+            crate::geo::units::SceneCoord::scene(self.target),
+            self.up,
+        )
     }
 }
 
@@ -233,7 +237,11 @@ impl FpsCamera {
     }
 
     pub fn view_matrix(&self, anchor: &Anchor) -> Mat4 {
-        anchor.view_look_at(self.position, self.position + self.forward(), self.up)
+        anchor.view_look_at(
+            crate::geo::units::SceneCoord::scene(self.position),
+            crate::geo::units::SceneCoord::scene(self.position + self.forward()),
+            self.up,
+        )
     }
 }
 
@@ -271,8 +279,10 @@ impl CameraController {
                 CameraMode::Fps => {
                     self.fps.position = self.orbit.eye();
                     // Compute yaw/pitch from orbit
-                    let forward = crate::camera::Anchor::direction_to_render(
-                        (self.orbit.target - self.orbit.eye()).normalize(),
+                    let forward = crate::camera::Anchor::offset_to_render(
+                        crate::geo::units::SceneOffset::scene(
+                            (self.orbit.target - self.orbit.eye()).normalize(),
+                        ),
                     );
                     self.fps.pitch = forward.y.asin();
                     self.fps.yaw = forward.z.atan2(forward.x);
@@ -462,7 +472,9 @@ impl CameraController {
     ) -> Result<(), CameraFrameError> {
         validate_camera_pose(current_anchor, eye, eye, target)?;
 
-        let forward = Anchor::direction_to_render((target - eye).normalize());
+        let forward = Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(
+            (target - eye).normalize(),
+        ));
         let pitch = forward.y.asin();
         let yaw = forward.z.atan2(forward.x);
         let distance = (target - eye).length().max(0.01);
@@ -470,7 +482,7 @@ impl CameraController {
         // Update orbit
         self.mode = CameraMode::Orbit;
         self.orbit.target = target;
-        self.orbit.distance = Anchor::direction_to_render(DVec3::new(distance, 0.0, 0.0)).x;
+        self.orbit.distance = distance as f32;
         self.orbit.yaw = yaw;
         self.orbit.pitch = pitch;
         self.orbit.up = if up.length_squared() > 0.0 {

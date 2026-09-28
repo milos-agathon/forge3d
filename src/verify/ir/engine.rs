@@ -8,7 +8,8 @@ const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xd904_56ee_98b5_6d96;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x32c0_583b_cf1a_f865;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x18d9_8438_2afc_6aa8;
+// Updated from the assembled terrain module whenever its source changes.
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x8e7e_ac0a_01e4_6e5b;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {

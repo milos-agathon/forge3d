@@ -639,8 +639,18 @@ def test_gpu_backend_uses_native_msdf_text_for_labels(tmp_path, monkeypatch):
     metrics = load_atlas_metrics(default_latin_atlas_paths()[1])
     accepted = scene.compiled_label_plans["labels"].accepted[0]
     positioned = [glyph for glyph in accepted.positioned_glyphs if glyph["has_outline"]]
-    anchor_x, anchor_y = map_scene._render_label_anchor(accepted, 80, 64)
     render_size = 12.0
+    anchor_x, anchor_y = map_scene._label_pen_origin(
+        accepted, accepted.positioned_glyphs, render_size, 80, 64
+    )
+    # The drawn glyph block is centred on the box the declutter solver reserved.
+    left = min(g["origin"][0] for g in accepted.positioned_glyphs)
+    right = max(g["origin"][0] + g["advance"][0] for g in accepted.positioned_glyphs)
+    box = accepted.candidate.bounds
+    assert anchor_x + (left + right) * 0.5 * render_size == pytest.approx((box[0] + box[2]) * 0.5, abs=1.0)
+    assert anchor_y - 0.5 * map_scene._LABEL_CAP_HEIGHT_EM * render_size == pytest.approx(
+        (box[1] + box[3]) * 0.5, abs=1.0
+    )
     atlas_scale = render_size / metrics["font_size"]
     expected = []
     for item in positioned:
@@ -1088,6 +1098,28 @@ def test_native_scene_render_rgba_draws_raster_overlay_and_sdf_text():
 
     assert red_base > 1000
     assert green_text > 100
+
+
+def test_native_scene_raster_overlay_passes_colour_through_unchanged():
+    # MapScene composites labels and vectors over the terrain frame through
+    # set_raster_overlay; an sRGB decode on upload darkened every such frame.
+    try:
+        scene = f3d.Scene(80, 64)
+    except Exception as exc:
+        pytest.skip(f"native Scene unavailable: {exc}")
+
+    scene.disable_terrain()
+    base = np.zeros((64, 80, 4), dtype=np.uint8)
+    base[..., 0] = 48
+    base[..., 1] = 128
+    base[..., 2] = 200
+    base[..., 3] = 255
+    scene.set_raster_overlay(base, 1.0, None, None)
+
+    rgba = np.asarray(scene.render_rgba())
+    centre = rgba[8:56, 8:72, :3].reshape(-1, 3).astype(np.int16)
+
+    assert np.abs(centre - np.array([48, 128, 200], dtype=np.int16)).max() <= 2
 
 
 def test_gpu_backend_uses_native_vector_oit_for_line_layers(tmp_path, monkeypatch):

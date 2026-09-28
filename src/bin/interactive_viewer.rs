@@ -1,7 +1,5 @@
-use std::error::Error;
+#[cfg(not(target_arch = "wasm32"))]
+include!("../bin_support/interactive_viewer_native.rs");
 
-use forge3d::cli::interactive_viewer::run_interactive_viewer_cli;
-
-fn main() -> Result<(), Box<dyn Error>> {
-    run_interactive_viewer_cli()
-}
+#[cfg(target_arch = "wasm32")]
+fn main() {}

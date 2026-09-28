@@ -444,9 +444,97 @@ pub fn transform_pair_supported(src: &CrsSpec, dst: &CrsSpec) -> GisResult<()> {
     }
 }
 
+/// Stable diagnostic code for a reported EPSG datum operation.
+pub const WARNING_DATUM_OPERATION: &str = "datum_null_transformation";
+
+/// The datum operations the built-in engine applies for `src → dst`, in
+/// order. Transforms pivot through WGS 84, so a non-WGS 84 source contributes
+/// its operation forward and a non-WGS 84 destination contributes its
+/// operation in reverse; a pair sharing one datum needs none. Explicit Earth
+/// `CrsSpec.projection` definitions consume WGS 84 geodetic coordinates by
+/// contract. Supported same-body planetary pairs have no EPSG datum steps.
+/// Unsupported pairs raise the same error as the transform itself.
+pub fn datum_steps(
+    src: &CrsSpec,
+    dst: &CrsSpec,
+) -> GisResult<Vec<crate::geo::projections::DatumStep>> {
+    use crate::geo::projections::{epsg_geodetic_datum, DatumStep, GeodeticDatum};
+
+    transform_pair_supported(src, dst)?;
+    if crs_equal(src, dst) {
+        return Ok(Vec::new());
+    }
+    let is_planetary = |spec: &CrsSpec| {
+        iau_code(spec).is_some()
+            || body_fixed_code(spec).is_some()
+            || explicit_planetocentric_projection(spec).is_some()
+    };
+    // A supported planetary pair has already passed the body and convention
+    // checks above. EPSG datum operations describe Earth datum changes and do
+    // not apply to same-body IAU/body-fixed/planetocentric transforms.
+    if is_planetary(src) || is_planetary(dst) {
+        return Ok(Vec::new());
+    }
+    let datum = |spec: &CrsSpec| -> GisResult<GeodeticDatum> {
+        if spec.projection.is_some() {
+            return Ok(GeodeticDatum::Wgs84);
+        }
+        epsg_code(spec)
+            .and_then(epsg_geodetic_datum)
+            .ok_or_else(|| {
+                GisError::BackendUnavailable(format!(
+                    "BackendUnavailable: CRS {} has no built-in datum definition",
+                    canonical_label(spec).unwrap_or_else(|_| "<unknown>".to_string())
+                ))
+            })
+    };
+    let (src_datum, dst_datum) = (datum(src)?, datum(dst)?);
+    if src_datum == dst_datum {
+        return Ok(Vec::new());
+    }
+    let forward = src_datum.operation_to_wgs84().map(|operation| DatumStep {
+        operation,
+        reverse: false,
+    });
+    let reverse = dst_datum.operation_to_wgs84().map(|operation| DatumStep {
+        operation,
+        reverse: true,
+    });
+    Ok(forward.into_iter().chain(reverse).collect())
+}
+
+/// One structured diagnostic per applied datum operation, so reprojection
+/// results never hide a datum assumption.
+pub fn datum_step_warnings(src: &CrsSpec, dst: &CrsSpec) -> GisResult<Vec<RasterWarning>> {
+    Ok(datum_steps(src, dst)?
+        .iter()
+        .map(|step| {
+            RasterWarning::new(
+                WARNING_DATUM_OPERATION,
+                format!(
+                    "{} -> {} via EPSG:{} ({}; null geocentric translation, published \
+                     accuracy {} m{})",
+                    step.source_datum().name(),
+                    step.target_datum().name(),
+                    step.operation.epsg_code,
+                    step.operation.name,
+                    step.operation.accuracy_m,
+                    if step.reverse {
+                        ", applied in reverse"
+                    } else {
+                        ""
+                    },
+                ),
+                Some("crs"),
+            )
+        })
+        .collect())
+}
+
 /// Transform geographic/projected 3D coordinates to/from body-fixed Cartesian
-/// coordinates for WGS84 Earth or a registered planetocentric IAU body.
-/// Planar-only calls remain on [`transform_point`].
+/// coordinates for WGS84 Earth or a registered planetocentric IAU body. The
+/// WGS84 path uses typed ellipsoidal height for EPSG method 9602. Planar-only
+/// calls remain on [`transform_point`].
 pub fn transform_point3(
     x: f64,
     y: f64,
@@ -459,6 +547,7 @@ pub fn transform_point3(
         wgs84_geodetic_to_ecef,
     };
     use crate::geo::projections::ProjError;
+    use crate::geo::units::{Ellipsoidal, Height};
     use glam::DVec3;
 
     if !x.is_finite() || !y.is_finite() || !z.is_finite() {
@@ -566,11 +655,14 @@ pub fn transform_point3(
     }
     match (epsg_code(src), epsg_code(dst)) {
         (Some(4326 | 4979), Some(4978)) => {
-            let point = wgs84_geodetic_to_ecef(x, y, z)
+            // EPSG:4979's third axis is ellipsoidal height; EPSG:4326 input
+            // carries the same ellipsoidal-height convention for `z`.
+            let point = wgs84_geodetic_to_ecef(x, y, Height::<Ellipsoidal>::new(z))
                 .map_err(|error| GisError::TransformFailed(error.to_string()))?;
             Ok((point.x, point.y, point.z))
         }
         (Some(4978), Some(4326 | 4979)) => wgs84_ecef_to_geodetic(DVec3::new(x, y, z))
+            .map(|(lon, lat, h)| (lon, lat, h.metres()))
             .map_err(|error| GisError::TransformFailed(error.to_string())),
         _ => Err(GisError::BackendUnavailable(format!(
             "BackendUnavailable: CRS transform {} to {} has no built-in 3D path",
@@ -819,6 +911,27 @@ impl CrsTransform {
         self.axis_order_policy.clone()
     }
 
+    /// EPSG datum operations this transform applies, in order (empty when
+    /// both CRSs share a datum).
+    #[getter]
+    fn datum_operations(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let list = pyo3::types::PyList::empty_bound(py);
+        for step in datum_steps(&self.src, &self.dst)? {
+            let entry = pyo3::types::PyDict::new_bound(py);
+            entry.set_item("epsg_code", step.operation.epsg_code)?;
+            entry.set_item("name", step.operation.name)?;
+            entry.set_item("method", step.operation.method)?;
+            entry.set_item("method_epsg_code", step.operation.method_epsg_code)?;
+            entry.set_item("source_datum", step.source_datum().name())?;
+            entry.set_item("target_datum", step.target_datum().name())?;
+            entry.set_item("reverse", step.reverse)?;
+            entry.set_item("translation_m", step.operation.translation_m.to_vec())?;
+            entry.set_item("accuracy_m", step.operation.accuracy_m)?;
+            list.append(entry)?;
+        }
+        Ok(list.into_py(py))
+    }
+
     fn transform_point(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
         transform_point(x, y, &self.src, &self.dst).map_err(Into::into)
     }
@@ -881,6 +994,47 @@ mod tests {
                 "{code} round-trip residual {residual:.3e} deg exceeds 1e-9"
             );
         }
+    }
+
+    #[test]
+    fn datum_steps_name_every_non_wgs84_pivot_operation() {
+        let codes = |src: &str, dst: &str| -> Vec<(u32, bool)> {
+            datum_steps(&spec(src), &spec(dst))
+                .expect("supported pair")
+                .iter()
+                .map(|step| (step.operation.epsg_code, step.reverse))
+                .collect()
+        };
+        assert_eq!(codes("EPSG:4326", "EPSG:2154"), vec![(1671, true)]);
+        assert_eq!(codes("EPSG:2154", "EPSG:4326"), vec![(1671, false)]);
+        assert_eq!(
+            codes("EPSG:5070", "EPSG:2154"),
+            vec![(1188, false), (1671, true)]
+        );
+        assert_eq!(codes("EPSG:32633", "EPSG:3857"), Vec::<(u32, bool)>::new());
+        assert_eq!(codes("EPSG:2154", "EPSG:2154"), Vec::<(u32, bool)>::new());
+        assert_eq!(codes("EPSG:4979", "EPSG:4978"), Vec::<(u32, bool)>::new());
+        assert!(matches!(
+            datum_steps(&spec("EPSG:4326"), &spec("EPSG:4269")),
+            Err(GisError::BackendUnavailable(_))
+        ));
+        let warnings = datum_step_warnings(&spec("EPSG:5070"), &spec("EPSG:4326")).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, WARNING_DATUM_OPERATION);
+        assert!(warnings[0]
+            .message
+            .contains("NAD83 -> WGS 84 via EPSG:1188"));
+        assert!(warnings[0].message.contains("accuracy 4 m"));
+    }
+
+    #[test]
+    fn reported_null_datum_operation_leaves_coordinates_unchanged() {
+        use crate::geo::projections::epsg_projection_definition;
+        let lambert93 = epsg_projection_definition(2154).unwrap();
+        let (lon, lat) = (2.5, 47.0);
+        let direct = lambert93.forward(lon, lat).unwrap();
+        let routed = transform_point(lon, lat, &spec("EPSG:4326"), &spec("EPSG:2154")).unwrap();
+        assert_eq!(direct, routed);
     }
 
     #[test]

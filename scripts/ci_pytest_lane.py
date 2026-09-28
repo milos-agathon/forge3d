@@ -46,6 +46,7 @@ FAST_LANE_FILES = [
     "tests/test_determinism_matrix.py",
     "tests/test_no_silent_degradation.py",
     "tests/test_substratia_evidence_report.py",
+    "tests/test_orbis_task6_contracts.py",
 ]
 
 
@@ -123,9 +124,9 @@ def build_pytest_args(
     if slow and profile != "full":
         raise ValueError("--slow-lane is valid only with --profile full")
     marker = (
-        "slow and not interactive_viewer"
+        "slow and not interactive_viewer and not wasm"
         if slow
-        else "not slow and not interactive_viewer"
+        else "not slow and not interactive_viewer and not wasm"
     )
     return [*profile_files(profile), "-m", marker, *forwarded]
 

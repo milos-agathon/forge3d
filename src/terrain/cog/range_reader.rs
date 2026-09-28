@@ -13,6 +13,7 @@ const DEFAULT_BYTE_CACHE_BUDGET: u64 = 64 * 1024 * 1024;
 pub struct RangeReader {
     client: reqwest::Client,
     url: String,
+    local_path: Option<PathBuf>,
     file_size: u64,
     byte_cache: Arc<Mutex<ByteCache>>,
     disk_cache: Option<Arc<Mutex<DiskCache>>>,
@@ -64,6 +65,7 @@ impl RangeReader {
         Ok(Self {
             client,
             url: url.to_string(),
+            local_path: None,
             file_size,
             byte_cache: Arc::new(Mutex::new(ByteCache::new(cache_budget_bytes))),
             disk_cache: cache_dir
@@ -95,13 +97,19 @@ impl RangeReader {
         disk_cache_budget_bytes: u64,
     ) -> Result<Self, CogError> {
         use std::fs;
-        let metadata = fs::metadata(path)?;
+        let local_path = PathBuf::from(path);
+        let metadata = fs::metadata(&local_path).map_err(|error| {
+            CogError::InvalidIfd(format!(
+                "cannot stat local COG path {local_path:?}: {error}"
+            ))
+        })?;
         let file_size = metadata.len();
         let url = format!("file://{}", path);
 
         Ok(Self {
             client: reqwest::Client::new(),
             url: url.clone(),
+            local_path: Some(local_path),
             file_size,
             byte_cache: Arc::new(Mutex::new(ByteCache::new(cache_budget_bytes))),
             disk_cache: cache_dir
@@ -166,7 +174,7 @@ impl RangeReader {
 
         let start_time = std::time::Instant::now();
 
-        let data = if self.url.starts_with("file://") {
+        let data = if self.local_path.is_some() {
             self.read_local_range(offset, length)?
         } else {
             self.read_http_range(offset, length).await?
@@ -268,12 +276,27 @@ impl RangeReader {
         use std::fs::File;
         use std::io::{Read, Seek, SeekFrom};
 
-        let path = self.url.strip_prefix("file://").unwrap_or(&self.url);
-        let mut file = File::open(path)?;
-        file.seek(SeekFrom::Start(offset))?;
+        let path = self.local_path.as_ref().ok_or_else(|| {
+            CogError::IoError(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "local range read has no filesystem path",
+            ))
+        })?;
+        let mut file = File::open(path).map_err(|error| {
+            CogError::InvalidIfd(format!("cannot open local COG path {path:?}: {error}"))
+        })?;
+        file.seek(SeekFrom::Start(offset)).map_err(|error| {
+            CogError::InvalidIfd(format!(
+                "cannot seek to offset {offset} in local COG path {path:?}: {error}"
+            ))
+        })?;
 
         let mut buffer = vec![0u8; length as usize];
-        file.read_exact(&mut buffer)?;
+        file.read_exact(&mut buffer).map_err(|error| {
+            CogError::InvalidIfd(format!(
+                "cannot read {length} bytes at offset {offset} from local COG path {path:?}: {error}"
+            ))
+        })?;
         Ok(buffer)
     }
 

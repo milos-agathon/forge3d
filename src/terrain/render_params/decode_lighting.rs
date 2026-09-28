@@ -251,8 +251,8 @@ mod tests {
     }
 
     #[test]
-    fn native_shadow_decode_rejects_signed_and_unbounded_dimensions() {
-        for resolution in [-1, 0, 511, 513, 16_384, i64::MAX] {
+    fn native_shadow_decode_rejects_signed_and_invalid_dimensions() {
+        for resolution in [-1, 0, 511, 513, i64::MAX] {
             assert!(validate_shadow_dimensions(resolution, 1).is_err());
         }
         for cascades in [-1, 0, 5, i64::MAX] {
@@ -261,6 +261,10 @@ mod tests {
         assert_eq!(
             validate_shadow_dimensions(512, 1).expect("valid dimensions"),
             (512, 1)
+        );
+        assert_eq!(
+            validate_shadow_dimensions(16_384, 1).expect("large power-of-two resolution"),
+            (16_384, 1)
         );
     }
 }
