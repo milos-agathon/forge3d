@@ -118,7 +118,7 @@ def test_terrain_material_variation_is_uploaded_and_consumed_as_uniforms() -> No
     assert "params.hue_variation_strength.clamp(0.0, 0.2)" in upload
     assert "params.material_slope_bias.clamp(0.0, 1.0)" in upload
     assert "clamp(u_overlay.params3.z, 0.0, 0.2)" in shader
-    assert "clamp(u_overlay.params3.w, 0.0, 1.0)" in shader
+    assert "clamp(u_overlay.params6.x, 0.0, 1.0)" in shader
     assert "let hue_variation_strength = 0.08" not in shader
 
 
