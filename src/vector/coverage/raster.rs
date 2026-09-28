@@ -456,12 +456,7 @@ impl CoverageRasterizer {
 fn build_pixel_baselines(geometry: &CoverageGeometry) -> Vec<i32> {
     let row_count = geometry.layers.len() * geometry.height as usize;
     let mut rows: Vec<Vec<(f64, i32, u32)>> = vec![Vec::new(); row_count];
-    let height = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
-        f64::from(geometry.height),
-        0.0,
-        0.0,
-    ))
-    .x;
+    let height = geometry.height as f32;
     for primitive in &geometry.primitives {
         let min_row = primitive.bounds[1].floor().max(0.0) as u32;
         let max_row = primitive.bounds[3].ceil().max(0.0).min(height) as u32;
@@ -528,11 +523,8 @@ fn build_pixel_dispatch_lists(
         RenderError::Budget("vector_coverage_raster_budget: screen mask exceeds usize".into())
     })?;
     let mut resolve_active = vec![false; screen_pixel_count];
-    let extent = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
-        f64::from(geometry.width),
-        f64::from(geometry.height),
-        0.0,
-    ));
+    let extent =
+        glam::DVec3::new(f64::from(geometry.width), f64::from(geometry.height), 0.0).as_vec3();
 
     let mut components = Vec::new();
     let mut first = 0_usize;

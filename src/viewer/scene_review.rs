@@ -1004,7 +1004,7 @@ fn first_f32(map: &Map<String, Value>, keys: &[&str]) -> Option<f32> {
 }
 
 fn narrow_nonposition_scalar(value: f64) -> f32 {
-    crate::camera::Anchor::direction_to_render(DVec3::new(value, 0.0, 0.0)).x
+    value as f32
 }
 
 fn first_u32(map: &Map<String, Value>, keys: &[&str]) -> Option<u32> {

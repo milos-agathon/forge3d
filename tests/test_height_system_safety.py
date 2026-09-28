@@ -58,6 +58,92 @@ def test_prepare_dem_converts_declared_egm96_pixels_to_ellipsoidal():
     assert abs(value - expected) < 1e-6
 
 
+@pytest.mark.parametrize(
+    ("code", "transform", "datum_codes"),
+    [
+        # UTM 33N around (15E, 45N): WGS 84, no datum operation.
+        (32633, (1000.0, 0.0, 480_000.0, 0.0, -1000.0, 4_990_000.0), []),
+        # Lambert-93 around Paris: RGF93 v1, reported EPSG:1671 null operation.
+        (2154, (1000.0, 0.0, 650_000.0, 0.0, -1000.0, 6_865_000.0), [1671]),
+    ],
+)
+def test_prepare_dem_converts_projected_egm96_dem_per_pixel(code, transform, datum_codes):
+    # MENSURA: the height-system conversion is not limited to EPSG:4326. Each
+    # affine pixel centre is inverted to WGS 84 lon/lat through the built-in
+    # engine and must differ from the raw value by exactly its own N.
+    raw = np.arange(12, dtype=np.float64).reshape(1, 3, 4) * 37.25 + 150.0
+    result = gis.prepare_dem(
+        {
+            "array": raw,
+            "height_system": "orthometric_egm96",
+            "info": {
+                "width": 4,
+                "height": 3,
+                "band_count": 1,
+                "crs_authority": {"name": "EPSG", "code": str(code)},
+                "transform": transform,
+            },
+        }
+    )
+    assert result["height_system"] == "ellipsoidal"
+    out = np.asarray(result["array"])
+    assert out.dtype == np.float64
+    to_wgs84 = gis.create_crs_transformer(code, 4326)
+    a, b, c, d, e, f = transform
+    worst = 0.0
+    for row in range(3):
+        for col in range(4):
+            x = a * (col + 0.5) + b * (row + 0.5) + c
+            y = d * (col + 0.5) + e * (row + 0.5) + f
+            lon, lat = to_wgs84.transform_point(x, y)
+            n = forge3d.geoid_undulation(lat, lon)
+            worst = max(worst, abs((out[0, row, col] - raw[0, row, col]) - n))
+    assert worst < 1e-6, f"worst per-pixel H+N residual {worst} m"
+    reported = [
+        w for w in result["warnings"] if w["code"] == "datum_null_transformation"
+    ]
+    assert [int(w["message"].split("EPSG:")[1].split(" ")[0]) for w in reported] == datum_codes
+
+
+def test_prepare_dem_rejects_egm96_in_crs_without_builtin_path():
+    raw = np.full((1, 2, 2), 100.0, dtype=np.float64)
+    with pytest.raises(Exception, match="orthometric_egm96 DEM requires EPSG:4326"):
+        gis.prepare_dem(
+            {
+                "array": raw,
+                "height_system": "orthometric_egm96",
+                "info": {
+                    "width": 2,
+                    "height": 2,
+                    "band_count": 1,
+                    "crs_authority": {"name": "EPSG", "code": "4269"},
+                    "transform": (0.1, 0.0, -100.0, 0.0, -0.1, 40.0),
+                },
+            }
+        )
+
+    # A projected WKT can contain "WGS 84" even when no EPSG authority was
+    # supplied. It must not be inferred to mean geographic EPSG:4326.
+    utm_wkt = (
+        'PROJCS["WGS 84 / UTM zone 33N",GEOGCS["WGS 84"],'
+        'PROJECTION["Transverse_Mercator"],AUTHORITY["EPSG","32633"]]'
+    )
+    with pytest.raises(Exception, match="orthometric_egm96 DEM requires EPSG:4326"):
+        gis.prepare_dem(
+            {
+                "array": raw,
+                "height_system": "orthometric_egm96",
+                "info": {
+                    "width": 2,
+                    "height": 2,
+                    "band_count": 1,
+                    "crs_wkt": utm_wkt,
+                    "transform": (1000.0, 0.0, 480_000.0, 0.0, -1000.0, 4_990_000.0),
+                },
+            }
+        )
+
+
 def test_orthometric_and_ellipsoidal_differ_by_exactly_n():
     lat, lon = -14.6212170, 305.0211140
     n = forge3d.geoid_undulation(lat, lon)
