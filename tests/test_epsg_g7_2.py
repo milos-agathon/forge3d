@@ -144,3 +144,71 @@ def test_differential_oracle_against_pyproj_to_1mm():
         f"pyproj differential oracle: UTM {worst_utm:.2e} m, "
         f"WebMercator {worst_merc:.2e} m, ECEF {worst_ecef:.2e} m"
     )
+
+
+# MENSURA datum boundary: RGF93 v1 (EPSG:2154) and NAD83 (EPSG:5070) reach WGS 84
+# only through the published EPSG null transformations, and every transform
+# surface names them instead of treating the datums as silently equivalent.
+@pytest.mark.parametrize(
+    ("src", "dst", "expected"),
+    [
+        (4326, 2154, [(1671, "WGS 84", "RGF93 v1", True, 1.0)]),
+        (2154, 4326, [(1671, "RGF93 v1", "WGS 84", False, 1.0)]),
+        (5070, 2154, [(1188, "NAD83", "WGS 84", False, 4.0), (1671, "WGS 84", "RGF93 v1", True, 1.0)]),
+        (4326, 32633, []),
+        (32633, 3857, []),
+        (2154, 2154, []),
+    ],
+)
+def test_crs_transform_reports_datum_operations(src, dst, expected):
+    ops = gis.create_crs_transformer(src, dst).datum_operations
+    assert [
+        (op["epsg_code"], op["source_datum"], op["target_datum"], op["reverse"], op["accuracy_m"])
+        for op in ops
+    ] == expected
+    for op in ops:
+        assert op["method_epsg_code"] == 9603
+        assert op["method"] == "Geocentric translations (geog2D domain)"
+        assert op["translation_m"] == [0.0, 0.0, 0.0]
+
+
+def test_null_datum_operation_does_not_change_coordinates():
+    to_lambert = gis.create_crs_transformer(4326, 2154)
+    back = gis.create_crs_transformer(2154, 4326)
+    e, n = to_lambert.transform_point(2.5, 47.0)
+    lon, lat = back.transform_point(e, n)
+    assert abs(lon - 2.5) < 1e-9 and abs(lat - 47.0) < 1e-9
+
+
+def test_reproject_vector_reports_datum_operation_but_not_for_wgs84_family():
+    features = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [2.5, 47.0]}}
+        ],
+    }
+    codes = lambda result: [
+        w["code"] for w in result["warnings"] if w["code"] == "datum_null_transformation"
+    ]
+    lambert = gis.reproject_vector(features, "EPSG:2154", "EPSG:4326")
+    assert codes(lambert) == ["datum_null_transformation"]
+    assert "EPSG:1671" in next(
+        w["message"] for w in lambert["warnings"] if w["code"] == "datum_null_transformation"
+    )
+    assert codes(gis.reproject_vector(features, "EPSG:3857", "EPSG:4326")) == []
+
+
+def test_reproject_raster_reports_datum_operation(tmp_path):
+    import numpy as np
+
+    path = tmp_path / "dem.tif"
+    gis.write_raster(
+        str(path),
+        np.ones((1, 4, 4), dtype=np.float32),
+        crs="EPSG:4326",
+        transform=(0.01, 0, 2.5, 0, -0.01, 47.0),
+    )
+    lambert = gis.reproject_raster(str(path), "EPSG:2154", resampling="nearest")
+    assert [d["code"] for d in lambert["diagnostics"]] == ["datum_null_transformation"]
+    mercator = gis.reproject_raster(str(path), "EPSG:3857", resampling="nearest")
+    assert mercator["diagnostics"] == []

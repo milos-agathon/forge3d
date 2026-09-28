@@ -164,7 +164,7 @@ pub fn wgs84_to_ecef(lon_rad: f64, lat_rad: f64, height: Height<Ellipsoidal>) ->
     crate::geo::projections::geocentric::wgs84_geodetic_to_ecef(
         lon_rad.to_degrees(),
         lat_rad.to_degrees(),
-        height.metres(),
+        height,
     )
     .expect("finite geodetic inputs")
 }

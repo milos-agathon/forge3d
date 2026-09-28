@@ -9,6 +9,10 @@ pub(in crate::terrain::renderer) struct RenderTargets {
     pub(in crate::terrain::renderer) msaa_view: Option<wgpu::TextureView>,
     pub(in crate::terrain::renderer) _depth_texture: Arc<TrackedTexture>,
     pub(in crate::terrain::renderer) depth_view: wgpu::TextureView,
+    #[cfg(feature = "enable-globe")]
+    pub(in crate::terrain::renderer) orbis_coverage_texture: Option<Arc<TrackedTexture>>,
+    #[cfg(feature = "enable-globe")]
+    pub(in crate::terrain::renderer) orbis_coverage_view: Option<wgpu::TextureView>,
     pub(in crate::terrain::renderer) resolved_texture: Arc<TrackedTexture>,
     pub(in crate::terrain::renderer) resolved_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) out_width: u32,
@@ -125,6 +129,36 @@ impl TerrainScene {
                 self.color_format,
                 effective_msaa,
             ));
+        }
+        #[cfg(feature = "enable-globe")]
+        if needs_clipmap
+            && self.orbis_capture_request.is_some()
+            && self
+                .orbis_coverage_pipeline
+                .lock()
+                .map_err(|_| anyhow!("ORBIS coverage pipeline mutex poisoned"))?
+                .is_none()
+        {
+            let light_buffer = self
+                .light_buffer
+                .lock()
+                .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
+            *self
+                .orbis_coverage_pipeline
+                .lock()
+                .map_err(|_| anyhow!("ORBIS coverage pipeline mutex poisoned"))? = Some(
+                Self::create_orbis_coverage_pipeline(
+                    self.device.as_ref(),
+                    &self.bind_group_layout,
+                    light_buffer.bind_group_layout(),
+                    &self.ibl_bind_group_layout,
+                    &self.shadow_bind_group_layout,
+                    &self.fog_bind_group_layout,
+                    &self.water_reflection_bind_group_layout,
+                    &self.material_layer_bind_group_layout,
+                    self.color_format,
+                ),
+            );
         }
         if needs_clipmap
             && effective_msaa == 1
@@ -245,7 +279,7 @@ impl TerrainScene {
                 format: TERRAIN_DEPTH_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                     | if effective_msaa == 1 {
-                        wgpu::TextureUsages::TEXTURE_BINDING
+                        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC
                     } else {
                         wgpu::TextureUsages::empty()
                     },
@@ -253,6 +287,35 @@ impl TerrainScene {
             },
         )?);
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        #[cfg(feature = "enable-globe")]
+        let orbis_coverage_texture = if self.orbis_capture_request.is_some() {
+            anyhow::ensure!(effective_msaa == 1, "ORBIS coverage capture requires one sample");
+            Some(Arc::new(tracked_create_texture(
+                self.device.as_ref(),
+                &wgpu::TextureDescriptor {
+                    label: Some("orbis.metric.terrain_coverage"),
+                    size: wgpu::Extent3d {
+                        width: internal_width,
+                        height: internal_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                },
+            )?))
+        } else {
+            None
+        };
+        #[cfg(feature = "enable-globe")]
+        let orbis_coverage_view = orbis_coverage_texture
+            .as_ref()
+            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
 
         let resolved_texture = if needs_scaling {
             Arc::new(tracked_create_texture(
@@ -317,6 +380,10 @@ impl TerrainScene {
             msaa_view,
             _depth_texture: depth_texture,
             depth_view,
+            #[cfg(feature = "enable-globe")]
+            orbis_coverage_texture,
+            #[cfg(feature = "enable-globe")]
+            orbis_coverage_view,
             resolved_texture,
             resolved_view,
             out_width,

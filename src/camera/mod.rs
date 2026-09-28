@@ -9,6 +9,8 @@ pub mod validation;
 
 pub use anchor::Anchor;
 
+use crate::geo::units::{SceneCoord, SceneOffset};
+
 use glam::{DVec3, Mat4, Vec3, Vec4Swizzles};
 use numpy::PyArray2;
 use pyo3::prelude::*;
@@ -66,8 +68,8 @@ fn anchored_view(
 
     let mut anchor = Anchor::new();
     anchor.rebase_if_needed(eye_d);
-    let up_v = anchor.to_render_direction(up_d);
-    Ok(anchor.view_look_at(eye_d, target_d, up_v))
+    let up_v = Anchor::offset_to_render(SceneOffset::scene(up_d));
+    Ok(anchor.view_look_at(SceneCoord::scene(eye_d), SceneCoord::scene(target_d), up_v))
 }
 
 /// Returns the GL->WGPU depth conversion matrix.

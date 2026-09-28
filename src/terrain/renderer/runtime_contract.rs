@@ -65,10 +65,18 @@ pub(super) fn build_observation(
     );
     check_slice(
         &mut observation,
-        "u_terrain.spacing_h_exag.zw",
+        "u_terrain.spacing_h_exag.z",
         0,
-        &terrain[38..40],
+        &terrain[38..39],
         0.0,
+        65_536.0,
+    );
+    check_slice(
+        &mut observation,
+        "u_terrain.spacing_h_exag.w",
+        0,
+        &terrain[39..40],
+        -2.0,
         65_536.0,
     );
     check_slice(
@@ -298,5 +306,13 @@ mod tests {
         );
         assert_eq!(observe_spacing([1.0, 1.0, 100_000.0, 1.0]).status, "failed");
         assert_eq!(observe_spacing([1.0, 1.0, 1.0, 100_000.0]).status, "failed");
+    }
+
+    #[test]
+    fn detail_blend_encoding_is_bounded_but_exaggeration_stays_nonnegative() {
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -1.0]).status, "passed");
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -2.0]).status, "passed");
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -2.5]).status, "failed");
+        assert_eq!(observe_spacing([1.0, 1.0, -1.0, 1.0]).status, "failed");
     }
 }

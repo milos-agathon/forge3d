@@ -4,9 +4,22 @@
 //! artifacts and visual seams between clipmap rings.
 
 use super::vertex::ClipmapVertex;
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+/// Residency state for the fine and coarse tiles that meet at one ring
+/// boundary. A boundary may only use distance-based morphing when both sides
+/// are resident; otherwise the fine side is snapped to the coarse lattice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TileReadiness {
+    pub fine_resident: bool,
+    pub coarse_resident: bool,
+}
+
+fn position_xz(vertex: &ClipmapVertex) -> Vec2 {
+    Vec2::new(vertex.position[0], vertex.position[1])
+}
 
 /// Configuration for geo-morphing.
 #[derive(Debug, Clone, Copy)]
@@ -126,6 +139,38 @@ pub fn calculate_morph_weight(distance_from_inner: f32, ring_width: f32, morph_r
     }
 }
 
+/// Calculate the normal distance morph only after both boundary tile sides
+/// are resident. Coarse snapping during arrival keeps both sides topologically
+/// compatible instead of exposing a partial T-junction.
+pub fn calculate_readiness_gated_morph_weight(
+    distance_from_inner: f32,
+    ring_width: f32,
+    morph_range: f32,
+    readiness: TileReadiness,
+) -> f32 {
+    if readiness.fine_resident && readiness.coarse_resident {
+        calculate_morph_weight(distance_from_inner, ring_width, morph_range)
+    } else {
+        1.0
+    }
+}
+
+/// Apply the arrival gate to an already generated ring without touching skirt
+/// markers or its index topology.
+pub fn apply_tile_readiness(vertices: &mut [ClipmapVertex], readiness: TileReadiness) {
+    if readiness.fine_resident && readiness.coarse_resident {
+        return;
+    }
+    for vertex in vertices {
+        // Only the pre-existing outer morph band belongs to this boundary.
+        // Weight-zero inner vertices meet the next-finer ring and must not be
+        // changed because an unavailable ring farther out cannot gate them.
+        if !vertex.is_skirt() && vertex.morph_weight() > 0.0 {
+            vertex.morph_data[0] = 1.0;
+        }
+    }
+}
+
 /// Snap a UV coordinate to the coarser LOD grid.
 ///
 /// This ensures that vertices at LOD boundaries align with the coarser grid,
@@ -157,19 +202,16 @@ pub fn analyze_seams(
             seams_valid: false,
         };
     }
-    let (inner_min, inner_max) = inner_vertices
-        .iter()
-        .map(|vertex| Vec2::from(vertex.position))
-        .fold(
-            (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY)),
-            |(min, max), position| (min.min(position), max.max(position)),
-        );
+    let (inner_min, inner_max) = inner_vertices.iter().map(position_xz).fold(
+        (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY)),
+        |(min, max), position| (min.min(position), max.max(position)),
+    );
     // A finer boundary vertex is allowed to land in the middle of a coarser
     // edge; vertex-to-vertex distance therefore reports false cracks at every
     // legitimate T-junction. Measure the four shared boundary lines instead.
     let mut side_gaps = [f32::INFINITY; 4];
     for vertex in outer_vertices {
-        let p = Vec2::from(vertex.position);
+        let p = position_xz(vertex);
         if p.y >= inner_min.y && p.y <= inner_max.y {
             side_gaps[0] = side_gaps[0].min((p.x - inner_min.x).abs());
             side_gaps[1] = side_gaps[1].min((p.x - inner_max.x).abs());
@@ -188,7 +230,7 @@ pub fn analyze_seams(
     let boundary_count = inner_vertices
         .iter()
         .filter(|vertex| {
-            let p = Vec2::from(vertex.position);
+            let p = position_xz(vertex);
             (p.x - inner_min.x).abs() <= config.max_seam_gap
                 || (p.x - inner_max.x).abs() <= config.max_seam_gap
                 || (p.y - inner_min.y).abs() <= config.max_seam_gap
@@ -233,13 +275,10 @@ pub fn analyze_depth_discontinuities(
             ..Default::default()
         };
     }
-    let (fine_min, fine_max) = fine_vertices
-        .iter()
-        .map(|vertex| Vec2::from(vertex.position))
-        .fold(
-            (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY)),
-            |(min, max), position| (min.min(position), max.max(position)),
-        );
+    let (fine_min, fine_max) = fine_vertices.iter().map(position_xz).fold(
+        (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY)),
+        |(min, max), position| (min.min(position), max.max(position)),
+    );
     let side_of = |p: Vec2| -> Option<(usize, f32)> {
         let distances = [
             (p.x - fine_min.x).abs(),
@@ -255,7 +294,7 @@ pub fn analyze_depth_discontinuities(
     };
     let mut coarse_sides: [Vec<(f32, &ClipmapVertex)>; 4] = Default::default();
     for vertex in coarse_vertices {
-        if let Some((side, axis)) = side_of(Vec2::from(vertex.position)) {
+        if let Some((side, axis)) = side_of(position_xz(vertex)) {
             coarse_sides[side].push((axis, vertex));
         }
     }
@@ -311,7 +350,7 @@ pub fn analyze_depth_discontinuities(
     let mut result = DepthSeamAnalysis::default();
     let mut total = 0.0;
     for fine in fine_vertices {
-        let Some((side, axis)) = side_of(Vec2::from(fine.position)) else {
+        let Some((side, axis)) = side_of(position_xz(fine)) else {
             continue;
         };
         let candidates = &coarse_sides[side];
@@ -381,12 +420,12 @@ pub fn blend_boundary_vertices(
 
     for fine_v in fine_vertices {
         // Find corresponding coarse vertex
-        let fine_pos = Vec2::from(fine_v.position);
+        let fine_pos = position_xz(fine_v);
         let mut best_coarse: Option<&ClipmapVertex> = None;
         let mut best_dist = f32::MAX;
 
         for coarse_v in coarse_vertices {
-            let coarse_pos = Vec2::from(coarse_v.position);
+            let coarse_pos = position_xz(coarse_v);
             let dist = fine_pos.distance(coarse_pos);
             if dist < best_dist {
                 best_dist = dist;
@@ -398,17 +437,25 @@ pub fn blend_boundary_vertices(
             if best_dist < 1.0 {
                 // Blend position based on morph weight
                 let t = blend_factor * fine_v.morph_weight();
-                let blended_pos = fine_pos.lerp(Vec2::from(coarse_v.position), t);
+                let blended_pos =
+                    Vec3::from(fine_v.position).lerp(Vec3::from(coarse_v.position), t);
+                let blended_up = fine_v
+                    .geodetic_up()
+                    .lerp(coarse_v.geodetic_up(), t)
+                    .normalize_or_zero();
                 let blended_uv = Vec2::from(fine_v.uv).lerp(Vec2::from(coarse_v.uv), t);
 
-                blended.push(ClipmapVertex::new(
-                    blended_pos.x,
-                    blended_pos.y,
-                    blended_uv.x,
-                    blended_uv.y,
+                let mut vertex = ClipmapVertex::with_position(
+                    blended_pos,
+                    blended_up,
+                    blended_uv,
                     fine_v.morph_weight(),
-                    fine_v.ring_index() as u32,
-                ));
+                    fine_v.ring_index(),
+                );
+                if fine_v.is_globe() {
+                    vertex.set_globe_position(blended_pos, blended_up);
+                }
+                blended.push(vertex);
             } else {
                 blended.push(*fine_v);
             }
@@ -479,6 +526,76 @@ mod tests {
         // At start of morph zone (70% through ring with 0.3 morph_range)
         let w = calculate_morph_weight(70.0, 100.0, 0.3);
         assert!(w >= 0.0 && w <= 0.1);
+    }
+
+    #[test]
+    fn unavailable_ring_side_forces_the_boundary_to_the_coarse_lattice() {
+        // This catches the unsafe branch that keeps distance-based morphing
+        // while either adjoining ring has not become resident.
+        let ready = TileReadiness {
+            fine_resident: true,
+            coarse_resident: true,
+        };
+        assert!(
+            (calculate_readiness_gated_morph_weight(85.0, 100.0, 0.3, ready) - 0.5).abs() < 1e-5
+        );
+
+        for unavailable in [
+            TileReadiness {
+                fine_resident: false,
+                coarse_resident: true,
+            },
+            TileReadiness {
+                fine_resident: true,
+                coarse_resident: false,
+            },
+            TileReadiness {
+                fine_resident: false,
+                coarse_resident: false,
+            },
+        ] {
+            assert_eq!(
+                calculate_readiness_gated_morph_weight(85.0, 100.0, 0.3, unavailable),
+                1.0
+            );
+        }
+    }
+
+    #[test]
+    fn readiness_gate_changes_only_surface_morph_weights_not_mesh_topology() {
+        // This catches a transition implementation that edits skirt markers
+        // or indices while tiles arrive, creating a transient boundary hole.
+        let (mut vertices, mut indices) =
+            crate::terrain::clipmap::make_ring(0, 10.0, 20.0, 8, Vec2::ZERO, 100.0, 0.3);
+        let base_vertex_count = vertices.len();
+        let (skirts, skirt_indices) =
+            crate::terrain::clipmap::make_ring_skirts(&vertices, &indices, 10.0, 0, 0);
+        vertices.extend(skirts);
+        indices.extend(skirt_indices);
+        let original_indices = indices.clone();
+        let unavailable = TileReadiness {
+            fine_resident: false,
+            coarse_resident: true,
+        };
+
+        apply_tile_readiness(&mut vertices, unavailable);
+
+        assert_eq!(indices, original_indices);
+        let outer = 20.0;
+        let inner = 10.0;
+        assert!(vertices[..base_vertex_count].iter().all(|vertex| {
+            let position = position_xz(vertex);
+            let is_outer = position.x.abs() == outer || position.y.abs() == outer;
+            !is_outer || vertex.morph_weight() == 1.0
+        }));
+        assert!(vertices[..base_vertex_count].iter().all(|vertex| {
+            let position = position_xz(vertex);
+            let is_inner = position.abs().max_element() == inner;
+            !is_inner || vertex.morph_weight() == 0.0
+        }));
+        assert!(vertices[base_vertex_count..]
+            .iter()
+            .all(|vertex| vertex.is_skirt() && vertex.morph_data[0] == -1.0));
     }
 
     #[test]

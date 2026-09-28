@@ -25,6 +25,8 @@
 //! let off = e - e;
 //! assert_eq!((off.dx, off.dy, off.dz), (0.0, 0.0, 0.0));
 //! let _ = (c.lon(), c.lat(), c.height());
+//! let ecef = forge3d::geo::projections::geocentric::wgs84_geodetic_to_ecef(13.4, 52.5, h).unwrap();
+//! assert!(ecef.length() > 6.3e6);
 //! ```
 //!
 //! # Uncompilable errors (rustdoc `compile_fail` proofs)
@@ -46,6 +48,23 @@
 //! let e = Height::<Ellipsoidal>::new(100.0);
 //! let o = Height::<Orthometric<Egm96>>::new(100.0);
 //! let _ = e - o; // ERROR: height systems differ
+//! ```
+//!
+//! Feeding an orthometric (DEM) height into ECEF math does not compile — the
+//! geocentric conversion accepts only `Height<Ellipsoidal>`:
+//!
+//! ```compile_fail
+//! use forge3d::geo::projections::geocentric::wgs84_geodetic_to_ecef;
+//! use forge3d::geo::units::{Egm96, Height, Orthometric};
+//! let h = Height::<Orthometric<Egm96>>::new(8_848.86);
+//! let _ = wgs84_geodetic_to_ecef(86.925, 27.988, h); // ERROR: expected `Height<Ellipsoidal>`
+//! ```
+//!
+//! A bare `f64` height does not compile either:
+//!
+//! ```compile_fail
+//! use forge3d::geo::projections::geocentric::wgs84_geodetic_to_ecef;
+//! let _ = wgs84_geodetic_to_ecef(86.925, 27.988, 8_848.86); // ERROR: expected `Height<Ellipsoidal>`
 //! ```
 //!
 //! Differencing coordinates from different epochs does not compile — go
@@ -510,6 +529,22 @@ impl<B: BodyTag> CrsTag for EcefOf<B> {
     const NAME: &'static str = B::BODY_FIXED_NAME;
 }
 
+/// Forge3D scene world: the local engineering frame (metres) that viewer,
+/// scene, label, point-cloud, and 3D-Tiles positions are stored in before the
+/// active `Anchor` narrows them. It is not an EPSG CRS; `FORGE3D:0` is its
+/// internal identifier. Its nominal `Earth` body satisfies the `CrsTag`
+/// metadata contract; as a metric engineering frame it has no geographic
+/// height interpretation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SceneWorld {}
+impl Sealed for SceneWorld {}
+impl CrsTag for SceneWorld {
+    type Body = Earth;
+    const AUTHORITY: &'static str = "FORGE3D";
+    const CODE: u32 = 0;
+    const NAME: &'static str = "forge3d scene world (local engineering, metres)";
+}
+
 /// Marker trait for reference-frame realization epochs (ITRF sense).
 pub trait EpochTag: Sealed + Copy + core::fmt::Debug + 'static {
     const NAME: &'static str;
@@ -538,6 +573,15 @@ impl EpochTag for Itrf2000 {
     const NAME: &'static str = "ITRF2000";
 }
 
+/// Epoch tag for a frame that is not tied to any ITRF realization (the
+/// [`SceneWorld`] engineering frame).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unreferenced {}
+impl Sealed for Unreferenced {}
+impl EpochTag for Unreferenced {
+    const NAME: &'static str = "unreferenced";
+}
+
 // ---------------------------------------------------------------------------
 // Coord
 // ---------------------------------------------------------------------------
@@ -552,6 +596,12 @@ impl GeographicCrs for MarsIau2000 {}
 pub trait MetricCrs: CrsTag {}
 impl MetricCrs for WebMercator {}
 impl<B: BodyTag> MetricCrs for EcefOf<B> {}
+impl MetricCrs for SceneWorld {}
+
+/// A position in the Forge3D scene world.
+pub type SceneCoord = Coord<SceneWorld, Unreferenced>;
+/// A displacement or direction in the Forge3D scene world.
+pub type SceneOffset = CoordOffset<SceneWorld>;
 
 /// A position tagged with its CRS and its reference epoch. Coordinates from
 /// different CRSs or epochs cannot be differenced; convert first.
@@ -675,6 +725,14 @@ impl<C: CrsTag, E: EpochTag> Coord<C, E> {
     }
 }
 
+impl Coord<SceneWorld, Unreferenced> {
+    /// Tag an f64 scene-world position. This named crossing is the only way
+    /// an untyped scene position reaches `Anchor::to_render_f32`.
+    pub fn scene(position: DVec3) -> Self {
+        Self::from_raw(position)
+    }
+}
+
 /// Metric offset between two coordinates of identical CRS and epoch.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CoordOffset<C: CrsTag> {
@@ -682,6 +740,25 @@ pub struct CoordOffset<C: CrsTag> {
     pub dy: f64,
     pub dz: f64,
     _crs: PhantomData<C>,
+}
+
+impl<C: CrsTag> CoordOffset<C> {
+    pub(crate) fn raw(&self) -> DVec3 {
+        DVec3::new(self.dx, self.dy, self.dz)
+    }
+}
+
+impl CoordOffset<SceneWorld> {
+    /// Tag an f64 scene-world displacement or direction. Offsets are
+    /// translation-invariant, so they never depend on an anchor origin.
+    pub fn scene(offset: DVec3) -> Self {
+        Self {
+            dx: offset.x,
+            dy: offset.y,
+            dz: offset.z,
+            _crs: PhantomData,
+        }
+    }
 }
 
 impl<C: CrsTag, E: EpochTag> Sub for Coord<C, E> {

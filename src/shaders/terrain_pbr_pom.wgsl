@@ -208,19 +208,280 @@ var height_tex : texture_2d<f32>;
 @group(0) @binding(2)
 var height_samp : sampler;
 
+struct HeightPageTableHeader {
+    enabled: u32,
+    root_ready: u32,
+    table_mask: u32,
+    max_probe_count: u32,
+    target_lod: u32,
+    tile_resolution: u32,
+    atlas_width: u32,
+    atlas_height: u32,
+    overview_u_min: f32,
+    overview_v_min: f32,
+    overview_u_max: f32,
+    overview_v_max: f32,
+    overview_valid: u32,
+    _overview_pad0: u32,
+    _overview_pad1: u32,
+    _overview_pad2: u32,
+};
+
+struct HeightPageTableEntry {
+    lod: u32,
+    x: u32,
+    y: u32,
+    _pad0: u32,
+    sx: u32,
+    sy: u32,
+    slot: u32,
+    _pad1: u32,
+};
+
+struct HeightPageTable {
+    header: HeightPageTableHeader,
+    buckets: array<HeightPageTableEntry>,
+};
+
+@group(0) @binding(20)
+var<storage, read> height_pages: HeightPageTable;
+
+@group(0) @binding(21)
+var height_atlas: texture_2d<f32>;
+
+@group(0) @binding(22)
+var height_coverage_atlas: texture_2d<f32>;
+
+const HEIGHT_PAGE_EMPTY: u32 = 0xffffffffu;
+
+fn height_page_hash(lod: u32, x: u32, y: u32) -> u32 {
+    var h = lod * 0x9e3779b9u;
+    h = h ^ (x * 0x85ebca6bu);
+    h = (h << 13u) | (h >> 19u);
+    h = h ^ (y * 0xc2b2ae35u);
+    return h ^ (h >> 16u);
+}
+
+fn height_page_lookup(lod: u32, x: u32, y: u32) -> HeightPageTableEntry {
+    var missing: HeightPageTableEntry;
+    missing.lod = HEIGHT_PAGE_EMPTY;
+    let bucket_count = arrayLength(&height_pages.buckets);
+    if (height_pages.header.enabled == 0u || bucket_count == 0u) {
+        return missing;
+    }
+    let table_mask = min(height_pages.header.table_mask, bucket_count - 1u);
+    let max_probe_count = min(height_pages.header.max_probe_count, bucket_count);
+    var bucket = height_page_hash(lod, x, y) & table_mask;
+    for (var probe = 0u; probe < max_probe_count; probe = probe + 1u) {
+        if (bucket >= arrayLength(&height_pages.buckets)) {
+            return missing;
+        }
+        let entry = height_pages.buckets[bucket];
+        if (entry.lod == HEIGHT_PAGE_EMPTY) {
+            return missing;
+        }
+        if (entry.lod == lod && entry.x == x && entry.y == y) {
+            return entry;
+        }
+        bucket = (bucket + 1u) & table_mask;
+    }
+    return missing;
+}
+
+fn height_target_lod() -> u32 {
+    var target_lod = height_pages.header.target_lod;
+    if (u_terrain.spacing_h_exag.w < 0.0 && -u_terrain.spacing_h_exag.w - 1.0 <= 0.0) {
+        let overview_span = max(
+            height_pages.header.overview_u_max - height_pages.header.overview_u_min,
+            0.0000001,
+        );
+        target_lod = u32(clamp(i32(round(-det_log2(overview_span))), 0, 31));
+    }
+    if (target_lod > 31u) {
+        target_lod = 31u;
+    }
+    return target_lod;
+}
+
+fn height_page_resolve(uv: vec2<f32>, sample_lod: f32) -> HeightPageTableEntry {
+    let rounded_lod = u32(max(floor(sample_lod + 0.5), 0.0));
+    let target_lod = height_target_lod();
+    var requested_lod = 0u;
+    if (rounded_lod < target_lod) {
+        requested_lod = target_lod - rounded_lod;
+    }
+    // Keep uv==1 on the final virtual tile instead of wrapping fract(1) to 0.
+    let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+    for (var depth = 0u; depth <= target_lod; depth = depth + 1u) {
+        let axis = 1u << requested_lod;
+        let tile_xy = vec2<u32>(bounded_uv * f32(axis));
+        let entry = height_page_lookup(requested_lod, tile_xy.x, tile_xy.y);
+        if (entry.lod != HEIGHT_PAGE_EMPTY || requested_lod == 0u) {
+            return entry;
+        }
+        requested_lod = requested_lod - 1u;
+    }
+    var missing: HeightPageTableEntry;
+    missing.lod = HEIGHT_PAGE_EMPTY;
+    return missing;
+}
+
+fn height_atlas_load(coord: vec2<i32>) -> f32 {
+    let dimensions = textureDimensions(height_atlas, 0);
+    let max_x = max(i32(dimensions.x) - 1, 0);
+    let max_y = max(i32(dimensions.y) - 1, 0);
+    let bounded = vec2<i32>(
+        clamp(coord.x, 0, max_x),
+        clamp(coord.y, 0, max_y),
+    );
+    return textureLoad(height_atlas, bounded, 0).r;
+}
+
+fn height_coverage_atlas_load(coord: vec2<i32>) -> f32 {
+    let dimensions = textureDimensions(height_coverage_atlas, 0);
+    let max_x = max(i32(dimensions.x) - 1, 0);
+    let max_y = max(i32(dimensions.y) - 1, 0);
+    let bounded = vec2<i32>(
+        clamp(coord.x, 0, max_x),
+        clamp(coord.y, 0, max_y),
+    );
+    return textureLoad(height_coverage_atlas, bounded, 0).r;
+}
+
+// Returns (coverage-weighted height sum, covered bilinear weight).
+fn height_page_sample_covered(entry: HeightPageTableEntry, uv: vec2<f32>) -> vec2<f32> {
+    let sampled_dimensions = textureDimensions(height_atlas, 0);
+    var tile_resolution = height_pages.header.tile_resolution;
+    if (tile_resolution == 0u) {
+        tile_resolution = 1u;
+    }
+    if (tile_resolution > sampled_dimensions.x) {
+        tile_resolution = sampled_dimensions.x;
+    }
+    if (tile_resolution > sampled_dimensions.y) {
+        tile_resolution = sampled_dimensions.y;
+    }
+    let max_slot_x = (sampled_dimensions.x - 1u) / tile_resolution;
+    let max_slot_y = (sampled_dimensions.y - 1u) / tile_resolution;
+    var slot_x = entry.sx;
+    var slot_y = entry.sy;
+    if (slot_x > max_slot_x) {
+        slot_x = max_slot_x;
+    }
+    if (slot_y > max_slot_y) {
+        slot_y = max_slot_y;
+    }
+    let atlas_min_x = slot_x * tile_resolution;
+    let atlas_min_y = slot_y * tile_resolution;
+    var atlas_max_x = atlas_min_x + tile_resolution - 1u;
+    var atlas_max_y = atlas_min_y + tile_resolution - 1u;
+    if (atlas_max_x >= sampled_dimensions.x) {
+        atlas_max_x = sampled_dimensions.x - 1u;
+    }
+    if (atlas_max_y >= sampled_dimensions.y) {
+        atlas_max_y = sampled_dimensions.y - 1u;
+    }
+    var entry_lod = entry.lod;
+    if (entry_lod > 31u) {
+        entry_lod = 31u;
+    }
+    let axis = 1u << entry_lod;
+    let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+    let tile_origin = vec2<f32>(f32(entry.x), f32(entry.y));
+    let local_uv = clamp(
+        bounded_uv * f32(axis) - tile_origin,
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
+    let atlas_texel_x = f32(atlas_min_x) + local_uv.x * f32(atlas_max_x - atlas_min_x);
+    let atlas_texel_y = f32(atlas_min_y) + local_uv.y * f32(atlas_max_y - atlas_min_y);
+    let atlas_0 = vec2<i32>(i32(floor(atlas_texel_x)), i32(floor(atlas_texel_y)));
+    let atlas_1 = vec2<i32>(
+        min(atlas_0.x + 1, i32(atlas_max_x)),
+        min(atlas_0.y + 1, i32(atlas_max_y)),
+    );
+    let atlas_blend = clamp(
+        vec2<f32>(atlas_texel_x - f32(atlas_0.x), atlas_texel_y - f32(atlas_0.y)),
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
+    let a00 = height_atlas_load(atlas_0);
+    let a10 = height_atlas_load(vec2<i32>(atlas_1.x, atlas_0.y));
+    let a01 = height_atlas_load(vec2<i32>(atlas_0.x, atlas_1.y));
+    let a11 = height_atlas_load(atlas_1);
+    let c00 = height_coverage_atlas_load(atlas_0);
+    let c10 = height_coverage_atlas_load(vec2<i32>(atlas_1.x, atlas_0.y));
+    let c01 = height_coverage_atlas_load(vec2<i32>(atlas_0.x, atlas_1.y));
+    let c11 = height_coverage_atlas_load(atlas_1);
+    let w00 = (1.0 - atlas_blend.x) * (1.0 - atlas_blend.y);
+    let w10 = atlas_blend.x * (1.0 - atlas_blend.y);
+    let w01 = (1.0 - atlas_blend.x) * atlas_blend.y;
+    let w11 = atlas_blend.x * atlas_blend.y;
+    return vec2<f32>(
+        a00 * c00 * w00 + a10 * c10 * w10 + a01 * c01 * w01 + a11 * c11 * w11,
+        clamp(c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11, 0.0, 1.0),
+    );
+}
+
+fn logical_height_dimensions() -> vec2<f32> {
+    if (height_pages.header.enabled != 0u) {
+        let axis = 1u << height_target_lod();
+        let logical = max(f32(axis) * f32(max(height_pages.header.tile_resolution, 1u)), 1.0);
+        return vec2<f32>(logical);
+    }
+    let overview_dimensions = vec2<f32>(textureDimensions(height_tex, 0));
+    if (height_pages.header.overview_valid != 0u) {
+        let global_span = max(
+            vec2<f32>(
+                height_pages.header.overview_u_max - height_pages.header.overview_u_min,
+                height_pages.header.overview_v_max - height_pages.header.overview_v_min,
+            ),
+            vec2<f32>(0.0000001),
+        );
+        return vec2<f32>(
+            det_div(overview_dimensions.x, global_span.x),
+            det_div(overview_dimensions.y, global_span.y),
+        );
+    }
+    return overview_dimensions;
+}
+
+// Returns local overview UV and 1 when the global equirectangular coordinate
+// is covered. Flat/disabled headers preserve the input UV exactly.
+fn height_overview_uv(global_uv: vec2<f32>) -> vec3<f32> {
+    if (height_pages.header.overview_valid == 0u) {
+        return vec3<f32>(global_uv, 1.0);
+    }
+    let overview_min = vec2<f32>(
+        height_pages.header.overview_u_min,
+        height_pages.header.overview_v_min,
+    );
+    let overview_max = vec2<f32>(
+        height_pages.header.overview_u_max,
+        height_pages.header.overview_v_max,
+    );
+    if (any(global_uv < overview_min) || any(global_uv > overview_max)) {
+        return vec3<f32>(0.0, 0.0, 0.0);
+    }
+    let offset = global_uv - overview_min;
+    let span = max(overview_max - overview_min, vec2<f32>(0.0000001));
+    return vec3<f32>(det_div(offset.x, span.x), det_div(offset.y, span.y), 1.0);
+}
+
 // R32Float height textures are intentionally bound as unfilterable on the
 // portable terrain path. Reconstruct bilinear filtering explicitly so height
 // sampling is identical on adapters that cannot filter this format.
 fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
     let last_level = i32(textureNumLevels(height_tex)) - 1;
-    let level = clamp(i32(floor(lod + 0.5)), 0, last_level);
+    var level = clamp(i32(floor(lod + 0.5)), 0, last_level);
     let dimensions = textureDimensions(height_tex, level);
     let max_x = max(i32(dimensions.x) - 1, 0);
     let max_y = max(i32(dimensions.y) - 1, 0);
-    let texel_x = det_barrier(clamp(uv.x, 0.0, 1.0) * f32(max_x));
-    let texel_y = det_barrier(clamp(uv.y, 0.0, 1.0) * f32(max_y));
-    let x0 = i32(floor(texel_x));
-    let y0 = i32(floor(texel_y));
+    let overview_mapping = height_overview_uv(uv);
+    let texel_x = det_barrier(clamp(overview_mapping.x, 0.0, 1.0) * f32(max_x));
+    let texel_y = det_barrier(clamp(overview_mapping.y, 0.0, 1.0) * f32(max_y));
+    let x0 = clamp(i32(floor(texel_x)), 0, max_x);
+    let y0 = clamp(i32(floor(texel_y)), 0, max_y);
     // Keep each upper-bound relation explicit for the CENSOR IR proof as well
     // as for runtime safety; all four coordinates are clamped to this texture.
     let x1 = clamp(x0 + 1, 0, max_x);
@@ -230,12 +491,64 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
         vec2<f32>(0.0),
         vec2<f32>(1.0),
     );
-
     let h00 = textureLoad(height_tex, vec2<i32>(x0, y0), level).r;
     let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), level).r;
     let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), level).r;
     let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), level).r;
-    return det_mix(det_mix(h00, h10, blend.x), det_mix(h01, h11, blend.x), blend.y);
+    let overview_height = overview_mapping.z * det_mix(
+        det_mix(h00, h10, blend.x),
+        det_mix(h01, h11, blend.x),
+        blend.y,
+    );
+    if (height_pages.header.enabled != 0u) {
+        let rounded_lod = u32(max(floor(lod + 0.5), 0.0));
+        let target_lod = height_target_lod();
+        var requested_lod = 0u;
+        if (rounded_lod < target_lod) {
+            requested_lod = target_lod - rounded_lod;
+        }
+        let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+        if (u_terrain.spacing_h_exag.w < 0.0 && -u_terrain.spacing_h_exag.w - 1.0 <= 0.0) {
+            requested_lod = 0u;
+        }
+        var accumulated_height = 0.0;
+        var remaining_weight = 1.0;
+        for (var depth = 0u; depth <= target_lod; depth = depth + 1u) {
+            let axis = 1u << requested_lod;
+            let tile_xy = vec2<u32>(bounded_uv * f32(axis));
+            let entry = height_page_lookup(requested_lod, tile_xy.x, tile_xy.y);
+            if (entry.lod != HEIGHT_PAGE_EMPTY) {
+                let covered = height_page_sample_covered(entry, bounded_uv);
+                accumulated_height = accumulated_height + remaining_weight * covered.x;
+                remaining_weight = remaining_weight * (1.0 - covered.y);
+            }
+            if (requested_lod == 0u || remaining_weight <= 0.000001) {
+                break;
+            }
+            requested_lod = requested_lod - 1u;
+        }
+        var detail_height = accumulated_height + remaining_weight * overview_height;
+        // Where part of the footprint is COG nodata (and no overview backs
+        // it), renormalize by the covered weight so the surface keeps its
+        // real height up to the data edge instead of sagging towards 0 m.
+        // Fully covered footprints (every flat path) are left bit-exact.
+        let covered_total = (1.0 - remaining_weight) + remaining_weight * overview_mapping.z;
+        if (covered_total > 0.000001 && covered_total < 0.999999) {
+            detail_height = det_div(detail_height, covered_total);
+        }
+        if (u_terrain.spacing_h_exag.w >= 0.0) {
+            return detail_height;
+        }
+        let detail_blend = clamp(-u_terrain.spacing_h_exag.w - 1.0, 0.0, 1.0);
+        if (detail_blend <= 0.0) {
+            return detail_height;
+        }
+        if (detail_blend >= 1.0) {
+            return detail_height;
+        }
+        return det_mix(overview_height, detail_height, detail_blend);
+    }
+    return overview_height;
 }
 
 fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
@@ -603,6 +916,43 @@ struct TerrainFrameCounters {
 
 @group(6) @binding(16)
 var<storage, read_write> terrain_frame_counters: TerrainFrameCounters;
+
+// ORBIS acceptance bindings are reachable only from the compute entry below;
+// ordinary terrain render entry points therefore retain their seven groups.
+struct OrbisProbeUniforms {
+    absolute_view_proj: mat4x4<f32>,
+    local_to_ecef: mat4x4<f32>,
+    anchor_abs: vec4<f32>,
+    viewport_and_count: vec4<f32>,
+};
+
+struct OrbisProjectionSample {
+    production: vec4<f32>,
+    naive: vec4<f32>,
+    resolved_local: vec4<f32>,
+};
+
+struct OrbisOutputHeader {
+    visible_count: u32,
+    total_triangles: u32,
+    _pad0: u32,
+    _pad1: u32,
+};
+
+struct OrbisDrawIndexedIndirectArgs {
+    index_count: u32,
+    instance_count: u32,
+    first_index: u32,
+    base_vertex: i32,
+    first_instance: u32,
+};
+
+@group(7) @binding(0) var<storage, read> orbis_vertex_words: array<u32>;
+@group(7) @binding(1) var<storage, read_write> orbis_projection_samples: array<OrbisProjectionSample>;
+@group(7) @binding(2) var<uniform> orbis_probe: OrbisProbeUniforms;
+@group(7) @binding(3) var<storage, read> orbis_selection_header: OrbisOutputHeader;
+@group(7) @binding(4) var<storage, read> orbis_selected_draws: array<OrbisDrawIndexedIndirectArgs>;
+@group(7) @binding(5) var<storage, read> orbis_mesh_indices: array<u32>;
 struct TerrainMaterialNoise {
     snow_macro: f32,
     snow_detail: f32,
@@ -1508,6 +1858,11 @@ struct FragmentOutput {
     @location(4) source_id : u32,
 };
 
+struct OrbisCoverageOutput {
+    @location(0) color : vec4<f32>,
+    @location(5) terrain_coverage : vec4<f32>,
+};
+
 // VERITAS: resolved in the material splat loop (where layer weights and
 // triplanar context are in scope) and handed to the fragment output at the
 // AOV write block. Stays 0 (SOURCE_ID_NONE) whenever the material albedo
@@ -1566,7 +1921,7 @@ fn height_curve_lut_sample(t: f32) -> f32 {
 }
 
 fn calculate_texel_size() -> vec2<f32> {
-    let dims = vec2<f32>(textureDimensions(height_tex, 0));
+    let dims = logical_height_dimensions();
     return vec2<f32>(
         select(1.0, det_div(1.0, dims.x), dims.x > 0.0),
         select(1.0, det_div(1.0, dims.y), dims.y > 0.0),
@@ -1758,8 +2113,12 @@ struct LodInfo {
 
 fn compute_height_lod(uv: vec2<f32>) -> LodInfo {
     var info: LodInfo;
-    let dims = vec2<f32>(textureDimensions(height_tex, 0));
-    let max_lod = f32(textureNumLevels(height_tex) - 1u);
+    let dims = logical_height_dimensions();
+    let max_lod = select(
+        f32(textureNumLevels(height_tex) - 1u),
+        f32(height_pages.header.target_lod),
+        height_pages.header.enabled != 0u,
+    );
 
     // Compute screen-space derivatives of UV
     let ddx_uv = terrain_screen_ddx_uv(uv);
@@ -1813,6 +2172,132 @@ fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
         vertical_scale,
         -det_div(dy, world_texel.y),
     ));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORBIS globe shading frame
+// ─────────────────────────────────────────────────────────────────────────────
+// On the planetary path `uv` is the global equirectangular coordinate (the
+// whole Earth spans [0, 1], v = 0 at the north pole) and the render frame is
+// east/north/up at the clipmap anchor, with +Z up. The flat height normal
+// above assumes a Y-up world and a heightmap spanning `terrain_span`, so it is
+// both mis-oriented and ~1000x too steep there. u_overlay.params3.w carries
+// ORBIS_GLOBE_FRAME_FLAG_OFFSET + anchor latitude (radians) when the globe is
+// active and 0 otherwise; the planet's axis in render space is then
+// (0, cos lat, sin lat).
+const ORBIS_GLOBE_FRAME_FLAG_OFFSET: f32 = 10.0;
+const ORBIS_EARTH_RADIUS_M: f32 = 6371008.8;
+const ORBIS_PI: f32 = 3.14159265358979;
+
+fn orbis_globe_active() -> bool {
+    return u_overlay.params3.w > ORBIS_GLOBE_FRAME_FLAG_OFFSET * 0.5;
+}
+
+/// Fraction of the surface at `uv` backed by source data. The finest resident
+/// page is authoritative: inside a loaded page zero coverage is COG nodata,
+/// not "not loaded yet", so coarser ancestors (down to the world-level
+/// prefill, whose single texel spans hundreds of kilometres) must not claim
+/// it. With no resident page, only the active overview seed counts.
+fn orbis_source_coverage(uv: vec2<f32>) -> f32 {
+    let overview_covered = height_overview_uv(uv).z;
+    if (height_pages.header.enabled == 0u) {
+        return overview_covered;
+    }
+    let target_lod = height_target_lod();
+    let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
+    var requested_lod = target_lod;
+    for (var depth = 0u; depth <= target_lod; depth = depth + 1u) {
+        let axis = 1u << requested_lod;
+        let tile_xy = vec2<u32>(bounded_uv * f32(axis));
+        let entry = height_page_lookup(requested_lod, tile_xy.x, tile_xy.y);
+        if (entry.lod != HEIGHT_PAGE_EMPTY) {
+            let covered = height_page_sample_covered(entry, bounded_uv);
+            return max(covered.y, overview_covered);
+        }
+        if (requested_lod == 0u) {
+            break;
+        }
+        requested_lod = requested_lod - 1u;
+    }
+    return overview_covered;
+}
+
+/// Depth of planetary seam skirts that border source nodata.
+const ORBIS_BORDER_SKIRT_DEPTH_M: f32 = 120.0;
+
+/// Planetary skirt vertices (clip_morph.x < 0, clip_morph.y < 0) probe the
+/// source coverage around their seam; any nodata there means the neighbouring
+/// surface is discarded and the skirt would be seen. A ring cell spans about
+/// 2^(ring + 1) target-LOD texels, so the 2^(ring + 4) texel step reaches four
+/// coarse cells beyond the seam.
+fn orbis_skirt_source_coverage(uv: vec2<f32>, clip_morph: vec2<f32>) -> f32 {
+    if (clip_morph.y >= 0.0 || clip_morph.x >= 0.0) {
+        return 1.0;
+    }
+    let ring = -clip_morph.y - 1.0;
+    let step = det_div2(
+        vec2<f32>(det_exp2(ring + 4.0)),
+        max(logical_height_dimensions(), vec2<f32>(1.0)),
+    );
+    for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let probe = uv + vec2<f32>(f32(dx), f32(dy)) * step;
+            if (orbis_source_coverage(probe) < 0.5) {
+                return 0.0;
+            }
+        }
+    }
+    return 1.0;
+}
+
+fn orbis_render_pole() -> vec3<f32> {
+    let latitude = u_overlay.params3.w - ORBIS_GLOBE_FRAME_FLAG_OFFSET;
+    return vec3<f32>(0.0, det_cos(latitude), det_sin(latitude));
+}
+
+/// Terrain normal on the globe: Sobel gradient of the streamed height field
+/// at the fragment's footprint LOD, in metres per equirectangular texel,
+/// assembled in the fragment's local east/north/up frame (`up` is its
+/// geodetic up in render space).
+fn orbis_globe_height_normal(uv: vec2<f32>, up: vec3<f32>) -> vec3<f32> {
+    let lod_info = compute_height_lod(uv);
+    let lod = lod_info.lod;
+    let texel_uv = lod_info.texel_uv;
+    let offset_x = vec2<f32>(texel_uv.x, 0.0);
+    let offset_y = vec2<f32>(0.0, texel_uv.y);
+
+    let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) - offset_y, lod));
+    let t  = sample_height_geom_level(uv - offset_y, lod);
+    let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) - offset_y, lod));
+    let l  = sample_height_geom_level(uv - offset_x, lod);
+    let r  = sample_height_geom_level(uv + offset_x, lod);
+    let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) + offset_y, lod));
+    let b  = sample_height_geom_level(uv + offset_y, lod);
+    let br = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) + offset_y, lod));
+    // +u is east, +v is south.
+    let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
+    let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
+
+    let latitude = det_fma(-uv.y, ORBIS_PI, ORBIS_PI * 0.5);
+    let east_step_m = max(
+        det_barrier(texel_uv.x * 2.0 * ORBIS_PI * ORBIS_EARTH_RADIUS_M) * abs(det_cos(latitude)),
+        1e-3,
+    );
+    let north_step_m = max(det_barrier(texel_uv.y * ORBIS_PI) * ORBIS_EARTH_RADIUS_M, 1e-3);
+    let exag = u_terrain.spacing_h_exag.z;
+    // The 1-2-1 Sobel kernel spans two texels with total weight 4.
+    let slope_east = det_div(dx * exag, 8.0 * east_step_m);
+    let slope_south = det_div(dy * exag, 8.0 * north_step_m);
+
+    var east = det_cross3(orbis_render_pole(), up);
+    let east_length = det_length3(east);
+    if (east_length < 1e-4) {
+        // At the poles east is undefined; any tangent keeps the basis valid.
+        east = det_cross3(vec3<f32>(1.0, 0.0, 0.0), up);
+    }
+    east = det_normalize3(east);
+    let north = det_cross3(up, east);
+    return det_normalize3(up - east * slope_east + north * slope_south);
 }
 
 /// Sprint 2: Multi-scale height normal for enhanced edge visibility.
@@ -3470,7 +3955,19 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
 
     // LOD-aware height normal (Milestone 2: fixes flakes from mip mismatch)
     // Sprint 2 note: Multi-scale approach didn't improve edge ratio
-    let height_normal_lod = calculate_normal_lod_aware(uv);
+    let orbis_globe = orbis_globe_active();
+    // Globe clipmap rings extend past the source; where no data backs the
+    // surface, drop the fragment so the lit Earth behind shows through
+    // instead of a flat 0 m shelf.
+    if (orbis_globe && orbis_source_coverage(uv) < 0.5) {
+        discard;
+    }
+    var height_normal_lod: vec3<f32>;
+    if (orbis_globe) {
+        height_normal_lod = orbis_globe_height_normal(uv, base_normal);
+    } else {
+        height_normal_lod = calculate_normal_lod_aware(uv);
+    }
 
     // Legacy height normal for comparison (not LOD-aware)
     let texel_size = calculate_texel_size();
@@ -3498,7 +3995,13 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let lod_fade_end = 4.0;    // lod_hi: above this, no height-normal
     // smoothstep(edge0, edge1, x) = smooth hermite interpolation
     // We want fade=1.0 at lod_fade_start and fade=0.0 at lod_fade_end
-    let lod_fade = 1.0 - det_smoothstep(lod_fade_start, lod_fade_end, height_lod);
+    // The globe normal is already sampled at the footprint LOD; fading it
+    // would leave distant relief lit as the bare sphere.
+    let lod_fade = select(
+        1.0 - det_smoothstep(lod_fade_start, lod_fade_end, height_lod),
+        1.0,
+        orbis_globe,
+    );
 
     // P5-N: normal_strength controls local normal variation (range 0.25-4.0, default 1.0)
     // Values > 1.0 amplify the deviation between height_normal and base_normal
@@ -3546,7 +4049,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let refine_steps = clamp(u32(max(u_shading.pom_steps.z, 0.0)), 0u, 32u);
     let pom_scale = max(u_shading.triplanar_params.w, 0.0);
     let pom_flags = u32(u_shading.pom_steps.w + 0.5);
-    let pom_enabled = (pom_flags & 0x1u) != 0u && pom_scale > 0.0;
+    // Globe geometry is displaced and its UV spans the whole Earth, so a
+    // parallax offset would leave the loaded tiles entirely.
+    let pom_enabled = (pom_flags & 0x1u) != 0u && pom_scale > 0.0 && !orbis_globe;
     let occlusion_enabled = (pom_flags & 0x2u) != 0u;
     let shadow_enabled = (pom_flags & 0x4u) != 0u;
 
@@ -3592,7 +4097,13 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let tri_blend = max(u_shading.triplanar_params.y, 1.0);
     // Use base_normal (stable geometric normal) for slope, NOT blended_normal
     // blended_normal has high-frequency perturbations that cause layer selection jitter → flakes
-    let slope_raw = 1.0 - abs(base_normal.y);
+    // On the Z-up globe the geometric normal is the bare geodetic up, so the
+    // slope comes from the terrain normal measured against it.
+    let slope_raw = select(
+        1.0 - abs(base_normal.y),
+        1.0 - abs(det_dot3(height_normal_lod, base_normal)),
+        orbis_globe,
+    );
     let slope_factor = clamp(slope_raw, u_shading.clamp0.z, u_shading.clamp0.w);
     var layer_count = i32(u_shading.layer_control.x + 0.5);
     if (layer_count < 1) {
@@ -5066,12 +5577,10 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // VERITAS: co-emitted with the color at composite time so the source map
     // and the image always describe the same frame.
     out.source_id = terrain_vt_albedo_source_id;
-
     return out;
 }
 
-@fragment
-fn fs_main(input : VertexOutput) -> FragmentOutput {
+fn forward_shade_with_feedback(input : VertexOutput) -> FragmentOutput {
     det_seed(input.clip_position.x);
     // Capture the quad gradients while every fragment lane is still active.
     // The feedback helper is intentionally derivative-free so later selector
@@ -5133,37 +5642,67 @@ fn fs_aov_main(input : VertexOutput) -> FragmentOutput {
 // Consumes the CPU-generated clipmap mesh (src/terrain/clipmap/) instead of
 // the procedural grid in vs_main, sampling the same height texture and
 // feeding the same fs_main PBR fragment stage. clip_morph.x < 0 marks skirt
-// vertices, which are pushed down by a small offset derived from the ring
-// resolution (u_terrain.camera_mode_params.y) to seal cracks between LOD rings.
+// vertices, which are pushed down along the per-vertex geodetic up direction.
 // ──────────────────────────────────────────────────────────────────────────
 
-@vertex
-fn vs_clipmap_main(
-    @location(0) clip_pos_xz : vec2<f32>,
-    @location(1) clip_uv : vec2<f32>,
-    @location(2) clip_morph : vec2<f32>,
-    @location(3) instance_col0 : vec4<f32>,
-    @location(4) instance_col1 : vec4<f32>,
-    @location(5) instance_col2 : vec4<f32>,
-    @location(6) instance_col3 : vec4<f32>,
-    @location(7) _tile_id_lod : vec2<u32>
-) -> VertexOutput {
-    det_seed(clip_pos_xz.x);
-    var out : VertexOutput;
+fn clipmap_decode_octahedral(encoded: vec2<f32>) -> vec3<f32> {
+    var normal = vec3<f32>(
+        encoded,
+        1.0 - abs(encoded.x) - abs(encoded.y),
+    );
+    if (normal.z < 0.0) {
+        let old_x = normal.x;
+        normal.x = (1.0 - abs(normal.y)) * select(-1.0, 1.0, old_x >= 0.0);
+        normal.y = (1.0 - abs(old_x)) * select(-1.0, 1.0, normal.y >= 0.0);
+    }
+    return det_normalize3(normal);
+}
 
+struct ClipmapResolvedVertex {
+    world_position: vec3<f32>,
+    centered_position: vec3<f32>,
+    geodetic_up: vec3<f32>,
+    uv: vec2<f32>,
+};
+
+fn clipmap_sample_height_level(
+    uv: vec2<f32>,
+    level: f32,
+    height_dims: vec2<f32>,
+) -> f32 {
+    let bounded_level = min(max(level, 0.0), 16.0);
+    if bounded_level == 0.0 {
+        return sample_height_bilinear(uv);
+    }
+    let level_texels = det_exp2(bounded_level);
+    let level_step = det_div2(
+        vec2<f32>(level_texels),
+        max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0)),
+    );
+    let level_cell = det_div2(uv, level_step);
+    let level_base = floor(level_cell) * level_step;
+    let level_t = fract(level_cell);
+    let h00 = sample_height_bilinear(level_base);
+    let h10 = sample_height_bilinear(det_barrier2(level_base) + vec2<f32>(level_step.x, 0.0));
+    let h01 = sample_height_bilinear(det_barrier2(level_base) + vec2<f32>(0.0, level_step.y));
+    let h11 = sample_height_bilinear(det_barrier2(level_base) + level_step);
+    return det_mix(det_mix(h00, h10, level_t.x), det_mix(h01, h11, level_t.x), level_t.y);
+}
+
+fn clipmap_resolve_vertex(
+    clip_position: vec3<f32>,
+    clip_uv: vec2<f32>,
+    clip_morph: vec2<f32>,
+    instance_transform: mat4x4<f32>,
+    clip_normal_oct: vec2<f32>,
+    planetary_skirt_cap: f32,
+) -> ClipmapResolvedVertex {
     let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_fine = sample_height_bilinear(uv);
-    let height_dims = vec2<f32>(textureDimensions(height_tex));
-    let coarse_texels = det_exp2(min(max(clip_morph.y, 0.0) + 1.0, 16.0));
-    let coarse_step = det_div2(vec2<f32>(coarse_texels), max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0)));
-    let coarse_cell = det_div2(uv, coarse_step);
-    let coarse_base = floor(coarse_cell) * coarse_step;
-    let coarse_t = fract(coarse_cell);
-    let h00 = sample_height_bilinear(coarse_base);
-    let h10 = sample_height_bilinear(det_barrier2(coarse_base) + vec2<f32>(coarse_step.x, 0.0));
-    let h01 = sample_height_bilinear(det_barrier2(coarse_base) + vec2<f32>(0.0, coarse_step.y));
-    let h11 = sample_height_bilinear(det_barrier2(coarse_base) + coarse_step);
-    let h_coarse = det_mix(det_mix(h00, h10, coarse_t.x), det_mix(h01, h11, coarse_t.x), coarse_t.y);
+    let height_dims = logical_height_dimensions();
+    let clip_ring_index = select(clip_morph.y, -clip_morph.y - 1.0, clip_morph.y < 0.0);
+    let fine_level = select(0.0, clip_ring_index, clip_morph.y < 0.0);
+    let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);
+    let h_coarse = clipmap_sample_height_level(uv, clip_ring_index + 1.0, height_dims);
     let h_raw = det_barrier(det_mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0)));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
@@ -5171,25 +5710,98 @@ fn vs_clipmap_main(
     let h_disp = det_fma(apply_height_curve01(t_geom), h_max - h_min, h_min);
     let h_exag = u_terrain.spacing_h_exag.z;
     let h_center = (h_min + h_max) * 0.5;
-    let skirt_offset = select(0.0, u_terrain.camera_mode_params.y * 0.001, clip_morph.x < 0.0);
+    // Planetary skirts only have to seal vertical gaps between LOD samplings
+    // of the same clamped height field (at most its exaggerated relief) plus
+    // coarse-edge chord sag (~cell^2 / 8R, about a metre). The CPU depth
+    // also carries a camera-altitude allowance that would otherwise hang
+    // hundreds of kilometres of curtain below the terrain edge from orbit.
+    let planetary_skirt_bound = det_fma(max(h_max - h_min, 0.0), h_exag, 64.0);
+    let skirt_depth = select(
+        u_terrain.camera_mode_params.y * 0.001,
+        min(min(-clip_morph.x, planetary_skirt_bound), planetary_skirt_cap),
+        clip_morph.y < 0.0,
+    );
+    let skirt_offset = select(0.0, skirt_depth, clip_morph.x < 0.0);
     let world_z_centered = (det_barrier(det_barrier(h_disp) - det_barrier(h_center)) - skirt_offset) * h_exag;
     let world_z_original = (det_barrier(h_disp) - skirt_offset) * h_exag;
+    let instance_base = instance_transform * vec4<f32>(clip_position, 1.0);
+    let geodetic_up = det_normalize3(
+        (instance_transform * vec4<f32>(clipmap_decode_octahedral(clip_normal_oct), 0.0)).xyz,
+    );
+    var out: ClipmapResolvedVertex;
+    out.world_position = instance_base.xyz + geodetic_up * world_z_original;
+    out.centered_position = instance_base.xyz + geodetic_up * world_z_centered;
+    out.geodetic_up = geodetic_up;
+    out.uv = uv;
+    return out;
+}
+
+fn clipmap_raster_position(
+    resolved: ClipmapResolvedVertex,
+    clip_morph: vec2<f32>,
+) -> vec3<f32> {
+    // Flat clipmaps retain the historical height-centered raster contract.
+    // Planetary vertices use their physical height above the reference sphere
+    // so a ground-relative camera anchor remains outside the globe.
+    return select(resolved.centered_position, resolved.world_position, clip_morph.y < 0.0);
+}
+
+@fragment
+fn fs_main(input : VertexOutput) -> FragmentOutput {
+    return forward_shade_with_feedback(input);
+}
+
+@fragment
+fn fs_orbis_coverage(input : VertexOutput) -> OrbisCoverageOutput {
+    let shaded = forward_shade_with_feedback(input);
+    var out: OrbisCoverageOutput;
+    out.color = shaded.color;
+    out.terrain_coverage = vec4<f32>(1.0);
+    return out;
+}
+
+@vertex
+fn vs_clipmap_main(
+    @location(0) clip_position : vec3<f32>,
+    @location(1) clip_uv : vec2<f32>,
+    @location(2) clip_morph : vec2<f32>,
+    @location(3) instance_col0 : vec4<f32>,
+    @location(4) instance_col1 : vec4<f32>,
+    @location(5) instance_col2 : vec4<f32>,
+    @location(6) instance_col3 : vec4<f32>,
+    @location(7) _tile_id_lod : vec2<u32>,
+    @location(8) clip_normal_oct : vec2<f32>
+) -> VertexOutput {
+    det_seed(clip_position.x);
+    var out : VertexOutput;
+
     let instance_transform = mat4x4<f32>(
         instance_col0,
         instance_col1,
         instance_col2,
         instance_col3,
     );
-    let instance_position = det_mat4_mul_vec4(instance_transform, vec4<f32>(
-        clip_pos_xz.x,
-        clip_pos_xz.y,
-        world_z_centered,
-        1.0),
+    // Seam skirts next to source nodata are kept short: the surface beyond
+    // them is discarded, so a full-depth skirt would stand as a wall along the
+    // DEM border, while a short one still seals ordinary seam gaps.
+    let skirt_cap = select(
+        ORBIS_BORDER_SKIRT_DEPTH_M,
+        3.0e38,
+        orbis_skirt_source_coverage(clip_uv, clip_morph) > 0.5,
     );
+    let resolved = clipmap_resolve_vertex(
+        clip_position,
+        clip_uv,
+        clip_morph,
+        instance_transform,
+        clip_normal_oct,
+        skirt_cap,
+    );
+    let raster_position = clipmap_raster_position(resolved, clip_morph);
 
-    out.world_position = vec3<f32>(instance_position.xy, world_z_original);
-    out.world_normal = vec3<f32>(0.0, 0.0, 1.0);
-    out.tex_coord = uv;
+    out.world_position = resolved.world_position;
+    out.world_normal = resolved.geodetic_up;
+    out.tex_coord = resolved.uv;
     // TESSELLA: the clipmap vertex stage always emits the packed tile/LOD
     // identity terrain_visbuffer_write.wgsl consumes. No forward shading path
     // reads tile_id, so both pipelines share this one vertex stage.
@@ -5198,8 +5810,103 @@ fn vs_clipmap_main(
         u_terrain.proj,
         det_mat4_mul_vec4(
             u_terrain.view,
-            instance_position,
+            vec4<f32>(raster_position, 1.0),
         ),
     );
     return out;
+}
+
+fn orbis_project(matrix: mat4x4<f32>, position: vec3<f32>) -> vec4<f32> {
+    let clip = det_mat4_mul_vec4(matrix, vec4<f32>(position, 1.0));
+    return vec4<f32>(clip.xy / clip.w, clip.w, 0.0);
+}
+
+// The indirect index stream can reference a vertex many times.  Give each
+// output slot exactly one invocation/writer, and test membership against the
+// exact GPU-selected spans instead of dispatching one writer per index.
+fn orbis_vertex_is_selected(vertex_index: u32) -> bool {
+    var draw_index = 0u;
+    loop {
+        if (draw_index >= orbis_selection_header.visible_count) {
+            break;
+        }
+        let draw = orbis_selected_draws[draw_index];
+        var template_index = 0u;
+        loop {
+            if (template_index >= draw.index_count) {
+                break;
+            }
+            let raw_index = orbis_mesh_indices[draw.first_index + template_index];
+            let signed_index = i32(raw_index) + draw.base_vertex;
+            if (signed_index >= 0 && u32(signed_index) == vertex_index) {
+                return true;
+            }
+            template_index += 1u;
+        }
+        draw_index += 1u;
+    }
+    return false;
+}
+
+@compute @workgroup_size(64)
+fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let index = invocation.x;
+    if (index >= arrayLength(&orbis_projection_samples)) {
+        return;
+    }
+    if (!orbis_vertex_is_selected(index)) {
+        return;
+    }
+    let word = index * 9u;
+    let clip_position = vec3<f32>(
+        bitcast<f32>(orbis_vertex_words[word]),
+        bitcast<f32>(orbis_vertex_words[word + 1u]),
+        bitcast<f32>(orbis_vertex_words[word + 2u]),
+    );
+    let clip_uv = vec2<f32>(
+        bitcast<f32>(orbis_vertex_words[word + 3u]),
+        bitcast<f32>(orbis_vertex_words[word + 4u]),
+    );
+    let clip_morph = vec2<f32>(
+        bitcast<f32>(orbis_vertex_words[word + 5u]),
+        bitcast<f32>(orbis_vertex_words[word + 6u]),
+    );
+    let clip_normal_oct = vec2<f32>(
+        bitcast<f32>(orbis_vertex_words[word + 7u]),
+        bitcast<f32>(orbis_vertex_words[word + 8u]),
+    );
+    let resolved = clipmap_resolve_vertex(
+        clip_position,
+        clip_uv,
+        clip_morph,
+        mat4x4<f32>(
+            vec4<f32>(1.0, 0.0, 0.0, 0.0),
+            vec4<f32>(0.0, 1.0, 0.0, 0.0),
+            vec4<f32>(0.0, 0.0, 1.0, 0.0),
+            vec4<f32>(0.0, 0.0, 0.0, 1.0),
+        ),
+        clip_normal_oct,
+        3.0e38,
+    );
+    let raster_position = clipmap_raster_position(resolved, clip_morph);
+    // Deliberate control: transform the exact resolved ENU vertex into ECEF,
+    // but narrow the planet-scale anchor and matrix to f32 before projection.
+    // This is the naive implementation the production camera-relative path
+    // must materially outperform.
+    let absolute = orbis_probe.anchor_abs.xyz
+        + (orbis_probe.local_to_ecef * vec4<f32>(raster_position, 0.0)).xyz;
+    let production_clip = det_mat4_mul_vec4(
+        u_terrain.proj,
+        det_mat4_mul_vec4(
+            u_terrain.view,
+            vec4<f32>(raster_position, 1.0),
+        ),
+    );
+    var sample: OrbisProjectionSample;
+    sample.production = orbis_project(u_terrain.proj * u_terrain.view, raster_position);
+    sample.naive = orbis_project(orbis_probe.absolute_view_proj, absolute);
+    sample.naive.w = production_clip.z / production_clip.w;
+    sample.resolved_local = vec4<f32>(raster_position, 1.0);
+    sample.production.w = select(0.0, 1.0, clip_morph.x < 0.0);
+    orbis_projection_samples[index] = sample;
 }

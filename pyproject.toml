@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "forge3d"
-version = "1.37.1"
+version = "1.38.0"
 description = "forge3d: Rust/WebGPU offline 3D maps with Rust-first GIS vector, rasterization, mask, thematic, CRS, affine, windowing, and reprojection support"
 requires-python = ">=3.10"
 dependencies = [
@@ -119,7 +119,7 @@ module-name = "forge3d._forge3d"
 # Optimize for size and performance in release builds
 cargo-extra-args = "--profile release-lto"
 # Generate abi3 wheels for Python 3.10+ compatibility
-features = ["extension-module", "weighted-oit", "enable-pbr", "enable-tbn", "enable-gpu-instancing", "enable-staging-rings", "enable-inverse-pt", "copc_laz", "cog_streaming", "gis-remote", "geos-topology", "atmosphere-bake", "shader-contract-asserts"]
+features = ["extension-module", "weighted-oit", "enable-pbr", "enable-tbn", "enable-gpu-instancing", "enable-staging-rings", "enable-inverse-pt", "copc_laz", "cog_streaming", "gis-remote", "geos-topology", "atmosphere-bake", "shader-contract-asserts", "enable-globe"]
 include = [
     { path = "assets/fonts/*.ttf", format = "sdist" },
     { path = "assets/fonts/*-OFL.txt", format = "sdist" },
