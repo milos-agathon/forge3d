@@ -839,7 +839,9 @@ impl TerrainScene {
         if orbis_capture {
             color_attachments.extend([None, None, None, None]);
             color_attachments.push(Some(wgpu::RenderPassColorAttachment {
-                view: render_targets.orbis_coverage_view.as_ref().unwrap(),
+                view: render_targets.orbis_coverage_view.as_ref().ok_or_else(|| {
+                    anyhow!("ORBIS capture requires a coverage render target")
+                })?,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: if load_depth { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) },

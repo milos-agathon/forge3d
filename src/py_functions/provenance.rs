@@ -305,7 +305,9 @@ pub(crate) fn verify_provenance(
     let signature: [u8; 64] = hex_field("signature", 64)?.try_into().unwrap();
     let public_key: [u8; 32] = hex_field("public_key", 32)?.try_into().unwrap();
     let manifest_image: Option<[u8; 32]> = if binds_image {
-        Some(hex_field("image_sha256", 32)?.try_into().unwrap())
+        Some(hex_field("image_sha256", 32)?.try_into().map_err(|_| {
+            PyValueError::new_err("image_sha256 must be 32 bytes")
+        })?)
     } else {
         None
     };
