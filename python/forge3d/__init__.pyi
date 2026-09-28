@@ -1552,9 +1552,11 @@ def seal_provenance(
     source_map: np.ndarray,
     contributing_tiles: Sequence[Dict[str, Any]],
     private_key: bytes,
-    image_bytes: bytes,
+    image_bytes: Optional[bytes] = None,
 ) -> bytes: ...
-def verify_provenance(source_map: np.ndarray, manifest: bytes, image_bytes: bytes) -> bool: ...
+def verify_provenance(
+    source_map: np.ndarray, manifest: bytes, image_bytes: Optional[bytes] = None
+) -> bool: ...
 
 # CENSOR: global degradation sink
 def native_degradations() -> list[dict]: ...

@@ -105,6 +105,68 @@ def test_offline_verifier_rejects_same_dimension_replacement_image(tmp_path) -> 
     assert "verified: False" in result.stdout
 
 
+def _solid_png(width: int, height: int) -> bytes:
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        body = struct.pack(">I", len(payload)) + kind + payload
+        return body + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+
+    rows = b"".join(b"\x00" + b"\x80\x80\x80" * width for _ in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+
+
+def test_offline_verifier_accepts_legacy_schema_v1_manifest(tmp_path) -> None:
+    """1.38.0 manifests carry no image leaf; the CLI must still verify them."""
+    import hashlib
+    import warnings
+
+    from forge3d import provenance as prov
+
+    source_map = np.zeros((6, 8), dtype=np.uint32)
+    source_map[1:4, 2:7] = 1
+    tiles = [
+        {
+            "family": "albedo",
+            "family_slot": 0,
+            "source_id": 1,
+            "tile_x": 0,
+            "tile_y": 0,
+            "mip_level": 0,
+            "content_hash": hashlib.sha256(b"legacy-source").hexdigest(),
+        }
+    ]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        legacy = prov.seal_provenance_offline(
+            source_map, tiles, hashlib.sha256(b"legacy-key").digest()
+        )
+    assert json.loads(legacy)["schema_version"] == 1
+
+    image = tmp_path / "legacy.png"
+    image.write_bytes(_solid_png(8, 6))
+    source_map_path = tmp_path / "legacy.source_map.npy"
+    np.save(source_map_path, source_map)
+    manifest = tmp_path / "legacy.provenance.json"
+    manifest.write_bytes(legacy)
+
+    result = _run_verifier_without_native(image, source_map_path, manifest)
+    assert result.returncode == 0, f"verifier failed:\n{result.stdout}\n{result.stderr}"
+    assert "image_sha256_match: unbound (schema_version 1)" in result.stdout
+    assert "verified: True" in result.stdout
+
+    tampered = source_map.copy()
+    tampered[0, 0] ^= 1
+    np.save(source_map_path, tampered)
+    result = _run_verifier_without_native(image, source_map_path, manifest)
+    assert result.returncode != 0
+    assert "verified: False" in result.stdout
+
+
 def test_pure_python_report_on_fixture() -> None:
     """In-process check of the pure-Python path (no native calls involved)."""
     from forge3d import provenance as prov
