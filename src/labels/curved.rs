@@ -197,6 +197,32 @@ pub fn layout_curved_text(
         0.0
     };
 
+    layout_curved_text_at_offset(
+        &chars,
+        path,
+        glyph_advances,
+        font_size,
+        color,
+        tracking,
+        start_offset,
+        total_width,
+    )
+}
+
+/// Curved layout with an explicit arc-length start offset. Shares
+/// [`layout_curved_text`]'s per-glyph math so geometry-authority producers
+/// can slide a candidate along the path without duplicating the layout
+/// rule.
+pub(crate) fn layout_curved_text_at_offset(
+    chars: &[char],
+    path: &SampledPath,
+    glyph_advances: &[f32],
+    font_size: f32,
+    color: [f32; 4],
+    tracking: f32,
+    start_offset: f32,
+    total_width: f32,
+) -> CurvedTextLayout {
     let mut glyphs = Vec::with_capacity(chars.len());
     let mut current_offset = start_offset;
 
