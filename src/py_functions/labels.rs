@@ -342,7 +342,9 @@ pub(crate) fn layout_label_candidates_py(
                 // guess a mapping for ligatured/merged glyph streams.
                 return Ok(None);
             }
-            let path = curved_path.as_ref().expect("curved path built");
+            let path = curved_path.as_ref().ok_or_else(|| {
+                PyValueError::new_err("curved label candidate has no geometry path")
+            })?;
             let layout = crate::labels::curved::layout_curved_text_at_offset(
                 &chars,
                 path,
@@ -460,7 +462,9 @@ pub(crate) fn layout_label_candidates_py(
     payload.set_item("projection_authority", "deterministic")?;
     payload.set_item(
         "positioned_glyphs",
-        shared_glyphs.expect("at least one candidate emitted"),
+        shared_glyphs.ok_or_else(|| {
+            PyValueError::new_err("label candidates have no positioned glyphs")
+        })?,
     )?;
     payload.set_item("candidates", candidates)?;
     Ok(Some(payload.unbind()))

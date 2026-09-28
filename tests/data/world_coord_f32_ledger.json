@@ -1181,5 +1181,99 @@
     "map.get(*key) .and_then(Value::as_f64) .map(narrow_nonposition_scalar) }) } fn narrow_nonposition_scalar(value: f64) -> f32 { crate::camera::Anchor::direction_to_render(DVec3::new(value, 0.0, 0.0)).x"
    ]
   ]
+ },
+ "release_1_39": {
+  "base_commit": "a0afd6ee9ca6c35b264d8b6b0ed486c9806f0a94",
+  "base_count": 1812,
+  "base_digest": "6b668d254136b037c7cbdc3c00b1afb8229468cc8ba91f058f672aa7ccf4b73f",
+  "result_count": 1818,
+  "result_digest": "aaa7563e5767455b0bc9812ecf8aff9904cb6cb6c3124266d9eb261177072bf3",
+  "review": "Milos approved the exact release inventory on 2026-09-28. Six additions interpolate bounded screen-space label paths, widths and offsets; the remaining replacement preserves the globe-latitude conversion while adding params6 to its containing uniform initializer. No new absolute world-coordinate narrowing. The MENSURA integration record is retained unchanged.",
+  "added": [
+   [
+    "src/py_functions/labels.rs",
+    "screen_path_sample",
+    "as_f32",
+    1,
+    "let t = ((distance as f64 - traversed) / length) as f32"
+   ],
+   [
+    "src/py_functions/labels.rs",
+    "<module>",
+    "as_f32",
+    1,
+    "let max_start = (path_length - text_width).max(0.0) as f32"
+   ],
+   [
+    "src/py_functions/labels.rs",
+    "<module>",
+    "as_f32",
+    2,
+    "let start_offset = ((fraction * path_length as f32) - (text_width as f32) * 0.5).clamp(0.0, max_start)"
+   ],
+   [
+    "src/py_functions/labels.rs",
+    "<module>",
+    "as_f32",
+    3,
+    "let start_offset = ((fraction * path_length as f32) - (text_width as f32) * 0.5).clamp(0.0, max_start)"
+   ],
+   [
+    "src/py_functions/labels.rs",
+    "<module>",
+    "as_f32",
+    4,
+    "let layout = crate::labels::curved::layout_curved_text_at_offset( &chars, path, &glyphs_in .iter() .map(|glyph| glyph.unit_advance) .collect::<Vec<_>>(), font_size, [1.0, 1.0, 1.0, 1.0], tracking, start_offset, text_width as f32, )"
+   ],
+   [
+    "src/py_functions/labels.rs",
+    "<module>",
+    "as_f32",
+    5,
+    "let anchor_distance = fraction * path_length as f32"
+   ],
+   [
+    "src/terrain/renderer/upload.rs",
+    "extract_overlay_binding",
+    "as_f32",
+    3,
+    "4], params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength], params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale], params3: [ ao_weight, ao_fallback_enabled, params.hue_variation_strength.clamp(0.0, 0.2), self.orbis_render_frame_latitude() .map(|latitude| ORBIS_GLOBE_FRAME_FLAG_OFFSET + latitude as f32) .unwrap_or(0.0), ], params4: [ detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise, ], params5: [ detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_flag, ], params6: [params.material_slope_bias.clamp(0.0, 1.0), 0.0, 0.0, 0.0],"
+   ]
+  ],
+  "removed": [
+   [
+    "src/terrain/renderer/upload.rs",
+    "extract_overlay_binding",
+    "as_f32",
+    3,
+    "4], params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength], params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale], params3: [ ao_weight, ao_fallback_enabled, params.hue_variation_strength.clamp(0.0, 0.2), self.orbis_render_frame_latitude() .map(|latitude| ORBIS_GLOBE_FRAME_FLAG_OFFSET + latitude as f32) .unwrap_or(0.0), ], params4: [ detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise, ], params5: [ detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_flag, ],"
+   ]
+  ]
+ },
+ "release_1_39_terrain": {
+  "base_commit": "038238ffe4aa154cf27d784214789e37186d2adb",
+  "base_count": 1818,
+  "base_digest": "aaa7563e5767455b0bc9812ecf8aff9904cb6cb6c3124266d9eb261177072bf3",
+  "result_count": 1818,
+  "result_digest": "8f0d3034f225897d70445c9491bb3f046ce48e432e5e88fc7a310e03f9e906c3",
+  "review": "Milos approved this exact #194 transition on 2026-09-28. The cast count is unchanged. The only replaced record is the existing globe-latitude conversion: its enclosing uniform initializer now includes the no-data threshold and enable flag. No added world-coordinate narrowing.",
+  "added": [
+   [
+    "src/terrain/renderer/upload.rs",
+    "extract_overlay_binding",
+    "as_f32",
+    3,
+    "4], params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength], params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale], params3: [ ao_weight, ao_fallback_enabled, params.hue_variation_strength.clamp(0.0, 0.2), self.orbis_render_frame_latitude() .map(|latitude| ORBIS_GLOBE_FRAME_FLAG_OFFSET + latitude as f32) .unwrap_or(0.0), ], params4: [ detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise, ], params5: [ detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_flag, ], params6: [ params.material_slope_bias.clamp(0.0, 1.0), params.nodata_height_below.unwrap_or(0.0), if params.nodata_height_below.is_some() { 1.0"
+   ]
+  ],
+  "removed": [
+   [
+    "src/terrain/renderer/upload.rs",
+    "extract_overlay_binding",
+    "as_f32",
+    3,
+    "4], params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength], params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale], params3: [ ao_weight, ao_fallback_enabled, params.hue_variation_strength.clamp(0.0, 0.2), self.orbis_render_frame_latitude() .map(|latitude| ORBIS_GLOBE_FRAME_FLAG_OFFSET + latitude as f32) .unwrap_or(0.0), ], params4: [ detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise, ], params5: [ detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_flag, ], params6: [params.material_slope_bias.clamp(0.0, 1.0), 0.0, 0.0, 0.0],"
+   ]
+  ]
  }
 }

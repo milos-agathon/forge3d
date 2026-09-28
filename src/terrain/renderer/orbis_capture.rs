@@ -572,8 +572,14 @@ impl OrbisPendingCapture {
         if !validation.is_empty() {
             return Err(anyhow!("ORBIS GPU validation failed: {}", validation.join("; ")));
         }
-        let second = self.frames.pop().unwrap();
-        let first = self.frames.pop().unwrap();
+        let second = self
+            .frames
+            .pop()
+            .ok_or_else(|| anyhow!("missing second ORBIS capture frame"))?;
+        let first = self
+            .frames
+            .pop()
+            .ok_or_else(|| anyhow!("missing first ORBIS capture frame"))?;
         ensure!(
             (second.frame_anchor_ecef - first.frame_anchor_ecef).length() > 0.0,
             "ORBIS two-frame capture did not cross a physical reanchor"
@@ -1892,11 +1898,9 @@ fn analyze_paired_cracks(
                         continue;
                     }
                     let depth_offset = y as usize * bytes_per_row as usize + x as usize * 4;
-                    let depth = f32::from_le_bytes(
-                        bytes[depth_offset..depth_offset + 4]
-                            .try_into()
-                            .expect("validated depth readback stride"),
-                    );
+                    let mut depth_bytes = [0; 4];
+                    depth_bytes.copy_from_slice(&bytes[depth_offset..depth_offset + 4]);
+                    let depth = f32::from_le_bytes(depth_bytes);
                     let Some(linear_depth) = linearize_depth(depth, clip_near, clip_far) else {
                         continue;
                     };

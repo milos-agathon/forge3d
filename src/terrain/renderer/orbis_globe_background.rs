@@ -197,7 +197,10 @@ impl TerrainScene {
                 ),
             ));
         }
-        let pipeline = &cache.as_ref().expect("pipeline just inserted").1;
+        let pipeline = &cache
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("ORBIS globe background pipeline is unavailable"))?
+            .1;
         let load = if sky_present {
             wgpu::LoadOp::Load
         } else {
