@@ -72,7 +72,7 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # owner. Release 1.39 adds six screen-label conversions and records the
 # params6 initializer change without introducing world-position narrowing.
 EXPECTED_CONVERSION_COUNT = 1818
-EXPECTED_CONVERSION_SHA256 = "aaa7563e5767455b0bc9812ecf8aff9904cb6cb6c3124266d9eb261177072bf3"
+EXPECTED_CONVERSION_SHA256 = "8f0d3034f225897d70445c9491bb3f046ce48e432e5e88fc7a310e03f9e906c3"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -711,21 +711,48 @@ def test_mensura_main_integration_inventory_transition_is_exact():
 
 def test_release_1_39_inventory_transition_is_exact():
     release = _ledger_data()["release_1_39"]
+    terrain = _ledger_data()["release_1_39_terrain"]
     assert (release["result_count"], release["result_digest"]) == (
-        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+        terrain["base_count"], terrain["base_digest"]
     )
     assert release["review"]
     added = list(map(tuple, release["added"]))
     removed = list(map(tuple, release["removed"]))
     assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
     assert not set(added) & set(removed)
-    assert release["base_count"] + len(added) - len(removed) == EXPECTED_CONVERSION_COUNT
+    assert release["base_count"] + len(added) - len(removed) == release["result_count"]
     current = collections.Counter(conversion_inventory())
+    # Reconstruct the preceding #193 inventory while retaining #194's exact
+    # replacement record and the independent final-tree freeze.
+    for site in map(tuple, terrain["added"]):
+        assert current[site] > 0
+        current[site] -= 1
+    for site in map(tuple, terrain["removed"]):
+        assert current[site] == 0
+        current[site] += 1
     for site in added:
         assert current[site] > 0, f"recorded addition missing: {site}"
         current[site] -= 1
     for site in removed:
         assert site not in current, f"recorded removal still present: {site}"
+
+
+def test_release_1_39_terrain_inventory_transition_is_exact():
+    transition = _ledger_data()["release_1_39_terrain"]
+    assert (transition["result_count"], transition["result_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+    )
+    assert transition["review"]
+    added = list(map(tuple, transition["added"]))
+    removed = list(map(tuple, transition["removed"]))
+    assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
+    assert not set(added) & set(removed)
+    assert transition["base_count"] + len(added) - len(removed) == EXPECTED_CONVERSION_COUNT
+    current = collections.Counter(conversion_inventory())
+    for site in added:
+        assert current[site] > 0, f"recorded addition missing: {site}"
+    for site in removed:
+        assert current[site] == 0, f"recorded removal still present: {site}"
 
 
 def test_mensura_transition_leaves_one_world_cast_in_the_typed_anchor_exit():

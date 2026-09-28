@@ -115,7 +115,17 @@ impl TerrainScene {
                     output_srgb_eotf,
                     offline_hdr_flag,
                 ],
-                params6: [params.material_slope_bias.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
+                params6: [
+                    params.material_slope_bias.clamp(0.0, 1.0),
+                    // No-data threshold (raw height units) and its enable flag.
+                    params.nodata_height_below.unwrap_or(0.0),
+                    if params.nodata_height_below.is_some() {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    0.0,
+                ],
             },
             lut: None,
         };
@@ -449,7 +459,17 @@ impl TerrainScene {
             pom_flags as f32,
         ]);
 
-        let layer_centers = gpu_materials.layer_centers();
+        let mut layer_centers = gpu_materials.layer_centers();
+        if let Some(centers) = params.material_layer_centers.as_deref() {
+            if centers.len() != gpu_materials.layer_count as usize {
+                return Err(anyhow!(
+                    "material_layer_centers has {} values but the material set has {} layers",
+                    centers.len(),
+                    gpu_materials.layer_count
+                ));
+            }
+            layer_centers[..centers.len()].copy_from_slice(centers);
+        }
         uniforms.extend_from_slice(&layer_centers);
 
         let mut layer_roughness = [1.0f32; MATERIAL_LAYER_CAPACITY];

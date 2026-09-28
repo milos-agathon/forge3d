@@ -93,6 +93,16 @@ impl TerrainRenderParams {
         self.material_slope_bias
     }
 
+    #[getter]
+    pub fn material_layer_centers(&self) -> Option<Vec<f32>> {
+        self.material_layer_centers.clone()
+    }
+
+    #[getter]
+    pub fn nodata_height_below(&self) -> Option<f32> {
+        self.nodata_height_below
+    }
+
     /// P5: Get AO weight (0.0 = no AO, 1.0 = full AO)
     #[getter]
     pub fn ao_weight(&self) -> f32 {

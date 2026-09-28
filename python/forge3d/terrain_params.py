@@ -2086,6 +2086,12 @@ class TerrainRenderParams:
     # Slope/elevation hue rotation. 0.0 preserves the pre-lighting albedo palette.
     hue_variation_strength: float = 0.08
     material_slope_bias: float = 1.0
+    # Material layer band centres in normalized height [0, 1], one per material
+    # layer, strictly increasing. None spaces the layers evenly over the range.
+    material_layer_centers: Optional[Tuple[float, ...]] = None
+    # Heights below this raw value are no-data cells: left empty, not shaded or
+    # attributed. None renders every cell.
+    nodata_height_below: Optional[float] = None
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -2195,6 +2201,21 @@ class TerrainRenderParams:
         if not np.isfinite(self.material_slope_bias):
             raise ValueError("material_slope_bias must be finite")
         self.material_slope_bias = min(max(self.material_slope_bias, 0.0), 1.0)
+        if self.material_layer_centers is not None:
+            centers = tuple(float(value) for value in self.material_layer_centers)
+            if not 1 <= len(centers) <= 4:
+                raise ValueError("material_layer_centers must hold 1 to 4 values")
+            if not all(np.isfinite(value) and 0.0 <= value <= 1.0 for value in centers):
+                raise ValueError(
+                    "material_layer_centers values must be finite and within [0, 1]"
+                )
+            if any(later <= earlier for earlier, later in zip(centers, centers[1:])):
+                raise ValueError("material_layer_centers must be strictly increasing")
+            self.material_layer_centers = centers
+        if self.nodata_height_below is not None:
+            self.nodata_height_below = float(self.nodata_height_below)
+            if not np.isfinite(self.nodata_height_below):
+                raise ValueError("nodata_height_below must be finite")
 
         valid_curve_modes = {"linear", "pow", "smoothstep", "lut"}
         if self.height_curve_mode not in valid_curve_modes:
@@ -2297,6 +2318,8 @@ def make_terrain_params_config(
     colormap_strength: float = 0.5,
     hue_variation_strength: float = 0.08,
     material_slope_bias: float = 1.0,
+    material_layer_centers: Optional[Sequence[float]] = None,
+    nodata_height_below: Optional[float] = None,
     ibl_enabled: bool = True,
     light_azimuth_deg: float = 135.0,
     light_elevation_deg: float = 35.0,
@@ -2476,6 +2499,10 @@ def make_terrain_params_config(
         colormap_strength=colormap_strength,
         hue_variation_strength=hue_variation_strength,
         material_slope_bias=material_slope_bias,
+        material_layer_centers=(
+            None if material_layer_centers is None else tuple(material_layer_centers)
+        ),
+        nodata_height_below=nodata_height_below,
         height_curve_mode=height_curve_mode,
         height_curve_strength=height_curve_strength,
         height_curve_power=height_curve_power,

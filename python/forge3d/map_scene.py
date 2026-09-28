@@ -596,6 +596,33 @@ def _heightmap_domain(heightmap: Any) -> tuple[float, float]:
     return (lo, hi)
 
 
+def _mapscene_nodata_heightmap(heightmap: Any) -> tuple[Any, float | None]:
+    """Turn non-finite (no-data) heightmap cells into renderer holes.
+
+    No-data cells are filled just below the lowest valid height, and the
+    returned threshold tells the terrain shader to leave every fragment under
+    it empty: not shaded, and attributed to no source. Returns the heightmap
+    unchanged and ``None`` when every cell is finite.
+    """
+    import numpy as np
+
+    arr = np.asarray(heightmap, dtype=np.float32)
+    valid = np.isfinite(arr)
+    if valid.all():
+        return heightmap, None
+    if not valid.any():
+        raise ValueError("MapScene terrain heightmap has no finite heights")
+    lo = float(arr[valid].min())
+    hi = float(arr[valid].max())
+    # The drop below the lowest valid height is 0.1% of the relief, too small
+    # to read as a wall, but never under 64 float32 steps at this magnitude so
+    # interpolated heights keep valid and no-data cells apart.
+    ulp = float(np.spacing(np.float32(max(abs(lo), abs(hi), 1.0))))
+    step = max(1e-3 * (hi - lo), 64.0 * ulp)
+    filled = np.where(valid, arr, np.float32(lo - step)).astype(np.float32)
+    return np.ascontiguousarray(filled), lo - 0.5 * step
+
+
 def _write_minimal_hdr(path: Path) -> None:
     with path.open("wb") as handle:
         handle.write(b"#?RADIANCE\n")
@@ -1280,6 +1307,7 @@ def _build_mapscene_terrain_params(
     render_size: tuple[int, int],
     *,
     emit_source_id: bool = False,
+    nodata_height_below: float | None = None,
 ) -> Any | None:
     try:
         import forge3d as f3d
@@ -1291,7 +1319,15 @@ def _build_mapscene_terrain_params(
     if not all(hasattr(f3d, name) for name in ("Colormap1D", "OverlayLayer", "TerrainRenderParams")):
         return None
 
-    domain = _heightmap_domain(heightmap)
+    if nodata_height_below is None:
+        domain = _heightmap_domain(heightmap)
+    else:
+        # No-data fill sits below every valid height; keep it out of the
+        # colour/material domain so the bands span only real terrain.
+        import numpy as np
+
+        values = np.asarray(heightmap, dtype=np.float32)
+        domain = _heightmap_domain(values[values >= nodata_height_below])
     output = recipe.output
     denoise_enabled = _mapscene_denoise_enabled(output)
     settings = _metadata_dict(recipe.lighting.settings)
@@ -1330,6 +1366,7 @@ def _build_mapscene_terrain_params(
     configured_colormap_strength = settings.get("colormap_strength")
     configured_hue_variation_strength = settings.get("hue_variation_strength")
     configured_material_slope_bias = settings.get("material_slope_bias")
+    configured_material_layer_centers = settings.get("material_layer_centers")
     camera_mode = str(cli_params.get("camera_mode") or camera.get("camera_mode") or "screen")
     if camera_mode == "screen":
         camera_mode = _mapscene_clipmap_camera_mode(_mapscene_clipmap_config(recipe)) or camera_mode
@@ -1355,6 +1392,8 @@ def _build_mapscene_terrain_params(
         material_slope_bias=float(
             1.0 if configured_material_slope_bias is None else configured_material_slope_bias
         ),
+        material_layer_centers=configured_material_layer_centers,
+        nodata_height_below=nodata_height_below,
         ibl_enabled="ibl" in renderer_config.gi.modes,
         light_azimuth_deg=azimuth,
         light_elevation_deg=elevation,
@@ -1457,11 +1496,16 @@ def _render_terrain_renderer_result(
     heightmap: Any,
     *,
     emit_provenance: bool = False,
+    nodata_height_below: float | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     try:
         import forge3d as f3d
     except Exception:
         return None
+
+    heightmap, detected_nodata = _mapscene_nodata_heightmap(heightmap)
+    if detected_nodata is not None:
+        nodata_height_below = detected_nodata
 
     required = ("Session", "TerrainRenderer", "MaterialSet", "IBL", "TerrainRenderParams")
     if not all(hasattr(f3d, name) for name in required):
@@ -1475,7 +1519,11 @@ def _render_terrain_renderer_result(
     assert output is not None
     render_size = (max(64, int(output.width)), max(64, int(output.height)))
     params = _build_mapscene_terrain_params(
-        recipe, heightmap, render_size, emit_source_id=emit_provenance
+        recipe,
+        heightmap,
+        render_size,
+        emit_source_id=emit_provenance,
+        nodata_height_below=nodata_height_below,
     )
     if params is None:
         return None
@@ -3397,16 +3445,19 @@ def _render_native_offscreen_result(
     heightmap = _load_native_heightmap(recipe.terrain)
     if heightmap is None or recipe.output is None:
         return None
+    heightmap, nodata_height_below = _mapscene_nodata_heightmap(heightmap)
 
     import numpy as np
 
     try:
-        # Keyword passed only when enabled so existing call-compatible test
+        # Keywords passed only when enabled so existing call-compatible test
         # doubles for `_render_terrain_renderer_result` stay valid.
+        render_kwargs: dict[str, Any] = {}
         if emit_provenance:
-            result = _render_terrain_renderer_result(recipe, heightmap, emit_provenance=True)
-        else:
-            result = _render_terrain_renderer_result(recipe, heightmap)
+            render_kwargs["emit_provenance"] = True
+        if nodata_height_below is not None:
+            render_kwargs["nodata_height_below"] = nodata_height_below
+        result = _render_terrain_renderer_result(recipe, heightmap, **render_kwargs)
     except BaseException as exc:
         if _is_native_adapter_unavailable(exc):
             return None

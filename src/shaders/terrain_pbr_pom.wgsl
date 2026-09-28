@@ -190,7 +190,7 @@ struct OverlayUniforms {
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
-    params6 : vec4<f32>, // material_slope_bias, reserved, reserved, reserved
+    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, reserved
 };
 
 struct IblUniforms {
@@ -4049,6 +4049,13 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     }
 
     let uv = input.tex_coord;
+    // No-data cells (params6.z enables, params6.y is the raw-height
+    // threshold): the caller stores them just below the lowest valid height,
+    // so a fragment whose unclamped height falls under the threshold lies on
+    // no source data and is left empty rather than shaded or attributed.
+    if (u_overlay.params6.z > 0.5 && sample_height(uv) < u_overlay.params6.y) {
+        discard;
+    }
     let debug_mode = u32(u_overlay.params1.y + 0.5);
 
     // Compute all normal variants for diagnostics

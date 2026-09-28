@@ -3,9 +3,11 @@
 
 Renders Switzerland in the Swiss national grid (EPSG:2056 / LV95) from
 assets/tif/switzerland_dem.tif (the swiss_terrain_landcover_viewer.py input), looking
-straight down. Four texture sources carry the land half of Crameri's *bukavu* palette;
-the terrain shader blends them by elevation into a continuous bukavu relief ramp, so every
-colour on screen really comes from an attributed source. With ``emit_provenance=True``
+straight down. Four texture sources carry colours from Crameri's *batlow* palette;
+the terrain shader blends them by elevation into a continuous batlow relief ramp, so every
+colour on screen really comes from an attributed source. The bands meet at 800 m,
+1,800 m and 3,000 m, and cells outside the border are no-data, so they render empty and
+are attributed to no source. With ``emit_provenance=True``
 the render also writes, next to image.png:
 
 * image.source_map.npy  - for every pixel, the id of the texture source that painted it
@@ -26,7 +28,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 from _import_shim import ensure_repo_import
 
@@ -43,9 +45,11 @@ OUT_DIR = ROOT / "out" / "provenance_demo"
 TARGET_CRS = "EPSG:2056"  # Swiss LV95
 # Demo-only signing seed. Real deployments keep their 32-byte Ed25519 seed secret.
 SIGNING_KEY = hashlib.sha256(b"forge3d-provenance-demo-key").digest()
-# The terrain shader weights its 4 material layers by elevation around evenly spaced
-# centres (0, 1/3, 2/3, 1 of the height range); source id = layer index + 1.
+# The terrain shader weights its 4 material layers by elevation around band centres; a
+# pixel is attributed to the layer whose centre is nearest, so each band edge sits midway
+# between two centres. Source id = layer index + 1.
 LAYERS = ["lowland", "foothill", "alpine", "summit"]
+BAND_EDGES_M = (800.0, 1800.0, 3000.0)  # lowland|foothill, foothill|alpine, alpine|summit
 LEGEND = [(230, 97, 1), (27, 158, 119), (117, 112, 179), (102, 166, 230)]
 GRID_CELLS = 3600          # heightmap width in cells (~100 m in LV95)
 VERTICAL_EXAGGERATION = 2.0
@@ -66,16 +70,27 @@ SUN_INTENSITY = 3.5
 GPU_AVAILABLE = f3d.has_gpu() and _terrain_renderer_runtime_available()
 
 
-def bukavu_land(positions: np.ndarray) -> list[tuple[int, int, int]]:
-    """Sample the land half (0.5-1.0) of the bukavu colormap."""
+def batlow_colors(positions: np.ndarray) -> list[tuple[int, int, int]]:
+    """Sample the batlow colormap (teal, olive, orange, pink over 0.2-0.95)."""
     from cmcrameri import cm
 
-    rgb = cm.bukavu(0.5 + 0.5 * np.asarray(positions))[:, :3]
+    rgb = cm.batlow(np.asarray(positions))[:, :3]
     return [tuple(int(round(v * 255)) for v in c) for c in rgb]
 
 
-def load_heightmap() -> tuple[np.ndarray, np.ndarray]:
-    """Square LV95 heightmap in grid units plus the matching inside-Switzerland mask."""
+def band_centers(low_m: float, high_m: float) -> tuple[float, ...]:
+    """Normalized layer centres whose midpoints fall on BAND_EDGES_M."""
+    edges = [(edge - low_m) / (high_m - low_m) for edge in BAND_EDGES_M]
+    centers = [0.0]
+    for edge in edges:
+        centers.append(2.0 * edge - centers[-1])
+    if not all(0.0 <= c <= 1.0 for c in centers) or sorted(set(centers)) != centers:
+        raise ValueError(f"band edges {BAND_EDGES_M} do not fit the {low_m:.0f}-{high_m:.0f} m relief")
+    return tuple(centers)
+
+
+def load_heightmap() -> tuple[np.ndarray, tuple[float, float]]:
+    """Square LV95 heightmap in grid units (NaN outside the border) and its metre range."""
     import rasterio
     from rasterio.enums import Resampling
 
@@ -87,26 +102,29 @@ def load_heightmap() -> tuple[np.ndarray, np.ndarray]:
         dem = src.read(1, out_shape=(round(src.height / scale), GRID_CELLS), resampling=Resampling.average)
         cell_m = src.res[0] * scale
     inside = dem > -1000.0  # nodata is -3.4e38 outside the border
-    dem = np.where(inside, dem, dem[inside].min()) / cell_m * VERTICAL_EXAGGERATION  # metres -> cells
+    relief_m = (float(dem[inside].min()), float(dem[inside].max()))
+    # NaN marks no-data: MapScene leaves those cells empty and unattributed.
+    dem = np.where(inside, dem / cell_m * VERTICAL_EXAGGERATION, np.nan)  # metres -> cells
     # MapScene lays any heightmap on a square footprint: pad to square so the country keeps
     # its proportions, and flip rows so north ends up at the top of a straight-down view.
     n, top = max(dem.shape), (max(dem.shape) - dem.shape[0]) // 2
-    square, mask = np.full((n, n), dem.min(), np.float32), np.zeros((n, n), bool)
-    square[top:top + dem.shape[0]], mask[top:top + dem.shape[0]] = dem, inside
-    return np.ascontiguousarray(np.flipud(square)), mask
+    square = np.full((n, n), np.nan, np.float32)
+    square[top:top + dem.shape[0]] = dem
+    return np.ascontiguousarray(np.flipud(square)), relief_m
 
 
 def write_texture_sources(folder: Path) -> list[dict]:
     folder.mkdir(parents=True, exist_ok=True)
     specs = []
-    for index, (name, rgb) in enumerate(zip(LAYERS, bukavu_land(np.linspace(0.0, 1.0, 4)))):
+    for index, (name, rgb) in enumerate(zip(LAYERS, batlow_colors(np.linspace(0.2, 0.95, 4)))):
         np.save(folder / f"{name}.npy", np.full((512, 512, 4), (*rgb, 255), np.uint8))
         specs.append({"material_index": index, "family": "albedo", "path": str(folder / f"{name}.npy"),
                       "virtual_size_px": [512, 512]})
     return specs
 
 
-def build_scene(heightmap: np.ndarray, image_path: Path) -> f3d.MapScene:
+def build_scene(heightmap: np.ndarray, relief_m: tuple[float, float], image_path: Path) -> f3d.MapScene:
+    lighting = {**LIGHTING, "material_layer_centers": band_centers(*relief_m)}
     vt = {"enabled": True, "families": [{"family": "albedo", "virtual_size_px": [512, 512]}],
           "sources": write_texture_sources(OUT_DIR / "sources")}
     return f3d.MapScene(
@@ -114,7 +132,7 @@ def build_scene(heightmap: np.ndarray, image_path: Path) -> f3d.MapScene:
                                   metadata={"source_id": "switzerland-dem-lv95", "virtual_texture": vt}),
         camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=1700.0 * heightmap.shape[0] / 1215,
                                azimuth_deg=90.0, elevation_deg=89.0, fov_deg=40.0),
-        lighting=f3d.LightingPreset(intensity=SUN_INTENSITY, settings=LIGHTING),
+        lighting=f3d.LightingPreset(intensity=SUN_INTENSITY, settings=lighting),
         # Provenance needs the one-shot path: 1 sample, no denoise, no HDR.
         output=f3d.OutputSpec(width=SIZE, height=SIZE, format="png", samples=1, path=str(image_path)),
     )
@@ -127,16 +145,12 @@ def verify(image: Path, source_map: Path, manifest: Path) -> bool:
     return result.returncode == 0
 
 
-def compose(image: Path, source_map: np.ndarray, mask: np.ndarray, ok: bool, map_tampered_ok: bool,
+def compose(image: Path, source_map: np.ndarray, ok: bool, map_tampered_ok: bool,
             png_tampered_ok: bool, out: Path) -> None:
-    """Display only (the signed files are untouched): hide the padding outside the border."""
-    ys, xs = np.nonzero(source_map)  # the terrain square on screen
-    box = (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1)
-    screen_mask = np.zeros(source_map.shape, bool)
-    border = Image.fromarray(mask).resize((box[2] - box[0], box[3] - box[1]), Image.NEAREST)
-    # Trim the few pixels where the terrain drops to the padding, so no dark wall frames the border.
-    border = border.convert("L").filter(ImageFilter.MinFilter(2 * (SIZE // 1600) + 1))
-    screen_mask[box[1]:box[3], box[0]:box[2]] = np.asarray(border) > 0
+    """Display only (the signed files are untouched): white where no source painted."""
+    # No-data cells render empty, so the attributed pixels are exactly the country; the
+    # legend shares below are the same per-source coverage the verifier reports.
+    screen_mask = source_map != 0
     rows, cols = np.nonzero(screen_mask)
     pad = SIZE // 80
     crop = (slice(max(rows.min() - pad, 0), rows.max() + pad), slice(max(cols.min() - pad, 0), cols.max() + pad))
@@ -152,7 +166,7 @@ def compose(image: Path, source_map: np.ndarray, mask: np.ndarray, ok: bool, map
         canvas.paste(Image.fromarray(panel.astype(np.uint8)), (i * (width + 2 * unit), 3 * unit))
     draw = ImageDraw.Draw(canvas)
     big, small = ImageFont.load_default(size=int(1.5 * unit)), ImageFont.load_default(size=unit)
-    draw.text((0, unit // 2), "1. The rendered map (EPSG:2056, bukavu relief)", fill="black", font=big)
+    draw.text((0, unit // 2), "1. The rendered map (EPSG:2056, batlow relief)", fill="black", font=big)
     draw.text((width + 2 * unit, unit // 2), "2. Which texture source painted each pixel", fill="black", font=big)
     inside = source_map[screen_mask]
     for row, (name, color) in enumerate(zip(LAYERS, LEGEND)):
@@ -179,8 +193,8 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     image = OUT_DIR / "image.png"
     source_map_path, manifest = OUT_DIR / "image.source_map.npy", OUT_DIR / "image.provenance.json"
-    heightmap, mask = load_heightmap()
-    build_scene(heightmap, image).render(emit_provenance=True, provenance_signing_key=SIGNING_KEY)
+    heightmap, relief_m = load_heightmap()
+    build_scene(heightmap, relief_m, image).render(emit_provenance=True, provenance_signing_key=SIGNING_KEY)
     print(f"Rendered {image}\n  + {source_map_path.name}\n  + {manifest.name}\n")
 
     print("== Verifying the untouched render ==")
@@ -202,7 +216,7 @@ def main() -> int:
     print(f"pixel ({x}, {y}): colour inverted")
     png_tampered_ok = verify(OUT_DIR / "tampered.png", source_map_path, manifest)
 
-    compose(image, source_map, mask, ok, map_tampered_ok, png_tampered_ok, OUT_DIR / "provenance_demo.png")
+    compose(image, source_map, ok, map_tampered_ok, png_tampered_ok, OUT_DIR / "provenance_demo.png")
     print(f"\nOriginal verified: {ok}  |  source-map tamper verified: {map_tampered_ok}  |  "
           f"PNG tamper verified: {png_tampered_ok}")
     print(f"Summary image: {OUT_DIR / 'provenance_demo.png'}")

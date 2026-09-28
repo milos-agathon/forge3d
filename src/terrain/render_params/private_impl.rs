@@ -73,6 +73,8 @@ impl TerrainRenderParams {
             colormap_strength: core.colormap_strength,
             hue_variation_strength: core.hue_variation_strength,
             material_slope_bias: core.material_slope_bias,
+            material_layer_centers: core.material_layer_centers,
+            nodata_height_below: core.nodata_height_below,
             ao_weight: core.ao_weight,
             height_curve_mode: core.height_curve_mode,
             height_curve_strength: core.height_curve_strength,

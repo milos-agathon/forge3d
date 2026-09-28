@@ -605,6 +605,8 @@ class TerrainRenderParams:
     colormap_strength: float
     hue_variation_strength: float
     material_slope_bias: float
+    material_layer_centers: Optional[Tuple[float, ...]]
+    nodata_height_below: Optional[float]
     overlays: Sequence[OverlayLayer]
     terrain_data_revision: Optional[int]
     material_map_paths: Dict[str, str]
