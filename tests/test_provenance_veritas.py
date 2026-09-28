@@ -242,6 +242,61 @@ def test_offline_legacy_calls_warn_and_verify() -> None:
         prov.verify_provenance_offline(source_map, new_manifest)
 
 
+# SHA256 of the manifest the v1.38.0 `seal_provenance_offline` returned for
+# `_legacy_source_map()` + `_sample_tiles()` + TEST_PRIVATE_KEY. The
+# deprecated no-image call must keep reproducing it byte for byte.
+LEGACY_1_38_0_MANIFEST_SHA256 = (
+    "44a0e3d7c4f8069f09f9849e60ff4c6589e428d59c489e1e00375139df60d799"
+)
+
+
+def _legacy_source_map() -> np.ndarray:
+    source_map = np.zeros((10, 10), dtype=np.uint32)
+    source_map[2:7, 3:9] = 1
+    source_map[7:, :4] = 2
+    return source_map
+
+
+def test_offline_legacy_seal_is_byte_identical_to_1_38_0() -> None:
+    with pytest.warns(DeprecationWarning):
+        manifest = prov.seal_provenance_offline(
+            _legacy_source_map(), _sample_tiles(), TEST_PRIVATE_KEY
+        )
+    assert hashlib.sha256(manifest).hexdigest() == LEGACY_1_38_0_MANIFEST_SHA256
+
+
+@pytest.mark.skipif(
+    not hasattr(f3d, "seal_provenance"), reason="native forge3d extension not available"
+)
+def test_native_legacy_calls_warn_and_keep_1_38_0_manifest() -> None:
+    source_map = _legacy_source_map()
+    tiles = _sample_tiles()
+    with pytest.warns(DeprecationWarning, match="image_bytes"):
+        native = bytes(f3d.seal_provenance(source_map, tiles, TEST_PRIVATE_KEY))
+    with pytest.warns(DeprecationWarning):
+        offline = prov.seal_provenance_offline(source_map, tiles, TEST_PRIVATE_KEY)
+    assert hashlib.sha256(offline).hexdigest() == LEGACY_1_38_0_MANIFEST_SHA256
+    # The native seal serializes the same 1.38.0 content with serde_json's
+    # sorted keys and two-space pretty printing.
+    assert native == json.dumps(json.loads(offline), indent=2, sort_keys=True).encode()
+    decoded = json.loads(native)
+    assert decoded["schema_version"] == 1
+    assert "image_sha256" not in decoded
+
+    with pytest.warns(DeprecationWarning, match="image_bytes"):
+        assert f3d.verify_provenance(source_map, native) is True
+    # Schema v1 has no image leaf, so supplied image bytes are not bound.
+    assert f3d.verify_provenance(source_map, native, TEST_IMAGE_BYTES) is True
+    tampered = source_map.copy()
+    tampered[0, 0] ^= 1
+    with pytest.warns(DeprecationWarning):
+        assert f3d.verify_provenance(tampered, native) is False
+
+    current = f3d.seal_provenance(source_map, tiles, TEST_PRIVATE_KEY, TEST_IMAGE_BYTES)
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="image_bytes"):
+        f3d.verify_provenance(source_map, current)
+
+
 @pytest.mark.skipif(
     not hasattr(f3d, "seal_provenance"), reason="native forge3d extension not available"
 )

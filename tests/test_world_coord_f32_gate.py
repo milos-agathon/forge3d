@@ -60,7 +60,7 @@ REVIEWED_BASELINE_COUNT = 1545
 # remain bounded screen-space coordinates and do not cross the Anchor boundary.
 REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132ba79d35ee065"
 
-# Current freeze: the baseline plus every LATER_REVIEWED_TRANSITIONS entry.
+# Current freeze: historical transitions plus the release_1_39 ledger entry.
 # ORBIS (merged onto this tree) moves the two reviewed ring-index attribute
 # casts from `new`/`skirt` into `with_position`/`skirt_from`, and adds reviewed
 # conversions for its native globe scene, physical GPU probe boundary, and
@@ -69,20 +69,21 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # normalized crack-sampling ratios, or the deliberately naive f32 precision
 # control; ECEF world positions remain f64 until conversion through the active
 # Anchor, and Anchor remains the sole production world-position narrowing
-# owner.
-EXPECTED_CONVERSION_COUNT = 1812
-EXPECTED_CONVERSION_SHA256 = "6b668d254136b037c7cbdc3c00b1afb8229468cc8ba91f058f672aa7ccf4b73f"
+# owner. Release 1.39 adds six screen-label conversions and records the
+# params6 initializer change without introducing world-position narrowing.
+EXPECTED_CONVERSION_COUNT = 1818
+EXPECTED_CONVERSION_SHA256 = "aaa7563e5767455b0bc9812ecf8aff9904cb6cb6c3124266d9eb261177072bf3"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
 
-# The current tree includes the prior main history and MENSURA's typed anchor
+# This historical integration includes prior main and MENSURA's typed anchor
 # exit. Main's ORBIS merge was already six sites beyond its frozen count; the
 # integration record in LEDGER_PATH captures the exact 1803 -> 1812 delta.
 # Every production narrowing primitive remains locked by count and digest.
 REVIEWED_CURRENT_TREE = {
-    "count": EXPECTED_CONVERSION_COUNT,
-    "digest": EXPECTED_CONVERSION_SHA256,
+    "count": 1812,
+    "digest": "6b668d254136b037c7cbdc3c00b1afb8229468cc8ba91f058f672aa7ccf4b73f",
     "base_count": 1803,
     "base_digest": "66068ae811b2670291434b7d1fcb9c1cb173e2cfb8c580acd87cef03e67a41ae",
     "added_count": 16,
@@ -644,8 +645,9 @@ def test_historical_transition_ledger_and_current_freeze_are_consistent():
         previous_digest = transition["result_digest"]
     assert (previous_count, previous_digest) == (1643, "6449dccf48eff56b5af8605d52f07a6469226eedbca796aea7887ddcca895d77")
     current = REVIEWED_CURRENT_TREE
-    assert current["count"] == EXPECTED_CONVERSION_COUNT
-    assert current["digest"] == EXPECTED_CONVERSION_SHA256
+    release = _ledger_data()["release_1_39"]
+    assert current["count"] == release["base_count"]
+    assert current["digest"] == release["base_digest"]
     assert current["added_count"] - current["removed_count"] == current["count"] - current["base_count"]
     assert len(current["scopes"]) == 5
 
@@ -688,8 +690,8 @@ def test_mensura_main_integration_inventory_transition_is_exact():
         current["base_digest"],
     )
     assert (integration["result_count"], integration["result_digest"]) == (
-        EXPECTED_CONVERSION_COUNT,
-        EXPECTED_CONVERSION_SHA256,
+        current["count"],
+        current["digest"],
     )
     assert integration["review"]
     added = list(map(tuple, integration["added"]))
@@ -698,13 +700,32 @@ def test_mensura_main_integration_inventory_transition_is_exact():
     assert len(removed) == current["removed_count"]
     assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
     assert not set(added) & set(removed)
-    assert integration["base_count"] + len(added) - len(removed) == EXPECTED_CONVERSION_COUNT
+    assert integration["base_count"] + len(added) - len(removed) == current["count"]
     inventory = collections.Counter(conversion_inventory())
     for site in added:
         assert inventory[site] > 0, f"recorded addition missing: {site}"
         inventory[site] -= 1
     for site in removed:
         assert site not in inventory, f"recorded removal still present: {site}"
+
+
+def test_release_1_39_inventory_transition_is_exact():
+    release = _ledger_data()["release_1_39"]
+    assert (release["result_count"], release["result_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+    )
+    assert release["review"]
+    added = list(map(tuple, release["added"]))
+    removed = list(map(tuple, release["removed"]))
+    assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
+    assert not set(added) & set(removed)
+    assert release["base_count"] + len(added) - len(removed) == EXPECTED_CONVERSION_COUNT
+    current = collections.Counter(conversion_inventory())
+    for site in added:
+        assert current[site] > 0, f"recorded addition missing: {site}"
+        current[site] -= 1
+    for site in removed:
+        assert site not in current, f"recorded removal still present: {site}"
 
 
 def test_mensura_transition_leaves_one_world_cast_in_the_typed_anchor_exit():

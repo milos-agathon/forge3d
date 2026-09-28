@@ -5,16 +5,22 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+
+## [1.39.0] - 2026-09-28
 ### Added
 - VERITAS: signed render provenance binds the image and per-pixel source map to the contributing terrain tiles. Offline calls without image bytes warn and remain compatible with 1.38.0 manifests. (#187)
 - Labels now compile line and curved text geometry into the scene plan, so placement and rendering use the same glyph positions. (#184)
 - MENSURA: `CrsTransform.datum_operations` names each EPSG datum operation a transform applies. RGF93 v1 (EPSG:2154) and NAD83 (EPSG:5070) reach WGS 84 only through the published null transformations EPSG:1671 (1 m) and EPSG:1188 (4 m). `reproject_raster`, `reproject_vector`, and `prepare_dem` report them with a `datum_null_transformation` diagnostic instead of treating the datums as silently equivalent. Coordinate values are unchanged. (#192)
-- MENSURA: `prepare_dem` converts a declared `orthometric_egm96` DEM stored in any built-in projected CRS, not only EPSG:4326. Each affine pixel centre is inverted to WGS 84, and the per-pixel H + N residual measures below 1e-6 m. Other CRSs still raise.
+- MENSURA: `prepare_dem` converts a declared `orthometric_egm96` DEM stored in any built-in projected CRS, not only EPSG:4326. Each affine pixel centre is inverted to WGS 84, and the per-pixel H + N residual measures below 1e-6 m. Other CRSs still raise. (#192)
 
 ### Changed
-- MENSURA: `Anchor::to_render_f32(Coord)` is now the only world-coordinate f64-to-f32 crossing and holds the only world `as f32`. The untyped `Anchor::to_render_vec3`, `to_render_direction`, and `direction_to_render` Rust helpers are removed: positions are tagged `SceneCoord::scene`, and spans and directions narrow through `Anchor::offset_to_render(SceneOffset::scene(..))`. `view_look_at` and `model_offset` take typed coordinates. Rendered values are bit-identical.
-- MENSURA: the geocentric entry points `geo::projections::geocentric::{geodetic_to_ecef, wgs84_geodetic_to_ecef}` accept only `Height<Ellipsoidal>` and return a typed height, so an orthometric or bare-float height no longer compiles into ECEF math. The DUPLA Everest jitter scene now converts the summit's 8,848.86 m orthometric height through EGM96 instead of using it as an ellipsoidal height.
-- `tests/test_world_coord_f32_gate.py` re-freezes the narrowing inventory at 1,403 sites. Every re-freeze is now chained through `tests/data/world_coord_f32_ledger.json`. The ledger records the site-level drift that landed after the ANAMNESIS freeze, reviewed to contain no world-position narrowing, and the MENSURA transition.
+- MENSURA: `Anchor::to_render_f32(Coord)` is now the only world-coordinate f64-to-f32 crossing and holds the only world `as f32`. The untyped `Anchor::to_render_vec3`, `to_render_direction`, and `direction_to_render` Rust helpers are removed: positions are tagged `SceneCoord::scene`, and spans and directions narrow through `Anchor::offset_to_render(SceneOffset::scene(..))`. `view_look_at` and `model_offset` take typed coordinates. Rendered values are bit-identical. (#192)
+- MENSURA: the geocentric entry points `geo::projections::geocentric::{geodetic_to_ecef, wgs84_geodetic_to_ecef}` accept only `Height<Ellipsoidal>` and return a typed height, so an orthometric or bare-float height no longer compiles into ECEF math. The DUPLA Everest jitter scene now converts the summit's 8,848.86 m orthometric height through EGM96 instead of using it as an ellipsoidal height. (#192)
+- `tests/test_world_coord_f32_gate.py` re-freezes the narrowing inventory at 1,403 sites. Every re-freeze is now chained through `tests/data/world_coord_f32_ledger.json`. The ledger records the site-level drift that landed after the ANAMNESIS freeze, reviewed to contain no world-position narrowing, and the MENSURA transition. (#192)
+
+### Fixed
+- VERITAS: the native `seal_provenance` and `verify_provenance` accept calls without image bytes again, as in 1.38.0. They warn that the call is deprecated, produce the same 1.38.0 manifest byte for byte, and verify 1.38.0 manifests. (#193)
+- `tools/verify_provenance.py` no longer crashes on 1.38.0 manifests; it reports that the image is not bound and checks everything else. (#193)
 
 ## [1.38.0] - 2026-09-20
 

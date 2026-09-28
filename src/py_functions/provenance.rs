@@ -14,13 +14,25 @@ use numpy::PyUntypedArrayMethods;
 #[cfg(feature = "extension-module")]
 use crate::core::provenance::{
     encode_image_leaf, encode_source_map_leaf, encode_tile_leaf, from_hex, merkle_root, sha256,
-    sign_root, to_hex, verify_root, ContributingTile, FAMILY_NAMES, SOURCE_ID_NONE,
+    sign_root, to_hex, verify_root, ContributingTile, FAMILY_NAMES, LEGACY_SIGN_CONTEXT,
+    SIGN_CONTEXT, SOURCE_ID_NONE,
 };
 
 /// Manifest schema version emitted by `seal_provenance` and accepted by
 /// `verify_provenance` / the offline verifier.
 #[cfg(feature = "extension-module")]
 pub(crate) const PROVENANCE_SCHEMA_VERSION: u64 = 2;
+
+/// Deprecated 1.38.0 schema: no image leaf, `forge3d.provenance.v1` context.
+/// Emitted and accepted only when a caller omits `image_bytes`.
+#[cfg(feature = "extension-module")]
+const LEGACY_PROVENANCE_SCHEMA_VERSION: u64 = 1;
+
+#[cfg(feature = "extension-module")]
+fn warn_deprecated(py: Python<'_>, message: &str) -> PyResult<()> {
+    let category = py.get_type_bound::<pyo3::exceptions::PyDeprecationWarning>();
+    PyErr::warn_bound(py, category.as_any(), message, 1)
+}
 
 /// SHA256 over the row-major little-endian u32 raster of the source map.
 #[cfg(feature = "extension-module")]
@@ -92,19 +104,29 @@ fn parse_tile_dict(index: usize, tile: &Bound<'_, PyAny>) -> PyResult<Contributi
 ///     Records from `TerrainRenderer.read_contributing_tiles()`.
 /// private_key : bytes
 ///     32-byte Ed25519 seed.
-/// image_bytes : bytes
-///     Exact bytes of the published image the manifest seals.
+/// image_bytes : bytes, optional
+///     Exact bytes of the published image the manifest seals. Omitting it is
+///     deprecated: a `DeprecationWarning` is raised and the 1.38.0 schema v1
+///     manifest (no image binding) is returned unchanged.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (source_map, contributing_tiles, private_key, image_bytes))]
+#[pyo3(signature = (source_map, contributing_tiles, private_key, image_bytes=None))]
 pub(crate) fn seal_provenance(
     py: Python<'_>,
     source_map: numpy::PyReadonlyArray2<'_, u32>,
     contributing_tiles: &Bound<'_, PyAny>,
     private_key: Vec<u8>,
-    image_bytes: Vec<u8>,
+    image_bytes: Option<Vec<u8>>,
 ) -> PyResult<Py<PyAny>> {
     use pyo3::types::PyBytes;
+
+    if image_bytes.is_none() {
+        warn_deprecated(
+            py,
+            "calling seal_provenance without image_bytes is deprecated; \
+             the legacy schema_version 1 manifest does not bind the rendered image",
+        )?;
+    }
 
     let seed: [u8; 32] = private_key
         .as_slice()
@@ -146,12 +168,18 @@ pub(crate) fn seal_provenance(
     }
 
     let map_digest = source_map_digest(&source_map);
-    let image_digest = sha256(&image_bytes);
+    let image_digest = image_bytes.as_deref().map(sha256);
     let mut leaves: Vec<Vec<u8>> = tiles.iter().map(|t| encode_tile_leaf(t).to_vec()).collect();
     leaves.push(encode_source_map_leaf(width, height, &map_digest).to_vec());
-    leaves.push(encode_image_leaf(&image_digest).to_vec());
+    let (schema_version, sign_context) = match &image_digest {
+        Some(digest) => {
+            leaves.push(encode_image_leaf(digest).to_vec());
+            (PROVENANCE_SCHEMA_VERSION, SIGN_CONTEXT)
+        }
+        None => (LEGACY_PROVENANCE_SCHEMA_VERSION, LEGACY_SIGN_CONTEXT),
+    };
     let root = merkle_root(&leaves);
-    let (signature, public_key) = sign_root(&root, &seed);
+    let (signature, public_key) = sign_root(&root, &seed, sign_context);
 
     // source_table: unique (source_id, family, content_hash) triples.
     let mut source_table: Vec<(u32, u32, [u8; 32])> = tiles
@@ -167,13 +195,12 @@ pub(crate) fn seal_provenance(
             .copied()
             .unwrap_or("unknown")
     };
-    let manifest = serde_json::json!({
-        "schema_version": PROVENANCE_SCHEMA_VERSION,
+    let mut manifest = serde_json::json!({
+        "schema_version": schema_version,
         "merkle_root": to_hex(&root),
         "signature": to_hex(&signature),
         "public_key": to_hex(&public_key),
         "image_dims": [width, height],
-        "image_sha256": to_hex(&image_digest),
         "albedo_family_index": 0,
         "source_map_encoding": "u32le-row-major",
         "source_map_sha256": to_hex(&map_digest),
@@ -198,6 +225,11 @@ pub(crate) fn seal_provenance(
             }))
             .collect::<Vec<_>>(),
     });
+    // serde_json objects serialize with sorted keys, so inserting here keeps
+    // the v2 byte layout and leaves the v1 manifest identical to 1.38.0.
+    if let (Some(digest), Some(object)) = (&image_digest, manifest.as_object_mut()) {
+        object.insert("image_sha256".to_owned(), to_hex(digest).into());
+    }
     let bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|e| PyRuntimeError::new_err(format!("failed to serialize manifest: {e}")))?;
     Ok(PyBytes::new_bound(py, &bytes).into_py(py))
@@ -212,13 +244,19 @@ pub(crate) fn seal_provenance(
 /// bytes, and that the Ed25519 signature verifies against the embedded
 /// public key. Returns `False` on any mismatch; raises `ValueError` only for
 /// a structurally malformed manifest.
+///
+/// Omitting `image_bytes` is deprecated and raises a `DeprecationWarning`;
+/// it verifies only legacy schema v1 (1.38.0) manifests, which carry no
+/// image leaf. A schema v2 manifest without `image_bytes` raises
+/// `ValueError`.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (source_map, manifest, image_bytes))]
+#[pyo3(signature = (source_map, manifest, image_bytes=None))]
 pub(crate) fn verify_provenance(
+    py: Python<'_>,
     source_map: numpy::PyReadonlyArray2<'_, u32>,
     manifest: Vec<u8>,
-    image_bytes: Vec<u8>,
+    image_bytes: Option<Vec<u8>>,
 ) -> PyResult<bool> {
     let manifest: serde_json::Value = serde_json::from_slice(&manifest)
         .map_err(|e| PyValueError::new_err(format!("malformed provenance manifest: {e}")))?;
@@ -227,10 +265,26 @@ pub(crate) fn verify_provenance(
         .get("schema_version")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| PyValueError::new_err("manifest missing schema_version"))?;
-    if schema_version != PROVENANCE_SCHEMA_VERSION {
+    if schema_version != PROVENANCE_SCHEMA_VERSION
+        && schema_version != LEGACY_PROVENANCE_SCHEMA_VERSION
+    {
         return Err(PyValueError::new_err(format!(
-            "unsupported provenance schema_version {schema_version} (expected {PROVENANCE_SCHEMA_VERSION})"
+            "unsupported provenance schema_version {schema_version} \
+             (expected {LEGACY_PROVENANCE_SCHEMA_VERSION} or {PROVENANCE_SCHEMA_VERSION})"
         )));
+    }
+    let binds_image = schema_version == PROVENANCE_SCHEMA_VERSION;
+    if image_bytes.is_none() {
+        warn_deprecated(
+            py,
+            "calling verify_provenance without image_bytes is deprecated; \
+             only legacy schema_version 1 manifests can be verified without it",
+        )?;
+        if binds_image {
+            return Err(PyValueError::new_err(
+                "image_bytes is required for schema_version 2 provenance",
+            ));
+        }
     }
 
     let hex_field = |key: &str, expected_len: usize| -> PyResult<Vec<u8>> {
@@ -250,7 +304,13 @@ pub(crate) fn verify_provenance(
     let signed_root: [u8; 32] = hex_field("merkle_root", 32)?.try_into().unwrap();
     let signature: [u8; 64] = hex_field("signature", 64)?.try_into().unwrap();
     let public_key: [u8; 32] = hex_field("public_key", 32)?.try_into().unwrap();
-    let manifest_image: [u8; 32] = hex_field("image_sha256", 32)?.try_into().unwrap();
+    let manifest_image: Option<[u8; 32]> = if binds_image {
+        Some(hex_field("image_sha256", 32)?.try_into().map_err(|_| {
+            PyValueError::new_err("image_sha256 must be 32 bytes")
+        })?)
+    } else {
+        None
+    };
 
     let dims = manifest
         .get("image_dims")
@@ -302,11 +362,14 @@ pub(crate) fn verify_provenance(
     }
     let map_digest = source_map_digest(&source_map);
     leaves.push(encode_source_map_leaf(width, height, &map_digest).to_vec());
-    // The image leaf binds the published image bytes to the root.
-    let image_digest = sha256(&image_bytes);
-    leaves.push(encode_image_leaf(&image_digest).to_vec());
-    if manifest_image != image_digest {
-        return Ok(false);
+    // Schema v2: the image leaf binds the published image bytes to the root.
+    // Schema v1 has no image leaf, so supplied image bytes are not checked.
+    if let (Some(manifest_image), Some(image_bytes)) = (manifest_image, image_bytes.as_deref()) {
+        let image_digest = sha256(image_bytes);
+        leaves.push(encode_image_leaf(&image_digest).to_vec());
+        if manifest_image != image_digest {
+            return Ok(false);
+        }
     }
 
     let computed_root = merkle_root(&leaves);
@@ -319,5 +382,15 @@ pub(crate) fn verify_provenance(
             return Ok(false);
         }
     }
-    Ok(verify_root(&computed_root, &signature, &public_key))
+    let sign_context = if binds_image {
+        SIGN_CONTEXT
+    } else {
+        LEGACY_SIGN_CONTEXT
+    };
+    Ok(verify_root(
+        &computed_root,
+        &signature,
+        &public_key,
+        sign_context,
+    ))
 }

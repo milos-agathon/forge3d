@@ -622,10 +622,12 @@ async fn read_f64_array(
     Ok(bytes
         .chunks_exact(8)
         .map(|chunk| {
+            let mut value = [0; 8];
+            value.copy_from_slice(chunk);
             if big_endian {
-                f64::from_be_bytes(chunk.try_into().unwrap())
+                f64::from_be_bytes(value)
             } else {
-                f64::from_le_bytes(chunk.try_into().unwrap())
+                f64::from_le_bytes(value)
             }
         })
         .collect())

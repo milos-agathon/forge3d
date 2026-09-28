@@ -18,33 +18,7 @@ TOKEN_PATTERNS = {
 
 
 def _production_text(path: Path) -> str:
-    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    out: list[str] = []
-    skip = False
-    depth = 0
-    pending_cfg_test = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("#[cfg(test)]"):
-            pending_cfg_test = True
-            continue
-        if pending_cfg_test and re.match(r"(pub\s+)?mod\s+tests\b", stripped):
-            skip = True
-            pending_cfg_test = False
-            depth = line.count("{") - line.count("}")
-            if depth <= 0:
-                depth = 1
-            continue
-        if pending_cfg_test and stripped and not stripped.startswith("#"):
-            pending_cfg_test = False
-        if skip:
-            depth += line.count("{") - line.count("}")
-            if depth <= 0:
-                skip = False
-                depth = 0
-            continue
-        out.append(line)
-    return "\n".join(out)
+    return _production_text_value(path.read_text(encoding="utf-8", errors="ignore"))
 
 
 def _is_test_fixture_path(path: Path) -> bool:
@@ -82,29 +56,58 @@ def _production_text_value(raw: str) -> str:
     out: list[str] = []
     skip = False
     depth = 0
+    opened = False
     pending_cfg_test = False
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith("#[cfg(test)]"):
+        if re.match(r"#\[cfg\((?:test\)|all\(test\s*,)", stripped):
             pending_cfg_test = True
             continue
-        if pending_cfg_test and re.match(r"(pub\s+)?mod\s+tests\b", stripped):
+        if pending_cfg_test and re.match(
+            r"(?:pub(?:\([^)]*\))?\s+)?(?:mod|fn)\s+\w+", stripped
+        ):
             skip = True
             pending_cfg_test = False
             depth = line.count("{") - line.count("}")
-            if depth <= 0:
-                depth = 1
+            opened = "{" in line
+            if opened and depth == 0:
+                skip = False
             continue
         if pending_cfg_test and stripped and not stripped.startswith("#"):
             pending_cfg_test = False
         if skip:
+            opened = opened or "{" in line
             depth += line.count("{") - line.count("}")
-            if depth <= 0:
+            if opened and depth <= 0:
                 skip = False
                 depth = 0
             continue
         out.append(line)
     return "\n".join(out)
+
+
+def test_production_scanner_excludes_test_only_items_but_keeps_feature_code():
+    source = '''
+#[cfg(test)]
+mod overview_seed_tests { fn helper() { Some(1).unwrap(); } }
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests { fn helper() { panic!("test only"); } }
+#[cfg(test)]
+pub(super) fn test_helper() { Some(1).expect("test only"); }
+#[cfg(test)]
+fn multiline(
+    value: u32,
+) {
+    Some(value).unwrap();
+}
+#[cfg(any(test, feature = "enable-globe"))]
+fn production() { Some(1).unwrap(); }
+fn ordinary() { panic!("production"); }
+'''
+    production = _production_text_value(source)
+    assert len(TOKEN_PATTERNS["unwrap"].findall(production)) == 1
+    assert len(TOKEN_PATTERNS["panic"].findall(production)) == 1
+    assert len(TOKEN_PATTERNS["expect"].findall(production)) == 0
 
 
 def _counts(
@@ -217,11 +220,19 @@ def test_cog_unwrap_ablation_fails_module_and_source_allowlist_without_rewriting
     assert _module_offenders(_counts(), ratchet) == []
     assert _allowlist_offenders(_source_counts(), ratchet) == []
 
-    module_offenders = _module_offenders(_counts(source_overrides=overrides), ratchet)
     source_offenders = _allowlist_offenders(
         _source_counts(source_overrides=overrides), ratchet
     )
-    assert "terrain.unwrap: 32 > ratchet 31" in module_offenders
+    # Exceed the recorded limit even when a production fix has reduced the
+    # live count below it; a single new source is still caught independently.
+    terrain_limit = next(
+        row["unwrap"] for row in ratchet["modules"] if row["module"] == "terrain"
+    )
+    additional = terrain_limit - _counts()["terrain"]["unwrap"] + 1
+    module_overrides = {rel: original + injection * additional}
+    assert f"terrain.unwrap: {terrain_limit + 1} > ratchet {terrain_limit}" in _module_offenders(
+        _counts(source_overrides=module_overrides), ratchet
+    )
     assert any(
         rel in offender and ("missing=" in offender or ".unwrap: 1 > allowlist 0" in offender)
         for offender in source_offenders

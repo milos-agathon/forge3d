@@ -17,6 +17,10 @@
 //! - Empty leaf set: root = SHA256(b"forge3d.provenance.v2.empty").
 //! - Signature message = `b"forge3d.provenance.v2" || root[32]` (Ed25519).
 //!
+//! Schema v1 (1.38.0) manifests have no image leaf and sign with the
+//! `b"forge3d.provenance.v1"` context ([`LEGACY_SIGN_CONTEXT`]); they stay
+//! sealable and verifiable through the deprecated no-image calls.
+//!
 //! Kept free of wgpu/PyO3 so the unit tests run under the curated cargo
 //! feature set (which excludes `extension-module`).
 
@@ -34,6 +38,9 @@ pub const FAMILY_NAMES: [&str; 3] = ["albedo", "normal", "mask"];
 
 /// Domain-separation prefix for the signed Merkle root.
 pub const SIGN_CONTEXT: &[u8] = b"forge3d.provenance.v2";
+
+/// Domain-separation prefix of deprecated schema v1 (1.38.0) manifests.
+pub const LEGACY_SIGN_CONTEXT: &[u8] = b"forge3d.provenance.v1";
 
 const EMPTY_ROOT_PREIMAGE: &[u8] = b"forge3d.provenance.v2.empty";
 const TILE_LEAF_TAG: &[u8; 4] = b"VTLF";
@@ -124,27 +131,33 @@ pub fn merkle_root(leaf_encodings: &[Vec<u8>]) -> [u8; 32] {
     level[0]
 }
 
-/// Sign a Merkle root with an Ed25519 32-byte seed. Returns
+/// Sign a Merkle root with an Ed25519 32-byte seed under `context`
+/// ([`SIGN_CONTEXT`] or [`LEGACY_SIGN_CONTEXT`]). Returns
 /// `(signature, public_key)`.
-pub fn sign_root(root: &[u8; 32], seed: &[u8; 32]) -> ([u8; 64], [u8; 32]) {
+pub fn sign_root(root: &[u8; 32], seed: &[u8; 32], context: &[u8]) -> ([u8; 64], [u8; 32]) {
     use ed25519_dalek::{Signer, SigningKey};
     let signing_key = SigningKey::from_bytes(seed);
-    let mut message = Vec::with_capacity(SIGN_CONTEXT.len() + 32);
-    message.extend_from_slice(SIGN_CONTEXT);
+    let mut message = Vec::with_capacity(context.len() + 32);
+    message.extend_from_slice(context);
     message.extend_from_slice(root);
     let signature = signing_key.sign(&message);
     (signature.to_bytes(), signing_key.verifying_key().to_bytes())
 }
 
-/// Verify an Ed25519 seal over a Merkle root.
-pub fn verify_root(root: &[u8; 32], signature: &[u8; 64], public_key: &[u8; 32]) -> bool {
+/// Verify an Ed25519 seal over a Merkle root signed under `context`.
+pub fn verify_root(
+    root: &[u8; 32],
+    signature: &[u8; 64],
+    public_key: &[u8; 32],
+    context: &[u8],
+) -> bool {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     let Ok(key) = VerifyingKey::from_bytes(public_key) else {
         return false;
     };
     let signature = Signature::from_bytes(signature);
-    let mut message = Vec::with_capacity(SIGN_CONTEXT.len() + 32);
-    message.extend_from_slice(SIGN_CONTEXT);
+    let mut message = Vec::with_capacity(context.len() + 32);
+    message.extend_from_slice(context);
     message.extend_from_slice(root);
     key.verify(&message, &signature).is_ok()
 }
@@ -267,16 +280,43 @@ mod tests {
     fn sign_verify_round_trip_and_rejection() {
         let seed = sha256(b"forge3d-veritas-unit-seed");
         let root = merkle_root(&[encode_tile_leaf(&tile(0, 0, 0, 0, 0)).to_vec()]);
-        let (signature, public_key) = sign_root(&root, &seed);
-        assert!(verify_root(&root, &signature, &public_key));
+        let (signature, public_key) = sign_root(&root, &seed, SIGN_CONTEXT);
+        assert!(verify_root(&root, &signature, &public_key, SIGN_CONTEXT));
 
         let mut wrong_root = root;
         wrong_root[0] ^= 0xFF;
-        assert!(!verify_root(&wrong_root, &signature, &public_key));
+        assert!(!verify_root(
+            &wrong_root,
+            &signature,
+            &public_key,
+            SIGN_CONTEXT
+        ));
 
         let other_seed = sha256(b"a-different-seed");
-        let (_, other_public) = sign_root(&root, &other_seed);
-        assert!(!verify_root(&root, &signature, &other_public));
+        let (_, other_public) = sign_root(&root, &other_seed, SIGN_CONTEXT);
+        assert!(!verify_root(&root, &signature, &other_public, SIGN_CONTEXT));
+    }
+
+    #[test]
+    fn legacy_and_current_contexts_do_not_cross_verify() {
+        let seed = sha256(b"forge3d-veritas-unit-seed");
+        let root = merkle_root(&[encode_tile_leaf(&tile(0, 0, 0, 0, 0)).to_vec()]);
+        let (legacy, public_key) = sign_root(&root, &seed, LEGACY_SIGN_CONTEXT);
+        assert!(verify_root(
+            &root,
+            &legacy,
+            &public_key,
+            LEGACY_SIGN_CONTEXT
+        ));
+        assert!(!verify_root(&root, &legacy, &public_key, SIGN_CONTEXT));
+
+        let (current, _) = sign_root(&root, &seed, SIGN_CONTEXT);
+        assert!(!verify_root(
+            &root,
+            &current,
+            &public_key,
+            LEGACY_SIGN_CONTEXT
+        ));
     }
 
     /// Known-answer vector; `tests/test_provenance_veritas.py` asserts the

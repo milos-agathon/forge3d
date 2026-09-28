@@ -217,8 +217,13 @@ def test_height_is_the_fourth_feedback_driven_vt_family():
     assert "HeightVtFamilyRuntime" in streaming
     assert "RetainedRequestSet" in streaming
     assert "FamilyResidencyTracker" in streaming
-    assert "ReaderPageStore" in streaming
-    assert "VirtualTextureStore for ReaderPageStore" in streaming
+    # Height pages now load asynchronously; retain the demand/retry contract
+    # instead of requiring the removed synchronous ReaderPageStore adapter.
+    assert "AsyncTileLoader::new_with_reader(" in streaming
+    assert "self.loader.request(tile)" in streaming
+    assert "self.loader.drain_terminals(max_uploads)" in streaming
+    assert "TileLoadTerminal::Complete(tile) => tile" in streaming
+    assert "self.schedule_retry(ticket.tile_id)" in streaming
     assert "latest_feedback_uvs" in py_api
 
 

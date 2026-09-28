@@ -25,7 +25,9 @@ Checks, in order:
 
 Exit code 0 iff the root matches, the signature verifies, the image/source-map
 dimensions agree, the manifest ``image_sha256`` matches the actual image
-bytes, and the tamper probe is detected.
+bytes, and the tamper probe is detected. Legacy schema_version 1 (1.38.0)
+manifests carry no image binding: they report ``image_sha256_match: unbound``
+and verify on the remaining checks.
 """
 
 from __future__ import annotations
@@ -112,7 +114,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"merkle_root_match: {report['root_match']}")
     print(f"signature_valid: {report['signature_valid']}")
-    print(f"image_sha256_match: {report['image_sha256_match']}")
+    # Schema v1 manifests have no image leaf, so the report omits the field.
+    image_bound = "image_sha256_match" in report
+    image_sha256_ok = report["image_sha256_match"] if image_bound else True
+    print(
+        "image_sha256_match: "
+        + (str(image_sha256_ok) if image_bound else "unbound (schema_version 1)")
+    )
 
     # Single-texel tamper probe: flipping one source-map texel must break the
     # recomputed root. SOURCE_ID_NONE never gains attribution — the probe uses
@@ -129,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         report["root_match"]
         and report["signature_valid"]
         and report["dims_match"]
-        and report["image_sha256_match"]
+        and image_sha256_ok
         and image_dims_match
         and not report["unknown_source_ids"]
         and tamper_detected
