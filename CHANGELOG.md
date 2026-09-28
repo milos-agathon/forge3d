@@ -18,6 +18,10 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - MENSURA: the geocentric entry points `geo::projections::geocentric::{geodetic_to_ecef, wgs84_geodetic_to_ecef}` accept only `Height<Ellipsoidal>` and return a typed height, so an orthometric or bare-float height no longer compiles into ECEF math. The DUPLA Everest jitter scene now converts the summit's 8,848.86 m orthometric height through EGM96 instead of using it as an ellipsoidal height. (#192)
 - `tests/test_world_coord_f32_gate.py` re-freezes the narrowing inventory at 1,403 sites. Every re-freeze is now chained through `tests/data/world_coord_f32_ledger.json`. The ledger records the site-level drift that landed after the ANAMNESIS freeze, reviewed to contain no world-position narrowing, and the MENSURA transition. (#192)
 
+### Fixed
+- VERITAS: the native `seal_provenance` and `verify_provenance` accept calls without image bytes again, as in 1.38.0. They warn that the call is deprecated, produce the same 1.38.0 manifest byte for byte, and verify 1.38.0 manifests. (#193)
+- `tools/verify_provenance.py` no longer crashes on 1.38.0 manifests; it reports that the image is not bound and checks everything else. (#193)
+
 ## [1.38.0] - 2026-09-20
 
 ### Added
