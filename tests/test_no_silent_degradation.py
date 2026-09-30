@@ -866,6 +866,9 @@ def test_nephele_physical_exclusion_is_one_hosted_site_and_six_required_gates():
     exclusion = "--deselect=tests/test_nephele_physical.py"
     assert workflow.count(exclusion) == 1
     assert slow_job.count(exclusion) == 1
+    assert re.findall(r"--(?:deselect|ignore(?:-glob)?)(?:=|\s+)(\S+)", workflow) == [
+        "tests/test_nephele_physical.py"
+    ]
     assert re.findall(r"--deselect(?:=|\s+)(\S+)", slow_job) == ["tests/test_nephele_physical.py"]
     assert "--ignore" not in slow_job
     args = ci_pytest_lane.build_pytest_args("full", [], slow=True)

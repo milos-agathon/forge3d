@@ -41,9 +41,10 @@ result = render_volumetric_reference(
 beauty = result["beauty"]
 ```
 
-The reference renderer is a GPU pixel producer and follows the repository
-certificate contract. Set `certificate=True` to retain the signed execution
-certificate in the diagnostics surface, or pass a path to write it. The
+The reference renderer combines CPU transport with production GPU terrain
+queries and follows the repository certificate contract. Set `certificate=True`
+to retain the execution certificate in the diagnostics surface, or pass a path
+to write it. The
 certificate records the negotiated adapter and capabilities, tracked
 allocations, the executed terrain-trace WGSL, the media pass, and any
 degradations.
