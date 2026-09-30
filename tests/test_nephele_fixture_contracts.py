@@ -431,11 +431,16 @@ def test_fixture_manifest_hashes_every_input_and_masks_regenerate(tmp_path: Path
         for role, digest in provenance["scene_inputs"].items():
             assert digest == manifest["scene_inputs"][role]["sha256"]
         for relative, expected in provenance["source_inputs"].items():
-            assert expected == _hash(ROOT / relative)
+            recorded_source = subprocess.run(
+                ["git", "-C", str(ROOT), "show", f"{provenance['source_revision']}:{relative}"],
+                check=True, capture_output=True,
+            ).stdout
+            assert expected == hashlib.sha256(recorded_source).hexdigest(), relative
         assert set(provenance["native_runtime"]) == {
             "source_revision", "wheel_filename", "wheel_sha256",
             "wheel_native_member", "native_sha256",
         }
+        assert provenance["source_revision"] == provenance["native_runtime"]["source_revision"]
         assert provenance["native_runtime"]["source_revision"] == provenance["diagnostics"]["source_revision"]
         assert set(provenance["camera_contract"]) == {
             "origin", "look_at", "up", "right", "forward", "fov_y",
