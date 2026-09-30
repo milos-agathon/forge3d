@@ -32,9 +32,11 @@ def _distance_squared(a: tuple[int, int], b: tuple[int, int]) -> int:
 
 
 def _energy(point: tuple[int, int], occupied: set[tuple[int, int]]) -> float:
-    return sum(
+    # Python 3.12 changed float summation. Use a stable order and compensated
+    # summation so supported Python versions reproduce the same ranked tile.
+    return math.fsum(
         math.exp(-_distance_squared(point, other) / (2.0 * SIGMA * SIGMA))
-        for other in occupied
+        for other in sorted(occupied)
         if other != point
     )
 

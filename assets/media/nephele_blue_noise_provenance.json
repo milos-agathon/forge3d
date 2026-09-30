@@ -5,7 +5,7 @@
     8
   ],
   "generator": "scripts/generate_media_blue_noise.py",
-  "generator_sha256": "c79448da1945c229bddfe9bd8e66e04c2d70b56ce1ebc3ef0a769c8b0e3a3932",
+  "generator_sha256": "9020627e00f9ac3b6803eeb1d4ba0b602eaf158fa62bb79c98411bff3eaca50a",
   "license": "MIT",
   "license_file": "LICENSE",
   "parameters": {
