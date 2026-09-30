@@ -148,3 +148,8 @@ a unique N without a confidence choice: the owner selected N = 10,000,000, and
 the report gives the resulting measured k = tau sqrt(N/V) and approximate
 false-failure probability. These are uncertainty reports, not new gates.
 The registry `wgpu-hal` is used without a vendored patch (OD-3 a).
+
+Physical evidence retains reference wheels under
+`reference-wheel/<wheel-sha256>/<original-filename>`. Candidate wheels remain
+at the archive root, so two builds of the same package version cannot overwrite
+each other. Both retain their original filenames and verified native bytes.

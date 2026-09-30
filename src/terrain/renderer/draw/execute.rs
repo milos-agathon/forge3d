@@ -1284,7 +1284,9 @@ impl TerrainScene {
 mod media_tonemap_tests {
     #[test]
     fn realtime_media_honors_configured_aces_instead_of_legacy_filmic() {
-        let source = include_str!("execute.rs");
+        let source = include_str!("execute.rs")
+            .split_once("#[cfg(test)]")
+            .map_or("", |(production, _)| production);
         assert!(source.contains("operator_index: decoded.tonemap.operator_index"));
         assert!(!source.contains("operator_index: 5,"));
     }

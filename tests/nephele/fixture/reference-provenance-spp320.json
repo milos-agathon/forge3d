@@ -52,11 +52,11 @@
     "majorant_proof": "TrilinearConvexHull",
     "majorant_valid": true,
     "multiple_scatter_luminance": null,
-    "sample_count": 2621440,
+    "sample_count": 1310720,
     "single_scatter_luminance": null,
     "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
     "staging_readback_bytes": 0,
-    "step_count": 29772270,
+    "step_count": 14882610,
     "temporal_history_decision": "not_applicable",
     "temporal_history_reason": "independent reference samples do not reuse temporal history"
   },
@@ -79,11 +79,11 @@
     "algorithm": "per-pixel-absolute-sample-index-v1",
     "range": [
       0,
-      640
+      320
     ],
     "seed": 1313165384
   },
-  "samples_per_pixel": 640,
+  "samples_per_pixel": 320,
   "scene_inputs": {
     "atmosphere": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47",
     "camera": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1",

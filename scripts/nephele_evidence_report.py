@@ -1059,6 +1059,13 @@ def _camera_contract(value: Any, label: str) -> dict[str, Any]:
     return result
 
 
+def _reference_wheel_path(artifact_dir: Path, runtime: dict[str, str]) -> Path:
+    content_path = artifact_dir / "reference-wheel" / runtime["wheel_sha256"] / runtime["wheel_filename"]
+    # Existing flat archives remain verifiable. A present content path must
+    # validate itself; corrupted retained bytes never fall back to another file.
+    return content_path if content_path.exists() else artifact_dir / runtime["wheel_filename"]
+
+
 def _native_runtime(
     value: Any,
     source_revision: str,
@@ -1085,7 +1092,7 @@ def _native_runtime(
         or not SHA256_RE.fullmatch(str(value["native_sha256"]))
     ):
         _fail("provenance_error", f"{label}: reference wheel/native runtime identity is incomplete")
-    wheel_path = artifact_dir / wheel_filename
+    wheel_path = _reference_wheel_path(artifact_dir, value)
     if _sha256(wheel_path) != value["wheel_sha256"]:
         _fail("provenance_error", f"{label}: retained reference wheel bytes differ from provenance")
     try:
@@ -1343,7 +1350,8 @@ def _verify_reference_provenance(
     prior_paths: dict[str, Path] = {}
     artifact_names = {
         generator_name, final_rgb_name, final_provenance_name, prior_provenance_name,
-        convergence_path.name, current_provenance["native_runtime"]["wheel_filename"],
+        convergence_path.name,
+        _reference_wheel_path(artifact_dir, current_provenance["native_runtime"]).relative_to(artifact_dir).as_posix(),
     }
     for canonical_name, record in artifacts.items():
         if not isinstance(record, dict):

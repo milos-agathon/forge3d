@@ -12,7 +12,7 @@
     "cloud_shadow_mask": {
       "artifact": "cloud-shadow-mask.npy",
       "path": "tests/nephele/fixture/cloud-shadow-mask.npy",
-      "sha256": "5416e6a33da470d854f39521a6fbd32414bc1d203e22e4ff23301f9161d19db3"
+      "sha256": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e"
     },
     "godray_roi_mask": {
       "artifact": "godray-roi-mask.npy",
@@ -22,12 +22,12 @@
     "reference_cloud_shadow_aov": {
       "artifact": "reference-cloud-shadow-aov.npy",
       "path": "tests/nephele/fixture/reference-cloud-shadow-aov.npy",
-      "sha256": "348860143100486e8f25f6f15feef560ea9eda0930023ac935bea58e7262dd9e"
+      "sha256": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667"
     },
     "reference_in_scatter": {
       "artifact": "reference-in-scatter.npy",
       "path": "tests/nephele/fixture/reference-in-scatter.npy",
-      "sha256": "881e05d77142a0d3087fd141ec0988a1af19ea71f1dad7b775e054a74471ad5a"
+      "sha256": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e"
     },
     "reference_media_lighting_visibility": {
       "artifact": "reference-media-lighting-visibility.npy",
@@ -37,12 +37,12 @@
     "reference_optical_depth": {
       "artifact": "reference-optical-depth.npy",
       "path": "tests/nephele/fixture/reference-optical-depth.npy",
-      "sha256": "363ee4ad3a3fb3bca9c1e6017c24c4a5e7c6cb76173f65baa7b6471c52b7c8cb"
+      "sha256": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6"
     },
     "reference_rgb": {
       "artifact": "reference-rgb.npy",
       "path": "tests/nephele/fixture/reference-rgb.npy",
-      "sha256": "b01e0727bbdbd36c26ebaa706227938ed534454ac1acbfafdff6fc41f0b9574b"
+      "sha256": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd"
     },
     "reference_terrain_hit": {
       "artifact": "reference-terrain-hit.npy",
@@ -52,12 +52,12 @@
     "reference_terrain_slice": {
       "artifact": "reference-terrain-slice.npy",
       "path": "tests/nephele/fixture/reference-terrain-slice.npy",
-      "sha256": "c38667c8072d8ba30434a2fc35a71a2de9ed3218c1b2cde7bc9a6d5641ff993f"
+      "sha256": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5"
     },
     "reference_transmittance": {
       "artifact": "reference-transmittance.npy",
       "path": "tests/nephele/fixture/reference-transmittance.npy",
-      "sha256": "785991ea37f9e8c28338841b676c84676778999c5b45cf5803c5e24b27431f23"
+      "sha256": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20"
     },
     "shaft_mask": {
       "artifact": "shaft-mask.npy",
@@ -138,6 +138,6 @@
     }
   },
   "schema": "forge3d.nephele.fixture_manifest/3",
-  "source_revision": "92cf80d20d7d5c6e9a564b853e79d596f3f5088f",
-  "status": "UNRESOLVED"
+  "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+  "status": "APPROVED"
 }

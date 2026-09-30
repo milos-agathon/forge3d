@@ -25,6 +25,7 @@ from scripts.nephele_evidence_report import (
     _accumulator_from_array,
     _derived_cache_key,
     _policy_evaluator,
+    _native_runtime,
     _reference_module_sha256,
     _validate_realtime_diagnostics,
     _verify_transported_medium,
@@ -1129,8 +1130,19 @@ def test_capture_reference_wheel_seam_recomputes_exact_bytes(tmp_path: Path) -> 
             "native_sha256": hashlib.sha256(native).hexdigest(),
         },
     }
+    candidate_bytes = b"different candidate with the same package version and filename"
+    (artifact / wheel_path.name).write_bytes(candidate_bytes)
     _retain_reference_wheel(artifact, provenance, source)
-    assert (artifact / wheel_path.name).read_bytes() == wheel_path.read_bytes()
+    runtime = provenance["native_runtime"]
+    retained = artifact / "reference-wheel" / runtime["wheel_sha256"] / wheel_path.name
+    assert retained.read_bytes() == wheel_path.read_bytes()
+    assert (artifact / wheel_path.name).read_bytes() == candidate_bytes
+    assert _native_runtime(runtime, "a" * 40, artifact, "reference") == runtime
+    # Do not accept a valid legacy copy when the selected retained copy is corrupt.
+    (artifact / wheel_path.name).write_bytes(wheel_path.read_bytes())
+    retained.write_bytes(b"corrupted reference wheel")
+    with pytest.raises(EvidenceError, match="reference wheel bytes"):
+        _native_runtime(runtime, "a" * 40, artifact, "reference")
     provenance["native_runtime"]["native_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="native bytes"):
         _retain_reference_wheel(artifact, provenance, source)
@@ -1487,7 +1499,7 @@ def test_cli_has_no_arbitrary_fixture_override_and_writes_structured_error(tmp_p
     assert error["status"] == "FAIL"
 
 
-def test_tracked_unresolved_fixture_fails_closed_and_inventory_is_exact() -> None:
+def test_tracked_approved_fixture_verifies_and_inventory_is_exact(tmp_path: Path) -> None:
     inventory = _load(ROOT / "tests/nephele/evidence-inventory.json")
     expected = RAW_FILES | {
         "run-context.json", "adapter-probe.json", "installed-wheel-runtime.json",
@@ -1522,10 +1534,25 @@ def test_tracked_unresolved_fixture_fails_closed_and_inventory_is_exact() -> Non
     }
     fixture = _load(ROOT / "tests/nephele/fixture-manifest.json")
     policy = _load(ROOT / "tests/nephele/gate4-policy.json")
-    assert fixture["status"] == "UNRESOLVED"
-    with pytest.raises(EvidenceError) as unresolved:
-        _verify_fixture_manifest(ROOT, fixture, ROOT, _git(ROOT, "rev-parse", "HEAD"))
-    assert unresolved.value.code == "fixture_unresolved"
+    assert fixture["status"] == "APPROVED"
+    for source in (ROOT / "tests/nephele/fixture").iterdir():
+        if source.is_file():
+            shutil.copy2(source, tmp_path / source.name)
+    for record in [*fixture["scene_inputs"].values(), *fixture["files"].values()]:
+        shutil.copy2(ROOT / record["path"], tmp_path / record["artifact"])
+    shutil.copy2(ROOT / "tests/nephele/homogeneous-slab.json", tmp_path / "homogeneous-slab.json")
+    convergence_record = _load(ROOT / "tests/nephele/fixture/reference-convergence.json")
+    generator = ROOT / convergence_record["generator"]
+    shutil.copy2(generator, tmp_path / generator.name)
+    _retain_reference_wheel(
+        tmp_path,
+        _load(ROOT / "tests/nephele/fixture/reference-provenance.json"),
+        ROOT / "tests/nephele/acceptance-runtime/reference-wheel",
+    )
+    head = _git(ROOT, "rev-parse", "HEAD")
+    _verify_fixture_manifest(tmp_path, fixture, ROOT, head)
+    convergence, _, _ = _verify_reference_provenance(tmp_path, fixture, ROOT, head)
+    assert convergence["status"] == "CONVERGED"
     assert policy["status"] == "APPROVED"
     assert policy["aggregation"] == {"kind": "per_pixel_pass_fraction", "minimum_fraction": 0.95}
     assert inventory["gate4_aggregation"] == "per_pixel_pass_fraction"

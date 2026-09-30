@@ -246,7 +246,7 @@ def test_fixture_manifest_hashes_every_input_and_masks_regenerate(tmp_path: Path
     }
     provenance = _object(ROOT / "tests/nephele/fixture/reference-provenance.json")
     assert provenance["schema"] == "forge3d.nephele.reference_provenance/2"
-    assert provenance["algorithm"] == "integrated-hybrid-terrain-ratio-delta-tracking-reference"
+    assert provenance["algorithm"] == "integrated-hybrid-terrain-spectral-ratio-delta-tracking-surface-env-mis-v3"
     assert provenance["samples_per_pixel"] > 0
     assert len(provenance["source_revision"]) == 40
     assert provenance["assembled_sources"] == {

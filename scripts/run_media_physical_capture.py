@@ -198,9 +198,10 @@ def _retain_reference_wheel(
         or str(runtime["source_revision"]).encode("ascii") not in native_bytes
     ):
         raise ValueError("supplied reference native bytes differ from tracked provenance or source")
-    destination = artifact / wheel_name
+    destination = artifact / "reference-wheel" / runtime["wheel_sha256"] / wheel_name
+    destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and destination.read_bytes() != source.read_bytes():
-        raise ValueError("reference and candidate wheels collide by filename with different bytes")
+        raise ValueError("retained reference wheel path contains different bytes")
     shutil.copy2(source, destination)
 
 
@@ -282,7 +283,7 @@ def prepare(
     wheel = wheels[0]
     retained_wheel = artifact / wheel.name
     if retained_wheel.exists() and retained_wheel.read_bytes() != wheel.read_bytes():
-        raise ValueError("candidate and reference wheels collide by filename with different bytes")
+        raise ValueError("retained candidate wheel path contains different bytes")
     shutil.copy2(wheel, retained_wheel)
     with zipfile.ZipFile(retained_wheel) as archive:
         members = [name for name in archive.namelist() if name.startswith("forge3d/_forge3d") and name.endswith(".pyd")]

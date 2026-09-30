@@ -1,16 +1,73 @@
 {
+  "classification_identity": {
+    "reference-media-lighting-visibility.npy": true,
+    "reference-terrain-hit.npy": true,
+    "reference-terrain-slice.npy": true
+  },
   "criterion": "actual downstream Gate 3 and approved Gate 4 metrics over exact identical reference-derived masks",
   "final": {
     "provenance_path": "tests/nephele/fixture/reference-provenance.json",
-    "provenance_sha256": "020d7f1c6bd80c8a2975d313ee128ce97a549011c95ff1985e6407ea77b41c49",
+    "provenance_sha256": "9650034250479e286b1455d7c19df8c971cd845f996a346bb63456975023979b",
     "rgb_path": "tests/nephele/fixture/reference-rgb.npy",
-    "rgb_sha256": "b01e0727bbdbd36c26ebaa706227938ed534454ac1acbfafdff6fc41f0b9574b",
-    "samples_per_pixel": 10
+    "rgb_sha256": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "samples_per_pixel": 640
   },
   "generator": "scripts/record_media_reference_convergence.py",
   "generator_sha256": "3c733e32558e464bc907f77990683afa100d8ad9dc19d5c73228be7f31b112c9",
-  "nested_prefix": false,
+  "mask_identity": {
+    "cloud_shadow_mask": true,
+    "godray_roi_mask": true,
+    "shaft_mask": true,
+    "sky_cloud_mask": true,
+    "terrain_mask": true
+  },
+  "metrics": {
+    "gate3_godray_roi_ssim": 0.9942275395295402,
+    "gate3_sky_cloud_delta_e_below_2_5_fraction": 1.0,
+    "gate4_cloud_shadow_terrain_delta_e_below_2_fraction": 0.9961464354527938
+  },
+  "nested_prefix": true,
   "next_samples_per_pixel_if_unresolved": null,
+  "previous": {
+    "artifacts": {
+      "reference-cloud-shadow-aov.npy": {
+        "path": "tests/nephele/fixture/reference-cloud-shadow-aov-spp320.npy",
+        "sha256": "04dd3fc04c71f6269c481451404c1df81e5d63537c6d81efdf4ae4fbf99cceff"
+      },
+      "reference-in-scatter.npy": {
+        "path": "tests/nephele/fixture/reference-in-scatter-spp320.npy",
+        "sha256": "d778b1a58e930677e40b2e1d0210da857fac4b620e51c316e0170b5f8ecea856"
+      },
+      "reference-media-lighting-visibility.npy": {
+        "path": "tests/nephele/fixture/reference-media-lighting-visibility-spp320.npy",
+        "sha256": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159"
+      },
+      "reference-optical-depth.npy": {
+        "path": "tests/nephele/fixture/reference-optical-depth-spp320.npy",
+        "sha256": "ee7fa9a309077021ac05c8df91b110421c59eb6c74c37b6f0c7d023dae16c31b"
+      },
+      "reference-rgb.npy": {
+        "path": "tests/nephele/fixture/reference-rgb-spp320.npy",
+        "sha256": "faed5d5f8d5aec7ede7d30c7f8363e24737825ddf8393207b3f33d6038807dac"
+      },
+      "reference-terrain-hit.npy": {
+        "path": "tests/nephele/fixture/reference-terrain-hit-spp320.npy",
+        "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+      },
+      "reference-terrain-slice.npy": {
+        "path": "tests/nephele/fixture/reference-terrain-slice-spp320.npy",
+        "sha256": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5"
+      },
+      "reference-transmittance.npy": {
+        "path": "tests/nephele/fixture/reference-transmittance-spp320.npy",
+        "sha256": "922c7305e0fe0d0f2260446a0f6e26747023ca2ca05533f087569f250d3382fd"
+      }
+    },
+    "provenance_path": "tests/nephele/fixture/reference-provenance-spp320.json",
+    "provenance_sha256": "13ec3a4f8c0419440ee2c33e2888e1cd6bf55de0f1a99da11a7844db03b7657a",
+    "samples_per_pixel": 320
+  },
   "schema": "forge3d.nephele.reference_convergence/2",
-  "status": "UNRESOLVED"
+  "spatial_tiles_identity": true,
+  "status": "CONVERGED"
 }
