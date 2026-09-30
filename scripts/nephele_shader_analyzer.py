@@ -125,7 +125,7 @@ def _source_parameter(function:dict[str,Any],name:str)->int|None:
 def _resolve(expr:str,path:Path,text:str,before:int,constants:dict[str,tuple[Path,str,str]],stack:set[str])->str|None:
     expr=expr.strip().rstrip(",")
     while expr.startswith("&"): expr=expr[1:].strip()
-    for suffix in (".as_str()",".as_ref()",".to_string()",".into()"):
+    for suffix in (".as_str()",".as_ref()",".to_string()",".into()",".to_vec()"):
         if expr.endswith(suffix): return _resolve(expr[:-len(suffix)],path,text,before,constants,stack)
     if expr.startswith("("):
         try:
@@ -169,10 +169,57 @@ def _resolve(expr:str,path:Path,text:str,before:int,constants:dict[str,tuple[Pat
         base=_resolve(replace.group(1),path,text,before,constants,stack); args=_split_args(replace.group(2))
         old=_resolve(args[0],path,text,before,constants,stack) if len(args)==2 else None; new=_resolve(args[1],path,text,before,constants,stack) if len(args)==2 else None
         return base.replace(old,new) if base is not None and old is not None and new is not None else None
+    joined=re.fullmatch(r"(\[.*\])\s*\.join\((.*)\)",expr,re.DOTALL)
+    if joined:
+        separator=_rust_string(joined.group(2).strip())
+        if separator is None: return None
+        values=[_resolve(part,path,text,before,constants,stack) for part in _split_args(joined.group(1)[1:-1])]
+        return None if any(value is None for value in values) else separator.join(values)
+    # Main's shader_sources module represents assemblies as ordered SourcePart
+    # arrays. Resolve those records, including the strip flag, rather than
+    # guessing a source from an unrelated nested iterator/helper call.
+    if expr.startswith("["):
+        try: body,end=_balanced(expr,0,"[","]")
+        except ValueError: return None
+        if end!=len(expr): return None
+        pieces=[]
+        for part in _split_args(body):
+            part=part.strip()
+            if not part: continue
+            record=constants.get(part)
+            part_path,part_text,part_expr=record if record else (path,text,part)
+            match=re.fullmatch(r"SourcePart\s*\{(.*)\}",part_expr.strip(),re.DOTALL)
+            if not match: return None
+            fields={}
+            for field in _split_args(match.group(1)):
+                if not field.strip(): continue
+                key,separator,value=field.partition(":")
+                if not separator: return None
+                fields[key.strip()]=value.strip()
+            if set(fields)!={"path","text","strip"} or fields["strip"] not in ("true","false"): return None
+            piece=_resolve(fields["text"],part_path,part_text,len(part_text),constants,stack)
+            if piece is None: return None
+            if fields["strip"]=="true": piece="\n".join(line for line in piece.splitlines() if not line.lstrip().startswith("#include"))
+            pieces.append(piece)
+        return "\n".join(pieces) if pieces else None
     call=re.fullmatch(r"(?:[A-Za-z_]\w*::)*([A-Za-z_]\w*)\s*\((.*)\)",expr,re.DOTALL)
     if call and call.group(1) not in stack:
+        arguments=_split_args(call.group(2))
+        if call.group(1)=="strip_includes" and len(arguments)==1:
+            source=_resolve(arguments[0],path,text,before,constants,stack)
+            return None if source is None else "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#include"))
+        if call.group(1)=="assemble_parts" and len(arguments)==1:
+            return _resolve(arguments[0],path,text,before,constants,stack)
+        if call.group(1)=="det_and" and len(arguments)==2:
+            det=constants.get("PART_DET")
+            if det is None: return None
+            prefix=_resolve("[PART_DET]",det[0],det[1],len(det[1]),constants,stack)
+            source=_resolve(arguments[1],path,text,before,constants,stack)
+            return None if prefix is None or source is None else f"{prefix}\n{source}"
         candidates=_RUST_FUNCTIONS.get(call.group(1),[])
         for function_path,function_text,body in candidates:
+            if re.match(r"\s*(?:&?\[|(?:crate::shader_sources::)?(?:assemble_parts|det_and)\s*\()",body):
+                return _resolve(body.strip(),function_path,function_text,len(function_text),constants,stack|{call.group(1)})
             pieces=[]
             for included in re.finditer(r'(strip_includes\s*\()?include_str!\(\s*"([^"]+\.wgsl)"\s*\)',body):
                 target=(function_path.parent/included.group(2)).resolve()
@@ -242,13 +289,14 @@ def _naga_analyze(assemblies:dict[str,str])->tuple[int,list[str]]:
         (root/"Cargo.toml").write_text('[package]\nname="nephele_naga_check"\nversion="0.0.0"\nedition="2021"\n[dependencies]\nnaga={version="=0.19.2",features=["wgsl-in"]}\n',encoding="utf-8")
         (src/"main.rs").write_text(r'''use naga::{Expression,ShaderStage,Statement}; use std::{collections::HashSet,env,fs};
 fn calls(block:&naga::Block,out:&mut Vec<naga::Handle<naga::Function>>){for statement in block{match statement{Statement::Block(v)=>calls(v,out),Statement::If{accept,reject,..}=>{calls(accept,out);calls(reject,out)},Statement::Switch{cases,..}=>for case in cases{calls(&case.body,out)},Statement::Loop{body,continuing,..}=>{calls(body,out);calls(continuing,out)},Statement::Call{function,..}=>out.push(*function),_=>{}}}}
-fn main(){for file in env::args().skip(1){let source=fs::read_to_string(&file).unwrap();let module=naga::front::wgsl::parse_str(&source).unwrap_or_else(|e|panic!("{}: {}",file,e.emit_to_string(&source)));naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all()).validate(&module).unwrap_or_else(|e|panic!("{}: {:?}",file,e));for entry in &module.entry_points{if entry.stage!=ShaderStage::Compute{continue}if entry.function.expressions.iter().any(|(_,e)|matches!(e,Expression::ImageSample{depth_ref:Some(_),..})){panic!("{}: compute {} compare",file,entry.name)}let mut pending=Vec::new();calls(&entry.function.body,&mut pending);let mut seen=HashSet::new();while let Some(handle)=pending.pop(){if !seen.insert(handle){continue}let function=&module.functions[handle];if function.expressions.iter().any(|(_,e)|matches!(e,Expression::ImageSample{depth_ref:Some(_),..})){panic!("{}: compute {} compare",file,entry.name)}calls(&function.body,&mut pending)}}}}''',encoding="utf-8")
+fn main(){std::thread::spawn(validate_sources).join().unwrap();}
+fn validate_sources(){for file in env::args().skip(1){eprintln!("NEPHELE_NAGA_FILE={}",file);let source=fs::read_to_string(&file).unwrap();let module=naga::front::wgsl::parse_str(&source).unwrap_or_else(|e|panic!("{}: {}",file,e.emit_to_string(&source)));naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all()).validate(&module).unwrap_or_else(|e|panic!("{}: {:?}",file,e));for entry in &module.entry_points{if entry.stage!=ShaderStage::Compute{continue}if entry.function.expressions.iter().any(|(_,e)|matches!(e,Expression::ImageSample{depth_ref:Some(_),..})){panic!("{}: compute {} compare",file,entry.name)}let mut pending=Vec::new();calls(&entry.function.body,&mut pending);let mut seen=HashSet::new();while let Some(handle)=pending.pop(){if !seen.insert(handle){continue}let function=&module.functions[handle];if function.expressions.iter().any(|(_,e)|matches!(e,Expression::ImageSample{depth_ref:Some(_),..})){panic!("{}: compute {} compare",file,entry.name)}calls(&function.body,&mut pending)}}}}''',encoding="utf-8")
         ordered=sorted(assemblies.items()); paths=[]
         for index,(_,source) in enumerate(ordered):
             target=root/f"assembly-{index}.wgsl"; target.write_text(source,encoding="utf-8"); paths.append(str(target))
         completed=subprocess.run(["cargo","run","--offline","--quiet","--manifest-path",str(root/"Cargo.toml"),"--",*paths],cwd=root,capture_output=True,text=True)
         if completed.returncode:
-            output=(completed.stderr or completed.stdout)[-4000:]; match=re.search(r"assembly-(\d+)\.wgsl",output); label=ordered[int(match.group(1))][0] if match and int(match.group(1))<len(ordered) else "unknown"
+            output=(completed.stderr or completed.stdout)[-4000:]; matches=re.findall(r"assembly-(\d+)\.wgsl",output); index=int(matches[-1]) if matches else None; label=ordered[index][0] if index is not None and index<len(ordered) else "unknown"
             raise ValueError(f"Naga assembly parse/call-graph failure for {label}: {output}")
     return len(paths),sorted(assemblies)
 

@@ -124,12 +124,12 @@
     "terrain": {
       "artifact": "terrain.json",
       "path": "tests/nephele/fixture/terrain.json",
-      "sha256": "70868de90bcbd79bf7a35333a8a7f073b0ae88fb407137a6cb4c485c5fb0ceb5"
+      "sha256": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315"
     },
     "terrain_dem": {
       "artifact": "terrain-dem.npy",
       "path": "tests/nephele/fixture/terrain-dem.npy",
-      "sha256": "04848e967fe6fe9b1677a374f131898b8f9177fe5a6de4b07dec549bc5ea653e"
+      "sha256": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf"
     },
     "tonemap": {
       "artifact": "tonemap.json",

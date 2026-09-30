@@ -39,3 +39,6 @@ src/terrain/camera.rs text eol=lf
 src/terrain/mod.rs text eol=lf
 tests/nephele/*.json text eol=lf
 tests/nephele/fixture/*.json text eol=lf
+
+scripts/generate_media_blue_noise.py text eol=lf
+assets/media/nephele_blue_noise_provenance.json text eol=lf

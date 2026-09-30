@@ -1,6 +1,6 @@
 {
   "dem": "terrain-dem.npy",
-  "dem_sha256": "04848e967fe6fe9b1677a374f131898b8f9177fe5a6de4b07dec549bc5ea653e",
+  "dem_sha256": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
   "dimensions": [
     16,
     16

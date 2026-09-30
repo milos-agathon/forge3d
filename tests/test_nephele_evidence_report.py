@@ -1545,6 +1545,27 @@ def test_gate4_owner_fraction_boundary_and_self_approval_rejection():
         assert caught.value.code == "policy_unresolved"
 
 
+def test_shader_source_parts_preserve_order_and_strip_contract(tmp_path: Path, monkeypatch):
+    import scripts.nephele_shader_analyzer as analyzer
+
+    (tmp_path / "det.wgsl").write_text("// prelude\n", encoding="utf-8")
+    (tmp_path / "body.wgsl").write_text('#include "det.wgsl"\n// body\n', encoding="utf-8")
+    path = tmp_path / "source.rs"
+    constants = {"PART_DET": (path, "", 'SourcePart { path: "det.wgsl", text: include_str!("det.wgsl"), strip: false }')}
+    body = '&[PART_DET, SourcePart { path: "body.wgsl", text: include_str!("body.wgsl"), strip: true }]'
+    monkeypatch.setattr(analyzer, "_RUST_FUNCTIONS", {
+        "terrain_parts": [(path, "", body)],
+        "kernel": [(path, "", '[include_str!("det.wgsl"), strip_includes(include_str!("body.wgsl"))].join("\\n")')],
+        "inverse": [(path, "", '[kernel(), "// inverse"].join("\\n")')],
+    })
+    assert analyzer._resolve("assemble_parts(terrain_parts())", path, "", 0, constants, set()) == "// prelude\n\n// body"
+    assert analyzer._resolve("assemble_parts(terrain_parts().to_vec())", path, "", 0, constants, set()) == "// prelude\n\n// body"
+    assert analyzer._resolve("inverse()", path, "", 0, constants, set()) == "// prelude\n\n// body\n// inverse"
+    assert analyzer._resolve('det_and("body.wgsl", include_str!("body.wgsl"))', path, "", 0, constants, set()) == '// prelude\n\n#include "det.wgsl"\n// body\n'
+    invalid = body.replace("strip: true", "strip: unknown_runtime_flag")
+    assert analyzer._resolve(invalid, path, "", 0, constants, set()) is None
+
+
 def test_gate2_count_is_read_from_artifact_not_hardcoded(tmp_path: Path):
     repo, artifact, head = _fixture(tmp_path)
     matrix = np.array([[1, 1, 0], [0, 0, 1]], dtype=np.uint8)
