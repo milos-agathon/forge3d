@@ -1004,6 +1004,18 @@ def test_reference_module_hash_binds_query_shader_bytes(tmp_path: Path) -> None:
     assert after != before
 
 
+def test_registered_convergence_metrics_survive_measured_ssim_roundoff(tmp_path: Path, monkeypatch) -> None:
+    import scripts.nephele_evidence_report as evidence_module
+
+    original_ssim = evidence_module.ssim
+    # Difference observed between Linux CI and the retained Windows registration.
+    offset = 0.9942275395295544 - 0.9942275395295402
+    monkeypatch.setattr(
+        evidence_module, "ssim", lambda *args, **kwargs: original_ssim(*args, **kwargs) + offset
+    )
+    test_tracked_approved_fixture_verifies_and_inventory_is_exact(tmp_path)
+
+
 def test_gate2_rejects_tautological_per_sample_closure(tmp_path: Path) -> None:
     repo, artifact, head = _fixture(tmp_path)
     count = 1_000_000

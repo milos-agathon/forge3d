@@ -1424,7 +1424,10 @@ def _verify_reference_provenance(
         {
             "previous_samples_per_pixel": prior_spp,
             "final_samples_per_pixel": final_spp,
-            "metrics": metrics,
+            # Preserve the hash-bound registration after validating it above.
+            # NumPy/SciPy convolution rounding can differ across runner platforms.
+            "metrics": dict(convergence["metrics"]),
+            "recomputed_metrics": metrics,
             "native_runtime": current_provenance["native_runtime"],
         },
         artifact_names,

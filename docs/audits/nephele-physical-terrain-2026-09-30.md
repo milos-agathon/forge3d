@@ -36,7 +36,7 @@ The independently rendered array reproduced SHA-256 `7e9912a7370597b2395b22edca0
 
 The assembled terrain source pin is `0xe3539a322a87b8cc`. Its conditional authorization is satisfied by the observed source, proof, ablation, shader-proof and unchanged NVIDIA golden checks below. The old four Rust and two Python failures were genuine alarms in the newly added shader code; they were not failures of the pin procedure.
 
-| Check | Observed result | Log in `.tmp/nephele-completion/` |
+| Check | Observed result | Log in [committed validation records](nephele-remediation-2026-09-30/) |
 |---|---|---|
 | Rust verifier/source pins/proofs/ablations | 108 passed, 0 failed, 1 existing inspection-only ignored | `remediation-proof-tests.log` |
 | Rust realtime-media contracts | 25 passed, 0 failed/ignored; expected names confirmed | `remediation-media-tests.log` |
@@ -47,13 +47,19 @@ The assembled terrain source pin is `0xe3539a322a87b8cc`. Its conditional author
 | Control and diagnostic provenance checks | 17 passed, 0 failed/skipped | `remediation-control-tests.log` |
 | Full three-file NEPHELE suite on rebuilt wheel | 151 passed, 0 failed/skipped; 1,257.45 s | `remediation-nephele-suite.log` |
 | Formatting / canonical clippy | Both exit 0 | `remediation-format.log`, `remediation-clippy.log` |
-| Whitespace | Exit 0; recheck required after final report edits | `remediation-diff-check.log` |
+| Source whitespace | Passed; archived raw CRLF evidence is preserved byte-for-byte and produces whitespace notices in an unfiltered diff check | `remediation-source-diff-check.log` |
 
 The historical `approved-shader-goldens.log` contains **11 failures**, consisting of two shader-proof failures and all nine goldens. Its golden selector was missing, so NVIDIA output was compared to the generic/Metal fallback. The independent NVIDIA run and the current 18-test run explicitly use `FORGE3D_TERRAIN_GOLDEN_VARIANT=nvidia-vulkan`; no golden file changed. The historical 143-test result used an earlier wheel and is not final-source evidence.
 
 Current wheel SHA-256: `6df33167c94c7b01bb8fd7abcf04a60eb212d8b67eb91b378274749236c21997`. Installed native SHA-256: `e4cfbd5123be2255ab411d93906f56d44678188a4a89358bba51b2cb48a89586`. It reports source revision `1cf04e47…`, but was built from dirty source. The new B1 report correctly records `source_matches_repository_head: false`; a matching embedded HEAD alone does not prove a clean-source build. Historical captures are preserved rather than rewriting their hash-bound metadata.
 
 GPU evidence uses a literal NVIDIA GeForce RTX 3070 / Vulkan / NVIDIA 610.60; adapter qualification succeeded with `software_fallback: false`. Python checks set `FORGE3D_NO_BOOTSTRAP=1` and `FORGE3D_TEST_INSTALLED_WHEEL=1`; GPU checks also set `WGPU_BACKEND=vulkan` and `WGPU_BACKENDS=vulkan`. Golden checks additionally set `FORGE3D_RUN_TERRAIN_GOLDENS=1` and the explicit NVIDIA variant. Golden-update variables were not enabled. Rust tests and clippy used `extension-module,default,cog_streaming,shader-contract-asserts` and the isolated worktree `target` directory.
+
+## Hosted core CI correction
+
+The first source commit, `1c6500154efff602c1be0b691492adf67a947bae`, failed hosted Fast Contract because the computed SSIM was `0.9942275395295544`, while the registered Windows value was `0.9942275395295402`. The verifier already checked recomputation against registration with its existing `1e-12` tolerances, then returned the computed value to a caller that expected the exact registration. It now returns the validated registered `metrics` and separately exposes `recomputed_metrics`. Acceptance still uses the recomputed values and unchanged thresholds; no test was weakened. The new measured-roundoff regression and tracked-fixture test passed (2); all 24 provenance/convergence tampering cases passed; the full six-gate report recomputation test passed (1).
+
+The initial plan-only CI failure was a shallow-history lookup (`fatal: not a tree object`); the full-history workflow change resolved it. The current follow-up CI result will be recorded below.
 
 ## Remaining physical evidence
 
