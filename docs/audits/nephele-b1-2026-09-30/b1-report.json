@@ -1,0 +1,162 @@
+{
+  "changed_control_input": "sigma_a = sigma_s = RGB zero",
+  "diagnostic_tool": {
+    "path": "D:\\forge3d\\cache\\nephele172-b1-diagnostic.py",
+    "sha256": "8e9aa9079af51177367123efc35f04dc8b0e5130a36c45b7e99d38d314726bae"
+  },
+  "fixture_manifest_sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817",
+  "native_source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+  "owner_decision_OD9_required": true,
+  "physical_acceptance": false,
+  "scene_inputs": {
+    "atmosphere": {
+      "artifact": "atmosphere.json",
+      "path": "tests/nephele/fixture/atmosphere.json",
+      "sha256": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47"
+    },
+    "camera": {
+      "artifact": "camera.json",
+      "path": "tests/nephele/fixture/camera.json",
+      "sha256": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1"
+    },
+    "crop": {
+      "artifact": "crop.json",
+      "path": "tests/nephele/fixture/crop.json",
+      "sha256": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04"
+    },
+    "exposure": {
+      "artifact": "exposure.json",
+      "path": "tests/nephele/fixture/exposure.json",
+      "sha256": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31"
+    },
+    "material": {
+      "artifact": "material.json",
+      "path": "tests/nephele/fixture/material.json",
+      "sha256": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789"
+    },
+    "medium": {
+      "artifact": "medium.json",
+      "path": "tests/nephele/fixture/medium.json",
+      "sha256": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9"
+    },
+    "sun": {
+      "artifact": "sun.json",
+      "path": "tests/nephele/fixture/sun.json",
+      "sha256": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02"
+    },
+    "terrain": {
+      "artifact": "terrain.json",
+      "path": "tests/nephele/fixture/terrain.json",
+      "sha256": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315"
+    },
+    "terrain_dem": {
+      "artifact": "terrain-dem.npy",
+      "path": "tests/nephele/fixture/terrain-dem.npy",
+      "sha256": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf"
+    },
+    "tonemap": {
+      "artifact": "tonemap.json",
+      "path": "tests/nephele/fixture/tonemap.json",
+      "sha256": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034"
+    }
+  },
+  "schema": "forge3d.nephele.b1_diagnostic/1",
+  "terrain_comparison": {
+    "fraction_delta_e_below_2": 0.17265725288831835,
+    "maximum_delta_e": 31.024162921895968,
+    "mean_delta_e": 8.787831367503586,
+    "p95_delta_e": 19.03335987875224,
+    "pixels": 1558
+  },
+  "vacuum_reference_prefixes": [
+    {
+      "diagnostics": {
+        "adapter": "NVIDIA GeForce RTX 3070",
+        "backend": "Vulkan",
+        "density_device_local_bytes": 0,
+        "driver": "NVIDIA 610.60",
+        "energy_accounting_residual": null,
+        "executed_multi_scatter": false,
+        "froxel_device_local_bytes": 0,
+        "host_visible_bytes": 270336,
+        "majorant_device_local_bytes": 0,
+        "majorant_proof": "TrilinearConvexHull",
+        "majorant_valid": true,
+        "multiple_scatter_luminance": null,
+        "sample_count": 40960,
+        "single_scatter_luminance": null,
+        "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+        "staging_readback_bytes": 0,
+        "step_count": 0,
+        "temporal_history_decision": "not_applicable",
+        "temporal_history_reason": "independent reference samples do not reuse temporal history"
+      },
+      "spp": 10,
+      "wall_seconds": 23.456148800003575
+    },
+    {
+      "diagnostics": {
+        "adapter": "NVIDIA GeForce RTX 3070",
+        "backend": "Vulkan",
+        "density_device_local_bytes": 0,
+        "driver": "NVIDIA 610.60",
+        "energy_accounting_residual": null,
+        "executed_multi_scatter": false,
+        "froxel_device_local_bytes": 0,
+        "host_visible_bytes": 270336,
+        "majorant_device_local_bytes": 0,
+        "majorant_proof": "TrilinearConvexHull",
+        "majorant_valid": true,
+        "multiple_scatter_luminance": null,
+        "sample_count": 81920,
+        "single_scatter_luminance": null,
+        "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+        "staging_readback_bytes": 0,
+        "step_count": 0,
+        "temporal_history_decision": "not_applicable",
+        "temporal_history_reason": "independent reference samples do not reuse temporal history"
+      },
+      "self_convergence": {
+        "fraction_delta_e_below_2": 0.8940949935815148,
+        "maximum_delta_e": 5.116672315088121,
+        "mean_delta_e": 0.9035535161303632,
+        "p95_delta_e": 2.7006125744575287,
+        "pixels": 1558
+      },
+      "spp": 20,
+      "wall_seconds": 47.18387190000067
+    },
+    {
+      "diagnostics": {
+        "adapter": "NVIDIA GeForce RTX 3070",
+        "backend": "Vulkan",
+        "density_device_local_bytes": 0,
+        "driver": "NVIDIA 610.60",
+        "energy_accounting_residual": null,
+        "executed_multi_scatter": false,
+        "froxel_device_local_bytes": 0,
+        "host_visible_bytes": 270336,
+        "majorant_device_local_bytes": 0,
+        "majorant_proof": "TrilinearConvexHull",
+        "majorant_valid": true,
+        "multiple_scatter_luminance": null,
+        "sample_count": 163840,
+        "single_scatter_luminance": null,
+        "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+        "staging_readback_bytes": 0,
+        "step_count": 0,
+        "temporal_history_decision": "not_applicable",
+        "temporal_history_reason": "independent reference samples do not reuse temporal history"
+      },
+      "self_convergence": {
+        "fraction_delta_e_below_2": 0.9679075738125802,
+        "maximum_delta_e": 3.963149334760206,
+        "mean_delta_e": 0.644416493256637,
+        "p95_delta_e": 1.9160960434646261,
+        "pixels": 1558
+      },
+      "spp": 40,
+      "wall_seconds": 94.57851959999971
+    }
+  ]
+}

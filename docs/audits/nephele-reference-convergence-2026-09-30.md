@@ -129,3 +129,35 @@ The weighted reference wheel is `forge3d-1.40.0-cp310-abi3-win_amd64.whl`,
 SHA-256 `e1e1f8444ff0300bf63ec24963b70a1578871647be2a3a9753e7b3a26dd7928e`.
 Its `forge3d/_forge3d.pyd` member has SHA-256
 `7661b8f81f6a5253d035b8d2e6241ccf73e8b1c001c4db6981b5c65a3012607f`.
+
+## T4/B1: owner decision OD-9 required
+
+The medium-disabled real-time terrain was compared with a vacuum reference
+(sigma_a = sigma_s = zero) on the frozen terrain mask, on the same Windows
+RTX 3070 Vulkan adapter and source `6a4ae50a4c3c01b390b1222468632e88d1db6ca0`.
+Camera contracts matched exactly; all tracked scene-input hashes were checked.
+This is the prescribed vacuum diagnostic, not a G3/G4 candidate observation.
+
+The vacuum reference used the existing 10, 20, 40 spp doubling sequence.
+20-to-40 convergence passed: 96.7908% of 1,558 terrain pixels have dE < 2,
+mean 0.644416, p95 1.916096. The 40-spp generation took 94.5785 seconds.
+
+| Medium-disabled vs vacuum reference | Measured |
+| --- | ---: |
+| Terrain pixels | 1,558 |
+| Fraction with dE < 2 | 0.172657253 |
+| Required fraction | 0.95 |
+| Mean dE | 8.787831 |
+| p95 dE | 19.033360 |
+| Maximum dE | 31.024163 |
+
+This fails B1 and triggers OD-9. Work is stopped pending the owner's choice:
+revise fixture material inputs before any candidate G3/G4 comparison, or extend
+the reference BRDF to the shipped terrain shading; either requires regeneration.
+No threshold or mask has been relaxed. These measurements establish a parity
+gap, not its detailed cause. G1-G6 acceptance, merge and release remain pending.
+
+Raw diagnostic arrays, source, source/adapter metadata, report and SHA-256
+inventory are retained in `docs/audits/nephele-b1-2026-09-30/`. The diagnostic
+source preserves its original local paths; it is an audit artifact, not a new
+supported CLI. `physical_acceptance` is false in its report.
