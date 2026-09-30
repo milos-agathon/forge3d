@@ -1285,3 +1285,18 @@ def test_nvidia_vulkan_recipe_pixel_golden_render_and_match(tmp_path: Path) -> N
         item for item in RECIPE_GOLDENS if item.scene_id == "mapscene_terrain_raster"
     )
     _render_recipe_golden_pixels(tmp_path, spec)
+
+
+def test_metal_recipe_pixel_golden_render_and_match(tmp_path: Path) -> None:
+    """Verify the committed Metal pixel baseline in the optional Metal diagnostic.
+
+    Like the NVIDIA proof it never touches certificates, and it only compares:
+    the Metal diagnostic must never write a baseline.
+    """
+    if _recipe_golden_variant() != "metal":
+        pytest.skip("Metal recipe pixel proof was not selected")
+    assert not _update_goldens_enabled(), "the Metal diagnostic must never write baselines"
+    spec = next(
+        item for item in RECIPE_GOLDENS if item.scene_id == "mapscene_terrain_raster"
+    )
+    _render_recipe_golden_pixels(tmp_path, spec)

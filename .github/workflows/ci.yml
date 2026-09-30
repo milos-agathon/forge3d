@@ -1034,7 +1034,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-       vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
+       contains(fromJSON('["1", "true"]'), vars.FORGE3D_RUN_METAL_DIAGNOSTIC)
     outputs:
       aether_lane: ${{ steps.aether-absent.outputs.aether_lane || steps.aether-ran.outputs.aether_lane || steps.aether-software-absent.outputs.aether_lane || 'unknown' }}
     env:
@@ -1079,6 +1079,18 @@ jobs:
       - name: Run optional Metal terrain control
         if: steps.metal-probe.outputs.probe == 'positive'
         run: python -m pytest tests/test_terrain_visual_goldens.py -v --tb=short
+      # mapscene_terrain_raster.metal.png is checked nowhere else. Compare-only:
+      # a mismatch uploads the Metal render via visual-golden-diffs.
+      - name: Run optional Metal recipe pixel golden
+        if: ${{ !cancelled() && steps.metal-probe.outputs.probe == 'positive' }}
+        env:
+          FORGE3D_RECIPE_GOLDEN_VARIANT: metal
+          FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR: tests/artifacts/recipe-goldens
+        run: |
+          mkdir -p tests/artifacts/recipe-goldens
+          junit=tests/artifacts/recipe-goldens/junit.xml
+          python -m pytest tests/test_recipe_goldens.py::test_metal_recipe_pixel_golden_render_and_match -v --tb=short --junitxml="$junit"
+          python scripts/assert_junit_zero_skips.py "$junit"
       - name: Probe AETHER physical Metal closure backend
         if: ${{ !cancelled() }}
         id: aether-metal-probe
@@ -1525,7 +1537,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-      vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
+      contains(fromJSON('["1", "true"]'), vars.FORGE3D_RUN_METAL_DIAGNOSTIC)
     runs-on: macos-14
     timeout-minutes: 30
     env:
