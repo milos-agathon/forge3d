@@ -1188,7 +1188,7 @@ def _verify_reference_provenance(
         }, label)
         if (
             value["schema"] != "forge3d.nephele.reference_provenance/2"
-            or value["algorithm"] != "integrated-hybrid-terrain-ratio-delta-tracking-surface-env-mis-v2"
+            or value["algorithm"] != "integrated-hybrid-terrain-spectral-ratio-delta-tracking-surface-env-mis-v3"
             or value["samples_per_pixel"] != expected_spp
             or value["seed"] != 0x4E455048
             or not SHA_RE.fullmatch(str(value["source_revision"]))

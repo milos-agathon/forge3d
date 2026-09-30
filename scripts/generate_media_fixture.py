@@ -531,7 +531,7 @@ def _render_reference(
         "schema": "forge3d.nephele.reference_provenance/2",
         "acceptance_eligible": acceptance_eligible,
         "diagnostic_reason": None if acceptance_eligible else "explicit diagnostic generation; cannot seed acceptance convergence",
-        "algorithm": "integrated-hybrid-terrain-ratio-delta-tracking-surface-env-mis-v2",
+        "algorithm": "integrated-hybrid-terrain-spectral-ratio-delta-tracking-surface-env-mis-v3",
         "samples_per_pixel": samples_per_pixel,
         "seed": REFERENCE_SEED,
         "sample_identity": {

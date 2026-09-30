@@ -851,3 +851,152 @@ fn lambert_surface_environment_nee_matches_furnace_and_is_deterministic() -> Res
     }
     Ok(())
 }
+
+#[test]
+fn spectral_tracking_preserves_analytic_rgb_event_probabilities() -> Result<(), MediaError> {
+    // Reuse the established reference canary count and G1's 3-SE criterion.
+    let count = 4096;
+    for extinction in [[0.2; 3], [0.0, 0.1, 0.2]] {
+        let medium = Medium::new(extinction, [0.0; 3], Phase::Isotropic, homogeneous(1.0))?;
+        let context = TrackingContext::new(medium.clone(), MajorantGrid::construct(&medium, 0)?)?;
+        let mut sums = [[0.0f64; 3]; 2];
+        let mut squares = [[0.0f64; 3]; 2];
+        for sample in 0..count {
+            let (collision, weight, _) = super::tracking::spectral_delta_track(
+                &context,
+                Ray {
+                    origin: [0.0; 3],
+                    direction: [0.0, 0.0, 1.0],
+                },
+                10.0,
+                SampleIdentity {
+                    frame: 0,
+                    pixel: 0,
+                    sample,
+                    bounce: 0,
+                },
+            )?;
+            if extinction == [0.2; 3] {
+                assert_eq!(weight, Rgb::ONE);
+            }
+            let event = usize::from(collision.is_some());
+            for (c, value) in weight.components().into_iter().enumerate() {
+                let value = f64::from(value);
+                sums[event][c] += value;
+                squares[event][c] += value * value;
+            }
+        }
+        for event in 0..2 {
+            for (c, sigma) in extinction.into_iter().enumerate() {
+                let n = count as f64;
+                let mean = sums[event][c] / n;
+                let variance =
+                    (squares[event][c] - sums[event][c] * sums[event][c] / n) / (n - 1.0);
+                let se = (variance / n).sqrt();
+                let transmittance = (-f64::from(sigma) * 10.0).exp();
+                let expected = if event == 0 {
+                    transmittance
+                } else {
+                    1.0 - transmittance
+                };
+                eprintln!("spectral event {event}, channel {c}: mean={mean}, SE={se}, expected={expected}");
+                assert!((mean - expected).abs() <= 3.0 * se);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn spectral_reference_grey_paths_have_no_chroma_noise() -> Result<(), MediaError> {
+    let medium = Medium::new([0.02; 3], [0.08; 3], Phase::Isotropic, homogeneous(1.0))?;
+    let context = TrackingContext::new(medium.clone(), MajorantGrid::construct(&medium, 0)?)?;
+    let environment = EnvironmentDistribution::new(2, 1, vec![Rgb::ONE; 2])?;
+    let sun = DirectionalSun::new([0.0, 1.0, 0.0], [1.0; 3])?;
+    for sample in 0..4096 {
+        let id = SampleIdentity {
+            frame: 0,
+            pixel: 0,
+            sample,
+            bounce: 0,
+        };
+        let ray = Ray {
+            origin: [0.0; 3],
+            direction: [0.0, 0.0, 1.0],
+        };
+        let config = ReferenceTransportConfig {
+            roulette_start_bounce: 3,
+            roulette_minimum_probability: 0.0,
+        };
+        let actual = trace_reference_rgb_sample(
+            &context,
+            &EmptyReferenceScene,
+            &environment,
+            sun,
+            ray,
+            id,
+            config,
+        )?;
+        assert_eq!(
+            actual,
+            trace_reference_rgb_sample(
+                &context,
+                &EmptyReferenceScene,
+                &environment,
+                sun,
+                ray,
+                id,
+                config
+            )?
+        );
+        let rgb = actual.radiance.components();
+        assert_eq!(rgb[0].to_bits(), rgb[1].to_bits());
+        assert_eq!(rgb[1].to_bits(), rgb[2].to_bits());
+    }
+    Ok(())
+}
+
+#[test]
+fn spectral_reference_surface_environment_matches_furnace() -> Result<(), MediaError> {
+    let medium = Medium::new([0.0; 3], [0.0; 3], Phase::Isotropic, homogeneous(1.0))?;
+    let context = TrackingContext::new(medium.clone(), MajorantGrid::construct(&medium, 0)?)?;
+    let environment = EnvironmentDistribution::new(2, 1, vec![Rgb::ONE; 2])?;
+    let sun = DirectionalSun::new([0.0, 1.0, 0.0], [0.0; 3])?;
+    let mut sum = 0.0f64;
+    let mut squares = 0.0f64;
+    let count = 4096;
+    for sample in 0..count {
+        let actual = trace_reference_rgb_sample(
+            &context,
+            &LambertReferencePlane,
+            &environment,
+            sun,
+            Ray {
+                origin: [0.0, 1.0, 0.0],
+                direction: [0.0, -1.0, 0.0],
+            },
+            SampleIdentity {
+                frame: 0,
+                pixel: 0,
+                sample,
+                bounce: 0,
+            },
+            ReferenceTransportConfig {
+                roulette_start_bounce: 3,
+                roulette_minimum_probability: 0.0,
+            },
+        )?;
+        let rgb = actual.radiance.components();
+        assert_eq!(rgb[0].to_bits(), rgb[1].to_bits());
+        assert_eq!(rgb[1].to_bits(), rgb[2].to_bits());
+        let value = f64::from(rgb[0]);
+        sum += value;
+        squares += value * value;
+    }
+    let n = count as f64;
+    let mean = sum / n;
+    let se = (((squares - sum * sum / n) / (n - 1.0)) / n).sqrt();
+    eprintln!("spectral furnace: mean={mean}, SE={se}, analytic=0.6");
+    assert!((mean - 0.6).abs() <= 3.0 * se);
+    Ok(())
+}

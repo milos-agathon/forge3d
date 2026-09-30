@@ -100,14 +100,84 @@ pub fn trace_reference_sample<S: ReferenceScene>(
         bits
     });
     let channel = ((identity.sample % 3) as usize + rotation) % 3;
+    let sample = trace_reference_core(
+        context,
+        scene,
+        environment,
+        sun,
+        camera_ray,
+        identity,
+        (config, Some(channel)),
+    )?;
+    Ok(ReferenceTransportSample {
+        radiance: Rgb::new(
+            sample.radiance.components().map(|v| v * 3.0),
+            "reference radiance",
+        )?,
+        spectral_channel: channel as u32,
+        collision_count: sample.collision_count,
+        surface_count: sample.surface_count,
+        tracking_step_count: sample.tracking_step_count,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ReferenceRgbTransportSample {
+    pub radiance: Rgb,
+    pub collision_count: u32,
+    pub surface_count: u32,
+    pub tracking_step_count: u64,
+}
+
+/// Shared RGB paths with real/null-event likelihood ratios. Unlike hero-channel
+/// sampling, a grey scene produces identical RGB components in every sample.
+/// Environment/surface MIS and the delta sun use the same strategies as the
+/// public single-channel reference; only the spectral proposal differs.
+pub(crate) fn trace_reference_rgb_sample<S: ReferenceScene>(
+    context: &TrackingContext,
+    scene: &S,
+    environment: &EnvironmentDistribution,
+    sun: DirectionalSun,
+    camera_ray: Ray,
+    identity: SampleIdentity,
+    config: ReferenceTransportConfig,
+) -> Result<ReferenceRgbTransportSample, MediaError> {
+    trace_reference_core(
+        context,
+        scene,
+        environment,
+        sun,
+        camera_ray,
+        identity,
+        (config, None),
+    )
+}
+
+fn trace_reference_core<S: ReferenceScene>(
+    context: &TrackingContext,
+    scene: &S,
+    environment: &EnvironmentDistribution,
+    sun: DirectionalSun,
+    camera_ray: Ray,
+    identity: SampleIdentity,
+    sampling: (ReferenceTransportConfig, Option<usize>),
+) -> Result<ReferenceRgbTransportSample, MediaError> {
+    let (config, channel) = sampling;
+    config.validate()?;
     let mut ray = Ray {
         origin: camera_ray.origin,
         direction: normalize(camera_ray.direction).ok_or_else(|| {
             MediaError::InvalidTransport("camera direction must be finite and nonzero".into())
         })?,
     };
-    let mut throughput = 1.0f32;
-    let mut radiance = 0.0f32;
+    let mut throughput = std::array::from_fn::<_, 3, _>(|c| {
+        if channel.is_none_or(|selected| selected == c) {
+            1.0f32
+        } else {
+            0.0
+        }
+    });
+    let mut radiance = [0.0f32; 3];
     let mut collision_count = 0;
     let mut surface_count = 0;
     let mut tracking_step_count = 0;
@@ -124,34 +194,41 @@ pub fn trace_reference_sample<S: ReferenceScene>(
         }
         let geometry_distance = surface.map_or(geometry_reach, |hit| hit.distance);
         let interval = validated_medium_interval(scene, ray, geometry_distance)?;
-        let (collision, steps) = if let Some(interval) = interval {
-            delta_track_counted(
-                context,
-                shifted_ray(ray, interval.start),
-                interval.end - interval.start,
-                channel,
-                bounce_id,
-            )?
+        let (collision, weights, steps) = if let Some(interval) = interval {
+            let segment = shifted_ray(ray, interval.start);
+            let length = interval.end - interval.start;
+            if let Some(channel) = channel {
+                let (collision, steps) =
+                    delta_track_counted(context, segment, length, channel, bounce_id)?;
+                (collision, Rgb::ONE, steps)
+            } else {
+                super::tracking::spectral_delta_track(context, segment, length, bounce_id)?
+            }
         } else {
-            (None, 0)
+            (None, Rgb::ONE, 0)
         };
         tracking_step_count += steps;
+        for (value, weight) in throughput.iter_mut().zip(weights.components()) {
+            *value *= weight;
+        }
 
         if let Some(collision) = collision {
             collision_count += 1;
-            let sigma_t = collision.extinction.components()[channel];
+            let sigma_t = collision.extinction.components();
             let density = context
                 .medium()
                 .density()
                 .physical_density(collision.position);
-            let sigma_s = context.medium().sigma_s().components()[channel] * density;
-            if sigma_t == 0.0 {
-                return Err(MediaError::InvalidTransport(
-                    "delta tracking accepted a zero-extinction collision".into(),
-                ));
+            let sigma_s = context.medium().sigma_s().components();
+            for c in 0..3 {
+                if sigma_t[c] > 0.0 {
+                    throughput[c] *= (sigma_s[c] * density) / sigma_t[c];
+                } else {
+                    // A channel with no extinction has zero real-event weight.
+                    throughput[c] = 0.0;
+                }
             }
-            throughput *= sigma_s / sigma_t;
-            if throughput == 0.0 {
+            if throughput == [0.0; 3] {
                 break;
             }
 
@@ -174,13 +251,15 @@ pub fn trace_reference_sample<S: ReferenceScene>(
                     },
                 )?;
                 tracking_step_count += steps;
-                radiance += throughput
-                    * context
-                        .medium()
-                        .phase()
-                        .evaluate(dot(ray.direction, to_sun))?
-                    * sun.radiance.components()[channel]
-                    * transmittance.components()[channel];
+                for c in 0..3 {
+                    radiance[c] += throughput[c]
+                        * context
+                            .medium()
+                            .phase()
+                            .evaluate(dot(ray.direction, to_sun))?
+                        * sun.radiance.components()[c]
+                        * transmittance.components()[c];
+                }
             }
 
             let env = environment.sample([
@@ -212,19 +291,23 @@ pub fn trace_reference_sample<S: ReferenceScene>(
                     },
                 )?;
                 tracking_step_count += steps;
-                radiance += throughput
-                    * phase_pdf
-                    * env.radiance.components()[channel]
-                    * transmittance.components()[channel]
-                    * light_weight
-                    / env.pdf_solid_angle;
+                for c in 0..3 {
+                    radiance[c] += throughput[c]
+                        * phase_pdf
+                        * env.radiance.components()[c]
+                        * transmittance.components()[c]
+                        * light_weight
+                        / env.pdf_solid_angle;
+                }
             }
 
             let phase = context.medium().phase().sample(
                 ray.direction,
                 [bounce_id.uniform(20), bounce_id.uniform(21)],
             )?;
-            throughput *= phase.value / phase.pdf;
+            for value in &mut throughput {
+                *value *= phase.value / phase.pdf;
+            }
             previous_continuation_pdf = Some(phase.pdf);
             ray = Ray {
                 origin: collision.position,
@@ -232,7 +315,7 @@ pub fn trace_reference_sample<S: ReferenceScene>(
             };
         } else if let Some(hit) = surface {
             surface_count += 1;
-            let albedo = hit.albedo.components()[channel];
+            let albedo = hit.albedo.components();
             let normal = normalize(hit.normal).ok_or_else(|| {
                 MediaError::InvalidTransport("surface normal must be finite and nonzero".into())
             })?;
@@ -257,12 +340,14 @@ pub fn trace_reference_sample<S: ReferenceScene>(
                         },
                     )?;
                     tracking_step_count += steps;
-                    radiance += throughput
-                        * albedo
-                        * cosine
-                        * sun.radiance.components()[channel]
-                        * transmittance.components()[channel]
-                        / std::f32::consts::PI;
+                    for c in 0..3 {
+                        radiance[c] += throughput[c]
+                            * albedo[c]
+                            * cosine
+                            * sun.radiance.components()[c]
+                            * transmittance.components()[c]
+                            / std::f32::consts::PI;
+                    }
                 }
             }
 
@@ -294,17 +379,21 @@ pub fn trace_reference_sample<S: ReferenceScene>(
                     tracking_step_count += steps;
                     let (light_weight, _) =
                         power_heuristic(env.pdf_solid_angle, cos_l / std::f32::consts::PI)?;
-                    radiance += throughput
-                        * albedo
-                        * cos_l
-                        * env.radiance.components()[channel]
-                        * transmittance.components()[channel]
-                        * light_weight
-                        / (std::f32::consts::PI * env.pdf_solid_angle);
+                    for c in 0..3 {
+                        radiance[c] += throughput[c]
+                            * albedo[c]
+                            * cos_l
+                            * env.radiance.components()[c]
+                            * transmittance.components()[c]
+                            * light_weight
+                            / (std::f32::consts::PI * env.pdf_solid_angle);
+                    }
                 }
             }
             let direction = cosine_hemisphere(normal, bounce_id.uniform(30), bounce_id.uniform(31));
-            throughput *= albedo;
+            for (value, albedo) in throughput.iter_mut().zip(albedo) {
+                *value *= albedo;
+            }
             previous_continuation_pdf =
                 Some(dot(normal, direction).max(0.0) / std::f32::consts::PI);
             ray = Ray {
@@ -312,18 +401,20 @@ pub fn trace_reference_sample<S: ReferenceScene>(
                 direction,
             };
         } else {
-            let env = environment.radiance(ray.direction).components()[channel];
+            let env = environment.radiance(ray.direction).components();
             let weight = if let Some(phase_pdf) = previous_continuation_pdf {
                 power_heuristic(phase_pdf, environment.pdf(ray.direction))?.0
             } else {
                 1.0
             };
-            radiance += throughput * env * weight;
+            for c in 0..3 {
+                radiance[c] += throughput[c] * env[c] * weight;
+            }
             break;
         }
 
         if bounce >= config.roulette_start_bounce {
-            let rgb = channel_rgb(channel, throughput)?;
+            let rgb = Rgb::new(throughput, "reference throughput")?;
             let Some(scale) = russian_roulette(
                 rgb,
                 bounce_id.uniform(40),
@@ -332,9 +423,15 @@ pub fn trace_reference_sample<S: ReferenceScene>(
             else {
                 break;
             };
-            throughput *= scale;
+            for value in &mut throughput {
+                *value *= scale;
+            }
         }
-        if !throughput.is_finite() || throughput < 0.0 || !radiance.is_finite() {
+        if throughput
+            .iter()
+            .chain(radiance.iter())
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
             return Err(MediaError::InvalidTransport(
                 "reference path produced non-finite or negative transport".into(),
             ));
@@ -344,9 +441,8 @@ pub fn trace_reference_sample<S: ReferenceScene>(
         })?;
     }
 
-    Ok(ReferenceTransportSample {
-        radiance: channel_rgb(channel, radiance * 3.0)?,
-        spectral_channel: channel as u32,
+    Ok(ReferenceRgbTransportSample {
+        radiance: Rgb::new(radiance, "reference radiance")?,
         collision_count,
         surface_count,
         tracking_step_count,
@@ -440,12 +536,6 @@ fn validate_surface_hit(hit: ReferenceSurfaceHit, maximum_distance: f32) -> Resu
         ));
     }
     Ok(())
-}
-
-fn channel_rgb(channel: usize, value: f32) -> Result<Rgb, MediaError> {
-    let mut rgb = [0.0; 3];
-    rgb[channel] = value;
-    Rgb::new(rgb, "reference radiance")
 }
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {

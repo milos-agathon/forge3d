@@ -18,6 +18,7 @@ pub use density::{
 pub use diagnostics::AllocationBreakdown;
 pub use lighting::{power_heuristic, DirectionalSun, EnvironmentDistribution, EnvironmentSample};
 pub use model::{MediaError, Medium, Phase, PhaseSample, Rgb};
+pub(crate) use reference::trace_reference_rgb_sample;
 pub use reference::{
     trace_reference_sample, ReferenceMediumInterval, ReferenceScene, ReferenceSurfaceHit,
     ReferenceTransportConfig, ReferenceTransportSample,

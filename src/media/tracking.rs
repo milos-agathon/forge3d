@@ -210,6 +210,72 @@ pub fn delta_track_counted(
     }
 }
 
+/// RGB-weighted delta tracking using the mean extinction as the real-event
+/// proposal. Real and null likelihood ratios preserve each channel's transport
+/// expectation while sharing geometry and scattering directions across RGB.
+/// The single-channel production sampler above remains unchanged.
+pub(super) fn spectral_delta_track(
+    context: &TrackingContext,
+    ray: Ray,
+    distance: f32,
+    identity: SampleIdentity,
+) -> Result<(Option<Collision>, Rgb, u64), MediaError> {
+    let ray = ray.normalized()?;
+    let rate = context.global_rate;
+    validate_segment(distance, rate)?;
+    if rate == 0.0 || distance == 0.0 {
+        return Ok((None, Rgb::ONE, 0));
+    }
+    let mut weight = [1.0; 3];
+    let mut traveled = 0.0;
+    let mut step = 0u64;
+    loop {
+        traveled += -identity.uniform(step.wrapping_mul(2)).ln() / rate;
+        if traveled >= distance {
+            return Ok((None, Rgb::new(weight, "spectral tracking weight")?, step));
+        }
+        let position = ray.at(traveled);
+        let extinction = context.medium.extinction_at(position);
+        let sigma = extinction.components();
+        if sigma.iter().any(|value| *value > rate) {
+            return Err(MediaError::InvalidMajorant(format!(
+                "sampled RGB extinction {sigma:?} exceeds tracking rate {rate}"
+            )));
+        }
+        // Evaluate around the minimum to avoid overflowing a sum of large
+        // extinctions and to preserve equal-channel proposals exactly.
+        let minimum = sigma.into_iter().fold(f32::INFINITY, f32::min);
+        let mean = minimum + sigma.into_iter().map(|v| (v - minimum) / 3.0).sum::<f32>();
+        if mean > rate || (mean == 0.0 && sigma.iter().any(|value| *value > 0.0)) {
+            return Err(MediaError::InvalidTransport(
+                "spectral collision proposal is not representable within the majorant".into(),
+            ));
+        }
+        if identity.uniform(step.wrapping_mul(2).wrapping_add(1)) < mean / rate {
+            for (value, sigma) in weight.iter_mut().zip(sigma) {
+                *value *= sigma / mean;
+            }
+            return Ok((
+                Some(Collision {
+                    distance: traveled,
+                    position,
+                    extinction,
+                    sample_identity: identity,
+                    step_count: step + 1,
+                }),
+                Rgb::new(weight, "spectral tracking weight")?,
+                step + 1,
+            ));
+        }
+        // A null event is unreachable when mean == rate. No clamp or
+        // substitute estimator is needed for either zero-extinction channel.
+        for (value, sigma) in weight.iter_mut().zip(sigma) {
+            *value *= (rate - sigma) / (rate - mean);
+        }
+        step += 1;
+    }
+}
+
 pub fn russian_roulette(
     throughput: Rgb,
     uniform: f32,

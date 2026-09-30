@@ -126,6 +126,14 @@ participation limited to production `terrain_trace` visibility (OD-8 option a).
 This is an explicit exemption from reference WGSL tracking; it does not waive
 any G1–G6 estimator, visual, memory, determinism, or physical-lane requirement.
 
+The terrain reference uses shared RGB paths with spectral real/null-event
+likelihood weights and environment/surface MIS. Real collisions are proposed
+from mean RGB extinction; real weights are sigma_t,c / mean(sigma_t), and
+null weights are (majorant - sigma_t,c) / (majorant - mean(sigma_t)). This
+preserves each channel's expectation while reducing hero-channel color noise.
+The existing single-channel Rust reference API and production
+`delta_track_counted` sampler remain available and keep their contracts.
+
 Gate 4 uses `per_pixel_pass_fraction`: at least 95% of reference-cloud-shadowed
 terrain pixels must have DeltaE2000 strictly below 2.0. The owner record is
 `tests/nephele/gate4-policy.json`; the same criterion governs convergence.

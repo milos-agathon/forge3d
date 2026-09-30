@@ -353,7 +353,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
     }
     provenance_base = {
         "schema": "forge3d.nephele.reference_provenance/2",
-        "algorithm": "integrated-hybrid-terrain-ratio-delta-tracking-surface-env-mis-v2",
+        "algorithm": "integrated-hybrid-terrain-spectral-ratio-delta-tracking-surface-env-mis-v3",
         "seed": 0x4E455048,
         "source_revision": source_head,
         "source_inputs": source_inputs,

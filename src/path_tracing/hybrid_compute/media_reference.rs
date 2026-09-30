@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::core::gpu_timing::OneShotTiming;
 use crate::core::resource_tracker::TrackedBuffer;
 use crate::media::{
-    ratio_track, trace_reference_sample, Bounds3, DensityField, DirectionalSun,
+    ratio_track, trace_reference_rgb_sample, Bounds3, DensityField, DirectionalSun,
     EnvironmentDistribution, MediaError, Ray, ReferenceMediumInterval, ReferenceScene,
     ReferenceSurfaceHit, ReferenceTransportConfig, Rgb, SampleIdentity, TrackingContext,
 };
@@ -528,7 +528,7 @@ impl HybridPathTracer {
                         sample,
                         bounce: 0,
                     };
-                    let transport = trace_reference_sample(
+                    let transport = trace_reference_rgb_sample(
                         context,
                         &scene,
                         environment,
@@ -983,7 +983,7 @@ mod tests {
             .intersect(camera_ray, TERRAIN_QUERY_REACH)
             .unwrap()
             .is_some());
-        let sample = trace_reference_sample(
+        let sample = trace_reference_rgb_sample(
             &context,
             &scene,
             &EnvironmentDistribution::new(1, 1, vec![Rgb::ONE]).unwrap(),
