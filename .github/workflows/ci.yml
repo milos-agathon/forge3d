@@ -321,6 +321,9 @@ jobs:
               - 'tests/test_terrain_tv10_goldens.py'
               - 'tests/test_terrain_vt_pbr_families.py'
               - 'tests/test_recipe_goldens.py'
+              - 'tests/test_mapscene_sutura_integrity.py'
+              - 'tests/test_mapscene_render_cache.py'
+              - 'tests/test_chronos_flythrough.py'
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
               - 'tests/test_prometheus_dem_reference.py'
@@ -1276,6 +1279,35 @@ jobs:
         shell: pwsh
         run: |
           python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_EXPECTED_ADAPTER_PROBE"
+          exit $LASTEXITCODE
+
+      # Run before the visual-golden catalog: SUTURA remains executable even
+      # when an independently governed pixel golden or certificate is stale.
+      - name: Run SUTURA MapScene integrity gate
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "sutura"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $junit = Join-Path $dir "junit.xml"
+          python -m pytest tests/test_mapscene_sutura_integrity.py tests/test_mapscene_render_cache.py -v --tb=short --junitxml="$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
+      # CHRONOS GPU cases (repeat-run cache, per-frame certificates, physical
+      # pixel-hash replay, samples>1, popping) skip in the hosted default lane;
+      # this is their only executing lane.
+      - name: Run CHRONOS flythrough gate
+        shell: pwsh
+        env:
+          FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+        run: |
+          $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "chronos"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $junit = Join-Path $dir "junit.xml"
+          python -m pytest tests/test_chronos_flythrough.py -v --tb=short --junitxml="$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE
 
       - name: Run visual golden tests

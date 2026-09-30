@@ -501,7 +501,8 @@ class VectorScene:
 
         ``quality="default"`` preserves weighted OIT and its existing
         feathered-line semantics. ``quality="analytic"`` opts every collected
-        polyline into LIMES's exact round-stroke coverage path.
+        polyline into LIMES's exact analytic stroke coverage path; this
+        collector always emits round caps and round joins.
         """
         if quality not in {"default", "analytic"}:
             raise ValueError("quality must be 'default' or 'analytic'")

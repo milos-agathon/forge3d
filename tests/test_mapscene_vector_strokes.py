@@ -185,8 +185,7 @@ def test_styled_vector_layers_route_to_precise_raster_path(monkeypatch, tmp_path
     assert int(np.count_nonzero(rgba[..., 3])) > 0
 
     # Through public MapScene.render() the precise route must not be hidden as
-    # native OIT: the metadata and support report name the deterministic CPU
-    # precise raster compositor explicitly.
+    # native OIT: metadata and support report name the deterministic CPU path.
     def fake_terrain(_recipe, _heightmap, **_kwargs):
         frame = np.zeros((48, 64, 4), dtype=np.uint8)
         frame[..., 3] = 255
