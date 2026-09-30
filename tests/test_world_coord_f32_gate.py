@@ -71,8 +71,11 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # Anchor, and Anchor remains the sole production world-position narrowing
 # owner. Release 1.39 adds six screen-label conversions and records the
 # params6 initializer change without introducing world-position narrowing.
-EXPECTED_CONVERSION_COUNT = 1878
-EXPECTED_CONVERSION_SHA256 = "beeb7833b23e4ef857acdc0c56955c07ce8ba5e20a8f10b067bad23ad9ba5f1c"
+# NEPHELE and CHRONOS preserve independent reviewed transitions from 1.39.
+# Release 1.40 CHRONOS rewrites the two R2 jitter casts one-for-one and adds
+# the three unit-direction casts of SunPosition::to_scene_direction.
+EXPECTED_CONVERSION_COUNT = 1881
+EXPECTED_CONVERSION_SHA256 = "45ca418834228c2e25d26dfded6e8d86f1cda1ba67b1eb0079cf32f6df33b192"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -739,8 +742,9 @@ def test_release_1_39_inventory_transition_is_exact():
 
 def test_release_1_39_terrain_inventory_transition_is_exact():
     transition = _ledger_data()["release_1_39_terrain"]
+    chronos = _ledger_data()["release_1_40_chronos"]
     assert (transition["result_count"], transition["result_digest"]) == (
-        _ledger_data()["nephele"]["base_count"], _ledger_data()["nephele"]["base_digest"]
+        chronos["base_count"], chronos["base_digest"]
     )
     assert transition["review"]
     added = list(map(tuple, transition["added"]))
@@ -748,7 +752,48 @@ def test_release_1_39_terrain_inventory_transition_is_exact():
     assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
     assert not set(added) & set(removed)
     assert transition["base_count"] + len(added) - len(removed) == transition["result_count"]
+    # Reconstruct the #194 result inventory by undoing the 1.40 CHRONOS record.
     current = collections.Counter(conversion_inventory())
+    for site in map(tuple, chronos["added"]):
+        assert current[site] > 0
+        current[site] -= 1
+    for site in map(tuple, chronos["removed"]):
+        assert current[site] == 0
+        current[site] += 1
+    for site in added:
+        assert current[site] > 0, f"recorded addition missing: {site}"
+    for site in removed:
+        assert current[site] == 0, f"recorded removal still present: {site}"
+
+
+def test_release_1_40_chronos_inventory_transition_is_exact():
+    transition = _ledger_data()["release_1_40_chronos"]
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1821, "1b17f3f2ac765a98e747d2bc7ef067aa8fb746a5d2bcf693189586f9b5c1d0c8"
+    )
+    assert transition["review"]
+    added = list(map(tuple, transition["added"]))
+    removed = list(map(tuple, transition["removed"]))
+    assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
+    assert not set(added) & set(removed)
+    assert transition["base_count"] + len(added) - len(removed) == transition["result_count"]
+
+    r2 = ("src/terrain/accumulation.rs", "generate_r2_sequence", "as_f32")
+    assert removed == [
+        (*r2, 1, "let x = ((n * alpha1) % 1.0) as f32"),
+        (*r2, 2, "let y = ((n * alpha2) % 1.0) as f32"),
+    ]
+    sun = ("src/lighting/ephemeris.rs", "<module>", "as_f32")
+    assert added == [
+        (*sun, 4, "[x as f32, y as f32, z as f32]"),
+        (*sun, 5, "[x as f32, y as f32, z as f32]"),
+        (*sun, 6, "[x as f32, y as f32, z as f32]"),
+        (*r2, 1, "let x = ((i as f64) * alpha1 + phase_x).fract() as f32"),
+        (*r2, 2, "let y = ((i as f64) * alpha2 + phase_y).fract() as f32"),
+    ]
+    assert "fn to_scene_direction" in _read("src/lighting/ephemeris.rs")
+
+    current = _undo_reviewed_transition(collections.Counter(conversion_inventory()), _ledger_data()["nephele"])
     for site in added:
         assert current[site] > 0, f"recorded addition missing: {site}"
     for site in removed:
@@ -848,13 +893,26 @@ def test_public_camera_helper_preserves_earth_scale_offset():
     np.testing.assert_allclose(earth, local, rtol=0.0, atol=1e-6)
 
 
+def _undo_reviewed_transition(current, transition):
+    added = collections.Counter(map(tuple, transition["added"]))
+    removed = collections.Counter(map(tuple, transition["removed"]))
+    assert not (added & removed)
+    for site, count in added.items():
+        assert current[site] >= count, f"reviewed addition missing: {site}"
+        current[site] -= count
+    for site, count in removed.items():
+        assert current[site] == 0, f"reviewed removal still present: {site}"
+        current[site] += count
+    return current
+
+
 def test_nephele_reviewed_inventory_transition_is_exact():
     transition = _ledger_data()["nephele"]
     preceding = _ledger_data()["release_1_39_terrain"]
     assert (transition["base_count"], transition["base_digest"]) == (preceding["result_count"], preceding["result_digest"])
-    assert (transition["result_count"], transition["result_digest"]) == (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256)
+    assert (transition["result_count"], transition["result_digest"]) == (1878, "beeb7833b23e4ef857acdc0c56955c07ce8ba5e20a8f10b067bad23ad9ba5f1c")
     assert transition["review"]
-    current = collections.Counter(conversion_inventory())
+    current = _undo_reviewed_transition(collections.Counter(conversion_inventory()), _ledger_data()["release_1_40_chronos"])
     added, removed = collections.Counter(map(tuple, transition["added"])), collections.Counter(map(tuple, transition["removed"]))
     assert not (added & removed)
     for site, count in added.items():

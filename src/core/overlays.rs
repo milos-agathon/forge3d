@@ -219,7 +219,7 @@ impl OverlayRenderer {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8UnormSrgb,
+                format: TextureFormat::Rgba8Unorm,
                 usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -329,7 +329,11 @@ impl OverlayRenderer {
             overlay_sampler,
             height_sampler,
             depth_sampler,
-            overlay_format: TextureFormat::Rgba8UnormSrgb,
+            // Contract: the bound overlay texture's storage encoding must match
+            // the render target's (unorm target -> unorm texture, srgb target
+            // -> srgb texture) so sampled colors pass through overlays.wgsl
+            // without a one-sided sRGB round-trip.
+            overlay_format: TextureFormat::Rgba8Unorm,
         })
     }
 
@@ -425,7 +429,7 @@ impl OverlayRenderer {
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: TextureDimension::D2,
-                        format: TextureFormat::Rgba8UnormSrgb,
+                        format: TextureFormat::Rgba8Unorm,
                         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
                         view_formats: &[],
                     },

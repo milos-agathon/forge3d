@@ -43,6 +43,7 @@ pub(in crate::terrain::renderer) struct ClipmapGeometryKey {
     z_scale_bits: u32,
     readiness: Vec<u8>,
     globe_center_anchor_bits: Option<([u64; 3], [u64; 3])>,
+    chronos_morph_bits: Vec<(u32, u32)>,
 }
 
 #[derive(Clone, Copy)]
@@ -82,6 +83,23 @@ fn lod_selection_provenance(
     LodSelectionProvenance(hasher.finish())
 }
 
+fn chronos_morph_bits(
+    params: &crate::terrain::render_params::TerrainRenderParams,
+) -> Vec<(u32, u32)> {
+    params
+        .chronos_frame
+        .as_ref()
+        .map(|frame| {
+            frame
+                .state()
+                .ring_morphs
+                .iter()
+                .map(|morph| (morph.ring, morph.morph.to_bits()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 impl ClipmapGeometryKey {
     pub(in crate::terrain::renderer) fn new(
         config: &ClipmapConfig,
@@ -97,6 +115,7 @@ impl ClipmapGeometryKey {
         z_scale: f32,
         readiness: Vec<crate::terrain::clipmap::geomorph::TileReadiness>,
         globe_identity: Option<(glam::DVec3, glam::DVec3)>,
+        chronos_morph_bits: Vec<(u32, u32)>,
     ) -> Self {
         Self {
             ring_count: config.ring_count,
@@ -121,6 +140,7 @@ impl ClipmapGeometryKey {
             globe_center_anchor_bits: globe_identity.map(|(center, anchor)| {
                 (center.to_array().map(f64::to_bits), anchor.to_array().map(f64::to_bits))
             }),
+            chronos_morph_bits,
         }
     }
 }
@@ -771,6 +791,7 @@ impl TerrainScene {
             params.z_scale,
             readiness.clone(),
             globe_identity,
+            chronos_morph_bits(params),
         );
         if let Some(TerrainGeometryProvider::Clipmap {
             cache_key: existing,
@@ -810,6 +831,20 @@ impl TerrainScene {
                 &mut mesh.vertices[range],
                 readiness[ring_index],
             );
+        }
+        if let Some(chronos_frame) = params.chronos_frame.as_ref() {
+            let ring_morphs = &chronos_frame.state().ring_morphs;
+            for vertex in &mut mesh.vertices {
+                if vertex.is_skirt() {
+                    continue;
+                }
+                let factor = ring_morphs
+                    .iter()
+                    .find(|morph| morph.ring == vertex.ring_index())
+                    .map(|morph| morph.morph)
+                    .unwrap_or(1.0);
+                vertex.morph_data[0] *= factor;
+            }
         }
         let seam_regions = std::iter::once(mesh.center_bounds)
             .chain(mesh.ring_bounds.iter().copied())

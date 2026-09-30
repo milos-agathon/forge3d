@@ -12,6 +12,23 @@ use wgpu::{
     TextureUsages, TextureView, TextureViewDescriptor,
 };
 
+const SPLITMIX64_GAMMA: u64 = 0x9E3779B97F4A7C15;
+
+fn splitmix64_finalize(mut value: u64) -> u64 {
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D049BB133111EB);
+    value ^ (value >> 31)
+}
+
+/// Per-frame seed. `base_seed` is mixed on its own before `frame_index` is
+/// combined, so a flythrough's seeds are not a shifted copy of a neighbouring
+/// base seed's (a plain `base_seed + frame_index` makes
+/// `frame_seed(b, i) == frame_seed(b + 1, i - 1)`).
+pub fn frame_seed(base_seed: u64, frame_index: u64) -> u64 {
+    let base = splitmix64_finalize(base_seed.wrapping_add(SPLITMIX64_GAMMA));
+    splitmix64_finalize(base.wrapping_add(frame_index.wrapping_mul(SPLITMIX64_GAMMA)))
+}
+
 /// Accumulation AA configuration
 #[derive(Debug, Clone, Copy)]
 pub struct AccumulationConfig {
@@ -19,6 +36,15 @@ pub struct AccumulationConfig {
     pub samples: u32,
     /// Optional seed for deterministic jitter (None = use default sequence)
     pub seed: Option<u64>,
+}
+
+impl AccumulationConfig {
+    pub fn for_frame(samples: u32, base_seed: u64, frame_index: u64) -> Self {
+        Self {
+            samples,
+            seed: Some(frame_seed(base_seed, frame_index)),
+        }
+    }
 }
 
 impl Default for AccumulationConfig {
@@ -202,15 +228,15 @@ impl JitterSequence {
         let alpha1 = 1.0 / PHI2;
         let alpha2 = 1.0 / (PHI2 * PHI2);
 
-        // Starting point based on seed
-        let start = seed.unwrap_or(0) as f64 * 0.5;
+        let seed = seed.unwrap_or(0);
+        let phase_x = (seed >> 32) as f64 / 4294967296.0;
+        let phase_y = (seed as u32) as f64 / 4294967296.0;
 
         let mut offsets = Vec::with_capacity(count as usize);
         for i in 0..count {
-            let n = (i as f64) + start;
-            // R2 sequence formula: x_n = frac(n * α)
-            let x = ((n * alpha1) % 1.0) as f32;
-            let y = ((n * alpha2) % 1.0) as f32;
+            // R2 sequence formula: x_n = frac(i * α + phase)
+            let x = ((i as f64) * alpha1 + phase_x).fract() as f32;
+            let y = ((i as f64) * alpha2 + phase_y).fract() as f32;
             // Map from [0,1] to [-0.5, 0.5] for pixel-center offset
             offsets.push((x - 0.5, y - 0.5));
         }
@@ -291,6 +317,7 @@ pub fn apply_jitter_to_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn test_jitter_sequence_r2() {
@@ -357,5 +384,62 @@ mod tests {
         buffer.swap();
         assert_eq!(buffer.current_texture() as *const _, second);
         assert_eq!(buffer.write_texture() as *const _, first);
+    }
+
+    #[test]
+    fn test_frame_seed_known_vectors() {
+        assert_eq!(frame_seed(0, 0), 0x4821_8226_ff3c_d4bf);
+        assert_eq!(frame_seed(0, 1), 0xa706_dd2f_4d19_7e6f);
+    }
+
+    #[test]
+    fn test_frame_seed_adjacent_uniqueness() {
+        // The label-fade interval is 256 frames: uniqueness across that span
+        // covers the longest window a label transition could alias jitter.
+        const SPAN: u64 = 256;
+        for base in [0u64, 1, u64::MAX / 2, u64::MAX - SPAN] {
+            let seeds: HashSet<u64> = (0..SPAN).map(|i| frame_seed(base, i)).collect();
+            assert_eq!(
+                seeds.len(),
+                SPAN as usize,
+                "adjacent frame seeds must be unique for base {base}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_base_seed_is_mixed_before_frame_index() {
+        for base in [0u64, 1, 7, u64::MAX / 2, u64::MAX - 1] {
+            for index in [1u64, 2, 17, 255] {
+                assert_ne!(
+                    frame_seed(base, index),
+                    frame_seed(base.wrapping_add(1), index - 1),
+                    "base {base} frame {index} replays base+1 frame-1"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_for_frame_uses_derived_seed() {
+        let cfg = AccumulationConfig::for_frame(64, 7, 3);
+        assert_eq!(cfg.samples, 64);
+        assert_eq!(cfg.seed, Some(frame_seed(7, 3)));
+    }
+
+    #[test]
+    fn test_seeded_jitter_nonaliasing_adjacent_frames() {
+        let jit0 = JitterSequence::new(8, Some(frame_seed(0, 0)));
+        let jit1 = JitterSequence::new(8, Some(frame_seed(0, 1)));
+        let offsets0 = jit0.offsets.clone();
+        let offsets1 = jit1.offsets.clone();
+        assert_ne!(
+            offsets0, offsets1,
+            "adjacent frame seeds must produce distinct jitter phases"
+        );
+        assert_ne!(
+            offsets0[0], offsets1[0],
+            "first R2 offset must differ for adjacent frame seeds"
+        );
     }
 }

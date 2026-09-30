@@ -5,13 +5,30 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+
+## [1.40.0] - 2026-09-30
 ### Added
 - NEPHELE: typed spatial media, a weighted RGB transport reference, terrain-coupled real-time froxels, media AOVs, and explicit transport/resource diagnostics. (#172)
 - Terrain material bands can be placed where you want them: the `material_layer_centers` lighting setting (and `TerrainRenderParams.material_layer_centers`) sets each texture layer's centre as a fraction of the height range, instead of spacing the layers evenly. (#194)
 - Heightmap cells without data (NaN) now render as holes in `MapScene`: they are not drawn, not shaded, and credited to no source in VERITAS provenance. `TerrainRenderParams.nodata_height_below` exposes the same cut-off for direct renderer use. (#194)
+- CHRONOS: `forge3d.chronos.render_flythrough` renders a camera path as frame-perfect, repeatable frames. Each frame is compiled first from its camera, scene, label fades, texture residency and clipmap detail levels. It gets its own seed, pixel hash and provenance record, and `FlythroughManifest.replay_frame` re-renders any frame byte for byte. `certificate=True` writes one signed certificate per frame; `cache=` replays unchanged frames. The native `CompiledFrame`, `frame_seed`, `compile_frame` and `render_compiled_frame` are exported. (#185)
+- CHRONOS: on the NVIDIA Vulkan lane, a held camera shows no change in static pixels. A label fade moves no pixel by more than one 8-bit step per frame. A slow dolly across a clipmap detail band changes pixels by at most one 8-bit step more than the same dolly with detail frozen. Each frame samples exactly its compiled texture pages. (#185)
+- SUTURA: `MapScene.render` either draws natively on the GPU or raises `MapSceneNativeUnavailable` with structured diagnostics; there is no placeholder image. The SUTURA integrity and CHRONOS flythrough tests run in CI with zero skips allowed. (#190)
+- `SunPosition.to_scene_direction()` returns the sun direction in the `MapScene` convention (azimuth 0 = +Z). (#185)
 
 ### Changed
 - The VERITAS demo (`examples/provenance_demo.py`) uses the *batlow* palette, places its four bands at 800 m, 1,800 m and 3,000 m so every legend entry covers real terrain, and leaves the area outside Switzerland empty and unattributed. (#194)
+- `MapScene` render caching no longer depends on the output path: moving the output directory still hits the cache. (#190)
+- `tests/test_world_coord_f32_gate.py` re-freezes the narrowing inventory at 1,821 sites through one new ledger entry. The R2 jitter swaps its two casts one for one, and `to_scene_direction` adds three unit-direction casts. No world position is narrowed. (#185)
+- Bumped the package and PyPI version to `1.40.0`.
+
+### Fixed
+- Fading labels no longer pop: glyph quads overlap, and each quad was blended at the fade alpha and rounded separately, so one frame could jump by two 8-bit steps. Each label run is now faded as a single layer. Labels at full opacity render byte for byte as before. (#185)
+
+### Compatibility
+- A `RasterOverlay` whose source is missing, unreadable, or in an unsupported format now stops `MapScene.render` with a `MapSceneNativeUnavailable` diagnostic block. In 1.39.0 the overlay was silently left out of the image. (#190)
+- Accumulation anti-aliasing jitter with a nonzero `aa_seed` follows a new R2 sequence: the seed sets the sequence phase instead of offsetting its index. Renders with a nonzero `aa_seed` and more than one sample differ from 1.39.0. `aa_seed=0` or unset is unchanged. (#185)
+- The `MapScene` render cache key no longer contains the output path, so existing ANAMNESIS cache entries from 1.39.0 miss once and every scene re-renders on its first 1.40.0 render. (#190)
 
 ## [1.39.0] - 2026-09-28
 ### Added
