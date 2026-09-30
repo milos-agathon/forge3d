@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+
+## [1.40.0] - 2026-09-30
 ### Added
 - Terrain material bands can be placed where you want them: the `material_layer_centers` lighting setting (and `TerrainRenderParams.material_layer_centers`) sets each texture layer's centre as a fraction of the height range, instead of spacing the layers evenly. (#194)
 - Heightmap cells without data (NaN) now render as holes in `MapScene`: they are not drawn, not shaded, and credited to no source in VERITAS provenance. `TerrainRenderParams.nodata_height_below` exposes the same cut-off for direct renderer use. (#194)
