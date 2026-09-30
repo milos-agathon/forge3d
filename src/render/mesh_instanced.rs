@@ -80,6 +80,10 @@ pub struct TerrainBlendContext<'a> {
 }
 
 pub struct MeshInstancedRenderer {
+    #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+    pbr: Option<crate::pipeline::pbr::PbrPipelineWithShadows>,
+    #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+    pbr_target: (TextureFormat, u32, Option<TextureFormat>),
     pipeline: RenderPipeline,
     shadow_pipeline: Option<RenderPipeline>,
     uniforms: ScatterBatchUniforms,
@@ -307,7 +311,11 @@ impl MeshInstancedRenderer {
                     entry_point: "fs_main",
                     targets: &[Some(ColorTargetState {
                         format: color_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        blend: if color_format == TextureFormat::Rgba32Float {
+                            None
+                        } else {
+                            Some(wgpu::BlendState::ALPHA_BLENDING)
+                        },
                         write_mask: ColorWrites::ALL,
                     })],
                 }),
@@ -454,6 +462,10 @@ impl MeshInstancedRenderer {
         }
 
         Ok(Self {
+            #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+            pbr: None,
+            #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+            pbr_target: (color_format, sample_count, depth_format),
             pipeline,
             shadow_pipeline,
             uniforms,
@@ -626,6 +638,62 @@ impl MeshInstancedRenderer {
         }))
     }
 
+    #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+    pub fn enable_pbr(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        material: crate::core::material::PbrMaterial,
+        environment: [f32; 3],
+        sun_color: [f32; 3],
+    ) -> RenderResult<()> {
+        use crate::core::error::RenderError;
+        if self.pbr_target.1 != 1 || self.pbr_target.2 != Some(TextureFormat::Depth32Float) {
+            return Err(RenderError::Render(
+                "PBR meshes require a single-sample Depth32Float target".into(),
+            ));
+        }
+        if material.texture_flags != 0
+            || !material
+                .base_color
+                .iter()
+                .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+            || !material.roughness.is_finite()
+            || !(0.0..=1.0).contains(&material.roughness)
+            || !material.metallic.is_finite()
+            || !(0.0..=1.0).contains(&material.metallic)
+            || !environment
+                .iter()
+                .chain(sun_color.iter())
+                .all(|v| v.is_finite() && *v >= 0.0)
+        {
+            return Err(RenderError::Render(
+                "PBR meshes require finite solid materials and nonnegative lighting".into(),
+            ));
+        }
+        let mut pbr =
+            crate::pipeline::pbr::PbrPipelineWithShadows::new(device, queue, material, true)?;
+        let sampler = crate::pipeline::pbr::create_pbr_sampler(device);
+        pbr.ensure_material_bind_group(device, queue, &sampler)?;
+        pbr.set_environment_map(device, queue, &environment, 1, 1)?;
+        pbr.set_brdf_index(queue, 4);
+        pbr.lighting_uniforms.light_color = sun_color;
+        pbr.lighting_uniforms.ibl_intensity = 1.0;
+        pbr.ensure_instanced_pipeline(device, self.pbr_target.0);
+        let shadow = pbr.shadow_manager.as_mut().unwrap().renderer_mut();
+        shadow.uniforms.cascade_count = 0;
+        shadow.upload_uniforms(queue);
+        self.pbr = Some(pbr);
+        Ok(())
+    }
+
+    #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+    pub fn pbr_pipeline_mut(
+        &mut self,
+    ) -> Option<&mut crate::pipeline::pbr::PbrPipelineWithShadows> {
+        self.pbr.as_mut()
+    }
+
     pub fn set_view_proj(&mut self, view: Mat4, proj: Mat4) {
         self.uniforms.view = view.to_cols_array_2d();
         self.uniforms.proj = proj.to_cols_array_2d();
@@ -688,6 +756,33 @@ impl MeshInstancedRenderer {
 
     pub fn reset_shadow_draw_batch_uniforms(&self) {
         self.shadow_per_draw_cursor.set(0);
+    }
+
+    pub fn render_shadow<'a>(
+        &'a self,
+        pass: &mut RenderPass<'a>,
+        queue: &Queue,
+        view_projection: Mat4,
+        instance_count: u32,
+    ) {
+        if let (Some(vbuf), Some(ibuf), Some(instbuf)) = (&self.vbuf, &self.ibuf, &self.instbuf) {
+            self.draw_shadow_batch_params(
+                pass,
+                queue,
+                Mat4::IDENTITY,
+                view_projection,
+                vbuf,
+                ibuf,
+                instbuf,
+                self.index_count,
+                instance_count,
+            );
+        }
+    }
+
+    #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+    pub fn pbr_pipeline(&self) -> Option<&crate::pipeline::pbr::PbrPipelineWithShadows> {
+        self.pbr.as_ref()
     }
 
     pub fn set_mesh(
@@ -812,6 +907,32 @@ impl MeshInstancedRenderer {
         let Some(inst) = &self.instbuf else {
             return;
         };
+        #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+        if let Some(pbr) = &self.pbr {
+            let view = Mat4::from_cols_array_2d(&self.uniforms.view);
+            let projection = Mat4::from_cols_array_2d(&self.uniforms.proj);
+            let scene = crate::pipeline::pbr::PbrSceneUniforms::from_matrices(
+                Mat4::IDENTITY,
+                view,
+                projection,
+            );
+            let mut lighting = pbr.lighting_uniforms;
+            lighting.camera_position = view.inverse().w_axis.truncate().to_array();
+            lighting.light_direction = self.uniforms.light_dir_ws[..3].try_into().unwrap();
+            lighting.light_intensity = self.uniforms.light_dir_ws[3];
+            queue.write_buffer(&pbr.scene_uniform_buffer, 0, bytemuck::bytes_of(&scene));
+            queue.write_buffer(
+                &pbr.lighting_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&lighting),
+            );
+            pbr.bind_instanced(pass);
+            pass.set_vertex_buffer(0, vbuf.slice(..));
+            pass.set_vertex_buffer(1, inst.slice(..));
+            pass.set_index_buffer(ibuf.slice(..), IndexFormat::Uint32);
+            pass.draw_indexed(0..self.index_count, 0, 0..instance_count);
+            return;
+        }
         crate::core::shader_registry::record_shader_use("mesh_instanced_shader");
         // Update uniforms
         queue.write_buffer(&self.uniforms_buf, 0, bytemuck::bytes_of(&self.uniforms));
@@ -940,6 +1061,7 @@ impl MeshInstancedRenderer {
             bytemuck::bytes_of(&u),
         );
 
+        crate::core::shader_registry::record_shader_use("mesh_instanced_shader");
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.shadow_per_draw_bind_groups[slot], &[]);
         pass.set_vertex_buffer(0, vbuf.slice(..));

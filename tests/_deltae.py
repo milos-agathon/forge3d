@@ -32,19 +32,16 @@ _LUMA_WEIGHTS = _SRGB_TO_XYZ[1]
 
 def srgb_to_linear(rgb: np.ndarray) -> np.ndarray:
     """Decode sRGB-encoded values (uint8 0..255 or float 0..1) to linear 0..1."""
-    rgb = np.asarray(rgb, dtype=np.float64)
-    if rgb.max(initial=0.0) > 1.0:
+    rgb = np.asarray(rgb)
+    is_uint8 = rgb.dtype == np.uint8
+    rgb = rgb.astype(np.float64)
+    if is_uint8 or rgb.max(initial=0.0) > 1.0:
         rgb = rgb / 255.0
     rgb = np.clip(rgb, 0.0, 1.0)
     return np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
 
 
-def srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
-    """Convert sRGB (..., 3) [uint8 or 0..1 float] to CIELAB (..., 3) under D65."""
-    rgb = np.asarray(rgb)
-    if rgb.shape[-1] < 3:
-        raise ValueError(f"Expected trailing RGB(A) axis, got shape {rgb.shape}")
-    linear = srgb_to_linear(rgb[..., :3])
+def _linear_rgb_to_lab(linear: np.ndarray) -> np.ndarray:
     xyz = linear @ _SRGB_TO_XYZ.T
     xyz_n = xyz / _D65_WHITE
 
@@ -59,6 +56,39 @@ def srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
         [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)], axis=-1
     )
     return lab
+
+
+def srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
+    """Convert sRGB (..., 3) [uint8 or 0..1 float] to CIELAB (..., 3) under D65."""
+    rgb = np.asarray(rgb)
+    if rgb.shape[-1] < 3:
+        raise ValueError(f"Expected trailing RGB(A) axis, got shape {rgb.shape}")
+    return _linear_rgb_to_lab(srgb_to_linear(rgb[..., :3]))
+
+
+def linear_rgb_to_lab(rgb: np.ndarray) -> np.ndarray:
+    """Convert linear Rec.709 RGB (..., 3) to CIELAB (..., 3) under D65.
+
+    For albedo maps and other already-linear reflectance data — no sRGB
+    decode is applied. Values are clamped to [0, 1].
+    """
+    rgb = np.asarray(rgb, dtype=np.float64)
+    if rgb.shape[-1] < 3:
+        raise ValueError(f"Expected trailing RGB axis, got shape {rgb.shape}")
+    return _linear_rgb_to_lab(np.clip(rgb, 0.0, 1.0))
+
+
+def median_delta_e2000_linear(a: np.ndarray, b: np.ndarray) -> float:
+    """Median per-texel ΔE2000 between two linear-RGB maps of equal shape.
+
+    The DIFFERENTIA albedo-recovery score — the same AEQUITAS metric,
+    entered at linear RGB instead of display u8.
+    """
+    aa = np.asarray(a, dtype=np.float64)
+    bb = np.asarray(b, dtype=np.float64)
+    if aa.shape != bb.shape:
+        raise ValueError(f"albedo maps must have equal shape, got {aa.shape} vs {bb.shape}")
+    return float(np.median(delta_e_2000(linear_rgb_to_lab(aa), linear_rgb_to_lab(bb))))
 
 
 def delta_e_2000(lab1: np.ndarray, lab2: np.ndarray) -> np.ndarray:

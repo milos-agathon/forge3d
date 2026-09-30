@@ -423,7 +423,7 @@ def _verify_physical_producer(record: Any, repo_root: Path, commit: str) -> None
     if not isinstance(record, dict):
         _fail("schema_error", "physical producer identity must be an object")
     _keys(record, {"implementation", "source_revision", "native_source", "producer_tool"}, "physical producer")
-    if record["implementation"] != "canonical-ratio-delta-roulette-and-analog-sphere-v1" or record["source_revision"] != commit:
+    if record["implementation"] != "canonical-ratio-delta-roulette-and-analog-sphere-v2" or record["source_revision"] != commit:
         _fail("provenance_error", "physical producer implementation or source revision differs")
     for key, expected in (("native_source", "src/media_py.rs"), ("producer_tool", "scripts/run_media_physical_capture.py")):
         value = record[key]
@@ -1188,7 +1188,7 @@ def _verify_reference_provenance(
         }, label)
         if (
             value["schema"] != "forge3d.nephele.reference_provenance/2"
-            or value["algorithm"] != "integrated-hybrid-terrain-ratio-delta-tracking-reference"
+            or value["algorithm"] != "integrated-hybrid-terrain-ratio-delta-tracking-surface-env-mis-v2"
             or value["samples_per_pixel"] != expected_spp
             or value["seed"] != 0x4E455048
             or not SHA_RE.fullmatch(str(value["source_revision"]))
@@ -1402,14 +1402,14 @@ def _verify_reference_provenance(
     metrics = {
         "gate3_sky_cloud_delta_e_below_2_5_fraction": float(np.mean(delta_e[masks["sky_cloud_mask"]] < 2.5)),
         "gate3_godray_roi_ssim": ssim(old_roi, new_roi, data_range=255.0),
-        "gate4_cloud_shadow_terrain_maximum_delta_e": float(shadow_values.max()),
+        "gate4_cloud_shadow_terrain_delta_e_below_2_fraction": _policy_evaluator(_object(artifact_dir / "gate4-policy.json"))(shadow_values)[0],
     }
     if not isinstance(convergence["metrics"], dict) or set(convergence["metrics"]) != set(metrics) or any(
         not math.isclose(_finite(convergence["metrics"][name], f"reference convergence metric {name}"), value, rel_tol=1e-12, abs_tol=1e-12)
         for name, value in metrics.items()
     ):
         _fail("provenance_error", "reference convergence downstream metrics differ from recomputation")
-    if not (metrics["gate3_sky_cloud_delta_e_below_2_5_fraction"] >= 0.95 and metrics["gate3_godray_roi_ssim"] > 0.95 and metrics["gate4_cloud_shadow_terrain_maximum_delta_e"] < 2.0):
+    if not (metrics["gate3_sky_cloud_delta_e_below_2_5_fraction"] >= 0.95 and metrics["gate3_godray_roi_ssim"] > 0.95 and metrics["gate4_cloud_shadow_terrain_delta_e_below_2_fraction"] >= 0.95):
         _fail("fixture_unresolved", "reference convergence does not satisfy downstream Gate 3/4 criteria")
     return (
         {
@@ -1426,15 +1426,24 @@ def _verify_reference_provenance(
 def _policy_evaluator(policy: dict[str, Any]) -> Callable[[np.ndarray], tuple[float, bool]]:
     if policy.get("schema") != "forge3d.nephele.gate4_policy/1" or policy.get("status") != "APPROVED":
         _fail("policy_unresolved", "Gate 4 aggregation has no owner-approved policy")
-    _keys(policy, {"schema", "status", "policy_id", "approved_by", "approved_revision", "aggregation", "definition"}, "gate4-policy.json")
-    if not all(isinstance(policy[key], str) and policy[key].strip() for key in ("policy_id", "approved_by", "definition")):
+    owner = policy.get("owner_record")
+    aggregation = {"kind": "per_pixel_pass_fraction", "minimum_fraction": 0.95}
+    if (not isinstance(owner, dict) or owner.get("approver") != "Milos"
+        or owner.get("date") != "2026-09-30" or not owner.get("source")
+        or owner.get("aggregation") != aggregation or policy.get("approved_by") != "Milos"
+        or policy.get("aggregation") != aggregation):
+        _fail("policy_unresolved", "Gate 4 requires Milos's 2026-09-30 approval of the 95% pass fraction")
+    _keys(policy, {"schema", "status", "policy_id", "approved_by", "approved_revision", "owner_record", "aggregation", "definition"}, "gate4-policy.json")
+    if not all(isinstance(policy[key], str) and policy[key].strip() for key in ("policy_id", "definition")):
         _fail("schema_error", "gate4-policy.json: approval identity is incomplete")
     if not SHA_RE.fullmatch(str(policy["approved_revision"])):
-        _fail("schema_error", "gate4-policy.json: approved_revision must be an exact Git SHA")
-    aggregation = policy["aggregation"]
-    if aggregation != {"kind": "maximum"}:
-        _fail("policy_unresolved", "Gate 4 requires the exact owner-approved maximum aggregation")
-    return lambda values: (float(values.max()), bool(values.max() < 2.0))
+        _fail("schema_error", "gate4-policy.json: approved_revision must identify the reviewed Git SHA")
+    def evaluate(values: np.ndarray) -> tuple[float, bool]:
+        if not values.size or not np.all(np.isfinite(values)) or np.any(values < 0):
+            _fail("schema_error", "Gate 4 population must be nonempty, finite and nonnegative")
+        fraction = float(np.mean(values < 2.0))
+        return fraction, fraction >= aggregation["minimum_fraction"]
+    return evaluate
 
 
 def _gate1(
@@ -1726,14 +1735,14 @@ def _gate1(
 
 def _gate2(artifact_dir: Path, head_sha: str, repo_root: Path) -> dict[str, Any]:
     raw = _object(artifact_dir / "gate2-energy.json")
-    _keys(raw, {"schema", "producer", "homogeneous_slab", "sample_mapping", "normalization", "raw_output", "transmitted", "scattered_out", "absorbed", "incident", "closure_residual"}, "gate2-energy.json")
-    if raw["schema"] != "forge3d.nephele.gate2_raw/2" or raw["normalization"] != "three independent analog-transport ensembles share one incident energy unit per sample":
+    _keys(raw, {"schema", "producer", "sample_count", "homogeneous_slab", "sample_mapping", "normalization", "raw_output", "transmitted", "scattered_out", "absorbed", "incident", "closure_residual"}, "gate2-energy.json")
+    if raw["schema"] != "forge3d.nephele.gate2_raw/3" or raw["normalization"] != "three independent analog-transport ensembles share one incident energy unit per sample":
         _fail("schema_error", "gate2-energy.json: schema or normalization missing")
     _verify_physical_producer(raw["producer"], repo_root, head_sha)
     _verify_homogeneous_slab(raw["homogeneous_slab"], artifact_dir, repo_root, head_sha)
     _identity_hash(raw["sample_mapping"], "gate2.sample_mapping")
     expected_mapping = {
-        "algorithm": "independent-analog-closed-sphere-v1",
+        "algorithm": "independent-analog-closed-sphere-v2",
         "parameters": {
             "streams": {"transmitted": 0x4E4550482001, "scattered_out": 0x4E4550482002, "absorbed": 0x4E4550482003},
             "normalization": "one incident energy unit per estimator sample",
@@ -1742,28 +1751,29 @@ def _gate2(artifact_dir: Path, head_sha: str, repo_root: Path) -> dict[str, Any]
     expected_mapping["sha256"] = hashlib.sha256(json.dumps(expected_mapping, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     if raw["sample_mapping"] != expected_mapping:
         _fail("provenance_error", "Gate 2 independent analog stream identity differs")
+    count = raw["sample_count"]
+    if not isinstance(count, int) or isinstance(count, bool) or count < 2:
+        _fail("schema_error", "Gate 2 sample_count must be an integer greater than one")
+    record = raw["raw_output"]
+    path = artifact_dir / "gate2-energy-samples.bin"
+    if (record.get("columns") != ["transmitted", "scattered_out", "absorbed"]
+        or record.get("encoding") != "u8-outcome-columns"
+        or record.get("path") != path.name or record.get("samples") != count
+        or record.get("sha256") != _sha256(path)):
+        _fail("provenance_error", "Gate 2 raw outcomes identity differs")
+    outcomes = np.fromfile(path, dtype=np.uint8)
+    if outcomes.size != count * 3 or not np.isin(outcomes, (0, 1)).all():
+        _fail("schema_error", "Gate 2 raw output must contain three binary outcomes per sample")
+    outcomes = outcomes.reshape(count, 3).astype(np.float64)
+    incident = np.ones(count)
+    matrix = np.column_stack((outcomes, incident, outcomes.sum(axis=1) - incident))
     expected_columns = ["transmitted", "scattered_out", "absorbed", "incident", "closure_residual"]
-    if raw["raw_output"].get("columns") != expected_columns:
-        _fail("provenance_error", "Gate 2 raw columns or independent-estimator identity differs")
-    flat = _raw_f64(
-        artifact_dir / "gate2-energy-samples.bin",
-        raw["raw_output"],
-        "Gate 2 closed-sphere transport",
-        1_000_000,
-    )
-    if flat.size != 5_000_000:
-        _fail("schema_error", "Gate 2 raw output must contain five values per sample")
-    matrix = flat.reshape(1_000_000, 5)
-    if not np.isin(matrix[:, :3], (0.0, 1.0)).all() or not np.all(matrix[:, 3] == 1.0):
-        _fail("schema_error", "Gate 2 independent energy samples have invalid support")
-    if not np.array_equal(matrix[:, 4], matrix[:, 0] + matrix[:, 1] + matrix[:, 2] - matrix[:, 3]):
-        _fail("schema_error", "Gate 2 raw closure residual differs from raw independent terms")
     if not np.any(matrix[:, 4] != 0.0):
         _fail("provenance_error", "Gate 2 closure is tautological rather than independently estimated")
     for index, name in enumerate(expected_columns):
         if raw[name] != _accumulator_from_array(matrix[:, index]):
             _fail("schema_error", f"Gate 2 {name} accumulator differs from raw samples")
-    terms = {name: _stats(raw[name], f"gate2.{name}", exact_count=1_000_000) for name in expected_columns}
+    terms = {name: _stats(raw[name], f"gate2.{name}", exact_count=count) for name in expected_columns}
     counts = {term.count for term in terms.values()}
     if (
         len(counts) != 1
@@ -1775,9 +1785,21 @@ def _gate2(artifact_dir: Path, head_sha: str, repo_root: Path) -> dict[str, Any]
     recorded_residual = abs(terms["closure_residual"].mean) / terms["incident"].mean
     if not math.isclose(residual, recorded_residual, rel_tol=1.0e-9, abs_tol=1.0e-12):
         _fail("schema_error", "gate2-energy.json: closure residual accumulator is inconsistent with energy terms")
-    if residual > 1.0e-3:
-        _fail("gate_failure", "Gate 2 energy residual exceeds 1e-3")
-    return {"terms": {name: value.__dict__ for name, value in terms.items()}, "relative_residual": residual}
+    variance_sum = sum(terms[name].variance for name in ("transmitted", "scattered_out", "absorbed"))
+    standard_error = math.sqrt(variance_sum / count)
+    threshold = 1.0e-3
+    sigma_distance = threshold / standard_error if standard_error > 0 else None
+    if residual > threshold:
+        _fail("gate_failure", f"Gate 2 energy residual exceeds 1e-3: residual={residual:.9g}, "
+              f"standard_error={standard_error:.9g}, independent_samples_per_ensemble={count}")
+    return {"terms": {name: value.__dict__ for name, value in terms.items()},
+        "relative_residual": residual, "sample_count": count,
+        "uncertainty": {"residual_standard_error": standard_error,
+            "normal_approximation_false_fail_probability": math.erfc(sigma_distance / math.sqrt(2.0)) if sigma_distance is not None else 0.0},
+        "sample_count_derivation": {"rule": "For variance sum V and threshold tau=1e-3, SE=sqrt(V/N), k=tau/SE, and N=k^2*V/tau^2. The owner selected N; k and the normal-approximation false-fail probability are measured consequences, not additional acceptance thresholds.",
+            "owner_selected_N": count, "estimated_variance_sum": variance_sum,
+            "threshold": threshold, "threshold_in_standard_errors": sigma_distance}}
+
 
 
 def _visual_gates(
@@ -1855,7 +1877,7 @@ def _visual_gates(
         _fail("gate_failure", "Gate 5 ridgeline agreement is below 99 percent")
     return (
         {"sky_cloud_delta_e_pass_fraction": sky_pass_fraction, "godray_roi_ssim": shaft_ssim},
-        {"shadow_aggregate": aggregate, "medium_ablation_changed_fraction": changed_fraction, "terrain_occlusion_ablation_ssim": occlusion_ssim},
+        {"shadow_aggregate": aggregate, "aggregate_pass": aggregate_pass, "aggregation": {"kind": "per_pixel_pass_fraction", "minimum_fraction": 0.95}, "medium_ablation_changed_fraction": changed_fraction, "terrain_occlusion_ablation_ssim": occlusion_ssim},
         {"compute_entry_texture_sample_compare_calls": 0, "stale_disabled_shadow_comments": 0, "ridgeline_within_one_slice_fraction": agreement},
     )
 
@@ -1908,6 +1930,8 @@ def _validate_realtime_diagnostics(
         or str(diagnostics["backend"]).lower() != "vulkan"
         or diagnostics["adapter"] != adapter["name"]
         or diagnostics["driver"] != expected_driver
+        or diagnostics["temporal_history_decision"] != "rejected"
+        or diagnostics["temporal_history_reason"] != "no prior media history exists"
         or diagnostics["majorant_valid"] is not True
         or diagnostics["majorant_proof"] != "TrilinearConvexHull"
         or diagnostics["executed_multi_scatter"] is not True

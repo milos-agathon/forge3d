@@ -16,7 +16,10 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     let uv = vec2<f32>(uv_x, uv_y);
 
     out.clip_position = vec4<f32>(uv * vec2<f32>(2.0, 2.0) - vec2<f32>(1.0, 1.0), 0.0, 1.0);
-    out.uv = uv * 0.5;
+    // The oversize triangle's uv interpolates over [0,1] inside the viewport —
+    // scaling it would sample only one source quadrant. NDC is bottom-up while
+    // texture coordinates are top-down, so V is flipped to preserve orientation.
+    out.uv = vec2<f32>(uv.x, 1.0 - uv.y);
     return out;
 }
 

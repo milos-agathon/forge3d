@@ -137,6 +137,22 @@ impl TerrainScene {
                     binding: 19,
                     resource: wgpu::BindingResource::Sampler(&self.sun_vis_sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 20,
+                    resource: self.main_pass_height_page_table().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 21,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.main_pass_height_atlas_view(heightmap_view),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 22,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.main_pass_height_coverage_view(heightmap_view),
+                    ),
+                },
             ],
         });
         drop(sun_vis_sample_guard);
@@ -230,10 +246,9 @@ impl TerrainScene {
         let media_depth = media_resources
             .as_ref()
             .map(|r| r.depth_transform)
-            .unwrap_or_else(|| {
-                super::super::media::FroxelDepthTransform::new(0.1, 1.0)
-                    .expect("constant depth transform is valid")
-            });
+            .map(Ok)
+            .unwrap_or_else(|| super::super::media::FroxelDepthTransform::new(0.1, 1.0))
+            .map_err(|error| anyhow!(error))?;
         let fog_uniforms = FogUniforms {
             params0: [
                 decoded.fog.density,

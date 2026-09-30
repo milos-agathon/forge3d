@@ -92,7 +92,7 @@ impl ResourceRegistry {
             let message = format!(
                 "Memory budget exceeded: allocation '{label}' requesting {additional_host_visible} bytes would exceed the 512 MiB host-visible limit (current: {current} bytes); top consumers: {top5}"
             );
-            return Err(crate::core::error::RenderError::Budget(message));
+            return Err(crate::core::error::RenderError::budget(message));
         }
         Ok(())
     }

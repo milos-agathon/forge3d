@@ -41,6 +41,11 @@ impl HybridPathTracer {
                 sampled_texture_entry(6),
                 storage_entry(7, false),
                 uniform_entry(10),
+                // Per-texel terrain albedo map (sampled only when the
+                // terrain.mips.y flag bit 1 is set; dummy-bound otherwise).
+                // Lives at 16 so the dense 0..9 binding range the shaders
+                // declare stays untouched.
+                sampled_texture_entry(16),
             ],
         })
     }

@@ -44,7 +44,8 @@ pub(super) fn anchored_model(
     origin: glam::DVec3,
     local_model: glam::Mat4,
 ) -> glam::Mat4 {
-    glam::Mat4::from_translation(anchor.model_offset(origin)) * local_model
+    glam::Mat4::from_translation(anchor.model_offset(crate::geo::units::SceneCoord::scene(origin)))
+        * local_model
 }
 
 // F16: GPU Instancing batch description

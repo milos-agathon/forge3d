@@ -39,6 +39,10 @@ mod height_ao;
 pub(crate) use super::realtime_media as media;
 mod msaa;
 mod offline;
+#[cfg(all(feature = "enable-globe", feature = "extension-module"))]
+pub(crate) mod orbis_capture;
+#[cfg(feature = "enable-globe")]
+mod orbis_globe_background;
 mod pipeline_cache;
 mod probes;
 mod py_api;
@@ -58,6 +62,8 @@ mod water_reflection;
 
 pub(crate) use self::core::is_yup_camera_mode;
 pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
+#[cfg(feature = "enable-globe")]
+pub(crate) use self::orbis_globe_background::ORBIS_EARTH_TEXTURE_MAX_WIDTH;
 
 use self::atmosphere::create_atmosphere_init_resources;
 use self::bind_groups::create_base_bind_group_layouts;

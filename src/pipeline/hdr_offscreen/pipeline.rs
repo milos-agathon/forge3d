@@ -171,12 +171,7 @@ impl HdrOffscreenPipeline {
         .map_err(|e| e.to_string())?;
 
         // Create tonemap pipeline
-        let tonemap_shader_source = format!(
-            "{}\n{}\n{}",
-            include_str!("../../shaders/includes/determinism.wgsl"),
-            include_str!("../../shaders/includes/tonemap_common.wgsl"),
-            include_str!("../../shaders/postprocess_tonemap.wgsl")
-        );
+        let tonemap_shader_source = crate::shader_sources::hdr_tonemap();
         let tonemap_shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "hdr_offscreen.tonemap_shader",

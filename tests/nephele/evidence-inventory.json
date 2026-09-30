@@ -107,7 +107,9 @@
     "gate4_shadow_delta_e_strict_upper_bound": 2.0,
     "gate5_ridgeline_fraction_minimum": 0.99,
     "gate5_ridgeline_slice_difference_maximum": 1,
-    "gate6_peak_host_visible_bytes_strict_upper_bound": 536870912
+    "gate6_peak_host_visible_bytes_strict_upper_bound": 536870912,
+    "gate4_minimum_pass_fraction": 0.95,
+    "gate2_samples_per_ensemble": 10000000
   },
-  "gate4_aggregation": "maximum"
+  "gate4_aggregation": "per_pixel_pass_fraction"
 }

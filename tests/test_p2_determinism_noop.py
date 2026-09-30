@@ -104,5 +104,15 @@ def test_advanced_label_diagnostics_are_deterministic_not_silent_success():
     second = f3d.LabelPlan.compile(labels=labels, camera={}, viewport=(100, 100), seed=9)
 
     assert first.to_dict() == second.to_dict()
-    assert [label.label_id for label in first.accepted] == ["repeat"]
-    assert any(diagnostic.code == "experimental_feature" for diagnostic in first.diagnostics)
+    # Without geometry authority neither advanced line label is synthesized;
+    # each is rejected with an explicit, deterministic diagnostic.
+    assert list(first.accepted) == []
+    assert {r.label_id: r.reason for r in first.rejected} == {
+        "curved": "missing_geometry_authority",
+        "repeat": "missing_geometry_authority",
+    }
+    assert {
+        d.object_id: d.details["required_authority"]
+        for d in first.diagnostics
+        if d.code == "label_geometry_authority_missing"
+    } == {"curved": "layout_curved_text", "repeat": "compute_line_label_placement"}

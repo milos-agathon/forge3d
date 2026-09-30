@@ -14,7 +14,7 @@ fn chebyshev_upper_bound_visibility(mean: f32, variance: f32, receiver: f32) -> 
         return 1.0;
     }
     let delta = receiver - mean;
-    return variance / (variance + delta * delta);
+    return det_div(variance, variance + det_barrier(delta * delta));
 }
 
 fn evsm_minimum_variance(
@@ -22,17 +22,15 @@ fn evsm_minimum_variance(
     exponents: vec2<f32>
 ) -> vec2<f32> {
     let depth_scale =
-        EVSM_MINIMUM_VARIANCE * exponents * abs(warped_receiver);
+        det_barrier2(det_barrier2(EVSM_MINIMUM_VARIANCE * exponents) * abs(warped_receiver));
     return depth_scale * depth_scale;
 }
 
 // Returns conservative mean-upper and variance-upper bounds for independently
 // rounded Rgba16Float first and second moments.
 fn evsm_fp16_moment_bounds(quantized: vec2<f32>) -> vec2<f32> {
-    let error = (
-        EVSM_FP16_UNIT_ROUNDOFF * abs(quantized)
-        + vec2<f32>(EVSM_FP16_MIN_SUBNORMAL_HALF)
-    ) / (1.0 - EVSM_FP16_UNIT_ROUNDOFF);
+    let error = det_div2(det_barrier2(EVSM_FP16_UNIT_ROUNDOFF * abs(quantized))
+        + vec2<f32>(EVSM_FP16_MIN_SUBNORMAL_HALF), vec2<f32>(1.0 - EVSM_FP16_UNIT_ROUNDOFF));
     let mean_lower = quantized.x - error.x;
     let mean_upper = quantized.x + error.x;
     let square_lower = select(
@@ -41,7 +39,7 @@ fn evsm_fp16_moment_bounds(quantized: vec2<f32>) -> vec2<f32> {
         mean_lower <= 0.0 && mean_upper >= 0.0
     );
     let variance_upper =
-        max(quantized.y + error.y - square_lower, 0.0);
+        max(det_barrier(quantized.y + error.y) - square_lower, 0.0);
     return vec2<f32>(mean_upper, variance_upper);
 }
 
@@ -51,7 +49,7 @@ fn evsm_reduce_light_bleed(visibility: f32) -> f32 {
     }
     // A smooth contrast curve suppresses high-probability light leaks without
     // introducing the discontinuity of a hard light-bleed cutoff.
-    return pow(visibility, EVSM_VISIBILITY_CONTRAST_POWER);
+    return det_pow(visibility, EVSM_VISIBILITY_CONTRAST_POWER);
 }
 
 fn evsm_visibility_from_moments(
@@ -75,13 +73,13 @@ fn evsm_visibility_from_moments(
     let negative_variance = max(negative_bounds.y, variance_floor.y);
     let positive_visibility =
         chebyshev_upper_bound_visibility(
-            positive_bounds.x,
+            det_barrier(positive_bounds.x),
             positive_variance,
             positive_receiver
         );
     let negative_visibility =
         chebyshev_upper_bound_visibility(
-            negative_bounds.x,
+            det_barrier(negative_bounds.x),
             negative_variance,
             negative_receiver
         );
@@ -110,7 +108,7 @@ fn evsm_moment_leak_control(
     let moment_bounds = evsm_fp16_moment_bounds(positive_moments);
     let variance = max(moment_bounds.y, minimum_variance);
     let visibility = chebyshev_upper_bound_visibility(
-        moment_bounds.x,
+        det_barrier(moment_bounds.x),
         variance,
         positive_receiver
     );
@@ -135,7 +133,7 @@ fn msm_visibility_from_moments(
 
     let variance_floor = max(moment_bias, 0.000001);
     let variance = max(
-        raw_moments.y - raw_moments.x * raw_moments.x,
+        raw_moments.y - det_barrier(raw_moments.x * raw_moments.x),
         variance_floor
     );
     let fallback = clamp(
@@ -147,39 +145,39 @@ fn msm_visibility_from_moments(
     // Hamburger 4MSM. A small bias towards a valid moment vector compensates
     // Rgba16Float quantization before the Hankel-system reconstruction.
     let quantization_bias = clamp(max(moment_bias, 0.00003), 0.0, 0.01);
-    let b = mix(raw_moments, vec4<f32>(0.5), quantization_bias);
-    let d22 = b.y - b.x * b.x;
-    let l32_d22 = b.z - b.x * b.y;
+    let b = det_mix4(raw_moments, vec4<f32>(0.5), quantization_bias);
+    let d22 = det_barrier(b.y) - det_barrier(b.x * b.x);
+    let l32_d22 = det_barrier(b.z) - det_barrier(b.x * b.y);
     let d33_d22 =
-        (b.w - b.y * b.y) * d22 - l32_d22 * l32_d22;
+        det_barrier((det_barrier(b.w) - det_barrier(b.y * b.y)) * d22) - det_barrier(l32_d22 * l32_d22);
     if (!(d22 > MSM_MATRIX_EPSILON) ||
         !(d33_d22 > MSM_DETERMINANT_EPSILON)) {
         return fallback;
     }
 
-    let l32 = l32_d22 / d22;
+    let l32 = det_div(l32_d22, d22);
     var coefficients = vec3<f32>(1.0, receiver, receiver * receiver);
-    coefficients.y -= b.x;
-    coefficients.z -= b.y + l32 * coefficients.y;
-    coefficients.y /= d22;
-    coefficients.z *= d22 / d33_d22;
-    coefficients.y -= l32 * coefficients.z;
-    coefficients.x -= dot(coefficients.yz, b.xy);
+    coefficients.y = det_barrier(coefficients.y) - (det_barrier(b.x));
+    coefficients.z = det_barrier(coefficients.z) - (det_barrier(det_barrier(b.y) + det_barrier(l32 * coefficients.y)));
+    coefficients.y = det_div(coefficients.y, d22);
+    coefficients.z *= det_div(d22, d33_d22);
+    coefficients.y = det_barrier(coefficients.y) - (det_barrier(l32 * det_barrier(coefficients.z)));
+    coefficients.x -= det_barrier(det_dot2(coefficients.yz, b.xy));
     if (!(abs(coefficients.z) > MSM_MATRIX_EPSILON) ||
         !all(abs(coefficients) <= vec3<f32>(MSM_FINITE_LIMIT))) {
         return fallback;
     }
 
-    let p = coefficients.y / coefficients.z;
-    let q = coefficients.x / coefficients.z;
-    let discriminant = p * p * 0.25 - q;
+    let p = det_div(coefficients.y, coefficients.z);
+    let q = det_div(coefficients.x, coefficients.z);
+    let discriminant = det_barrier(det_barrier(p * p) * 0.25) - q;
     if (!(discriminant >= 0.0) || !(discriminant <= MSM_FINITE_LIMIT)) {
         return fallback;
     }
 
-    let root_radius = sqrt(discriminant);
-    let root1 = -p * 0.5 - root_radius;
-    let root2 = -p * 0.5 + root_radius;
+    let root_radius = det_sqrt(discriminant);
+    let root1 = det_barrier(det_barrier(-p * 0.5) - root_radius);
+    let root2 = det_barrier(det_barrier(-p * 0.5) + root_radius);
     var branch = vec4<f32>(0.0);
     if (root2 < receiver) {
         branch = vec4<f32>(root1, receiver, 1.0, 1.0);
@@ -196,9 +194,8 @@ fn msm_visibility_from_moments(
         return fallback;
     }
     let quotient =
-        (branch.x * root2 - b.x * (branch.x + root2) + b.y) /
-        denominator;
-    let visibility = 1.0 - clamp(branch.z + branch.w * quotient, 0.0, 1.0);
+        det_div(det_barrier(det_barrier(branch.x * root2) - det_barrier(b.x * (branch.x + root2))) + det_barrier(b.y), denominator);
+    let visibility = 1.0 - clamp(branch.z + det_barrier(branch.w * quotient), 0.0, 1.0);
     if (!(visibility >= 0.0) || !(visibility <= 1.0)) {
         return fallback;
     }

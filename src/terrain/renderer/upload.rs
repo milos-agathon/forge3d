@@ -2,6 +2,9 @@ use super::*;
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::terrain::render_params;
 
+/// Must match `ORBIS_GLOBE_FRAME_FLAG_OFFSET` in `terrain_pbr_pom.wgsl`.
+pub(super) const ORBIS_GLOBE_FRAME_FLAG_OFFSET: f32 = 10.0;
+
 impl TerrainScene {
     pub(super) fn extract_overlay_binding(
         &self,
@@ -94,7 +97,11 @@ impl TerrainScene {
                     ao_weight,
                     ao_fallback_enabled,
                     params.hue_variation_strength.clamp(0.0, 0.2),
-                    0.0,
+                    // ORBIS globe shading frame: 10 + anchor latitude
+                    // (radians) on the planetary path, 0 on flat paths.
+                    self.orbis_render_frame_latitude()
+                        .map(|latitude| ORBIS_GLOBE_FRAME_FLAG_OFFSET + latitude as f32)
+                        .unwrap_or(0.0),
                 ],
                 params4: [
                     detail_enabled,
@@ -107,6 +114,17 @@ impl TerrainScene {
                     detail_fade_end,
                     output_srgb_eotf,
                     offline_hdr_flag,
+                ],
+                params6: [
+                    params.material_slope_bias.clamp(0.0, 1.0),
+                    // No-data threshold (raw height units) and its enable flag.
+                    params.nodata_height_below.unwrap_or(0.0),
+                    if params.nodata_height_below.is_some() {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    0.0,
                 ],
             },
             lut: None,
@@ -300,9 +318,11 @@ impl TerrainScene {
         _terrain_height: f32,
     ) -> Result<Vec<f32>> {
         let (_eye, view, proj) = Self::build_camera_matrices(params);
-        Ok(Self::build_uniforms_with_matrices(
-            params, decoded, view, proj,
-        ))
+        let mut uniforms = Self::build_uniforms_with_matrices(params, decoded, view, proj);
+        if let Some(blend) = self.height_detail_blend_override {
+            uniforms[39] = -(blend.clamp(0.0, 1.0) + 1.0);
+        }
+        Ok(uniforms)
     }
 
     pub(super) fn build_uniforms_with_matrices(
@@ -347,7 +367,7 @@ impl TerrainScene {
         uniforms
     }
 
-    pub(in crate::terrain) fn build_camera_matrices(
+    pub(crate) fn build_camera_matrices(
         params: &render_params::TerrainRenderParams,
     ) -> (glam::Vec3, glam::Mat4, glam::Mat4) {
         let phi_rad = params.cam_phi_deg.to_radians();
@@ -447,7 +467,17 @@ impl TerrainScene {
             pom_flags as f32,
         ]);
 
-        let layer_centers = gpu_materials.layer_centers();
+        let mut layer_centers = gpu_materials.layer_centers();
+        if let Some(centers) = params.material_layer_centers.as_deref() {
+            if centers.len() != gpu_materials.layer_count as usize {
+                return Err(anyhow!(
+                    "material_layer_centers has {} values but the material set has {} layers",
+                    centers.len(),
+                    gpu_materials.layer_count
+                ));
+            }
+            layer_centers[..centers.len()].copy_from_slice(centers);
+        }
         uniforms.extend_from_slice(&layer_centers);
 
         let mut layer_roughness = [1.0f32; MATERIAL_LAYER_CAPACITY];

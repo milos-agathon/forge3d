@@ -9,7 +9,7 @@ paths: ["Cargo.toml", "pyproject.toml", ".cargo/**", ".github/workflows/**", "py
   `cargo forge3d-clippy-acceptance` for an explicit full acceptance candidate;
   never use plain `cargo clippy`.
 - The current portable feature inventory is:
-  `default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts`.
+  `default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts,enable-globe`.
   `.github/workflows/ci.yml` and `.cargo/config.toml` are authoritative and the
   honesty gate locks routing and duplicate inventories. `PR Core Success` runs
   the stable hosted pull-request contract. A manual `scope=full` dispatch runs

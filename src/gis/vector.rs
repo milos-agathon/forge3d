@@ -235,6 +235,15 @@ pub fn reproject_vector(
             &mut warnings,
         )?);
     }
+    // Reported after the transforms so an unsupported pair keeps raising its
+    // transform error; an empty feature set transformed no position, so it
+    // applied no datum operation.
+    if !features.is_empty() {
+        match crs::datum_step_warnings(&src_crs, &dst_crs) {
+            Err(GisError::BackendUnavailable(_)) => {}
+            other => warnings.extend(other?),
+        }
+    }
 
     let bounds = bounds_for_features(&out_features).map(RasterBounds::tuple);
     let feature_count = out_features.len() as u64;

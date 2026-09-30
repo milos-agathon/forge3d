@@ -254,6 +254,7 @@ impl IBLRenderer {
                 label: Some("ibl.precompute.pass.equirect"),
                 timestamp_writes: None,
             });
+            crate::core::shader_registry::record_shader_use("ibl.precompute.shader.equirect");
             pass.set_pipeline(&self.equirect_pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
             let work = 8u32;

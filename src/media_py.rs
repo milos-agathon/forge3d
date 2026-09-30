@@ -11,7 +11,8 @@ use crate::media::{
     Rgb, SampleIdentity, SpatialTransform, TrackingContext,
 };
 
-const PHYSICAL_SAMPLE_COUNT: usize = 1_000_000;
+const GATE1_RATIO_SAMPLE_COUNT: usize = 1_000_000;
+const GATE2_SPHERE_SAMPLE_COUNT: usize = 10_000_000;
 
 fn media_error(error: crate::media::MediaError) -> PyErr {
     PyValueError::new_err(format!("invalid participating medium: {error}"))
@@ -51,10 +52,11 @@ enum SphereOutcome {
 }
 
 fn sphere_transport(
-    medium: &Medium,
+    context: &TrackingContext,
     sample: u64,
     stream: u64,
 ) -> Result<SphereOutcome, crate::media::MediaError> {
+    let medium = context.medium();
     let radius = 5.0f32;
     let identity = SampleIdentity {
         frame: stream,
@@ -71,8 +73,6 @@ fn sphere_transport(
     ];
     let mut direction = [0.0, 0.0, 1.0];
     let sigma_t = medium.sigma_t().components()[0];
-    let density = medium.extinction_at([0.0; 3]).components()[0] / sigma_t;
-    let rate = sigma_t * density;
     let albedo = medium.sigma_s().components()[0] / sigma_t;
     let mut collision_count = 0u32;
     loop {
@@ -80,16 +80,28 @@ fn sphere_transport(
             bounce: collision_count,
             ..identity
         };
-        let free_flight = -bounce_identity.uniform(2).ln() / rate;
         let exit = sphere_exit_distance(point, direction, radius);
-        if free_flight >= exit {
+        let (collision, _) = crate::media::delta_track_counted(
+            context,
+            Ray {
+                origin: point,
+                direction,
+            },
+            exit,
+            0,
+            SampleIdentity {
+                pixel: 1,
+                ..bounce_identity
+            },
+        )?;
+        let Some(collision) = collision else {
             return Ok(if collision_count == 0 {
                 SphereOutcome::Transmitted
             } else {
                 SphereOutcome::ScatteredOut
             });
-        }
-        point = std::array::from_fn(|axis| point[axis] + direction[axis] * free_flight);
+        };
+        point = collision.position;
         if bounce_identity.uniform(3) >= albedo {
             return Ok(SphereOutcome::Absorbed);
         }
@@ -100,7 +112,9 @@ fn sphere_transport(
                 [bounce_identity.uniform(4), bounce_identity.uniform(5)],
             )?
             .direction;
-        collision_count = collision_count.wrapping_add(1);
+        collision_count = collision_count.checked_add(1).ok_or_else(|| {
+            crate::media::MediaError::InvalidTransport("sphere bounce identity overflowed".into())
+        })?;
     }
 }
 
@@ -402,6 +416,18 @@ fn render_volumetric_reference(
         max_frames: 1,
         min_frames: 1,
         variance_threshold: 1.0,
+        albedo_map: None,
+        albedo_sampling: crate::path_tracing::hybrid_compute::AlbedoSampling::Bilinear,
+        turbidity: 1.0,
+        camera_model: crate::path_tracing::hybrid_compute::CameraModel::Pinhole,
+        seamless_camera: false,
+        ortho_half_height: 1.0,
+        sensor_rect: [0.0, 0.0, 1.0, 1.0],
+        full_width: width,
+        full_height: height,
+        pixel_offset_x: 0,
+        pixel_offset_y: 0,
+        sdf_scene: None,
     };
     let environment = EnvironmentDistribution::new(
         1,
@@ -528,17 +554,23 @@ fn render_volumetric_reference(
 /// Raw samples are returned so the external verifier can recompute every
 /// accumulator instead of trusting native summary claims.
 #[pyfunction]
-#[pyo3(name = "_nephele_physical_samples", signature = (homogeneous, heterogeneous, homogeneous_distance, sample_count))]
+#[pyo3(name = "_nephele_physical_samples", signature = (homogeneous, heterogeneous, homogeneous_distance, gate1_sample_count, gate2_sample_count))]
 fn nephele_physical_samples(
     py: Python<'_>,
     homogeneous: &PyMedium,
     heterogeneous: &PyMedium,
     homogeneous_distance: f32,
-    sample_count: usize,
+    gate1_sample_count: usize,
+    gate2_sample_count: usize,
 ) -> PyResult<PyObject> {
-    if sample_count != PHYSICAL_SAMPLE_COUNT {
+    if gate1_sample_count != GATE1_RATIO_SAMPLE_COUNT {
         return Err(PyValueError::new_err(
-            "NEPHELE physical sampling requires exactly 1,000,000 samples",
+            "NEPHELE Gate 1 requires exactly 1,000,000 samples",
+        ));
+    }
+    if gate2_sample_count != GATE2_SPHERE_SAMPLE_COUNT {
+        return Err(PyValueError::new_err(
+            "NEPHELE Gate 2 requires exactly 10,000,000 samples per ensemble",
         ));
     }
     if !homogeneous_distance.is_finite() || homogeneous_distance <= 0.0 {
@@ -587,18 +619,18 @@ fn nephele_physical_samples(
         ));
     }
     let albedo = homogeneous.medium().sigma_s().components()[0] / sigma_t;
-    let mut homogeneous_values = Vec::with_capacity(sample_count);
-    let mut heterogeneous_values = Vec::with_capacity(sample_count);
-    let mut rr_on = Vec::with_capacity(sample_count);
-    let mut rr_off = Vec::with_capacity(sample_count);
-    let mut transmitted = Vec::with_capacity(sample_count);
-    let mut scattered_out = Vec::with_capacity(sample_count);
-    let mut absorbed = Vec::with_capacity(sample_count);
+    let mut homogeneous_values = Vec::with_capacity(gate1_sample_count);
+    let mut heterogeneous_values = Vec::with_capacity(gate1_sample_count);
+    let mut rr_on = Vec::with_capacity(gate1_sample_count);
+    let mut rr_off = Vec::with_capacity(gate1_sample_count);
+    let mut transmitted = Vec::with_capacity(gate2_sample_count);
+    let mut scattered_out = Vec::with_capacity(gate2_sample_count);
+    let mut absorbed = Vec::with_capacity(gate2_sample_count);
     let ray = Ray {
         origin: [0.0; 3],
         direction: [1.0, 0.0, 0.0],
     };
-    for sample in 0..sample_count as u64 {
+    for sample in 0..gate1_sample_count as u64 {
         let homogeneous_identity = SampleIdentity {
             frame: 0x4e45_5048_1001,
             pixel: 0,
@@ -675,21 +707,22 @@ fn nephele_physical_samples(
             }
         }
         rr_on.push(roulette_contribution);
-
+    }
+    for sample in 0..gate2_sample_count as u64 {
         transmitted.push(
-            (sphere_transport(homogeneous.medium(), sample, 0x4e45_5048_2001)
+            (sphere_transport(&homogeneous_context, sample, 0x4e45_5048_2001)
                 .map_err(media_error)?
-                == SphereOutcome::Transmitted) as u8 as f64,
+                == SphereOutcome::Transmitted) as u8,
         );
         scattered_out.push(
-            (sphere_transport(homogeneous.medium(), sample, 0x4e45_5048_2002)
+            (sphere_transport(&homogeneous_context, sample, 0x4e45_5048_2002)
                 .map_err(media_error)?
-                == SphereOutcome::ScatteredOut) as u8 as f64,
+                == SphereOutcome::ScatteredOut) as u8,
         );
         absorbed.push(
-            (sphere_transport(homogeneous.medium(), sample, 0x4e45_5048_2003)
+            (sphere_transport(&homogeneous_context, sample, 0x4e45_5048_2003)
                 .map_err(media_error)?
-                == SphereOutcome::Absorbed) as u8 as f64,
+                == SphereOutcome::Absorbed) as u8,
         );
     }
     let result = PyDict::new_bound(py);
@@ -706,10 +739,12 @@ fn nephele_physical_samples(
     result.set_item("transmitted", PyArray1::from_vec_bound(py, transmitted))?;
     result.set_item("scattered_out", PyArray1::from_vec_bound(py, scattered_out))?;
     result.set_item("absorbed", PyArray1::from_vec_bound(py, absorbed))?;
+    result.set_item("gate1_sample_count", gate1_sample_count)?;
+    result.set_item("gate2_sample_count", gate2_sample_count)?;
     result.set_item("source_revision", env!("FORGE3D_GIT_SHA_FULL"))?;
     result.set_item(
         "implementation",
-        "canonical-ratio-delta-roulette-and-analog-sphere-v1",
+        "canonical-ratio-delta-roulette-and-analog-sphere-v2",
     )?;
     Ok(result.into())
 }

@@ -137,6 +137,41 @@ pub struct ForwardDraw<'a> {
     pub vertices: Range<u32>,
 }
 
+pub trait ForwardRecorder {
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    fn record<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
+}
+
+impl ForwardRecorder for [ForwardDraw<'_>] {
+    fn len(&self) -> usize {
+        <[ForwardDraw]>::len(self)
+    }
+
+    fn record<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        for draw in self {
+            pass.set_pipeline(draw.pipeline);
+            if let Some(bind_group) = draw.bind_group {
+                pass.set_bind_group(0, bind_group, &[]);
+            }
+            match (draw.vertex_buffer, draw.index_buffer) {
+                (Some(vb), Some(ib)) => {
+                    pass.set_vertex_buffer(0, vb.slice(..));
+                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..draw.index_count, 0, 0..1);
+                }
+                (Some(vb), None) => {
+                    pass.set_vertex_buffer(0, vb.slice(..));
+                    pass.draw(draw.vertices.clone(), 0..1);
+                }
+                _ => pass.draw(draw.vertices.clone(), 0..1),
+            }
+        }
+    }
+}
+
 /// Complete key material for cacheable caller-owned forward draws.
 ///
 /// `RenderPipeline` and `BindGroup` are intentionally opaque in wgpu, so the
@@ -163,6 +198,15 @@ pub fn encode_forward_pass(
     clear: wgpu::Color,
     draws: &[ForwardDraw],
 ) {
+    encode_forward_recorded(encoder, targets, clear, draws);
+}
+
+fn encode_forward_recorded<R: ForwardRecorder + ?Sized>(
+    encoder: &mut CommandEncoder,
+    targets: &ForwardTargets,
+    clear: wgpu::Color,
+    draws: &R,
+) {
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("offscreen-forward-pass"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -184,26 +228,7 @@ pub fn encode_forward_pass(
         timestamp_writes: None,
         occlusion_query_set: None,
     });
-    for draw in draws {
-        pass.set_pipeline(draw.pipeline);
-        if let Some(bind_group) = draw.bind_group {
-            pass.set_bind_group(0, bind_group, &[]);
-        }
-        match (draw.vertex_buffer, draw.index_buffer) {
-            (Some(vb), Some(ib)) => {
-                pass.set_vertex_buffer(0, vb.slice(..));
-                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..draw.index_count, 0, 0..1);
-            }
-            (Some(vb), None) => {
-                pass.set_vertex_buffer(0, vb.slice(..));
-                pass.draw(draw.vertices.clone(), 0..1);
-            }
-            _ => {
-                pass.draw(draw.vertices.clone(), 0..1);
-            }
-        }
-    }
+    draws.record(&mut pass);
 }
 
 /// Render `draws` into `targets` and read the HDR color target back as
@@ -241,6 +266,18 @@ pub fn render_forward_hdr_incremental(
     targets: &ForwardTargets,
     clear: wgpu::Color,
     draws: &[ForwardDraw],
+    timing: Option<(&mut crate::core::gpu_timing::OneShotTiming, &str)>,
+    cache: Option<&ForwardCacheDeclaration>,
+) -> Result<(Vec<f32>, crate::core::anamnesis::CacheReport), RenderError> {
+    render_forward_hdr_recorded(device, queue, targets, clear, draws, timing, cache)
+}
+
+pub fn render_forward_hdr_recorded<R: ForwardRecorder + ?Sized>(
+    device: &Device,
+    queue: &Queue,
+    targets: &ForwardTargets,
+    clear: wgpu::Color,
+    draws: &R,
     mut timing: Option<(&mut crate::core::gpu_timing::OneShotTiming, &str)>,
     cache: Option<&ForwardCacheDeclaration>,
 ) -> Result<(Vec<f32>, crate::core::anamnesis::CacheReport), RenderError> {
@@ -388,7 +425,7 @@ pub fn render_forward_hdr_incremental(
                         let timing_scope = timing
                             .as_mut()
                             .and_then(|(t, label)| t.begin(&mut encoder, label));
-                        encode_forward_pass(&mut encoder, targets, clear, draws);
+                        encode_forward_recorded(&mut encoder, targets, clear, draws);
                         if let Some((t, _)) = timing.as_mut() {
                             t.end(&mut encoder, timing_scope, draws.len() as u32);
                             t.resolve(&mut encoder);
@@ -452,7 +489,7 @@ pub fn render_forward_hdr_incremental(
         .as_mut()
         .and_then(|(t, label)| t.begin(&mut encoder, label));
     graph.execute_with_barriers("offscreen.forward", |_barriers| {
-        encode_forward_pass(&mut encoder, targets, clear, draws);
+        encode_forward_recorded(&mut encoder, targets, clear, draws);
         Ok::<(), RenderError>(())
     })?;
     if let Some((t, _)) = timing.as_mut() {

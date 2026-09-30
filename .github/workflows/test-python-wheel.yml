@@ -89,6 +89,10 @@ jobs:
         if: inputs.test_mode == 'full' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
 
+      - name: Install Vulkan runtime for native constructor tests
+        if: inputs.test_mode == 'full' && runner.os == 'Linux'
+        run: sudo apt-get install -y libvulkan1 mesa-vulkan-drivers
+
       - name: Run compatibility smoke
         if: inputs.test_mode == 'compatibility'
         env:
@@ -105,5 +109,4 @@ jobs:
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: |
-          python -m pytest tests/test_install_smoke.py tests/test_license.py -v --tb=short
           python scripts/ci_pytest_lane.py --profile full -v --tb=short

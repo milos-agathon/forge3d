@@ -51,12 +51,32 @@ pub(super) fn build_observation(
         -1.0,
         65_536.0,
     );
+    // spacing_h_exag.xy carry the terrain extent in world units (upload.rs packs
+    // [terrain_span, terrain_span, z_scale, render_scale] for mesh/clipmap modes;
+    // the shader maps uv - 0.5 onto it), so real DEM spans exceed 65536 m. They
+    // share the contract's world_position bound; .zw keep the 65536 cap.
     check_slice(
         &mut observation,
-        "u_terrain.spacing_h_exag",
+        "u_terrain.spacing_h_exag.xy",
         0,
-        &terrain[36..40],
+        &terrain[36..38],
         0.0,
+        10_000_000.0,
+    );
+    check_slice(
+        &mut observation,
+        "u_terrain.spacing_h_exag.z",
+        0,
+        &terrain[38..39],
+        0.0,
+        65_536.0,
+    );
+    check_slice(
+        &mut observation,
+        "u_terrain.spacing_h_exag.w",
+        0,
+        &terrain[39..40],
+        -2.0,
         65_536.0,
     );
     check_slice(
@@ -107,6 +127,7 @@ pub(super) fn build_observation(
         overlay.params3,
         overlay.params4,
         overlay.params5,
+        overlay.params6,
     ]
     .iter()
     .enumerate()
@@ -219,6 +240,7 @@ mod tests {
                 params3: [0.0; 4],
                 params4: [0.0; 4],
                 params5: [0.0; 4],
+                params6: [0.0; 4],
             },
             &[0.0, 0.5, 1.0, 0.25],
             2,
@@ -234,5 +256,66 @@ mod tests {
         assert!(names.contains("u_shading.clamp0.height_range"));
         assert!(names.contains("height_tex.samples"));
         assert_eq!(observation.status, "passed");
+    }
+
+    fn observe_spacing(spacing_h_exag: [f32; 4]) -> RuntimeContractObservation {
+        let mut terrain = vec![0.0; 44];
+        terrain[32..36].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
+        terrain[36..40].copy_from_slice(&spacing_h_exag);
+        terrain[40..44].copy_from_slice(&[0.0, 64.0, 0.1, 1_000.0]);
+        let mut shading = vec![0.0; 44];
+        shading[0..4].copy_from_slice(&[1.0, 4.0, 1.0, 0.0]);
+        shading[8..12].copy_from_slice(&[0.0, 0.33, 0.66, 1.0]);
+        shading[12..16].fill(0.5);
+        shading[20..24].copy_from_slice(&[4.0, 0.125, 0.0, 0.0]);
+        shading[24..28].copy_from_slice(&[1.0, 1.0, 1.0, 1.0]);
+        shading[28..32].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
+        shading[32..36].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
+        shading[36..40].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
+        shading[40..44].copy_from_slice(&[0.0, 1.0, 1.0, 0.5]);
+        build_observation(
+            "terrain.render_internal",
+            &terrain,
+            &shading,
+            &OverlayUniforms {
+                params0: [0.0; 4],
+                params1: [0.0; 4],
+                params2: [0.0; 4],
+                params3: [0.0; 4],
+                params4: [0.0; 4],
+                params5: [0.0; 4],
+                params6: [0.0; 4],
+            },
+            &[0.0, 0.5, 1.0, 0.25],
+            2,
+            2,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn terrain_extent_above_65536_is_in_contract_but_exaggeration_is_not() {
+        assert_eq!(
+            observe_spacing([100_000.0, 100_000.0, 1.0, 1.0]).status,
+            "passed"
+        );
+        assert_eq!(
+            observe_spacing([20_000_000.0, 1.0, 1.0, 1.0]).status,
+            "failed"
+        );
+        assert_eq!(
+            observe_spacing([1.0, 20_000_000.0, 1.0, 1.0]).status,
+            "failed"
+        );
+        assert_eq!(observe_spacing([1.0, 1.0, 100_000.0, 1.0]).status, "failed");
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, 100_000.0]).status, "failed");
+    }
+
+    #[test]
+    fn detail_blend_encoding_is_bounded_but_exaggeration_stays_nonnegative() {
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -1.0]).status, "passed");
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -2.0]).status, "passed");
+        assert_eq!(observe_spacing([1.0, 1.0, 1.0, -2.5]).status, "failed");
+        assert_eq!(observe_spacing([1.0, 1.0, -1.0, 1.0]).status, "failed");
     }
 }

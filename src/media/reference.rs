@@ -74,6 +74,8 @@ pub struct ReferenceTransportSample {
 /// by sample index (each consecutive triple covers all three) and weighted
 /// by three. A deterministic per-triple rotation keeps incomplete terminal
 /// triples unbiased without sacrificing exact triple coverage.
+/// Surface environment NEE and cosine-BSDF continuation use power-heuristic
+/// MIS with both PDFs measured per unit solid angle; the sun remains delta.
 pub fn trace_reference_sample<S: ReferenceScene>(
     context: &TrackingContext,
     scene: &S,
@@ -109,7 +111,7 @@ pub fn trace_reference_sample<S: ReferenceScene>(
     let mut collision_count = 0;
     let mut surface_count = 0;
     let mut tracking_step_count = 0;
-    let mut previous_phase_pdf = None;
+    let mut previous_continuation_pdf = None;
 
     let mut bounce = 0u32;
     loop {
@@ -223,7 +225,7 @@ pub fn trace_reference_sample<S: ReferenceScene>(
                 [bounce_id.uniform(20), bounce_id.uniform(21)],
             )?;
             throughput *= phase.value / phase.pdf;
-            previous_phase_pdf = Some(phase.pdf);
+            previous_continuation_pdf = Some(phase.pdf);
             ray = Ray {
                 origin: collision.position,
                 direction: phase.direction,
@@ -231,7 +233,9 @@ pub fn trace_reference_sample<S: ReferenceScene>(
         } else if let Some(hit) = surface {
             surface_count += 1;
             let albedo = hit.albedo.components()[channel];
-            let normal = normalize(hit.normal).expect("validated surface normal");
+            let normal = normalize(hit.normal).ok_or_else(|| {
+                MediaError::InvalidTransport("surface normal must be finite and nonzero".into())
+            })?;
             let to_sun = sun.direction_to_sun;
             let cosine = dot(normal, to_sun).max(0.0);
             if cosine > 0.0 {
@@ -262,16 +266,54 @@ pub fn trace_reference_sample<S: ReferenceScene>(
                 }
             }
 
+            let env = environment.sample([
+                bounce_id.uniform(32),
+                bounce_id.uniform(33),
+                bounce_id.uniform(34),
+                bounce_id.uniform(35),
+            ])?;
+            let cos_l = dot(normal, env.direction).max(0.0);
+            if cos_l > 0.0 {
+                let env_ray = Ray {
+                    origin: hit.position,
+                    direction: env.direction,
+                };
+                let reach = scene.geometry_reach(env_ray)?;
+                validate_distance(reach)?;
+                if !scene.occluded(env_ray, reach)? {
+                    let (transmittance, steps) = reference_transmittance(
+                        context,
+                        scene,
+                        env_ray,
+                        reach,
+                        SampleIdentity {
+                            sample: identity.sample.wrapping_add(0x6000),
+                            ..bounce_id
+                        },
+                    )?;
+                    tracking_step_count += steps;
+                    let (light_weight, _) =
+                        power_heuristic(env.pdf_solid_angle, cos_l / std::f32::consts::PI)?;
+                    radiance += throughput
+                        * albedo
+                        * cos_l
+                        * env.radiance.components()[channel]
+                        * transmittance.components()[channel]
+                        * light_weight
+                        / (std::f32::consts::PI * env.pdf_solid_angle);
+                }
+            }
             let direction = cosine_hemisphere(normal, bounce_id.uniform(30), bounce_id.uniform(31));
             throughput *= albedo;
-            previous_phase_pdf = None;
+            previous_continuation_pdf =
+                Some(dot(normal, direction).max(0.0) / std::f32::consts::PI);
             ray = Ray {
                 origin: hit.position,
                 direction,
             };
         } else {
             let env = environment.radiance(ray.direction).components()[channel];
-            let weight = if let Some(phase_pdf) = previous_phase_pdf {
+            let weight = if let Some(phase_pdf) = previous_continuation_pdf {
                 power_heuristic(phase_pdf, environment.pdf(ray.direction))?.0
             } else {
                 1.0

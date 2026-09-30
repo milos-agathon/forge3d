@@ -32,14 +32,14 @@ def _strip_line_comments(text: str) -> str:
     return "\n".join(line.split("//")[0] for line in text.splitlines())
 
 
-def _raw_sites():
+def _raw_sites(root: Path = ROOT, tracker: Path = TRACKER):
     sites = []
-    for path in (ROOT / "src").rglob("*.rs"):
-        if path == TRACKER:
+    for path in (root / "src").rglob("*.rs"):
+        if path == tracker:
             continue
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if RAW.search(line) and not line.lstrip().startswith("//"):
-                sites.append(f"{path.relative_to(ROOT).as_posix()}:{i}")
+                sites.append(f"{path.relative_to(root).as_posix()}:{i}")
     return sites
 
 
@@ -101,6 +101,19 @@ def test_gate_regex_excludes_tracked_wrapper():
     assert not RAW.search("let t = tracked_create_texture(&device, &desc);")
     split = re.sub(r"\s+", "", "device.\n    create_buffer(&desc)")
     assert RAW.search(split)
+
+
+def test_wasm_cfg_raw_allocation_is_not_hidden_from_scanner(tmp_path):
+    tracker = tmp_path / "src" / "core" / "resource_tracker.rs"
+    tracker.parent.mkdir(parents=True)
+    tracker.write_text("device.create_buffer(&desc);\n", encoding="utf-8")
+    lib = tmp_path / "src" / "lib.rs"
+    lib.write_text(
+        '#[cfg(target_arch = "wasm32")]\nfn raw(device: &wgpu::Device) {\n'
+        "    device.create_buffer(&desc);\n}\n",
+        encoding="utf-8",
+    )
+    assert _raw_sites(tmp_path, tracker) == ["src/lib.rs:3"]
 
 
 def test_toml_fallback_parser_handles_empty_entries():

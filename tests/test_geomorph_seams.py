@@ -210,11 +210,11 @@ class TestSkirtVertices:
         morph_data = mesh.morph_data()
         morph_weights = morph_data[:, 0]
 
-        # Count skirt vertices (negative weight)
         skirt_count = np.sum(morph_weights < 0)
-        # With current implementation, skirts may not be generated
-        # This is a placeholder test for when skirts are fully implemented
-        assert skirt_count >= 0  # Always passes, but documents intent
+        assert skirt_count > 0, "indexed ring boundaries must emit skirts"
+        # The flat clipmap's historical ABI uses -1 as the skirt marker; globe
+        # curvature depth is carried only by globe-rebased vertices.
+        assert np.all(morph_weights[morph_weights < 0] == -1.0)
 
     def test_skirt_depth_configuration(self):
         """Skirt depth should be configurable."""

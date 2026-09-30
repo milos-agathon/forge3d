@@ -91,6 +91,27 @@ forge3d also exposes lower-level rendering utilities outside the terrain viewer:
 These modules are more specialized than the viewer workflow, but they are part
 of the public package surface and documented in the API reference.
 
+## Match A Compatible Terrain Reference
+
+`recover_scene()` is an optional matching tool, not something that runs when
+you open or render a map. Give it a known terrain shape and a compatible image
+made with Forge3D's terrain renderer, and it can estimate the land colours,
+sun position, sun strength, and haze that make a new render look like that
+reference.
+
+In 1.37.1, this matching is more dependable around ridges, the seams between
+terrain cells, and the borders of cast shadows. Those are places where a tiny
+change in the terrain or light can make a visible difference. If Forge3D cannot
+establish a trustworthy boundary calculation there, it rejects that calculation
+rather than treating a guess as an answer.
+
+Existing maps are unchanged by this release. The improvement matters only when
+you explicitly run `recover_scene()` again; a rerun can choose slightly
+different land colours or lighting near those difficult boundaries. This is not
+a general photo-to-map converter: it currently supports flat, terrain-only
+Forge3D reference scenes with known terrain shape, not arbitrary aerial or
+satellite photographs.
+
 ## Diagnostics And Device Utilities
 
 Use the top-level helpers and `forge3d.mem` when you need environment or memory

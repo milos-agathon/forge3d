@@ -90,8 +90,9 @@ impl PntsPayload {
         self.world_positions()
             .chunks_exact(3)
             .flat_map(|point| {
-                let relative =
-                    anchor.to_render_vec3(glam::DVec3::new(point[0], point[1], point[2]));
+                let relative = anchor.to_render_f32(crate::geo::units::SceneCoord::scene(
+                    glam::DVec3::new(point[0], point[1], point[2]),
+                ));
                 [relative.x, relative.y, relative.z]
             })
             .collect()

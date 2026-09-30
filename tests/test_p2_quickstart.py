@@ -75,5 +75,15 @@ def test_p2_quickstart_advanced_labels_compile_or_diagnose():
         viewport=(120, 80),
     )
 
-    assert [label.label_id for label in plan.accepted] == ["road"]
-    assert any(diagnostic.code == "experimental_feature" for diagnostic in plan.diagnostics)
+    # The native producer supplies curved geometry. Repetition still needs
+    # caller-authored authority because its semantics are caller-defined.
+    assert [label.label_id for label in plan.accepted] == ["curved"]
+    assert plan.accepted[0].positioned_glyphs
+    assert {r.label_id: r.reason for r in plan.rejected} == {
+        "road": "missing_geometry_authority",
+    }
+    assert {
+        d.object_id
+        for d in plan.diagnostics
+        if d.code == "label_geometry_authority_missing"
+    } == {"road"}

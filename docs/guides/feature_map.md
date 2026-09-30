@@ -16,6 +16,7 @@ organized by workflow rather than by Rust module layout.
 | Camera automation | `forge3d.animation`, `forge3d.camera_rigs` | `camera_animation_demo.py`, `terrain_camera_rigs_demo.py` |
 | Terrain quality controls | `terrain_params`, `presets`, `terrain_scatter` | `terrain_atmosphere_path_demo.py`, `pnoa_river_showcase_video.py` |
 | Native/offscreen rendering | `Scene`, `Session`, `TerrainRenderer`, `render_offline` | `terrain_atmosphere_path_demo.py`, `triangle_png.py` |
+| Match a compatible terrain reference | `recover_scene`, `RecoveredScene` | GPU acceptance scene; this estimates surface colour, sunlight, and haze without changing an existing map on its own |
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |
 | Geometry, mesh, vector, SDF, path tracing | `geometry`, `mesh`, `vector`, `sdf`, `path_tracing` | API-level usage; not every module has a dedicated showcase script |
 | Device and memory diagnostics | `has_gpu`, `device_probe`, `mem` | diagnostics and tooling flows rather than gallery scripts |
@@ -36,6 +37,7 @@ The main package surface splits naturally into a few groups:
 
 - Viewer and notebook control: `forge3d.viewer`, `forge3d.viewer_ipc`, `forge3d.widgets`, `forge3d.interactive`
 - Terrain configuration: `forge3d.terrain_params`, `forge3d.presets`, `forge3d.terrain_scatter`
+- Reference-scene matching: `forge3d.recover_scene`, `forge3d.RecoveredScene`
 - Scene animation and rigs: `forge3d.animation`, `forge3d.camera_rigs`
 - Terrain and asset loading: `forge3d.datasets`, `forge3d.crs`, `forge3d.cog`, `forge3d.pointcloud`, `forge3d.tiles3d`
 - Production-oriented scene assets: `forge3d.buildings`, `forge3d.style`, `forge3d.bundle`, `forge3d.map_plate`, `forge3d.export`

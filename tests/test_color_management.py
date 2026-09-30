@@ -102,8 +102,8 @@ def test_tonemap_common_locks_operator_ids() -> None:
 def test_gpu_tonemap_loaders_use_common_source() -> None:
     common = "includes/tonemap_common.wgsl"
     loaders = {
-        ROOT / "src" / "pipeline" / "hdr_offscreen" / "pipeline.rs": common,
-        ROOT / "src" / "terrain" / "renderer" / "offline.rs": common,
+        ROOT / "src" / "pipeline" / "hdr_offscreen" / "pipeline.rs": "shader_sources::hdr_tonemap()",
+        ROOT / "src" / "terrain" / "renderer" / "offline.rs": "shader_sources::offline_tonemap()",
         ROOT / "src" / "terrain" / "renderer" / "pipeline_cache.rs": "shader_sources::terrain",
         ROOT / "src" / "pipeline" / "pbr" / "rendering.rs": "shader_sources::pbr",
         ROOT / "src" / "pipeline" / "pbr" / "tone_mapping.rs": common,
@@ -111,9 +111,14 @@ def test_gpu_tonemap_loaders_use_common_source() -> None:
     for path, needle in loaders.items():
         assert needle in _read(path), f"{path} does not load shared tonemap WGSL"
 
+    # TERRA v2 centralized these assemblies in shader_sources.rs; each must
+    # still compose the shared tonemap source.
     centralized = _read(ROOT / "src" / "shader_sources.rs")
     pbr_loader = centralized.split("fn pbr()", 1)[1].split("#[cfg(test)]", 1)[0]
     assert common in pbr_loader, "shader_sources::pbr omits shared tonemap WGSL"
+    for parts_fn in ("fn hdr_tonemap_parts()", "fn offline_tonemap_parts()"):
+        body = centralized.split(parts_fn, 1)[1].split("\n}\n", 1)[0]
+        assert common in body, f"shader_sources {parts_fn} omits shared tonemap WGSL"
 
 
 def test_cpu_adjudication_resolver_has_an_explicit_matching_contract() -> None:

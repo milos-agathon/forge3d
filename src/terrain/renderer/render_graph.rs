@@ -189,7 +189,11 @@ pub(super) fn build_terrain_render_graph(
             false,
             false,
         );
-        ext.extent.as_mut().unwrap().depth_or_array_layers = media.froxel_grid.depth;
+        ext.extent = Some(wgpu::Extent3d {
+            width: media.froxel_grid.width,
+            height: media.froxel_grid.height,
+            depth_or_array_layers: media.froxel_grid.depth,
+        });
         let extinction = builder.add_resource(ext);
         let radiance_provider = builder.add_resource(texture_resource(
             "nephele.media.radiance_provider",
@@ -213,7 +217,11 @@ pub(super) fn build_terrain_render_graph(
             false,
             false,
         );
-        light.extent.as_mut().unwrap().depth_or_array_layers = media.froxel_grid.depth;
+        light.extent = Some(wgpu::Extent3d {
+            width: media.froxel_grid.width,
+            height: media.froxel_grid.height,
+            depth_or_array_layers: media.froxel_grid.depth,
+        });
         let light_transmittance = builder.add_resource(light);
         let mut scatter = texture_resource(
             "nephele.media.froxel.in_scatter",
@@ -225,7 +233,11 @@ pub(super) fn build_terrain_render_graph(
             false,
             false,
         );
-        scatter.extent.as_mut().unwrap().depth_or_array_layers = media.froxel_grid.depth;
+        scatter.extent = Some(wgpu::Extent3d {
+            width: media.froxel_grid.width,
+            height: media.froxel_grid.height,
+            depth_or_array_layers: media.froxel_grid.depth,
+        });
         let in_scatter = builder.add_resource(scatter);
         let history_depth_previous = builder.add_resource(texture_resource(
             "nephele.media.history.previous.depth",

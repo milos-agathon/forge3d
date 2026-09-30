@@ -7,6 +7,8 @@ pub mod csm;
 pub mod diagnostics;
 pub mod frame;
 pub mod geodesy;
+#[cfg(all(feature = "extension-module", feature = "enable-inverse-pt"))]
+pub mod inverse;
 pub mod labels;
 pub mod path_tracing;
 pub mod pointcloud;
@@ -25,6 +27,8 @@ pub(crate) use csm::*;
 pub(crate) use diagnostics::*;
 pub(crate) use frame::*;
 pub(crate) use geodesy::*;
+#[cfg(all(feature = "extension-module", feature = "enable-inverse-pt"))]
+pub(crate) use inverse::*;
 pub(crate) use labels::*;
 pub(crate) use path_tracing::*;
 pub(crate) use pointcloud::*;

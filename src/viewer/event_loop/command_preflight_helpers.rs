@@ -16,6 +16,24 @@ where
         .try_for_each(|point| validate_world_point(role, point, anchor).map_err(|e| e.to_string()))
 }
 
+/// Like [`validate_points`] but with an explicit residual bound. Used for
+/// synthetic default camera placements whose legitimate relative distance
+/// (a fraction of the terrain span) exceeds the absolute M-06 bound.
+pub(super) fn validate_points_with_bound<I>(
+    anchor: &crate::camera::Anchor,
+    role: CoordRole,
+    max: f64,
+    points: I,
+) -> Result<(), String>
+where
+    I: IntoIterator<Item = DVec3>,
+{
+    use crate::viewer::camera_controller::validate_world_point_with_bound;
+    points.into_iter().try_for_each(|point| {
+        validate_world_point_with_bound(role, point, anchor, max).map_err(|e| e.to_string())
+    })
+}
+
 pub(super) fn distinct_value<T: Copy + PartialEq>(
     slot: &mut Option<T>,
     value: T,

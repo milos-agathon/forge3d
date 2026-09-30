@@ -375,12 +375,7 @@ impl TerrainScene {
                     },
                 ],
             });
-        let tonemap_shader_source = format!(
-            "{}\n{}\n{}",
-            include_str!("../../shaders/includes/determinism.wgsl"),
-            include_str!("../../shaders/includes/tonemap_common.wgsl"),
-            include_str!("../../shaders/tonemap_terrain_offline.wgsl")
-        );
+        let tonemap_shader_source = crate::shader_sources::offline_tonemap();
         let tonemap_pipeline = create_pipeline(
             device,
             "terrain.offline.tonemap.pipeline",

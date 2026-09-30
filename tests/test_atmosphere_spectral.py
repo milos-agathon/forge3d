@@ -13,6 +13,10 @@ from forge3d import atmosphere
 from forge3d._native import NATIVE_AVAILABLE
 from forge3d.terrain_params import SkySettings
 
+# NumPy 2.0 renamed trapz to trapezoid and 2.4 removed trapz; pyproject still
+# allows numpy>=1.21, so resolve whichever the installed NumPy provides.
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -177,7 +181,11 @@ def test_aether_terrain_segment_contract_locks_actual_distance_and_domain_guards
     assert "clamp(camera_height_m, 0.0, 100000.0)" in evaluation_core
     assert "fn aether_eval_spherical_altitude(" in evaluation_core
     assert "fn aether_eval_spherical_endpoint_mus(" in evaluation_core
-    assert "2.0 * radius_m * bounded_distance_m * clamp(view_mu" in evaluation_core
+    # TERRA v2 spells the same expressions with det_* ops and FMA barriers.
+    assert (
+        "det_barrier(det_barrier(2.0 * radius_m) * bounded_distance_m) * clamp(view_mu"
+        in evaluation_core
+    )
     assert "let h00 = aether_eval_spherical_altitude(" in evaluation_core
     assert "bounded_camera_height_m, view_mu," in evaluation_core
     assert "bounded_distance_m * 0.03125, bottom_radius_m," in evaluation_core
@@ -185,26 +193,31 @@ def test_aether_terrain_segment_contract_locks_actual_distance_and_domain_guards
     assert "mix(bounded_camera_height_m, bounded_surface_height_m" not in evaluation_core
     assert "let endpoint_mus = aether_eval_spherical_endpoint_mus(" in shader
     assert "endpoint_mus.y,\n        endpoint_mus.x," in shader
-    assert "let rayleigh_density_sum = det_exp(-h00 / 8000.0)" in evaluation_core
-    assert "let mie_density_sum = det_exp(-h00 / 1200.0)" in evaluation_core
+    assert "let rayleigh_density_sum = det_barrier(" in evaluation_core
+    assert "det_exp(det_div(-h00, 8000.0))" in evaluation_core
+    assert "let mie_density_sum = det_barrier(" in evaluation_core
+    assert "det_exp(det_div(-h00, 1200.0))" in evaluation_core
+    assert "let ozone_density_sum = det_barrier(" in evaluation_core
+    assert "max(1.0 - abs(det_div(h00 - 25000.0, 15000.0)), 0.0)" in evaluation_core
     assert (
-        "let ozone_density_sum = max(1.0 - abs((h00 - 25000.0)"
+        "let path_per_sample = det_barrier(det_barrier(bounded_distance_m * density_scale) * 0.0625);"
         in evaluation_core
     )
-    assert (
-        "let path_per_sample = bounded_distance_m * density_scale * 0.0625;"
-        in evaluation_core
-    )
-    assert "path * det_exp(-mean_height / 8000.0)" not in evaluation_core
-    assert "path * det_exp(-mean_height / 1200.0)" not in evaluation_core
+    for mean_height_form in (
+        "path * det_exp(-mean_height / 8000.0)",
+        "path * det_exp(-mean_height / 1200.0)",
+        "det_exp(det_div(-mean_height, 8000.0))",
+        "det_exp(det_div(-mean_height, 1200.0))",
+    ):
+        assert mean_height_form not in evaluation_core
     assert "AETHER_TERRAIN_WAVELENGTHS_NM" not in shader
     assert "AETHER_TERRAIN_CIE_XYZ" not in shader
     assert "fn aether_terrain_mu_to_unit" not in shader
     assert "fn aether_terrain_nu_to_unit" not in shader
     assert "fn aether_terrain_load_scattering" not in shader
     assert "fn aether_terrain_finite_normalize(direction: vec3<f32>)" in shader
-    assert "direction / max(largest_component, 1.0)" in shader
-    assert "inverseSqrt(max(length_squared, 1.0e-12))" in shader
+    assert "det_div3(direction, vec3<f32>(max(largest_component, 1.0)))" in shader
+    assert "det_inverse_sqrt(max(length_squared, 1.0e-12))" in shader
     assert "let view = aether_terrain_finite_normalize(view_direction);" in shader
     assert "let sun = aether_terrain_finite_normalize(sun_direction);" in shader
     assert "let view = normalize(view_direction);" not in shader
@@ -213,14 +226,15 @@ def test_aether_terrain_segment_contract_locks_actual_distance_and_domain_guards
     assert "aether_accumulated_scattering_tex" in shader
     assert "aether_terrain_sample_inscatter" in shader
     assert (
-        "camera_scattering - base_transmittance * endpoint_scattering" in shader
+        "det_barrier3(camera_scattering) - det_barrier3(base_transmittance * det_barrier3(endpoint_scattering))"
+        in shader
     )
     assert "let sun_intensity = aether_eval_clamp_radiometric_scale(" in shader
     assert "fog_uniforms.sky_params0.w);" in shader
     assert "let atmosphere_exposure = aether_eval_clamp_radiometric_scale(" in shader
     assert "fog_uniforms.sky_params1.w);" in shader
     assert (
-        "base_finite_inscatter * density_adjustment * atmosphere_exposure" in shader
+        "det_barrier3(base_finite_inscatter * density_adjustment) * atmosphere_exposure" in shader
     )
     assert "fn aether_eval_clamp_radiometric_scale(value: f32) -> f32" in evaluation_core
     assert "return min(max(value, 0.0), 65504.0);" in evaluation_core
@@ -233,7 +247,7 @@ def test_aether_terrain_segment_contract_locks_actual_distance_and_domain_guards
     assert "let atmosphere_exposure = aether_eval_clamp_radiometric_scale(" in background
     assert "aether_eval_clamp_hdr_radiance(radiance*atmosphere_exposure)" in background
     assert "bounded_sky * (vec3<f32>(1.0) - transmittance)" not in shader
-    assert "bounded_surface * transmittance + finite_inscatter" in shader
+    assert "det_barrier3(bounded_surface * transmittance) + det_barrier3(finite_inscatter)" in shader
     assert "fog_enabled && !(aether_enabled && sky_aerial_enabled)" in shader
     assert "sky.aerial_density must be finite and in [0.0, 10.0]" in decoder
     apply_contract = contract.split('name = "aether_terrain_apply_segment"', 1)[1]
@@ -387,10 +401,10 @@ def test_terrain_segment_midpoint_columns_cover_vertical_and_curved_paths() -> N
         np.mean(np.maximum(1.0 - np.abs((midpoint_heights - 25_000.0) / 15_000.0), 0.0))
     )
     heights = np.linspace(camera_height, surface_height, 200_001, dtype=np.float64)
-    numeric_rayleigh = float(np.trapz(np.exp(-heights / 8_000.0), heights) / height_delta)
-    numeric_mie = float(np.trapz(np.exp(-heights / 1_200.0), heights) / height_delta)
+    numeric_rayleigh = float(_trapezoid(np.exp(-heights / 8_000.0), heights) / height_delta)
+    numeric_mie = float(_trapezoid(np.exp(-heights / 1_200.0), heights) / height_delta)
     ozone = np.maximum(1.0 - np.abs((heights - 25_000.0) / 15_000.0), 0.0)
-    numeric_ozone = float(np.trapz(ozone, heights) / height_delta)
+    numeric_ozone = float(_trapezoid(ozone, heights) / height_delta)
 
     assert exact_rayleigh_mean == pytest.approx(numeric_rayleigh, rel=1.0e-10)
     assert exact_mie_mean == pytest.approx(numeric_mie, rel=1.0e-9)

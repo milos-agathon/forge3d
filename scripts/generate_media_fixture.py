@@ -39,7 +39,7 @@ SCENE_INPUT_FILES = {
 
 
 def _json(path: Path, value: Any) -> None:
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
 
 
 def _save(path: Path, value: np.ndarray) -> None:
@@ -531,7 +531,7 @@ def _render_reference(
         "schema": "forge3d.nephele.reference_provenance/2",
         "acceptance_eligible": acceptance_eligible,
         "diagnostic_reason": None if acceptance_eligible else "explicit diagnostic generation; cannot seed acceptance convergence",
-        "algorithm": "integrated-hybrid-terrain-ratio-delta-tracking-reference",
+        "algorithm": "integrated-hybrid-terrain-ratio-delta-tracking-surface-env-mis-v2",
         "samples_per_pixel": samples_per_pixel,
         "seed": REFERENCE_SEED,
         "sample_identity": {

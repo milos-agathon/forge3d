@@ -81,7 +81,9 @@ def gate1_estimator_majorant_rr(physical: dict[str, Any]) -> None:
 
 
 def gate2_energy(physical: dict[str, Any]) -> None:
-    assert _gate2(physical["artifact"], physical["head"], ROOT)["relative_residual"] <= 1.0e-3
+    gate = _gate2(physical["artifact"], physical["head"], ROOT)
+    assert gate["sample_count"] == 10_000_000
+    assert gate["relative_residual"] <= 1.0e-3
 
 
 def gate3_realtime_reference(physical: dict[str, Any]) -> None:
@@ -92,7 +94,7 @@ def gate3_realtime_reference(physical: dict[str, Any]) -> None:
 
 def gate4_terrain_coupling(physical: dict[str, Any]) -> None:
     gate = physical["visual"][1]
-    assert gate["shadow_aggregate"] < 2.0
+    assert gate["aggregate_pass"] is True
     assert gate["medium_ablation_changed_fraction"] >= 0.10
     assert gate["terrain_occlusion_ablation_ssim"] < 0.80
 

@@ -143,6 +143,8 @@ impl TerrainTraceReferenceScene {
                 .as_ref()
                 .map(|(data, width, height)| (data.as_slice(), *width, *height)),
             desc.env_intensity,
+            None,
+            desc.turbidity,
         )
         .map_err(render_error)?;
         let terrain_uniform = terrain_scene.uniforms(1, 2);
@@ -899,6 +901,18 @@ mod tests {
             max_frames: 1,
             min_frames: 1,
             variance_threshold: 1.0,
+            albedo_map: None,
+            albedo_sampling: super::super::AlbedoSampling::Bilinear,
+            turbidity: 1.0,
+            camera_model: super::super::CameraModel::Pinhole,
+            seamless_camera: false,
+            ortho_half_height: 1.0,
+            sensor_rect: [0.0, 0.0, 1.0, 1.0],
+            full_width: 1,
+            full_height: 1,
+            pixel_offset_x: 0,
+            pixel_offset_y: 0,
+            sdf_scene: None,
         }
     }
 

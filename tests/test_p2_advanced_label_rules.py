@@ -23,7 +23,22 @@ def test_cartographic_priority_preset_orders_multi_class_labels():
             "geometry": {"type": "LineString", "coordinates": [[0, 30], [80, 30]]},
             "priority_class": "roads",
             "placement_preset": "road",
-            "repeat_distance": 80,
+            # CARTOGRAPHER-PRIME consumes line placement from its geometry
+            # authority rather than synthesizing it (see da4d5d1e).
+            "geometry_authority": {
+                "source": "compute_line_label_placement",
+                "positioned_glyphs": [
+                    {"font_index": 0, "glyph_id": 7, "origin": [2.0, 3.0], "rotation": 0.0}
+                ],
+                "candidates": [
+                    {
+                        "candidate_id": "road:line-0",
+                        "candidate_type": "line_repeat",
+                        "anchor": [40.0, 30.0, 0.5],
+                        "bounds": [36.0, 28.0, 44.0, 32.0],
+                    }
+                ],
+            },
         },
     ]
 

@@ -26,7 +26,7 @@ fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> v
     let gloss_max = max(vec3<f32>(1.0 - roughness), f0);
     let delta = gloss_max - f0;
     let fresnel_term = det_pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
-    let scaled = delta * fresnel_term;
+    let scaled = det_barrier3(delta * fresnel_term);
     return f0 + scaled;
 }
 
@@ -65,23 +65,23 @@ fn eval_ibl(
     let reflection_dir = det_reflect3(-v, n);
 
     // Fresnel term for IBL
-    let F_ibl = fresnel_schlick_roughness(n_dot_v, f0, roughness_clamped);
+    let F_ibl = det_barrier3(fresnel_schlick_roughness(n_dot_v, f0, roughness_clamped));
 
     // Diffuse IBL (Lambertian)
     // kD = (1 - kS) * (1 - metallic)
     let kS_ibl = F_ibl;
     let one_minus_ks = vec3<f32>(1.0) - kS_ibl;
-    let kD_ibl = one_minus_ks * (1.0 - metallic);
+    let kD_ibl = det_barrier3(one_minus_ks * (1.0 - metallic));
 
     // Sample irradiance cubemap (explicit LOD 0)
     let irradiance = textureSampleLevel(envIrradiance, envSampler, n, 0.0).rgb;
-    let diffuse_albedo = kD_ibl * base_color;
-    let diffuse_ibl = diffuse_albedo * irradiance;
+    let diffuse_albedo = det_barrier3(kD_ibl * base_color);
+    let diffuse_ibl = det_barrier3(diffuse_albedo * irradiance);
 
     // Specular IBL (split-sum approximation)
     // Map roughness to mip level: mip = roughness² * (mipCount-1)
     // For prefiltered environment, we use roughness directly to select mip
-    let roughness_sq = roughness_clamped * roughness_clamped;
+    let roughness_sq = det_barrier(roughness_clamped * roughness_clamped);
     let mip_level = roughness_sq * 9.0; // Assume 10 mips (0-9)
 
     // Sample prefiltered specular cubemap (explicit LOD)
@@ -93,7 +93,7 @@ fn eval_ibl(
 
     // Split-sum: prefiltered_color * (F0 * scale + bias), scale/bias pinned
     let split_sum = det_fma3(F_ibl, vec3<f32>(brdf_lut.x), vec3<f32>(brdf_lut.y));
-    let specular_ibl = prefiltered_color * split_sum;
+    let specular_ibl = det_barrier3(prefiltered_color * split_sum);
 
     // Combine diffuse and specular (single pinned add)
     return diffuse_ibl + specular_ibl;

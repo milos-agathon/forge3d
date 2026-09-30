@@ -105,7 +105,8 @@ def test_active_consumers_are_typed_to_the_exact_handle() -> None:
         "            camera_height_unit,\n"
         "            sun_dir.y,\n"
         "            ray.y,\n"
-        "            dot(ray, sun_dir),\n"
+        # TERRA v2 routes the phase cosine through the deterministic dot.
+        "            det_dot3(ray, sun_dir),\n"
         "        ) * sun_intensity;"
         in miss_branch
     )
@@ -129,7 +130,7 @@ def test_active_consumers_are_typed_to_the_exact_handle() -> None:
     assert "prometheus_load_boundary_mean_transmittance" not in prometheus_shader
     assert "scatter_fraction" not in prometheus_shader
     assert (
-        "camera_scattering - transmittance * endpoint_scattering,\n"
+        "camera_scattering - det_barrier3(transmittance * endpoint_scattering),\n"
         "        vec3<f32>(0.0),"
         in prometheus_shader
     )

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.check_determinism_hashes import _validate_adapter  # noqa: E402
+from scripts.check_determinism_hashes import _adapter_failure  # noqa: E402
 
 
 IDENTITY_FIELDS = (
@@ -35,6 +35,37 @@ class AcceptanceError(RuntimeError):
     """The NVIDIA determinism evidence is incomplete or inconsistent."""
 
 
+def _require_nvidia_adapter(adapter: object) -> dict:
+    """Validate physical-hardware metadata and the NVIDIA/Vulkan leg contract.
+
+    Wraps the checker's vendor-agnostic physical-hardware gate with the
+    NVIDIA-specific requirements this leg exists to prove.
+    """
+    reason = _adapter_failure(adapter)
+    if reason is not None:
+        raise AcceptanceError(f"adapter does not qualify as physical hardware: {reason}")
+    assert isinstance(adapter, dict)
+    name = str(adapter.get("name", "")).lower()
+    backend = str(adapter.get("backend", "")).lower()
+    device_type = str(adapter.get("device_type", "")).lower()
+    if backend != "vulkan":
+        raise AcceptanceError("required NVIDIA leg did not use Vulkan")
+    if device_type != "discretegpu":
+        raise AcceptanceError("required NVIDIA leg did not use a discrete GPU")
+    try:
+        vendor = int(adapter.get("vendor", 0))
+        device = int(adapter.get("device"))
+    except (TypeError, ValueError) as exc:
+        raise AcceptanceError("adapter vendor/device ID is not an integer") from exc
+    if device < 0:
+        raise AcceptanceError("adapter device ID is negative")
+    if vendor != 0x10DE:
+        raise AcceptanceError("required NVIDIA leg has a non-NVIDIA vendor ID")
+    if "nvidia" not in name:
+        raise AcceptanceError("required NVIDIA leg has a non-NVIDIA adapter name")
+    return adapter
+
+
 def _read_probe(path: Path) -> dict:
     try:
         envelope = json.loads(path.read_text(encoding="utf-8"))
@@ -45,8 +76,8 @@ def _read_probe(path: Path) -> dict:
     if str(envelope.get("requested_backend", "")).lower() != "vulkan":
         raise AcceptanceError("NVIDIA adapter probe did not request Vulkan")
     try:
-        return _validate_adapter("nvidia", envelope.get("probe"))
-    except (TypeError, ValueError) as exc:
+        return _require_nvidia_adapter(envelope.get("probe"))
+    except (TypeError, ValueError, AcceptanceError) as exc:
         raise AcceptanceError(f"NVIDIA adapter probe is invalid: {exc}") from exc
 
 
@@ -77,8 +108,8 @@ def _parse_record(stdout: str, png_path: Path, label: str) -> dict:
     if SHA256_PATTERN.fullmatch(declared_sha) is None or declared_sha != actual_sha:
         raise AcceptanceError(f"{label} render SHA does not match its PNG bytes")
     try:
-        record["adapter"] = _validate_adapter("nvidia", record.get("adapter"))
-    except (TypeError, ValueError) as exc:
+        record["adapter"] = _require_nvidia_adapter(record.get("adapter"))
+    except (TypeError, ValueError, AcceptanceError) as exc:
         raise AcceptanceError(f"{label} render adapter is invalid: {exc}") from exc
     return record
 

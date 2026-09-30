@@ -87,7 +87,7 @@ def downstream_metrics(old: np.ndarray, new: np.ndarray, masks: dict[str, np.nda
             np.mean(delta_e[masks["sky_cloud_mask"]] < 2.5)
         ),
         "gate3_godray_roi_ssim": ssim(old_roi, new_roi, data_range=255.0),
-        "gate4_cloud_shadow_terrain_maximum_delta_e": float(shadow_values.max()),
+        "gate4_cloud_shadow_terrain_delta_e_below_2_fraction": float(np.mean(shadow_values < 2.0)),
     }
 
 
@@ -196,7 +196,7 @@ def main() -> int:
         and all(classification_identity.values())
         and metrics["gate3_sky_cloud_delta_e_below_2_5_fraction"] >= 0.95
         and metrics["gate3_godray_roi_ssim"] > 0.95
-        and metrics["gate4_cloud_shadow_terrain_maximum_delta_e"] < 2.0
+        and metrics["gate4_cloud_shadow_terrain_delta_e_below_2_fraction"] >= 0.95
     )
     generator = Path(__file__).resolve()
     record = {
@@ -226,7 +226,7 @@ def main() -> int:
         "generator_sha256": _sha256(generator),
     }
     (FIXTURE / "reference-convergence.json").write_text(
-        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
     )
     if not converged:
         raise SystemExit(

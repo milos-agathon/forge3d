@@ -145,6 +145,7 @@ impl PbrPipelineWithShadows {
             material_bind_group_layout,
             ibl_bind_group_layout,
             render_pipeline: None,
+            instanced_pipeline: None,
             pipeline_format: None,
             tone_mapping: ToneMappingConfig::new(ToneMappingMode::Reinhard, 1.0),
             light_buffer,

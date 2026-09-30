@@ -764,7 +764,15 @@ impl VirtualTextureStore for CogPageStore {
         }
         let heights = self
             .reader
-            .read_tile(key.x, key.y, u32::from(key.mip))
+            .read_height_tile(crate::terrain::cog::HeightTileRequest {
+                tile_id: crate::terrain::tiling::TileId::new(
+                    u32::from(key.mip),
+                    key.x,
+                    key.y,
+                ),
+                output_width: self.metadata.tile_size,
+                output_height: self.metadata.tile_size,
+            })
             .map_err(|error| error.to_string())?;
         let side = (heights.len() as f64).sqrt() as u32;
         if u64::from(side) * u64::from(side) != heights.len() as u64 {

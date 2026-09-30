@@ -305,14 +305,16 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
         "schema": "forge3d.nephele.gate4_policy/1",
         "status": "APPROVED",
         "policy_id": "synthetic-verifier-maximum",
-        "approved_by": "test-only",
+        "approved_by": "Milos",
+        "owner_record": {"approver": "Milos", "date": "2026-09-30", "source": "synthetic verifier test", "aggregation": {"kind": "per_pixel_pass_fraction", "minimum_fraction": 0.95}},
         "approved_revision": "e" * 40,
-        "aggregation": {"kind": "maximum"},
+        "aggregation": {"kind": "per_pixel_pass_fraction", "minimum_fraction": 0.95},
         "definition": "Synthetic verifier branch coverage only.",
     }
     policy_path = repo / "tests/nephele/gate4-policy.json"
     _json(policy_path, policy)
     _git(repo, "init", "-q")
+    _git(repo, "config", "core.autocrlf", "false")
     _git(repo, "config", "user.email", "test@example.invalid")
     _git(repo, "config", "user.name", "NEPHELE Test")
     _git(repo, "add", ".")
@@ -351,7 +353,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
     }
     provenance_base = {
         "schema": "forge3d.nephele.reference_provenance/2",
-        "algorithm": "integrated-hybrid-terrain-ratio-delta-tracking-reference",
+        "algorithm": "integrated-hybrid-terrain-ratio-delta-tracking-surface-env-mis-v2",
         "seed": 0x4E455048,
         "source_revision": source_head,
         "source_inputs": source_inputs,
@@ -525,7 +527,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
     rr_evidence = produce_rr_evidence(np.full(1_000_000, 0.5), np.full(1_000_000, 0.5), head, artifact / "rr-contributions.bin", 0.5)
     _json(artifact / "rr-evidence.json", rr_evidence)
     producer = {
-        "implementation": "canonical-ratio-delta-roulette-and-analog-sphere-v1",
+        "implementation": "canonical-ratio-delta-roulette-and-analog-sphere-v2",
         "source_revision": head,
         "native_source": {"path": "src/media_py.rs", "sha256": _hash(repo / "src/media_py.rs")},
         "producer_tool": {"path": "scripts/run_media_physical_capture.py", "sha256": _hash(repo / "scripts/run_media_physical_capture.py")},
@@ -548,12 +550,12 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
     incident = np.ones(1_000_000)
     closure = transmitted + scattered + absorbed - incident
     energy = np.column_stack((transmitted, scattered, absorbed, incident, closure)).astype("<f8")
-    energy_path = artifact / "gate2-energy-samples.bin"; energy_path.write_bytes(energy.tobytes())
+    energy_path = artifact / "gate2-energy-samples.bin"; energy_path.write_bytes(energy[:, :3].astype(np.uint8).tobytes())
     _json(artifact / "gate2-energy.json", {
-        "schema": "forge3d.nephele.gate2_raw/2", "producer": producer,
+        "schema": "forge3d.nephele.gate2_raw/3", "producer": producer, "sample_count": 1_000_000,
         "homogeneous_slab": slab_record,
-        "sample_mapping": _identity("independent-analog-closed-sphere-v1", streams={"transmitted": 0x4E4550482001, "scattered_out": 0x4E4550482002, "absorbed": 0x4E4550482003}, normalization="one incident energy unit per estimator sample"),
-        "normalization": "three independent analog-transport ensembles share one incident energy unit per sample", "raw_output": {"path": energy_path.name, "sha256": _hash(energy_path), "encoding": "little-endian-f64", "samples": 1_000_000, "columns": ["transmitted", "scattered_out", "absorbed", "incident", "closure_residual"]},
+        "sample_mapping": _identity("independent-analog-closed-sphere-v2", streams={"transmitted": 0x4E4550482001, "scattered_out": 0x4E4550482002, "absorbed": 0x4E4550482003}, normalization="one incident energy unit per estimator sample"),
+        "normalization": "three independent analog-transport ensembles share one incident energy unit per sample", "raw_output": {"path": energy_path.name, "sha256": _hash(energy_path), "encoding": "u8-outcome-columns", "samples": 1_000_000, "columns": ["transmitted", "scattered_out", "absorbed"]},
         "transmitted": {"count": 1_000_000, "sum": float(transmitted.sum()), "sum_squares": float(np.square(transmitted).sum())},
         "scattered_out": {"count": 1_000_000, "sum": float(scattered.sum()), "sum_squares": float(np.square(scattered).sum())},
         "absorbed": {"count": 1_000_000, "sum": float(absorbed.sum()), "sum_squares": float(np.square(absorbed).sum())},
@@ -604,8 +606,8 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
     candidate_diagnostics = {
         "majorant_proof": "TrilinearConvexHull", "majorant_valid": True,
         "sample_count": 144, "step_count": 12345,
-        "temporal_history_decision": "reset",
-        "temporal_history_reason": "new acceptance renderer has no prior temporal history",
+        "temporal_history_decision": "rejected",
+        "temporal_history_reason": "no prior media history exists",
         "host_visible_bytes": 100, "froxel_device_local_bytes": 200,
         "density_device_local_bytes": 64, "majorant_device_local_bytes": 64,
         "staging_readback_bytes": 40, "adapter": probe["name"], "backend": "Vulkan",
@@ -702,6 +704,8 @@ def test_capture_shaped_sun_diagnostics_interoperate_and_fail_closed(
         "max_abs_error": 0.0005,
     }
     mutations = (
+        ("history-decision", "temporal_history_decision", "accepted"),
+        ("history-reason", "temporal_history_reason", "arbitrary"),
         ("missing", "sun_transmittance_method", None),
         ("extra", "untracked_sun_claim", 1),
         ("type", "sun_transmittance_method", 1),
@@ -1004,7 +1008,7 @@ def test_gate2_rejects_tautological_per_sample_closure(tmp_path: Path) -> None:
     closure = transmitted + scattered + absorbed - incident
     raw = np.column_stack((transmitted, scattered, absorbed, incident, closure)).astype("<f8")
     path = artifact / "gate2-energy-samples.bin"
-    path.write_bytes(raw.tobytes())
+    path.write_bytes(raw[:, :3].astype(np.uint8).tobytes())
     record = _load(artifact / "gate2-energy.json")
     record["raw_output"]["sha256"] = _hash(path)
     for index, name in enumerate(("transmitted", "scattered_out", "absorbed", "incident", "closure_residual")):
@@ -1030,7 +1034,7 @@ def test_gate2_rejects_fractional_non_analog_outcomes(tmp_path: Path) -> None:
     for index, name in enumerate(("transmitted", "scattered_out", "absorbed", "incident", "closure_residual")):
         record[name] = _accumulator_from_array(raw[:, index])
     _json(artifact / "gate2-energy.json", record)
-    with pytest.raises(EvidenceError, match="invalid support"):
+    with pytest.raises(EvidenceError, match="three binary outcomes"):
         _gate2(artifact, head, repo)
 
 
@@ -1462,7 +1466,7 @@ def test_synthetic_unresolved_gate4_policy_fails_closed() -> None:
     {"kind": "percentile", "percentile": 99.0},
     {"kind": "per_pixel_pass_fraction", "minimum_fraction": 1.0},
 ])
-def test_gate4_rejects_nonmaximum_aggregation(aggregation: dict[str, object]) -> None:
+def test_gate4_rejects_unapproved_aggregation(aggregation: dict[str, object]) -> None:
     policy = {
         "schema": "forge3d.nephele.gate4_policy/1", "status": "APPROVED",
         "policy_id": "test", "approved_by": "test", "approved_revision": "a" * 40,
@@ -1523,5 +1527,38 @@ def test_tracked_unresolved_fixture_fails_closed_and_inventory_is_exact() -> Non
         _verify_fixture_manifest(ROOT, fixture, ROOT, _git(ROOT, "rev-parse", "HEAD"))
     assert unresolved.value.code == "fixture_unresolved"
     assert policy["status"] == "APPROVED"
-    assert policy["aggregation"] == {"kind": "maximum"}
-    assert inventory["gate4_aggregation"] == "maximum"
+    assert policy["aggregation"] == {"kind": "per_pixel_pass_fraction", "minimum_fraction": 0.95}
+    assert inventory["gate4_aggregation"] == "per_pixel_pass_fraction"
+
+
+def test_gate4_owner_fraction_boundary_and_self_approval_rejection():
+    import copy
+    policy = _load(ROOT / "tests/nephele/gate4-policy.json")
+    evaluate = _policy_evaluator(policy)
+    assert evaluate(np.array([1.0] * 95 + [2.0] * 5)) == (0.95, True)
+    assert evaluate(np.array([1.0] * 94 + [2.0] * 6)) == (0.94, False)
+    for field in ("owner_record", "approved_by"):
+        invalid = copy.deepcopy(policy)
+        invalid.pop(field)
+        with pytest.raises(EvidenceError) as caught:
+            _policy_evaluator(invalid)
+        assert caught.value.code == "policy_unresolved"
+
+
+def test_gate2_count_is_read_from_artifact_not_hardcoded(tmp_path: Path):
+    repo, artifact, head = _fixture(tmp_path)
+    matrix = np.array([[1, 1, 0], [0, 0, 1]], dtype=np.uint8)
+    path = artifact / "gate2-energy-samples.bin"
+    path.write_bytes(matrix.tobytes())
+    record = _load(artifact / "gate2-energy.json")
+    record["sample_count"] = len(matrix)
+    record["raw_output"].update(samples=len(matrix), sha256=_hash(path))
+    for i, name in enumerate(("transmitted", "scattered_out", "absorbed")):
+        record[name] = _accumulator_from_array(matrix[:, i].astype(float))
+    record["incident"] = _accumulator_from_array(np.ones(len(matrix)))
+    record["closure_residual"] = _accumulator_from_array(matrix.astype(float).sum(axis=1) - 1)
+    _json(artifact / "gate2-energy.json", record)
+    # These independent synthetic estimates intentionally miss closure by 0.5;
+    # the verifier must reach the metric, rather than reject a hard-coded N.
+    with pytest.raises(EvidenceError, match="residual exceeds"):
+        _gate2(artifact, head, repo)

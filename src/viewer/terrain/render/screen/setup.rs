@@ -26,14 +26,16 @@ impl ViewerTerrainScene {
             let terrain = self.terrain.as_ref().unwrap();
             (terrain.world_origin_xz, terrain.world_span_xz)
         };
-        let origin =
-            frame
-                .anchor
-                .to_render_vec3(glam::DVec3::new(origin_world.x, 0.0, origin_world.y));
-        let span =
-            frame
-                .anchor
-                .to_render_direction(glam::DVec3::new(span_world.x, 0.0, span_world.y));
+        let origin = frame
+            .anchor
+            .to_render_f32(crate::geo::units::SceneCoord::scene(glam::DVec3::new(
+                origin_world.x,
+                0.0,
+                origin_world.y,
+            )));
+        let span = crate::camera::Anchor::offset_to_render(crate::geo::units::SceneOffset::scene(
+            glam::DVec3::new(span_world.x, 0.0, span_world.y),
+        ));
         let render_origin_span = [origin.x, origin.z, span.x, span.z];
         let terrain_width = span.x;
         let proj_base = frame.projection(width, height);

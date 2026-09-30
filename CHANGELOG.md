@@ -5,6 +5,148 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+### Added
+- Terrain material bands can be placed where you want them: the `material_layer_centers` lighting setting (and `TerrainRenderParams.material_layer_centers`) sets each texture layer's centre as a fraction of the height range, instead of spacing the layers evenly. (#194)
+- Heightmap cells without data (NaN) now render as holes in `MapScene`: they are not drawn, not shaded, and credited to no source in VERITAS provenance. `TerrainRenderParams.nodata_height_below` exposes the same cut-off for direct renderer use. (#194)
+
+### Changed
+- The VERITAS demo (`examples/provenance_demo.py`) uses the *batlow* palette, places its four bands at 800 m, 1,800 m and 3,000 m so every legend entry covers real terrain, and leaves the area outside Switzerland empty and unattributed. (#194)
+
+## [1.39.0] - 2026-09-28
+### Added
+- VERITAS: signed render provenance binds the image and per-pixel source map to the contributing terrain tiles. Offline calls without image bytes warn and remain compatible with 1.38.0 manifests. (#187)
+- Labels now compile line and curved text geometry into the scene plan, so placement and rendering use the same glyph positions. (#184)
+- MENSURA: `CrsTransform.datum_operations` names each EPSG datum operation a transform applies. RGF93 v1 (EPSG:2154) and NAD83 (EPSG:5070) reach WGS 84 only through the published null transformations EPSG:1671 (1 m) and EPSG:1188 (4 m). `reproject_raster`, `reproject_vector`, and `prepare_dem` report them with a `datum_null_transformation` diagnostic instead of treating the datums as silently equivalent. Coordinate values are unchanged. (#192)
+- MENSURA: `prepare_dem` converts a declared `orthometric_egm96` DEM stored in any built-in projected CRS, not only EPSG:4326. Each affine pixel centre is inverted to WGS 84, and the per-pixel H + N residual measures below 1e-6 m. Other CRSs still raise. (#192)
+
+### Changed
+- MENSURA: `Anchor::to_render_f32(Coord)` is now the only world-coordinate f64-to-f32 crossing and holds the only world `as f32`. The untyped `Anchor::to_render_vec3`, `to_render_direction`, and `direction_to_render` Rust helpers are removed: positions are tagged `SceneCoord::scene`, and spans and directions narrow through `Anchor::offset_to_render(SceneOffset::scene(..))`. `view_look_at` and `model_offset` take typed coordinates. Rendered values are bit-identical. (#192)
+- MENSURA: the geocentric entry points `geo::projections::geocentric::{geodetic_to_ecef, wgs84_geodetic_to_ecef}` accept only `Height<Ellipsoidal>` and return a typed height, so an orthometric or bare-float height no longer compiles into ECEF math. The DUPLA Everest jitter scene now converts the summit's 8,848.86 m orthometric height through EGM96 instead of using it as an ellipsoidal height. (#192)
+- `tests/test_world_coord_f32_gate.py` re-freezes the narrowing inventory at 1,403 sites. Every re-freeze is now chained through `tests/data/world_coord_f32_ledger.json`. The ledger records the site-level drift that landed after the ANAMNESIS freeze, reviewed to contain no world-position narrowing, and the MENSURA transition. (#192)
+
+### Fixed
+- VERITAS: the native `seal_provenance` and `verify_provenance` accept calls without image bytes again, as in 1.38.0. They warn that the call is deprecated, produce the same 1.38.0 manifest byte for byte, and verify 1.38.0 manifests. (#193)
+- `tools/verify_provenance.py` no longer crashes on 1.38.0 manifests; it reports that the image is not bound and checks everything else. (#193)
+
+## [1.38.0] - 2026-09-20
+
+### Added
+- ORBIS: whole-Earth globe rendering. Forge3D can now draw the entire planet,
+  not just flat local scenes — real Earth curvature, a horizon that bends away
+  correctly, and a camera that can descend smoothly from 408 km altitude down
+  to 1 m above the ground. Adds Python `GlobeScene` and `GlobeMetrics` with
+  `fly_to`, scripted descent, and snapshot calls; the native globe path sits
+  behind the `enable-globe` feature. (#141)
+- Globe terrain data streams in bounded pieces over the network as the camera
+  descends — locally and in the browser (WebAssembly) — without stalling
+  frames, with coarse stand-in imagery while detail arrives, and a hard
+  GPU-memory ceiling (~450 MB observed) so large datasets stay safe on modest
+  hardware. (#141)
+- Positions stay stable at planetary scale: the engine re-anchors arithmetic
+  around the camera so geometry does not jitter, and ring geometry is joined
+  without cracks between detail levels. On a physical NVIDIA Vulkan adapter
+  the audited descent measured ~0.00004 px of vertex jitter, zero crack
+  pixels, and 25/25 nonblocking streaming frames. (#141)
+- Globe views now reach across the whole source DEM: coarse context tiles
+  fill the outer clipmap rings, and COG nodata (the `GDAL_NODATA` tag) is
+  honoured, so a country-wide DEM shows its real outline on a sun-lit Earth
+  with an atmosphere rim instead of a filled rectangle. (#141)
+- `GlobeScene(earth_texture=...)` colours the Earth outside the terrain source
+  from an equirectangular image (e.g. a global elevation map), lit by the same
+  sun as the terrain, and the camera can now start up to 9,000 km out, far
+  enough to frame the whole visible Earth. `examples/orbis_swiss_alps_descent.py`
+  opens on a whole-Earth view coloured with Crameri's *bukavu* palette (NOAA
+  ETOPO 2022 outside Switzerland) and flies down onto the Eiger, Moench and
+  Jungfrau. (#141)
+
+### Fixed
+- Globe terrain shading: height normals are now built in each fragment's
+  east/north/up frame at metric scale (they were Y-up and ~1000x too steep,
+  which left slopes unlit and "crumbly"), slope-based materials use the real
+  terrain slope, and parallax mapping no longer shifts the global UV off the
+  loaded tiles (which collapsed elevation colormaps to one colour). (#141)
+- Globe geometry: coarse clipmap LOD variants were offset by the camera's
+  distance from the clipmap centre, so oblique and orbital views lost the
+  terrain; skirts no longer hang altitude-sized curtains below the terrain
+  edge. (#141)
+
+### Changed
+- Environment lighting now follows the corrected upstream IBL math (Karis
+  separable-Smith split-sum and cosine-weighted irradiance). Scenes lit mainly
+  by the environment can render modestly dimmer but more physically correct;
+  the ORBIS ground golden was regenerated against the corrected lighting.
+  (#141)
+- Bumped the package and PyPI version to `1.38.0`.
+
+### Compatibility
+- Existing flat-terrain maps, viewers, and rendering calls are unchanged; the
+  globe path is opt-in via `GlobeScene`. No existing public API was altered.
+
+## [1.37.1] - 2026-09-20
+
+### Fixed
+- DIFFERENTIA scene recovery now accounts for tricky places where a terrain
+  slope, a seam in the height data, or a cast shadow changes the image. For a
+  compatible Forge3D terrain reference, this makes the recovered ground
+  colours, sun position, sun strength, and haze more dependable. When that
+  calculation is not clear enough, Forge3D rejects it rather than quietly
+  treating a guess as a reliable adjustment. (#182)
+
+### Compatibility
+- Installing 1.37.1 does not redraw, recolour, or otherwise alter an existing
+  map. Ordinary viewer and rendering calls produce the same kind of output as
+  before. The correction applies only when an application explicitly reruns
+  `recover_scene()` to match a compatible terrain reference image.
+- A rerun of `recover_scene()` can produce different recovered colours or
+  lighting around terrain and shadow edges; that is the intended accuracy fix.
+  Its public Python API and output shapes are unchanged.
+- This does not turn arbitrary aerial or satellite photographs into supported
+  inputs. The recovery workflow remains for flat, terrain-only Forge3D
+  reference scenes with known terrain shape.
+
+### Changed
+
+- Bumped the package and PyPI version to `1.37.1`.
+
+## [1.37.0] - 2026-09-18
+1.36.0 was published from the OBLIQUA branch before it reached `main`. 1.37.0 is the
+first release built from `main` with both lines merged: everything in 1.36.0 plus
+everything merged to `main` since.
+
+### Added
+- DIFFERENTIA: differentiable inverse path tracing that recovers per-texel terrain albedo, sun direction and intensity, and aerosol turbidity from a single observed image, running the real PROMETHEUS forward kernels in reverse mode. Adds Python `recover_scene`, `RecoveredScene` and `InverseSolveUnavailable`, and the native `inverse_solve` / `inverse_render_primal` behind the `enable-inverse-pt` feature, which the wheel now builds with. (#180)
+- `hybrid_render_terrain_reference` gains `turbidity` (>= 1, default 1 = identity: spectral Beer extinction on the direct sun plus diffuse in-scatter on the environment), `sdf_scene` (a native SDF scene traversed alongside the terrain by primary and shadow rays; exhausted SDF marches fail closed), and new outputs: linear `radiance`, `luminance_variance`, `convergence_metric` and measured `traversal` counters. Mapped terrain uses spectral ReSTIR. (#174, #180)
+- TERRA-DETERMINATA v2: compute and raster determinism canaries run before a deterministic context serves work, `forge3d.determinism_probe()`, a determinism IR lint with a one-edit rewrite pass, and browser (headless Chrome WebGPU) and Apple legs of the cross-vendor matrix. (#178)
+- PROMETHEUS acceptance: a provenance-verified Gore Range DEM fixture with persisted beauty/AOV references, numeric scores and CI gates in the protected GPU lane, and a 1 -> 8 spp timing gate on a real DEM. (#174)
+
+### Changed
+- Convergence is now the estimated variance of the mean frame luminance (Welford M2/(N*(N-1)) over all frames, checked every 32 frames) instead of the running-mean stability window, so renders stop at different frame counts than in 1.36.0. (#174)
+- `albedo_map` accepts an `(H, W, 3)` linear-RGB array as well as the `(H, W, 4)` RGBA form. `albedo_sampling` now defaults to `None`, which means nearest for RGBA maps (the 1.36.0 behaviour) and bilinear for RGB maps; an explicit value is honoured as before. Nearest sampling and the alpha fallback also apply in the inverse solver's adjoint: texels that fall back to the constant albedo receive no gradient.
+- Bumped the package and PyPI version to `1.37.0`.
+
+### Fixed
+- The `seed` argument had no effect on the terrain kernel: its RNG state XOR-ed `seed` with `seed ^ constant`, so every seed produced the same image. Seeds now give independent streams, hashed on the global sensor pixel so poster tiles still reproduce the monolithic render exactly. Output for a given seed therefore differs from 1.36.0. (#174)
+- Terrain ReSTIR could finalize a reservoir weight far outside its contract on grazing surfaces (measured 4.4e6) and abort the render; the weight is now capped at 4.0 at the source. (#177)
+- The determinism IR lint missed inlined fusion edges (455 sites, several on the canonical terrain path, are now barriered), and the Apple-leg acceptance job could run before its artifact existed. (#179)
+- The AETHER spectral reference bound its terrain resources without the earth-curvature uniform (binding 10) its layout declares; it is now bound.
+- The wavefront path tracer bound a 96-byte uniform block to the ReSTIR shaders, whose shared camera block is 128 bytes since OBLIQUA; it now supplies the full block (single-pass values, so its output is unchanged).
+- Type stubs: `hybrid_render_aether_spectral_reference` no longer lists parameters the native function does not accept.
+
+### Compatibility
+- Default renders (no albedo map, pinhole camera, no tile offset) are byte-identical to `main` before this release. They differ from 1.36.0 only through the seed and convergence changes above.
+- OBLIQUA's public API is unchanged: RGBA maps default to nearest sampling as in 1.36.0, and `render_terrain_poster` tiles remain byte-identical to the monolithic render.
+
+## [1.36.0] - 2026-09-05
+### Added
+- OBLIQUA: added public `render_terrain_poster` rendering of exact full-sensor tiles for orthographic, pinhole, and off-axis (oblique) terrain cameras, with full-frame dimensions, sensor rectangles, pixel offsets, independent per-tile convergence, owner-scoped peak-memory diagnostics, ReSTIR reservoir evidence, and render-certificate inputs.
+- Added terrain-grid RGBA albedo maps with explicit `nearest` sampling for categorical data and `bilinear` sampling for continuous data, used consistently by beauty, albedo AOV, and ReSTIR terrain shading.
+- Added deterministic camera, albedo, and poster contract coverage plus representative Southeast Europe population and Swiss land-cover examples.
+
+### Fixed
+- Corrected terrain ReSTIR spatial reweighting for receiver materials and extended resource tracking with owner-scoped allocation captures so poster-tile memory evidence excludes unrelated live allocations.
+
+### Changed
+- Bumped the package and PyPI version to `1.36.0`.
 
 ## [1.35.0] - 2026-08-13
 ### Added

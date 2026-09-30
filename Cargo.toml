@@ -1,6 +1,6 @@
 [package]
 name = "forge3d"
-version = "1.35.0"
+version = "1.39.0"
 edition = "2021"
 autoexamples = false
 description = "GPU-accelerated offline 3D map rendering with Rust-first GIS vector, rasterization, mask, thematic, CRS, affine, windowing, and reprojection support"
@@ -37,18 +37,22 @@ enable-pbr = []
 enable-tbn = []
 enable-normal-mapping = ["enable-tbn"]
 enable-hdr-offscreen = []
-# GPU instancing experimental flag (no-op stub for now)
-enable-gpu-instancing = []
+# GPU mesh instancing includes the opt-in solid-material PBR pipeline.
+enable-gpu-instancing = ["enable-pbr", "enable-tbn"]
 # P0-03: Renderer config plumbing (no shader/pipeline changes)
 enable-renderer-config = []
 # Workstream O: Resource & Memory Management
 enable-staging-rings = []
+# DIFFERENTIA: differentiable inverse path tracing (scene-parameter recovery)
+enable-inverse-pt = []
 # A14: AOV image format support
 images = ["dep:exr"]
 # P2.2: LAZ decompression in COPC reader
 copc_laz = ["dep:laz"]
 # P3: Cloud Optimized GeoTIFF streaming
 cog_streaming = ["dep:reqwest", "dep:async-trait", "dep:tokio", "dep:flate2"]
+# ORBIS: opt-in planetary clipmap assembly.
+enable-globe = ["cog_streaming"]
 # G-002 Later: explicit remote geodata fetch/cache backend
 gis-remote = ["dep:reqwest", "dep:tokio"]
 # P3-reproject: On-the-fly CRS reprojection via PROJ
@@ -60,8 +64,6 @@ geos-topology = ["dep:geo"]
 [dependencies]
 # Do NOT enable pyo3's extension-module by default; gate it via the Cargo feature above.
 # Enable `macros` so procedural attributes like #[pyclass], #[pymethods], and #[pyo3(signature=..)] work when the extension is built.
-pyo3  = { version = "0.21.2", features = ["abi3-py310", "macros", "multiple-pymethods"] }
-numpy = "0.21"
 ndarray = "0.15"
 wgpu = "0.19"
 naga = { version = "=0.19.2", features = ["wgsl-in"] }
@@ -79,7 +81,6 @@ lyon_tessellation = "1.0"
 lyon_path = "1.0"
 lyon_geom = "1.0"
 ttf-parser = "0.20"
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"], optional = true }
 futures-intrusive = "0.5"
 env_logger = "0.10"
 anyhow = "1"
@@ -95,27 +96,31 @@ las = { version = "0.8", features = ["laz"] }
 # P2.2: Direct laz crate for COPC chunk decompression (optional, feature-gated)
 laz = { version = "0.9", optional = true }
 # P3: COG streaming dependencies (optional)
-reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"], optional = true }
-async-trait = { version = "0.1", optional = true }
-flate2 = { version = "1.0", optional = true }
 # P3-reproject: CRS transformation via PROJ (optional, feature-gated)
 proj = { version = "0.27", optional = true }
 # G-002c C4.1: pure-Rust polygon boolean operations, feature-gated.
 geo = { version = "0.33.1", default-features = false, optional = true }
 
-# Keep the public wgpu 0.19.4 API/application stack.  This exact 0.19.5 HAL
-# source is vendored only to carry the macOS 26 Metal timestamp boundary fix;
-# its registry package checksum is bfabcfc55fd86611a855816326b2d54c3b2fd7972c27ce414291562650552703.
-[patch.crates-io]
-wgpu-hal = { path = "vendor/wgpu-hal-0.19.5" }
-
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pyo3 = { version = "0.21.2", features = ["abi3-py310", "macros", "multiple-pymethods"] }
+numpy = "0.21"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"], optional = true }
+async-trait = { version = "0.1", optional = true }
+flate2 = { version = "1.0", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", features = ["rt", "sync"], optional = true }
+
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] }
 env_logger = "0.10"
 sha2 = "0.10"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] }
 
 [build-dependencies]
 # Reuse the runtime hash implementation to embed a build-time fingerprint of

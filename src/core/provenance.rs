@@ -9,12 +9,17 @@
 //!   tile_x:u32le || tile_y:u32le || mip_level:u32le || content_hash[32]`.
 //! - Source-map leaf (44 bytes): `b"VTSM" || width:u32le || height:u32le ||
 //!   sha256(row-major little-endian u32 raster)[32]`.
+//! - Image leaf (36 bytes): `b"VTIM" || sha256(rendered image bytes)[32]`.
 //! - Leaf hash = SHA256(encoding); leaves sorted ascending by raw encoding
 //!   bytes so async tile-arrival order cannot change the root.
 //! - Interior node = SHA256(left || right); an odd trailing node is promoted
 //!   unchanged to the next level.
-//! - Empty leaf set: root = SHA256(b"forge3d.provenance.v1.empty").
-//! - Signature message = `b"forge3d.provenance.v1" || root[32]` (Ed25519).
+//! - Empty leaf set: root = SHA256(b"forge3d.provenance.v2.empty").
+//! - Signature message = `b"forge3d.provenance.v2" || root[32]` (Ed25519).
+//!
+//! Schema v1 (1.38.0) manifests have no image leaf and sign with the
+//! `b"forge3d.provenance.v1"` context ([`LEGACY_SIGN_CONTEXT`]); they stay
+//! sealable and verifiable through the deprecated no-image calls.
 //!
 //! Kept free of wgpu/PyO3 so the unit tests run under the curated cargo
 //! feature set (which excludes `extension-module`).
@@ -32,11 +37,15 @@ pub const SOURCE_ID_MATERIAL_CAPACITY: u32 = 4;
 pub const FAMILY_NAMES: [&str; 3] = ["albedo", "normal", "mask"];
 
 /// Domain-separation prefix for the signed Merkle root.
-pub const SIGN_CONTEXT: &[u8] = b"forge3d.provenance.v1";
+pub const SIGN_CONTEXT: &[u8] = b"forge3d.provenance.v2";
 
-const EMPTY_ROOT_PREIMAGE: &[u8] = b"forge3d.provenance.v1.empty";
+/// Domain-separation prefix of deprecated schema v1 (1.38.0) manifests.
+pub const LEGACY_SIGN_CONTEXT: &[u8] = b"forge3d.provenance.v1";
+
+const EMPTY_ROOT_PREIMAGE: &[u8] = b"forge3d.provenance.v2.empty";
 const TILE_LEAF_TAG: &[u8; 4] = b"VTLF";
 const SOURCE_MAP_LEAF_TAG: &[u8; 4] = b"VTSM";
+const IMAGE_LEAF_TAG: &[u8; 4] = b"VTIM";
 
 /// One deduplicated tile that was resident and sampled for a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -86,6 +95,15 @@ pub fn encode_source_map_leaf(width: u32, height: u32, digest: &[u8; 32]) -> [u8
     out
 }
 
+/// Canonical 36-byte image-leaf preimage. `image_sha256` is the SHA256 of
+/// the exact rendered-image bytes the manifest seals.
+pub fn encode_image_leaf(image_sha256: &[u8; 32]) -> [u8; 36] {
+    let mut out = [0u8; 36];
+    out[0..4].copy_from_slice(IMAGE_LEAF_TAG);
+    out[4..36].copy_from_slice(image_sha256);
+    out
+}
+
 /// Binary SHA256 Merkle root over the given leaf preimages. Leaves are sorted
 /// by their raw encoding, so the root is independent of arrival order.
 pub fn merkle_root(leaf_encodings: &[Vec<u8>]) -> [u8; 32] {
@@ -113,27 +131,33 @@ pub fn merkle_root(leaf_encodings: &[Vec<u8>]) -> [u8; 32] {
     level[0]
 }
 
-/// Sign a Merkle root with an Ed25519 32-byte seed. Returns
+/// Sign a Merkle root with an Ed25519 32-byte seed under `context`
+/// ([`SIGN_CONTEXT`] or [`LEGACY_SIGN_CONTEXT`]). Returns
 /// `(signature, public_key)`.
-pub fn sign_root(root: &[u8; 32], seed: &[u8; 32]) -> ([u8; 64], [u8; 32]) {
+pub fn sign_root(root: &[u8; 32], seed: &[u8; 32], context: &[u8]) -> ([u8; 64], [u8; 32]) {
     use ed25519_dalek::{Signer, SigningKey};
     let signing_key = SigningKey::from_bytes(seed);
-    let mut message = Vec::with_capacity(SIGN_CONTEXT.len() + 32);
-    message.extend_from_slice(SIGN_CONTEXT);
+    let mut message = Vec::with_capacity(context.len() + 32);
+    message.extend_from_slice(context);
     message.extend_from_slice(root);
     let signature = signing_key.sign(&message);
     (signature.to_bytes(), signing_key.verifying_key().to_bytes())
 }
 
-/// Verify an Ed25519 seal over a Merkle root.
-pub fn verify_root(root: &[u8; 32], signature: &[u8; 64], public_key: &[u8; 32]) -> bool {
+/// Verify an Ed25519 seal over a Merkle root signed under `context`.
+pub fn verify_root(
+    root: &[u8; 32],
+    signature: &[u8; 64],
+    public_key: &[u8; 32],
+    context: &[u8],
+) -> bool {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     let Ok(key) = VerifyingKey::from_bytes(public_key) else {
         return false;
     };
     let signature = Signature::from_bytes(signature);
-    let mut message = Vec::with_capacity(SIGN_CONTEXT.len() + 32);
-    message.extend_from_slice(SIGN_CONTEXT);
+    let mut message = Vec::with_capacity(context.len() + 32);
+    message.extend_from_slice(context);
     message.extend_from_slice(root);
     key.verify(&message, &signature).is_ok()
 }
@@ -194,6 +218,10 @@ mod tests {
         let sm = encode_source_map_leaf(640, 480, &sha256(b"map"));
         assert_eq!(sm.len(), 44);
         assert_eq!(&sm[0..4], b"VTSM");
+
+        let image = encode_image_leaf(&sha256(b"image"));
+        assert_eq!(image.len(), 36);
+        assert_eq!(&image[0..4], b"VTIM");
     }
 
     #[test]
@@ -228,7 +256,7 @@ mod tests {
 
     #[test]
     fn merkle_empty_uses_documented_sentinel() {
-        assert_eq!(merkle_root(&[]), sha256(b"forge3d.provenance.v1.empty"));
+        assert_eq!(merkle_root(&[]), sha256(b"forge3d.provenance.v2.empty"));
     }
 
     #[test]
@@ -252,16 +280,43 @@ mod tests {
     fn sign_verify_round_trip_and_rejection() {
         let seed = sha256(b"forge3d-veritas-unit-seed");
         let root = merkle_root(&[encode_tile_leaf(&tile(0, 0, 0, 0, 0)).to_vec()]);
-        let (signature, public_key) = sign_root(&root, &seed);
-        assert!(verify_root(&root, &signature, &public_key));
+        let (signature, public_key) = sign_root(&root, &seed, SIGN_CONTEXT);
+        assert!(verify_root(&root, &signature, &public_key, SIGN_CONTEXT));
 
         let mut wrong_root = root;
         wrong_root[0] ^= 0xFF;
-        assert!(!verify_root(&wrong_root, &signature, &public_key));
+        assert!(!verify_root(
+            &wrong_root,
+            &signature,
+            &public_key,
+            SIGN_CONTEXT
+        ));
 
         let other_seed = sha256(b"a-different-seed");
-        let (_, other_public) = sign_root(&root, &other_seed);
-        assert!(!verify_root(&root, &signature, &other_public));
+        let (_, other_public) = sign_root(&root, &other_seed, SIGN_CONTEXT);
+        assert!(!verify_root(&root, &signature, &other_public, SIGN_CONTEXT));
+    }
+
+    #[test]
+    fn legacy_and_current_contexts_do_not_cross_verify() {
+        let seed = sha256(b"forge3d-veritas-unit-seed");
+        let root = merkle_root(&[encode_tile_leaf(&tile(0, 0, 0, 0, 0)).to_vec()]);
+        let (legacy, public_key) = sign_root(&root, &seed, LEGACY_SIGN_CONTEXT);
+        assert!(verify_root(
+            &root,
+            &legacy,
+            &public_key,
+            LEGACY_SIGN_CONTEXT
+        ));
+        assert!(!verify_root(&root, &legacy, &public_key, SIGN_CONTEXT));
+
+        let (current, _) = sign_root(&root, &seed, SIGN_CONTEXT);
+        assert!(!verify_root(
+            &root,
+            &current,
+            &public_key,
+            LEGACY_SIGN_CONTEXT
+        ));
     }
 
     /// Known-answer vector; `tests/test_provenance_veritas.py` asserts the
@@ -285,15 +340,17 @@ mod tests {
             content_hash: sha256(b"source-b"),
         };
         let sm = encode_source_map_leaf(4, 2, &sha256(b"source-map"));
+        let image = encode_image_leaf(&sha256(b"forge3d-veritas-rendered-image"));
         let leaves = vec![
             encode_tile_leaf(&t0).to_vec(),
             encode_tile_leaf(&t1).to_vec(),
             sm.to_vec(),
+            image.to_vec(),
         ];
         let root = merkle_root(&leaves);
         assert_eq!(
             to_hex(&root),
-            "67e632b879b8d0f52360148abad03584b213f9065714e2b722db766e03e980c4"
+            "579d5530432f9620ff2b8d4547df385c52b26282bd6a6a77c67e8ff6874cce75"
         );
     }
 

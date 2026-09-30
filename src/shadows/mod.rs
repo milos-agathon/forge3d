@@ -175,8 +175,16 @@ mod tests {
     }
 
     fn execute_shader_probe(source: &str, label: &str, probe_body: &str) -> Option<[f32; 5]> {
+        // The determinism prelude is required for det_* calls inside
+        // shadow_moments.wgsl, but sources that already carry it (the full
+        // shadows module) must not get a second copy.
+        let prelude = if source.contains("fn det_barrier(") {
+            ""
+        } else {
+            include_str!("../shaders/includes/determinism.wgsl")
+        };
         let source = format!(
-            "{source}
+            "{prelude}{source}
 @group(0) @binding(31) var<storage, read_write> visibility_output: array<f32, 5>;
 
 @compute @workgroup_size(1)
@@ -261,7 +269,7 @@ fn test_visibility_entry() {{
 
     fn execute_evsm_half_uniform_probe(depths: &[f32]) -> Option<Vec<f32>> {
         let source = format!(
-            "{}
+            "{}{}
 @group(0) @binding(30) var<storage, read> evsm_inputs: array<vec4<f32>>;
 @group(0) @binding(31) var<storage, read_write> evsm_outputs: array<f32>;
 
@@ -274,6 +282,7 @@ fn test_evsm_half_uniform(@builtin(global_invocation_id) id: vec3<u32>) {{
     evsm_outputs[id.x] =
         evsm_moment_leak_control(input.xy, input.z, 5.5, input.w);
 }}",
+            include_str!("../shaders/includes/determinism.wgsl"),
             include_str!("../shaders/includes/shadow_moments.wgsl"),
             depths.len()
         );

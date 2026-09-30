@@ -105,7 +105,11 @@ PORTABLE_CI_CARGO_FEATURES = {
     "enable-hdr-offscreen",
     "enable-renderer-config",
     "enable-staging-rings",
+    # DIFFERENTIA: the differentiable inverse solver is compiled into every
+    # portable CI check/test/doc lane.
+    "enable-inverse-pt",
     "shader-contract-asserts",
+    "enable-globe",
 }
 DEDICATED_SYSTEM_FEATURES = {"proj"}
 DEDICATED_ACCEPTANCE_FEATURES = {"atmosphere-bake"}
@@ -275,6 +279,7 @@ WHEEL_REQUIRED_FEATURES = {
     "enable-staging-rings",
     "copc_laz",
     "cog_streaming",
+    "enable-globe",
     "gis-remote",
     # MENSURA ships real topology ops (pure-Rust `geo` crate) as a wheel
     # feature; the public forge3d.gis topology surface requires it.
@@ -282,6 +287,8 @@ WHEEL_REQUIRED_FEATURES = {
     # AETHER exposes an explicit offline bake API in the shipped wheel while
     # normal rendering still consumes its shipped LUT bank.
     "atmosphere-bake",
+    # DIFFERENTIA: `inverse_solve`/`inverse_render_primal` are public API.
+    "enable-inverse-pt",
 }
 
 
@@ -450,6 +457,7 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
         "tests/test_determinism_matrix.py",
         "tests/test_no_silent_degradation.py",
         "tests/test_substratia_evidence_report.py",
+        "tests/test_orbis_task6_contracts.py",
     }
     assert fast_lane == expected_fast, (
         "fast profile changed without updating the architectural-contract lock: "
@@ -469,10 +477,10 @@ def test_e_slow_lane_is_marker_selected_and_accounted():
         "full", [ci_pytest_lane.SLOW_LANE_SELECTOR]
     )
     assert default_args[default_args.index("-m") + 1] == (
-        "not slow and not interactive_viewer"
+        "not slow and not interactive_viewer and not wasm"
     )
     assert slow_args[slow_args.index("-m") + 1] == (
-        "slow and not interactive_viewer"
+        "slow and not interactive_viewer and not wasm"
     )
     assert ci_pytest_lane.SLOW_LANE_SELECTOR not in slow_args
 
@@ -848,3 +856,35 @@ def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
     assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
     assert "continue-on-error: true" in metal_diagnostic
     assert "test-substratia-gpu," not in acceptance.split("\n    runs-on:", 1)[0]
+
+
+def test_nephele_physical_exclusion_is_one_hosted_site_and_six_required_gates():
+    import ast
+
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    slow_job = _workflow_job(workflow, "test-python-slow")
+    exclusion = "--deselect=tests/test_nephele_physical.py"
+    assert workflow.count(exclusion) == 1
+    assert slow_job.count(exclusion) == 1
+    assert re.findall(r"--deselect(?:=|\s+)(\S+)", slow_job) == ["tests/test_nephele_physical.py"]
+    assert "--ignore" not in slow_job
+    args = ci_pytest_lane.build_pytest_args("full", [], slow=True)
+    assert args[args.index("-o") + 1] == "python_functions=test* gate*"
+    assert "tests/test_nephele_physical.py" in args
+    assert not any(arg.startswith(("--ignore", "--deselect")) for arg in args)
+    physical = ast.parse((ROOT / "tests/test_nephele_physical.py").read_text(encoding="utf-8"))
+    names = {node.name for node in physical.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    gates = {
+        "gate1_estimator_majorant_rr", "gate2_energy", "gate3_realtime_reference",
+        "gate4_terrain_coupling", "gate5_compute_shadow_ridgeline", "gate6_determinism_memory",
+    }
+    assert names == gates | {"physical"}
+    assert not any(isinstance(node, ast.ClassDef) for node in physical.body)
+    gpu = _workflow_job(workflow, "test-nephele-gpu")
+    assert "gpu-nvidia" in gpu and "Windows" in gpu and "X64" in gpu
+    assert "tests/test_nephele_physical.py" in gpu
+    assert "assert_junit_zero_skips.py" in gpu
+    assert "continue-on-error: true" not in gpu
+    summary = _workflow_job(workflow, "full-acceptance-summary")
+    assert "test-nephele-gpu" in summary.split("runs-on:", 1)[0]
+    assert "needs.test-nephele-gpu.result" in summary

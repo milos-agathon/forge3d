@@ -1,10 +1,16 @@
-# PROBATUM proof-coverage ledger. Expired entries fail tests/test_shader_proofs.py.
+[[unproven]]
+path = "src/shaders/det_probe.wgsl"
+reason = "det_probe.wgsl: certification harness whose arithmetic-canary outputs are compared to committed probe goldens at deterministic context start; its fixed output-contract coverage is not yet modeled"
+owner = "determinism"
+expiry = "2027-08-06"
 
 [[unproven]]
-path = "src/shaders/adjudication_raster.wgsl"
-reason = "adjudication_raster.wgsl: nonlinear native-math result envelopes are not yet modeled"
-owner = "render-quality"
-expiry = "2027-01-17"
+path = "src/shaders/det_raster.wgsl"
+reason = "det_raster.wgsl: raster canary whose output hash is compared to committed goldens at deterministic context start; its rasterizer-precision contract coverage is not yet modeled"
+owner = "determinism"
+expiry = "2027-08-06"
+
+# PROBATUM proof-coverage ledger. Expired entries fail tests/test_shader_proofs.py.
 
 [[unproven]]
 path = "src/shaders/ao_from_aovs.wgsl"
@@ -463,9 +469,27 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
+path = "src/shaders/pt_edge_sample.wgsl"
+reason = "pt_edge_sample.wgsl: DIFFERENTIA silhouette edge-sampling adjoint over sampled AOV neighbourhoods; host-computed storage offsets and atomic CAS gradient accumulation are not yet modeled; FD gradient tests in path_tracing::inverse exercise the shipped path"
+owner = "path-tracing"
+expiry = "2027-01-17"
+
+[[unproven]]
 path = "src/shaders/pt_intersect.wgsl"
 reason = "pt_intersect.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/pt_inverse_loss.wgsl"
+reason = "pt_inverse_loss.wgsl: DIFFERENTIA loss adjoint over the replicate-mean image; tiled K*px storage offsets and atomic<u32> bitcast CAS accumulation are not yet modeled; FD gradient and checkpointed-replay tests exercise the shipped path"
+owner = "path-tracing"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/shaders/pt_inverse_shade.wgsl"
+reason = "pt_inverse_shade.wgsl: DIFFERENTIA reverse-mode spectral ReSTIR shading; per-slot reservoir-history indexing and atomic CAS gradient accumulation are not yet modeled; FD gradient, primal-parity, and synthetic-recovery tests exercise the shipped path"
+owner = "path-tracing"
 expiry = "2027-01-17"
 
 [[unproven]]
@@ -783,5 +807,12 @@ expiry = "2027-01-17"
 [[unproven]]
 path = "src/viewer/terrain/shader_pbr/terrain_shadow_depth.wgsl"
 reason = "viewer/terrain/shader_pbr/terrain_shadow_depth.wgsl: shadow relations are not yet modeled"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+# Milos approved this explicit unproven entry on 2026-09-28.
+[[unproven]]
+path = "src/shaders/orbis_globe_background.wgsl"
+reason = "orbis_globe_background.wgsl: ray/sphere intersections, homogeneous projection divisions, normalized directions and texture sampling relations are not yet modeled by the interval proof contracts."
 owner = "render-quality"
 expiry = "2027-01-17"

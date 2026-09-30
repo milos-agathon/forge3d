@@ -122,7 +122,7 @@ pub fn geometry_instance_mesh_gpu_py(
 /// Render an instanced mesh to RGBA8 using GPU instancing (feature-gated).
 #[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]
 #[pyfunction]
-#[pyo3(signature = (width, height, mesh, transforms, certificate=None, cache=None))]
+#[pyo3(signature = (width, height, mesh, transforms, certificate=None, cache=None, pbr=None))]
 pub fn geometry_instance_mesh_gpu_render_py(
     py: Python<'_>,
     width: u32,
@@ -131,6 +131,7 @@ pub fn geometry_instance_mesh_gpu_render_py(
     transforms: PyReadonlyArray2<'_, f32>, // (N,16) row-major
     certificate: Option<Bound<'_, PyAny>>,
     cache: Option<Bound<'_, PyAny>>,
+    pbr: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
     let _ = cache;
     let certificate_capture =
@@ -149,6 +150,23 @@ pub fn geometry_instance_mesh_gpu_render_py(
     let vcount = base.positions.len();
     if vcount == 0 || base.indices.is_empty() {
         return Err(PyValueError::new_err("base mesh is empty"));
+    }
+    if pbr.is_some()
+        && (base.normals.len() != vcount
+            || !base
+                .positions
+                .iter()
+                .flatten()
+                .all(|value| value.is_finite())
+            || base.normals.iter().any(|normal| {
+                let length = glam::Vec3::from(*normal).length_squared();
+                !length.is_finite() || length <= 0.0
+            })
+            || base.indices.iter().any(|index| *index as usize >= vcount))
+    {
+        return Err(PyValueError::new_err(
+            "PBR meshes require finite positions, nonzero normals and valid indices",
+        ));
     }
     // Build PN vertices (default normal if missing)
     #[cfg(feature = "enable-gpu-instancing")]
@@ -197,6 +215,51 @@ pub fn geometry_instance_mesh_gpu_render_py(
     renderer.set_view_proj(view, proj);
     renderer.set_color([0.85, 0.85, 0.9, 1.0]);
     renderer.set_light([0.3, 0.7, 0.2], 1.2);
+
+    if let Some(options) = pbr {
+        #[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+        {
+            let mut material = crate::core::material::PbrMaterial {
+                base_color: [0.85, 0.85, 0.9, 1.0],
+                ..Default::default()
+            };
+            let mut environment = [0.03; 3];
+            let mut sun_color = [1.0; 3];
+            for (key, value) in options.iter() {
+                match key.extract::<String>()?.as_str() {
+                    "base_color" => material.base_color = value.extract()?,
+                    "roughness" => material.roughness = value.extract()?,
+                    "metallic" => material.metallic = value.extract()?,
+                    "environment" => environment = value.extract()?,
+                    "sun_color" => sun_color = value.extract()?,
+                    key => {
+                        return Err(PyValueError::new_err(format!(
+                            "unknown PBR mesh setting: {key}"
+                        )))
+                    }
+                }
+            }
+            for row in transforms.as_array().rows() {
+                let values: [f32; 16] = row.to_vec().try_into().unwrap();
+                let matrix = glam::Mat4::from_cols_array(&values).transpose();
+                if !matrix.is_finite() || !matrix.inverse().is_finite() {
+                    return Err(PyValueError::new_err(
+                        "PBR instance transforms must be finite and invertible",
+                    ));
+                }
+            }
+            renderer
+                .enable_pbr(&g.device, &g.queue, material, environment, sun_color)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        }
+        #[cfg(not(all(feature = "enable-pbr", feature = "enable-tbn")))]
+        {
+            let _ = options;
+            return Err(PyValueError::new_err(
+                "PBR mesh rendering requires enable-pbr and enable-tbn",
+            ));
+        }
+    }
 
     // Upload transforms (row-major)
     let arr = transforms.as_array();

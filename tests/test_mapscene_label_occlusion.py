@@ -247,12 +247,14 @@ def test_curved_label_depth_occlusion_is_documented_unsupported_substitution() -
 
     assert plan.accepted == []
     assert [(label.label_id, label.reason) for label in plan.rejected] == [
-        ("curved-ridge", "missing_geometry_authority")
+        ("curved-ridge", "incompatible_depth_convention")
     ]
-    assert plan.rejected[0].details == {"required_authority": "layout_curved_text"}
-    assert plan.rejected[0].diagnostic_refs == ("label_geometry_authority_missing",)
+    sample = plan.rejected[0].details["terrain_sample"]
+    assert sample["depth_convention_incompatible"] is True
+    assert sample["depth_tested"] is False
+    assert "label_depth_convention_incompatible" in plan.rejected[0].diagnostic_refs
     assert any(
-        diagnostic.code == "label_geometry_authority_missing"
+        diagnostic.code == "label_depth_convention_incompatible"
         and diagnostic.object_id == "curved-ridge"
         for diagnostic in plan.diagnostics
     )

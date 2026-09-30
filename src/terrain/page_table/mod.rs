@@ -10,8 +10,10 @@ mod queue;
 mod readers;
 
 pub use common::CoalescePolicy;
-pub use gpu::{PageTable, PageTableEntry};
-pub use height_loader::AsyncTileLoader;
+pub use gpu::{
+    create_disabled_page_table, OverviewUvTransform, PageTable, PageTableEntry, PageTableHeader,
+};
+pub use height_loader::{AsyncTileLoader, RequestTicket, TileLoadTerminal, MAX_LOADER_WORKERS};
 pub use overlay_loader::{AsyncOverlayLoader, OverlayTileData};
 pub use queue::AsyncTileQueue;
-pub use readers::{FileHeightReader, FileOverlayReader, HeightReader, OverlayReader};
+pub use readers::{FileHeightReader, FileOverlayReader, HeightRead, HeightReader, OverlayReader};

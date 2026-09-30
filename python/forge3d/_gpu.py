@@ -93,6 +93,44 @@ def device_probe(backend: Optional[str] = None) -> Dict:
     return probe
 
 
+def determinism_probe() -> Dict:
+    """Run the TERRA-DETERMINATA arithmetic canary on the active adapter.
+
+    Returns a dict with ``status`` (``"ok"``/``"probe_error"``/``"native_missing"``),
+    ``probe_sha256`` (SHA-256 of the 256-byte canary buffer), ``probe_bytes_hex``,
+    ``wgsl_sha256`` (SHA-256 of the assembled probe WGSL source), and adapter
+    metadata (``adapter_name``, ``adapter_backend``, ``software_fallback``, ...).
+
+    The same WGSL runs in browser WebGPU via
+    ``tools/determinism_browser/det_probe.js``, making ``probe_sha256`` a real
+    cross-implementation arithmetic-identity leg. Requires the GPU context to
+    be initialized already (backend pinned before first init in deterministic
+    mode).
+    """
+    native = get_native_module()
+    native_probe = getattr(native, "determinism_probe", None) if native is not None else None
+    if not callable(native_probe):
+        import_error = native_import_error()
+        reason = (
+            f"forge3d._forge3d failed to import: {import_error!r}"
+            if import_error is not None
+            else "forge3d._forge3d is not available (extension not built) or lacks determinism_probe"
+        )
+        return {
+            "status": "native_missing",
+            "reason": reason,
+            "remediation": _REMEDIATION_NATIVE,
+        }
+    try:
+        return native_probe()
+    except Exception as exc:
+        return {
+            "status": "probe_error",
+            "reason": f"native determinism_probe raised: {exc!r}",
+            "remediation": _REMEDIATION_ADAPTER,
+        }
+
+
 def has_gpu() -> bool:
     if not NATIVE_AVAILABLE:
         return False

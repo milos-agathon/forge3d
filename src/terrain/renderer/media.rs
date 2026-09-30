@@ -9,7 +9,6 @@ use crate::core::resource_tracker::{
     tracked_host_allocation, ResourceHandle, TrackedBuffer, TrackedTexture,
 };
 use bytemuck::{Pod, Zeroable};
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 #[repr(C, align(16))]
@@ -165,6 +164,8 @@ pub(crate) struct MediaExecutionDiagnostics {
     pub host_visible_bytes: u64,
     pub froxel_device_local_bytes: u64,
     pub density_device_local_bytes: u64,
+    /// Canonical majorants are CPU-side validity proofs; the froxel GPU path
+    /// consumes the canonical extinction atlas and allocates no majorant buffer.
     pub majorant_device_local_bytes: u64,
     pub staging_readback_bytes: u64,
     pub adapter: String,
@@ -313,7 +314,33 @@ struct TerminationReadback {
     allocation: ResourceHandle,
 }
 
+struct InjectBindGroups {
+    key: (
+        wgpu::Id<wgpu::Texture>,
+        wgpu::Id<wgpu::Buffer>,
+        wgpu::Id<wgpu::Buffer>,
+        wgpu::Id<wgpu::Buffer>,
+    ),
+    groups: [wgpu::BindGroup; 5],
+}
+struct IntegrateBindGroups {
+    key: (
+        wgpu::Id<wgpu::TextureView>,
+        wgpu::Id<wgpu::Texture>,
+        wgpu::Id<wgpu::Texture>,
+    ),
+    groups: [wgpu::BindGroup; 3],
+}
+struct CompositeBindGroups {
+    key: wgpu::Id<wgpu::TextureView>,
+    groups: [wgpu::BindGroup; 4],
+}
+
 pub(super) struct TerrainMediaResources {
+    inject_bind_groups: Option<InjectBindGroups>,
+    integrate_bind_groups: Option<IntegrateBindGroups>,
+    integrate_bind_groups_next: Option<IntegrateBindGroups>,
+    composite_bind_groups: Option<CompositeBindGroups>,
     pub(super) grid: FroxelGrid,
     pub(super) viewport: (u32, u32),
     pub(super) resource_version: u64,
@@ -542,8 +569,10 @@ impl ViewerMediaPass {
             self.viewer_terrain_key = Some(viewer_key);
         }
         let albedo = self.viewer_terrain_albedo;
-        let terrain_identity = viewer_key
-            ^ stable_words_hash(albedo.into_iter().map(|value| u64::from(value.to_bits())));
+        let terrain_identity = stable_words_hash([
+            viewer_key,
+            stable_words_hash(albedo.into_iter().map(|value| u64::from(value.to_bits()))),
+        ]);
         let placement = viewer_terrain_trace_placement(
             dimensions,
             render_origin_xz,
@@ -605,26 +634,13 @@ impl ViewerMediaPass {
             crate::media::Phase::Isotropic => (0.0, 0.0),
             crate::media::Phase::HenyeyGreenstein { g } => (g, 1.0),
         };
-        let history_key = MediaHistoryKey {
-            camera: stable_words_hash(
-                view_projection
-                    .to_cols_array()
-                    .into_iter()
-                    .map(|value| u64::from(value.to_bits())),
-            ),
-            scene_depth: terrain_revision,
-            medium: medium_identity,
-            lighting: media_lighting_identity(sun_direction, sun_radiance, 1.0, true)
-                ^ self.resources.blue_noise_identity
-                ^ self
-                    .resources
-                    .terrain_trace
-                    .as_ref()
-                    .map_or(0, |trace| trace.terrain_identity),
-            viewport,
-            resource_version: self.version,
-            adapter: stable_adapter_hash(&adapter.get_info()),
-        };
+        let history_key = self.resources.build_history_key(
+            view_projection,
+            terrain_revision,
+            medium_identity,
+            media_lighting_identity(sun_direction, sun_radiance, 1.0, true),
+            &adapter.get_info(),
+        );
         let mut depth_params = depth.wgsl_params();
         depth_params[3] = 0.2;
         let uniforms = MediaUniforms {
@@ -754,6 +770,37 @@ impl RealtimeMediaPipelines {
 }
 
 impl TerrainMediaResources {
+    fn build_history_key(
+        &self,
+        view_projection: glam::Mat4,
+        scene_depth: u64,
+        medium: crate::media::MediumIdentity,
+        lighting: u64,
+        adapter: &wgpu::AdapterInfo,
+    ) -> MediaHistoryKey {
+        MediaHistoryKey {
+            camera: stable_words_hash(
+                view_projection
+                    .to_cols_array()
+                    .into_iter()
+                    .map(|v| u64::from(v.to_bits())),
+            ),
+            scene_depth,
+            medium,
+            lighting: stable_words_hash([
+                lighting,
+                self.radiance_provider_identity,
+                self.blue_noise_identity,
+                self.terrain_trace
+                    .as_ref()
+                    .map_or(0, |t| t.terrain_identity),
+            ]),
+            viewport: self.viewport,
+            resource_version: self.resource_version,
+            adapter: stable_adapter_hash(adapter),
+        }
+    }
+
     pub(super) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -967,7 +1014,7 @@ impl TerrainMediaResources {
             terrain_albedo: [0.0; 3],
             diffuse_ibl: [0.0; 3],
             depth_transform: FroxelDepthTransform::new(0.1, 1.0)
-                .expect("constant depth transform is valid"),
+                .map_err(crate::core::error::RenderError::render)?,
             previous_view_projection: glam::Mat4::IDENTITY,
             sun_transmittance_diagnostic: SunTransmittanceDiagnostic::default(),
             radiance_provider: Arc::new(radiance_provider),
@@ -995,6 +1042,10 @@ impl TerrainMediaResources {
             density_froxel_count: 0,
             termination_readback: None,
             pending_history: None,
+            inject_bind_groups: None,
+            integrate_bind_groups: None,
+            integrate_bind_groups_next: None,
+            composite_bind_groups: None,
         })
     }
 
@@ -1173,6 +1224,9 @@ impl TerrainMediaResources {
             self.viewport,
             1,
             2,
+            1.0,
+            false,
+            crate::path_tracing::hybrid_compute::AlbedoSampling::Bilinear,
         );
         let curvature_uniform =
             crate::path_tracing::hybrid_compute::terrain_heightfield::EarthCurvatureUniforms {
@@ -1376,26 +1430,76 @@ impl TerrainMediaResources {
             );
         }
 
-        let single_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.inject.single.group0"),
-            layout: &self.pipelines.inject_single.get_bind_group_layout(0),
-            entries: &[
-                buffer_entry(0, &self.uniforms),
-                texture_entry(1, &extinction),
-                texture_entry(2, &blue_noise),
-                texture_entry(3, &terrain_shadow_maps),
-                buffer_entry(4, &csm.uniform_buffer),
-                texture_entry(5, &light_transmittance),
-                texture_entry(6, &radiance_provider),
-                buffer_entry(7, &trace.sun_hits),
-                buffer_entry(8, &trace.phase_hits),
-            ],
-        });
-        let single_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.inject.single.group1"),
-            layout: &self.pipelines.inject_single.get_bind_group_layout(1),
-            entries: &[texture_entry(0, &single_scatter)],
-        });
+        let binding_key = (
+            csm.shadow_maps.global_id(),
+            csm.uniform_buffer.global_id(),
+            trace.sun_hits.global_id(),
+            trace.phase_hits.global_id(),
+        );
+        if self
+            .inject_bind_groups
+            .as_ref()
+            .is_none_or(|cached| cached.key != binding_key)
+        {
+            let single_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.inject.single.group0"),
+                layout: &self.pipelines.inject_single.get_bind_group_layout(0),
+                entries: &[
+                    buffer_entry(0, &self.uniforms),
+                    texture_entry(1, &extinction),
+                    texture_entry(2, &blue_noise),
+                    texture_entry(3, &terrain_shadow_maps),
+                    buffer_entry(4, &csm.uniform_buffer),
+                    texture_entry(5, &light_transmittance),
+                    texture_entry(6, &radiance_provider),
+                    buffer_entry(7, &trace.sun_hits),
+                    buffer_entry(8, &trace.phase_hits),
+                ],
+            });
+            let single_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.inject.single.group1"),
+                layout: &self.pipelines.inject_single.get_bind_group_layout(1),
+                entries: &[texture_entry(0, &single_scatter)],
+            });
+            let multiple_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.inject.multiple.group0"),
+                layout: &self.pipelines.inject_multiple.get_bind_group_layout(0),
+                entries: &[
+                    buffer_entry(0, &self.uniforms),
+                    texture_entry(1, &extinction),
+                    texture_entry(2, &blue_noise),
+                    buffer_entry(8, &trace.phase_hits),
+                ],
+            });
+            let multiple_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.inject.multiple.group1"),
+                layout: &self.pipelines.inject_multiple.get_bind_group_layout(1),
+                entries: &[texture_entry(1, &in_scatter)],
+            });
+            let multiple_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.inject.multiple.group2"),
+                layout: &self.pipelines.inject_multiple.get_bind_group_layout(2),
+                entries: &[
+                    texture_entry(0, &extinction),
+                    texture_entry(9, &single_scatter),
+                ],
+            });
+            self.inject_bind_groups = Some(InjectBindGroups {
+                key: binding_key,
+                groups: [
+                    single_group0,
+                    single_group1,
+                    multiple_group0,
+                    multiple_group1,
+                    multiple_group2,
+                ],
+            });
+        }
+        let cached = self.inject_bind_groups.as_ref().ok_or_else(|| {
+            crate::core::error::RenderError::render("media bind group cache was not initialized")
+        })?;
+        let [single_group0, single_group1, multiple_group0, multiple_group1, multiple_group2] =
+            &cached.groups;
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("nephele.media.inject.single"),
@@ -1403,8 +1507,8 @@ impl TerrainMediaResources {
             });
             crate::core::shader_registry::record_shader_use("nephele.media.inject.single.pipeline");
             pass.set_pipeline(&self.pipelines.inject_single);
-            pass.set_bind_group(0, &single_group0, &[]);
-            pass.set_bind_group(1, &single_group1, &[]);
+            pass.set_bind_group(0, single_group0, &[]);
+            pass.set_bind_group(1, single_group1, &[]);
             pass.dispatch_workgroups(
                 self.grid.width.div_ceil(4),
                 self.grid.height.div_ceil(4),
@@ -1413,29 +1517,6 @@ impl TerrainMediaResources {
         }
         self.single_scatter_dispatches = self.single_scatter_dispatches.wrapping_add(1);
 
-        let multiple_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.inject.multiple.group0"),
-            layout: &self.pipelines.inject_multiple.get_bind_group_layout(0),
-            entries: &[
-                buffer_entry(0, &self.uniforms),
-                texture_entry(1, &extinction),
-                texture_entry(2, &blue_noise),
-                buffer_entry(8, &trace.phase_hits),
-            ],
-        });
-        let multiple_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.inject.multiple.group1"),
-            layout: &self.pipelines.inject_multiple.get_bind_group_layout(1),
-            entries: &[texture_entry(1, &in_scatter)],
-        });
-        let multiple_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.inject.multiple.group2"),
-            layout: &self.pipelines.inject_multiple.get_bind_group_layout(2),
-            entries: &[
-                texture_entry(0, &extinction),
-                texture_entry(9, &single_scatter),
-            ],
-        });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("nephele.media.inject.multiple"),
@@ -1445,9 +1526,9 @@ impl TerrainMediaResources {
                 "nephele.media.inject.multiple.pipeline",
             );
             pass.set_pipeline(&self.pipelines.inject_multiple);
-            pass.set_bind_group(0, &multiple_group0, &[]);
-            pass.set_bind_group(1, &multiple_group1, &[]);
-            pass.set_bind_group(2, &multiple_group2, &[]);
+            pass.set_bind_group(0, multiple_group0, &[]);
+            pass.set_bind_group(1, multiple_group1, &[]);
+            pass.set_bind_group(2, multiple_group2, &[]);
             pass.dispatch_workgroups(
                 self.grid.width.div_ceil(4),
                 self.grid.height.div_ceil(4),
@@ -1509,36 +1590,55 @@ impl TerrainMediaResources {
         let history_depth = self
             .history_depth
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let integrate_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.integrate.group0"),
-            layout: &self.pipelines.integrate.get_bind_group_layout(0),
-            entries: &[
-                buffer_entry(0, &self.uniforms),
-                texture_entry(2, &blue_noise),
-                texture_entry(5, &light_transmittance),
-            ],
-        });
-        let integrate_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.integrate.group1.empty"),
-            layout: &self.pipelines.integrate.get_bind_group_layout(1),
-            entries: &[],
-        });
-        let integrate_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.integrate.group2"),
-            layout: &self.pipelines.integrate.get_bind_group_layout(2),
-            entries: &[
-                texture_entry(0, &extinction),
-                texture_entry(1, &in_scatter),
-                texture_entry(2, scene_depth_view),
-                texture_entry(3, &history),
-                texture_entry(4, &history_depth),
-                texture_entry(5, &transmittance),
-                texture_entry(6, &integrated),
-                texture_entry(7, &cloud_shadow),
-                texture_entry(8, &optical_depth),
-                texture_entry(9, &single_scatter),
-            ],
-        });
+        let binding_key = (
+            scene_depth_view.global_id(),
+            self.history.global_id(),
+            self.history_depth.global_id(),
+        );
+        if self
+            .integrate_bind_groups
+            .as_ref()
+            .is_none_or(|cached| cached.key != binding_key)
+        {
+            let integrate_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.integrate.group0"),
+                layout: &self.pipelines.integrate.get_bind_group_layout(0),
+                entries: &[
+                    buffer_entry(0, &self.uniforms),
+                    texture_entry(2, &blue_noise),
+                    texture_entry(5, &light_transmittance),
+                ],
+            });
+            let integrate_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.integrate.group1.empty"),
+                layout: &self.pipelines.integrate.get_bind_group_layout(1),
+                entries: &[],
+            });
+            let integrate_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.integrate.group2"),
+                layout: &self.pipelines.integrate.get_bind_group_layout(2),
+                entries: &[
+                    texture_entry(0, &extinction),
+                    texture_entry(1, &in_scatter),
+                    texture_entry(2, scene_depth_view),
+                    texture_entry(3, &history),
+                    texture_entry(4, &history_depth),
+                    texture_entry(5, &transmittance),
+                    texture_entry(6, &integrated),
+                    texture_entry(7, &cloud_shadow),
+                    texture_entry(8, &optical_depth),
+                    texture_entry(9, &single_scatter),
+                ],
+            });
+            self.integrate_bind_groups = Some(IntegrateBindGroups {
+                key: binding_key,
+                groups: [integrate_group0, integrate_group1, integrate_group2],
+            });
+        }
+        let cached = self.integrate_bind_groups.as_ref().ok_or_else(|| {
+            crate::core::error::RenderError::render("media bind group cache was not initialized")
+        })?;
+        let [integrate_group0, integrate_group1, integrate_group2] = &cached.groups;
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("nephele.media.integrate"),
@@ -1546,9 +1646,9 @@ impl TerrainMediaResources {
             });
             crate::core::shader_registry::record_shader_use("nephele.media.integrate.pipeline");
             pass.set_pipeline(&self.pipelines.integrate);
-            pass.set_bind_group(0, &integrate_group0, &[]);
-            pass.set_bind_group(1, &integrate_group1, &[]);
-            pass.set_bind_group(2, &integrate_group2, &[]);
+            pass.set_bind_group(0, integrate_group0, &[]);
+            pass.set_bind_group(1, integrate_group1, &[]);
+            pass.set_bind_group(2, integrate_group2, &[]);
             pass.dispatch_workgroups(self.viewport.0.div_ceil(8), self.viewport.1.div_ceil(8), 1);
         }
 
@@ -1576,31 +1676,52 @@ impl TerrainMediaResources {
         let composite = self
             .composite_linear_hdr
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let composite_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.composite.group0"),
-            layout: &self.pipelines.composite_linear_hdr.get_bind_group_layout(0),
-            entries: &[buffer_entry(0, &self.uniforms)],
-        });
-        let composite_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.composite.group1.empty"),
-            layout: &self.pipelines.composite_linear_hdr.get_bind_group_layout(1),
-            entries: &[],
-        });
-        let composite_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.composite.group2.empty"),
-            layout: &self.pipelines.composite_linear_hdr.get_bind_group_layout(2),
-            entries: &[],
-        });
-        let composite_group3 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("nephele.media.composite.group3"),
-            layout: &self.pipelines.composite_linear_hdr.get_bind_group_layout(3),
-            entries: &[
-                texture_entry(0, terrain_linear_hdr_view),
-                texture_entry(1, &integrated),
-                texture_entry(2, &transmittance),
-                texture_entry(3, &composite),
-            ],
-        });
+        let binding_key = terrain_linear_hdr_view.global_id();
+        if self
+            .composite_bind_groups
+            .as_ref()
+            .is_none_or(|cached| cached.key != binding_key)
+        {
+            let composite_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.composite.group0"),
+                layout: &self.pipelines.composite_linear_hdr.get_bind_group_layout(0),
+                entries: &[buffer_entry(0, &self.uniforms)],
+            });
+            let composite_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.composite.group1.empty"),
+                layout: &self.pipelines.composite_linear_hdr.get_bind_group_layout(1),
+                entries: &[],
+            });
+            let composite_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.composite.group2.empty"),
+                layout: &self.pipelines.composite_linear_hdr.get_bind_group_layout(2),
+                entries: &[],
+            });
+            let composite_group3 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.composite.group3"),
+                layout: &self.pipelines.composite_linear_hdr.get_bind_group_layout(3),
+                entries: &[
+                    texture_entry(0, terrain_linear_hdr_view),
+                    texture_entry(1, &integrated),
+                    texture_entry(2, &transmittance),
+                    texture_entry(3, &composite),
+                ],
+            });
+            self.composite_bind_groups = Some(CompositeBindGroups {
+                key: binding_key,
+                groups: [
+                    composite_group0,
+                    composite_group1,
+                    composite_group2,
+                    composite_group3,
+                ],
+            });
+        }
+        let cached = self.composite_bind_groups.as_ref().ok_or_else(|| {
+            crate::core::error::RenderError::render("media bind group cache was not initialized")
+        })?;
+        let [composite_group0, composite_group1, composite_group2, composite_group3] =
+            &cached.groups;
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("nephele.media.composite.linear_hdr"),
@@ -1610,10 +1731,10 @@ impl TerrainMediaResources {
                 "nephele.media.composite.linear_hdr.pipeline",
             );
             pass.set_pipeline(&self.pipelines.composite_linear_hdr);
-            pass.set_bind_group(0, &composite_group0, &[]);
-            pass.set_bind_group(1, &composite_group1, &[]);
-            pass.set_bind_group(2, &composite_group2, &[]);
-            pass.set_bind_group(3, &composite_group3, &[]);
+            pass.set_bind_group(0, composite_group0, &[]);
+            pass.set_bind_group(1, composite_group1, &[]);
+            pass.set_bind_group(2, composite_group2, &[]);
+            pass.set_bind_group(3, composite_group3, &[]);
             pass.dispatch_workgroups(self.viewport.0.div_ceil(8), self.viewport.1.div_ceil(8), 1);
         }
 
@@ -1644,6 +1765,10 @@ impl TerrainMediaResources {
         );
         std::mem::swap(&mut self.history, &mut self.history_next);
         std::mem::swap(&mut self.history_depth, &mut self.history_depth_next);
+        std::mem::swap(
+            &mut self.integrate_bind_groups,
+            &mut self.integrate_bind_groups_next,
+        );
         self.history_key = Some(history_key);
         self.last_history_decision = decision;
         self.previous_view_projection = view_projection;
@@ -2083,9 +2208,12 @@ impl crate::terrain::renderer::TerrainScene {
             return Ok(());
         };
         let sky = &decoded.sky;
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        sky.enabled.hash(&mut hasher);
-        sky.model.hash(&mut hasher);
+        let mut identity_words = vec![
+            u64::from(rendered.is_some()),
+            u64::from(environment.is_some()),
+        ];
+        identity_words.push(u64::from(sky.enabled));
+        identity_words.push(u64::from(sky.model));
         for value in [
             sky.turbidity,
             sky.ground_albedo,
@@ -2096,11 +2224,14 @@ impl crate::terrain::renderer::TerrainScene {
             sky.aerial_density,
             sky.sky_exposure,
         ] {
-            value.to_bits().hash(&mut hasher);
+            identity_words.push(u64::from(value.to_bits()));
         }
-        sky.aerial_perspective.hash(&mut hasher);
+        identity_words.push(u64::from(sky.aerial_perspective));
+        identity_words.push(u64::from(sky.lut_handle.is_some()));
         if let Some(lut) = sky.lut_handle.as_ref() {
-            lut.deterministic_sha256().hash(&mut hasher);
+            identity_words.push(stable_words_hash(
+                lut.deterministic_sha256().into_iter().map(u64::from),
+            ));
         }
         if let Some(rendered) = rendered {
             encoder.copy_texture_to_texture(
@@ -2116,10 +2247,10 @@ impl crate::terrain::renderer::TerrainScene {
                 environment,
                 environment_intensity,
             )?;
-            environment.width.hash(&mut hasher);
-            environment.height.hash(&mut hasher);
+            identity_words.push(u64::from(environment.width));
+            identity_words.push(u64::from(environment.height));
             for value in &environment.data {
-                value.to_bits().hash(&mut hasher);
+                identity_words.push(u64::from(value.to_bits()));
             }
         } else {
             fill_radiance_provider(
@@ -2130,10 +2261,10 @@ impl crate::terrain::renderer::TerrainScene {
             )?;
         }
         for value in fallback_radiance {
-            value.to_bits().hash(&mut hasher);
+            identity_words.push(u64::from(value.to_bits()));
         }
-        environment_intensity.to_bits().hash(&mut hasher);
-        resources.radiance_provider_identity = hasher.finish();
+        identity_words.push(u64::from(environment_intensity.to_bits()));
+        resources.radiance_provider_identity = stable_words_hash(identity_words);
         resources.diffuse_ibl = diffuse_ibl_irradiance(fallback_radiance);
         Ok(())
     }
@@ -2310,7 +2441,9 @@ impl crate::terrain::renderer::TerrainScene {
                 version,
             )?);
         }
-        let r = slot.as_mut().expect("created above");
+        let r = slot.as_mut().ok_or_else(|| {
+            crate::core::error::RenderError::render("media resource initialization is incomplete")
+        })?;
         let identity = r.upload_canonical_extinction(
             self.queue.as_ref(),
             medium,
@@ -2386,38 +2519,23 @@ impl crate::terrain::renderer::TerrainScene {
                     "media terrain-occlusion control mutex poisoned",
                 )
             })?;
-        let history_key = MediaHistoryKey {
-            camera: stable_words_hash(
-                view_projection
-                    .to_cols_array()
-                    .into_iter()
-                    .map(|value| u64::from(value.to_bits())),
-            ),
-            scene_depth: stable_words_hash(
-                [
-                    u64::from(params.terrain_data_revision.is_some()),
-                    params.terrain_data_revision.unwrap_or(0),
-                    u64::from(params.z_scale.to_bits()),
-                    u64::from(params.terrain_span.to_bits()),
-                ]
-                .into_iter(),
-            ),
-            medium: medium_identity,
-            lighting: media_lighting_identity(
+        let history_key = resources.build_history_key(
+            view_projection,
+            stable_words_hash([
+                u64::from(params.terrain_data_revision.is_some()),
+                params.terrain_data_revision.unwrap_or(0),
+                u64::from(params.z_scale.to_bits()),
+                u64::from(params.terrain_span.to_bits()),
+            ]),
+            medium_identity,
+            media_lighting_identity(
                 sun_direction,
                 decoded.light.color,
                 decoded.light.intensity,
                 terrain_occlusion_enabled,
-            ) ^ resources.radiance_provider_identity
-                ^ resources.blue_noise_identity
-                ^ resources
-                    .terrain_trace
-                    .as_ref()
-                    .map_or(0, |trace| trace.terrain_identity),
-            viewport: resources.viewport,
-            resource_version: resources.resource_version,
-            adapter: stable_adapter_hash(&adapter_info),
-        };
+            ),
+            &adapter_info,
+        );
         let depth = FroxelDepthTransform::new(params.clip.0, params.clip.1)
             .map_err(crate::core::error::RenderError::render)?;
         let uniforms = MediaUniforms {
@@ -2615,12 +2733,18 @@ impl crate::terrain::renderer::TerrainScene {
     }
 }
 
+/// FNV-1a over explicitly ordered little-endian u64 words. No toolchain or
+/// process-dependent hashing, and no commutative XOR of independent identities.
 fn stable_words_hash(words: impl IntoIterator<Item = u64>) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for word in words {
-        word.hash(&mut hasher);
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in words.into_iter().flat_map(u64::to_le_bytes) {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
     }
-    hasher.finish()
+    hash
+}
+
+fn stable_text_hash(text: &str) -> u64 {
+    stable_words_hash(std::iter::once(text.len() as u64).chain(text.bytes().map(u64::from)))
 }
 
 fn media_lighting_identity(
@@ -2641,14 +2765,14 @@ fn media_lighting_identity(
 }
 
 fn stable_adapter_hash(info: &wgpu::AdapterInfo) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    info.name.hash(&mut hasher);
-    info.vendor.hash(&mut hasher);
-    info.device.hash(&mut hasher);
-    format!("{:?}", info.backend).hash(&mut hasher);
-    info.driver.hash(&mut hasher);
-    info.driver_info.hash(&mut hasher);
-    hasher.finish()
+    stable_words_hash([
+        stable_text_hash(&info.name),
+        u64::from(info.vendor),
+        u64::from(info.device),
+        stable_text_hash(&format!("{:?}", info.backend)),
+        stable_text_hash(&info.driver),
+        stable_text_hash(&info.driver_info),
+    ])
 }
 
 /// Convert the public terrain light's legacy Z-up azimuth/elevation axes into
@@ -2857,6 +2981,14 @@ fn parse_blue_noise_asset() -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordered_history_hash_is_stable_and_position_sensitive() {
+        assert_eq!(stable_words_hash([1, 2]), 0x7717980363c8e066);
+        assert_ne!(stable_words_hash([1, 2]), stable_words_hash([2, 1]));
+        assert_ne!(stable_words_hash([7, 7]), stable_words_hash([0, 0]));
+        assert_ne!(stable_text_hash("ab"), stable_text_hash("a"));
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -3700,6 +3832,8 @@ mod tests {
     #[test]
     fn viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear() {
         let source = concat!(
+            include_str!("../../shaders/includes/determinism.wgsl"),
+            "\n",
             include_str!("../../shaders/includes/shadow_moments.wgsl"),
             "\n",
             include_str!("../../viewer/terrain/shader_pbr/terrain_pbr.wgsl")
@@ -3735,7 +3869,7 @@ mod tests {
     #[test]
     fn terrain_media_surface_lookup_uses_froxel_xy_and_log_depth_coordinates() {
         let source = include_str!("../../shaders/terrain_pbr_pom.wgsl");
-        assert!(source.contains("screen_position / vec2<f32>(8.0)"));
+        assert!(source.contains("det_div2(screen_position, vec2<f32>(8.0))"));
         assert!(source.contains("vec2<f32>(fog_uniforms.media_depth.w)"));
         assert!(source.contains("let unit_depth = clamp("));
         assert!(!source.contains("let xy = screen_position +"));

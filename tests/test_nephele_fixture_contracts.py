@@ -112,12 +112,12 @@ def test_convergence_uses_actual_gate3_and_approved_gate4_metrics() -> None:
     assert metrics == {
         "gate3_sky_cloud_delta_e_below_2_5_fraction": 1.0,
         "gate3_godray_roi_ssim": 1.0,
-        "gate4_cloud_shadow_terrain_maximum_delta_e": 0.0,
+        "gate4_cloud_shadow_terrain_delta_e_below_2_fraction": 1.0,
     }
     changed = old.copy()
     changed[0, 0] = 255
     metrics = downstream_metrics(old, changed, masks)
-    assert metrics["gate4_cloud_shadow_terrain_maximum_delta_e"] > 2.0
+    assert metrics["gate4_cloud_shadow_terrain_delta_e_below_2_fraction"] == 143 / 144
 
 
 def test_spatial_partition_is_exact_and_worker_independent() -> None:
@@ -326,7 +326,7 @@ def test_fixture_manifest_hashes_every_input_and_masks_regenerate(tmp_path: Path
         assert all(convergence["mask_identity"].values())
         assert convergence["metrics"]["gate3_sky_cloud_delta_e_below_2_5_fraction"] >= 0.95
         assert convergence["metrics"]["gate3_godray_roi_ssim"] > 0.95
-        assert convergence["metrics"]["gate4_cloud_shadow_terrain_maximum_delta_e"] < 2.0
+        assert convergence["metrics"]["gate4_cloud_shadow_terrain_delta_e_below_2_fraction"] >= 0.95
     else:
         assert convergence["nested_prefix"] is False
         expected_next = (
@@ -366,9 +366,9 @@ def test_fixture_manifest_hashes_every_input_and_masks_regenerate(tmp_path: Path
 def test_gate4_and_exhaustive_lane_inventory_are_literal() -> None:
     policy = _object(ROOT / "tests/nephele/gate4-policy.json")
     assert policy["status"] == "APPROVED"
-    assert policy["aggregation"] == {"kind": "maximum"}
+    assert policy["aggregation"] == {"kind": "per_pixel_pass_fraction", "minimum_fraction": 0.95}
     inventory = _object(ROOT / "tests/nephele/evidence-inventory.json")
-    assert inventory["gate4_aggregation"] == "maximum"
+    assert inventory["gate4_aggregation"] == "per_pixel_pass_fraction"
     assert inventory["required_junit_cases"] == [
         "gate1_estimator_majorant_rr", "gate2_energy", "gate3_realtime_reference",
         "gate4_terrain_coupling", "gate5_compute_shadow_ridgeline", "gate6_determinism_memory",

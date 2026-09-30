@@ -442,6 +442,20 @@ impl Value {
         })
     }
 
+    /// Weak update through an unknown-index (or array-element) write: the
+    /// concrete cell targeted by the store is not known, so the update must
+    /// union the updated element with the previous abstract element instead
+    /// of overwriting it — never forgetting values the write may have left
+    /// untouched.
+    fn weak_write_path(&mut self, path: &[usize], value: Value) -> bool {
+        let mut updated = self.clone();
+        if !updated.write_path(path, value) {
+            return false;
+        }
+        *self = self.join(&updated);
+        true
+    }
+
     pub(super) fn write_path(&mut self, path: &[usize], value: Value) -> bool {
         let Some((&first, rest)) = path.split_first() else {
             *self = value;
@@ -449,14 +463,10 @@ impl Value {
         };
         if first == usize::MAX {
             return match self {
-                Value::Array { element, .. } => {
-                    let joined = element.join(&value);
-                    element.write_path(rest, joined)
-                }
+                Value::Array { element, .. } => element.weak_write_path(rest, value),
                 Value::Composite(values) => {
                     for slot in values {
-                        let joined = slot.join(&value);
-                        if !slot.write_path(rest, joined) {
+                        if !slot.weak_write_path(rest, value.clone()) {
                             return false;
                         }
                     }
@@ -469,8 +479,7 @@ impl Value {
             Value::Array { element, length }
                 if length.is_none_or(|length| first < length as usize) =>
             {
-                let joined = element.join(&value);
-                element.write_path(rest, joined)
+                element.weak_write_path(rest, value)
             }
             Value::Composite(values) => values
                 .get_mut(first)

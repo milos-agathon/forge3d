@@ -117,31 +117,31 @@ fn compose_wboit_fallback(uv: vec2<f32>, bg_color: vec4<f32>) -> vec4<f32> {
 
 // Apply tone mapping and color correction
 fn apply_tone_mapping(color: vec4<f32>) -> vec4<f32> {
-    var result = color.rgb;
+    var result = color;
 
     // Apply exposure
-    result *= pow(2.0, compose_uniforms.exposure);
+    result.rgb *= pow(2.0, compose_uniforms.exposure);
 
     // Apply tone mapping based on mode
     switch (compose_uniforms.tone_mapping_mode) {
         case 1u: {
             // Reinhard tone mapping
-            result = reinhard_tonemap(result);
+            result.rgb = reinhard_tonemap(result.rgb);
         }
         case 2u: {
             // ACES approximation
-            result = aces_approx_tonemap(result);
+            result.rgb = aces_approx_tonemap(result.rgb);
         }
         default: {
             // No tone mapping, just clamp
-            result = clamp(result, vec3<f32>(0.0), vec3<f32>(1.0));
+            result.rgb = clamp(result.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
         }
     }
 
     // Apply gamma correction
-    result = pow(result, vec3<f32>(1.0 / compose_uniforms.gamma));
+    result.rgb = pow(result.rgb, vec3<f32>(1.0 / compose_uniforms.gamma));
 
-    return vec4<f32>(result, color.a);
+    return result;
 }
 
 // Reinhard tone mapping

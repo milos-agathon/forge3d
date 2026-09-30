@@ -55,6 +55,29 @@ impl Evaluator<'_> {
             }
             Expression::Load { pointer } => {
                 let pointer = self.eval_expr(function_ref, frame, *pointer)?;
+                // det_zu invariant: the determinism include's private global
+                // is 0 at runtime for every finite seed (det_seed stores
+                // u32(fract(s)), which is 0 for all finite s), and the seed
+                // lint guarantees no other writer exists. Model loads as the
+                // exact 0 so the opaque OR barrier evaluates to identity;
+                // without this the bitcast round-trip is an unconstrained
+                // integer interval and every det_* lemma fails possible_nan.
+                if let Value::Pointer(place) = &pointer {
+                    if let Root::Global(index) = place.root {
+                        if let Some((_, global)) = self
+                            .module
+                            .global_variables
+                            .iter()
+                            .find(|(handle, _)| handle.index() == index)
+                        {
+                            if global.name.as_deref() == Some("det_zu")
+                                && global.space == naga::AddressSpace::Private
+                            {
+                                return Ok(Value::Int { lo: 0, hi: 0 });
+                            }
+                        }
+                    }
+                }
                 if let Value::Pointer(place) = &pointer {
                     if let Some(relation) = frame.place_relations.get(place).cloned() {
                         frame.relations.insert(handle, relation);
@@ -484,6 +507,35 @@ impl Evaluator<'_> {
                     } = function.expressions[*expr]
                     {
                         self.eval_expr(function_ref, frame, original)?
+                    } else if let Expression::Binary {
+                        op: naga::BinaryOperator::InclusiveOr,
+                        left,
+                        right,
+                    } = function.expressions[*expr]
+                    {
+                        // Opaque determinism barrier: bitcast<f32>(
+                        // bitcast<u32>(x) | det_zu). det_zu is modeled as
+                        // the exact 0 (see the Load arm), so the OR is
+                        // bit-identity and the bitcast pair collapses to x.
+                        // Recognizing the shape here keeps the det_barrier*
+                        // lemmas provable for negative inputs, where the
+                        // integer-interval domain would otherwise lose the
+                        // float range.
+                        let (data, mask) = if self.references_det_zu(function, right) {
+                            (left, right)
+                        } else {
+                            (right, left)
+                        };
+                        match function.expressions[data] {
+                            Expression::As {
+                                expr: original,
+                                convert: None,
+                                ..
+                            } if self.references_det_zu(function, mask) => {
+                                self.eval_expr(function_ref, frame, original)?
+                            }
+                            _ => bitcast_value(self.eval_expr(function_ref, frame, *expr)?, *kind),
+                        }
                     } else {
                         bitcast_value(self.eval_expr(function_ref, frame, *expr)?, *kind)
                     }
@@ -879,7 +931,7 @@ impl Evaluator<'_> {
             })
     }
 
-    fn correlated_divide(
+    pub(super) fn correlated_divide(
         &self,
         function_ref: FunctionRef,
         frame: &Frame,
@@ -977,6 +1029,39 @@ impl Evaluator<'_> {
         relation_value
             .clone()
             .unary_float(|value| value.max(Interval::constant(0.0)))
+    }
+
+    /// Does this expression subtree load the determinism include's private
+    /// `det_zu` global? Used to recognize the opaque OR barrier
+    /// (`bitcast(x) | det_zu`, scalar or vector-splat form).
+    pub(super) fn references_det_zu(
+        &self,
+        function: &naga::Function,
+        handle: Handle<Expression>,
+    ) -> bool {
+        match &function.expressions[handle] {
+            Expression::Load { pointer } => match &function.expressions[*pointer] {
+                Expression::GlobalVariable(global) => {
+                    self.module.global_variables[*global].name.as_deref() == Some("det_zu")
+                }
+                Expression::Access { base, .. } | Expression::AccessIndex { base, .. } => {
+                    self.references_det_zu(function, *base)
+                }
+                _ => false,
+            },
+            Expression::GlobalVariable(global) => {
+                self.module.global_variables[*global].name.as_deref() == Some("det_zu")
+            }
+            Expression::Splat { value, .. } => self.references_det_zu(function, *value),
+            Expression::Compose { components, .. } => components
+                .iter()
+                .any(|component| self.references_det_zu(function, *component)),
+            Expression::Access { base, .. } | Expression::AccessIndex { base, .. } => {
+                self.references_det_zu(function, *base)
+            }
+            Expression::Unary { expr, .. } => self.references_det_zu(function, *expr),
+            _ => false,
+        }
     }
 }
 

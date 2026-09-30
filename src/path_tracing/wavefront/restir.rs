@@ -1,6 +1,28 @@
 use super::*;
 
 impl WavefrontScheduler {
+    pub(super) fn dispatch_restir_for_primary(
+        &mut self,
+        encoder: &mut CommandEncoder,
+        uniforms_buffer: &Buffer,
+        scene_bind_group: &BindGroup,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.dispatch_restir_init(encoder, uniforms_buffer, scene_bind_group)?;
+        let bytes = self.restir_prev.size();
+        if self.restir_temporal_enabled && self.frame_index > 0 {
+            self.dispatch_restir_temporal(encoder, uniforms_buffer, scene_bind_group)?;
+            encoder.copy_buffer_to_buffer(&self.restir_out, 0, &self.restir_prev, 0, bytes);
+        } else {
+            encoder.copy_buffer_to_buffer(&self.restir_reservoirs, 0, &self.restir_prev, 0, bytes);
+        }
+        if self.restir_spatial_enabled {
+            self.dispatch_restir_spatial(encoder, uniforms_buffer, scene_bind_group)?;
+            encoder.copy_buffer_to_buffer(&self.restir_out, 0, &self.restir_prev, 0, bytes);
+            self.restir_spatial_dispatches += 1;
+        }
+        Ok(())
+    }
+
     fn create_restir_spatial_bind_group(&self) -> Result<BindGroup, Box<dyn std::error::Error>> {
         Ok(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("restir-spatial-bind-group"),
@@ -66,8 +88,9 @@ impl WavefrontScheduler {
         if let Some(ref scene_spatial_bg) = self.restir_scene_spatial_bind_group {
             pass.set_bind_group(1, scene_spatial_bg, &[]);
         } else {
-            return Ok(());
+            return Err("ReSTIR spatial dispatch requires a scene binding".into());
         }
+        crate::core::shader_registry::record_shader_use("pt-restir-spatial-shader");
         pass.set_bind_group(2, &spatial_bind_group, &[]);
         let num_pixels = self.width * self.height;
         let workgroups = (num_pixels + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;

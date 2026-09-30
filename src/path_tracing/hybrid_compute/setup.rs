@@ -2,8 +2,14 @@ use super::*;
 
 impl HybridPathTracer {
     pub fn new() -> Result<Self, RenderError> {
+        Self::new_with_source(crate::shader_sources::hybrid_kernel())
+    }
+
+    /// Build all pipelines from a caller-supplied assembled kernel. Used by
+    /// render_terrain_reference when a validated SdfScene is specialized into
+    /// the shared shader's constant declarations before module creation.
+    pub(super) fn new_with_source(shader_src: String) -> Result<Self, RenderError> {
         let device = &try_ctx()?.device;
-        let shader_src = crate::shader_sources::hybrid_kernel();
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "hybrid-pt-kernel",
@@ -133,7 +139,18 @@ impl HybridPathTracer {
             },
         );
 
+        let pipeline_terrain_publish = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("hybrid-pt-terrain-publish-compute"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "main_terrain_publish",
+            },
+        );
+
         Ok(Self {
+            pipeline_terrain_publish,
             layouts,
             pipeline,
             pipeline_terrain,

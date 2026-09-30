@@ -73,6 +73,10 @@ struct ReferenceEnvironment {
 @group(2) @binding(5) var<storage, read_write> miss_queue: array<Ray>;
 @group(3) @binding(0) var<storage, read_write> accum_hdr: array<vec4<f32>>;
 
+fn environment_escape_weight(depth: u32, pdf: f32) -> f32 {
+    return select(0.0, 1.0, depth == 0u || pdf == 0.0);
+}
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Persistent threads loop: keep pulling scatter rays until queue is empty
@@ -123,10 +127,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         
         // Compute background color from ReferenceSceneDesc.
         let sky_t = 0.5 * (miss_ray.d.y + 1.0);
-        let sky_color = mix(reference_environment.miss_ground.rgb, reference_environment.miss_sky.rgb, sky_t);
+        let backdrop = mix(reference_environment.miss_ground.rgb, reference_environment.miss_sky.rgb, sky_t);
+        let environment = mix(reference_environment.env_ground.rgb, reference_environment.env_sky.rgb, sky_t);
+        let sky_color = select(environment, backdrop, miss_ray.depth == 0u);
         
         // Apply throughput and accumulate to pixel
-        let contrib = miss_ray.throughput * sky_color;
+        let contrib = miss_ray.throughput * sky_color * environment_escape_weight(miss_ray.depth, miss_ray.pdf);
         let pixel_idx = miss_ray.pixel;
         accum_hdr[pixel_idx] = accum_hdr[pixel_idx] + vec4<f32>(contrib, 0.0);
     }

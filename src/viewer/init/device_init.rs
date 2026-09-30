@@ -49,7 +49,7 @@ pub async fn create_device_and_surface(
         .map_or(wgpu::Backends::all(), |(_, mask, _)| *mask);
     let instance = Instance::new(wgpu::InstanceDescriptor {
         backends: backend_mask,
-        flags: crate::core::gpu::instance_flags(),
+        flags: crate::core::gpu::instance_flags(backend_mask),
         ..Default::default()
     });
 

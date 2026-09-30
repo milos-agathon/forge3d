@@ -153,7 +153,7 @@ from .style import (
 )
 from . import smoke
 from . import verify
-from .path_tracing import ExperimentalSyntheticOutput
+from .path_tracing import ExperimentalSyntheticOutput, render_terrain_poster
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -605,6 +605,9 @@ class TerrainRenderParams:
     albedo_mode: str
     colormap_strength: float
     hue_variation_strength: float
+    material_slope_bias: float
+    material_layer_centers: Optional[Tuple[float, ...]]
+    nodata_height_below: Optional[float]
     overlays: Sequence[OverlayLayer]
     terrain_data_revision: Optional[int]
     material_map_paths: Dict[str, str]
@@ -764,6 +767,118 @@ class CameraAnimation:
     def get_frame_count(self, fps: int) -> int: ...
     def evaluate(self, time: float) -> Optional[CameraState]: ...
 
+class GlobeMetrics:
+    @property
+    def max_vertex_jitter_px(self) -> float: ...
+    @property
+    def naive_max_vertex_jitter_px(self) -> float: ...
+    @property
+    def jitter_sample_count(self) -> int: ...
+    @property
+    def peak_gpu_visible_bytes(self) -> int: ...
+    @property
+    def lod_crack_pixels(self) -> int: ...
+    @property
+    def crack_boundary_samples(self) -> int: ...
+    @property
+    def crack_depth_variance(self) -> float: ...
+    @property
+    def rendered_frames(self) -> int: ...
+    @property
+    def bounded_poll_frames(self) -> int: ...
+    @property
+    def streaming_progress_frames(self) -> int: ...
+    @property
+    def pending_streaming_frames(self) -> int: ...
+    @property
+    def coarse_fallback_frames(self) -> int: ...
+    @property
+    def max_stream_uploads_per_frame(self) -> int: ...
+    @property
+    def adapter_name(self) -> str: ...
+    @property
+    def adapter_backend(self) -> str: ...
+    @property
+    def adapter_vendor(self) -> int: ...
+    @property
+    def adapter_device_type(self) -> str: ...
+    @property
+    def software_fallback(self) -> bool: ...
+    def __getitem__(self, key: str) -> float | int | str | bool: ...
+    def as_dict(self) -> Dict[str, float | int | str | bool]: ...
+
+class GlobeScene:
+    """Native COG-backed globe scene with cached regional overview seeds.
+
+    Waypoint longitude/latitude must remain inside finite source coverage.
+    Altitude is measured in metres above the rendered terrain at the waypoint.
+    """
+    def __init__(
+        self,
+        cog_source: PathLikeStr,
+        target_lon: float,
+        target_lat: float,
+        target_name: str,
+        material_set: Optional["MaterialSet"] = ...,
+        env_maps: Optional["IBL"] = ...,
+        params: Optional[TerrainRenderParams] = ...,
+        earth_texture: Optional[np.ndarray] = ...,
+    ) -> None:
+        """``earth_texture`` optionally colours the Earth outside the terrain
+        source: a uint8 array shaped (height, width, 3|4), equirectangular with
+        width == 2 * height (row 0 = 90 N, column 0 = 180 W), width <= 8192.
+        """
+        ...
+    @staticmethod
+    def default_descent_altitudes() -> list[float]: ...
+    def fly_to(
+        self,
+        lon: float,
+        lat: float,
+        altitude: float,
+        heading: float = ...,
+        pitch: float = ...,
+    ) -> Frame:
+        """Render one covered waypoint at 0..9,000,000 metres above local ground
+        (camera-to-target distance ``altitude / cos(pitch)`` at most 9,800 km).
+
+        ``heading`` is the horizontal look direction clockwise from north in
+        degrees; ``pitch`` is degrees away from nadir in ``[0, 90)``.
+        """
+        ...
+    def scripted_descent(
+        self,
+        waypoints: Optional[
+            Sequence[
+                Tuple[float, float, float]
+                | Tuple[float, float, float, float, float]
+            ]
+        ] = ...,
+    ) -> GlobeMetrics:
+        """Render a prevalidated descent and return completed physical metrics.
+
+        Each waypoint is ``(lon, lat, altitude)`` or oriented
+        ``(lon, lat, altitude, heading, pitch)`` where ``heading`` is the
+        horizontal look direction clockwise from north in degrees and
+        ``pitch`` is degrees away from nadir in ``[0, 90)``.
+        """
+        ...
+    def snapshot(self) -> Frame: ...
+    def metrics(self) -> GlobeMetrics: ...
+    @property
+    def source(self) -> str: ...
+    @property
+    def target_name(self) -> str: ...
+    @property
+    def current_position(self) -> Optional[Tuple[float, float, float]]: ...
+    @property
+    def rendered_waypoint_count(self) -> int: ...
+    def streaming_stats(self) -> Dict[str, Any]: ...
+    @property
+    def source_bounds(self) -> Tuple[float, float, float, float]: ...
+    @property
+    def source_dimensions(self) -> Tuple[int, int]: ...
+
 class TerrainRenderer:
     def __init__(self, session: "Session") -> None: ...
     @property
@@ -844,6 +959,9 @@ class TerrainRenderer:
     def resolve_captured_vt_feedback_provenance(
         self, feedback: Sequence[Tuple[int, int, int, int, int]]
     ) -> List[Dict[str, Any]]: ...
+    def set_material_vt_residency_schedule_for_test(
+        self, schedule: Sequence[Tuple[str, int, int, int, int]]
+    ) -> None: ...
     # BOP-P2-02: runtime height-tile streaming for clipmap terrain.
     def enable_height_streaming(
         self,
@@ -870,11 +988,31 @@ class TerrainRenderer:
         pool_size: int = ...,
         coarse_prefill: bool = ...,
         max_resident_bytes: Optional[int] = ...,
+        overview_lonlat_bounds: Optional[Tuple[float, float, float, float]] = ...,
+    ) -> None: ...
+    def enable_height_streaming_cog_globe(
+        self,
+        dataset: CogDataset,
+        terrain_extent_m: float,
+        ring_count: int = ...,
+        ring_resolution: int = ...,
+        lod: int = ...,
+        tile_resolution: int = ...,
+        max_in_flight: int = ...,
+        pool_size: int = ...,
+        coarse_prefill: bool = ...,
+        max_resident_bytes: Optional[int] = ...,
+        overview_lonlat_bounds: Optional[Tuple[float, float, float, float]] = ...,
     ) -> None: ...
     def disable_height_streaming(self) -> None: ...
     def stream_height_tiles(
         self,
         camera_pos: Tuple[float, float, float],
+        max_uploads: int = ...,
+    ) -> Dict[str, Any]: ...
+    def stream_height_tiles_globe(
+        self,
+        camera_ecef: Tuple[float, float, float],
         max_uploads: int = ...,
     ) -> Dict[str, Any]: ...
     def height_streaming_stats(self) -> Dict[str, Any]: ...
@@ -1196,8 +1334,30 @@ class DeviceProbeResult(TypedDict, total=False):
     backend: str
     software_fallback: bool
 
+class DeterminismProbeResult(TypedDict, total=False):
+    # status is always present: "ok" | "probe_error" | "native_missing".
+    status: str
+    reason: str
+    remediation: str
+    # Present when status == "ok".
+    probe_sha256: str
+    probe_bytes_hex: str
+    raster_sha256: str
+    raster_bytes_hex: str
+    wgsl_sha256: str
+    raster_wgsl_sha256: str
+    adapter_name: str
+    adapter_vendor: int
+    adapter_device: int
+    adapter_device_type: str
+    adapter_backend: str
+    adapter_driver: str
+    adapter_driver_info: str
+    software_fallback: bool
+
 def enumerate_adapters() -> list[dict[str, Any]]: ...
 def device_probe(backend: Optional[str] = ...) -> DeviceProbeResult: ...
+def determinism_probe() -> DeterminismProbeResult: ...
 def native_import_error() -> BaseException | None: ...
 
 def memory_metrics() -> Dict[str, Any]: ...
@@ -1414,8 +1574,11 @@ def seal_provenance(
     source_map: np.ndarray,
     contributing_tiles: Sequence[Dict[str, Any]],
     private_key: bytes,
+    image_bytes: Optional[bytes] = None,
 ) -> bytes: ...
-def verify_provenance(source_map: np.ndarray, manifest: bytes) -> bool: ...
+def verify_provenance(
+    source_map: np.ndarray, manifest: bytes, image_bytes: Optional[bytes] = None
+) -> bool: ...
 
 # CENSOR: global degradation sink
 def native_degradations() -> list[dict]: ...
@@ -1479,6 +1642,17 @@ def declutter(
     margin: float = ...,
 ) -> Tuple[List[Tuple[int, int]], float, LabelRationale]: ...
 
+def layout_label_candidates(
+    kind: Literal["line", "curved"],
+    label_id: str,
+    text: str,
+    screen_path: Sequence[Tuple[float, float, float]],
+    positioned_glyphs: Sequence[Dict[str, Any]],
+    font_size: float,
+    arc_fractions: Sequence[float] | None = ...,
+    tracking: float = ...,
+) -> Dict[str, Any] | None: ...
+
 # AEQUITAS: PT-vs-raster perceptual adjudication pair
 def render_adjudication_pair(
     width: int,
@@ -1487,6 +1661,65 @@ def render_adjudication_pair(
     certificate: bool | str | PathLikeStr | None = ...,
     cache: str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
+
+# DIFFERENTIA: differentiable inverse path tracing (enable-inverse-pt)
+from .inverse import (
+    InverseSolveUnavailable,
+    RecoveredScene,
+    recover_scene,
+)
+from . import inverse as inverse
+
+def inverse_solve(
+    target_rgba: np.ndarray,
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    cam: Dict[str, Any],
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    init_albedo: Optional[Any] = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    turbidity: float = ...,
+    sun_color: Tuple[float, float, float] = ...,
+    env_map: Optional[np.ndarray] = ...,
+    env_intensity: float = ...,
+    iters: int = ...,
+    spp: int = ...,
+    frames: int = ...,
+    tile_size: int = ...,
+    seed: int = ...,
+    lr_albedo: float = ...,
+    lr_sun: float = ...,
+    lr_turbidity: float = ...,
+    early_stop_tol: float = ...,
+    early_stop_patience: int = ...,
+    spatial_reuse: bool = ...,
+    edge_term: bool = ...,
+    score_correction: bool = ...,
+) -> Dict[str, Any]: ...
+
+def inverse_render_primal(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    cam: Dict[str, Any],
+    albedo: Any,
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    turbidity: float = ...,
+    sun_color: Tuple[float, float, float] = ...,
+    env_map: Optional[np.ndarray] = ...,
+    env_intensity: float = ...,
+    spp: int = ...,
+    frames: int = ...,
+    seed: int = ...,
+) -> Dict[str, Any]: ...
 
 # PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
 # ``earth_model="flat"`` requires ``refraction_model="none"``; unsupported
@@ -1500,6 +1733,14 @@ def hybrid_render_terrain_reference(
     spacing: Tuple[float, float] = ...,
     exaggeration: float = ...,
     albedo: Tuple[float, float, float] = ...,
+    albedo_map: np.ndarray | None = ...,
+    albedo_sampling: str | None = ...,
+    camera_model: str | None = ...,
+    sensor_rect: Tuple[float, float, float, float] | None = ...,
+    full_width: int | None = ...,
+    full_height: int | None = ...,
+    pixel_offset: Optional[Tuple[int, int]] = ...,
+    turbidity: float = ...,
     sun_azimuth_deg: float | None = ...,
     sun_elevation_deg: float | None = ...,
     solar_time: object | None = ...,
@@ -1525,6 +1766,7 @@ def hybrid_render_terrain_reference(
     pressure_mbar: float | None = ...,
     temperature_c: float | None = ...,
     atmosphere: AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None = ...,
+    sdf_scene: object | None = ...,
 ) -> Dict[str, Any]: ...
 
 # AETHER: independent stochastic spectral atmosphere acceptance reference.

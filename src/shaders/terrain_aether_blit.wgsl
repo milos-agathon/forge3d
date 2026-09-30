@@ -8,12 +8,13 @@ struct AetherBlitVertexOutput {
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_id: u32) -> AetherBlitVertexOutput {
+    det_seed(f32(vertex_id));
     let uv = vec2<f32>(
         f32((vertex_id << 1u) & 2u),
         f32(vertex_id & 2u),
     );
     var out: AetherBlitVertexOutput;
-    out.clip_position = vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
+    out.clip_position = vec4<f32>(det_barrier2(uv * 2.0) - 1.0, 0.0, 1.0);
     // The oversize triangle's `uv` interpolates over [0,1] inside the
     // viewport. Halving it samples only one source quadrant and stretches the
     // below-horizon LUT over the frame (magenta on Metal).
@@ -29,6 +30,7 @@ var aether_hdr_sampler: sampler;
 
 @fragment
 fn fs_main(input: AetherBlitVertexOutput) -> @location(0) vec4<f32> {
+    det_seed(input.clip_position.x);
     // Full-screen NDC is bottom-up while texture coordinates are top-down.
     // Preserve positive atmospheric elevation above the displayed horizon.
     let source_uv = vec2<f32>(input.uv.x, 1.0 - input.uv.y);

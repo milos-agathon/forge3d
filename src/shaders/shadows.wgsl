@@ -60,133 +60,161 @@ struct CsmUniforms {
 @group(2) @binding(3) var moment_maps: texture_2d_array<f32>;
 @group(2) @binding(4) var moment_sampler: sampler;
 
+fn sample_moments(uv: vec2<f32>, layer: u32) -> vec4<f32> {
+    let dimensions = vec2<i32>(textureDimensions(moment_maps));
+    let position = det_barrier2(uv * vec2<f32>(dimensions)) - vec2<f32>(0.5);
+    let base = vec2<i32>(floor(position));
+    let fraction = fract(position);
+    let maximum = dimensions - vec2<i32>(1);
+    let a = textureLoad(moment_maps, clamp(base, vec2<i32>(0), maximum), layer, 0);
+    let b = textureLoad(moment_maps, clamp(base + vec2<i32>(1, 0), vec2<i32>(0), maximum), layer, 0);
+    let c = textureLoad(moment_maps, clamp(base + vec2<i32>(0, 1), vec2<i32>(0), maximum), layer, 0);
+    let d = textureLoad(moment_maps, clamp(base + vec2<i32>(1), vec2<i32>(0), maximum), layer, 0);
+    return det_mix4(det_mix4(a, b, fraction.x), det_mix4(c, d, fraction.x), fraction.y);
+}
+
 // Convert world position to light space for cascade
 fn world_to_light_space(world_pos: vec3<f32>, cascade_idx: u32) -> vec4<f32> {
-    let light_space_pos = csm_uniforms.cascades[cascade_idx].light_view_proj * vec4<f32>(world_pos, 1.0);
+    let light_space_pos = det_mat4_mul_vec4(csm_uniforms.cascades[cascade_idx].light_view_proj, vec4<f32>(world_pos, 1.0));
     return light_space_pos;
 }
 
 // Select appropriate shadow cascade based on view depth
 fn select_cascade(view_depth: f32) -> u32 {
     var cascade_idx = csm_uniforms.cascade_count - 1u;
-    
+
     for (var i = 0u; i < csm_uniforms.cascade_count; i++) {
         if (view_depth <= csm_uniforms.cascades[i].far_distance) {
             cascade_idx = i;
             break;
         }
     }
-    
+
     return cascade_idx;
 }
 
 // Basic shadow sampling (single sample) - Hard shadows
 fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32) -> f32 {
     // Perspective divide and convert to texture coordinates
-    let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
-    
+    let proj_coords = det_div3(light_space_pos.xyz, vec3<f32>(light_space_pos.w));
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        det_barrier2(proj_coords.xy * vec2<f32>(0.5, -0.5)) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
+
     // Check if position is within shadow map bounds
-    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || 
+    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
         shadow_coords.z < 0.0 || shadow_coords.z > 1.0) {
         return 1.0; // Outside shadow map bounds - not in shadow
     }
-    
+
     // Apply depth bias with clamping to prevent excessive peter-panning
     // Use per-cascade texel size for better bias scaling
     let cascade_texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
     let max_bias = cascade_texel_size * 2.0; // Clamp bias to 2 texels
     let bias = min(csm_uniforms.depth_bias, max_bias);
-    let biased_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
-    
+    let biased_depth = clamp(det_barrier(shadow_coords.z) - bias, 0.0, 1.0);
+
     // Sample shadow map with comparison
-    return textureSampleCompare(shadow_maps, shadow_sampler, 
+    return textureSampleCompare(shadow_maps, shadow_sampler,
                                shadow_coords.xy, cascade_idx, biased_depth);
 }
 
 // PCF (Percentage-Closer Filtering) implementation
 fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world_normal: vec3<f32>) -> f32 {
     // Perspective divide and convert to texture coordinates
-    let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
-    
+    let proj_coords = det_div3(light_space_pos.xyz, vec3<f32>(light_space_pos.w));
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        det_barrier2(proj_coords.xy * vec2<f32>(0.5, -0.5)) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
+
     // Check if position is within shadow map bounds
-    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || 
+    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
         shadow_coords.z < 0.0 || shadow_coords.z > 1.0) {
         return 1.0; // Outside shadow map bounds
     }
-    
+
     // Calculate slope-scaled bias with proper clamping
-    let light_dir = normalize(csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(world_normal, -light_dir), 0.001); // Avoid division by zero
-    
+    let light_dir = det_normalize3(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(world_normal, -light_dir), 0.001); // Avoid division by zero
+
     // Clamp slope scale to prevent excessive bias at grazing angles
-    let slope_scale = min(sqrt(max(1.0 - n_dot_l * n_dot_l, 0.0)) / n_dot_l, 10.0);
-    
+    let slope_scale = min(det_div(det_sqrt(max(1.0 - det_barrier(n_dot_l * n_dot_l), 0.0)), n_dot_l), 10.0);
+
     // Use per-cascade texel size for better bias scaling
     let cascade_texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
     let max_bias = cascade_texel_size * 3.0; // Clamp total bias to 3 texels
-    let bias = min(csm_uniforms.depth_bias + csm_uniforms.slope_bias * slope_scale, max_bias);
-    let biased_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
-    
+    let bias = min(csm_uniforms.depth_bias + det_barrier(csm_uniforms.slope_bias * slope_scale), max_bias);
+    let biased_depth = clamp(det_barrier(shadow_coords.z) - bias, 0.0, 1.0);
+
     // PCF kernel size
     let kernel_size = i32(csm_uniforms.pcf_kernel_size);
     let half_kernel = kernel_size / 2;
-    
+
     // Use per-cascade texel size in texture space
-    let texel_size = 1.0 / csm_uniforms.shadow_map_size;
-    
+    let texel_size = det_div(1.0, csm_uniforms.shadow_map_size);
+
     // Accumulate shadow samples
     var shadow_factor = 0.0;
     var sample_count = 0.0;
-    
+
     for (var x = -half_kernel; x <= half_kernel; x++) {
         for (var y = -half_kernel; y <= half_kernel; y++) {
-            let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-            let sample_coords = shadow_coords.xy + offset;
-            
+            let offset = det_barrier2(vec2<f32>(f32(x), f32(y)) * texel_size);
+            let sample_coords = det_barrier2(shadow_coords.xy) + offset;
+
             // Bounds check for each sample
-            if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 && 
+            if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
                 sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
-                
-                shadow_factor += textureSampleCompare(shadow_maps, shadow_sampler, 
-                                                    sample_coords, cascade_idx, biased_depth);
-                sample_count += 1.0;
+
+                shadow_factor = det_barrier(shadow_factor + textureSampleCompare(shadow_maps, shadow_sampler,
+                                                    sample_coords, cascade_idx, biased_depth));
+                sample_count = det_barrier(sample_count + 1.0);
             }
         }
     }
-    
-    return shadow_factor / sample_count;
+
+    return det_div(shadow_factor, sample_count);
 }
 
 // Advanced PCF with Poisson disk sampling for better quality
 fn sample_shadow_poisson_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world_normal: vec3<f32>) -> f32 {
     // Perspective divide and convert to texture coordinates
-    let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
-    
+    let proj_coords = det_div3(light_space_pos.xyz, vec3<f32>(light_space_pos.w));
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        det_barrier2(proj_coords.xy * vec2<f32>(0.5, -0.5)) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
+
     // Check bounds
-    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || 
+    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
         shadow_coords.z < 0.0 || shadow_coords.z > 1.0) {
         return 1.0;
     }
-    
+
     // Calculate bias with proper clamping
-    let light_dir = normalize(csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(world_normal, -light_dir), 0.001); // Avoid division by zero
-    
+    let light_dir = det_normalize3(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(world_normal, -light_dir), 0.001); // Avoid division by zero
+
     // Clamp slope scale to prevent excessive bias at grazing angles
-    let slope_scale = min(sqrt(max(1.0 - n_dot_l * n_dot_l, 0.0)) / n_dot_l, 10.0);
-    
+    let slope_scale = min(det_div(det_sqrt(max(1.0 - det_barrier(n_dot_l * n_dot_l), 0.0)), n_dot_l), 10.0);
+
     // Use per-cascade texel size for better bias scaling
     let cascade_texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
     let max_bias = cascade_texel_size * 3.0; // Clamp total bias to 3 texels
-    let bias = min(csm_uniforms.depth_bias + csm_uniforms.slope_bias * slope_scale, max_bias);
-    let biased_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
-    
+    let bias = min(csm_uniforms.depth_bias + det_barrier(csm_uniforms.slope_bias * slope_scale), max_bias);
+    let biased_depth = clamp(det_barrier(shadow_coords.z) - bias, 0.0, 1.0);
+
     // Poisson disk samples for better distribution
     var poisson_disk = array<vec2<f32>, 16>(
         vec2<f32>(-0.94201624, -0.39906216),
@@ -206,29 +234,29 @@ fn sample_shadow_poisson_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, world
         vec2<f32>(0.19984126, 0.78641367),
         vec2<f32>(0.14383161, -0.14100790)
     );
-    
+
     // Sample using Poisson disk
-    let texel_size = 1.0 / csm_uniforms.shadow_map_size;
-    let filter_radius = f32(csm_uniforms.pcf_kernel_size) * texel_size * 0.5;
-    
+    let texel_size = det_div(1.0, csm_uniforms.shadow_map_size);
+    let filter_radius = det_barrier(det_barrier(f32(csm_uniforms.pcf_kernel_size) * texel_size) * 0.5);
+
     var shadow_factor = 0.0;
     let sample_count = 16.0; // Using 16 Poisson samples
-    
+
     for (var i = 0; i < 16; i++) {
-        let offset = poisson_disk[i] * filter_radius;
-        let sample_coords = shadow_coords.xy + offset;
-        
-        if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 && 
+        let offset = det_barrier2(poisson_disk[i] * filter_radius);
+        let sample_coords = det_barrier2(shadow_coords.xy) + offset;
+
+        if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
             sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
-            
-            shadow_factor += textureSampleCompare(shadow_maps, shadow_sampler, 
-                                                sample_coords, cascade_idx, biased_depth);
+
+            shadow_factor = det_barrier(shadow_factor + textureSampleCompare(shadow_maps, shadow_sampler,
+                                                sample_coords, cascade_idx, biased_depth));
         } else {
-            shadow_factor += 1.0; // Outside bounds - not shadowed
+            shadow_factor = det_barrier(shadow_factor + 1.0); // Outside bounds - not shadowed
         }
     }
-    
-    return shadow_factor / sample_count;
+
+    return det_div(shadow_factor, sample_count);
 }
 
 // PCSS: Search for blockers in the blocker search region
@@ -258,22 +286,22 @@ fn pcss_blocker_search(
         vec2<f32>(-0.26496911, -0.41893023),
         vec2<f32>(0.79197514, 0.19090188)
     );
-    
+
     var blocker_sum = 0.0;
     var blocker_count = 0.0;
-    
-    let texel_size = 1.0 / csm_uniforms.shadow_map_size;
-    let scaled_search_radius = search_radius * texel_size;
-    
+
+    let texel_size = det_div(1.0, csm_uniforms.shadow_map_size);
+    let scaled_search_radius = det_barrier(search_radius * texel_size);
+
     // Search for blockers
     for (var i = 0; i < 12; i++) {
-        let offset = poisson_disk[i] * scaled_search_radius;
+        let offset = det_barrier2(poisson_disk[i] * scaled_search_radius);
         let sample_coords = shadow_coords + offset;
-        
+
         // Check bounds
         if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
             sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
-            
+
             // Blocker search needs the stored depth, not a comparison result.
             let dimensions = textureDimensions(shadow_maps);
             let texel_coords = vec2<i32>(clamp(
@@ -283,18 +311,18 @@ fn pcss_blocker_search(
             ));
             let shadow_depth =
                 textureLoad(shadow_maps, texel_coords, i32(cascade_idx), 0);
-            
+
             // If this sample is closer than receiver (blocking)
             if (shadow_depth < receiver_depth) {
-                blocker_sum += shadow_depth;
-                blocker_count += 1.0;
+                blocker_sum = det_barrier(blocker_sum + shadow_depth);
+                blocker_count = det_barrier(blocker_count + 1.0);
             }
         }
     }
-    
+
     // Return average blocker depth, or -1 if no blockers
     if (blocker_count > 0.0) {
-        return blocker_sum / blocker_count;
+        return det_div(blocker_sum, blocker_count);
     } else {
         return -1.0; // No blockers found
     }
@@ -309,8 +337,8 @@ fn pcss_penumbra_size(
     // Penumbra estimation: (receiver - blocker) * light_size / blocker
     // Clamped to avoid extreme values
     let depth_diff = max(receiver_depth - blocker_depth, 0.0);
-    let penumbra = (depth_diff * light_size) / max(blocker_depth, 0.001);
-    
+    let penumbra = det_div(depth_diff * light_size, max(blocker_depth, 0.001));
+
     // Clamp to reasonable range
     return clamp(penumbra, 0.0, 100.0);
 }
@@ -322,57 +350,62 @@ fn sample_shadow_pcss(
     world_normal: vec3<f32>
 ) -> f32 {
     // Perspective divide and convert to texture coordinates
-    let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
-    
+    let proj_coords = det_div3(light_space_pos.xyz, vec3<f32>(light_space_pos.w));
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        det_barrier2(proj_coords.xy * vec2<f32>(0.5, -0.5)) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
+
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
         shadow_coords.z < 0.0 || shadow_coords.z > 1.0) {
         return 1.0;
     }
-    
+
     // Calculate bias
-    let light_dir = normalize(csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(world_normal, -light_dir), 0.001);
-    let slope_scale = min(sqrt(max(1.0 - n_dot_l * n_dot_l, 0.0)) / n_dot_l, 10.0);
-    
+    let light_dir = det_normalize3(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(world_normal, -light_dir), 0.001);
+    let slope_scale = min(det_div(det_sqrt(max(1.0 - det_barrier(n_dot_l * n_dot_l), 0.0)), n_dot_l), 10.0);
+
     let cascade_texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
     let max_bias = cascade_texel_size * 3.0;
-    let bias = min(csm_uniforms.depth_bias + csm_uniforms.slope_bias * slope_scale, max_bias);
-    let receiver_depth = shadow_coords.z - bias;
-    
+    let bias = min(csm_uniforms.depth_bias + det_barrier(csm_uniforms.slope_bias * slope_scale), max_bias);
+    let receiver_depth = det_barrier(det_barrier(shadow_coords.z) - bias);
+
     // Extract PCSS parameters
     let blocker_search_radius = csm_uniforms.technique_params.x;
     let base_filter_radius = csm_uniforms.technique_params.y;
     let light_size = csm_uniforms.technique_params.w;
-    
+
     // PCSS radii are measured in shadow-map texels; cascade_texel_size is world-space.
     let clamped_blocker_radius = min(blocker_search_radius, 50.0);
-    
+
     // Step 1: Blocker search
     let avg_blocker_depth = pcss_blocker_search(
-        shadow_coords.xy,
+        det_barrier2(shadow_coords.xy),
         receiver_depth,
         cascade_idx,
         clamped_blocker_radius
     );
-    
+
     // If no blockers found, fully lit
     if (avg_blocker_depth < 0.0) {
         return 1.0;
     }
-    
+
     // Step 2: Penumbra estimation
     let penumbra = pcss_penumbra_size(receiver_depth, avg_blocker_depth, light_size);
-    
+
     // Step 3: Adaptive PCF filter with penumbra-based radius
     let max_filter_radius = min(base_filter_radius, 100.0);
     let clamped_filter_radius = min(
         max(penumbra, min(max_filter_radius, 1.0)),
         max_filter_radius
     );
-    
+
     // Use Poisson disk for final filtering
     var poisson_disk = array<vec2<f32>, 16>(
         vec2<f32>(-0.94201624, -0.39906216),
@@ -392,33 +425,33 @@ fn sample_shadow_pcss(
         vec2<f32>(0.19984126, 0.78641367),
         vec2<f32>(0.14383161, -0.14100790)
     );
-    
-    let texel_size = 1.0 / csm_uniforms.shadow_map_size;
-    let scaled_filter_radius = clamped_filter_radius * texel_size;
-    
+
+    let texel_size = det_div(1.0, csm_uniforms.shadow_map_size);
+    let scaled_filter_radius = det_barrier(clamped_filter_radius * texel_size);
+
     var shadow_factor = 0.0;
     let sample_count = 16.0;
-    
+
     for (var i = 0; i < 16; i++) {
-        let offset = poisson_disk[i] * scaled_filter_radius;
-        let sample_coords = shadow_coords.xy + offset;
-        
+        let offset = det_barrier2(poisson_disk[i] * scaled_filter_radius);
+        let sample_coords = det_barrier2(shadow_coords.xy) + offset;
+
         if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
             sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
-            
-            shadow_factor += textureSampleCompare(
+
+            shadow_factor = det_barrier(shadow_factor + textureSampleCompare(
                 shadow_maps,
                 shadow_sampler,
                 sample_coords,
                 cascade_idx,
                 clamp(receiver_depth, 0.0, 1.0)
-            );
+            ));
         } else {
-            shadow_factor += 1.0;
+            shadow_factor = det_barrier(shadow_factor + 1.0);
         }
     }
-    
-    return shadow_factor / sample_count;
+
+    return det_div(shadow_factor, sample_count);
 }
 
 // Light leak reduction: reduce shadow factor near light sources
@@ -435,48 +468,53 @@ fn sample_shadow_vsm(
     world_normal: vec3<f32>
 ) -> f32 {
     // Perspective divide and convert to texture coordinates
-    let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
-    
+    let proj_coords = det_div3(light_space_pos.xyz, vec3<f32>(light_space_pos.w));
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        det_barrier2(proj_coords.xy * vec2<f32>(0.5, -0.5)) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
+
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
         shadow_coords.z < 0.0 || shadow_coords.z > 1.0) {
         return 1.0;
     }
-    
+
     // Calculate bias
-    let light_dir = normalize(csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(world_normal, -light_dir), 0.001);
-    let slope_scale = min(sqrt(max(1.0 - n_dot_l * n_dot_l, 0.0)) / n_dot_l, 10.0);
-    
+    let light_dir = det_normalize3(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(world_normal, -light_dir), 0.001);
+    let slope_scale = min(det_div(det_sqrt(max(1.0 - det_barrier(n_dot_l * n_dot_l), 0.0)), n_dot_l), 10.0);
+
     let cascade_texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
     let max_bias = cascade_texel_size * 3.0;
-    let bias = min(csm_uniforms.depth_bias + csm_uniforms.slope_bias * slope_scale, max_bias);
-    let receiver_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
-    
+    let bias = min(csm_uniforms.depth_bias + det_barrier(csm_uniforms.slope_bias * slope_scale), max_bias);
+    let receiver_depth = clamp(det_barrier(shadow_coords.z) - bias, 0.0, 1.0);
+
     // Sample moment map (RG channels contain E[x] and E[x^2])
-    let moments = textureSample(moment_maps, moment_sampler, shadow_coords.xy, cascade_idx);
-    let mean = moments.r;      // E[x]
-    let mean_sq = moments.g;   // E[x^2]
-    
+    let moments = sample_moments(shadow_coords.xy, cascade_idx);
+    let mean = det_barrier(moments.r);      // E[x]
+    let mean_sq = det_barrier(moments.g);   // E[x^2]
+
     // If receiver is closer than mean, it is definitely lit.
     if (receiver_depth <= mean) {
         return 1.0;
     }
-    
+
     // Calculate variance: Var(x) = E[x^2] - E[x]^2
-    let variance = max(mean_sq - mean * mean, 0.0001); // Clamp to avoid division by zero
-    
+    let variance = max(mean_sq - det_barrier(mean * mean), 0.0001); // Clamp to avoid division by zero
+
     // Apply Chebyshev inequality
     var shadow_factor = chebyshev_upper_bound_visibility(mean, variance, receiver_depth);
-    
+
     // Apply light leak reduction
     let moment_bias = csm_uniforms.technique_params.z;
     if (moment_bias > 0.0) {
         shadow_factor = reduce_light_leak(shadow_factor, moment_bias);
     }
-    
+
     return shadow_factor;
 }
 
@@ -487,41 +525,46 @@ fn sample_shadow_evsm(
     world_normal: vec3<f32>
 ) -> f32 {
     // Perspective divide and convert to texture coordinates
-    let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
-    
+    let proj_coords = det_div3(light_space_pos.xyz, vec3<f32>(light_space_pos.w));
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        det_barrier2(proj_coords.xy * vec2<f32>(0.5, -0.5)) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
+
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
         shadow_coords.z < 0.0 || shadow_coords.z > 1.0) {
         return 1.0;
     }
-    
+
     // Calculate bias
-    let light_dir = normalize(csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(world_normal, -light_dir), 0.001);
-    let slope_scale = min(sqrt(max(1.0 - n_dot_l * n_dot_l, 0.0)) / n_dot_l, 10.0);
-    
+    let light_dir = det_normalize3(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(world_normal, -light_dir), 0.001);
+    let slope_scale = min(det_div(det_sqrt(max(1.0 - det_barrier(n_dot_l * n_dot_l), 0.0)), n_dot_l), 10.0);
+
     let cascade_texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
     let max_bias = cascade_texel_size * 3.0;
-    let bias = min(csm_uniforms.depth_bias + csm_uniforms.slope_bias * slope_scale, max_bias);
-    let receiver_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
-    
+    let bias = min(csm_uniforms.depth_bias + det_barrier(csm_uniforms.slope_bias * slope_scale), max_bias);
+    let receiver_depth = clamp(det_barrier(shadow_coords.z) - bias, 0.0, 1.0);
+
     // Sample moment map (RGBA channels)
-    let moments = textureSample(moment_maps, moment_sampler, shadow_coords.xy, cascade_idx);
-    
+    let moments = det_barrier4(sample_moments(shadow_coords.xy, cascade_idx));
+
     // EVSM uses exponential warp to reduce light leaking
     let c_pos = csm_uniforms.evsm_positive_exp;
     let c_neg = csm_uniforms.evsm_negative_exp;
-    
+
     // Warp receiver depth
-    let warp_depth_pos = exp(c_pos * (receiver_depth - 1.0));
-    let warp_depth_neg = -exp(-c_neg * receiver_depth);
+    let warp_depth_pos = det_exp(c_pos * (receiver_depth - 1.0));
+    let warp_depth_neg = -det_exp(-c_neg * receiver_depth);
     let variance_floor = evsm_minimum_variance(
         vec2<f32>(warp_depth_pos, warp_depth_neg),
         vec2<f32>(c_pos, c_neg)
     );
-    
+
     // Apply each lobe's front-of-mean shortcut independently, then combine.
     var shadow_factor =
         evsm_visibility_from_moments(
@@ -533,19 +576,19 @@ fn sample_shadow_evsm(
     shadow_factor = min(
         shadow_factor,
         evsm_moment_leak_control(
-            moments.rg,
+            det_barrier2(moments.rg),
             warp_depth_pos,
             c_pos,
             variance_floor.x
         )
     );
-    
+
     // Apply light leak reduction
     let moment_bias = csm_uniforms.technique_params.z;
     if (moment_bias > 0.0) {
         shadow_factor = reduce_light_leak(shadow_factor, moment_bias);
     }
-    
+
     return shadow_factor;
 }
 
@@ -556,29 +599,34 @@ fn sample_shadow_msm(
     world_normal: vec3<f32>
 ) -> f32 {
     // Perspective divide and convert to texture coordinates
-    let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
-    
+    let proj_coords = det_div3(light_space_pos.xyz, vec3<f32>(light_space_pos.w));
+    // orthographic_rh NDC -> shadow UV: y flips (NDC up vs texture-down);
+    // z is already in [0,1] and must NOT be remapped (terrain convention).
+    let shadow_coords = vec3<f32>(
+        det_barrier2(proj_coords.xy * vec2<f32>(0.5, -0.5)) + vec2<f32>(0.5),
+        proj_coords.z,
+    );
+
     // Check bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
         shadow_coords.z < 0.0 || shadow_coords.z > 1.0) {
         return 1.0;
     }
-    
+
     // Calculate bias
-    let light_dir = normalize(csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(world_normal, -light_dir), 0.001);
-    let slope_scale = min(sqrt(max(1.0 - n_dot_l * n_dot_l, 0.0)) / n_dot_l, 10.0);
-    
+    let light_dir = det_normalize3(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(world_normal, -light_dir), 0.001);
+    let slope_scale = min(det_div(det_sqrt(max(1.0 - det_barrier(n_dot_l * n_dot_l), 0.0)), n_dot_l), 10.0);
+
     let cascade_texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
     let max_bias = cascade_texel_size * 3.0;
-    let bias = min(csm_uniforms.depth_bias + csm_uniforms.slope_bias * slope_scale, max_bias);
-    let receiver_depth = clamp(shadow_coords.z - bias, 0.0, 1.0);
-    
+    let bias = min(csm_uniforms.depth_bias + det_barrier(csm_uniforms.slope_bias * slope_scale), max_bias);
+    let receiver_depth = clamp(det_barrier(shadow_coords.z) - bias, 0.0, 1.0);
+
     // Sample moment map (4 moments in RGBA)
-    let moments = textureSample(moment_maps, moment_sampler, shadow_coords.xy, cascade_idx);
-    
+    let moments = sample_moments(shadow_coords.xy, cascade_idx);
+
     let moment_bias = csm_uniforms.technique_params.z;
     return msm_visibility_from_moments(moments, receiver_depth, moment_bias);
 }
@@ -589,16 +637,16 @@ fn calculate_shadow(world_pos: vec3<f32>, view_depth: f32, world_normal: vec3<f3
     if (csm_uniforms.cascade_count == 0u) {
         return 1.0;
     }
-    
+
     // Select appropriate cascade
     let cascade_idx = select_cascade(view_depth);
-    
+
     // Transform to light space
     let light_space_pos = world_to_light_space(world_pos, cascade_idx);
-    
+
     // Choose filtering method based on technique and kernel size
     var shadow_factor: f32;
-    
+
     // Dispatch based on shadow technique
     if (csm_uniforms.technique == 3u) {
         // VSM (Variance Shadow Maps)
@@ -622,17 +670,17 @@ fn calculate_shadow(world_pos: vec3<f32>, view_depth: f32, world_normal: vec3<f3
         // High-quality Poisson PCF
         shadow_factor = sample_shadow_poisson_pcf(light_space_pos, cascade_idx, world_normal);
     }
-    
+
     // Optional cascade blending at boundaries to reduce visible transitions
     if (csm_uniforms.cascade_blend_range > 0.0 && cascade_idx < csm_uniforms.cascade_count - 1u) {
         let current_far = csm_uniforms.cascades[cascade_idx].far_distance;
-        let blend_start = current_far * (1.0 - csm_uniforms.cascade_blend_range);
-        
+        let blend_start = det_barrier(current_far * (1.0 - csm_uniforms.cascade_blend_range));
+
         // Check if we're in the blend region
         if (view_depth > blend_start) {
             // Sample next cascade
             let next_light_space_pos = world_to_light_space(world_pos, cascade_idx + 1u);
-            
+
             var next_shadow_factor: f32;
             if (csm_uniforms.technique == 3u) {
                 next_shadow_factor = sample_shadow_vsm(next_light_space_pos, cascade_idx + 1u, world_normal);
@@ -649,13 +697,13 @@ fn calculate_shadow(world_pos: vec3<f32>, view_depth: f32, world_normal: vec3<f3
             } else {
                 next_shadow_factor = sample_shadow_poisson_pcf(next_light_space_pos, cascade_idx + 1u, world_normal);
             }
-            
+
             // Blend between cascades based on depth
-            let blend_factor = (view_depth - blend_start) / (current_far - blend_start);
-            shadow_factor = mix(shadow_factor, next_shadow_factor, blend_factor);
+            let blend_factor = det_div(view_depth - blend_start, current_far - blend_start);
+            shadow_factor = det_mix(shadow_factor, next_shadow_factor, blend_factor);
         }
     }
-    
+
     return shadow_factor;
 }
 
@@ -663,7 +711,7 @@ fn calculate_shadow(world_pos: vec3<f32>, view_depth: f32, world_normal: vec3<f3
 fn get_cascade_debug_color(cascade_idx: u32) -> vec3<f32> {
     switch (cascade_idx) {
         case 0u: { return vec3<f32>(1.0, 0.0, 0.0); } // Red
-        case 1u: { return vec3<f32>(0.0, 1.0, 0.0); } // Green  
+        case 1u: { return vec3<f32>(0.0, 1.0, 0.0); } // Green
         case 2u: { return vec3<f32>(0.0, 0.0, 1.0); } // Blue
         case 3u: { return vec3<f32>(1.0, 1.0, 0.0); } // Yellow
         default: { return vec3<f32>(1.0, 0.0, 1.0); } // Magenta
@@ -675,12 +723,12 @@ fn apply_debug_visualization(base_color: vec3<f32>, world_pos: vec3<f32>, view_d
     if (csm_uniforms.debug_mode == 0u) {
         return base_color;
     }
-    
+
     let cascade_idx = select_cascade(view_depth);
     let debug_color = get_cascade_debug_color(cascade_idx);
-    
+
     // Blend base color with cascade debug color
-    return mix(base_color, debug_color, 0.3);
+    return det_mix3(base_color, debug_color, 0.3);
 }
 
 // Vertex shader for shadow map rendering
@@ -694,11 +742,12 @@ struct ShadowVertexOutput {
 
 @vertex
 fn shadow_vs_main(input: ShadowVertexInput, @builtin(instance_index) cascade_idx: u32) -> ShadowVertexOutput {
+    det_seed(f32(cascade_idx));
     var out: ShadowVertexOutput;
-    
+
     // Transform vertex to light space for current cascade
-    out.clip_position = csm_uniforms.cascades[cascade_idx].light_view_proj * vec4<f32>(input.position, 1.0);
-    
+    out.clip_position = det_mat4_mul_vec4(csm_uniforms.cascades[cascade_idx].light_view_proj, vec4<f32>(input.position, 1.0));
+
     return out;
 }
 
@@ -737,20 +786,21 @@ struct CameraUniforms {
 
 @vertex
 fn standard_vs_main(input: StandardVertexInput) -> StandardVertexOutput {
+    det_seed(input.position.x);
     var out: StandardVertexOutput;
-    
+
     // Transform to world space
     out.world_position = input.position; // Assuming input is already in world space
-    out.world_normal = normalize(input.normal);
+    out.world_normal = det_normalize3(input.normal);
     out.uv = input.uv;
-    
+
     // Transform to clip space
-    out.clip_position = camera.view_projection * vec4<f32>(input.position, 1.0);
-    
+    out.clip_position = det_mat4_mul_vec4(camera.view_projection, vec4<f32>(input.position, 1.0));
+
     // Calculate view depth for cascade selection
-    let view_pos = camera.view * vec4<f32>(input.position, 1.0);
+    let view_pos = det_mat4_mul_vec4(camera.view, vec4<f32>(input.position, 1.0));
     out.view_depth = -view_pos.z; // Negative Z in view space
-    
+
     return out;
 }
 
@@ -761,26 +811,27 @@ struct StandardFragmentOutput {
 
 @fragment
 fn standard_fs_main(input: StandardVertexOutput) -> StandardFragmentOutput {
+    det_seed(input.clip_position.x);
     var out: StandardFragmentOutput;
-    
+
     // Base material color (white for demonstration)
     var base_color = vec3<f32>(0.8, 0.8, 0.8);
-    
+
     // Calculate lighting
-    let light_dir = normalize(csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(input.world_normal, -light_dir), 0.0);
-    
+    let light_dir = det_normalize3(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(input.world_normal, -light_dir), 0.0);
+
     // Calculate shadow
     let shadow_factor = calculate_shadow(input.world_position, input.view_depth, input.world_normal);
-    
+
     // Apply lighting and shadows
     let ambient = vec3<f32>(0.1, 0.1, 0.1);
-    let diffuse = base_color * n_dot_l * shadow_factor;
+    let diffuse = det_barrier3(det_barrier3(base_color * n_dot_l) * shadow_factor);
     let final_color = ambient + diffuse;
-    
+
     // Apply debug visualization if enabled
     let debug_color = apply_debug_visualization(final_color, input.world_position, input.view_depth);
-    
+
     out.color = vec4<f32>(debug_color, 1.0);
     return out;
 }

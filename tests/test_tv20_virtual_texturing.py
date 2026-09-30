@@ -53,6 +53,8 @@ def test_terrain_shader_declares_vt_sampling_and_feedback_bindings() -> None:
     assert "TERRAIN_VT_FAMILY_NORMAL,\n            grid_uv," in source
     assert "TERRAIN_VT_FAMILY_MASK,\n            grid_uv," in source
     assert "if (desired_entry.z > 0.5)" in source
+    assert "fn terrain_vt_provenance_capture()" in source
+    assert "FeedbackEncoding::ProvenanceBitset" in VT_RUNTIME.read_text(encoding="utf-8")
     assert "terrain_vt_page_table_layer(family_slot, material_index)," in source
     assert "mip_level," in source
 
@@ -83,7 +85,7 @@ def test_native_terrain_vt_runtime_accepts_material_map_families() -> None:
 
 def test_terrain_vt_feedback_uses_nonblocking_readback() -> None:
     source = VT_RUNTIME.read_text(encoding="utf-8")
-    assert "try_read_feedback_entries(device)?" in source
+    assert "try_read_feedback_entries_with_encoding(" in source
     assert "read_feedback_entries(device, queue)?" not in source
 
     feedback_source = (Path(__file__).resolve().parents[1] / "src" / "core" / "feedback_buffer.rs").read_text(

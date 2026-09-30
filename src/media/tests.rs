@@ -735,3 +735,119 @@ fn non_vacuum_transport_tracks_before_independent_surface_reach() {
     assert_eq!(sample.surface_count, 0);
     assert_eq!(sample.radiance, Rgb::ZERO);
 }
+
+struct LambertReferencePlane;
+impl ReferenceScene for LambertReferencePlane {
+    fn intersect(
+        &self,
+        ray: Ray,
+        maximum_distance: f32,
+    ) -> Result<Option<ReferenceSurfaceHit>, MediaError> {
+        if ray.direction[1] >= 0.0 || ray.origin[1] <= 0.0 {
+            return Ok(None);
+        }
+        let distance = -ray.origin[1] / ray.direction[1];
+        Ok(
+            (distance <= maximum_distance).then_some(ReferenceSurfaceHit {
+                distance,
+                position: [0.0; 3],
+                normal: [0.0, 1.0, 0.0],
+                albedo: Rgb::new([0.6; 3], "Lambert albedo")?,
+            }),
+        )
+    }
+    fn occluded(&self, _ray: Ray, _maximum_distance: f32) -> Result<bool, MediaError> {
+        Ok(false)
+    }
+    fn geometry_reach(&self, _ray: Ray) -> Result<f32, MediaError> {
+        Ok(10.0)
+    }
+    fn medium_interval(
+        &self,
+        _ray: Ray,
+        _distance: f32,
+    ) -> Result<Option<ReferenceMediumInterval>, MediaError> {
+        Ok(None)
+    }
+}
+
+#[test]
+fn surface_env_and_bsdf_power_weights_sum_to_one() -> Result<(), MediaError> {
+    for env_pdf in [0.0, 0.01, 0.2, 1.0] {
+        for cosine in [0.0, 0.1, 0.5, 1.0] {
+            let bsdf_pdf = cosine / std::f32::consts::PI;
+            if env_pdf + bsdf_pdf == 0.0 {
+                continue;
+            }
+            let sum = power_heuristic(env_pdf, bsdf_pdf)?.0 + power_heuristic(bsdf_pdf, env_pdf)?.0;
+            assert!((sum - 1.0).abs() <= f32::EPSILON);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn lambert_surface_environment_nee_matches_furnace_and_is_deterministic() -> Result<(), MediaError>
+{
+    let medium = Medium::new([0.0; 3], [0.0; 3], Phase::Isotropic, homogeneous(1.0))?;
+    let context = TrackingContext::new(medium.clone(), MajorantGrid::construct(&medium, 0)?)?;
+    let environment = EnvironmentDistribution::new(2, 1, vec![Rgb::ONE; 2])?;
+    let sun = DirectionalSun::new([0.0, 1.0, 0.0], [0.0; 3])?;
+    let ray = Ray {
+        origin: [0.0, 1.0, 0.0],
+        direction: [0.0, -1.0, 0.0],
+    };
+    let config = ReferenceTransportConfig {
+        roulette_start_bounce: 3,
+        roulette_minimum_probability: 0.0,
+    };
+    // Match the established device-free vacuum reference canary's sample count.
+    let count = 4096;
+    let mut sums = [0.0f64; 3];
+    let mut squares = [0.0f64; 3];
+    for sample in 0..count {
+        let id = SampleIdentity {
+            frame: 0,
+            pixel: 0,
+            sample,
+            bounce: 0,
+        };
+        let actual = trace_reference_sample(
+            &context,
+            &LambertReferencePlane,
+            &environment,
+            sun,
+            ray,
+            id,
+            config,
+        )?;
+        assert_eq!(
+            actual,
+            trace_reference_sample(
+                &context,
+                &LambertReferencePlane,
+                &environment,
+                sun,
+                ray,
+                id,
+                config
+            )?
+        );
+        for (c, value) in actual.radiance.components().into_iter().enumerate() {
+            sums[c] += f64::from(value);
+            squares[c] += f64::from(value).powi(2);
+        }
+    }
+    for channel in 0..3 {
+        let n = count as f64;
+        let mean = sums[channel] / n;
+        let variance = (squares[channel] - sums[channel] * sums[channel] / n) / (n - 1.0);
+        let standard_error = (variance / n).sqrt();
+        eprintln!(
+            "Lambert furnace channel {channel}: mean={mean}, SE={standard_error}, analytic=0.6"
+        );
+        // Use the spec G1 estimator check, without introducing a visual threshold.
+        assert!((mean - 0.6).abs() <= 3.0 * standard_error);
+    }
+    Ok(())
+}

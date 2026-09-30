@@ -19,15 +19,6 @@ impl WavefrontScheduler {
                 label: Some("wavefront-frame"),
             });
         self.queue_buffers.reset_counters(&self.queue, &mut encoder);
-        if self.restir_enabled {
-            self.dispatch_restir_init(&mut encoder, uniforms_buffer, scene_bind_group)?;
-            self.dispatch_restir_temporal(&mut encoder, uniforms_buffer, scene_bind_group)?;
-            if self.restir_spatial_enabled {
-                self.dispatch_restir_spatial(&mut encoder, uniforms_buffer, scene_bind_group)?;
-                use std::mem::swap;
-                swap(&mut self.restir_prev, &mut self.restir_out);
-            }
-        }
         self.dispatch_raygen(
             &mut encoder,
             uniforms_buffer,
@@ -35,7 +26,7 @@ impl WavefrontScheduler {
             accum_bind_group,
         )?;
         let max_iterations = MAX_DEPTH * 2;
-        for _iteration in 0..max_iterations {
+        for iteration in 0..max_iterations {
             let ray_count =
                 self.queue_buffers
                     .get_active_ray_count(&self.device, &self.queue, &mut encoder)?;
@@ -43,6 +34,9 @@ impl WavefrontScheduler {
                 break;
             }
             self.dispatch_intersect(&mut encoder, uniforms_buffer, scene_bind_group)?;
+            if self.restir_enabled && iteration == 0 {
+                self.dispatch_restir_for_primary(&mut encoder, uniforms_buffer, scene_bind_group)?;
+            }
             self.dispatch_shade(
                 &mut encoder,
                 uniforms_buffer,
@@ -97,15 +91,6 @@ impl WavefrontScheduler {
                 label: Some("wavefront-frame-simple"),
             });
         self.queue_buffers.reset_counters(&self.queue, &mut encoder);
-        if self.restir_enabled {
-            self.dispatch_restir_init(&mut encoder, uniforms_buffer, scene_bind_group)?;
-            self.dispatch_restir_temporal(&mut encoder, uniforms_buffer, scene_bind_group)?;
-            if self.restir_spatial_enabled {
-                self.dispatch_restir_spatial(&mut encoder, uniforms_buffer, scene_bind_group)?;
-                use std::mem::swap;
-                swap(&mut self.restir_prev, &mut self.restir_out);
-            }
-        }
         self.dispatch_raygen(
             &mut encoder,
             uniforms_buffer,
@@ -168,6 +153,9 @@ impl WavefrontScheduler {
                 None
             };
             self.dispatch_intersect(&mut encoder, uniforms_buffer, scene_bind_group)?;
+            if self.restir_enabled && iteration == 0 {
+                self.dispatch_restir_for_primary(&mut encoder, uniforms_buffer, scene_bind_group)?;
+            }
             self.dispatch_shade(
                 &mut encoder,
                 uniforms_buffer,

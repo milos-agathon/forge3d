@@ -7,19 +7,9 @@ impl IBLRenderer {
         // IBL precompute feeds the deterministic terrain reference. Assemble
         // it through the certificate-aware registry so normalized WGSL hashes
         // describe exactly the source wgpu compiles.
-        let determinism = include_str!("../../shaders/includes/determinism.wgsl");
-        let equirect_source = format!(
-            "{determinism}\n{}",
-            include_str!("../../shaders/ibl_equirect.wgsl")
-        );
-        let prefilter_source = format!(
-            "{determinism}\n{}",
-            include_str!("../../shaders/ibl_prefilter.wgsl")
-        );
-        let brdf_source = format!(
-            "{determinism}\n{}",
-            include_str!("../../shaders/ibl_brdf.wgsl")
-        );
+        let equirect_source = crate::shader_sources::ibl_equirect();
+        let prefilter_source = crate::shader_sources::ibl_prefilter();
+        let brdf_source = crate::shader_sources::ibl_brdf();
         let shader_equirect = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "ibl.precompute.shader.equirect",
@@ -268,9 +258,9 @@ impl IBLRenderer {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mag_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            min_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            mipmap_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
             lod_min_clamp: 0.0,
             lod_max_clamp: 16.0,
             ..Default::default()
@@ -282,9 +272,9 @@ impl IBLRenderer {
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mag_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            min_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
+            mipmap_filter: crate::core::gpu::deterministic_filter_mode(wgpu::FilterMode::Linear),
             lod_min_clamp: 0.0,
             lod_max_clamp: 16.0,
             ..Default::default()

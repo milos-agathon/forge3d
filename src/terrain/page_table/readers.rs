@@ -2,6 +2,19 @@ use glam::Vec2;
 
 use crate::terrain::tiling::{TileBounds, TileId};
 
+#[derive(Debug)]
+pub struct HeightRead {
+    pub heights: Vec<f32>,
+    pub coverage: Vec<u8>,
+}
+
+impl HeightRead {
+    pub fn fully_covered(heights: Vec<f32>) -> Self {
+        let coverage = vec![u8::MAX; heights.len()];
+        Self { heights, coverage }
+    }
+}
+
 /// Simple file-backed overlay reader that expands a template like
 /// "/data/tiles/{lod}/{x}/{y}.png" and returns RGBA8 bytes.
 pub struct FileOverlayReader {
@@ -76,14 +89,14 @@ impl FileHeightReader {
 }
 
 impl HeightReader for FileHeightReader {
-    fn read(
+    fn read_result(
         &self,
         _root_bounds: &TileBounds,
         _tile_size: Vec2,
         tile_id: TileId,
         width: u32,
         height: u32,
-    ) -> Vec<f32> {
+    ) -> Result<Vec<f32>, String> {
         let path = self.expand(tile_id);
         let expected = (width * height) as usize;
         match image::open(&path) {
@@ -102,30 +115,42 @@ impl HeightReader for FileHeightReader {
                         let v = (v16 as f32) / 65535.0;
                         out.push(v * self.scale + self.offset);
                     }
-                    out
+                    Ok(out)
                 } else {
                     let mut out = Vec::with_capacity(expected);
                     for &v16 in gray.as_raw() {
                         let v = (v16 as f32) / 65535.0;
                         out.push(v * self.scale + self.offset);
                     }
-                    out
+                    Ok(out)
                 }
             }
-            Err(_) => vec![0.0f32; expected],
+            Err(error) => Err(format!("failed to read height tile {path}: {error}")),
         }
     }
 }
 
 pub trait HeightReader: Send + Sync + 'static {
-    fn read(
+    fn read_result(
         &self,
         root_bounds: &TileBounds,
         tile_size: Vec2,
         tile_id: TileId,
         width: u32,
         height: u32,
-    ) -> Vec<f32>;
+    ) -> Result<Vec<f32>, String>;
+
+    fn read_covered_result(
+        &self,
+        root_bounds: &TileBounds,
+        tile_size: Vec2,
+        tile_id: TileId,
+        width: u32,
+        height: u32,
+    ) -> Result<HeightRead, String> {
+        self.read_result(root_bounds, tile_size, tile_id, width, height)
+            .map(HeightRead::fully_covered)
+    }
 }
 
 pub trait OverlayReader: Send + Sync + 'static {

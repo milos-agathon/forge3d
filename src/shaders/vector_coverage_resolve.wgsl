@@ -33,6 +33,7 @@ struct AtomicWords {
 
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    det_seed(f32(gid.x));
     let layer_count = params.extent_layers.z;
     let pixel_count = params.extent_layers.w;
     if gid.x >= params.dispatch.x {

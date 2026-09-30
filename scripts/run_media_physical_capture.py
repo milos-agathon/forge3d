@@ -32,7 +32,8 @@ from scripts.nephele_shader_analyzer import analyze_shaders
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/nephele/fixture"
-GATE_SAMPLE_COUNT = 1_000_000
+GATE1_SAMPLE_COUNT = 1_000_000
+GATE2_SAMPLE_COUNT = 10_000_000
 HOMOGENEOUS_SLAB = ROOT / "tests/nephele/homogeneous-slab.json"
 ADAPTER_KEYS = {
     "status", "name", "vendor", "device", "backend", "device_type",
@@ -54,7 +55,7 @@ DIAGNOSTIC_KEYS = {
 
 
 def _json(path: Path, value: Any) -> None:
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
 
 
 def _object(path: Path) -> dict[str, Any]:
@@ -81,6 +82,8 @@ def _validate_candidate_diagnostics(
         or str(diagnostics.get("backend", "")).lower() != "vulkan"
         or diagnostics.get("adapter") != probe["name"]
         or diagnostics.get("driver") != expected_driver
+        or diagnostics["temporal_history_decision"] != "rejected"
+        or diagnostics["temporal_history_reason"] != "no prior media history exists"
         or type(diagnostics.get("step_count")) is not int
         or diagnostics["step_count"] <= 0
         or isinstance(diagnostics["energy_accounting_residual"], bool)
@@ -419,7 +422,7 @@ def _implementation_samples(medium_data: dict[str, Any], slab: dict[str, Any]) -
             homogeneous._native,
             heterogeneous._native,
             float(slab["distance"]),
-            GATE_SAMPLE_COUNT,
+            GATE1_SAMPLE_COUNT, GATE2_SAMPLE_COUNT,
         )
     )
 
@@ -445,7 +448,7 @@ def produce(artifact: Path, head: str) -> None:
     if samples.get("source_revision") != head:
         raise ValueError("native physical producer does not match the exact source revision")
     implementation = samples.get("implementation")
-    if implementation != "canonical-ratio-delta-roulette-and-analog-sphere-v1":
+    if implementation != "canonical-ratio-delta-roulette-and-analog-sphere-v2":
         raise ValueError("native physical producer identity is unknown")
     homogeneous_samples = np.asarray(samples["homogeneous_ratio"], dtype=np.float64)
     heterogeneous_samples = np.asarray(samples["heterogeneous_ratio"], dtype=np.float64)
@@ -455,7 +458,7 @@ def produce(artifact: Path, head: str) -> None:
         ("homogeneous", homogeneous_samples), ("heterogeneous", heterogeneous_samples),
         ("rr_on", rr_on), ("rr_off", rr_off),
     ):
-        if values.shape != (GATE_SAMPLE_COUNT,) or not np.isfinite(values).all() or np.any(values < 0):
+        if values.shape != (GATE1_SAMPLE_COUNT,) or not np.isfinite(values).all() or np.any(values < 0):
             raise ValueError(f"native physical producer returned invalid {name} samples")
     producer = _producer_identity(head, implementation)
     rr_path = artifact / "rr-evidence.json"
@@ -476,21 +479,26 @@ def produce(artifact: Path, head: str) -> None:
         "russian_roulette": {"evidence_sha256": _sha256(rr_path)},
     })
 
-    transmitted = np.asarray(samples["transmitted"], dtype=np.float64)
-    scattered = np.asarray(samples["scattered_out"], dtype=np.float64)
-    absorbed = np.asarray(samples["absorbed"], dtype=np.float64)
-    if any(values.shape != (GATE_SAMPLE_COUNT,) or not np.isin(values, (0.0, 1.0)).all() for values in (transmitted, scattered, absorbed)):
+    transmitted = np.asarray(samples["transmitted"])
+    scattered = np.asarray(samples["scattered_out"])
+    absorbed = np.asarray(samples["absorbed"])
+    if samples.get("gate1_sample_count") != GATE1_SAMPLE_COUNT or samples.get("gate2_sample_count") != GATE2_SAMPLE_COUNT:
+        raise ValueError("native per-gate counts do not match the acceptance contract")
+    if any(values.shape != (GATE2_SAMPLE_COUNT,) or values.dtype != np.uint8 or not np.isin(values, (0, 1)).all() for values in (transmitted, scattered, absorbed)):
         raise ValueError("native closed-sphere producer returned invalid independent outcomes")
-    incident = np.ones(GATE_SAMPLE_COUNT, dtype=np.float64)
-    closure = transmitted + scattered + absorbed - incident
-    energy_matrix = np.column_stack((transmitted, scattered, absorbed, incident, closure))
-    energy_raw = _raw_f64(artifact / "gate2-energy-samples.bin", energy_matrix)
-    energy_raw["samples"] = GATE_SAMPLE_COUNT
-    energy_raw["columns"] = ["transmitted", "scattered_out", "absorbed", "incident", "closure_residual"]
+    incident = np.ones(GATE2_SAMPLE_COUNT, dtype=np.float64)
+    closure = transmitted.astype(np.float64) + scattered + absorbed - incident
+    energy_matrix = np.column_stack((transmitted, scattered, absorbed))
+    energy_path = artifact / "gate2-energy-samples.bin"
+    energy_path.write_bytes(energy_matrix.tobytes())
+    energy_raw = {"path": energy_path.name, "sha256": _sha256(energy_path),
+        "encoding": "u8-outcome-columns", "samples": GATE2_SAMPLE_COUNT,
+        "columns": ["transmitted", "scattered_out", "absorbed"]}
     _json(artifact / "gate2-energy.json", {
-        "schema": "forge3d.nephele.gate2_raw/2", "producer": producer,
+        "schema": "forge3d.nephele.gate2_raw/3", "producer": producer,
+        "sample_count": GATE2_SAMPLE_COUNT,
         "homogeneous_slab": homogeneous_record,
-        "sample_mapping": _identity("independent-analog-closed-sphere-v1", streams={"transmitted": 0x4E4550482001, "scattered_out": 0x4E4550482002, "absorbed": 0x4E4550482003}, normalization="one incident energy unit per estimator sample"),
+        "sample_mapping": _identity("independent-analog-closed-sphere-v2", streams={"transmitted": 0x4E4550482001, "scattered_out": 0x4E4550482002, "absorbed": 0x4E4550482003}, normalization="one incident energy unit per estimator sample"),
         "normalization": "three independent analog-transport ensembles share one incident energy unit per sample", "raw_output": energy_raw, "transmitted": _accumulator(transmitted),
         "scattered_out": _accumulator(scattered), "absorbed": _accumulator(absorbed),
         "incident": _accumulator(incident), "closure_residual": _accumulator(closure),

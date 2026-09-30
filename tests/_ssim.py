@@ -21,7 +21,8 @@ def ssim(img1: np.ndarray, img2: np.ndarray,
          k1: float = 0.01, 
          k2: float = 0.03,
          win_size: int = 11,
-         sigma: float = 1.5) -> float:
+         sigma: float = 1.5,
+         *, mask: np.ndarray | None = None) -> float:
     """
     Compute SSIM between two images.
     
@@ -41,6 +42,11 @@ def ssim(img1: np.ndarray, img2: np.ndarray,
     if img1.ndim != 2 and img1.ndim != 3:
         raise ValueError(f"Images must be 2D or 3D, got {img1.ndim}D")
     
+    if mask is not None:
+        mask = np.asarray(mask)
+        if mask.shape != img1.shape[:2] or mask.dtype != np.bool_ or not mask.any():
+            raise ValueError("SSIM mask must be a nonempty boolean image-shaped mask")
+
     # Convert to float64 for computation
     img1 = img1.astype(np.float64)
     img2 = img2.astype(np.float64)
@@ -49,7 +55,7 @@ def ssim(img1: np.ndarray, img2: np.ndarray,
     if img1.ndim == 3:
         ssim_vals = []
         for c in range(img1.shape[2]):
-            ssim_vals.append(ssim(img1[:,:,c], img2[:,:,c], data_range, k1, k2, win_size, sigma))
+            ssim_vals.append(ssim(img1[:,:,c], img2[:,:,c], data_range, k1, k2, win_size, sigma, mask=mask))
         return np.mean(ssim_vals)
     
     # SSIM constants
@@ -79,7 +85,7 @@ def ssim(img1: np.ndarray, img2: np.ndarray,
     ssim_map = numerator / denominator
     
     # Return mean SSIM
-    return float(np.mean(ssim_map))
+    return float(np.mean(ssim_map if mask is None else ssim_map[mask]))
 
 
 def _filter2d(img: np.ndarray, kernel: np.ndarray) -> np.ndarray:

@@ -5,10 +5,10 @@
 
 fn brdf_phong(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color: vec3<f32>, params: ShadingParamsGPU) -> vec3<f32> {
     let shininess = to_shininess(params.roughness);
-    let reflect_dir = reflect(-light, normal);
-    let spec_angle = saturate(dot(reflect_dir, view));
-    let spec = pow(spec_angle, shininess);
-    let diffuse = brdf_lambert(base_color);
-    let spec_color = mix(vec3<f32>(0.04), base_color, params.metallic);
-    return diffuse + spec_color * spec * (shininess + 2.0) * 0.125 * INV_PI;
+    let reflect_dir = det_reflect3(-light, normal);
+    let spec_angle = saturate(det_dot3(reflect_dir, view));
+    let spec = det_pow(spec_angle, shininess);
+    let diffuse = det_barrier3(brdf_lambert(base_color));
+    let spec_color = det_mix3(vec3<f32>(0.04), base_color, params.metallic);
+    return diffuse + det_barrier3(det_barrier3(det_barrier3(det_barrier3(spec_color * spec) * (shininess + 2.0)) * 0.125) * INV_PI);
 }

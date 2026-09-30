@@ -596,6 +596,33 @@ def _heightmap_domain(heightmap: Any) -> tuple[float, float]:
     return (lo, hi)
 
 
+def _mapscene_nodata_heightmap(heightmap: Any) -> tuple[Any, float | None]:
+    """Turn non-finite (no-data) heightmap cells into renderer holes.
+
+    No-data cells are filled just below the lowest valid height, and the
+    returned threshold tells the terrain shader to leave every fragment under
+    it empty: not shaded, and attributed to no source. Returns the heightmap
+    unchanged and ``None`` when every cell is finite.
+    """
+    import numpy as np
+
+    arr = np.asarray(heightmap, dtype=np.float32)
+    valid = np.isfinite(arr)
+    if valid.all():
+        return heightmap, None
+    if not valid.any():
+        raise ValueError("MapScene terrain heightmap has no finite heights")
+    lo = float(arr[valid].min())
+    hi = float(arr[valid].max())
+    # The drop below the lowest valid height is 0.1% of the relief, too small
+    # to read as a wall, but never under 64 float32 steps at this magnitude so
+    # interpolated heights keep valid and no-data cells apart.
+    ulp = float(np.spacing(np.float32(max(abs(lo), abs(hi), 1.0))))
+    step = max(1e-3 * (hi - lo), 64.0 * ulp)
+    filled = np.where(valid, arr, np.float32(lo - step)).astype(np.float32)
+    return np.ascontiguousarray(filled), lo - 0.5 * step
+
+
 def _write_minimal_hdr(path: Path) -> None:
     with path.open("wb") as handle:
         handle.write(b"#?RADIANCE\n")
@@ -707,6 +734,41 @@ def _mapscene_shadow_settings(shadow_config: Any) -> Any:
     )
     settings.validate_for_terrain()
     return settings
+
+
+def _mapscene_pom_settings(settings: Mapping[str, Any]) -> Any | None:
+    """Parallax occlusion mapping from ``lighting.settings["pom"]``.
+
+    Absent keeps the renderer default (POM on). ``False`` or ``{"enabled": False}``
+    disables it; a mapping overrides individual PomSettings fields.
+    """
+    config = settings.get("pom")
+    if config is None:
+        return None
+    from .terrain_params import PomSettings
+
+    fields = {
+        "enabled": True,
+        "mode": "Occlusion",
+        "scale": 0.04,
+        "min_steps": 12,
+        "max_steps": 40,
+        "refine_steps": 4,
+        "shadow": True,
+        "occlusion": True,
+    }
+    if isinstance(config, bool):
+        fields["enabled"] = config
+    elif isinstance(config, Mapping):
+        unknown = sorted(set(config) - set(fields))
+        if unknown:
+            raise ValueError(f"unknown pom settings: {unknown}")
+        fields.update(config)
+    else:
+        raise TypeError("lighting.settings['pom'] must be a bool or a mapping")
+    if not fields["enabled"]:
+        fields.update(scale=0.0, min_steps=1, max_steps=1, refine_steps=0, shadow=False, occlusion=False)
+    return PomSettings(**fields)
 
 
 def _mapscene_material_settings(recipe: "SceneRecipe") -> Any | None:
@@ -1245,6 +1307,7 @@ def _build_mapscene_terrain_params(
     render_size: tuple[int, int],
     *,
     emit_source_id: bool = False,
+    nodata_height_below: float | None = None,
 ) -> Any | None:
     try:
         import forge3d as f3d
@@ -1256,7 +1319,15 @@ def _build_mapscene_terrain_params(
     if not all(hasattr(f3d, name) for name in ("Colormap1D", "OverlayLayer", "TerrainRenderParams")):
         return None
 
-    domain = _heightmap_domain(heightmap)
+    if nodata_height_below is None:
+        domain = _heightmap_domain(heightmap)
+    else:
+        # No-data fill sits below every valid height; keep it out of the
+        # colour/material domain so the bands span only real terrain.
+        import numpy as np
+
+        values = np.asarray(heightmap, dtype=np.float32)
+        domain = _heightmap_domain(values[values >= nodata_height_below])
     output = recipe.output
     denoise_enabled = _mapscene_denoise_enabled(output)
     settings = _metadata_dict(recipe.lighting.settings)
@@ -1292,6 +1363,10 @@ def _build_mapscene_terrain_params(
     clip_far = max(6000.0, terrain_span * 1.5)
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
+    configured_colormap_strength = settings.get("colormap_strength")
+    configured_hue_variation_strength = settings.get("hue_variation_strength")
+    configured_material_slope_bias = settings.get("material_slope_bias")
+    configured_material_layer_centers = settings.get("material_layer_centers")
     camera_mode = str(cli_params.get("camera_mode") or camera.get("camera_mode") or "screen")
     if camera_mode == "screen":
         camera_mode = _mapscene_clipmap_camera_mode(_mapscene_clipmap_config(recipe)) or camera_mode
@@ -1304,7 +1379,21 @@ def _build_mapscene_terrain_params(
         exposure=float(renderer_config.lighting.exposure),
         domain=domain,
         albedo_mode=str(settings.get("albedo_mode") or preset_albedo),
-        colormap_strength=float(settings.get("colormap_strength") or preset_colormap_strength),
+        colormap_strength=float(
+            preset_colormap_strength
+            if configured_colormap_strength is None
+            else configured_colormap_strength
+        ),
+        hue_variation_strength=float(
+            0.08
+            if configured_hue_variation_strength is None
+            else configured_hue_variation_strength
+        ),
+        material_slope_bias=float(
+            1.0 if configured_material_slope_bias is None else configured_material_slope_bias
+        ),
+        material_layer_centers=configured_material_layer_centers,
+        nodata_height_below=nodata_height_below,
         ibl_enabled="ibl" in renderer_config.gi.modes,
         light_azimuth_deg=azimuth,
         light_elevation_deg=elevation,
@@ -1330,6 +1419,7 @@ def _build_mapscene_terrain_params(
         water=_mapscene_water_settings(recipe),
         clouds=_mapscene_cloud_settings(recipe),
         materials=_mapscene_material_settings(recipe),
+        pom=_mapscene_pom_settings(settings),
         vt=_mapscene_vt_settings(recipe),
     )
     if emit_source_id:
@@ -1406,11 +1496,16 @@ def _render_terrain_renderer_result(
     heightmap: Any,
     *,
     emit_provenance: bool = False,
+    nodata_height_below: float | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     try:
         import forge3d as f3d
     except Exception:
         return None
+
+    heightmap, detected_nodata = _mapscene_nodata_heightmap(heightmap)
+    if detected_nodata is not None:
+        nodata_height_below = detected_nodata
 
     required = ("Session", "TerrainRenderer", "MaterialSet", "IBL", "TerrainRenderParams")
     if not all(hasattr(f3d, name) for name in required):
@@ -1424,7 +1519,11 @@ def _render_terrain_renderer_result(
     assert output is not None
     render_size = (max(64, int(output.width)), max(64, int(output.height)))
     params = _build_mapscene_terrain_params(
-        recipe, heightmap, render_size, emit_source_id=emit_provenance
+        recipe,
+        heightmap,
+        render_size,
+        emit_source_id=emit_provenance,
+        nodata_height_below=nodata_height_below,
     )
     if params is None:
         return None
@@ -2374,6 +2473,56 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
     return _alpha_composite_rgba(base, np.asarray(overlay, dtype=np.uint8)), True, metadata
 
 
+# Cap height of the packaged Noto Sans default, in em; used to centre a label's
+# glyph block vertically on its solver box.
+_LABEL_CAP_HEIGHT_EM = 0.714
+
+
+def _label_pen_origin(
+    accepted: Any,
+    positioned: Sequence[Mapping[str, Any]],
+    render_size: float,
+    width: int,
+    height: int,
+) -> tuple[float, float]:
+    """Pen origin that centres a label's glyph block on its solver box.
+
+    The declutter solver reserves ``candidate.bounds``, a box centred on the
+    candidate anchor. Glyph origins are relative to the pen (left end of the
+    baseline), so drawing from the anchor itself would shift the text half a
+    label right of the box the solver kept clear. Geometry-authority labels
+    (curved and line) carry glyph origins already laid out around their
+    anchor and are drawn from it unchanged.
+    """
+    candidate = getattr(accepted, "candidate", None)
+    details = dict(getattr(candidate, "details", None) or {})
+    bounds = getattr(candidate, "bounds", None) or getattr(accepted, "screen_bounds", None)
+    if details.get("geometry_authority") or not bounds or len(bounds) < 4 or not positioned:
+        return _render_label_anchor(accepted, width, height)
+    xs: list[float] = []
+    ys: list[float] = []
+    try:
+        for glyph in positioned:
+            origin = glyph.get("origin") or (0.0, 0.0)
+            advance = glyph.get("advance") or (0.0, 0.0)
+            xs.extend((float(origin[0]), float(origin[0]) + float(advance[0])))
+            ys.append(float(origin[1]))
+    except (AttributeError, IndexError, TypeError, ValueError):
+        # Malformed glyphs are reported by the compositor's own validation.
+        return _render_label_anchor(accepted, width, height)
+    if not all(math.isfinite(value) for value in (*xs, *ys)):
+        return _render_label_anchor(accepted, width, height)
+    centre_x, centre_y = _render_point_to_pixel(
+        ((float(bounds[0]) + float(bounds[2])) * 0.5, (float(bounds[1]) + float(bounds[3])) * 0.5),
+        width,
+        height,
+    )
+    block_centre_x = (min(xs) + max(xs)) * 0.5 * render_size
+    cap_height = _LABEL_CAP_HEIGHT_EM * render_size
+    block_centre_y = ((min(ys) * render_size - cap_height) + max(ys) * render_size) * 0.5
+    return centre_x - block_centre_x, centre_y - block_centre_y
+
+
 def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any]) -> tuple[Any, bool]:
     label_layers = [layer for layer in recipe.layers if isinstance(layer, LabelLayer)]
     if not label_layers:
@@ -2488,7 +2637,6 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                 else typography.get("halo_width", typography.get("text_halo_width")),
                 1.0,
             )
-            anchor_x, anchor_y = _render_label_anchor(accepted, int(width), int(height))
             # The packaged atlas bake resolution is an implementation detail,
             # not the public default label size. Keep MapScene's default at
             # 12 px there. An explicitly bound custom atlas retains its own
@@ -2507,6 +2655,9 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                 })
             atlas_scale = render_size / atlas_font_size
             positioned = tuple(getattr(accepted, "positioned_glyphs", ()) or ())
+            anchor_x, anchor_y = _label_pen_origin(
+                accepted, positioned, render_size, int(width), int(height)
+            )
             if not positioned:
                 raise MapSceneTextLayoutError({
                     "status": "diagnostic_block",
@@ -3294,16 +3445,19 @@ def _render_native_offscreen_result(
     heightmap = _load_native_heightmap(recipe.terrain)
     if heightmap is None or recipe.output is None:
         return None
+    heightmap, nodata_height_below = _mapscene_nodata_heightmap(heightmap)
 
     import numpy as np
 
     try:
-        # Keyword passed only when enabled so existing call-compatible test
+        # Keywords passed only when enabled so existing call-compatible test
         # doubles for `_render_terrain_renderer_result` stay valid.
+        render_kwargs: dict[str, Any] = {}
         if emit_provenance:
-            result = _render_terrain_renderer_result(recipe, heightmap, emit_provenance=True)
-        else:
-            result = _render_terrain_renderer_result(recipe, heightmap)
+            render_kwargs["emit_provenance"] = True
+        if nodata_height_below is not None:
+            render_kwargs["nodata_height_below"] = nodata_height_below
+        result = _render_terrain_renderer_result(recipe, heightmap, **render_kwargs)
     except BaseException as exc:
         if _is_native_adapter_unavailable(exc):
             return None
@@ -5931,6 +6085,10 @@ class MapScene:
                     native_result.source_map,
                     native_result.contributing_tiles,
                     provenance_signing_key,
+                    # The exact published image bytes — target_path was
+                    # already written above, so the seal binds what a
+                    # verifier will read back from disk.
+                    target_path.read_bytes(),
                 )
             )
             source_map_path = target_path.with_name(f"{target_path.stem}.source_map.npy")

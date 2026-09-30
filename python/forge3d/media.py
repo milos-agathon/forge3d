@@ -149,7 +149,6 @@ def render_volumetric_reference(
     """
     if not isinstance(medium, Medium):
         raise TypeError("medium must be forge3d.media.Medium")
-    _ = cache
     try:
         return _native_module()._render_volumetric_reference(
             medium._native,
@@ -177,3 +176,16 @@ def render_volumetric_reference(
 
 
 __all__ = ["MediaError", "Medium", "render_volumetric_reference"]
+
+
+def _nephele_physical_samples(
+    homogeneous: Medium, heterogeneous: Medium, homogeneous_distance: float,
+    gate1_sample_count: int, gate2_sample_count: int,
+) -> dict[str, Any]:
+    try:
+        return dict(_native_module()._nephele_physical_samples(
+            homogeneous._native, heterogeneous._native, float(homogeneous_distance),
+            int(gate1_sample_count), int(gate2_sample_count),
+        ))
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise MediaError(str(exc)) from exc

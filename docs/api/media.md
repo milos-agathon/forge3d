@@ -118,3 +118,24 @@ independent and remains valid. `viewer.get_stats()` reports
 `media_diagnostics` after a successful media frame and `media_render_error`
 after a failed media frame. Passing `None` to `viewer.set_media` removes the
 canonical pass and restores the legacy behavior.
+
+## Owner decisions — 2026-09-30
+
+Milos approved the CPU reference kernel in `crate::media::reference` with GPU
+participation limited to production `terrain_trace` visibility (OD-8 option a).
+This is an explicit exemption from reference WGSL tracking; it does not waive
+any G1–G6 estimator, visual, memory, determinism, or physical-lane requirement.
+
+Gate 4 uses `per_pixel_pass_fraction`: at least 95% of reference-cloud-shadowed
+terrain pixels must have DeltaE2000 strictly below 2.0. The owner record is
+`tests/nephele/gate4-policy.json`; the same criterion governs convergence.
+Gate 2 uses three independent ensembles of 10,000,000 paths each, routed through
+production `delta_track_counted` and `Phase::sample` (OD-7 a + 7b). Its uncertainty
+and sample-count derivation are reported alongside the measured energy terms.
+For independent outcome estimates with variance sum V, the residual standard
+error is sqrt(V/N). With the fixed threshold tau = 1e-3, requiring k standard
+errors below tau gives N >= k^2 V / tau^2. The threshold alone does not select
+a unique N without a confidence choice: the owner selected N = 10,000,000, and
+the report gives the resulting measured k = tau sqrt(N/V) and approximate
+false-failure probability. These are uncertainty reports, not new gates.
+The registry `wgpu-hal` is used without a vendored patch (OD-3 a).
