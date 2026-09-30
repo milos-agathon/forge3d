@@ -949,32 +949,50 @@ class TestFlythroughPhysical:
         manifest = render_flythrough(camera_path, base_seed=5, samples=1, out_dir=tmp_path)
 
         alphas = {}
-        frames = {}
+        codes = {}
         for record in manifest.frames:
             index = int(record["frame_index"])
             payload = json.loads(record["compiled_frame"])
             alphas[index] = [item["alpha"] for item in payload["labels"] if item["visible"]]
-            frames[index] = _rec709_luminance(_load_rgba(tmp_path / record["image"]))
+            codes[index] = _load_rgba(tmp_path / record["image"])[..., :3].astype(np.int64)
         assert alphas[appearance - 1] == []
         assert alphas[appearance] == [pytest.approx(1.0 / 256.0)]
         assert alphas[fade_end] == [1.0]
 
-        footprint = np.abs(frames[fade_end] - frames[appearance - 1]) > 0.0
+        # Rec. 709 luminance in exact integer units of 1/10000 of an 8-bit code
+        # (2126 + 7152 + 722 == 10000), so "one code" is compared without float
+        # rounding: a 1-code step in all three channels is exactly 10000.
+        weights = np.array([2126, 7152, 722], dtype=np.int64)
+        luminance = {index: rgb @ weights for index, rgb in codes.items()}
+        one_code = int(weights.sum())
+
+        footprint = np.abs(luminance[fade_end] - luminance[appearance - 1]) > 0
         assert footprint.any(), "the label must be drawn at full opacity"
         assert not footprint.all(), "the path must hold static terrain pixels"
 
-        worst_step = 0.0
-        worst_static = 0.0
+        worst_step = 0
+        worst_static = 0
+        worst_channel = 0
         for window in windows:
             ordered = list(window)
             for previous, current in zip(ordered, ordered[1:]):
-                delta = np.abs(frames[current] - frames[previous])
-                worst_step = max(worst_step, float(delta.max()))
-                worst_static = max(worst_static, float(delta[~footprint].max()))
-        print(f"max per-frame luminance step {worst_step:.6f}; held-static {worst_static:.6f}")
-        assert worst_static == 0.0, "held-static pixels must not change between frames"
-        # One fade step never moves a pixel by a full 8-bit step.
-        assert worst_step < 1.0 / 255.0
+                delta = np.abs(luminance[current] - luminance[previous])
+                worst_step = max(worst_step, int(delta.max()))
+                worst_static = max(worst_static, int(delta[~footprint].max()))
+                worst_channel = max(
+                    worst_channel, int(np.abs(codes[current] - codes[previous]).max())
+                )
+        print(
+            f"max per-frame luminance step {worst_step / one_code:.4f} code(s); "
+            f"max channel step {worst_channel} code(s); held-static {worst_static}"
+        )
+        assert worst_static == 0, "held-static pixels must not change between frames"
+        # Regression: a pixel blended once per overlapping glyph quad at the fade
+        # alpha is rounded twice and jumps 2 codes in one frame.
+        assert worst_channel <= 1, "a fade step moved a channel by 2 or more 8-bit codes"
+        # One fade step moves a pixel by at most one 8-bit step (<= 1/255): with
+        # 8-bit output, a 1/256 alpha step can round all three channels at once.
+        assert worst_step <= one_code
 
     def test_dolly_across_clipmap_morph_band_does_not_pop(self, tmp_path):
         if not _physical_render_available():

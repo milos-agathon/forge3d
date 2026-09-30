@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -2839,6 +2840,21 @@ def _chronos_label_plans(frame: Any) -> dict[str, Any]:
     }
 
 
+def _fade_label_run(base: Any, opaque: Any, alpha: float) -> Any:
+    """Composite a label run drawn at full opacity over ``base`` at ``alpha``.
+
+    For a layer L over base B, ``over(alpha * L, B) == B + alpha * (over(L, B) - B)``,
+    so the faded frame is one interpolation rounded once, rather than one
+    8-bit rounding per overlapping glyph quad.
+    """
+    import numpy as np
+
+    below = np.asarray(base, dtype=np.float64)
+    above = np.asarray(opaque, dtype=np.float64)
+    faded = np.rint(below + float(alpha) * (above - below))
+    return np.ascontiguousarray(np.clip(faded, 0.0, 255.0).astype(np.uint8))
+
+
 def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any]) -> tuple[Any, bool]:
     label_layers = [layer for layer in recipe.layers if isinstance(layer, LabelLayer)]
     if not label_layers:
@@ -2917,13 +2933,9 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
         native_scene = scene_cls(int(width), int(height))
         if not all(hasattr(native_scene, name) for name in required):
             return composited, rendered_any
-        if hasattr(native_scene, "disable_terrain"):
-            native_scene.disable_terrain()
-        native_scene.set_raster_overlay(composited, 1.0, None, None)
-        native_scene.set_native_text_atlas(atlas, int(metrics.get("channels", 1)), 1.0)
-        native_scene.enable_native_text()
 
-        pending_text_rects: list[tuple[float, ...]] = []
+        # (chronos_alpha, rect) in plan order; rects carry full-opacity colors.
+        pending_text_rects: list[tuple[float, tuple[float, ...]]] = []
         for accepted in plan.accepted:
             typography = dict(getattr(accepted, "typography", None) or {})
             shaped_hashes = tuple(
@@ -2954,8 +2966,6 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
             if not math.isfinite(chronos_alpha):
                 chronos_alpha = 1.0
             chronos_alpha = min(max(chronos_alpha, 0.0), 1.0)
-            text_color = (*text_color[:3], text_color[3] * chronos_alpha)
-            halo_color = (*halo_color[:3], halo_color[3] * chronos_alpha)
             halo_width = _render_number(
                 typography.get("halo_width_px")
                 if "halo_width_px" in typography
@@ -3063,9 +3073,7 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                         "object_id": accepted.label_id,
                         "identity": identity,
                     })
-                pending_text_rects.append(
-                    rect
-                )
+                pending_text_rects.append((chronos_alpha, rect))
 
         if not pending_text_rects:
             raise MapSceneTextLayoutError({
@@ -3074,13 +3082,29 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                 "layer": layer_id,
                 "object_id": None,
             })
-        for rect in pending_text_rects:
-            native_scene.add_native_text_rect_uv_halo(*rect)
-        rgba = np.asarray(native_scene.render_rgba())
-        if rgba.ndim != 3 or rgba.shape[2] != 4:
-            raise RuntimeError("MapScene native text compositor returned an invalid RGBA image")
-        composited = np.ascontiguousarray(rgba.astype(np.uint8, copy=False))
-        rendered_any = True
+        # Glyph quads overlap (atlas padding exceeds the advance), so blending
+        # each quad at a fade alpha rounds overlapping pixels once per quad and
+        # compounds their halos. Instead, each run of equal-alpha labels is drawn
+        # at full opacity and faded as one layer with a single rounding.
+        for chronos_alpha, run in itertools.groupby(pending_text_rects, key=lambda item: item[0]):
+            if chronos_alpha <= 0.0:
+                continue
+            if native_scene is None:
+                native_scene = scene_cls(int(width), int(height))
+            if hasattr(native_scene, "disable_terrain"):
+                native_scene.disable_terrain()
+            native_scene.set_raster_overlay(composited, 1.0, None, None)
+            native_scene.set_native_text_atlas(atlas, int(metrics.get("channels", 1)), 1.0)
+            native_scene.enable_native_text()
+            for _, rect in run:
+                native_scene.add_native_text_rect_uv_halo(*rect)
+            rgba = np.asarray(native_scene.render_rgba())
+            native_scene = None
+            if rgba.ndim != 3 or rgba.shape[2] != 4:
+                raise RuntimeError("MapScene native text compositor returned an invalid RGBA image")
+            opaque = np.ascontiguousarray(rgba.astype(np.uint8, copy=False))
+            composited = opaque if chronos_alpha >= 1.0 else _fade_label_run(composited, opaque, chronos_alpha)
+            rendered_any = True
 
     return composited, rendered_any
 
