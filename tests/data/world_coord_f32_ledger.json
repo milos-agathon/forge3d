@@ -1275,5 +1275,66 @@
     "4], params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength], params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale], params3: [ ao_weight, ao_fallback_enabled, params.hue_variation_strength.clamp(0.0, 0.2), self.orbis_render_frame_latitude() .map(|latitude| ORBIS_GLOBE_FRAME_FLAG_OFFSET + latitude as f32) .unwrap_or(0.0), ], params4: [ detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise, ], params5: [ detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_flag, ], params6: [params.material_slope_bias.clamp(0.0, 1.0), 0.0, 0.0, 0.0],"
    ]
   ]
+ },
+ "release_1_40_chronos": {
+  "base_commit": "6937017c4345d13939da5251410872a5a2829327",
+  "base_count": 1818,
+  "base_digest": "8f0d3034f225897d70445c9491bb3f046ce48e432e5e88fc7a310e03f9e906c3",
+  "result_count": 1821,
+  "result_digest": "1b17f3f2ac765a98e747d2bc7ef067aa8fb746a5d2bcf693189586f9b5c1d0c8",
+  "review": "Milos approved this exact CHRONOS transition for release 1.40.0. generate_r2_sequence replaces its two R2 fractional-offset casts one-for-one with the seeded-phase form (-2/+2, values in [0,1)). The new SunPosition::to_scene_direction narrows a unit sun direction (+3, |v| = 1), mirroring the existing to_direction. No added world-coordinate narrowing; Anchor stays the sole world-position narrowing owner.",
+  "added": [
+   [
+    "src/lighting/ephemeris.rs",
+    "<module>",
+    "as_f32",
+    4,
+    "[x as f32, y as f32, z as f32]"
+   ],
+   [
+    "src/lighting/ephemeris.rs",
+    "<module>",
+    "as_f32",
+    5,
+    "[x as f32, y as f32, z as f32]"
+   ],
+   [
+    "src/lighting/ephemeris.rs",
+    "<module>",
+    "as_f32",
+    6,
+    "[x as f32, y as f32, z as f32]"
+   ],
+   [
+    "src/terrain/accumulation.rs",
+    "generate_r2_sequence",
+    "as_f32",
+    1,
+    "let x = ((i as f64) * alpha1 + phase_x).fract() as f32"
+   ],
+   [
+    "src/terrain/accumulation.rs",
+    "generate_r2_sequence",
+    "as_f32",
+    2,
+    "let y = ((i as f64) * alpha2 + phase_y).fract() as f32"
+   ]
+  ],
+  "removed": [
+   [
+    "src/terrain/accumulation.rs",
+    "generate_r2_sequence",
+    "as_f32",
+    1,
+    "let x = ((n * alpha1) % 1.0) as f32"
+   ],
+   [
+    "src/terrain/accumulation.rs",
+    "generate_r2_sequence",
+    "as_f32",
+    2,
+    "let y = ((n * alpha2) % 1.0) as f32"
+   ]
+  ]
  }
 }

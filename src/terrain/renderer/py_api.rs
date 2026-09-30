@@ -987,6 +987,18 @@ impl TerrainRenderer {
         Ok(material_vt.retained_request_set())
     }
 
+    /// CHRONOS test seam: the exact resident material-VT page set after the
+    /// last render as `(family_slot, material_index, mip_level, tile_x,
+    /// tile_y)` tuples, so a compiled-residency gate can assert set equality
+    /// rather than the `resident_pages` count alone.
+    #[pyo3(text_signature = "(self)")]
+    fn read_material_vt_resident_pages_for_test(&self) -> PyResult<Vec<(u32, u32, u32, u32, u32)>> {
+        let material_vt = self.scene.material_vt.lock().map_err(|error| {
+            PyRuntimeError::new_err(format!("Failed to lock material_vt: {error}"))
+        })?;
+        Ok(material_vt.resident_page_set())
+    }
+
     /// Exact family-specific records emitted by the most recently staged GPU
     /// material-VT feedback pass. CPU prefetch and test-seeded requests are
     /// intentionally excluded.

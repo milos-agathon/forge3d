@@ -21,6 +21,9 @@ impl PySunPosition {
         )
     }
 
+    /// Normalized direction vector (Y-up, azimuth 0 = north maps to -Z).
+    /// For `MapScene`/`LightingPreset` `sun_direction` use
+    /// `to_scene_direction()` instead, which matches the +Z north convention.
     fn to_direction(&self) -> (f32, f32, f32) {
         let az_rad = self.azimuth.to_radians();
         let el_rad = self.elevation.to_radians();
@@ -29,6 +32,19 @@ impl PySunPosition {
         let y = el_rad.sin();
         let z = -az_rad.cos() * cos_el;
         (x as f32, y as f32, z as f32)
+    }
+
+    /// Direction toward the sun in the MapScene `sun_direction` convention
+    /// (azimuth 0 = north maps to +Z, azimuth 90 = east maps to +X). Feed the
+    /// result directly to `LightingPreset(sun_direction=...)`; no axis
+    /// negation is needed, unlike `to_direction()`.
+    fn to_scene_direction(&self) -> (f32, f32, f32) {
+        let pos = super::super::ephemeris::SunPosition {
+            azimuth: self.azimuth,
+            elevation: self.elevation,
+        };
+        let d = pos.to_scene_direction();
+        (d[0], d[1], d[2])
     }
 
     fn is_daytime(&self) -> bool {

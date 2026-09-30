@@ -1486,3 +1486,15 @@ class TestTerrainVTPbrFamilies:
                 "mip_sets": {str(family): sorted(mips) for family, mips in mip_sets.items()},
             },
         )
+
+
+@pytest.mark.skipif(not GPU_AVAILABLE, reason="requires GPU-backed forge3d runtime")
+def test_residency_schedule_seam_validates_entries(vt_render_env) -> None:
+    renderer, _material_set, _ibl, _heightmap = vt_render_env
+    with pytest.raises(RuntimeError, match="unsupported family"):
+        renderer.set_material_vt_residency_schedule_for_test([("height", 0, 0, 0, 0)])
+    with pytest.raises(RuntimeError, match="no source registered"):
+        renderer.set_material_vt_residency_schedule_for_test([("albedo", 0, 0, 0, 0)])
+    _register_family_sources(renderer, 256, ("albedo",))
+    renderer.set_material_vt_residency_schedule_for_test([("albedo", 0, 0, 0, 0)])
+    renderer.set_material_vt_residency_schedule_for_test([])

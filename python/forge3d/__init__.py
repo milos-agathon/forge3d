@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.39.0"
+__version__ = "1.40.0"
 version = __version__
 
 import numpy as np
@@ -161,6 +161,10 @@ _NATIVE_ONLY_EXPORTS = (
         "dd_selftest",  # DUPLA: GPU DD exactness canary
         "dd_harness",  # DUPLA: GPU DD bounds proof
         "dd_jitter_demo",  # DUPLA: Everest absolute-coordinate demo
+        "CompiledFrame",
+        "frame_seed",
+        "compile_frame",
+        "render_compiled_frame",
 )
 
 if _NATIVE_MODULE is not None:
@@ -679,6 +683,7 @@ from .map_scene import (
     VectorOverlay,
 )
 from . import recipe_manifest
+from .chronos import FlythroughManifest, render_flythrough
 from .alignment import (
     alignment_report,
     alignment_residual,
@@ -1025,6 +1030,12 @@ __all__ = [
     "LightingPreset",
     "OutputSpec",
     "ReproducibilityProfile",
+    "CompiledFrame",
+    "frame_seed",
+    "compile_frame",
+    "render_compiled_frame",
+    "FlythroughManifest",
+    "render_flythrough",
     "recipe_manifest",
     "alignment_report",
     "alignment_residual",

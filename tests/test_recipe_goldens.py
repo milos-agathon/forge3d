@@ -250,6 +250,20 @@ def _base_scene(
     )
 
 
+def _write_ortho_overlay(tmp_path: Path) -> Path:
+    """Deterministic raster overlay for the mapscene_terrain_raster golden."""
+    from forge3d.helpers.offscreen import save_png_deterministic
+
+    raster = np.zeros((32, 32, 4), dtype=np.uint8)
+    raster[..., 0] = np.linspace(30, 220, 32).astype(np.uint8)[None, :]
+    raster[..., 1] = 128
+    raster[..., 2] = np.linspace(200, 40, 32).astype(np.uint8)[:, None]
+    raster[..., 3] = 255
+    path = tmp_path / "ortho.png"
+    save_png_deterministic(path, raster)
+    return path
+
+
 def _terrain_raster(tmp_path: Path) -> f3d.MapScene:
     return _base_scene(
         tmp_path,
@@ -257,10 +271,10 @@ def _terrain_raster(tmp_path: Path) -> f3d.MapScene:
         layers=[
             f3d.RasterOverlay(
                 layer_id="ortho",
-                path="fixtures/ortho.tif",
+                path=str(_write_ortho_overlay(tmp_path)),
                 crs="EPSG:32610",
                 opacity=0.72,
-                metadata={"source_id": "ortho-fixture", "width": 8, "height": 8, "asset_status": "fixture"},
+                metadata={"source_id": "ortho-fixture", "width": 32, "height": 32, "asset_status": "fixture"},
             )
         ],
     )
@@ -1267,6 +1281,21 @@ def test_nvidia_vulkan_recipe_pixel_golden_render_and_match(tmp_path: Path) -> N
     """
     if not nvidia_vulkan_golden_selected("FORGE3D_RECIPE_GOLDEN_VARIANT"):
         pytest.skip("NVIDIA/Vulkan recipe pixel proof was not selected")
+    spec = next(
+        item for item in RECIPE_GOLDENS if item.scene_id == "mapscene_terrain_raster"
+    )
+    _render_recipe_golden_pixels(tmp_path, spec)
+
+
+def test_metal_recipe_pixel_golden_render_and_match(tmp_path: Path) -> None:
+    """Verify the committed Metal pixel baseline in the optional Metal diagnostic.
+
+    Like the NVIDIA proof it never touches certificates, and it only compares:
+    the Metal diagnostic must never write a baseline.
+    """
+    if _recipe_golden_variant() != "metal":
+        pytest.skip("Metal recipe pixel proof was not selected")
+    assert not _update_goldens_enabled(), "the Metal diagnostic must never write baselines"
     spec = next(
         item for item in RECIPE_GOLDENS if item.scene_id == "mapscene_terrain_raster"
     )

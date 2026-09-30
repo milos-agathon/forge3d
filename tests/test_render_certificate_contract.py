@@ -59,6 +59,7 @@ DOCUMENTED_EXCLUSIONS = {
     # CPU validation fixture used as an input to the separately certified PT
     # closure harness; it is not a product render and submits no GPU work.
     "atmosphere_generate_environment": "CPU validation fixture, no GPU render",
+    "render_compiled_frame": "hashes caller-supplied RGBA into a CHRONOS provenance record; no rendering executes (owner-approved 2026-09-24)",
 }
 
 
@@ -80,6 +81,7 @@ RENDER_ENTRYPOINTS = {
     "Renderer.render_triangle_png": f3d.Renderer.render_triangle_png,
     "MapScene.render": MapScene.render,
     "render_offline": render_offline,
+    "render_flythrough": f3d.render_flythrough,
     "determinism.render_reference": determinism.render_reference,
     "PathTracer.render_rgba": path_tracing.PathTracer.render_rgba,
     "PathTracer.render_progressive": path_tracing.PathTracer.render_progressive,
@@ -284,6 +286,7 @@ def test_documented_exclusions_explain_their_certificate_scope() -> None:
         "export_pdf": export_pdf,
         "run_benchmark": run_benchmark,
         "atmosphere_generate_environment": f3d.atmosphere_generate_environment,
+        "render_compiled_frame": f3d.render_compiled_frame,
     }
     for name, entrypoint in exclusions.items():
         assert name in DOCUMENTED_EXCLUSIONS

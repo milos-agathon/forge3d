@@ -127,6 +127,7 @@ class TestNativeModuleSymbols:
         "TransformFailed",
         # LITTERA: immutable native shaping result
         "ShapedText",
+        "CompiledFrame",
     ]
 
     def test_registered_classes_exist(self):
@@ -348,6 +349,9 @@ class TestNativeModuleSymbols:
         "compress_dem",
         "decompress_dem",
         "verify_dem",
+        "frame_seed",
+        "compile_frame",
+        "render_compiled_frame",
     ]
 
     def test_registered_functions_exist(self):
@@ -864,6 +868,12 @@ class TestPackageLevelApiContracts:
         "dd_selftest",
         "dd_harness",
         "dd_jitter_demo",
+        "CompiledFrame",
+        "frame_seed",
+        "compile_frame",
+        "render_compiled_frame",
+        "FlythroughManifest",
+        "render_flythrough",
         "geo",
         "terrain",
     ]

@@ -386,6 +386,33 @@ def _explicit_lane_files() -> set[str]:
     return golden | viewer
 
 
+def test_e_sutura_integrity_gate_runs_in_full_and_hardware_lanes():
+    """SUTURA is in the full lane plus a reachable hardware zero-skip gate."""
+
+    targets = {
+        "tests/test_mapscene_sutura_integrity.py",
+    }
+    full_lane = set(ci_pytest_lane.full_lane_files())
+    unrun = set(ci_pytest_lane.unrun_files())
+    assert targets <= full_lane
+    assert targets.isdisjoint(unrun)
+
+    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    probe = ci_yml.index("- name: Require physical NVIDIA Vulkan terrain adapter")
+    sutura = ci_yml.index("- name: Run SUTURA MapScene integrity gate")
+    visual = ci_yml.index("- name: Run visual golden tests")
+    assert probe < sutura < visual, "SUTURA must run before independent visual-golden failures"
+    gate = ci_yml[sutura:visual]
+    assert targets <= set(re.findall(r"tests/test_[A-Za-z0-9_]+\.py", gate))
+    assert "assert_junit_zero_skips.py" in gate
+
+    filters = ci_yml.index("filters: |")
+    filter_start = ci_yml.index("terrain_goldens:", filters)
+    filter_end = ci_yml.index("f3dz:", filter_start)
+    filter_block = ci_yml[filter_start:filter_end]
+    assert all(target in filter_block for target in targets)
+
+
 def _workflow_job(workflow: str, name: str) -> str:
     match = re.search(
         rf"^  {re.escape(name)}:\n.*?(?=^  [A-Za-z0-9_-]+:\n|\Z)",
