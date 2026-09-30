@@ -1034,7 +1034,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-       contains(fromJSON('["1", "true"]'), vars.FORGE3D_RUN_METAL_DIAGNOSTIC)
+       vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
     outputs:
       aether_lane: ${{ steps.aether-absent.outputs.aether_lane || steps.aether-ran.outputs.aether_lane || steps.aether-software-absent.outputs.aether_lane || 'unknown' }}
     env:
@@ -1080,7 +1080,9 @@ jobs:
         if: steps.metal-probe.outputs.probe == 'positive'
         run: python -m pytest tests/test_terrain_visual_goldens.py -v --tb=short
       # mapscene_terrain_raster.metal.png is checked nowhere else. Compare-only:
-      # a mismatch uploads the Metal render via visual-golden-diffs.
+      # a mismatch uploads the Metal render via visual-golden-diffs. Hosted
+      # macos-14 exposes only the Apple Paravirtual device, which the probe
+      # records ABSENT, so this runs only on a physical Metal adapter.
       - name: Run optional Metal recipe pixel golden
         if: ${{ !cancelled() && steps.metal-probe.outputs.probe == 'positive' }}
         env:
@@ -1537,7 +1539,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-      contains(fromJSON('["1", "true"]'), vars.FORGE3D_RUN_METAL_DIAGNOSTIC)
+      vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
     runs-on: macos-14
     timeout-minutes: 30
     env:
