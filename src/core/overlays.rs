@@ -329,6 +329,10 @@ impl OverlayRenderer {
             overlay_sampler,
             height_sampler,
             depth_sampler,
+            // Contract: the bound overlay texture's storage encoding must match
+            // the render target's (unorm target -> unorm texture, srgb target
+            // -> srgb texture) so sampled colors pass through overlays.wgsl
+            // without a one-sided sRGB round-trip.
             overlay_format: TextureFormat::Rgba8Unorm,
         })
     }
