@@ -9,6 +9,7 @@ pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::core::overlay_layer::OverlayLayer>()?;
     m.add_class::<crate::py_types::PyAtmosphereLutHandle>()?;
     m.add_class::<crate::terrain::render_params::TerrainRenderParams>()?;
+    m.add_class::<crate::py_functions::chronos::CompiledFrame>()?;
     m.add_class::<crate::terrain::renderer::TerrainRenderer>()?;
     m.add_class::<crate::render::material_set::MaterialSet>()?;
     m.add_class::<crate::lighting::ibl_wrapper::IBL>()?;
