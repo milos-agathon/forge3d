@@ -159,6 +159,11 @@ impl TerrainRenderParams {
     }
 
     #[getter]
+    pub fn terrain_shading_model(&self) -> &str {
+        &self.terrain_shading_model
+    }
+
+    #[getter]
     pub fn vt_store(&self) -> Option<String> {
         self.vt_store_path.clone()
     }

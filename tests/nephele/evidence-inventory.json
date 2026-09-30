@@ -111,5 +111,6 @@
     "gate4_minimum_pass_fraction": 0.95,
     "gate2_samples_per_ensemble": 10000000
   },
-  "gate4_aggregation": "per_pixel_pass_fraction"
+  "gate4_aggregation": "per_pixel_pass_fraction",
+  "terrain_shading_model": "lambert_physical"
 }

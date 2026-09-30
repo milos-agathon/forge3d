@@ -1,0 +1,41 @@
+{
+  "candidate_vs_spp20": {
+    "failures": 160,
+    "fraction_delta_e_below_2": 0.8973042362002568,
+    "maximum_delta_e": 7.478719486899073,
+    "mean_delta_e": 0.87693313061725,
+    "p95_delta_e": 2.717720093255833,
+    "pass": false,
+    "passes": 1398,
+    "pixels": 1558
+  },
+  "candidate_vs_spp40": {
+    "failures": 80,
+    "fraction_delta_e_below_2": 0.9486521181001284,
+    "maximum_delta_e": 7.478719486899073,
+    "mean_delta_e": 0.6804756726075588,
+    "p95_delta_e": 2.2262795564626017,
+    "pass": false,
+    "passes": 1478,
+    "pixels": 1558
+  },
+  "inputs": {
+    "docs\\audits\\nephele-b1-2026-09-30\\vacuum-reference-spp20.npy": "77ab7c21162afd13b04d10682667a0447c2f9d572b8e69ca858a5aa5c923f894",
+    "docs\\audits\\nephele-b1-2026-09-30\\vacuum-reference-spp40.npy": "cf36f955d766dbf742ec01fcd01afba5e7e875ffad6eec7b02c9c6f3e8a999c2",
+    "docs\\audits\\nephele-physical-terrain-2026-09-30\\medium-disabled-rgb.npy": "f833a79cc03506c8a9342eb2fd114f0b8baf727fe0d11298589135833bc8eb50",
+    "tests\\nephele\\fixture\\terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+  },
+  "mean_signed_linear_rgb_residual": 0.0007581869042506442,
+  "physical_acceptance": false,
+  "schema": "forge3d.nephele.vacuum_noise_diagnostic/1",
+  "spp20_vs_spp40": {
+    "failures": 50,
+    "fraction_delta_e_below_2": 0.9679075738125802,
+    "maximum_delta_e": 3.963149334760206,
+    "mean_delta_e": 0.644416493256637,
+    "p95_delta_e": 1.9160960434646261,
+    "pass": true,
+    "passes": 1508,
+    "pixels": 1558
+  }
+}

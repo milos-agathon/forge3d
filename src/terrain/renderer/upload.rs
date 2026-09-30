@@ -124,7 +124,11 @@ impl TerrainScene {
                     } else {
                         0.0
                     },
-                    0.0,
+                    if params.terrain_shading_model == "lambert_physical" {
+                        1.0
+                    } else {
+                        0.0
+                    },
                 ],
             },
             lut: None,
@@ -449,7 +453,7 @@ impl TerrainScene {
             (0.0, 0.0, 0.0)
         };
 
-        let mut uniforms = Vec::with_capacity(44);
+        let mut uniforms = Vec::with_capacity(48);
         uniforms.extend_from_slice(&[
             decoded.triplanar.scale,
             decoded.triplanar.blend_sharpness,
@@ -546,6 +550,18 @@ impl TerrainScene {
         let power = params.height_curve_power.max(0.01);
         let lambert_k = params.lambert_contrast.clamp(0.0, 1.0);
         uniforms.extend_from_slice(&[mode_f, strength, power, lambert_k]);
+
+        let physical_base_color = if params.terrain_shading_model == "lambert_physical" {
+            material_set.single_untextured_base_color()
+        } else {
+            None
+        };
+        match physical_base_color {
+            Some([red, green, blue]) => {
+                uniforms.extend_from_slice(&[red, green, blue, 1.0]);
+            }
+            None => uniforms.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]),
+        }
 
         Ok(uniforms)
     }

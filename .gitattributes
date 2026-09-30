@@ -18,6 +18,12 @@ scripts/nephele_majorant_domain_probe.py text eol=lf
 scripts/nephele_shader_analyzer.py text eol=lf
 scripts/record_media_reference_convergence.py text eol=lf
 scripts/run_media_physical_capture.py text eol=lf
+scripts/nephele_b1_diagnostic.py text eol=lf
+scripts/nephele_b6_environment_diagnostic.py text eol=lf
+scripts/nephele_b8_occlusion_diagnostic.py text eol=lf
+# Diagnostic arrays, capture scripts and registrations are bound by raw hashes.
+docs/audits/nephele-*/** -text
+docs/audits/nephele-*.json -text
 src/media/density.rs text eol=lf
 src/media/diagnostics.rs text eol=lf
 src/media/lighting.rs text eol=lf

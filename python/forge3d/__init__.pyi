@@ -613,6 +613,7 @@ class TerrainRenderParams:
     material_map_paths: Dict[str, str]
     culling: Literal["none", "frustum", "hzb_two_phase"]
     shading: Literal["forward", "visibility"]
+    terrain_shading_model: Literal["stylized", "lambert_physical"]
     vt_store: Optional[VTStore | str]
     prefetch_horizon_ms: float
     vt_upload_budget_bytes: int

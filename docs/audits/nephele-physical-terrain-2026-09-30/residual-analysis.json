@@ -1,0 +1,238 @@
+{
+  "attribution": {
+    "not_identifiable_from_one_frozen_beauty_pair": [
+      "reference interreflection contribution",
+      "40-spp reference sampling noise",
+      "visibility, normal, raster coverage, or tone-map contributions to any individual residual"
+    ],
+    "reason": "the frozen reference beauty is a composite of direct sun, environment, interreflection, visibility, sampling noise, ACES, sRGB encoding, and u8 quantization; it contains no matched component AOVs or interreflection-off control",
+    "supported": [
+      "the residual after both unit corrections and exact-float albedo is measured from the executed B1 capture",
+      "signed display and decoded linear-light residuals describe direction and spatial concentration of disagreement"
+    ]
+  },
+  "classification": "read-only diagnostic; not physical acceptance",
+  "inputs": {
+    "candidate": {
+      "path": ".tmp\\nephele-completion\\b1-physical-3\\medium-disabled-rgb.npy",
+      "sha256": "f833a79cc03506c8a9342eb2fd114f0b8baf727fe0d11298589135833bc8eb50"
+    },
+    "mask": {
+      "path": "tests\\nephele\\fixture\\terrain-mask.npy",
+      "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+    },
+    "reference": {
+      "path": "docs\\audits\\nephele-b1-2026-09-30\\vacuum-reference-spp40.npy",
+      "sha256": "cf36f955d766dbf742ec01fcd01afba5e7e875ffad6eec7b02c9c6f3e8a999c2"
+    }
+  },
+  "overall": {
+    "failures_delta_e_at_least_2": 80,
+    "fraction_delta_e_below_2": 0.9486521181001284,
+    "maximum_delta_e": 7.478719486899073,
+    "mean_delta_e": 0.6804756726075588,
+    "p95_delta_e": 2.2262795564626017,
+    "passes_delta_e_below_2": 1478,
+    "pixels": 1558,
+    "signed_encoded_rec709": {
+      "count": 1558,
+      "maximum": 0.0781483411764706,
+      "mean": 0.0014336861886782956,
+      "mean_absolute": 0.006987980442749628,
+      "median": 0.0,
+      "minimum": -0.027450983137254904,
+      "negative": 643,
+      "p05": -0.011764707058823529,
+      "p95": 0.019607845098039218,
+      "positive": 589,
+      "root_mean_square": 0.010613762147855527,
+      "zero": 326
+    },
+    "signed_linear_relative_luminance": {
+      "count": 1558,
+      "maximum": 0.07413629887441725,
+      "mean": 0.0008944914930292621,
+      "mean_absolute": 0.007306926177847698,
+      "median": 0.0,
+      "minimum": -0.026420624993717834,
+      "negative": 643,
+      "p05": -0.014879549898404731,
+      "p95": 0.01779118233306846,
+      "positive": 589,
+      "root_mean_square": 0.010501826474954172,
+      "zero": 326
+    }
+  },
+  "pipeline": {
+    "authored_linear_albedo": [
+      0.6,
+      0.6,
+      0.6
+    ],
+    "single_untextured_albedo": "authored f32 RGB via physical_base_color uniform",
+    "terrain_shading_model": "lambert_physical"
+  },
+  "schema": "forge3d.nephele.b1_residual_analysis/1",
+  "signed_residual_definition": {
+    "encoded_rec709": "Rec.709 weights applied to normalized sRGB codes; encoded-domain diagnostic, not physical luminance",
+    "linear_relative_luminance": "IEC 61966-2-1 decode followed by Rec.709 relative-luminance weights",
+    "sign": "candidate minus frozen reference; positive means candidate is brighter"
+  },
+  "spatial_classification": {
+    "edge": "masked pixel with at least one 4-connected neighbor outside the terrain mask or image",
+    "interior": "masked pixel whose four connected neighbors are all in the terrain mask",
+    "low_gradient": "reference gradient is zero or the smallest positive step observed in the masked frozen reference",
+    "observed_smallest_positive_gradient_u8_codes": 1,
+    "reference_gradient": "maximum absolute frozen-reference u8 RGB channel step to an in-mask 4-neighbor"
+  },
+  "spatial_table": {
+    "edge_low_gradient": {
+      "failures_delta_e_at_least_2": 0,
+      "fraction_delta_e_below_2": 1.0,
+      "maximum_delta_e": 0.8743598339148515,
+      "mean_delta_e": 0.26097530786526124,
+      "p95_delta_e": 0.763777939941343,
+      "passes_delta_e_below_2": 32,
+      "pixels": 32,
+      "signed_encoded_rec709": {
+        "count": 32,
+        "maximum": 0.007843138039215687,
+        "mean": -0.0005516388848039217,
+        "mean_absolute": 0.0025124233946078435,
+        "median": 0.0,
+        "minimum": -0.004204608235294118,
+        "negative": 15,
+        "p05": -0.003921569019607844,
+        "p95": 0.007843138039215687,
+        "positive": 5,
+        "root_mean_square": 0.003551207295646586,
+        "zero": 12
+      },
+      "signed_linear_relative_luminance": {
+        "count": 32,
+        "maximum": 0.007223630691006505,
+        "mean": -0.0014968491157891987,
+        "mean_absolute": 0.003409711157986237,
+        "median": 0.0,
+        "minimum": -0.006713935975936011,
+        "negative": 15,
+        "p05": -0.006713935975936011,
+        "p95": 0.007223630691006505,
+        "positive": 5,
+        "root_mean_square": 0.004615945938179698,
+        "zero": 12
+      }
+    },
+    "edge_other_gradient": {
+      "failures_delta_e_at_least_2": 4,
+      "fraction_delta_e_below_2": 0.9722222222222222,
+      "maximum_delta_e": 2.3222116443922483,
+      "mean_delta_e": 0.6846054336393433,
+      "p95_delta_e": 1.8620168857522934,
+      "passes_delta_e_below_2": 140,
+      "pixels": 144,
+      "signed_encoded_rec709": {
+        "count": 144,
+        "maximum": 0.023529414117647057,
+        "mean": 0.0009080262581699349,
+        "mean_absolute": 0.007187787461873639,
+        "median": 0.0,
+        "minimum": -0.019607845098039218,
+        "negative": 59,
+        "p05": -0.011764707058823529,
+        "p95": 0.015686276078431375,
+        "positive": 64,
+        "root_mean_square": 0.00934678415651552,
+        "zero": 21
+      },
+      "signed_linear_relative_luminance": {
+        "count": 144,
+        "maximum": 0.021242671796590434,
+        "mean": 0.0002319701369521416,
+        "mean_absolute": 0.008017483684483791,
+        "median": 0.0,
+        "minimum": -0.02574358591886101,
+        "negative": 59,
+        "p05": -0.01615618584168994,
+        "p95": 0.01638051024411375,
+        "positive": 64,
+        "root_mean_square": 0.010025065215360214,
+        "zero": 21
+      }
+    },
+    "interior_low_gradient": {
+      "failures_delta_e_at_least_2": 1,
+      "fraction_delta_e_below_2": 0.9939024390243902,
+      "maximum_delta_e": 5.85811860653431,
+      "mean_delta_e": 0.20644779603943159,
+      "p95_delta_e": 0.5575437308728692,
+      "passes_delta_e_below_2": 163,
+      "pixels": 164,
+      "signed_encoded_rec709": {
+        "count": 164,
+        "maximum": 0.06246206509803922,
+        "mean": -0.0009906944356767098,
+        "mean_absolute": 0.0021555979124820665,
+        "median": 0.0,
+        "minimum": -0.007843138039215687,
+        "negative": 75,
+        "p05": -0.003921569019607844,
+        "p95": 0.002804518431372549,
+        "positive": 10,
+        "root_mean_square": 0.005547916390398019,
+        "zero": 79
+      },
+      "signed_linear_relative_luminance": {
+        "count": 164,
+        "maximum": 0.06098059997079161,
+        "mean": -0.001915045559721792,
+        "mean_absolute": 0.003261173477712231,
+        "median": 0.0,
+        "minimum": -0.012203192880908927,
+        "negative": 75,
+        "p05": -0.006713935975936011,
+        "p95": 0.00434065132211947,
+        "positive": 10,
+        "root_mean_square": 0.006426263477221205,
+        "zero": 79
+      }
+    },
+    "interior_other_gradient": {
+      "failures_delta_e_at_least_2": 75,
+      "fraction_delta_e_below_2": 0.9384236453201971,
+      "maximum_delta_e": 7.478719486899073,
+      "mean_delta_e": 0.7548351946439704,
+      "p95_delta_e": 2.3222116443922483,
+      "passes_delta_e_below_2": 1143,
+      "pixels": 1218,
+      "signed_encoded_rec709": {
+        "count": 1218,
+        "maximum": 0.0781483411764706,
+        "mean": 0.0018744282697446795,
+        "mean_absolute": 0.007732607987700827,
+        "median": 0.0,
+        "minimum": -0.027450983137254904,
+        "negative": 494,
+        "p05": -0.011764707058823529,
+        "p95": 0.023529414117647057,
+        "positive": 510,
+        "root_mean_square": 0.01137075510934801,
+        "zero": 214
+      },
+      "signed_linear_relative_luminance": {
+        "count": 1218,
+        "maximum": 0.07413629887441725,
+        "mean": 0.0014139414531347376,
+        "mean_absolute": 0.007870057575632744,
+        "median": 0.0,
+        "minimum": -0.026420624993717834,
+        "negative": 494,
+        "p05": -0.014879549898404731,
+        "p95": 0.021242671796590434,
+        "positive": 510,
+        "root_mean_square": 0.011093810959684284,
+        "zero": 214
+      }
+    }
+  }
+}

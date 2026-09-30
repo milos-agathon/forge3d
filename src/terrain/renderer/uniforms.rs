@@ -18,6 +18,8 @@ pub(super) struct OverlayUniforms {
     pub(super) params3: [f32; 4],
     pub(super) params4: [f32; 4],
     pub(super) params5: [f32; 4],
+    /// x=material slope bias, y=no-data threshold, z=no-data enabled,
+    /// w=terrain shading model (0 stylized, 1 Lambert physical).
     pub(super) params6: [f32; 4],
 }
 

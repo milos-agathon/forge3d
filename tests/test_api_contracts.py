@@ -1426,6 +1426,9 @@ class TestSsgiSsrSettingsWiring:
         assert hasattr(_native.TerrainRenderParams, "screen_space_settings")
         assert callable(getattr(_native.TerrainRenderParams, "screen_space_settings"))
 
+    def test_terrain_params_exposes_terrain_shading_model(self):
+        assert hasattr(_native.TerrainRenderParams, "terrain_shading_model")
+
 
 # ===========================================================================
 # Section 15: P1.2 Bloom settings wiring behavior tests

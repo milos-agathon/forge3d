@@ -1,8 +1,8 @@
 # NEPHELE reference convergence measurements, 2026-09-30
 
 These are reference-versus-reference noise measurements, **not G3/G4 physical
-acceptance**. The fixture remains UNRESOLVED until its tracked exact-prefix
-convergence record passes every unchanged criterion.
+acceptance**. The tracked exact-prefix convergence record passed every unchanged
+criterion at 640 spp; the fixture is CONVERGED/APPROVED from source `6a4ae50a`.
 
 ## Measured baseline
 

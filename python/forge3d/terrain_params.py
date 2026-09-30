@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import math
 from numbers import Integral
-from typing import TYPE_CHECKING, List, Optional, Tuple, Sequence
+from typing import TYPE_CHECKING, List, Literal, Optional, Tuple, Sequence
 
 import numpy as np
 from pathlib import Path
@@ -2051,6 +2051,9 @@ class TerrainRenderParams:
     # Material evaluation path. "visibility" performs a depth/ID prepass and
     # one full-screen barycentric material resolve per visible pixel.
     shading: str = "forward"
+    # Terrain lighting composition. The physical path uses a Lambertian BRDF
+    # with direct-sun visibility and environment irradiance in radiometric units.
+    terrain_shading_model: Literal["stylized", "lambert_physical"] = "stylized"
     # Optional disk-backed store returned by forge3d.terrain.open_vt_store().
     vt_store: Optional[object] = None
     # One-frame camera-velocity extrapolation horizon for lower-priority pages.
@@ -2284,6 +2287,10 @@ class TerrainRenderParams:
             raise ValueError("culling must be one of: none, frustum, hzb_two_phase")
         if self.shading not in {"forward", "visibility"}:
             raise ValueError("shading must be one of: forward, visibility")
+        if self.terrain_shading_model not in {"stylized", "lambert_physical"}:
+            raise ValueError(
+                "terrain_shading_model must be one of: stylized, lambert_physical"
+            )
         if not np.isfinite(self.prefetch_horizon_ms) or self.prefetch_horizon_ms < 0.0:
             raise ValueError("prefetch_horizon_ms must be finite and >= 0")
         if (
@@ -2350,6 +2357,7 @@ def make_terrain_params_config(
     camera_mode: str = "screen",  # "screen", "mesh", or "mesh:zup" (Z-up orbit, see TerrainParams)
     culling: str = "frustum",  # "none", "frustum", or "hzb_two_phase"
     shading: str = "forward",  # "forward" or "visibility"
+    terrain_shading_model: Literal["stylized", "lambert_physical"] = "stylized",
     vt_store: Optional[object] = None,
     prefetch_horizon_ms: float = 100.0,
     vt_upload_budget_bytes: int = 16 * 1024 * 1024,
@@ -2538,6 +2546,7 @@ def make_terrain_params_config(
         camera_mode=str(camera_mode),
         culling=str(culling),
         shading=str(shading),
+        terrain_shading_model=str(terrain_shading_model),
         vt_store=vt_store,
         prefetch_horizon_ms=float(prefetch_horizon_ms),
         vt_upload_budget_bytes=int(vt_upload_budget_bytes),

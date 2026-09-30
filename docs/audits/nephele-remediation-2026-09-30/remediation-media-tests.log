@@ -1,0 +1,32 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.87s
+     Running unittests src\lib.rs (target\debug\deps\forge3d-037a749b21360b0c.exe)
+
+running 25 tests
+test terrain::realtime_media::tests::colored_multiple_scatter_diagnostic_matches_analytic_beer_integral ... ok
+test terrain::realtime_media::tests::depth_transform_round_trips ... ok
+test terrain::realtime_media::tests::canonical_f16_transport_rejects_positive_underflow_and_overflow ... ok
+test terrain::realtime_media::tests::froxel_grid_covers_one_tile_beyond_every_viewport_edge ... ok
+test terrain::realtime_media::tests::homogeneous_sun_transmittance_integrates_the_complete_unbounded_segment ... ok
+test terrain::realtime_media::tests::ibl_intensity_and_lambert_fallback_preserve_uniform_environment_units ... ok
+test terrain::realtime_media::tests::live_viewer_paths_prepare_canonical_terrain_trace_before_encode ... ok
+test terrain::realtime_media::tests::live_media_paths_fail_closed_when_pbr_initialization_fails ... ok
+test terrain::realtime_media::tests::edge_jitter_consumes_both_off_axis_border_tiles ... ok
+test terrain::realtime_media::tests::sun_transmittance_integrates_complete_bounded_segment ... ok
+test terrain::realtime_media::tests::readback_accounting_tracks_dimensions_and_optional_no_medium_capture ... ok
+test terrain::realtime_media::tests::multiple_scatter_is_accounted ... ok
+test terrain::realtime_media::tests::temporal_depth_accepts_one_depth32_code_and_rejects_real_mismatch ... ok
+test terrain::realtime_media::tests::sun_step_diagnostic_sums_asymmetric_hits_and_zero_step_misses ... ok
+test terrain::realtime_media::tests::history_rejects_all_dependencies ... ok
+test terrain::realtime_media::tests::blue_noise_integrity ... ok
+test terrain::realtime_media::tests::ordered_history_hash_is_stable_and_position_sensitive ... ok
+test terrain::realtime_media::tests::execution_diagnostics_serialize_the_exact_public_schema ... ok
+test terrain::realtime_media::tests::yup_media_uses_the_reference_sun_axes ... ok
+test terrain::realtime_media::tests::reviewer_task_c_contracts_are_explicit ... ok
+test terrain::realtime_media::tests::terrain_media_surface_lookup_uses_froxel_xy_and_log_depth_coordinates ... ok
+test terrain::realtime_media::tests::terrain_scene_binds_all_declared_media_graph_resources ... ok
+test terrain::realtime_media::tests::viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear ... ok
+test terrain::realtime_media::tests::shaders_validate_and_compute_call_graphs_use_manual_shadows ... ok
+test terrain::realtime_media::tests::assembled_terrain_shader_consumes_same_medium_transmittance ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 1631 filtered out; finished in 0.30s
+

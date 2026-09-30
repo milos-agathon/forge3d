@@ -172,6 +172,7 @@ pub(crate) struct MediaExecutionDiagnostics {
     pub backend: String,
     pub driver: String,
     pub source_revision: String,
+    pub terrain_shading_model: String,
     pub executed_multi_scatter: bool,
     pub single_scatter_dispatches: u64,
     pub multiple_scatter_dispatches: u64,
@@ -354,6 +355,7 @@ pub(super) struct TerrainMediaResources {
     pub(super) sigma_s: [f32; 3],
     pub(super) sigma_t: [f32; 3],
     pub(super) phase: crate::media::Phase,
+    pub(super) terrain_shading_model: String,
     pub(super) terrain_albedo: [f32; 3],
     pub(super) diffuse_ibl: [f32; 3],
     pub(super) depth_transform: FroxelDepthTransform,
@@ -1011,6 +1013,7 @@ impl TerrainMediaResources {
             sigma_s: [0.0; 3],
             sigma_t: [0.0; 3],
             phase: crate::media::Phase::Isotropic,
+            terrain_shading_model: "stylized".into(),
             terrain_albedo: [0.0; 3],
             diffuse_ibl: [0.0; 3],
             depth_transform: FroxelDepthTransform::new(0.1, 1.0)
@@ -1857,6 +1860,7 @@ impl TerrainMediaResources {
                 .collect::<Vec<_>>()
                 .join(" "),
             source_revision: env!("FORGE3D_GIT_SHA_FULL").into(),
+            terrain_shading_model: self.terrain_shading_model.clone(),
             executed_multi_scatter: self.multiple_scatter_dispatches > 0,
             single_scatter_dispatches: self.single_scatter_dispatches,
             multiple_scatter_dispatches: self.multiple_scatter_dispatches,
@@ -2504,6 +2508,9 @@ impl crate::terrain::renderer::TerrainScene {
                 "realtime media viewport does not match the linear-HDR terrain target",
             ));
         }
+        resources
+            .terrain_shading_model
+            .clone_from(&params.terrain_shading_model);
         let medium_identity = resources.medium_identity.ok_or_else(|| {
             crate::core::error::RenderError::render("canonical medium upload is incomplete")
         })?;
@@ -3694,6 +3701,7 @@ mod tests {
             backend: "backend".into(),
             driver: "driver".into(),
             source_revision: "revision".into(),
+            terrain_shading_model: "stylized".into(),
             executed_multi_scatter: true,
             single_scatter_dispatches: 1,
             multiple_scatter_dispatches: 1,
@@ -3740,6 +3748,7 @@ mod tests {
                 "step_count",
                 "temporal_history_decision",
                 "temporal_history_reason",
+                "terrain_shading_model",
                 "terrain_trace_queries",
                 "sun_transmittance_method",
                 "sun_transmittance_bias",
@@ -3755,6 +3764,7 @@ mod tests {
         );
         assert_eq!(value["majorant_proof"], "ExactConstant");
         assert_eq!(value["majorant_valid"], true);
+        assert_eq!(value["terrain_shading_model"], "stylized");
         assert_eq!(value["sun_transmittance_method"], "bounded_nested_midpoint");
         assert_eq!(
             value["sun_transmittance_bias"],

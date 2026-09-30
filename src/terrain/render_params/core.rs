@@ -76,6 +76,7 @@ pub struct TerrainRenderParams {
     pub camera_mode: String,
     pub culling: String,
     pub shading: String,
+    pub terrain_shading_model: String,
     pub vt_store_path: Option<String>,
     pub prefetch_horizon_ms: f32,
     pub vt_upload_budget_bytes: u64,

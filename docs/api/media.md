@@ -86,6 +86,49 @@ config = make_terrain_params_config(
 params = TerrainRenderParams(config)
 ```
 
+## Physical terrain surface
+
+`TerrainRenderParams.terrain_shading_model` and
+`make_terrain_params_config(terrain_shading_model=...)` accept `"stylized"`
+(the default) or `"lambert_physical"`. The default preserves the established
+terrain look. The physical model is available with or without an attached
+medium and evaluates the pre-exposure terrain radiance as
+
+\[
+L_o = \frac{\rho}{\pi}(L_{sun}\max(n\mathbin{\cdot}l,0)T_{medium}V_{terrain})
+    + \frac{\rho}{\pi}E_{env}.
+\]
+
+Here `rho` is the resolved terrain albedo, `n` is the analytic geometric
+normal of the rendered bilinear DEM cell, and `L_sun` is the uploaded sun
+color multiplied by intensity. `V_terrain` is the raw product of cascade and
+heightfield sun visibility; the physical path adds no shadow floor or clamp.
+For untextured `MaterialSet.custom` layers, `base_color` is linear reflectance.
+A single constant physical material retains its authored floating-point value
+through a shading uniform, avoiding sRGB8 quantization; general untextured
+layers use the physical material cache's sRGB encoding. File-backed albedo
+texture bytes retain their normal sRGB interpretation. The default stylized
+material cache is unchanged.
+`T_medium` affects direct sunlight only and is one when no medium is attached.
+The terrain IBL cube stores normalized irradiance `E_env / pi`: its
+cosine-weighted convolution returns the mean under a cosine-weighted sampling
+distribution. The physical path converts that sample back to `E_env`, applies
+the configured IBL intensity, and divides by pi exactly once in the Lambertian
+equation. Thus constant radiance 0.25 corresponds to irradiance pi/4 in every
+channel, while its normalized cube value is 0.25.
+
+The physical path does not add the stylized ambient floor, edge enhancement,
+ambient occlusion, hue rotation, subsurface term, or terrain specular term.
+It also does not estimate terrain-to-terrain interreflection. Reference
+comparisons must report the remaining positive indirect-energy residual rather
+than adding an unmeasured bounce term. Compare unoccluded surface regions to
+separate that residual from geometric-normal or PCF visibility differences,
+which concentrate at slopes, silhouettes, and shadow boundaries.
+
+When real-time media diagnostics are captured, `terrain_shading_model` records
+the active value so physical-reference evidence cannot silently use the
+default stylized path.
+
 Pass ``params`` to ``TerrainRenderer.render_with_aov`` together with the
 material set, environment maps, and heightmap used by your existing terrain
 rendering setup. Assign ``None`` to ``config.media`` before constructing new

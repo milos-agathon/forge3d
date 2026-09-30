@@ -181,11 +181,14 @@ impl TerrainScene {
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         offline_hdr_output: bool,
     ) -> Result<PreparedMaterials> {
-        let gpu_materials = material_set
-            .gpu(self.device.as_ref(), self.queue.as_ref())
-            .map_err(|err| {
-                PyRuntimeError::new_err(format!("Failed to prepare material textures: {err:#}"))
-            })?;
+        let gpu_materials = if params.terrain_shading_model == "lambert_physical" {
+            material_set.gpu_physical(self.device.as_ref(), self.queue.as_ref())
+        } else {
+            material_set.gpu(self.device.as_ref(), self.queue.as_ref())
+        }
+        .map_err(|err| {
+            PyRuntimeError::new_err(format!("Failed to prepare material textures: {err:#}"))
+        })?;
         let material_maps = self.prepare_material_map_resources(&decoded.materials)?;
 
         let shading_uniforms =

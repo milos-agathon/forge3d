@@ -1,4 +1,4 @@
-from typing import Any, Mapping, Sequence, TypedDict
+from typing import Any, Literal, Mapping, Sequence, TypedDict
 
 class ReferenceMediaDiagnostics(TypedDict):
     majorant_proof: Any
@@ -22,6 +22,7 @@ class ReferenceMediaDiagnostics(TypedDict):
     energy_accounting_residual: float | None
 
 class RealtimeMediaDiagnostics(ReferenceMediaDiagnostics):
+    terrain_shading_model: Literal["stylized", "lambert_physical"]
     sun_transmittance_method: str
     sun_transmittance_bias: str
     sun_transmittance_max_segment_length: float | None

@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.46s
+     Running unittests src\lib.rs (target\debug\deps\forge3d-037a749b21360b0c.exe)
+
+running 2 tests
+test media::tests::hg_is_finite_at_representable_anisotropy_limits ... ok
+test media::tests::hg_evaluation_and_sampling_are_consistent ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1654 filtered out; finished in 0.03s
+

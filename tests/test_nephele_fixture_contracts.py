@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from scripts.nephele_fixture_masks import (
     EXPECTED_RULES,
@@ -34,12 +35,163 @@ from scripts.nephele_majorant_domain_probe import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize("mutation", ["array", "native", "samples", "sun"])
+def test_b6_environment_reference_rejects_unbound_inputs_before_gpu(tmp_path, mutation) -> None:
+    from scripts.nephele_b6_environment_diagnostic import environment_reference
+
+    provenance = _object(ROOT / "tests/nephele/fixture/reference-provenance.json")
+    crop = _object(ROOT / "tests/nephele/fixture/crop.json")
+    array = tmp_path / "reference-environment-rgb.npy"
+    np.save(array, np.zeros((crop["height"], crop["width"], 3), dtype=np.uint8), allow_pickle=False)
+    record = {
+        "schema": "forge3d.nephele.b6_environment_diagnostic/1",
+        "sun_intensity": 0.0,
+        "fixture_manifest_sha256": _hash(ROOT / "tests/nephele/fixture-manifest.json"),
+        "samples_per_pixel": provenance["samples_per_pixel"],
+        "imported_native": {"sha256": provenance["native_runtime"]["native_sha256"]},
+        "diagnostics": provenance["diagnostics"],
+        "artifact_hashes": {array.name: _hash(array)},
+    }
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(record), encoding="utf-8")
+    environment_reference(ROOT, tmp_path)
+    if mutation == "array":
+        array.write_bytes(b"altered executed array")
+    elif mutation == "native":
+        record["imported_native"]["sha256"] = "0" * 64
+    elif mutation == "samples":
+        record["samples_per_pixel"] = 40
+    else:
+        record["sun_intensity"] = 3.0
+    report.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="environment reference"):
+        environment_reference(ROOT, tmp_path)
+
+
+def test_original_b1_audit_hashes_remain_valid() -> None:
+    audit = ROOT / "docs/audits/nephele-b1-2026-09-30"
+    hashes = _object(audit / "artifact-hashes.json")["files"]
+    for name, digest in hashes.items():
+        assert _hash(audit / name) == digest, name
+    capture = ROOT / "docs/audits/nephele-physical-terrain-2026-09-30"
+    assert _hash(capture / "diagnostic-capture.py") == _object(capture / "b1-report.json")["diagnostic_tool"]["sha256"]
+
+
+def test_b1_registered_control_binds_plan_and_rejects_tampering(tmp_path, monkeypatch) -> None:
+    from scripts import nephele_b1_diagnostic as tool
+    from scripts.nephele_b1_diagnostic import _require_registered_reference
+
+    fixture = tmp_path / "tests/nephele/fixture"
+    fixture.mkdir(parents=True)
+    provenance = _object(ROOT / "tests/nephele/fixture/reference-provenance.json")
+    (fixture / "reference-provenance.json").write_text(json.dumps(provenance), encoding="utf-8")
+    (fixture / "crop.json").write_bytes((ROOT / "tests/nephele/fixture/crop.json").read_bytes())
+    manifest = tmp_path / "tests/nephele/fixture-manifest.json"
+    manifest.write_bytes((ROOT / "tests/nephele/fixture-manifest.json").read_bytes())
+    fixture_manifest = _object(manifest)
+    monkeypatch.setattr(tool, "_frozen_fixture", lambda repo: (fixture_manifest, provenance))
+    wheel = tmp_path / "reference.whl"
+    wheel.write_bytes(b"test wheel; native import is checked separately")
+    monkeypatch.setattr(tool, "_reference_wheel", lambda repo, runtime: (wheel, tool._artifact_record(repo, wheel)))
+    generator = tmp_path / "scripts/nephele_b1_diagnostic.py"
+    generator.parent.mkdir()
+    generator.write_bytes((ROOT / "scripts/nephele_b1_diagnostic.py").read_bytes())
+    output = tmp_path / "control"
+    output.mkdir()
+    reference = output / "vacuum-reference-spp320.npy"
+    np.save(reference, np.zeros((64, 64, 3), dtype=np.uint8), allow_pickle=False)
+    plan = tool._control_plan(tmp_path, output, fixture_manifest, provenance)
+    plan_path = tmp_path / "control-plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    record = {
+        "schema": "forge3d.nephele.vacuum_control/1",
+        "plan": {"path": plan_path.name, "artifact": plan_path.name, "sha256": _hash(plan_path)},
+        "reference": tool._artifact_record(tmp_path, reference),
+        "published_plan_sha256": _hash(plan_path),
+        "seed": plan["seed"],
+        "medium_coefficients": plan["medium_coefficients"],
+        "criterion": plan["criterion"],
+        "native_wheel": plan["native_wheel"],
+        "imported_native": {"path": str((tmp_path / "_forge3d.pyd").resolve()), "sha256": provenance["native_runtime"]["native_sha256"]},
+        "generator": plan["generator"],
+        "samples_per_pixel": 320,
+        "native_runtime": provenance["native_runtime"],
+        "diagnostics": {**provenance["diagnostics"], "sample_count": 320 * 64 * 64},
+        "camera_contract": provenance["camera_contract"],
+    }
+    record["outputs"] = {"reference": record["reference"]}
+    registration = output / "vacuum-control-spp320.json"
+    registration.write_text(json.dumps(record), encoding="utf-8")
+    actual, evidence = _require_registered_reference(tmp_path, reference, registration)
+    assert actual == reference and evidence["samples_per_pixel"] == 320
+    # A control at another sample count cannot silently replace the planned one.
+    record["samples_per_pixel"] = 40
+    registration.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="sample count differs"):
+        _require_registered_reference(tmp_path, reference, registration)
+    record["samples_per_pixel"] = 320
+    registration.write_text(json.dumps(record), encoding="utf-8")
+    original = reference.read_bytes()
+    reference.write_bytes(original + b"tampered")
+    with pytest.raises(ValueError, match="differs from its recorded hash"):
+        _require_registered_reference(tmp_path, reference, registration)
+    reference.write_bytes(original)
+    plan_path.write_text(json.dumps({**plan, "samples_per_pixel": 40}), encoding="utf-8")
+    with pytest.raises(ValueError, match="differs from its recorded hash"):
+        _require_registered_reference(tmp_path, reference, registration)
+
+
+def test_b1_generator_rejects_changed_plan_before_runtime_validation(tmp_path, monkeypatch) -> None:
+    from scripts import nephele_b1_diagnostic as tool
+
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text('{"samples_per_pixel": 320}', encoding="utf-8")
+    published = _hash(plan_path)
+    plan_path.write_text('{"samples_per_pixel": 40}', encoding="utf-8")
+    def forbidden_validation(*args):
+        pytest.fail("runtime validation must not run for an unpublished or changed plan")
+    monkeypatch.setattr(tool, "_validate_control_plan", forbidden_validation)
+    for digest in (None, published):
+        with pytest.raises(ValueError, match="digest published before generation"):
+            tool._generate_control(tmp_path, plan_path, digest)
+
+
+def test_b1_generator_rejects_wrong_imported_native(tmp_path) -> None:
+    from types import SimpleNamespace
+    from scripts.nephele_b1_diagnostic import _verify_imported_native
+
+    extracted = tmp_path / "wheel"
+    extracted.mkdir()
+    expected = extracted / "_forge3d.pyd"
+    expected.write_bytes(b"reference native")
+    runtime = {"native_sha256": _hash(expected)}
+    native = SimpleNamespace(__file__=str(expected))
+    assert _verify_imported_native(native, runtime, extracted)["sha256"] == runtime["native_sha256"]
+    expected.write_bytes(b"candidate native")
+    with pytest.raises(RuntimeError, match="imported reference native differs"):
+        _verify_imported_native(native, runtime, extracted)
+    outside = tmp_path / "_forge3d.pyd"
+    outside.write_bytes(b"reference native")
+    with pytest.raises(RuntimeError, match="imported reference native differs"):
+        _verify_imported_native(SimpleNamespace(__file__=str(outside)), runtime, extracted)
+
+
 def _object(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_reference_tag_preserves_provenance_source_revision() -> None:
+    provenance = _object(ROOT / "tests/nephele/fixture/reference-provenance.json")
+    tagged_revision = subprocess.check_output(
+        ["git", "rev-parse", "nephele-reference-6a4ae50a^{commit}"],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+    assert tagged_revision == provenance["source_revision"]
 
 
 def test_blue_noise_is_generated_rank_data_with_bound_source_and_license() -> None:

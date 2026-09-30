@@ -40,6 +40,7 @@ ADAPTER_KEYS = {
     "driver", "driver_info", "software_fallback",
 }
 DIAGNOSTIC_KEYS = {
+    "terrain_shading_model",
     "majorant_proof", "majorant_valid", "sample_count", "step_count",
     "temporal_history_decision", "temporal_history_reason", "host_visible_bytes",
     "froxel_device_local_bytes", "density_device_local_bytes",
@@ -79,6 +80,7 @@ def _validate_candidate_diagnostics(
     max_abs_error = diagnostics["sun_transmittance_max_abs_error"]
     if (
         diagnostics.get("source_revision") != head
+        or diagnostics["terrain_shading_model"] != "lambert_physical"
         or str(diagnostics.get("backend", "")).lower() != "vulkan"
         or diagnostics.get("adapter") != probe["name"]
         or diagnostics.get("driver") != expected_driver
@@ -626,6 +628,7 @@ def render(artifact: Path, head: str, label: str, capture_primary: bool) -> None
         density_scale=density_scale, version=1,
     )
     config = make_terrain_params_config(
+        terrain_shading_model="lambert_physical",
         size_px=tuple(crop["full_viewport"]), render_scale=1.0, terrain_span=terrain_span, msaa_samples=1, z_scale=float(terrain_data["exaggeration"]),
         exposure=float(exposure["value"]), domain=(float(terrain.min()), float(terrain.max())), light_azimuth_deg=sun["azimuth_deg"],
         light_elevation_deg=sun["elevation_deg"], sun_intensity=sun["intensity"], sun_color=sun["color"],
@@ -635,6 +638,8 @@ def render(artifact: Path, head: str, label: str, capture_primary: bool) -> None
         tonemap=TonemapSettings(operator="aces"), aov=AovSettings(enabled=True, transmittance=True, in_scatter=True, cloud_shadow=True, optical_depth=True), media=medium,
     )
     params = f3d.TerrainRenderParams(config)
+    if params.terrain_shading_model != "lambert_physical":
+        raise ValueError("NEPHELE capture requires the physical terrain shading model")
     renderer = f3d.TerrainRenderer(f3d.Session(window=False))
     material = f3d.MaterialSet.custom(
         tuple(material_input["albedo"]), float(material_input["metallic"]), float(material_input["roughness"]),
@@ -673,6 +678,8 @@ def render(artifact: Path, head: str, label: str, capture_primary: bool) -> None
                 allow_pickle=False,
             )
             ablation = renderer._capture_nephele_acceptance(material, ibl, params, terrain, terrain_occlusion_in_media=False)
+            if ablation["diagnostics"]["terrain_shading_model"] != "lambert_physical":
+                raise ValueError("terrain-occlusion ablation changed the shading model")
             np.save(artifact / "terrain-occlusion-disabled-rgb.npy", _crop(np.asarray(ablation["beauty"], dtype=np.uint8), crop), allow_pickle=False)
             output_height, output_width = frame.shape[:2]
             termination = np.asarray(capture["termination_slice"])

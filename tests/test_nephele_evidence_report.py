@@ -605,6 +605,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
     bundle_hash = hashlib.sha256(json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     adapter_hash = hashlib.sha256(json.dumps(probe, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     candidate_diagnostics = {
+        "terrain_shading_model": "lambert_physical",
         "majorant_proof": "TrilinearConvexHull", "majorant_valid": True,
         "sample_count": 144, "step_count": 12345,
         "temporal_history_decision": "rejected",
@@ -705,6 +706,10 @@ def test_capture_shaped_sun_diagnostics_interoperate_and_fail_closed(
         "max_abs_error": 0.0005,
     }
     mutations = (
+        ("shading-model", "terrain_shading_model", "stylized"),
+        ("shading-model-invalid", "terrain_shading_model", "unknown"),
+        ("shading-model-type", "terrain_shading_model", 1),
+        ("shading-model-missing", "terrain_shading_model", None),
         ("history-decision", "temporal_history_decision", "accepted"),
         ("history-reason", "temporal_history_reason", "arbitrary"),
         ("missing", "sun_transmittance_method", None),
@@ -722,7 +727,7 @@ def test_capture_shaped_sun_diagnostics_interoperate_and_fail_closed(
     )
     for mutation, field, value in mutations:
         diagnostics = dict(base)
-        if mutation == "missing":
+        if mutation in ("missing", "shading-model-missing"):
             diagnostics.pop(field)
         else:
             diagnostics[field] = value
@@ -1534,6 +1539,7 @@ def test_tracked_approved_fixture_verifies_and_inventory_is_exact(tmp_path: Path
     }
     fixture = _load(ROOT / "tests/nephele/fixture-manifest.json")
     policy = _load(ROOT / "tests/nephele/gate4-policy.json")
+    shutil.copy2(ROOT / "tests/nephele/gate4-policy.json", tmp_path / "gate4-policy.json")
     assert fixture["status"] == "APPROVED"
     for source in (ROOT / "tests/nephele/fixture").iterdir():
         if source.is_file():
@@ -1552,10 +1558,14 @@ def test_tracked_approved_fixture_verifies_and_inventory_is_exact(tmp_path: Path
     head = _git(ROOT, "rev-parse", "HEAD")
     _verify_fixture_manifest(tmp_path, fixture, ROOT, head)
     convergence, _, _ = _verify_reference_provenance(tmp_path, fixture, ROOT, head)
-    assert convergence["status"] == "CONVERGED"
+    assert convergence_record["status"] == "CONVERGED"
+    assert convergence["metrics"] == convergence_record["metrics"]
+    assert convergence["previous_samples_per_pixel"] == convergence_record["previous"]["samples_per_pixel"]
+    assert convergence["final_samples_per_pixel"] == convergence_record["final"]["samples_per_pixel"]
     assert policy["status"] == "APPROVED"
     assert policy["aggregation"] == {"kind": "per_pixel_pass_fraction", "minimum_fraction": 0.95}
     assert inventory["gate4_aggregation"] == "per_pixel_pass_fraction"
+    assert inventory["terrain_shading_model"] == "lambert_physical"
 
 
 def test_gate4_owner_fraction_boundary_and_self_approval_rejection():

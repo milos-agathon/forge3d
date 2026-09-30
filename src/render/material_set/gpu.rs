@@ -41,8 +41,32 @@ impl MaterialSet {
     ) -> Result<Arc<GpuMaterialSet>> {
         self.gpu_cache
             .get_or_try_init(|| {
-                let gpu =
-                    GpuMaterialSet::new(device, queue, &self.materials, &self._texture_paths)?;
+                let gpu = GpuMaterialSet::new(
+                    device,
+                    queue,
+                    &self.materials,
+                    &self._texture_paths,
+                    false,
+                )?;
+                Ok(Arc::new(gpu))
+            })
+            .map(Arc::clone)
+    }
+
+    pub(crate) fn gpu_physical(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Arc<GpuMaterialSet>> {
+        self.physical_gpu_cache
+            .get_or_try_init(|| {
+                let gpu = GpuMaterialSet::new(
+                    device,
+                    queue,
+                    &self.materials,
+                    &self._texture_paths,
+                    true,
+                )?;
                 Ok(Arc::new(gpu))
             })
             .map(Arc::clone)
@@ -56,6 +80,7 @@ impl GpuMaterialSet {
         queue: &wgpu::Queue,
         materials: &[crate::core::material::PbrMaterial],
         texture_paths: &[Option<String>],
+        encode_untextured_linear: bool,
     ) -> Result<Self> {
         let mut layer_count = materials.len();
         if layer_count == 0 {
@@ -174,6 +199,7 @@ impl GpuMaterialSet {
                 target_width,
                 target_height,
                 mip_level_count,
+                encode_untextured_linear,
             );
             layer_pixels.push(mip_chain);
         }

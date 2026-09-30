@@ -180,6 +180,7 @@ struct TerrainShadingUniforms {
     clamp1 : vec4<f32>,           // ambient_min, ambient_max, shadow_min, shadow_max
     clamp2 : vec4<f32>,           // occlusion_min, occlusion_max, lod_level, anisotropy
     height_curve : vec4<f32>,     // x=mode, y=strength, z=power, w=lambert_contrast (P5-L)
+    physical_base_color : vec4<f32>, // authored linear rgb, w=single untextured material enabled
 };
 
 struct OverlayUniforms {
@@ -190,7 +191,7 @@ struct OverlayUniforms {
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
-    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, reserved
+    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, terrain_shading_model
 };
 
 struct IblUniforms {
@@ -2090,6 +2091,48 @@ fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
     return det_fma(apply_height_curve01(t), h_max - h_min, h_min);
+}
+
+// Geometric normal of the exact bilinear DEM cell under uv. In the Y-up
+// terrain mode this mirrors hybrid_terrain_traversal.wgsl::terrain_normal_at:
+// the same four corner heights, exaggeration, cell spacing, and analytic
+// bilinear derivatives are used by the production reference surface.
+fn terrain_reference_geometric_normal(uv: vec2<f32>) -> vec3<f32> {
+    let dimensions = max(logical_height_dimensions(), vec2<f32>(2.0));
+    let cell_count = max(dimensions - vec2<f32>(1.0), vec2<f32>(1.0));
+    let texel = det_barrier2(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * cell_count);
+    let cell = min(floor(texel), cell_count - vec2<f32>(1.0));
+    let local = texel - cell;
+
+    let uv00 = det_div2(cell, cell_count);
+    let uv10 = det_div2(cell + vec2<f32>(1.0, 0.0), cell_count);
+    let uv01 = det_div2(cell + vec2<f32>(0.0, 1.0), cell_count);
+    let uv11 = det_div2(cell + vec2<f32>(1.0, 1.0), cell_count);
+    let exaggeration = u_terrain.spacing_h_exag.z;
+    let h00 = det_barrier(sample_height_geom_level(uv00, 0.0) * exaggeration);
+    let h10 = det_barrier(sample_height_geom_level(uv10, 0.0) * exaggeration);
+    let h01 = det_barrier(sample_height_geom_level(uv01, 0.0) * exaggeration);
+    let h11 = det_barrier(sample_height_geom_level(uv11, 0.0) * exaggeration);
+    let dh_du = det_mix(h10 - h00, h11 - h01, local.y);
+    let dh_dv = det_mix(h01 - h00, h11 - h10, local.x);
+    let cell_spacing = max(
+        det_div2(u_terrain.spacing_h_exag.xy, cell_count),
+        // Keep the reciprocal out of zero/denormal inputs, matching the
+        // minimum normal f32 used by the deterministic normalization helper.
+        vec2<f32>(1.17549435e-38),
+    );
+
+    let z_up = vec3<f32>(
+        -det_div(dh_du, cell_spacing.x),
+        -det_div(dh_dv, cell_spacing.y),
+        1.0,
+    );
+    let y_up = vec3<f32>(
+        -det_div(dh_du, cell_spacing.x),
+        1.0,
+        -det_div(dh_dv, cell_spacing.y),
+    );
+    return det_normalize3(select(z_up, y_up, u32(u_terrain.camera_mode_params.x) == 2u));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4097,6 +4140,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         discard;
     }
     let debug_mode = u32(u_overlay.params1.y + 0.5);
+    let lambert_physical = u_overlay.params6.w > 0.5;
 
     // Compute all normal variants for diagnostics
     let base_normal = det_normalize3(input.world_normal);
@@ -4556,6 +4600,11 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let overlay_rgb = textureSample(colormap_tex, colormap_samp, lut_uv).rgb;
 
     // Apply overlay blend to material albedo (if overlay is active)
+    if (lambert_physical && !is_water && u_shading.physical_base_color.w > 0.5) {
+        // Preserve the authored f32 reflectance for a single constant material;
+        // the sRGB8 material texture remains available for all general cases.
+        albedo = u_shading.physical_base_color.rgb;
+    }
     var material_albedo = albedo; // Store original triplanar albedo
     if (overlay_strength_raw > 1e-5) {
         let strength = clamp(overlay_strength_raw, 0.0, 1.0);
@@ -4612,7 +4661,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // P4: Apply slope+elevation hue variation to increase h_std metric
     // Combines slope (steep=redder, flat=yellower) and elevation spread
     // The caller can set strength to zero when the supplied palette must remain authoritative.
-    if (!is_water) {
+    if (!is_water && !lambert_physical) {
         let hue_variation_strength = clamp(u_overlay.params3.z, 0.0, 0.2);
         albedo = det_barrier3(apply_slope_hue_variation(albedo, slope_factor, height_norm, hue_variation_strength));
     }
@@ -5447,6 +5496,58 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
                 WATER_BASE_TINT * WATER_BASE_TINT_SCALE) +
                 det_barrier3(det_barrier3(water_scatter) * WATER_SCATTER_SCALE);
 
+        } else if (lambert_physical) {
+            // OD-9c physical terrain surface. The planar/Y-up normal is the
+            // exact analytic bilinear-cell normal used by the reference
+            // traversal. ORBIS retains its displaced globe geometric normal.
+            let physical_normal = select(
+                terrain_reference_geometric_normal(uv),
+                height_normal_lod,
+                orbis_globe,
+            );
+            let n_dot_l = max(det_dot3(physical_normal, light_dir), 0.0);
+
+            // V_terrain is the raw product of the two production visibility
+            // estimators. Do not apply the stylized shadow or AO floors.
+            let sun_vis_uv = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
+            let sun_vis_tex_size = vec2<f32>(textureDimensions(sun_vis_tex, 0));
+            let sun_vis_pixel = vec2<i32>(sun_vis_uv * sun_vis_tex_size);
+            let sun_vis_clamped_pixel = clamp(
+                sun_vis_pixel,
+                vec2<i32>(0),
+                vec2<i32>(sun_vis_tex_size) - vec2<i32>(1),
+            );
+            let sun_vis_sample = textureLoad(sun_vis_tex, sun_vis_clamped_pixel, 0).r;
+            let terrain_visibility = det_barrier(shadow_visibility * sun_vis_sample);
+
+            // light_params.rgb is sun_color * intensity in radiance units.
+            // The terrain IBL cube stores normalized irradiance E_env / PI.
+            // Convert it back to irradiance so the physical equation divides
+            // by PI exactly once below.
+            let lambert_brdf = det_div3(albedo, vec3<f32>(PI));
+            let direct_radiance = det_barrier3(
+                det_barrier3(
+                    det_barrier3(lambert_brdf * u_shading.light_params.rgb) * n_dot_l
+                ) * same_medium_direct_t
+            ) * terrain_visibility;
+            let rotated_physical_normal = rotate_y(
+                physical_normal,
+                u_ibl.sin_theta,
+                u_ibl.cos_theta,
+            );
+            let environment_irradiance = textureSampleLevel(
+                envIrradiance,
+                envSampler,
+                rotated_physical_normal,
+                0.0,
+            ).rgb;
+            let environment_radiance = det_div3(
+                det_barrier3(albedo * det_barrier3(
+                    det_barrier3(environment_irradiance * u_ibl.intensity) * PI
+                )),
+                vec3<f32>(PI),
+            );
+            shaded = det_barrier3(direct_radiance) + det_barrier3(environment_radiance);
         } else {
             // ══════════════════════════════════════════════════════════════════════
             // P2-S4: Terrain Lighting Composition (structure locked per spec)

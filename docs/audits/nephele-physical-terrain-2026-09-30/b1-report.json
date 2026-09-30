@@ -1,0 +1,136 @@
+{
+  "candidate_native": {
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "driver": "NVIDIA 610.60",
+    "source_matches_repository_head": true,
+    "source_revision": "96e0b30381f65517b4f4813cd1faf228b94d4c95"
+  },
+  "criterion": {
+    "metric": "fraction_delta_e_below_2",
+    "minimum": 0.95,
+    "pass": false
+  },
+  "diagnostic_tool": {
+    "path": "D:\\forge3d\\.worktrees\\nephele-172-completion\\docs\\audits\\nephele-b1-2026-09-30\\diagnostic.py",
+    "sha256": "f9a9a396cc8cdd81a54b08d5fb1bbdec026cbed834ee890d053ae93c31ecc12d"
+  },
+  "fixture_manifest_sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817",
+  "gate4_comparison1": "NOT_PROVEN",
+  "medium_control": "candidate no-medium branch versus committed sigma_a=sigma_s=0 vacuum reference",
+  "physical_acceptance": false,
+  "repository": {
+    "head": "96e0b30381f65517b4f4813cd1faf228b94d4c95",
+    "path": "D:\\forge3d\\.worktrees\\nephele-172-completion",
+    "tracked_dirty_entries": [
+      "M .github/workflows/ci.yml",
+      " M .github/workflows/test-python-wheel.yml",
+      " M .gitignore",
+      " M docs/api/media.md",
+      " M docs/audits/nephele-b1-2026-09-30/diagnostic.py",
+      " M docs/audits/nephele-reference-convergence-2026-09-30.md",
+      " M python/forge3d/__init__.pyi",
+      " M python/forge3d/media.pyi",
+      " M python/forge3d/terrain_params.py",
+      " M scripts/nephele_evidence_report.py",
+      " M scripts/run_media_physical_capture.py",
+      " M shaders/contracts/terrain_pbr_pom.toml",
+      " M src/render/material_set/core.rs",
+      " M src/render/material_set/gpu.rs",
+      " M src/render/material_set/gpu_helpers.rs",
+      " M src/shaders/terrain_pbr_pom.wgsl",
+      " M src/terrain/render_params/core.rs",
+      " M src/terrain/render_params/decode_core.rs",
+      " M src/terrain/render_params/private_impl.rs",
+      " M src/terrain/render_params/py_api.rs",
+      " M src/terrain/renderer/draw/setup/context.rs",
+      " M src/terrain/renderer/media.rs",
+      " M src/terrain/renderer/py_api.rs",
+      " M src/terrain/renderer/runtime_contract.rs",
+      " M src/terrain/renderer/uniforms.rs",
+      " M src/terrain/renderer/upload.rs",
+      " M tests/nephele/evidence-inventory.json",
+      " M tests/shader_proofs_ledger.toml",
+      " M tests/test_api_contracts.py",
+      " M tests/test_nephele_evidence_report.py",
+      " M tests/test_nephele_fixture_contracts.py",
+      " M tests/test_nephele_public_api.py",
+      " M tests/test_no_silent_degradation.py",
+      " M tests/test_terrain_visual_goldens.py"
+    ],
+    "tracked_worktree_clean": false
+  },
+  "scene_inputs": {
+    "atmosphere": {
+      "artifact": "atmosphere.json",
+      "path": "tests/nephele/fixture/atmosphere.json",
+      "sha256": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47"
+    },
+    "camera": {
+      "artifact": "camera.json",
+      "path": "tests/nephele/fixture/camera.json",
+      "sha256": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1"
+    },
+    "crop": {
+      "artifact": "crop.json",
+      "path": "tests/nephele/fixture/crop.json",
+      "sha256": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04"
+    },
+    "exposure": {
+      "artifact": "exposure.json",
+      "path": "tests/nephele/fixture/exposure.json",
+      "sha256": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31"
+    },
+    "material": {
+      "artifact": "material.json",
+      "path": "tests/nephele/fixture/material.json",
+      "sha256": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789"
+    },
+    "medium": {
+      "artifact": "medium.json",
+      "path": "tests/nephele/fixture/medium.json",
+      "sha256": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9"
+    },
+    "sun": {
+      "artifact": "sun.json",
+      "path": "tests/nephele/fixture/sun.json",
+      "sha256": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02"
+    },
+    "terrain": {
+      "artifact": "terrain.json",
+      "path": "tests/nephele/fixture/terrain.json",
+      "sha256": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315"
+    },
+    "terrain_dem": {
+      "artifact": "terrain-dem.npy",
+      "path": "tests/nephele/fixture/terrain-dem.npy",
+      "sha256": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf"
+    },
+    "tonemap": {
+      "artifact": "tonemap.json",
+      "path": "tests/nephele/fixture/tonemap.json",
+      "sha256": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034"
+    }
+  },
+  "schema": "forge3d.nephele.b1_diagnostic/2",
+  "terrain_comparison": {
+    "fraction_delta_e_below_2": 0.9486521181001284,
+    "maximum_delta_e": 7.478719486899073,
+    "mean_delta_e": 0.6804756726075588,
+    "p95_delta_e": 2.2262795564626017,
+    "pass": false,
+    "pixels": 1558
+  },
+  "terrain_mask": {
+    "artifact": "terrain-mask.npy",
+    "path": "tests/nephele/fixture/terrain-mask.npy",
+    "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+  },
+  "terrain_shading_model": "lambert_physical",
+  "vacuum_reference": {
+    "path": "docs/audits/nephele-b1-2026-09-30/vacuum-reference-spp40.npy",
+    "reused_committed_blob": true,
+    "samples_per_pixel": 40,
+    "sha256": "cf36f955d766dbf742ec01fcd01afba5e7e875ffad6eec7b02c9c6f3e8a999c2"
+  }
+}

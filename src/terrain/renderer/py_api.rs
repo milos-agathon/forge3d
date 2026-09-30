@@ -431,7 +431,7 @@ impl TerrainRenderer {
     /// Acceptance-only deterministic capture for NEPHELE physical gates.
     /// This deliberately remains a private native method rather than a stable
     /// public rendering API.
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, *, terrain_occlusion_in_media=true, include_no_medium=false))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, *, terrain_occlusion_in_media=true, include_no_medium=false, capture_radiance_provider=false))]
     fn _capture_nephele_acceptance<'py>(
         &mut self,
         py: Python<'py>,
@@ -441,6 +441,7 @@ impl TerrainRenderer {
         heightmap: PyReadonlyArray2<'py, f32>,
         terrain_occlusion_in_media: bool,
         include_no_medium: bool,
+        capture_radiance_provider: bool,
     ) -> PyResult<PyObject> {
         let media = params.media.as_ref().ok_or_else(|| {
             PyRuntimeError::new_err("NEPHELE acceptance capture requires TerrainRenderParams.media")
@@ -512,6 +513,31 @@ impl TerrainRenderer {
                 "NEPHELE acceptance termination readback contains non-finite values",
             ));
         }
+
+        // Optional B2 readback observes the uploaded directional radiance and
+        // diffuse irradiance before a no-medium capture detaches the resources.
+        let radiance_provider = if capture_radiance_provider {
+            let resources = self
+                .scene
+                .media_resources
+                .lock()
+                .map_err(|_| PyRuntimeError::new_err("media_resources mutex poisoned"))?;
+            let resources = resources.as_ref().ok_or_else(|| {
+                PyRuntimeError::new_err("B2 capture requires attached realtime media")
+            })?;
+            let values = crate::core::hdr::read_hdr_texture(
+                self.scene.device.as_ref(),
+                self.scene.queue.as_ref(),
+                &resources.radiance_provider,
+                internal_viewport.0,
+                internal_viewport.1,
+                wgpu::TextureFormat::Rgba16Float,
+            )
+            .map_err(|error| PyRuntimeError::new_err(format!("B2 readback failed: {error:#}")))?;
+            Some((values, resources.diffuse_ibl))
+        } else {
+            None
+        };
 
         let no_medium_frame = if include_no_medium {
             self.scene.clear_realtime_media().map_err(|error| {
@@ -617,10 +643,17 @@ impl TerrainRenderer {
                 viewport,
                 internal_viewport,
                 no_medium_beauty.is_some(),
-            ),
+            ) + u64::from(capture_radiance_provider)
+                * u64::from(internal_viewport.0)
+                * u64::from(internal_viewport.1)
+                * 8,
         )?;
 
         let result = PyDict::new_bound(py);
+        if let Some((radiance, irradiance)) = radiance_provider {
+            result.set_item("radiance_provider", radiance.into_pyarray_bound(py))?;
+            result.set_item("diffuse_ibl", irradiance)?;
+        }
         result.set_item("beauty", beauty.into_pyarray_bound(py))?;
         if let Some(no_medium_beauty) = no_medium_beauty {
             result.set_item("no_medium_beauty", no_medium_beauty.into_pyarray_bound(py))?;

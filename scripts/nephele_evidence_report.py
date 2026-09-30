@@ -85,6 +85,7 @@ SCENE_INPUT_ROLES = {
     "camera", "terrain_dem", "terrain", "medium", "sun", "atmosphere", "exposure", "tonemap", "crop", "material"
 }
 REALTIME_DIAGNOSTIC_KEYS = {
+    "terrain_shading_model",
     "majorant_proof", "majorant_valid", "sample_count", "step_count",
     "temporal_history_decision", "temporal_history_reason", "host_visible_bytes",
     "froxel_device_local_bytes", "density_device_local_bytes",
@@ -1935,6 +1936,7 @@ def _validate_realtime_diagnostics(
     expected_driver = f'{adapter["driver"]} {adapter["driver_info"]}'
     if (
         diagnostics["source_revision"] != head_sha
+        or diagnostics["terrain_shading_model"] != "lambert_physical"
         or str(diagnostics["backend"]).lower() != "vulkan"
         or diagnostics["adapter"] != adapter["name"]
         or diagnostics["driver"] != expected_driver

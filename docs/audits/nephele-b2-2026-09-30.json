@@ -1,0 +1,126 @@
+{
+  "derived_surface_units": {
+    "classification": "static derivation from observed diffuse_ibl and shader formula",
+    "exposure": 1.0,
+    "lambert_exitant_radiance_albedo_times_diffuse_ibl_over_pi": [
+      0.15000000596046448,
+      0.15000000596046448,
+      0.15000000596046448
+    ],
+    "sun_term": "separate color * intensity * max(N dot L,0) * CSM visibility * medium transmittance"
+  },
+  "diffuse_ibl": {
+    "actual": [
+      0.7853981852531433,
+      0.7853981852531433,
+      0.7853981852531433
+    ],
+    "actual_f32_bits": [
+      1061752795,
+      1061752795,
+      1061752795
+    ],
+    "bitwise_match": true,
+    "expected_f32_bits": [
+      1061752795,
+      1061752795,
+      1061752795
+    ],
+    "expected_pi_times_radiance": [
+      0.7853981852531433,
+      0.7853981852531433,
+      0.7853981852531433
+    ]
+  },
+  "directional_radiance_provider": {
+    "all_texels_match_expected": true,
+    "logical_shape": [
+      64,
+      64,
+      4
+    ],
+    "statistics": {
+      "a": {
+        "count": 4096,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "standard_deviation": 0.0
+      },
+      "b": {
+        "count": 4096,
+        "max": 0.25,
+        "mean": 0.25,
+        "min": 0.25,
+        "standard_deviation": 0.0
+      },
+      "g": {
+        "count": 4096,
+        "max": 0.25,
+        "mean": 0.25,
+        "min": 0.25,
+        "standard_deviation": 0.0
+      },
+      "r": {
+        "count": 4096,
+        "max": 0.25,
+        "mean": 0.25,
+        "min": 0.25,
+        "standard_deviation": 0.0
+      }
+    },
+    "storage_format": "rgba16float"
+  },
+  "fixture": {
+    "decoded_linear_radiance": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "exposure": 1.0,
+    "hdr_sha256": "2261346ef0548dd2899821daa3fa39c10d6be6c8e74397ca7dabfc2eb0a6096d",
+    "ibl_intensity": 0.25,
+    "rgbe_pixel": [
+      128,
+      128,
+      128,
+      129
+    ],
+    "sky_enabled": false,
+    "sun_color": [
+      1.0,
+      0.97,
+      0.92
+    ],
+    "sun_intensity": 3.0,
+    "surface_albedo": [
+      0.6000000238418579,
+      0.6000000238418579,
+      0.6000000238418579
+    ],
+    "viewport": [
+      64,
+      64
+    ]
+  },
+  "git_head": "96e0b30381f65517b4f4813cd1faf228b94d4c95",
+  "memory": {
+    "density_majorant_device_local_bytes": 51200,
+    "expected_total_readback_bytes": 278528,
+    "froxel_device_local_bytes": 862048,
+    "peak_host_visible_bytes": 102400,
+    "provider_readback_bytes": 32768,
+    "readback_bytes": 278528,
+    "staging_bytes": 102400
+  },
+  "physical_gpu_measurement": true,
+  "runtime": {
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "driver": "NVIDIA 610.60",
+    "native_path": "D:\\forge3d\\.worktrees\\nephele-172-completion\\.tmp\\nephele-completion\\b2-env\\Lib\\site-packages\\forge3d\\_forge3d.pyd",
+    "package_version": "1.40.0",
+    "source_revision": "96e0b30381f65517b4f4813cd1faf228b94d4c95"
+  },
+  "schema": "forge3d.nephele.b2_ibl_measurement/1"
+}

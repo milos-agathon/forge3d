@@ -95,6 +95,7 @@ impl TerrainRenderParams {
             camera_mode: core.camera_mode,
             culling: core.culling,
             shading: core.shading,
+            terrain_shading_model: core.terrain_shading_model,
             vt_store_path: core.vt_store_path,
             prefetch_horizon_ms: core.prefetch_horizon_ms,
             vt_upload_budget_bytes: core.vt_upload_budget_bytes,

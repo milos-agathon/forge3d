@@ -40,6 +40,7 @@ REFERENCE_DIAGNOSTIC_FIELDS = (
     "energy_accounting_residual",
 )
 REALTIME_DIAGNOSTIC_FIELDS = REFERENCE_DIAGNOSTIC_FIELDS + (
+    "terrain_shading_model",
     "sun_transmittance_method",
     "sun_transmittance_bias",
     "sun_transmittance_max_segment_length",
@@ -231,6 +232,37 @@ def test_native_terrain_params_media_roundtrip_returns_public_wrapper() -> None:
     ]
 
 
+@pytest.mark.parametrize("model", ["stylized", "lambert_physical"])
+def test_terrain_shading_model_roundtrip_is_independent_of_media(model: str) -> None:
+    for medium in (None, Medium((0.1, 0.2, 0.3), (0.4, 0.5, 0.6))):
+        config = make_terrain_params_config(
+            size_px=(64, 64), render_scale=1.0, terrain_span=10.0,
+            msaa_samples=1, z_scale=1.0, exposure=1.0, domain=(0.0, 1.0),
+            media=medium, terrain_shading_model=model,
+        )
+        assert config.terrain_shading_model == model
+        assert f3d.TerrainRenderParams(config).terrain_shading_model == model
+
+
+def test_terrain_shading_model_defaults_and_invalid_values_fail_at_both_boundaries() -> None:
+    settings = dict(
+        size_px=(64, 64), render_scale=1.0, terrain_span=10.0,
+        msaa_samples=1, z_scale=1.0, exposure=1.0, domain=(0.0, 1.0),
+    )
+    config = make_terrain_params_config(**settings)
+    assert config.terrain_shading_model == "stylized"
+    assert f3d.TerrainRenderParams(config).terrain_shading_model == "stylized"
+    with pytest.raises(ValueError, match="terrain_shading_model"):
+        make_terrain_params_config(**settings, terrain_shading_model="unknown")
+    config.terrain_shading_model = "unknown"
+    with pytest.raises(ValueError, match="terrain_shading_model"):
+        f3d.TerrainRenderParams(config)
+    for invalid in (None, 1, ["lambert_physical"]):
+        config.terrain_shading_model = invalid
+        with pytest.raises((TypeError, ValueError), match="terrain_shading_model"):
+            f3d.TerrainRenderParams(config)
+
+
 def test_media_aov_settings_execute() -> None:
     settings = AovSettings(
         enabled=True,
@@ -304,6 +336,7 @@ def test_media_public_inventory_stubs_and_aov_methods_are_complete() -> None:
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
     }
     assert realtime_types == {
+        "terrain_shading_model": "Literal['stylized', 'lambert_physical']",
         "sun_transmittance_method": "str",
         "sun_transmittance_bias": "str",
         "sun_transmittance_max_segment_length": "float | None",
