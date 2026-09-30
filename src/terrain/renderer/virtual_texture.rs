@@ -723,6 +723,33 @@ impl TerrainMaterialVT {
         keys
     }
 
+    /// CHRONOS test seam: the page keys resident after the last render, as
+    /// `(family_slot, material_index, mip_level, tile_x, tile_y)` tuples in
+    /// the `retained_request_set` order. `get_material_vt_stats()` only
+    /// reports `resident_pages`, which cannot tell the compiled residency
+    /// set from a different set of the same size. Sorted for stable
+    /// Python-side comparison.
+    pub fn resident_page_set(&self) -> Vec<(u32, u32, u32, u32, u32)> {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return Vec::new();
+        };
+        let mut keys = runtime
+            .resident_page_keys()
+            .into_iter()
+            .map(|key| {
+                (
+                    key.family_slot,
+                    key.material_index,
+                    key.mip_level,
+                    key.x,
+                    key.y,
+                )
+            })
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys
+    }
+
     /// Arm the win-6 retention gate: seed an unsatisfied request set, then
     /// force the feedback map not-ready for `not_ready_frames` frames.
     ///

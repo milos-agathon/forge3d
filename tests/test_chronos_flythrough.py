@@ -976,11 +976,75 @@ class TestFlythroughPhysical:
         # One fade step never moves a pixel by a full 8-bit step.
         assert worst_step < 1.0 / 255.0
 
+    def test_dolly_across_clipmap_morph_band_does_not_pop(self, tmp_path):
+        if not _physical_render_available():
+            pytest.skip("CHRONOS physical render requires GPU-backed native module")
+        from forge3d.chronos import _clipmap_descriptor
+
+        def dolly(morph_range: float) -> dict[int, "f3d.MapScene"]:
+            clipmap = {
+                "mode": "clipmap",
+                "ring_count": 2,
+                "ring_resolution": 16,
+                "center_resolution": 16,
+                "morph_range": morph_range,
+                "skirt_depth": 10.0,
+            }
+            base = _synthetic_scene(width=96, height=64, terrain_metadata={"clipmap": clipmap})
+            return {
+                index: f3d.MapScene(
+                    replace(base.recipe, camera=replace(base.recipe.camera, distance=distance))
+                )
+                for index, distance in enumerate(distances)
+            }
+
+        # Ring 0's morph band is [span * (1 - 0.3), span]. The slow dolly starts
+        # inside the finer side of the band and leaves it on the coarse side.
+        descriptor = _clipmap_descriptor(_synthetic_scene().recipe)
+        outer = descriptor["terrain_span"]
+        band_start = outer * (1.0 - descriptor["morph_range"])
+        distances = [band_start - 0.8 + 0.75 * step for step in range(30)]
+        assert distances[0] < band_start and distances[-1] > outer
+
+        def luminance(camera_path: dict, name: str) -> tuple[list, list]:
+            manifest = render_flythrough(
+                camera_path, base_seed=9, samples=1, out_dir=tmp_path / name
+            )
+            frames, morphs = [], []
+            for record in manifest.frames:
+                payload = json.loads(record["compiled_frame"])
+                morphs.append({int(item["lod"]): float(item["morph"]) for item in payload["lod"]})
+                frames.append(_rec709_luminance(_load_rgba(tmp_path / name / record["image"])))
+            return frames, morphs
+
+        morphing, morphing_lod = luminance(dolly(0.3), "morphing")
+        frozen, frozen_lod = luminance(dolly(0.0), "frozen")
+        # The morphing path really crosses ring 0's band; the reference holds
+        # every ring at the finer level for the whole dolly.
+        ring0 = [lod[0] for lod in morphing_lod]
+        assert ring0[0] == 0.0 and ring0[-1] == 1.0
+        assert any(0.0 < value < 1.0 for value in ring0)
+        assert all(value == 0.0 for lod in frozen_lod for value in lod.values())
+        # Non-vacuous: the compiled morph reaches the pixels inside the band.
+        assert any(
+            np.abs(morphing[index] - frozen[index]).max() > 0.0
+            for index, value in enumerate(ring0)
+            if 0.0 < value < 1.0
+        ), "ring-0 geomorph never changed a pixel; the comparison would be vacuous"
+
+        worst_excess = -1.0
+        for index in range(len(distances) - 1):
+            moving = float(np.abs(morphing[index + 1] - morphing[index]).max())
+            reference = float(np.abs(frozen[index + 1] - frozen[index]).max())
+            worst_excess = max(worst_excess, moving - reference)
+            assert moving <= reference + 1.0 / 255.0, (index, moving, reference)
+        print(f"worst morph-over-frozen adjacent luminance excess: {worst_excess:.6f}")
+
     def test_vt_render_samples_only_compiled_residency(self, tmp_path):
         if not _physical_render_available():
             pytest.skip("CHRONOS physical render requires GPU-backed native module")
         from forge3d.chronos import _camera_json, _prepare_frame_scene, _scene_json
-        from forge3d.map_scene import _shared_terrain_render_context
+        from forge3d.map_scene import _ACTIVE_TERRAIN_RESOURCES, _shared_terrain_render_context
 
         def vt_scene(size: int, budget_mb: float) -> "f3d.MapScene":
             return _synthetic_scene(
@@ -1009,7 +1073,7 @@ class TestFlythroughPhysical:
                 },
             )
 
-        def render_compiled(source: "f3d.MapScene", index: int) -> tuple[dict, dict]:
+        def render_compiled(source: "f3d.MapScene", index: int) -> tuple[dict, dict, set]:
             output = tmp_path / f"frame_{index}.png"
             frame_scene = _prepare_frame_scene(source, index, 3, 1, output)
             compiled = f3d.compile_frame(
@@ -1018,16 +1082,35 @@ class TestFlythroughPhysical:
             frame_scene.compiled_plan = replace(frame_scene.compiled_plan, frame=compiled)
             frame_scene.render(str(output))
             payload = json.loads(compiled.to_json())
-            return payload, dict(frame_scene.last_render_metadata["material_vt_stats"])
+            (resources,) = _ACTIVE_TERRAIN_RESOURCES.holder
+            resident = {
+                tuple(key) for key in resources.renderer.read_material_vt_resident_pages_for_test()
+            }
+            return payload, dict(frame_scene.last_render_metadata["material_vt_stats"]), resident
+
+        def page_key(record: dict) -> tuple[int, int, int, int, int]:
+            return (
+                int(record["family_slot"]),
+                int(record["material_index"]),
+                int(record["mip_level"]),
+                int(record["x"]),
+                int(record["y"]),
+            )
 
         # One shared renderer: the finer frame leaves more pages resident than
         # the coarser frame compiles, so a stale page would be observable.
         with _shared_terrain_render_context():
-            fine, fine_stats = render_compiled(vt_scene(128, 8.0), 0)
-            coarse, coarse_stats = render_compiled(vt_scene(64, 8.0), 1)
-        fine_keys = {tuple(sorted(item.items())) for item in fine["residency"]}
-        coarse_keys = {tuple(sorted(item.items())) for item in coarse["residency"]}
+            fine, fine_stats, fine_resident = render_compiled(vt_scene(128, 8.0), 0)
+            coarse, coarse_stats, coarse_resident = render_compiled(vt_scene(64, 8.0), 1)
+        fine_keys = {page_key(item) for item in fine["residency"]}
+        coarse_keys = {page_key(item) for item in coarse["residency"]}
+        assert len(fine_keys) == len(fine["residency"])
+        assert len(coarse_keys) == len(coarse["residency"])
         assert coarse_keys and fine_keys - coarse_keys, (fine_keys, coarse_keys)
+        # Set equality, not just cardinality: exactly the compiled pages are
+        # resident, so no page left over from the finer frame survives.
+        assert fine_resident == fine_keys
+        assert coarse_resident == coarse_keys
         assert int(fine_stats["resident_pages"]) == len(fine_keys)
         assert int(coarse_stats["resident_pages"]) == len(coarse_keys)
 
