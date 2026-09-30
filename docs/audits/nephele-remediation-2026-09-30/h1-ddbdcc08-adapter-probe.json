@@ -1,0 +1,16 @@
+{
+  "probe": {
+    "backend": "Vulkan",
+    "device": 9348,
+    "device_type": "DiscreteGpu",
+    "driver": "NVIDIA",
+    "driver_info": "610.60",
+    "name": "NVIDIA GeForce RTX 3070",
+    "software_fallback": false,
+    "status": "ok",
+    "vendor": 4318
+  },
+  "requested_backend": "vulkan",
+  "schema": "forge3d.nephele.adapter_probe/1",
+  "status": "passed"
+}

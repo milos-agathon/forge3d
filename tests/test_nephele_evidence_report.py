@@ -1477,6 +1477,9 @@ def test_producers_execute_samples_and_bind_raw_outputs(tmp_path: Path, monkeypa
     assert probe["probe_count"] == 1_000
     assert probe["violation_count"] == 0
     assert probe["raw_output"]["pairs"] == 1_000
+    persisted = json.loads(json.dumps(probe, allow_nan=False))
+    assert type(persisted["violation_count"]) is int
+    assert persisted["violation_count"] == probe["violation_count"]
 
 
 def test_synthetic_unresolved_fixture_fails_closed(tmp_path: Path) -> None:

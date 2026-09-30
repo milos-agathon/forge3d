@@ -318,7 +318,7 @@ def produce(
             measured = max(measured, abs(float(extinction) - float(np.float32(extinction))))
             excess = float(extinction) - float(bound)
             maximum = max(maximum, excess)
-            violations += extinction > bound
+            violations += int(extinction > bound)
             raw_stream.write(struct.pack("<ff", float(extinction), float(bound)))
             extinction_sum += float(extinction)
             bound_sum += float(bound)
