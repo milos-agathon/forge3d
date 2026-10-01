@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import tempfile
 
@@ -15,7 +16,7 @@ from scripts.run_media_physical_capture import _camera_contract, _crop, _write_h
 LUMA = np.asarray([0.2126, 0.7152, 0.0722], dtype=np.float64)
 
 
-def capture(repo: Path, output: Path, label: str, *, isotropic=False, occlusion=True):
+def capture(repo: Path, output: Path, label: str, *, isotropic=False, occlusion=True, include_no_medium=False):
     import forge3d as f3d
     from forge3d.media import Medium
     from forge3d.terrain_params import AovSettings, TonemapSettings, make_terrain_params_config
@@ -52,12 +53,15 @@ def capture(repo: Path, output: Path, label: str, *, isotropic=False, occlusion=
         _write_hdr(hdr)
         ibl = f3d.IBL.from_hdr(str(hdr), intensity=atmosphere["environment_intensity"])
         raw = renderer._capture_nephele_acceptance(material, ibl, params, terrain,
-            terrain_occlusion_in_media=occlusion, capture_scatter_components=True)
+            terrain_occlusion_in_media=occlusion, capture_scatter_components=True,
+            include_no_medium=include_no_medium)
     expected_camera = b1._json(repo / "tests/nephele/fixture/reference-provenance.json")["camera_contract"]
     if _camera_contract(raw["camera_contract"]) != expected_camera:
         raise RuntimeError("shadow diagnostic camera differs from the frozen reference")
-    arrays = {key: _crop(np.asarray(raw[key]), crop) for key in
-        ("beauty", "in_scatter", "transmittance", "cloud_shadow", "in_scatter_multiple_luminance")}
+    keys = ("beauty", "in_scatter", "transmittance", "cloud_shadow", "in_scatter_multiple_luminance")
+    if include_no_medium:
+        keys += ("no_medium_beauty",)
+    arrays = {key: _crop(np.asarray(raw[key]), crop) for key in keys}
     for key, array in arrays.items():
         if not np.isfinite(array).all():
             raise RuntimeError(f"non-finite GPU readback: {key}")
@@ -102,10 +106,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--background-only", action="store_true",
+        help="Read the primary frame and its no-medium camera background without a B1 control registration.")
     args = parser.parse_args()
+    os.environ.update(FORGE3D_NO_BOOTSTRAP="1", FORGE3D_TEST_INSTALLED_WHEEL="1",
+        WGPU_BACKEND="vulkan", WGPU_BACKENDS="vulkan")
     repo, output = args.repo.resolve(), args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    result = measure(repo, output)
+    if args.background_only:
+        _, diagnostics = capture(repo, output, "primary", include_no_medium=True)
+        result = {"camera_background_capture": True, "diagnostics": dict(diagnostics)}
+    else:
+        result = measure(repo, output)
     result.update(schema="forge3d.nephele.shadow_inscatter_diagnostic/1", physical_acceptance=False,
         repository_head=b1._git(repo, "rev-parse", "HEAD"),
         tracked_worktree_clean=not bool(b1._git(repo, "status", "--porcelain=v1", "--untracked-files=no")),
