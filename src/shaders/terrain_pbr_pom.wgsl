@@ -765,10 +765,8 @@ var aether_accumulated_scattering_tex: texture_3d<f32>;
 @group(4) @binding(3)
 var nephele_light_transmittance_tex: texture_3d<f32>;
 
-@group(4) @binding(4)
-var nephele_sky_transmittance_tex: texture_3d<f32>;
-
-fn nephele_surface_froxel_coord(screen_position: vec2<f32>, distance_m: f32) -> vec3<f32> {
+fn nephele_same_medium_direct_transmittance(screen_position: vec2<f32>, distance_m: f32) -> vec3<f32> {
+    if (fog_uniforms.media_params.x < 0.5) { return vec3<f32>(1.0); }
     let dimensions = max(vec3<f32>(textureDimensions(nephele_light_transmittance_tex)), vec3<f32>(1.0));
     // The canonical froxel grid stores one XY sample per 8x8 framebuffer
     // tile plus one off-axis border texel on every side.
@@ -777,19 +775,8 @@ fn nephele_surface_froxel_coord(screen_position: vec2<f32>, distance_m: f32) -> 
     let distance_ratio = max(det_div(distance_m, near), 1.0);
     let log2_range = max(fog_uniforms.media_depth.z * 1.4426950408889634, 1e-6);
     let unit_depth = clamp(det_div(det_log2(distance_ratio), log2_range), 0.0, 1.0);
-    return clamp(vec3<f32>(det_div2(xy, dimensions.xy), unit_depth), vec3<f32>(0.0), vec3<f32>(1.0));
-}
-
-fn nephele_same_medium_direct_transmittance(screen_position: vec2<f32>, distance_m: f32) -> vec3<f32> {
-    if (fog_uniforms.media_params.x < 0.5) { return vec3<f32>(1.0); }
-    let coord = nephele_surface_froxel_coord(screen_position, distance_m);
-    return clamp(textureSampleLevel(nephele_light_transmittance_tex, material_samp, coord, 0.0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-}
-
-fn nephele_same_medium_sky_transmittance(screen_position: vec2<f32>, distance_m: f32) -> vec3<f32> {
-    if (fog_uniforms.media_params.x < 0.5) { return vec3<f32>(1.0); }
-    let coord = nephele_surface_froxel_coord(screen_position, distance_m);
-    return clamp(textureSampleLevel(nephele_sky_transmittance_tex, material_samp, coord, 0.0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let froxel_coord = clamp(vec3<f32>(det_div2(xy, dimensions.xy), unit_depth), vec3<f32>(0.0), vec3<f32>(1.0));
+    return clamp(textureSampleLevel(nephele_light_transmittance_tex, material_samp, froxel_coord, 0.0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -5560,8 +5547,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
                 )),
                 vec3<f32>(PI),
             );
-            let sky_t = nephele_same_medium_sky_transmittance(input.clip_position.xy, view_distance);
-            shaded = det_barrier3(direct_radiance) + det_barrier3(environment_radiance * sky_t);
+            shaded = det_barrier3(direct_radiance) + det_barrier3(environment_radiance);
         } else {
             // ══════════════════════════════════════════════════════════════════════
             // P2-S4: Terrain Lighting Composition (structure locked per spec)

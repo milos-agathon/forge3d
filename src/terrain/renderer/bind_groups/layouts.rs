@@ -106,16 +106,6 @@ impl TerrainScene {
                     },
                     count: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D3,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
             ],
         })
     }
@@ -490,17 +480,13 @@ mod tests {
                         binding: 3,
                         resource: wgpu::BindingResource::TextureView(&transmittance),
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(&transmittance),
-                    },
                 ],
             });
         let validation_error = pollster::block_on(context.device.pop_error_scope());
         drop(bind_group);
         assert!(
             validation_error.is_none(),
-            "atmosphere layout must accept NEPHELE sunlight and sky bindings 3/4: {validation_error:?}"
+            "atmosphere layout must accept NEPHELE binding 3: {validation_error:?}"
         );
         Ok(())
     }

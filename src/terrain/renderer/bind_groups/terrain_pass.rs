@@ -234,9 +234,6 @@ impl TerrainScene {
             r.light_transmittance
                 .create_view(&wgpu::TextureViewDescriptor::default())
         });
-        let media_sky_transmittance_view = media_resources.as_ref().map(|r| {
-            r.sky_transmittance.create_view(&wgpu::TextureViewDescriptor::default())
-        });
         let media_grid =
             media_resources
                 .as_ref()
@@ -341,13 +338,6 @@ impl TerrainScene {
                     resource: wgpu::BindingResource::TextureView(
                         media_light_transmittance_view
                             .as_ref()
-                            .unwrap_or(&self.media_light_transmittance_fallback_view),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(
-                        media_sky_transmittance_view.as_ref()
                             .unwrap_or(&self.media_light_transmittance_fallback_view),
                     ),
                 },
