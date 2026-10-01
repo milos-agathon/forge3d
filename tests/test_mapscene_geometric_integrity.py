@@ -44,8 +44,8 @@ def _top_down_north_up() -> "f3d.OrbitCamera":
     return f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=420.0, azimuth_deg=-90.0, elevation_deg=0.5, fov_deg=40.0)
 
 
-def _scene(dem: np.ndarray, *, camera=None, sun=(0.0, 0.8, 0.6), settings=None, layers=()) -> "f3d.MapScene":
-    lighting = {"colormap": "9a9a9a,9a9a9a", "hue_variation_strength": 0.0, "cli_params": dict(_ZUP)}
+def _scene(dem: np.ndarray, *, camera=None, sun=(0.0, 0.8, 0.6), settings=None, layers=(), camera_mode="mesh:zup") -> "f3d.MapScene":
+    lighting = {"colormap": "9a9a9a,9a9a9a", "hue_variation_strength": 0.0, "cli_params": {"camera_mode": camera_mode}}
     lighting.update(settings or {})
     return f3d.MapScene(
         terrain=f3d.TerrainSource(
@@ -64,6 +64,17 @@ def _scene(dem: np.ndarray, *, camera=None, sun=(0.0, 0.8, 0.6), settings=None, 
 def _render_luma(scene: "f3d.MapScene", path: Path) -> np.ndarray:
     scene.render(str(path))
     return np.asarray(Image.open(path).convert("L"), dtype=np.float64)
+
+
+def _feature_position(luma: np.ndarray) -> tuple[int, int]:
+    """Strongest shading deviation inside the terrain footprint (not the background)."""
+    background = luma[0, 0]
+    terrain = np.abs(luma - background) > 4.0
+    assert terrain.any(), "no terrain pixels rendered"
+    reference = np.median(luma[terrain])
+    contrast = np.where(terrain, np.abs(luma - reference), 0.0)
+    row, col = np.unravel_index(np.argmax(contrast), contrast.shape)
+    return int(row), int(col)
 
 
 requires_gpu = pytest.mark.skipif(
@@ -142,9 +153,31 @@ def test_chronos_camera_hash_covers_target():
 def test_3d_view_is_north_up_and_not_mirrored(tmp_path):
     # Row 0 is north and column 0 is west: one peak in the north-east quadrant.
     luma = _render_luma(_scene(_gaussian(200, 56, 20, 100.0)), tmp_path / "ne_peak.png")
-    contrast = np.abs(luma - np.median(luma))
-    row, col = np.unravel_index(np.argmax(contrast), contrast.shape)
+    row, col = _feature_position(luma)
     assert row < N // 2 and col >= N // 2, f"north-east peak rendered at row {row}, col {col}"
+
+
+@requires_gpu
+@pytest.mark.parametrize("facing, sun_from, sun_opposite", [
+    ("west", 270.0, 90.0), ("east", 90.0, 270.0), ("north", 0.0, 180.0), ("south", 180.0, 0.0),
+])
+def test_2d_sun_lights_the_slope_facing_it(tmp_path, facing, sun_from, sun_opposite):
+    """Default 2D map: a uniform slope is brighter under the sun it faces.
+
+    A plane needs no framing assumptions (the 2D view crops the DEM), so this
+    measures the shading frame alone. Rows run north -> south, columns west -> east.
+    """
+    yy, xx = np.mgrid[0:N, 0:N].astype(np.float32)
+    rises_to = {"west": 0.6 * xx, "east": 0.6 * (N - xx), "north": 0.6 * yy, "south": 0.6 * (N - yy)}
+    dem = rises_to[facing].astype(np.float32)
+
+    def mean_luma(azimuth: float) -> float:
+        scene = _scene(dem, sun=_compass_sun(azimuth, 30.0), camera_mode="screen",
+                       camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=300.0, azimuth_deg=0.0, elevation_deg=90.0))
+        return float(_render_luma(scene, tmp_path / f"plane_{facing}_{int(azimuth)}.png")[64:192, 64:192].mean())
+
+    lit, unlit = mean_luma(sun_from), mean_luma(sun_opposite)
+    assert lit > unlit + 10.0, f"{facing}-facing slope: sun it faces {lit:.1f}, opposite sun {unlit:.1f}"
 
 
 @requires_gpu
@@ -153,6 +186,8 @@ def test_3d_view_is_north_up_and_not_mirrored(tmp_path):
     [(90.0, "east", "west"), (270.0, "west", "east"), (180.0, "south", "north"), (0.0, "north", "south")],
 )
 def test_sun_lights_the_flank_facing_it(tmp_path, azimuth, lit, shaded):
+    # The 3D north-up camera shows north up and east right, so image flanks
+    # are compass flanks.
     scene = _scene(_gaussian(128, 128, 45, 120.0), sun=_compass_sun(azimuth, 25.0))
     luma = _render_luma(scene, tmp_path / f"sun_{int(azimuth)}.png")
     c = N // 2
@@ -166,18 +201,29 @@ def test_sun_lights_the_flank_facing_it(tmp_path, azimuth, lit, shaded):
 
 
 @requires_gpu
+def test_overhead_sun_lights_all_flanks_alike(tmp_path):
+    """A zenith sun has no preferred flank: shading must be symmetric."""
+    luma = _render_luma(_scene(_gaussian(128, 128, 45, 120.0), sun=_compass_sun(0.0, 89.9)), tmp_path / "zenith.png")
+    c = N // 2
+    flanks = [
+        luma[c - 60 : c - 30, c - 15 : c + 15].mean(),
+        luma[c + 30 : c + 60, c - 15 : c + 15].mean(),
+        luma[c - 15 : c + 15, c - 60 : c - 30].mean(),
+        luma[c - 15 : c + 15, c + 30 : c + 60].mean(),
+    ]
+    assert max(flanks) - min(flanks) < 8.0, flanks
+
+
+@requires_gpu
 def test_camera_target_moves_the_view(tmp_path):
     dem = _gaussian(128, 128, 12, 80.0)
     base = _render_luma(_scene(dem), tmp_path / "target0.png")
     moved_camera = f3d.OrbitCamera(target=(60.0, 0.0, 0.0), distance=420.0, azimuth_deg=-90.0, elevation_deg=0.5, fov_deg=40.0)
     moved = _render_luma(_scene(dem, camera=moved_camera), tmp_path / "target_east.png")
 
-    def peak_col(luma):
-        contrast = np.abs(luma - np.median(luma))
-        return int(np.unravel_index(np.argmax(contrast), contrast.shape)[1])
-
     # Looking 60 m further east puts the centred peak further left on screen.
-    assert peak_col(moved) < peak_col(base) - 10, (peak_col(base), peak_col(moved))
+    base_col, moved_col = _feature_position(base)[1], _feature_position(moved)[1]
+    assert moved_col < base_col - 10, (base_col, moved_col)
 
 
 @requires_gpu
