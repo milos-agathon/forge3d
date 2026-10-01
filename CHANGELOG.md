@@ -10,7 +10,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - NEPHELE (#172) is unreleased. Its typed spatial media, weighted RGB reference, terrain-coupled froxels, AOVs and diagnostics require Gate 3 and Gate 4 physical acceptance before delivery.
 
 ### Fixed
-- Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Every wait for all GPU work now lasts until the device has really finished. Two kinds of wait are unchanged: waits for one specific submission, used in vector code, and the frozen offline reference/hybrid path-tracer sources. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
+- Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Waits for all GPU work in the native library now last until the device has really finished; on the GL backend they keep wgpu's own wait, because GL defers freeing objects still in use. Some waits are unchanged: waits for one specific submission in the vector code and the fence tracker (`src/core/fence_tracker.rs`), the frozen offline reference/hybrid path-tracer sources, the `policies` benchmark binary (`bench/upload_policies/policies.rs`), and three resource-tracker unit tests. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
 
 ## [1.40.0] - 2026-09-30
 ### Added

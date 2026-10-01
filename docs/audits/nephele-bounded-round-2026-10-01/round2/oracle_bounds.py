@@ -1,11 +1,15 @@
-"""Upper bounds on what any single correction of the real-time frame could reach on G3/G4.
+"""Mean-matched gain estimates for corrections of the real-time frame on G3/G4.
 
 Run from the repository root:
     python docs/audits/nephele-bounded-round-2026-10-01/round2/oracle_bounds.py
 
 All candidates are mapped back through the fixture's ACES + sRGB8 presentation and
-scored with the production `_delta_e` and the unchanged mask rules. The oracle rows use
-the reference itself to choose gains, so they bound (and cannot be) a physical fix.
+scored with the production `_delta_e` and the unchanged mask rules. The mean-matched
+rows use the reference itself to choose gains, so they cannot be a physical fix. They
+are NOT upper bounds: each gain is the per-channel ratio of means over the whole terrain
+or sky mask (or tile intersected with it), not the gain that maximises the pass fraction,
+and G4 scores only the cloud-shadowed subset. A gain chosen on the scored mask, or one
+chosen to maximise the pass fraction, could score higher.
 """
 from __future__ import annotations
 
@@ -86,11 +90,11 @@ rows = {
     "realtime_background_fix_state": score(rt_u8),
     "reference_320spp_vs_640spp_noise_floor": score(np.load(FIX / "reference-rgb-spp320.npy")),
     "predicted_realtime_plus_T_times_surface_sun_inscatter": score(to_u8(rt + T * S2)),
-    "oracle_realtime_global_rgb_gain_on_terrain": score(to_u8(global_gain(rt, terrain))),
-    "oracle_realtime_global_rgb_gain_on_sky": score(to_u8(global_gain(rt, sky))),
-    "oracle_realtime_8x8_tile_rgb_gain": score(to_u8(tile_gain(rt))),
-    "oracle_first_order_structure_8x8_tile_gain": score(to_u8(tile_gain(fo["first_order"]))),
-    "oracle_first_order_plus_surface_sun_inscatter_8x8_tile_gain":
+    "mean_matched_realtime_global_rgb_gain_on_terrain": score(to_u8(global_gain(rt, terrain))),
+    "mean_matched_realtime_global_rgb_gain_on_sky": score(to_u8(global_gain(rt, sky))),
+    "mean_matched_realtime_8x8_tile_rgb_gain": score(to_u8(tile_gain(rt))),
+    "mean_matched_first_order_structure_8x8_tile_gain": score(to_u8(tile_gain(fo["first_order"]))),
+    "mean_matched_first_order_plus_surface_sun_inscatter_8x8_tile_gain":
         score(to_u8(tile_gain(fo["first_order"] + fo["T_cam"] * S2))),
 }
 summary = {

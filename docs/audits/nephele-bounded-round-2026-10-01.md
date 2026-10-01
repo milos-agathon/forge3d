@@ -1,6 +1,6 @@
 # NEPHELE bounded remediation round — 2026-10-01
 
-> **Round 2 update (same day):** the sky-attenuation change described below was reverted, and B1 reproduces 1,546/1,558. A validated first-order split shows that no single physical fix can pass G3/G4, so NEPHELE stays NOT_PROVEN. The hosted-Linux segfault came from a wgpu-core 0.19 wait defect and is fixed. See [Round 2](#round-2--revert-first-order-split-and-hosted-linux-crash). The sections before Round 2 record round 1 as it happened.
+> **Round 2 update (same day):** the sky-attenuation change described below was reverted, and B1 reproduces 1,546/1,558. A validated first-order split identified the best-defined missing term, but G4's terrain-occlusion-ablation SSIM (0.958, limit 0.80) and G3 (sky-only, 91.69%) already fail independently of it, so the fix was chosen but not implemented and NEPHELE stays NOT_PROVEN (owner sign-off recorded below). The hosted-Linux segfault came from a wgpu-core 0.19 wait defect and is fixed. See [Round 2](#round-2--revert-first-order-split-and-hosted-linux-crash). The sections before Round 2 record round 1 as it happened.
 
 **Round complete; physical acceptance NOT_PROVEN. NEPHELE remains unreleased and targets 1.41.0.** G3 and G4 still fail after the two lighting changes and the conditional shadow-mask diagnosis. The authorized stop rule has been applied: no further quality changes, fixture edits, H1 dispatch or H2 sequencing in this round.
 
@@ -109,6 +109,8 @@ Commit `7945d1b0` restores the terrain shader, its contract, the group-4 layout/
 
 None of these runs skipped anything. They used the round-1 environment variables plus `FORGE3D_TERRAIN_GOLDEN_VARIANT=nvidia-vulkan` for the goldens. No golden-update flag was set.
 
+**Unlogged:** the wheel SHA `b870961b…` and the counts 177/1, 8, 41 and 155 in this table come from local runs whose output was not committed. They cannot be checked from the repository. The B1 values match the committed round-1 evidence, but the round-2 rerun that reproduced them was not logged either.
+
 ### First-order split
 
 [`round2/nephele_first_order.py`](nephele-bounded-round-2026-10-01/round2/nephele_first_order.py) is a deterministic quadrature over the frozen fixture: 48 camera steps and 48 sphere directions. It was validated against the reference AOVs:
@@ -138,24 +140,27 @@ Reading the split:
 2. **Real-time surface versus first order.** The surplus of 0.061 is entirely unattenuated sky irradiance: the real-time sky term is about 0.150, against an attenuated first-order 0.089. In this medium, with single-scattering albedo about 0.85, out-scattered sky light is mostly replaced by in-scattered light. That is why attenuation alone (round 1) went to G4 6.5%.
 3. **Remainder.** The remainder is 0.111 on terrain and 0.117 on sky. It holds multiple scattering, interreflection, and light scattered from the sunlit medium onto the terrain. One of these terms was computed by [`surface_cloudlight.py`](nephele-bounded-round-2026-10-01/round2/surface_cloudlight.py): sun single-scattered by the medium onto the terrain hit point, with 192 directions. After camera transmittance it gives 0.0180, which matches the real-time terrain luminance deficit of 0.0184. It is the best-defined missing physical term.
 
-**Decision: no fix applied.** [`oracle_bounds.py`](nephele-bounded-round-2026-10-01/round2/oracle_bounds.py) scores candidates with the production ΔE and the unchanged masks ([oracle-bounds.json](nephele-bounded-round-2026-10-01/round2/first-order/oracle-bounds.json)):
+**Decision: fix chosen, not implemented.** The chosen fix is the medium-to-terrain sun term above. The contract reads "decide one physically defined fix… if G3/G4 still failed after it", that is, apply and then measure. This round departs from that wording: it did not implement or render the fix, because two gates already fail independently of it:
+
+- **G4 ablation:** G4 also requires the terrain-occlusion-ablation SSIM to be below 0.80. It measures 0.9578603137 (`terrain_occlusion_ablation_ssim` in [background-local/visual-metrics.json](nephele-bounded-round-2026-10-01/background-local/visual-metrics.json)), which is the state the revert restores. The candidate only adds sun light scattered by the medium onto the terrain surface. That it leaves the ablation SSIM unchanged is reasoned, not measured. A move from 0.958 to below 0.80 is very unlikely, but it was not tested.
+- **G3:** G3 scores sky/cloud pixels only, and the candidate changes terrain pixels only, so G3 stays at 91.69% (below its 95%).
+
+[`oracle_bounds.py`](nephele-bounded-round-2026-10-01/round2/oracle_bounds.py) scores candidates with the production ΔE and the unchanged masks ([oracle-bounds.json](nephele-bounded-round-2026-10-01/round2/first-order/oracle-bounds.json)):
 
 | Candidate | G4 shadow ΔE<2 (≥95%) | G3 sky ΔE<2.5 (≥95%) |
 |---|---:|---:|
 | Real time, reverted state | 46.56% | 91.69% |
 | Reference noise floor (320 vs 640 spp) | 99.61% | 100% |
-| Real time + the medium-to-terrain sun term (predicted) | 60.18% | 91.69% |
-| Oracle: best per-channel gain over all terrain | 71.36% | — |
-| Oracle: best per-channel gain over all sky | — | 94.37% |
-| Oracle: best per-channel gain per 8×8 froxel tile | 83.69% | 97.20% |
+| Real time + the medium-to-terrain sun term (offline prediction, not rendered) | 60.18% | 91.69% |
+| Mean-matched per-channel gain over all terrain (estimate, not a maximum) | 71.36% | — |
+| Mean-matched per-channel gain over all sky (estimate, not a maximum) | — | 94.37% |
+| Mean-matched per-channel gain per 8×8 froxel tile (estimate, not a maximum) | 83.69% | 97.20% |
 
-The oracle rows choose gains from the reference itself, so they bound every correction of that form:
+The 60.18% is a prediction: the term is added offline to the captured frame (`rt + T*S2`), not rendered. The mean-matched rows pick gains from the reference itself, so they are not physical fixes. They are also **not upper bounds**. Each gain is the per-channel ratio of means over the whole terrain or sky mask (or the tile intersected with it). It is not the gain that maximises the ΔE pass fraction, and G4 scores only the cloud-shadowed subset. A gain chosen on the scored mask, or one chosen to maximise the pass fraction, could score higher. These rows therefore do not show that no uniform or per-tile correction could reach 95%. The stop decision does not rest on them; it rests on the ablation SSIM and on G3.
 
-- No spatially uniform correction, and no correction that is constant within a froxel tile, can reach G4's 95%.
-- The best physical candidate is predicted at 60.2%.
-- G4 also requires terrain-occlusion-ablation SSIM below 0.80, measured at 0.958. Surface or energy terms do not change that.
+Implementing the candidate would cost a new terrain pin, goldens and a B1 rerun with no prospect of changing the outcome. The stop rule therefore applies: **NEPHELE remains NOT_PROVEN / unreleased; OD-10 still needs fresh evidence.** The sub-tile G4 error is consistent with the froxel-resolution concern, but this does not prove that resolution is the only cause. H1 was not run.
 
-Implementing the candidate would require a new terrain pin, goldens and B1 without any prospect of passing. The stop rule therefore applies: **NEPHELE remains NOT_PROVEN / unreleased; OD-10 still needs fresh evidence.** The sub-tile G4 error is consistent with the froxel-resolution concern, but this does not prove that resolution is the only cause. H1 was not run.
+**Owner sign-off (2026-10-01):** Milos approved recording the fix as chosen but not implemented, for the reasons above, on condition that the reasons cite the ablation SSIM and G3 rather than the mean-matched rows, that 60.18% is labelled a prediction, and that the unchanged ablation SSIM is labelled an inference.
 
 ### Hosted-Linux segfault: root cause and fix
 
@@ -179,10 +184,13 @@ On lavapipe with a cold LLVM shader cache, a single submission takes more than 5
 Fix (no dependency change):
 
 - `crate::core::gpu::wait_for_device_idle` repeats `Maintain::Poll` until the queue is empty. Poll reads the real fence value, so no unfinished submission is ever retired.
+- On the GL backend it keeps `Maintain::Wait` (round-2 review F3). wgpu-hal 0.19.5 GLES creates the submission fence without flushing (`gles/queue.rs`, `fence_sync` after the command list) and `Poll` only reads its status (`gles/mod.rs` `Fence::get_latest`), so an unflushed fence may never signal and a poll loop could spin forever. Only the `Wait` path flushes (`client_wait_sync(SYNC_FLUSH_COMMANDS_BIT)`, `gles/device.rs:1460`). GL hands commands to the driver at submit time and defers deletion of objects still in use, so the 5 s early retirement is harmless there. The backend is detected with `Device::as_hal::<Gles>`. A unit test (`core::gpu::backend_request_tests::wait_for_device_idle_classifies_gl_and_returns_after_real_work`) creates a device on every local adapter, checks the classification against the adapter backend, and waits for a real 1 MiB copy.
+- The non-GL loop still has no time limit: a submission that never completes and never reports device loss would spin forever. Device loss on Vulkan, DX12 or Metal ends in wgpu's fatal-error panic, not a hang. Any timeout is an owner decision; none was added.
 - 113 statement-form `poll(Maintain::Wait)` calls in the native crate use it.
 - Eight calls stay in three frozen reference-transport sources: `media_reference.rs`, `render_terrain.rs` and `terrain_heightfield.rs` under `src/path_tracing/hybrid_compute/`. The live-source provenance check rejects any edit to those files, and none of the eight runs during the real-time capture. They keep the latent defect for offline reference/hybrid renders on slow devices.
 - Three `Maintain::Wait` calls inside `resource_tracker.rs` unit tests stay, because that file is also compiled for wasm.
 - The 16 `WaitForSubmissionIndex` calls, in vector/fence-tracker code outside this capture path, keep the same latent 5 s defect. They are unchanged and unproven.
+- Four `Maintain::Wait` calls in `bench/upload_policies/policies.rs` (lines 193, 229, 240, 245) stay. That file is the shipped `policies` `[[bin]]` benchmark target (`Cargo.toml`, `required-features = ["async_readback"]`), outside the native library, so it keeps the same latent 5 s defect on slow devices.
 
 Results with the fixed Linux build `cb5c33cc…` on the same CI-identical Mesa and cold cache:
 
@@ -199,5 +207,9 @@ Results with the fixed Windows wheel `1e95fe05…`:
 
 The local Linux interpreter was Python 3.12.3; CI uses 3.11 with the same abi3 wheel.
 
-The first push (`5b6a875d`) also edited the three frozen reference sources. In broader run [36845903178](https://github.com/milos-agathon/forge3d/actions/runs/36845903178), both `test_nephele_environment_defects` tests passed on hosted Linux. The three live-reference-source provenance checks failed: 3 failed, 3,802 passed, 316 skipped, 55 deselected. The follow-up commit restores those three files byte-for-byte. With that source, the NEPHELE suite passes locally (155 passed, zero skips). The Linux and Windows wheel checks above were built before this restore. The restored files are outside the real-time capture path. Hosted results for the final head are reported separately.
+**Unlogged:** the wheel SHAs `3f208f88…`, `cb5c33cc…` and `1e95fe05…`, and the counts 183/1, 266 with 7 skips, and 8 in the Windows list, come from local runs whose output was not committed. They cannot be checked from the repository. The committed [`pytest-fix-env-defects.log`](nephele-bounded-round-2026-10-01/round2/linux-crash/pytest-fix-env-defects.log) records the 2 passed in 112.60 s but does not name the wheel or commit it ran on. The committed gdb, valgrind and validation-layer logs back the crash evidence above. The post-fix validation log shows only `OK media_only`; it has no positive sign that the layer loaded, though it came from the same script and environment as the pre-fix log, which did report errors.
+
+All of these local wheel checks were built before the GL branch above was added. The GL branch does not change the code path on Vulkan, DX12 or Metal devices.
+
+The first push (`5b6a875d`) also edited the three frozen reference sources. In broader run [36845903178](https://github.com/milos-agathon/forge3d/actions/runs/36845903178), both `test_nephele_environment_defects` tests passed on hosted Linux. The three live-reference-source provenance checks failed: 3 failed, 3,802 passed, 316 skipped, 55 deselected. The follow-up commit restores those three files byte-for-byte. With that source, the NEPHELE suite passes locally (155 passed, zero skips; unlogged). The Linux and Windows wheel checks above were built before this restore. The restored files are outside the real-time capture path. Hosted results for the final head are reported separately.
 
