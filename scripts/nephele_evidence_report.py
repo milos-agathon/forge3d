@@ -43,6 +43,24 @@ else:
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+# Milos's reviewed exception: CHRONOS re-exports, not transport changes.
+REFERENCE_SOURCE_ALLOWLIST = {
+    "src/terrain/mod.rs": "154b5c88a739e3331615976a1497621bbfd6fa79afec215543356b98daf51698",
+}
+
+
+def verify_live_reference_sources(repo_root: Path, inputs: dict[str, str]) -> None:
+    """Keep the retained reference valid for the current transport sources."""
+    for relative, frozen_digest in inputs.items():
+        path = repo_root / relative
+        actual = _sha256(path) if path.is_file() else None
+        if actual != frozen_digest and (
+            relative not in REFERENCE_SOURCE_ALLOWLIST
+            or actual != REFERENCE_SOURCE_ALLOWLIST[relative]
+        ):
+            _fail("provenance_error", f"live reference source differs from reviewed transport: {relative}")
+
+
 DENSITY_SAMPLING = "normalized-clamp-to-edge-linear-texel-center-uN-minus-0.5"
 MAJORANT_QUERY = "floor(clamp(unit,0,1)*N)-clamped-to-N-minus-1"
 MAJORANT_CONSTRUCTION = (
@@ -1266,6 +1284,7 @@ def _verify_reference_provenance(
                 _fail("provenance_error", f"{label}: invalid source dependency record")
             if hashlib.sha256(_tracked_blob(repo_root, value["source_revision"], repo_root / relative)).hexdigest() != digest:
                 _fail("provenance_error", f"{label}: source dependency differs from its clean revision: {relative_name}")
+        verify_live_reference_sources(repo_root, inputs)
         assembled = value["assembled_sources"]
         if assembled != {"terrain_media_reference_module_sha256": _reference_module_sha256(repo_root, value["source_revision"])}:
             _fail("provenance_error", f"{label}: assembled terrain-media reference module provenance differs")

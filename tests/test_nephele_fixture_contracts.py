@@ -35,6 +35,25 @@ from scripts.nephele_majorant_domain_probe import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_live_reference_transport_inputs_match_frozen_revision() -> None:
+    from scripts.nephele_evidence_report import verify_live_reference_sources
+
+    provenance = _object(ROOT / "tests/nephele/fixture/reference-provenance.json")
+    assert provenance["source_revision"] == "6a4ae50a4c3c01b390b1222468632e88d1db6ca0"
+    verify_live_reference_sources(ROOT, provenance["source_inputs"])
+
+
+@pytest.mark.parametrize("relative", ["src/media/tracking.rs", "src/terrain/mod.rs"])
+def test_live_reference_check_rejects_unreviewed_edits(tmp_path: Path, relative: str) -> None:
+    from scripts.nephele_evidence_report import EvidenceError, verify_live_reference_sources
+
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"unreviewed transport edit")
+    with pytest.raises(EvidenceError, match="live reference source"):
+        verify_live_reference_sources(tmp_path, {relative: hashlib.sha256(b"frozen source").hexdigest()})
+
+
 @pytest.mark.parametrize("mutation", ["array", "native", "samples", "sun"])
 def test_b6_environment_reference_rejects_unbound_inputs_before_gpu(tmp_path, mutation) -> None:
     from scripts.nephele_b6_environment_diagnostic import environment_reference

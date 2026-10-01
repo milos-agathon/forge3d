@@ -6,9 +6,11 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Planned for 1.41.0
+- NEPHELE (#172) is unreleased. Its typed spatial media, weighted RGB reference, terrain-coupled froxels, AOVs and diagnostics require Gate 3 and Gate 4 physical acceptance before delivery.
+
 ## [1.40.0] - 2026-09-30
 ### Added
-- NEPHELE: typed spatial media, a weighted RGB transport reference, terrain-coupled real-time froxels, media AOVs, and explicit transport/resource diagnostics. (#172)
 - Terrain material bands can be placed where you want them: the `material_layer_centers` lighting setting (and `TerrainRenderParams.material_layer_centers`) sets each texture layer's centre as a fraction of the height range, instead of spacing the layers evenly. (#194)
 - Heightmap cells without data (NaN) now render as holes in `MapScene`: they are not drawn, not shaded, and credited to no source in VERITAS provenance. `TerrainRenderParams.nodata_height_below` exposes the same cut-off for direct renderer use. (#194)
 - CHRONOS: `forge3d.chronos.render_flythrough` renders a camera path as frame-perfect, repeatable frames. Each frame is compiled first from its camera, scene, label fades, texture residency and clipmap detail levels. It gets its own seed, pixel hash and provenance record, and `FlythroughManifest.replay_frame` re-renders any frame byte for byte. `certificate=True` writes one signed certificate per frame; `cache=` replays unchanged frames. The native `CompiledFrame`, `frame_seed`, `compile_frame` and `render_compiled_frame` are exported. (#185)

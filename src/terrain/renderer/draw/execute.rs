@@ -382,6 +382,44 @@ impl TerrainScene {
             self.blit_background_texture(encoder, render_targets, &sky.view, sky.linear_hdr)?;
             ts_end(timing, encoder, scope, 1);
         }
+        // A uniform authored HDR environment is also the camera-visible
+        // boundary radiance. Keep it linear here; the common presentation
+        // resolve applies exposure and the colour pipeline exactly once.
+        let uniform_environment_background = sky_texture.is_none()
+            && render_targets.linear_hdr
+            && params.terrain_shading_model == "lambert_physical"
+            && media_environment.is_some_and(|image| {
+                image.data.len() >= 3
+                    && image.data.chunks_exact(3).all(|rgb| rgb == &image.data[..3])
+            });
+        if uniform_environment_background {
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain.uniform_environment.background"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: render_targets.msaa_view.as_ref().unwrap_or(&render_targets.internal_view),
+                    resolve_target: render_targets.msaa_view.as_ref().map(|_| &render_targets.internal_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: f64::from(media_environment_radiance[0]),
+                            g: f64::from(media_environment_radiance[1]),
+                            b: f64::from(media_environment_radiance[2]),
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &render_targets.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        }
         #[cfg(feature = "enable-globe")]
         let globe_background = self.render_orbis_globe_background(
             encoder,
@@ -403,7 +441,7 @@ impl TerrainScene {
             &pass_bind_groups.fog,
             &water_reflection_bind_group,
             &pass_bind_groups.material_layer,
-            sky_texture.is_some() || globe_background,
+            sky_texture.is_some() || globe_background || uniform_environment_background,
             staged_lod_selection,
         )?;
         ts_end(timing, encoder, main_scope, terrain_draw_calls);
