@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="6" failures="0" skipped="0" tests="6" time="10.878" timestamp="2026-10-01T01:58:48.061338+02:00" hostname="DESKTOP-6IEVQ7I"><testcase classname="tests.test_nephele_physical" name="gate1_estimator_majorant_rr" time="8.622"><error message="failed on setup with &quot;scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed&quot;">tests\test_nephele_physical.py:57: in physical
+    visual = _visual_gates(artifact, evaluator, ROOT, head)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scripts\nephele_evidence_report.py:1838: in _visual_gates
+    _fail("gate_failure", "Gate 3 DeltaE pass fraction or godray SSIM failed")
+scripts\nephele_evidence_report.py:141: in _fail
+    raise EvidenceError(code, message)
+E   scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed</error></testcase><testcase classname="tests.test_nephele_physical" name="gate2_energy" time="0.000"><error message="failed on setup with &quot;scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed&quot;">tests\test_nephele_physical.py:57: in physical
+    visual = _visual_gates(artifact, evaluator, ROOT, head)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scripts\nephele_evidence_report.py:1838: in _visual_gates
+    _fail("gate_failure", "Gate 3 DeltaE pass fraction or godray SSIM failed")
+scripts\nephele_evidence_report.py:141: in _fail
+    raise EvidenceError(code, message)
+E   scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed</error></testcase><testcase classname="tests.test_nephele_physical" name="gate3_realtime_reference" time="0.000"><error message="failed on setup with &quot;scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed&quot;">tests\test_nephele_physical.py:57: in physical
+    visual = _visual_gates(artifact, evaluator, ROOT, head)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scripts\nephele_evidence_report.py:1838: in _visual_gates
+    _fail("gate_failure", "Gate 3 DeltaE pass fraction or godray SSIM failed")
+scripts\nephele_evidence_report.py:141: in _fail
+    raise EvidenceError(code, message)
+E   scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed</error></testcase><testcase classname="tests.test_nephele_physical" name="gate4_terrain_coupling" time="0.000"><error message="failed on setup with &quot;scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed&quot;">tests\test_nephele_physical.py:57: in physical
+    visual = _visual_gates(artifact, evaluator, ROOT, head)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scripts\nephele_evidence_report.py:1838: in _visual_gates
+    _fail("gate_failure", "Gate 3 DeltaE pass fraction or godray SSIM failed")
+scripts\nephele_evidence_report.py:141: in _fail
+    raise EvidenceError(code, message)
+E   scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed</error></testcase><testcase classname="tests.test_nephele_physical" name="gate5_compute_shadow_ridgeline" time="0.000"><error message="failed on setup with &quot;scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed&quot;">tests\test_nephele_physical.py:57: in physical
+    visual = _visual_gates(artifact, evaluator, ROOT, head)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scripts\nephele_evidence_report.py:1838: in _visual_gates
+    _fail("gate_failure", "Gate 3 DeltaE pass fraction or godray SSIM failed")
+scripts\nephele_evidence_report.py:141: in _fail
+    raise EvidenceError(code, message)
+E   scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed</error></testcase><testcase classname="tests.test_nephele_physical" name="gate6_determinism_memory" time="0.001"><error message="failed on setup with &quot;scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed&quot;">tests\test_nephele_physical.py:57: in physical
+    visual = _visual_gates(artifact, evaluator, ROOT, head)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scripts\nephele_evidence_report.py:1838: in _visual_gates
+    _fail("gate_failure", "Gate 3 DeltaE pass fraction or godray SSIM failed")
+scripts\nephele_evidence_report.py:141: in _fail
+    raise EvidenceError(code, message)
+E   scripts.nephele_evidence_report.EvidenceError: Gate 3 DeltaE pass fraction or godray SSIM failed</error></testcase></testsuite></testsuites>

@@ -1,0 +1,15 @@
+{
+  "checked_out_head": "aeda3a8e4d7ba927d23cc978ad3c4678e6e79039",
+  "command": "python -m pytest tests/test_nephele_physical.py -o python_functions=gate*",
+  "fixture_commit": "aeda3a8e4d7ba927d23cc978ad3c4678e6e79039",
+  "fixture_manifest_sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817",
+  "gate4_policy_sha256": "90f6687a34e0338adfc86f9a06e0053cd2a3c3061072fcb769b90b42d006fd05",
+  "head_sha": "aeda3a8e4d7ba927d23cc978ad3c4678e6e79039",
+  "lane": "windows-nvidia-vulkan",
+  "required_backend": "vulkan",
+  "runner_arch": "X64",
+  "runner_os": "Windows",
+  "schema": "forge3d.nephele.run_context/1",
+  "status": "captured",
+  "tracked_worktree_clean": true
+}

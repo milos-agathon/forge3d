@@ -1,0 +1,19 @@
+{
+  "density_majorant_device_local_bytes": 51200,
+  "froxel_depth": 64,
+  "froxel_device_local_bytes": 862048,
+  "include_no_medium": true,
+  "internal_dimensions": [
+    64,
+    64
+  ],
+  "output_dimensions": [
+    64,
+    64
+  ],
+  "peak_host_visible_bytes": 119808,
+  "readback_bytes": 262144,
+  "schema": "forge3d.nephele.memory/2",
+  "staging_bytes": 102400,
+  "termination_integration_steps": 217682
+}
