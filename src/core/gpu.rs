@@ -804,12 +804,16 @@ mod backend_request_tests {
             );
             let usage = wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
             let make = |label| {
-                device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some(label),
-                    size: 1 << 20,
-                    usage,
-                    mapped_at_creation: false,
-                })
+                crate::core::resource_tracker::tracked_create_buffer(
+                    device,
+                    &wgpu::BufferDescriptor {
+                        label: Some(label),
+                        size: 1 << 20,
+                        usage,
+                        mapped_at_creation: false,
+                    },
+                )
+                .unwrap()
             };
             let (src, dst) = (make("wait-src"), make("wait-dst"));
             let mut encoder = device.create_command_encoder(&Default::default());
