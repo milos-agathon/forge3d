@@ -2416,15 +2416,15 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
 
 /// Compute geometric normal from screen-space derivatives of world position.
 /// This is the "ground truth" normal that doesn't suffer from mip mismatch.
-fn calculate_normal_ddxddy(world_pos: vec3<f32>) -> vec3<f32> {
+fn calculate_normal_ddxddy(world_pos: vec3<f32>, up: vec3<f32>) -> vec3<f32> {
     let ddx_pos = terrain_screen_ddx_world(world_pos);
     let ddy_pos = terrain_screen_ddy_world(world_pos);
     // Cross product gives surface normal (right-hand rule)
     // Note: order matters for winding direction
     let n = det_cross3(ddx_pos, ddy_pos);
-    // Ensure normal points "up" (positive Y in our coordinate system)
+    // Ensure normal points "up" (the hemisphere of the geometric up `up`)
     let n_norm = det_normalize3(n);
-    return select(n_norm, -n_norm, n_norm.y < 0.0);
+    return select(n_norm, -n_norm, det_dot3(n_norm, up) < 0.0);
 }
 
 /// Compute triplanar blend weights from surface normal.
@@ -4095,7 +4095,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let height_normal_legacy = calculate_normal(uv, texel_size);
 
     // Derivative-based normal (Milestone 1: ground truth comparison)
-    let n_dd = calculate_normal_ddxddy(input.world_position);
+    let n_dd = calculate_normal_ddxddy(input.world_position, base_normal);
 
     // Select which height normal to use based on debug mode
     var height_normal = height_normal_lod; // Default: LOD-aware (the fix)
@@ -5011,8 +5011,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
 
         // Recompute specular IBL with perturbed normal and SpecAA-corrected roughness
         let sparkle_ibl = eval_ibl(
-            sparkle_normal,
-            view_dir,
+            rotate_y(terrain_to_env(sparkle_normal), u_ibl.sin_theta, u_ibl.cos_theta),
+            rotated_view,
             albedo,
             metallic,
             sparkle_roughness, // Uses freshly-computed Toksvig roughness on perturbed normal
@@ -5127,7 +5127,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         // ── MODE 23: No Specular (Diffuse Only) ──
         // Shows terrain with ONLY diffuse/ambient lighting (no IBL specular).
         // If flakes disappear here → flakes are specular aliasing.
-        let ambient_strength_23 = det_mix(u_shading.clamp1.x, u_shading.clamp1.y, 1.0 - abs(blended_normal.z));
+        let ambient_strength_23 = det_mix(u_shading.clamp1.x, u_shading.clamp1.y, 1.0 - abs(det_dot3(blended_normal, base_normal)));
         let ambient_23 = albedo * ambient_strength_23;
         let direct_mult_23 = det_mix(0.65, 1.0, occlusion);
         let diffuse_only_23 = ibl_diffuse_scaled;
@@ -5239,7 +5239,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         // DBG_PREFILT_RAW: Direct sample of specular cubemap (no Fresnel)
         // This isolates whether the cubemap itself is returning data
         let refl_dir = det_reflect3(-view_dir, shading_normal);
-        let rot_refl = rotate_y(refl_dir, u_ibl.sin_theta, u_ibl.cos_theta);
+        let rot_refl = rotate_y(terrain_to_env(refl_dir), u_ibl.sin_theta, u_ibl.cos_theta);
         let prefilt = textureSampleLevel(envSpecular, envSampler, rot_refl, 0.0).rgb;
         final_color = debug_water_prefilt_raw(is_water, prefilt);
     } else if (debug_mode == 104u) {
@@ -5450,7 +5450,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // The shading_normal already encodes terrain microstructure from height map
 
             // Compute slope steepness from normal (deviation from up vector)
-            let slope_steepness = 1.0 - abs(shading_normal.z);  // 0=flat, 1=vertical (Z up)
+            let slope_steepness = 1.0 - abs(det_dot3(shading_normal, base_normal));  // 0=flat, 1=vertical (against the geometric up)
 
             // Edge detection via normal screen-space derivatives
             let dndx = dpdxCoarse(shading_normal);
