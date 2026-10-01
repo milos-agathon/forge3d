@@ -672,6 +672,21 @@ mod tests {
     }
     use std::sync::atomic::AtomicUsize;
     use std::sync::{Barrier, Condvar};
+    use std::time::{Duration, Instant};
+
+    /// Polls the non-blocking loader API until `poll` yields a value. Workers
+    /// are OS threads, so a fixed spin count races the scheduler on loaded
+    /// runners; a wall-clock deadline does not.
+    fn wait_for<T>(what: &str, mut poll: impl FnMut() -> Option<T>) -> T {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(value) = poll() {
+                return value;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
 
     struct ConstantReader;
     impl HeightReader for ConstantReader {
@@ -703,12 +718,10 @@ mod tests {
         assert!(loader.request(first));
         assert!(!loader.request(first));
         assert!(!loader.request(second));
-        let completed = (0..10_000)
-            .find_map(|_| {
-                let result = loader.drain_completed(1);
-                (!result.is_empty()).then_some(result)
-            })
-            .expect("worker completion");
+        let completed = wait_for("worker completion", || {
+            let result = loader.drain_completed(1);
+            (!result.is_empty()).then_some(result)
+        });
         assert_eq!(completed[0].tile_id, first);
         assert!(loader.request(second));
     }
@@ -762,9 +775,7 @@ mod tests {
         );
         let root = TileId::new(0, 0, 0);
         assert!(loader.request(root));
-        let first = (0..20_000)
-            .find_map(|_| loader.drain_terminals(1).pop())
-            .expect("failure terminal");
+        let first = wait_for("failure terminal", || loader.drain_terminals(1).pop());
         assert!(matches!(first, TileLoadTerminal::Error(ticket) if ticket.tile_id == root));
         assert!(
             loader.drain_completed(1).is_empty(),
@@ -775,9 +786,7 @@ mod tests {
             loader.request(root),
             "terminal failure releases bounded capacity for retry"
         );
-        let recovered = (0..20_000)
-            .find_map(|_| loader.drain_terminals(1).pop())
-            .expect("recovery terminal");
+        let recovered = wait_for("recovery terminal", || loader.drain_terminals(1).pop());
         match recovered {
             TileLoadTerminal::Complete(tile) => {
                 assert_eq!(tile.tile_id, root);
@@ -835,14 +844,10 @@ mod tests {
         let (lock, cv) = &*release;
         *lock.lock().unwrap() = true;
         cv.notify_all();
-        for _ in 0..10_000 {
+        wait_for("terminal acknowledgement", || {
             loader.drain_completed(1);
-            if loader.stats().0 == 0 {
-                break;
-            }
-            std::thread::yield_now();
-        }
-        assert_eq!(loader.stats().0, 0);
+            (loader.stats().0 == 0).then_some(())
+        });
         assert!(loader.request(second));
     }
 
@@ -880,14 +885,10 @@ mod tests {
         let (lock, cv) = &*release;
         *lock.lock().unwrap() = true;
         cv.notify_all();
-        for _ in 0..20_000 {
+        wait_for("terminal acknowledgement", || {
             loader.drain_completed(4);
-            if loader.stats().0 == 0 {
-                break;
-            }
-            std::thread::yield_now();
-        }
-        assert_eq!(loader.stats().0, 0);
+            (loader.stats().0 == 0).then_some(())
+        });
         assert!(loader.request(replacement));
     }
 }

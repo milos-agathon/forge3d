@@ -1035,7 +1035,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-       vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
+       contains(fromJSON('["1", "true"]'), vars.FORGE3D_RUN_METAL_DIAGNOSTIC)
     outputs:
       aether_lane: ${{ steps.aether-absent.outputs.aether_lane || steps.aether-ran.outputs.aether_lane || steps.aether-software-absent.outputs.aether_lane || 'unknown' }}
     env:
@@ -1274,7 +1274,16 @@ jobs:
               Remove-Item -LiteralPath $fixture.Path -Force
               throw "SHA-256 mismatch for $($fixture.Path)`: expected $($fixture.Sha256), got $actual"
             }
+            # Checkout runs with lfs: false, so the index holds the pointer's
+            # stat data. git status reports any size change as modified without
+            # running the LFS clean filter, so the verified media would read as
+            # dirty to later evidence gates. Re-adding cleans the media back to
+            # the committed pointer; any other content stays a staged change.
+            git add -- $fixture.Path
+            if ($LASTEXITCODE -ne 0) { throw "git add failed for $($fixture.Path)" }
           }
+          $dirty = (git status --porcelain --untracked-files=no | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw "verified fixtures left the tracked worktree dirty: $dirty" }
 
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
@@ -1540,7 +1549,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-      vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
+      contains(fromJSON('["1", "true"]'), vars.FORGE3D_RUN_METAL_DIAGNOSTIC)
     runs-on: macos-14
     timeout-minutes: 30
     env:
