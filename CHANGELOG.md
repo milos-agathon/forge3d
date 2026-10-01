@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+
+## [1.40.1] - 2026-10-01
+### Changed
+- Bumped the package and PyPI version to `1.40.1`.
+
 ### Fixed
 - Terrain hillshade now follows the sun in every camera mode, including the default 2D `MapScene` view. The shader built its shading normal in a Y-up frame but dotted it with a Z-up sun and view vector, so south-facing slopes were always lit and north-facing slopes always dark. The normal AOV keeps its published frame. (#196)
 - 3D `MapScene` views are no longer mirrored north-south, and `OrbitCamera.target` reaches the renderer instead of every 3D camera orbiting the tile centre. (#196)
