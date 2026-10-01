@@ -102,6 +102,13 @@ def test_lighting_extras_are_validated_not_dropped():
         map_scene._mapscene_lighting_extras({"height_ao": True})
 
 
+def test_ibl_intensity_requires_ibl_gi_mode():
+    assert map_scene._mapscene_ibl_intensity({"intensity": 0.3}, ["ibl", "ssao"]) == pytest.approx(0.3)
+    assert map_scene._mapscene_ibl_intensity({}, []) == 1.0
+    with pytest.raises(ValueError, match="gi.modes includes 'ibl'"):
+        map_scene._mapscene_ibl_intensity({"intensity": 0.3}, ["ssao"])
+
+
 def test_camera_target_must_be_finite():
     scene = _scene(np.zeros((N, N), dtype=np.float32), camera=f3d.OrbitCamera(target=(float("nan"), 0.0, 0.0)))
     with pytest.raises(ValueError, match="camera.target"):

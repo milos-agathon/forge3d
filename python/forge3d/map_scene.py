@@ -1395,11 +1395,6 @@ def _mapscene_north_up_camera_mode(camera_mode: str) -> str:
     return camera_mode
 
 
-def _is_north_up_camera_mode(camera_mode: str) -> bool:
-    options = _camera_mode_options(camera_mode)
-    return "zup" in options and "north" in options
-
-
 def _build_mapscene_terrain_params(
     recipe: "SceneRecipe",
     heightmap: Any,
@@ -1453,12 +1448,11 @@ def _build_mapscene_terrain_params(
         domain=domain,
     )
     azimuth, elevation = _sun_angles_from_direction(recipe.lighting.sun_direction)
-    camera_mode = _mapscene_effective_camera_mode(recipe)
-    if _is_north_up_camera_mode(camera_mode):
-        # sun_direction carries a compass azimuth (0 = north, 90 = east). The
-        # renderer reads a math angle from +X toward world +Y, and mesh world
-        # +Y runs south, so compass A maps to A - 90.
-        azimuth = azimuth - 90.0
+    # sun_direction carries a compass azimuth (0 = north, 90 = east). The
+    # renderer reads a math angle from +X (east) toward +Y in the terrain
+    # geometry frame, where +Y runs south (row 0 is north), so compass A maps
+    # to A - 90 in every camera mode.
+    azimuth = azimuth - 90.0
     renderer_config_data = settings.get("renderer_config") if isinstance(settings.get("renderer_config"), Mapping) else None
     renderer_config = load_renderer_config(renderer_config_data)
     ibl = settings.get("ibl") if isinstance(settings.get("ibl"), Mapping) else {}
@@ -1501,7 +1495,7 @@ def _build_mapscene_terrain_params(
         light_elevation_deg=elevation,
         sun_intensity=float(recipe.lighting.intensity),
         sun_color=sun.get("color"),
-        ibl_intensity=float(ibl.get("intensity", 1.0)),
+        ibl_intensity=_mapscene_ibl_intensity(ibl, renderer_config.gi.modes),
         cam_target=_mapscene_camera_target(recipe),
         cam_radius=float(recipe.camera.distance),
         cam_phi_deg=float(recipe.camera.azimuth_deg),
@@ -1577,6 +1571,16 @@ def _mapscene_lighting_extras(settings: Mapping[str, Any]) -> dict[str, Any]:
         except TypeError as exc:
             raise ValueError(f"LightingPreset.settings[{key!r}] is not a valid {class_name}: {exc}") from exc
     return extras
+
+
+def _mapscene_ibl_intensity(ibl: Mapping[str, Any], gi_modes: Sequence[str]) -> float:
+    """IBL intensity only reaches the image when ``gi.modes`` includes ``ibl``."""
+    if "intensity" in ibl and "ibl" not in gi_modes:
+        raise ValueError(
+            "LightingPreset.settings['ibl']['intensity'] has no effect unless "
+            "renderer_config.gi.modes includes 'ibl'"
+        )
+    return float(ibl.get("intensity", 1.0))
 
 
 def _frame_to_rgba(frame: Any, output: "OutputSpec") -> Any:

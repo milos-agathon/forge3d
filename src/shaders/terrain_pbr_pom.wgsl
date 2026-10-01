@@ -1273,9 +1273,9 @@ fn sample_water_reflection(
     reflection_uv.y = det_barrier(1.0 - reflection_uv.y);
 
     // Wave-based UV distortion
-    // Wave normal deviation from flat (0,1,0) creates UV offset
+    // Wave normal deviation from flat (0,0,1) creates UV offset (Z up)
     let wave_strength = water_reflection_uniforms.reflection_params.z;
-    let wave_distortion = det_barrier2((wave_normal.xz - vec2<f32>(0.0, 0.0)) * wave_strength);
+    let wave_distortion = det_barrier2((wave_normal.xy - vec2<f32>(0.0, 0.0)) * wave_strength);
 
     // Shore attenuation: reduce distortion near shore (calmer water at edges)
     let shore_atten_width = water_reflection_uniforms.reflection_params.w;
@@ -2173,10 +2173,12 @@ fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
     let world_texel = texel_uv * spacing; // Texel size in world units
 
     let vertical_scale = max(u_terrain.spacing_h_exag.z * 0.5, 1e-3);
+    // Geometry frame (+X east, +Y south = +v, +Z up), the frame of world
+    // positions, the sun and the view vector.
     return det_normalize3(vec3<f32>(
         -det_div(dx, world_texel.x),
-        vertical_scale,
         -det_div(dy, world_texel.y),
+        vertical_scale,
     ));
 }
 
@@ -2385,7 +2387,8 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
     combined_dx = det_div(combined_dx, total_weight);
     combined_dy = det_div(combined_dy, total_weight);
 
-    return det_normalize3(vec3<f32>(-combined_dx, vertical_scale, -combined_dy));
+    // Geometry frame (+X east, +Y south, +Z up), matching calculate_normal_lod_aware.
+    return det_normalize3(vec3<f32>(-combined_dx, -combined_dy, vertical_scale));
 }
 
 /// Calculate normal from height map using Sobel filter (LEGACY - not LOD-aware).
@@ -2407,7 +2410,8 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
     let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
 
     let vertical_scale = max(u_terrain.spacing_h_exag.z * 0.5, 1e-3);
-    return det_normalize3(vec3<f32>(-dx, vertical_scale, -dy));
+    // Geometry frame (+X east, +Y south, +Z up), matching calculate_normal_lod_aware.
+    return det_normalize3(vec3<f32>(-dx, -dy, vertical_scale));
 }
 
 /// Compute geometric normal from screen-space derivatives of world position.
@@ -3360,6 +3364,13 @@ fn apply_dem_detail_normal(
     return det_normalize3(det_mat3_mul_vec3(tbn, blended));
 }
 
+/// Terrain geometry frame (+X east, +Y south, +Z up) to the Y-up environment
+/// cubemap frame (+X east, +Y up, +Z south). The ORBIS globe keeps its own
+/// render frame unchanged.
+fn terrain_to_env(v: vec3<f32>) -> vec3<f32> {
+    return select(vec3<f32>(v.x, v.z, v.y), v, orbis_globe_active());
+}
+
 fn rotate_y(v : vec3<f32>, sin_theta : f32, cos_theta : f32) -> vec3<f32> {
     return vec3<f32>(
         det_barrier(v.x * cos_theta) + det_barrier(v.z * sin_theta),
@@ -4209,11 +4220,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // blended_normal has high-frequency perturbations that cause layer selection jitter → flakes
     // On the Z-up globe the geometric normal is the bare geodetic up, so the
     // slope comes from the terrain normal measured against it.
-    let slope_raw = select(
-        1.0 - abs(base_normal.y),
-        1.0 - abs(det_dot3(height_normal_lod, base_normal)),
-        orbis_globe,
-    );
+    // Slope is the terrain normal measured against the geometric up (+Z in
+    // the terrain geometry frame, the geodetic up on the globe).
+    let slope_raw = 1.0 - abs(det_dot3(height_normal_lod, base_normal));
     let slope_factor = clamp(slope_raw, u_shading.clamp0.z, u_shading.clamp0.w);
     var layer_count = i32(u_shading.layer_control.x + 0.5);
     if (layer_count < 1) {
@@ -4435,8 +4444,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         let wave_dx = det_barrier((det_barrier(det_barrier(wave1) + det_barrier(wave2)) + det_barrier(wave3)) * wind_cos) + det_barrier(det_barrier(cross_wave) * (-wind_sin));
         let wave_dy = det_barrier((det_barrier(det_barrier(wave1) + det_barrier(wave2)) + det_barrier(wave3)) * wind_sin) + det_barrier(det_barrier(cross_wave) * wind_cos);
 
-        // Build perturbed normal (Y is up)
-        shading_normal = det_normalize3(vec3<f32>(wave_dx, 1.0, wave_dy));
+        // Build perturbed normal in the terrain geometry frame (Z is up)
+        shading_normal = det_normalize3(vec3<f32>(wave_dx, wave_dy, 1.0));
     }
 
     if (!is_water) {
@@ -4740,8 +4749,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     }
 
     // Apply IBL rotation (terrain-specific feature)
-    let rotated_normal = rotate_y(shading_normal, u_ibl.sin_theta, u_ibl.cos_theta);
-    let rotated_view = rotate_y(view_dir, u_ibl.sin_theta, u_ibl.cos_theta);
+    let rotated_normal = rotate_y(terrain_to_env(shading_normal), u_ibl.sin_theta, u_ibl.cos_theta);
+    let rotated_view = rotate_y(terrain_to_env(view_dir), u_ibl.sin_theta, u_ibl.cos_theta);
 
     // For water: use near-black albedo for IBL (water surface has no diffuse color)
     // The underwater_color (stored in albedo) is for scatter, not surface reflectance
@@ -5118,7 +5127,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         // ── MODE 23: No Specular (Diffuse Only) ──
         // Shows terrain with ONLY diffuse/ambient lighting (no IBL specular).
         // If flakes disappear here → flakes are specular aliasing.
-        let ambient_strength_23 = det_mix(u_shading.clamp1.x, u_shading.clamp1.y, 1.0 - abs(blended_normal.y));
+        let ambient_strength_23 = det_mix(u_shading.clamp1.x, u_shading.clamp1.y, 1.0 - abs(blended_normal.z));
         let ambient_23 = albedo * ambient_strength_23;
         let direct_mult_23 = det_mix(0.65, 1.0, occlusion);
         let diffuse_only_23 = ibl_diffuse_scaled;
@@ -5441,7 +5450,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // The shading_normal already encodes terrain microstructure from height map
 
             // Compute slope steepness from normal (deviation from up vector)
-            let slope_steepness = 1.0 - abs(shading_normal.y);  // 0=flat, 1=vertical
+            let slope_steepness = 1.0 - abs(shading_normal.z);  // 0=flat, 1=vertical (Z up)
 
             // Edge detection via normal screen-space derivatives
             let dndx = dpdxCoarse(shading_normal);
@@ -5684,8 +5693,10 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // Alpha is a residency oracle for the VT normal family. It is 1 when VT
     // normal is disabled (the geometric-normal contract is fully satisfied),
     // otherwise the exact weighted coverage of resident Grid-UV samples.
+    // The normal AOV keeps its published frame (+X east, +Y up, +Z south):
+    // path-tracer parity, denoiser guidance and AOV oracles consume it.
     out.aov_normal = vec4<f32>(
-        det_normalize3(shading_normal),
+        det_normalize3(terrain_to_env(shading_normal)),
         select(1.0, clamp(vt_normal_residency, 0.0, 1.0), vt_normal_enabled),
     );
 
