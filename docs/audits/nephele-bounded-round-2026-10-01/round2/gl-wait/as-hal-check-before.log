@@ -1,0 +1,19 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 13s
+
+running 1 test
+
+thread 'core::gpu::backend_request_tests::wait_for_device_idle_classifies_gl_and_returns_after_real_work' (17400) panicked at src\core\gpu.rs:802:13:
+assertion `left == right` failed: AdapterInfo { name: "NVIDIA GeForce RTX 3070", vendor: 4318, device: 9348, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "610.60", backend: Vulkan }
+  left: true
+ right: false
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test core::gpu::backend_request_tests::wait_for_device_idle_classifies_gl_and_returns_after_real_work ... FAILED
+
+failures:
+
+failures:
+    core::gpu::backend_request_tests::wait_for_device_idle_classifies_gl_and_returns_after_real_work
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1654 filtered out; finished in 0.78s
+
+error: test failed, to rerun pass `--lib`

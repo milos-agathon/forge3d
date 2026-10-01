@@ -70,17 +70,15 @@ pub fn wait_for_device_idle(device: &wgpu::Device) {
     }
 }
 
-/// wgpu 0.19 compiles its GLES backend on exactly these targets.
-#[cfg(any(windows, all(unix, not(target_os = "ios"), not(target_os = "macos"))))]
+/// wgpu-core 0.19.4 stores the backend in the top 3 bits of every id
+/// (`id.rs` `BACKEND_SHIFT`, value 4 = GL), and native `Device::global_id` is
+/// that raw id. `Device::as_hal::<Gles>` is not usable here: it looks the id up
+/// in the GL registry by slot without checking the backend, so a live GL device
+/// in the same slot misclassifies a Vulkan device or panics on the epoch check.
+/// `Id::inner` is a hidden testing API, so the unit test below pins this
+/// against every local adapter with all devices alive at once.
 fn device_is_gl(device: &wgpu::Device) -> bool {
-    // SAFETY: the callback only checks whether a GLES device exists; the raw
-    // handle is neither used nor destroyed.
-    unsafe { device.as_hal::<wgpu::hal::api::Gles, _, _>(|hal| hal.is_some()) }.unwrap_or(false)
-}
-
-#[cfg(not(any(windows, all(unix, not(target_os = "ios"), not(target_os = "macos")))))]
-fn device_is_gl(_device: &wgpu::Device) -> bool {
-    false
+    device.global_id().inner() >> 61 == 4
 }
 
 /// Backend name of the already-initialized GPU context, if one exists.
@@ -782,18 +780,25 @@ mod backend_request_tests {
         ));
     }
 
+    /// Every device stays alive at once, so a GL device and a Vulkan/DX12
+    /// device share a registry slot number; a lookup in the GL registry by
+    /// slot would misclassify the non-GL device or panic on the epoch check.
     #[test]
     fn wait_for_device_idle_classifies_gl_and_returns_after_real_work() {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
-            let info = adapter.get_info();
-            let Ok((device, queue)) = pollster::block_on(
-                adapter.request_device(&wgpu::DeviceDescriptor::default(), None),
-            ) else {
-                continue;
-            };
+        let devices: Vec<_> = instance
+            .enumerate_adapters(wgpu::Backends::all())
+            .into_iter()
+            .filter_map(|adapter| {
+                let info = adapter.get_info();
+                pollster::block_on(adapter.request_device(&Default::default(), None))
+                    .ok()
+                    .map(|(device, queue)| (info, device, queue))
+            })
+            .collect();
+        for (info, device, queue) in &devices {
             assert_eq!(
-                device_is_gl(&device),
+                device_is_gl(device),
                 info.backend == wgpu::Backend::Gl,
                 "{info:?}"
             );
@@ -810,7 +815,7 @@ mod backend_request_tests {
             let mut encoder = device.create_command_encoder(&Default::default());
             encoder.copy_buffer_to_buffer(&src, 0, &dst, 0, 1 << 20);
             queue.submit([encoder.finish()]);
-            wait_for_device_idle(&device);
+            wait_for_device_idle(device);
             assert!(
                 device.poll(wgpu::Maintain::Poll).is_queue_empty(),
                 "{info:?}"
