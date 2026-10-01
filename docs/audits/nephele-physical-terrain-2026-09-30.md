@@ -1,8 +1,10 @@
-# NEPHELE deterministic physical terrain remediation
+# NEPHELE first deterministic physical terrain remediation (historical)
 
 Status: **deterministic remediation verified; clean H1 FAILED at Gate 3; physical acceptance NOT_PROVEN**. Worktree: `D:/forge3d/.worktrees/nephele-172-completion`, branch `codex/20-nephele`. The final source is `aeda3a8e4d7ba927d23cc978ad3c4678e6e79039`; its exact CI wheel was installed and checked locally after the clean H1 campaign. Historical dirty-tree evidence is labeled separately.
 
-## Current B1–B9 observations
+The later [bounded round](nephele-bounded-round-2026-10-01.md) supersedes this snapshot for the current source, pin and B1–B9 measurements. The evidence below remains the historical `aeda3a8e` campaign.
+
+## Historical B1–B9 observations
 
 | Check | Executed evidence | Result |
 |---|---|---|

@@ -48,3 +48,7 @@ tests/nephele/fixture/*.json text eol=lf
 
 scripts/generate_media_blue_noise.py text eol=lf
 assets/media/nephele_blue_noise_provenance.json text eol=lf
+
+# Preserve the bounded-round raw evidence and diagnostic producer hashes.
+docs/audits/nephele-bounded-round-2026-10-01/** -text
+scripts/nephele_shadow_inscatter_diagnostic.py -text

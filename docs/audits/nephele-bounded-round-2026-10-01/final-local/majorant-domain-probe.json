@@ -1,0 +1,89 @@
+{
+  "domain": {
+    "bounds_max": [
+      30.0,
+      44.0,
+      30.0
+    ],
+    "bounds_min": [
+      -30.0,
+      4.0,
+      -30.0
+    ],
+    "density_f16_sha256": "b67c3b52d1385022cb2b7e788c1dfd3a9220758a8dc7f793d3b0b4294aeeb1fe",
+    "domain_boundary_points": 8,
+    "domain_face_interiors": 54,
+    "exact_domain": true,
+    "grid_shape": [
+      3,
+      3,
+      3
+    ],
+    "majorant_boundary_sides": 108,
+    "majorant_cell_centers": 27,
+    "majorant_grid_shape": [
+      3,
+      3,
+      3
+    ],
+    "majorant_query": "floor(clamp(unit,0,1)*N)-clamped-to-N-minus-1",
+    "medium_sha256": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9",
+    "probe_mapping": "domain-boundaries-texel-extrema-majorant-boundaries-then-irrational-lattice-v3",
+    "schema": "forge3d.nephele.majorant_domain_coverage/3",
+    "sha256": "fbb00ecd7175a60f1b2a6825d8fc2c5db52e950bee19edbd32a3612898e8460c",
+    "texel_center_extrema": 27,
+    "texel_centers_are_majorant_cell_centers": true
+  },
+  "max_represented_extinction_minus_bound": -5.960464477539063e-08,
+  "measured_representation_error": 0.0,
+  "medium": {
+    "path": "tests/nephele/fixture/medium.json",
+    "sha256": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9"
+  },
+  "probe_count": 1000000,
+  "producer_tool": {
+    "path": "scripts/nephele_majorant_domain_probe.py",
+    "sha256": "f65358bd3c779376e71725a185e5e250d6b443c54b643fd0c0e3d84eca46bbcc"
+  },
+  "raw_output": {
+    "encoding": "little-endian-f32-extinction-bound-pairs",
+    "pairs": 1000000,
+    "path": "majorant-domain-probe.pairs.bin",
+    "sha256": "e20072e3352cd5a370e38fea8862029dd679719a5421d183b7f54182e06ca0a0"
+  },
+  "sample_mapping": {
+    "algorithm": "domain-boundaries-texel-extrema-majorant-boundaries-then-irrational-lattice-v3",
+    "count": 1000000
+  },
+  "schema": "forge3d.nephele.majorant_probe/3",
+  "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+  "summary": {
+    "bound": {
+      "maximum": 0.06500005722045898,
+      "minimum": 0.06500005722045898,
+      "sum": 65000.057220458984
+    },
+    "extinction": {
+      "maximum": 0.06499999761581421,
+      "minimum": 0.0013002774212509394,
+      "sum": 16802.309911947814
+    }
+  },
+  "transport_representation": {
+    "density_f16_sha256": "b67c3b52d1385022cb2b7e788c1dfd3a9220758a8dc7f793d3b0b4294aeeb1fe",
+    "density_sampling": "normalized-clamp-to-edge-linear-texel-center-uN-minus-0.5",
+    "grid_shape": [
+      3,
+      3,
+      3
+    ],
+    "majorant_grid_shape": [
+      3,
+      3,
+      3
+    ],
+    "majorant_query": "floor(clamp(unit,0,1)*N)-clamped-to-N-minus-1",
+    "sigma_t_max": 0.065
+  },
+  "violation_count": 0
+}

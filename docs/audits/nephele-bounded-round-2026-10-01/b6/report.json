@@ -1,0 +1,59 @@
+{
+  "artifact_hashes": {
+    "candidate-environment-in-scatter.npy": "612c8b7cc4099bd9a980f50701c3d76c849dd82b5f4f5304d678c1252e54a96c",
+    "candidate-environment-rgb.npy": "0e82f9ba0f19ec26e8b690cfa365b66c041ec569e1fa422bcdebb9299f185092",
+    "candidate-environment-transmittance.npy": "63e9e1a8990b3236552c6c822ced995eedb588b3fea24f3530a6514f9b2580b8",
+    "candidate-no-medium-environment-rgb.npy": "3c27f3be70d27bd2817d605508bfe6dff50b888eefd9f724cb0ef3dadb20f96f"
+  },
+  "cloud_shadow_mask": {
+    "artifact": "cloud-shadow-mask.npy",
+    "path": "tests/nephele/fixture/cloud-shadow-mask.npy",
+    "sha256": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e"
+  },
+  "diagnostics": {
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "density_device_local_bytes": 51200,
+    "driver": "NVIDIA 610.60",
+    "energy_accounting_residual": 2.980232238769531e-07,
+    "executed_multi_scatter": true,
+    "froxel_device_local_bytes": 913248,
+    "host_visible_bytes": 0,
+    "majorant_device_local_bytes": 0,
+    "majorant_proof": "TrilinearConvexHull",
+    "majorant_valid": true,
+    "multiple_scatter_dispatches": 1,
+    "multiple_scatter_luminance": 0.016647110314806923,
+    "sample_count": 4096,
+    "single_scatter_dispatches": 1,
+    "single_scatter_luminance": 0.06819470793873528,
+    "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+    "staging_readback_bytes": 153600,
+    "step_count": 341665,
+    "sun_transmittance_bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+    "sun_transmittance_executed_steps": 36723,
+    "sun_transmittance_max_abs_error": 0.008301794528961182,
+    "sun_transmittance_max_segment_length": 68.22770690917969,
+    "sun_transmittance_method": "bounded_nested_midpoint",
+    "temporal_history_decision": "rejected",
+    "temporal_history_reason": "no prior media history exists",
+    "terrain_shading_model": "lambert_physical",
+    "terrain_trace_queries": 1244
+  },
+  "environment_under_cloud": {
+    "fraction_delta_e_below_2": 0.10276172125883108,
+    "maximum_delta_e": 12.74670024576996,
+    "mean_delta_e": 6.848883690704303,
+    "p95_delta_e": 10.869657099241019,
+    "pass": false,
+    "pixels": 1557
+  },
+  "fixture_manifest_sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817",
+  "physical_acceptance": false,
+  "producer_sha256": "15f0ca70f8b7660368aa579403ed65ec67f48e9ccb14439bee165b970be459bd",
+  "reference_report_sha256": "ecd8ee51ff779a64a8330de26e008512025c3ac936006edaac60ffe7a6e33907",
+  "repository_head": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+  "schema": "forge3d.nephele.b6_environment_diagnostic/1",
+  "sun_intensity": 0.0,
+  "tracked_worktree_clean": true
+}

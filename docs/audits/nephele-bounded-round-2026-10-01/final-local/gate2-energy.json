@@ -1,0 +1,69 @@
+{
+  "absorbed": {
+    "count": 10000000,
+    "sum": 641738.0,
+    "sum_squares": 641738.0
+  },
+  "closure_residual": {
+    "count": 10000000,
+    "sum": 3167.0,
+    "sum_squares": 4294337.0
+  },
+  "homogeneous_slab": {
+    "path": "tests/nephele/homogeneous-slab.json",
+    "sha256": "cf1ff1ad3f68706fad3b1df00113bffc47918c5c4a0abb86082fd17ecce6c6a4"
+  },
+  "incident": {
+    "count": 10000000,
+    "sum": 10000000.0,
+    "sum_squares": 10000000.0
+  },
+  "normalization": "three independent analog-transport ensembles share one incident energy unit per sample",
+  "producer": {
+    "implementation": "canonical-ratio-delta-roulette-and-analog-sphere-v2",
+    "native_source": {
+      "path": "src/media_py.rs",
+      "sha256": "1cc2373940262b3b6abe43aca0878b2710145fb8e90f05e2dc67ddaef66e16c3"
+    },
+    "producer_tool": {
+      "path": "scripts/run_media_physical_capture.py",
+      "sha256": "9aaeb71b8c6f41d1e505534560970f1682d6eb9900ad45f48f1db7cdf6994344"
+    },
+    "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819"
+  },
+  "raw_output": {
+    "columns": [
+      "transmitted",
+      "scattered_out",
+      "absorbed"
+    ],
+    "encoding": "u8-outcome-columns",
+    "path": "gate2-energy-samples.bin",
+    "samples": 10000000,
+    "sha256": "440bb91f46328e6ba84a9dbf24d5b677322d05907844590cce0fdd23f76f4488"
+  },
+  "sample_count": 10000000,
+  "sample_mapping": {
+    "algorithm": "independent-analog-closed-sphere-v2",
+    "parameters": {
+      "normalization": "one incident energy unit per estimator sample",
+      "streams": {
+        "absorbed": 86059606614019,
+        "scattered_out": 86059606614018,
+        "transmitted": 86059606614017
+      }
+    },
+    "sha256": "b943f73fa4a54685d5c48cc7e5373982e70acfa436ace5c18c1c0ec0a745b958"
+  },
+  "scattered_out": {
+    "count": 10000000,
+    "sum": 2144632.0,
+    "sum_squares": 2144632.0
+  },
+  "schema": "forge3d.nephele.gate2_raw/3",
+  "transmitted": {
+    "count": 10000000,
+    "sum": 7216797.0,
+    "sum_squares": 7216797.0
+  }
+}

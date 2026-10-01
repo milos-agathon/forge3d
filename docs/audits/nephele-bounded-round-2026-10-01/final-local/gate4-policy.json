@@ -1,0 +1,21 @@
+{
+  "schema": "forge3d.nephele.gate4_policy/1",
+  "status": "APPROVED",
+  "policy_id": "nephele-gate4-owner-pass-fraction-v1",
+  "approved_by": "Milos",
+  "approved_revision": "94a2d5288efd77c06eac48bee38fc27ebd6251d5",
+  "owner_record": {
+    "approver": "Milos",
+    "date": "2026-09-30",
+    "source": "Explicit owner decision in the NEPHELE #172 completion chat on 2026-09-30",
+    "aggregation": {
+      "kind": "per_pixel_pass_fraction",
+      "minimum_fraction": 0.95
+    }
+  },
+  "aggregation": {
+    "kind": "per_pixel_pass_fraction",
+    "minimum_fraction": 0.95
+  },
+  "definition": "At least 95% of reference-cloud-shadowed terrain pixels must have DeltaE2000 strictly below 2.0. approved_revision identifies the branch reviewed when the owner gave this decision; owner_record identifies the approval source."
+}

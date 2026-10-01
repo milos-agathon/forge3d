@@ -1,0 +1,2486 @@
+{
+  "analysis_engine": "exact-wrapper-expanded-rust-source-resolution-plus-naga-ir-call-graph-v4",
+  "compute_entry_texture_sample_compare_calls": 0,
+  "embedded_rust_wgsl_sources": [
+    "src/astro/night_gpu.rs::embedded-wgsl-8",
+    "src/offscreen/forward.rs::embedded-wgsl-6",
+    "src/path_tracing/adjudication.rs::embedded-wgsl-2",
+    "src/path_tracing/adjudication.rs::embedded-wgsl-3",
+    "src/path_tracing/adjudication.rs::embedded-wgsl-4",
+    "src/path_tracing/hybrid_compute/terrain_heightfield.rs::embedded-wgsl-3",
+    "src/picking/id_buffer.rs::embedded-wgsl-2",
+    "src/picking/tile_id.rs::embedded-wgsl-1",
+    "src/util/debug_pattern.rs::embedded-wgsl-1",
+    "src/verify/contract.rs::embedded-wgsl-30",
+    "src/verify/contract.rs::embedded-wgsl-31",
+    "src/verify/contract.rs::embedded-wgsl-32",
+    "src/verify/contract.rs::embedded-wgsl-33",
+    "src/verify/determinism_lint.rs::embedded-wgsl-12",
+    "src/verify/determinism_lint.rs::embedded-wgsl-6",
+    "src/verify/ir/tests.rs::embedded-wgsl-13",
+    "src/verify/ir/tests.rs::embedded-wgsl-2",
+    "src/verify/ir/tests.rs::embedded-wgsl-24",
+    "src/viewer/init/composite_init.rs::embedded-wgsl-1",
+    "src/viewer/init/fallback_init.rs::embedded-wgsl-1",
+    "src/viewer/init/gbuffer_init.rs::embedded-wgsl-1",
+    "src/viewer/init/gbuffer_init.rs::embedded-wgsl-2",
+    "src/viewer/init/gi_baseline_init.rs::embedded-wgsl-1",
+    "src/viewer/init/gi_baseline_init.rs::embedded-wgsl-2",
+    "src/viewer/init/lit_init.rs::embedded-wgsl-1",
+    "src/viewer/init/sky_init.rs::embedded-wgsl-4",
+    "src/viewer/init/viewer_new.rs::embedded-wgsl-2",
+    "src/viewer/terrain/motion_blur.rs::embedded-wgsl-3",
+    "src/viewer/terrain/motion_blur_depth.rs::embedded-wgsl-2",
+    "src/viewer/terrain/motion_blur_depth/tests.rs::embedded-wgsl-1",
+    "src/viewer/terrain/post_process.rs::embedded-wgsl-3",
+    "src/viewer/terrain/render.rs::embedded-wgsl-1",
+    "src/viewer/terrain/scene.rs::embedded-wgsl-1",
+    "src/viewer/terrain/shader.rs::embedded-wgsl-1",
+    "src/viewer/terrain/vector_overlay.rs::embedded-wgsl-1"
+  ],
+  "executed_assembled_naga_contracts": [
+    "src/accel/lbvh_gpu/setup.rs:12:create_labeled_shader_module",
+    "src/accel/lbvh_gpu/setup.rs:18:create_labeled_shader_module",
+    "src/accel/lbvh_gpu/setup.rs:24:create_labeled_shader_module",
+    "src/accel/lbvh_gpu/setup.rs:6:create_labeled_shader_module",
+    "src/astro/night_gpu.rs:406:create_labeled_shader_module",
+    "src/astro/night_gpu.rs:57:create_labeled_shader_module",
+    "src/codec/f3dz/gpu.rs:125:create_labeled_shader_module",
+    "src/core/cloud_shadows/renderer.rs:94:create_labeled_shader_module",
+    "src/core/clouds/renderer/init.rs:159:create_labeled_shader_module",
+    "src/core/dd/gpu_exec.rs:67:create_labeled_shader_module#locally-parsed-variant-0",
+    "src/core/dd/gpu_exec.rs:67:create_labeled_shader_module#locally-parsed-variant-1",
+    "src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module#locally-parsed-variant-0",
+    "src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module#locally-parsed-variant-1",
+    "src/core/det_probe.rs:194:create_labeled_shader_module",
+    "src/core/det_probe.rs:66:create_labeled_shader_module",
+    "src/core/dof/pipeline.rs:72:create_labeled_shader_module",
+    "src/core/dual_source_oit/constructor.rs:15:create_labeled_shader_module",
+    "src/core/dual_source_oit/constructor.rs:20:create_labeled_shader_module",
+    "src/core/ground_plane/renderer.rs:86:create_labeled_shader_module",
+    "src/core/ibl/constructor.rs:13:create_labeled_shader_module",
+    "src/core/ibl/constructor.rs:18:create_labeled_shader_module",
+    "src/core/ibl/constructor.rs:23:create_labeled_shader_module",
+    "src/core/overlays.rs:280:create_labeled_shader_module",
+    "src/core/point_spot_lights/creation.rs:14:create_labeled_shader_module",
+    "src/core/screen_space_effects/hzb.rs:57:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:100:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:80:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:85:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:90:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:95:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-0",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-1",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-2",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-3",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-4",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-0",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-1",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-2",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-3",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-4",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:12:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:18:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:24:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:6:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/astro/night_gpu.rs:406:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/astro/night_gpu.rs:57:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/codec/f3dz/gpu.rs:125:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/cloud_shadows/renderer.rs:94:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/clouds/renderer/init.rs:159:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/gpu_exec.rs:67:create_labeled_shader_module#locally-parsed-variant-0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/gpu_exec.rs:67:create_labeled_shader_module#locally-parsed-variant-1",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module#locally-parsed-variant-0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module#locally-parsed-variant-1",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/det_probe.rs:194:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/det_probe.rs:66:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dof/pipeline.rs:72:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dual_source_oit/constructor.rs:15:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dual_source_oit/constructor.rs:20:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ground_plane/renderer.rs:86:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:13:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:18:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:23:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/overlays.rs:280:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/point_spot_lights/creation.rs:14:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/hzb.rs:57:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:100:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:80:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:85:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:90:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:95:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-1",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-2",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-3",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-4",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-1",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-2",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-3",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-4",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/soft_light_radius.rs:171:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/taa.rs:118:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/text_mesh/renderer.rs:31:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/text_overlay.rs:192:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/water_surface/constructor.rs:121:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/offscreen/pipeline.rs:130:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/passes/gi/mod.rs:36:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/passes/gi/mod.rs:41:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/compute/setup.rs:10:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/aether_post.rs:239:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/media_reference.rs:208:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:118:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:13:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:98:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:234:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:343:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:364:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:32:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:37:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:42:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:47:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:52:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:57:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:62:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:67:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:72:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/picking/id_buffer.rs:146:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/picking/tile_id.rs:146:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/hdr_offscreen/pipeline.rs:175:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/normal_mapping.rs:63:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/pbr/rendering.rs:240:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/py_functions/diagnostics.rs:122:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/render/mesh_instanced.rs:165:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/scene/ssao/setup.rs:30:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/shadows/blur_pass.rs:54:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/shadows/moment_pass.rs:73:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/analysis/viewshed.rs:246:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/analysis/viewshed.rs:486:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:127:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:132:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:137:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:142:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/clipmap/gpu_lod.rs:409:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/culling/two_phase.rs:453:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/pipeline/creation.rs:259:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/pipeline/creation.rs:265:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/atmosphere.rs:115:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/atmosphere.rs:185:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/height_ao/pipelines.rs:7:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/height_ao/pipelines.rs:92:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/media.rs:1303:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/media.rs:741:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:158:create_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:202:create_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:246:create_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:290:create_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:334:create_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:379:create_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:518:create_fullscreen_blit_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:655:create_fullscreen_blit_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:680:create_fullscreen_blit_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:699:create_fullscreen_blit_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:723:create_fullscreen_blit_pipeline",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:385:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:451:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:592:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/shadows/resources.rs:220:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/visibility_buffer.rs:872:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/util/debug_pattern.rs:48:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/binning.rs:156:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/raster.rs:104:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/resolve.rs:39:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/gpu_extrusion/pipeline.rs:14:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/indirect/init.rs:64:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/line.rs:66:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/oit/pipeline.rs:181:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/oit/pipeline.rs:80:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/point/pipeline.rs:19:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/point/renderer/pipelines.rs:32:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/polygon.rs:55:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/composite_init.rs:118:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fallback_init.rs:26:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fog_init.rs:196:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fog_init.rs:517:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gbuffer_init.rs:225:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gbuffer_init.rs:320:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gi_baseline_init.rs:100:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gi_baseline_init.rs:185:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/lit_init.rs:196:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/sky_init.rs:111:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/sky_init.rs:187:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/viewer_new.rs:440:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/pointcloud/state.rs:40:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/denoise.rs:37:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/dof/pass/setup.rs:61:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/motion_blur.rs:72:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/motion_blur_depth.rs:29:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/post_process.rs:84:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/render/motion_blur.rs:358:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/core.rs:44:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:186:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:369:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:490:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pipeline_init.rs:292:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pipeline_init.rs:69:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/vector_overlay/pipelines.rs:57:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/volumetrics.rs:61:create_labeled_shader_module",
+    "src/core/soft_light_radius.rs:171:create_labeled_shader_module",
+    "src/core/taa.rs:118:create_labeled_shader_module",
+    "src/core/text_mesh/renderer.rs:31:create_labeled_shader_module",
+    "src/core/text_overlay.rs:192:create_labeled_shader_module",
+    "src/core/water_surface/constructor.rs:121:create_labeled_shader_module",
+    "src/offscreen/pipeline.rs:130:create_labeled_shader_module",
+    "src/passes/gi/mod.rs:36:create_labeled_shader_module",
+    "src/passes/gi/mod.rs:41:create_labeled_shader_module",
+    "src/path_tracing/compute/setup.rs:10:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/aether_post.rs:239:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/media_reference.rs:208:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/setup.rs:118:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/setup.rs:13:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source",
+    "src/path_tracing/hybrid_compute/setup.rs:98:create_labeled_shader_module",
+    "src/path_tracing/inverse/pipeline.rs:234:create_labeled_shader_module",
+    "src/path_tracing/inverse/pipeline.rs:343:create_labeled_shader_module",
+    "src/path_tracing/inverse/pipeline.rs:364:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:32:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:37:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:42:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:47:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:52:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:57:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:62:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:67:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:72:create_labeled_shader_module",
+    "src/picking/id_buffer.rs:146:create_labeled_shader_module",
+    "src/picking/tile_id.rs:146:create_labeled_shader_module",
+    "src/pipeline/hdr_offscreen/pipeline.rs:175:create_labeled_shader_module",
+    "src/pipeline/normal_mapping.rs:63:create_labeled_shader_module",
+    "src/pipeline/pbr/rendering.rs:240:create_labeled_shader_module",
+    "src/py_functions/diagnostics.rs:122:create_labeled_shader_module",
+    "src/render/mesh_instanced.rs:165:create_labeled_shader_module",
+    "src/scene/ssao/setup.rs:30:create_labeled_shader_module",
+    "src/shadows/blur_pass.rs:54:create_labeled_shader_module",
+    "src/shadows/moment_pass.rs:73:create_labeled_shader_module",
+    "src/terrain/analysis/viewshed.rs:246:create_labeled_shader_module",
+    "src/terrain/analysis/viewshed.rs:486:create_labeled_shader_module",
+    "src/terrain/bloom_processor/constructor.rs:127:create_labeled_shader_module",
+    "src/terrain/bloom_processor/constructor.rs:132:create_labeled_shader_module",
+    "src/terrain/bloom_processor/constructor.rs:137:create_labeled_shader_module",
+    "src/terrain/bloom_processor/constructor.rs:142:create_labeled_shader_module",
+    "src/terrain/clipmap/gpu_lod.rs:409:create_labeled_shader_module",
+    "src/terrain/culling/two_phase.rs:453:create_labeled_shader_module",
+    "src/terrain/pipeline/creation.rs:259:create_labeled_shader_module",
+    "src/terrain/pipeline/creation.rs:265:create_labeled_shader_module",
+    "src/terrain/renderer/atmosphere.rs:115:create_labeled_shader_module",
+    "src/terrain/renderer/atmosphere.rs:185:create_labeled_shader_module",
+    "src/terrain/renderer/height_ao/pipelines.rs:7:create_labeled_shader_module",
+    "src/terrain/renderer/height_ao/pipelines.rs:92:create_labeled_shader_module",
+    "src/terrain/renderer/media.rs:1303:create_labeled_shader_module",
+    "src/terrain/renderer/media.rs:741:create_labeled_shader_module",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:158:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:202:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:246:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:290:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:334:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:379:create_pipeline",
+    "src/terrain/renderer/orbis_capture.rs:353:create_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:518:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:655:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:680:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:699:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:723:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:385:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:451:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:592:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module",
+    "src/terrain/renderer/shadows/resources.rs:220:create_labeled_shader_module",
+    "src/terrain/renderer/visibility_buffer.rs:872:create_labeled_shader_module",
+    "src/util/debug_pattern.rs:48:create_labeled_shader_module",
+    "src/vector/coverage/binning.rs:156:create_labeled_shader_module",
+    "src/vector/coverage/raster.rs:104:create_labeled_shader_module",
+    "src/vector/coverage/resolve.rs:39:create_labeled_shader_module",
+    "src/vector/gpu_extrusion/pipeline.rs:14:create_labeled_shader_module",
+    "src/vector/indirect/init.rs:64:create_labeled_shader_module",
+    "src/vector/line.rs:66:create_labeled_shader_module",
+    "src/vector/oit/pipeline.rs:181:create_labeled_shader_module",
+    "src/vector/oit/pipeline.rs:80:create_labeled_shader_module",
+    "src/vector/point/pipeline.rs:19:create_labeled_shader_module",
+    "src/vector/point/renderer/pipelines.rs:32:create_labeled_shader_module",
+    "src/vector/polygon.rs:55:create_labeled_shader_module",
+    "src/viewer/init/composite_init.rs:118:create_labeled_shader_module",
+    "src/viewer/init/fallback_init.rs:26:create_labeled_shader_module",
+    "src/viewer/init/fog_init.rs:196:create_labeled_shader_module",
+    "src/viewer/init/fog_init.rs:517:create_labeled_shader_module",
+    "src/viewer/init/gbuffer_init.rs:225:create_labeled_shader_module",
+    "src/viewer/init/gbuffer_init.rs:320:create_labeled_shader_module",
+    "src/viewer/init/gi_baseline_init.rs:100:create_labeled_shader_module",
+    "src/viewer/init/gi_baseline_init.rs:185:create_labeled_shader_module",
+    "src/viewer/init/lit_init.rs:196:create_labeled_shader_module",
+    "src/viewer/init/sky_init.rs:111:create_labeled_shader_module",
+    "src/viewer/init/sky_init.rs:187:create_labeled_shader_module",
+    "src/viewer/init/viewer_new.rs:440:create_labeled_shader_module",
+    "src/viewer/pointcloud/state.rs:40:create_labeled_shader_module",
+    "src/viewer/terrain/denoise.rs:37:create_labeled_shader_module",
+    "src/viewer/terrain/dof/pass/setup.rs:61:create_labeled_shader_module",
+    "src/viewer/terrain/motion_blur.rs:72:create_labeled_shader_module",
+    "src/viewer/terrain/motion_blur_depth.rs:29:create_labeled_shader_module",
+    "src/viewer/terrain/post_process.rs:84:create_labeled_shader_module",
+    "src/viewer/terrain/render/motion_blur.rs:358:create_labeled_shader_module",
+    "src/viewer/terrain/scene/core.rs:44:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pbr_compute.rs:186:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pbr_compute.rs:369:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pbr_compute.rs:490:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pipeline_init.rs:292:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pipeline_init.rs:69:create_labeled_shader_module",
+    "src/viewer/terrain/vector_overlay/pipelines.rs:57:create_labeled_shader_module",
+    "src/viewer/terrain/volumetrics.rs:61:create_labeled_shader_module"
+  ],
+  "naga_parser_contract_files": [
+    "src/codec/f3dz/gpu.rs",
+    "src/core/atmosphere/bake.rs",
+    "src/core/dd/gpu_exec.rs",
+    "src/core/dd/jitter_pipeline.rs",
+    "src/core/screen_space_effects/hzb_tests.rs",
+    "src/path_tracing/hybrid_compute/media_reference.rs",
+    "src/path_tracing/hybrid_compute/sdf_scene.rs",
+    "src/path_tracing/hybrid_compute/terrain_heightfield.rs",
+    "src/pipeline/pbr/shadow.rs",
+    "src/shader_sources.rs",
+    "src/terrain/analysis/viewshed.rs",
+    "src/terrain/clipmap/gpu_lod/tests.rs",
+    "src/terrain/culling/two_phase.rs",
+    "src/terrain/renderer/media.rs",
+    "src/vector/coverage/binning.rs",
+    "src/vector/coverage/raster_tests.rs",
+    "src/vector/coverage/resolve_tests.rs",
+    "src/verify/contract.rs",
+    "src/verify/determinism_lint.rs",
+    "src/verify/ir/mod.rs",
+    "src/verify/ir/tests.rs",
+    "src/verify/mod.rs",
+    "src/viewer/terrain/shader_pbr.rs"
+  ],
+  "naga_validated_assemblies": 303,
+  "resolved_source_sha256": {
+    "src/accel/lbvh_gpu/setup.rs:12:create_labeled_shader_module": "13786da6a70b8b21c43cbc916376b933618614858ba185d4ea6387e48fedf24a",
+    "src/accel/lbvh_gpu/setup.rs:18:create_labeled_shader_module": "fbd0dc23af016da9b986bf344d3c69ee4ec2774d5f12e7e8c4ecc3baead99f00",
+    "src/accel/lbvh_gpu/setup.rs:24:create_labeled_shader_module": "f18f8235ec4ef16695944d5bc64045077c66cf4b6fa2a1221b680badcbef9b5f",
+    "src/accel/lbvh_gpu/setup.rs:6:create_labeled_shader_module": "503eae5123e120a9e77857faf2a80486cdd3b7bbb493dec7af4abf7dd3e1f959",
+    "src/astro/night_gpu.rs:406:create_labeled_shader_module": "8e8f8654e0ddbd66a03558e1beedaf06d2cb4d2f8f2ce017190ed325b4dba471",
+    "src/astro/night_gpu.rs:57:create_labeled_shader_module": "b48ff0d98806028b00cf3e061c5ad7699617da94121eae1b2d87e144067f4c64",
+    "src/codec/f3dz/gpu.rs:125:create_labeled_shader_module": "256a017678fa1a2cd05fcfc3212a48af69a84f465ebc9fe1f9994b321a85d140",
+    "src/core/cloud_shadows/renderer.rs:94:create_labeled_shader_module": "ce4e76cc77e2045e10e53795fdf3a157b8de1d7ef57e7cef2c69bdbc2986f025",
+    "src/core/clouds/renderer/init.rs:159:create_labeled_shader_module": "65d0cf3c44c837f9ca94250633fe3029064c442f3282a8da12c5cc98f4043f11",
+    "src/core/dd/gpu_exec.rs:67:create_labeled_shader_module#locally-parsed-variant-0": "9348969cbd5ce0dc6edab3ed1e45eddf6155bb1f11da54a5c001ca05694a86e5",
+    "src/core/dd/gpu_exec.rs:67:create_labeled_shader_module#locally-parsed-variant-1": "2668544cfe5deaf0a91ae5894692a7d88ae14b8be721f53de6f9e88484a945ad",
+    "src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module#locally-parsed-variant-0": "4d8e2a926efb970d94f1e0a5393a43003ad574de932677b4fc41b46d4dadc951",
+    "src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module#locally-parsed-variant-1": "fac2e9896a12c222b5e4f229ff7067e667870dffc1c2ee2d1ce788efb0cfe9b5",
+    "src/core/det_probe.rs:194:create_labeled_shader_module": "214b2bda7c92e7c13f06df391f5dc1a83ec76e16f7f28d3d11d67c089ecc5368",
+    "src/core/det_probe.rs:66:create_labeled_shader_module": "5df44acd0540e1bd725e87a21a773be086e5cb5e94ce41df2c2e8f33e46b6da1",
+    "src/core/dof/pipeline.rs:72:create_labeled_shader_module": "112d676bea2ccd6ccb160ec49cf938c941b16e3577a5a511675b9798495264e7",
+    "src/core/dual_source_oit/constructor.rs:15:create_labeled_shader_module": "6c5b212b08e67ecb5393ec81fa63164452cb8352060eef1012aff082c614dbe9",
+    "src/core/dual_source_oit/constructor.rs:20:create_labeled_shader_module": "3387efe0409162948b8fee425ba6329eedd7beb3132ccc88e9fd2d40741b04cf",
+    "src/core/ground_plane/renderer.rs:86:create_labeled_shader_module": "5f961c71820dff3c7434c4143daf7055378a808d359336412b11545a45f64dd9",
+    "src/core/ibl/constructor.rs:13:create_labeled_shader_module": "c77440fdaca6bb421e6775d86cb0be2f7cb3638e103de07121027e338c2a9772",
+    "src/core/ibl/constructor.rs:18:create_labeled_shader_module": "7e705dff6742aa1a9ad760a42561d01d66899e27408043c0e62f8c907f9d1694",
+    "src/core/ibl/constructor.rs:23:create_labeled_shader_module": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
+    "src/core/overlays.rs:280:create_labeled_shader_module": "3f7493a10d4734daa97dedac61a21ab27ebc20e1c9353018abb40f31fdfa803d",
+    "src/core/point_spot_lights/creation.rs:14:create_labeled_shader_module": "4c97225a01d07a509a8119a616f620197fdb79e87269bdddee9917d7b6cef217",
+    "src/core/screen_space_effects/hzb.rs:57:create_labeled_shader_module": "3f220ddf95f8d948a9a705e54805094dde3565ffae3acd96a7abef33dd9fc066",
+    "src/core/screen_space_effects/ssao/pipelines.rs:100:create_labeled_shader_module": "f1500579d39472beb225846579ce5773c44f66e1c7f957f47dbacbb2e0c3bfc0",
+    "src/core/screen_space_effects/ssao/pipelines.rs:80:create_labeled_shader_module": "50a7177c1f8061a5b41181387dd56ec00aacfbe9732743d555118751a79ee44f",
+    "src/core/screen_space_effects/ssao/pipelines.rs:85:create_labeled_shader_module": "2419f34104e36127d247af55d2eeba479e608f9b413e648ccd051187d7c1d054",
+    "src/core/screen_space_effects/ssao/pipelines.rs:90:create_labeled_shader_module": "2d67b8bfa86ce9a6747c72b9bf2af03c3dc6fd174de05135f8952c06a11e1a96",
+    "src/core/screen_space_effects/ssao/pipelines.rs:95:create_labeled_shader_module": "1bf6440eee0f1c7596d5cdf4baa41117040a93566ee8e5ee16561a249b896369",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-0": "e6f24c018bf2d7f6694740fd81c6b7449dfb1e4c56fc4591a9fb2e676620e924",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-1": "f0d522e55beae7457ee4d4fe5f483a06fd7e40ddb41e77e7a2053d53d0f96405",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-2": "025dd24cd44a0736cd3034e9be9e700e31a8db54d3cf422575b6e52be737b6ec",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-3": "9ef2174b9726c14b5e6f0e037977cd05e6a6a6b35fb7c7f45d1f6c0366452ada",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-4": "a4025cda9583028c3b5b960f28af90cdfbf658e42c77e24470e80f31bdc4eb99",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-0": "fd8defab2cf6f6818b2b7fd49732a7f9c177eb1604ac82f5f75f73c8495af127",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-1": "d04094cc3f192c18709dc58c23e9e3dcb69ac740f2d8d77dff23b0700d17397c",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-2": "92fef1c0358c37d23e0de032ad7586269d6f6ce40650a521f69db88371709ecc",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-3": "66ca4c63dbe5207ebfbfdfd1351607e9c6573a0f8f1889f7fdf0398bd7d9dde6",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-4": "ae79a9fe2d66af83054e9435d7c6142c3c3fbbc8d7d25881290f5116706e2336",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:12:create_labeled_shader_module": "13786da6a70b8b21c43cbc916376b933618614858ba185d4ea6387e48fedf24a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:18:create_labeled_shader_module": "fbd0dc23af016da9b986bf344d3c69ee4ec2774d5f12e7e8c4ecc3baead99f00",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:24:create_labeled_shader_module": "f18f8235ec4ef16695944d5bc64045077c66cf4b6fa2a1221b680badcbef9b5f",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:6:create_labeled_shader_module": "503eae5123e120a9e77857faf2a80486cdd3b7bbb493dec7af4abf7dd3e1f959",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/astro/night_gpu.rs:406:create_labeled_shader_module": "8e8f8654e0ddbd66a03558e1beedaf06d2cb4d2f8f2ce017190ed325b4dba471",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/astro/night_gpu.rs:57:create_labeled_shader_module": "b48ff0d98806028b00cf3e061c5ad7699617da94121eae1b2d87e144067f4c64",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/codec/f3dz/gpu.rs:125:create_labeled_shader_module": "256a017678fa1a2cd05fcfc3212a48af69a84f465ebc9fe1f9994b321a85d140",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/cloud_shadows/renderer.rs:94:create_labeled_shader_module": "ce4e76cc77e2045e10e53795fdf3a157b8de1d7ef57e7cef2c69bdbc2986f025",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/clouds/renderer/init.rs:159:create_labeled_shader_module": "65d0cf3c44c837f9ca94250633fe3029064c442f3282a8da12c5cc98f4043f11",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/gpu_exec.rs:67:create_labeled_shader_module#locally-parsed-variant-0": "9348969cbd5ce0dc6edab3ed1e45eddf6155bb1f11da54a5c001ca05694a86e5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/gpu_exec.rs:67:create_labeled_shader_module#locally-parsed-variant-1": "2668544cfe5deaf0a91ae5894692a7d88ae14b8be721f53de6f9e88484a945ad",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module#locally-parsed-variant-0": "4d8e2a926efb970d94f1e0a5393a43003ad574de932677b4fc41b46d4dadc951",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module#locally-parsed-variant-1": "fac2e9896a12c222b5e4f229ff7067e667870dffc1c2ee2d1ce788efb0cfe9b5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/det_probe.rs:194:create_labeled_shader_module": "214b2bda7c92e7c13f06df391f5dc1a83ec76e16f7f28d3d11d67c089ecc5368",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/det_probe.rs:66:create_labeled_shader_module": "5df44acd0540e1bd725e87a21a773be086e5cb5e94ce41df2c2e8f33e46b6da1",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dof/pipeline.rs:72:create_labeled_shader_module": "112d676bea2ccd6ccb160ec49cf938c941b16e3577a5a511675b9798495264e7",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dual_source_oit/constructor.rs:15:create_labeled_shader_module": "6c5b212b08e67ecb5393ec81fa63164452cb8352060eef1012aff082c614dbe9",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dual_source_oit/constructor.rs:20:create_labeled_shader_module": "3387efe0409162948b8fee425ba6329eedd7beb3132ccc88e9fd2d40741b04cf",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ground_plane/renderer.rs:86:create_labeled_shader_module": "5f961c71820dff3c7434c4143daf7055378a808d359336412b11545a45f64dd9",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:13:create_labeled_shader_module": "c77440fdaca6bb421e6775d86cb0be2f7cb3638e103de07121027e338c2a9772",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:18:create_labeled_shader_module": "7e705dff6742aa1a9ad760a42561d01d66899e27408043c0e62f8c907f9d1694",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:23:create_labeled_shader_module": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/overlays.rs:280:create_labeled_shader_module": "3f7493a10d4734daa97dedac61a21ab27ebc20e1c9353018abb40f31fdfa803d",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/point_spot_lights/creation.rs:14:create_labeled_shader_module": "4c97225a01d07a509a8119a616f620197fdb79e87269bdddee9917d7b6cef217",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/hzb.rs:57:create_labeled_shader_module": "3f220ddf95f8d948a9a705e54805094dde3565ffae3acd96a7abef33dd9fc066",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:100:create_labeled_shader_module": "f1500579d39472beb225846579ce5773c44f66e1c7f957f47dbacbb2e0c3bfc0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:80:create_labeled_shader_module": "50a7177c1f8061a5b41181387dd56ec00aacfbe9732743d555118751a79ee44f",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:85:create_labeled_shader_module": "2419f34104e36127d247af55d2eeba479e608f9b413e648ccd051187d7c1d054",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:90:create_labeled_shader_module": "2d67b8bfa86ce9a6747c72b9bf2af03c3dc6fd174de05135f8952c06a11e1a96",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:95:create_labeled_shader_module": "1bf6440eee0f1c7596d5cdf4baa41117040a93566ee8e5ee16561a249b896369",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-0": "e6f24c018bf2d7f6694740fd81c6b7449dfb1e4c56fc4591a9fb2e676620e924",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-1": "f0d522e55beae7457ee4d4fe5f483a06fd7e40ddb41e77e7a2053d53d0f96405",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-2": "025dd24cd44a0736cd3034e9be9e700e31a8db54d3cf422575b6e52be737b6ec",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-3": "9ef2174b9726c14b5e6f0e037977cd05e6a6a6b35fb7c7f45d1f6c0366452ada",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module#variant-4": "a4025cda9583028c3b5b960f28af90cdfbf658e42c77e24470e80f31bdc4eb99",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-0": "fd8defab2cf6f6818b2b7fd49732a7f9c177eb1604ac82f5f75f73c8495af127",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-1": "d04094cc3f192c18709dc58c23e9e3dcb69ac740f2d8d77dff23b0700d17397c",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-2": "92fef1c0358c37d23e0de032ad7586269d6f6ce40650a521f69db88371709ecc",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-3": "66ca4c63dbe5207ebfbfdfd1351607e9c6573a0f8f1889f7fdf0398bd7d9dde6",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module#variant-4": "ae79a9fe2d66af83054e9435d7c6142c3c3fbbc8d7d25881290f5116706e2336",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/soft_light_radius.rs:171:create_labeled_shader_module": "269382c0c1cedd66e262d3bbb0d11adfa3ea2d54a7f23cd17d993231e8041cd0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/taa.rs:118:create_labeled_shader_module": "1cbea4dd92b0698251c8d1f042129a0210ce45786ba59bd1877d96fb5e0443d6",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/text_mesh/renderer.rs:31:create_labeled_shader_module": "535c80cc1eb99d5c8fd608cdb77ea9157bc787857c7da64de6958b05908b8fe9",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/text_overlay.rs:192:create_labeled_shader_module": "06e0fd5a97f2ad8d44664a1dc8f0e7fdd90231f032a863f7e23315314cb8e0df",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/water_surface/constructor.rs:121:create_labeled_shader_module": "90e271fb57d874becfb14c1188bc0e3557729f3110cd0d40c2d31f19f88be887",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/offscreen/pipeline.rs:130:create_labeled_shader_module": "7f47fff702fac142837279d9b7df09a893ecc4c933038746ca187610f15b5112",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/passes/gi/mod.rs:36:create_labeled_shader_module": "462d84d68b4353df27f83280ad8e5a2a3fcd23cc3bf1b25cd8998066648b4f0c",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/passes/gi/mod.rs:41:create_labeled_shader_module": "e17c9813aea618109e69f641e08a099f2295052dd2d30d7ff012fa94303167e7",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/compute/setup.rs:10:create_labeled_shader_module": "78ebfc67e28ea479de2e5722cde223c81a8c0999fc7d970fb44d57e90e23cebd",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/aether_post.rs:239:create_labeled_shader_module": "2726f718b5789ac13df973baade4b1e7918c72122f9e40b5eb81178cea4c691f",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/media_reference.rs:208:create_labeled_shader_module": "805fb9d2fcddab6c11c183629bddbcc8934e1c34fe34b18a264c14de2d1958ea",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:118:create_labeled_shader_module": "2d8dbb9a4c6d1643caefc99cebceb4937c9c715939157681b2ed84412e135d27",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:13:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source": "07bfb2e14b493b03146c913c1a576b15c6581baebbae045108a12aa58366b9ee",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:98:create_labeled_shader_module": "47d757e8a01933c5f2e932562637f65d9cfaa89c6c6ec2ba2c168936b7f88dc5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:234:create_labeled_shader_module": "773183322668a06bf3d24a38c7dd74dedd80c9898adb579348d41846672f3a4c",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:343:create_labeled_shader_module": "47d757e8a01933c5f2e932562637f65d9cfaa89c6c6ec2ba2c168936b7f88dc5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:364:create_labeled_shader_module": "2d8dbb9a4c6d1643caefc99cebceb4937c9c715939157681b2ed84412e135d27",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:32:create_labeled_shader_module": "3ed2190cfd98433eece1af62f620a472e57c04c06abd09bbf75c1947c9f31f65",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:37:create_labeled_shader_module": "108684e9fcca0810c5263f1b6a8d41c94defc2b1f6a5bfed545c795ac560ede1",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:42:create_labeled_shader_module": "b733615b56801a43392c65a796305285b459e404932f27ae78e87bdd49498a99",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:47:create_labeled_shader_module": "f6eec3221e6bc5cb96267feee50bf5500609ba1f7570028ba49ee50f7316bb75",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:52:create_labeled_shader_module": "8902b673211cf867d1a8255efe534dc7ac2b6bbe1f672b8f8f1e2501cfa3133c",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:57:create_labeled_shader_module": "cc1146adccf97d2e2338bdcb238d86a448a3149754e36cd48d7ceb6f9dd346f4",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:62:create_labeled_shader_module": "47d757e8a01933c5f2e932562637f65d9cfaa89c6c6ec2ba2c168936b7f88dc5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:67:create_labeled_shader_module": "2d8dbb9a4c6d1643caefc99cebceb4937c9c715939157681b2ed84412e135d27",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:72:create_labeled_shader_module": "58b928983a3401167a8a50defbb6e37d9bd790119dffb0c15a1bd6d5f5bbd622",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/picking/id_buffer.rs:146:create_labeled_shader_module": "0f54bfca1b389c52875780bfc7e3c022c3da8c654763de8fe4271c9f476ab4f0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/picking/tile_id.rs:146:create_labeled_shader_module": "de66f6b699843b139317be39ff8368a4409d59600bb8fe62ff6bdad28ba0dba3",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/hdr_offscreen/pipeline.rs:175:create_labeled_shader_module": "a8c3aa62d4c4661595abc0b6ed9c501f0578e514de1a5de7612c1cf47a91f13e",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/normal_mapping.rs:63:create_labeled_shader_module": "9e60acb94a823575f200b73b955a0f66dc120ba0ee1cada284dfd40f07aa56a0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/pbr/rendering.rs:240:create_labeled_shader_module": "bb41c4c344f4f0eedb3681813be063bc57128d63212e0fc388e652fae80f5025",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/py_functions/diagnostics.rs:122:create_labeled_shader_module": "a896fc385b468ad1df5c8ee8d8470121efa07e464a1c3049c665332cdc297912",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/render/mesh_instanced.rs:165:create_labeled_shader_module": "2016c621f3852f434ce1002292e150131b487a1a967bdca95c22a70150e9518a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/scene/ssao/setup.rs:30:create_labeled_shader_module": "fcc76574fd083609ba163840fab095cb5445dd44237d2dd1d6d2d62ef53b9b90",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/shadows/blur_pass.rs:54:create_labeled_shader_module": "828b97ba6f2b2dba7459f8e0a2e4d76f3f8ed643807f3a815a32921bb6838a7a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/shadows/moment_pass.rs:73:create_labeled_shader_module": "ac2ba82b0a622f763e9fbeac8f40fa06de74ca00e6d21ae161a38faa5ba74c28",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/analysis/viewshed.rs:246:create_labeled_shader_module": "ce4e76cc77e2045e10e53795fdf3a157b8de1d7ef57e7cef2c69bdbc2986f025",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/analysis/viewshed.rs:486:create_labeled_shader_module": "ce4e76cc77e2045e10e53795fdf3a157b8de1d7ef57e7cef2c69bdbc2986f025",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:127:create_labeled_shader_module": "1256a03da1ff1422544772dad4bb75cf64eacb307071971fc17d4989f444afc7",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:132:create_labeled_shader_module": "4e333086bbf1c92a313118455506732c594e111d8759f45cc9be74edcd91ade8",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:137:create_labeled_shader_module": "018bea4e63660a8fc144b4ac86c4db5dfdfc575a37dc067f12224e2b4c637a0e",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:142:create_labeled_shader_module": "1a98c953dd963e50264bb98455846eeccdff12ccf6f7a83cded609b60ac0e3b4",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/clipmap/gpu_lod.rs:409:create_labeled_shader_module": "380d1c31d3682f61cfa06d81027aafa215a49a155b650e4e93705167265b3421",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/culling/two_phase.rs:453:create_labeled_shader_module": "a5119ef4ef176b465e430f267ded95948a6e86191be78c1229303c48a9807b9c",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/pipeline/creation.rs:259:create_labeled_shader_module": "ac59cb6de1487e0e6c93a16735a0203e842f2aaafb64aa11eb009e1ff25198e8",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/pipeline/creation.rs:265:create_labeled_shader_module": "459b819e84ffc8195e6cfabbf57263a0bc105bf47c525a6668f96b05bab967a0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/atmosphere.rs:115:create_labeled_shader_module": "fa387de74ce34d2171f72cc236ed414739a39a22c29c974b80ec4db109590257",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/atmosphere.rs:185:create_labeled_shader_module": "e8f6d83315be95872669d7698fd54f664bcf55cc86f5bd2f5df0cc8a64e8c33d",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/height_ao/pipelines.rs:7:create_labeled_shader_module": "0d5cf62a789ebae822f002c2ef2eee65722b6965ff983c39ce527eaabedc76f9",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/height_ao/pipelines.rs:92:create_labeled_shader_module": "8242d92dc3ecc1e8601ff74a134392af79dbc3aba26ffcfb6571fe7a76100bb5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/media.rs:1303:create_labeled_shader_module": "87f7e65e478881847713851dc25643adcc980b9a379524355d7b1675e1437102",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/media.rs:741:create_labeled_shader_module": "087a27896cbd5e8ac24f032eb1219dd4b4968b4b275038bfd8f24b6e77fb5238",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:158:create_pipeline": "cd37fc252033f64ac13406bfef71e937c11a6087a120f416eb24ba5d79e61126",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:202:create_pipeline": "d2367288470929cc76d87081dc0d30617ecafd4c7a4b094edcbc797a8ac00f62",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:246:create_pipeline": "fec684f93ab3a539cc4cc6bf80a69e7d3c0640a1267a9c92143357965ca6af0d",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:290:create_pipeline": "6f14fde673a2cf69e5df1329388f883aee883e06d863125faebfb2ff492f4b35",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:334:create_pipeline": "1cb4d14718ffadbab41f43f89996a2c7f57e4601909a08bae22d7e84069351ab",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:379:create_pipeline": "621a5f156ac352a671a78e65d7599e5ef974efdc8426829f8975d16af668fe7a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:518:create_fullscreen_blit_pipeline": "f87e723f1c79242c109c6e78c82b397d44e37dfee5309b65f45743f637198166",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:655:create_fullscreen_blit_pipeline": "f87e723f1c79242c109c6e78c82b397d44e37dfee5309b65f45743f637198166",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:680:create_fullscreen_blit_pipeline": "8f20e527e5fb4cd3b806eb497dfe3f13f53e7b4097d59fd3b20a4e2e96ebe32a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:699:create_fullscreen_blit_pipeline": "6410c559346b5258e7cd95e35bac4869613ec5c1967789c7959416b62f87936a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:723:create_fullscreen_blit_pipeline": "7e1f58290fe2aaf541845521184e56c6b3e3d957515c7191d75988f71768ddc5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:385:create_labeled_shader_module": "039888d94ce510ecbfe2dc0d0b8642a651a62c3407e8a461299f4689cee2c96f",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:451:create_labeled_shader_module": "7bde4ef55be0efb66fa5dc49393a42403cff61cffaab8daed229b1febf08fada",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:592:create_labeled_shader_module": "a8c3aa62d4c4661595abc0b6ed9c501f0578e514de1a5de7612c1cf47a91f13e",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/shadows/resources.rs:220:create_labeled_shader_module": "228860457ad33e87fa6b6523a947453b1bdd65f09e6795746556b2cae94fc5b3",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/visibility_buffer.rs:872:create_labeled_shader_module": "7a7acf957a3e10465cff1ad4f296a6c9c41e89275e5d2d1755f4c3b1055f2e89",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/util/debug_pattern.rs:48:create_labeled_shader_module": "f929b42c72f01cda60ef8ea7779a2c8d40019114a15114e4889bb98afc2cd450",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/binning.rs:156:create_labeled_shader_module": "0f1404a7fd4158700db95d38bd3f5cae7b914bbe48a2367d2222a879f2b23dad",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/raster.rs:104:create_labeled_shader_module": "af73518b84599df3affd7e5f87733e15396e838f4a61e5f7e5a79eb30eb51adb",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/resolve.rs:39:create_labeled_shader_module": "46e1c5d2fe8234777a2f321efb7f01076b993b699dbe7fca3ed4bd7b0aa8da1a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/gpu_extrusion/pipeline.rs:14:create_labeled_shader_module": "f15c7c6a8230673aa708ad02a4532aebf38f622e7e6b0798cdc65d3adf45ec4d",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/indirect/init.rs:64:create_labeled_shader_module": "d7cb16e452041e4cffdab8a26abde9ede17066c4630892ee501cf525f1590b5a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/line.rs:66:create_labeled_shader_module": "0ebdc403a1ef64bff361ef867fc6ccdf71b3f5367d5a59b7c3c888eb74fde085",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/oit/pipeline.rs:181:create_labeled_shader_module": "7072f56a0ae357ab08cd6b4fc1f82573b3abf01db331b205f82c0596c678f8de",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/oit/pipeline.rs:80:create_labeled_shader_module": "934b46d4b65e4911a49ba0b29b6c2deea2662d8eac1db0cab40a78677a88122d",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/point/pipeline.rs:19:create_labeled_shader_module": "e8159414ae314a3988323cde19c5f4e0ebbc61f01dead822d25e3b386f438dfc",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/point/renderer/pipelines.rs:32:create_labeled_shader_module": "e8159414ae314a3988323cde19c5f4e0ebbc61f01dead822d25e3b386f438dfc",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/polygon.rs:55:create_labeled_shader_module": "75693f644f709f14a914b3d0acec9d5c0b5668365363a1eafe08aecd15c75c5a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/composite_init.rs:118:create_labeled_shader_module": "369be28bcde64cc9d67f9ce06e03889c6f1616d9add09140b300a00d05e4b2af",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fallback_init.rs:26:create_labeled_shader_module": "ef43a0b8f0f79225a2bfa73d9c2c5bf76f25e838f511a4026e7fea10f6465af5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fog_init.rs:196:create_labeled_shader_module": "6ebfea107906d9e9d83bb471afc26a7fa4cf1086d6d9ac9135b0a76b4d56b9e4",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fog_init.rs:517:create_labeled_shader_module": "18e8dd0386de09caef3785499de21656e9240ae0c8da0d44f8b285adaa8ad292",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gbuffer_init.rs:225:create_labeled_shader_module": "8b7e94a6aa02f1ca53fe783c2c4f2bdb21c66990d30e60c3d1cfded85a496d82",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gbuffer_init.rs:320:create_labeled_shader_module": "90e8ea6c52c3e5812d1c08a5f7ab8b650d8a9abe8e0d18c4d246cf9dcfedb1de",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gi_baseline_init.rs:100:create_labeled_shader_module": "3f81fd50682cf26dd39440a86f97a5b6cd0c7841300f5ca540f0dd4ae291d7d3",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gi_baseline_init.rs:185:create_labeled_shader_module": "8275ac80a6b8b3c5a936a67465d97fbdfe70b0d5ec77ec7e244f2654ee6e4090",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/lit_init.rs:196:create_labeled_shader_module": "1e49b678122be5035766b31e95916c7a357fb314783484e79cad97b69f938caa",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/sky_init.rs:111:create_labeled_shader_module": "fa387de74ce34d2171f72cc236ed414739a39a22c29c974b80ec4db109590257",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/sky_init.rs:187:create_labeled_shader_module": "5ba321048775ca6b6c2ec6353bc6ff2c75239e2418bcc784045569a780b5481f",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/viewer_new.rs:440:create_labeled_shader_module": "d55b832a66fca1b07893da0310cc9abc941c7845368aa19a6411482e5cb2d81b",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/pointcloud/state.rs:40:create_labeled_shader_module": "2ced036929626b5eb23705e8a9fff74e31eaa9f1e5731bb5c54e3bcdcda22eee",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/denoise.rs:37:create_labeled_shader_module": "3cef374707555d24810f864230ef168d0f2ce269e77a47806bb9791393b0efe1",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/dof/pass/setup.rs:61:create_labeled_shader_module": "0933d367484721c790ce2c3f9cf41c258ae010d0148da00c6915a3ae55b5047e",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/motion_blur.rs:72:create_labeled_shader_module": "4a370f10b663ff2cb7d21f6e665cf54592b679d4dd408a6239d188c2bf613987",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/motion_blur_depth.rs:29:create_labeled_shader_module": "8b138b459e676205cc6c9feb8212c8878cc1226d71c27d4d19577934507f1492",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/post_process.rs:84:create_labeled_shader_module": "1dc53e2ebd347c30787055a71d4087f42cb32a8b90e704e067680fad7efeae5a",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/render/motion_blur.rs:358:create_labeled_shader_module": "0686b846424565e97d455f0dd83f53d07980576c5f99e6dda582bcf409cc3c24",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/core.rs:44:create_labeled_shader_module": "6339cd2348dd53ba5ef70151a40046dbbd7e3f7b1409133e909335d35fb977a0",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:186:create_labeled_shader_module": "344a79dd8b29fe3b865ab6629ff40e7365e96f2fa7249a4ab8c8859cb387fb01",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:369:create_labeled_shader_module": "0d5cf62a789ebae822f002c2ef2eee65722b6965ff983c39ce527eaabedc76f9",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:490:create_labeled_shader_module": "8242d92dc3ecc1e8601ff74a134392af79dbc3aba26ffcfb6571fe7a76100bb5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pipeline_init.rs:292:create_labeled_shader_module": "5ca34cd732af99589b86a248a6cd0e9d9c75bd7ec5f2157097725ece0871c25f",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pipeline_init.rs:69:create_labeled_shader_module": "a27bd7dc6a33197ecbafdb26cd87b36383704dffc918de108574334fe3e124c5",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/vector_overlay/pipelines.rs:57:create_labeled_shader_module": "8a58fbace65634139824ba096d291637b15f2e873e286427330515a4de769c2e",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/volumetrics.rs:61:create_labeled_shader_module": "f6599661c4f69460e6dad74ef2faeb4c1a43018b8732aee47b4e5b4db16266b3",
+    "src/core/soft_light_radius.rs:171:create_labeled_shader_module": "269382c0c1cedd66e262d3bbb0d11adfa3ea2d54a7f23cd17d993231e8041cd0",
+    "src/core/taa.rs:118:create_labeled_shader_module": "1cbea4dd92b0698251c8d1f042129a0210ce45786ba59bd1877d96fb5e0443d6",
+    "src/core/text_mesh/renderer.rs:31:create_labeled_shader_module": "535c80cc1eb99d5c8fd608cdb77ea9157bc787857c7da64de6958b05908b8fe9",
+    "src/core/text_overlay.rs:192:create_labeled_shader_module": "06e0fd5a97f2ad8d44664a1dc8f0e7fdd90231f032a863f7e23315314cb8e0df",
+    "src/core/water_surface/constructor.rs:121:create_labeled_shader_module": "90e271fb57d874becfb14c1188bc0e3557729f3110cd0d40c2d31f19f88be887",
+    "src/offscreen/pipeline.rs:130:create_labeled_shader_module": "7f47fff702fac142837279d9b7df09a893ecc4c933038746ca187610f15b5112",
+    "src/passes/gi/mod.rs:36:create_labeled_shader_module": "462d84d68b4353df27f83280ad8e5a2a3fcd23cc3bf1b25cd8998066648b4f0c",
+    "src/passes/gi/mod.rs:41:create_labeled_shader_module": "e17c9813aea618109e69f641e08a099f2295052dd2d30d7ff012fa94303167e7",
+    "src/path_tracing/compute/setup.rs:10:create_labeled_shader_module": "78ebfc67e28ea479de2e5722cde223c81a8c0999fc7d970fb44d57e90e23cebd",
+    "src/path_tracing/hybrid_compute/aether_post.rs:239:create_labeled_shader_module": "2726f718b5789ac13df973baade4b1e7918c72122f9e40b5eb81178cea4c691f",
+    "src/path_tracing/hybrid_compute/media_reference.rs:208:create_labeled_shader_module": "805fb9d2fcddab6c11c183629bddbcc8934e1c34fe34b18a264c14de2d1958ea",
+    "src/path_tracing/hybrid_compute/setup.rs:118:create_labeled_shader_module": "2d8dbb9a4c6d1643caefc99cebceb4937c9c715939157681b2ed84412e135d27",
+    "src/path_tracing/hybrid_compute/setup.rs:13:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source": "07bfb2e14b493b03146c913c1a576b15c6581baebbae045108a12aa58366b9ee",
+    "src/path_tracing/hybrid_compute/setup.rs:98:create_labeled_shader_module": "47d757e8a01933c5f2e932562637f65d9cfaa89c6c6ec2ba2c168936b7f88dc5",
+    "src/path_tracing/inverse/pipeline.rs:234:create_labeled_shader_module": "773183322668a06bf3d24a38c7dd74dedd80c9898adb579348d41846672f3a4c",
+    "src/path_tracing/inverse/pipeline.rs:343:create_labeled_shader_module": "47d757e8a01933c5f2e932562637f65d9cfaa89c6c6ec2ba2c168936b7f88dc5",
+    "src/path_tracing/inverse/pipeline.rs:364:create_labeled_shader_module": "2d8dbb9a4c6d1643caefc99cebceb4937c9c715939157681b2ed84412e135d27",
+    "src/path_tracing/wavefront/pipeline.rs:32:create_labeled_shader_module": "3ed2190cfd98433eece1af62f620a472e57c04c06abd09bbf75c1947c9f31f65",
+    "src/path_tracing/wavefront/pipeline.rs:37:create_labeled_shader_module": "108684e9fcca0810c5263f1b6a8d41c94defc2b1f6a5bfed545c795ac560ede1",
+    "src/path_tracing/wavefront/pipeline.rs:42:create_labeled_shader_module": "b733615b56801a43392c65a796305285b459e404932f27ae78e87bdd49498a99",
+    "src/path_tracing/wavefront/pipeline.rs:47:create_labeled_shader_module": "f6eec3221e6bc5cb96267feee50bf5500609ba1f7570028ba49ee50f7316bb75",
+    "src/path_tracing/wavefront/pipeline.rs:52:create_labeled_shader_module": "8902b673211cf867d1a8255efe534dc7ac2b6bbe1f672b8f8f1e2501cfa3133c",
+    "src/path_tracing/wavefront/pipeline.rs:57:create_labeled_shader_module": "cc1146adccf97d2e2338bdcb238d86a448a3149754e36cd48d7ceb6f9dd346f4",
+    "src/path_tracing/wavefront/pipeline.rs:62:create_labeled_shader_module": "47d757e8a01933c5f2e932562637f65d9cfaa89c6c6ec2ba2c168936b7f88dc5",
+    "src/path_tracing/wavefront/pipeline.rs:67:create_labeled_shader_module": "2d8dbb9a4c6d1643caefc99cebceb4937c9c715939157681b2ed84412e135d27",
+    "src/path_tracing/wavefront/pipeline.rs:72:create_labeled_shader_module": "58b928983a3401167a8a50defbb6e37d9bd790119dffb0c15a1bd6d5f5bbd622",
+    "src/picking/id_buffer.rs:146:create_labeled_shader_module": "0f54bfca1b389c52875780bfc7e3c022c3da8c654763de8fe4271c9f476ab4f0",
+    "src/picking/tile_id.rs:146:create_labeled_shader_module": "de66f6b699843b139317be39ff8368a4409d59600bb8fe62ff6bdad28ba0dba3",
+    "src/pipeline/hdr_offscreen/pipeline.rs:175:create_labeled_shader_module": "a8c3aa62d4c4661595abc0b6ed9c501f0578e514de1a5de7612c1cf47a91f13e",
+    "src/pipeline/normal_mapping.rs:63:create_labeled_shader_module": "9e60acb94a823575f200b73b955a0f66dc120ba0ee1cada284dfd40f07aa56a0",
+    "src/pipeline/pbr/rendering.rs:240:create_labeled_shader_module": "bb41c4c344f4f0eedb3681813be063bc57128d63212e0fc388e652fae80f5025",
+    "src/py_functions/diagnostics.rs:122:create_labeled_shader_module": "a896fc385b468ad1df5c8ee8d8470121efa07e464a1c3049c665332cdc297912",
+    "src/render/mesh_instanced.rs:165:create_labeled_shader_module": "2016c621f3852f434ce1002292e150131b487a1a967bdca95c22a70150e9518a",
+    "src/scene/ssao/setup.rs:30:create_labeled_shader_module": "fcc76574fd083609ba163840fab095cb5445dd44237d2dd1d6d2d62ef53b9b90",
+    "src/shadows/blur_pass.rs:54:create_labeled_shader_module": "828b97ba6f2b2dba7459f8e0a2e4d76f3f8ed643807f3a815a32921bb6838a7a",
+    "src/shadows/moment_pass.rs:73:create_labeled_shader_module": "ac2ba82b0a622f763e9fbeac8f40fa06de74ca00e6d21ae161a38faa5ba74c28",
+    "src/terrain/analysis/viewshed.rs:246:create_labeled_shader_module": "ce4e76cc77e2045e10e53795fdf3a157b8de1d7ef57e7cef2c69bdbc2986f025",
+    "src/terrain/analysis/viewshed.rs:486:create_labeled_shader_module": "ce4e76cc77e2045e10e53795fdf3a157b8de1d7ef57e7cef2c69bdbc2986f025",
+    "src/terrain/bloom_processor/constructor.rs:127:create_labeled_shader_module": "1256a03da1ff1422544772dad4bb75cf64eacb307071971fc17d4989f444afc7",
+    "src/terrain/bloom_processor/constructor.rs:132:create_labeled_shader_module": "4e333086bbf1c92a313118455506732c594e111d8759f45cc9be74edcd91ade8",
+    "src/terrain/bloom_processor/constructor.rs:137:create_labeled_shader_module": "018bea4e63660a8fc144b4ac86c4db5dfdfc575a37dc067f12224e2b4c637a0e",
+    "src/terrain/bloom_processor/constructor.rs:142:create_labeled_shader_module": "1a98c953dd963e50264bb98455846eeccdff12ccf6f7a83cded609b60ac0e3b4",
+    "src/terrain/clipmap/gpu_lod.rs:409:create_labeled_shader_module": "380d1c31d3682f61cfa06d81027aafa215a49a155b650e4e93705167265b3421",
+    "src/terrain/culling/two_phase.rs:453:create_labeled_shader_module": "a5119ef4ef176b465e430f267ded95948a6e86191be78c1229303c48a9807b9c",
+    "src/terrain/pipeline/creation.rs:259:create_labeled_shader_module": "ac59cb6de1487e0e6c93a16735a0203e842f2aaafb64aa11eb009e1ff25198e8",
+    "src/terrain/pipeline/creation.rs:265:create_labeled_shader_module": "459b819e84ffc8195e6cfabbf57263a0bc105bf47c525a6668f96b05bab967a0",
+    "src/terrain/renderer/atmosphere.rs:115:create_labeled_shader_module": "fa387de74ce34d2171f72cc236ed414739a39a22c29c974b80ec4db109590257",
+    "src/terrain/renderer/atmosphere.rs:185:create_labeled_shader_module": "e8f6d83315be95872669d7698fd54f664bcf55cc86f5bd2f5df0cc8a64e8c33d",
+    "src/terrain/renderer/height_ao/pipelines.rs:7:create_labeled_shader_module": "0d5cf62a789ebae822f002c2ef2eee65722b6965ff983c39ce527eaabedc76f9",
+    "src/terrain/renderer/height_ao/pipelines.rs:92:create_labeled_shader_module": "8242d92dc3ecc1e8601ff74a134392af79dbc3aba26ffcfb6571fe7a76100bb5",
+    "src/terrain/renderer/media.rs:1303:create_labeled_shader_module": "87f7e65e478881847713851dc25643adcc980b9a379524355d7b1675e1437102",
+    "src/terrain/renderer/media.rs:741:create_labeled_shader_module": "087a27896cbd5e8ac24f032eb1219dd4b4968b4b275038bfd8f24b6e77fb5238",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:158:create_pipeline": "cd37fc252033f64ac13406bfef71e937c11a6087a120f416eb24ba5d79e61126",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:202:create_pipeline": "d2367288470929cc76d87081dc0d30617ecafd4c7a4b094edcbc797a8ac00f62",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:246:create_pipeline": "fec684f93ab3a539cc4cc6bf80a69e7d3c0640a1267a9c92143357965ca6af0d",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:290:create_pipeline": "6f14fde673a2cf69e5df1329388f883aee883e06d863125faebfb2ff492f4b35",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:334:create_pipeline": "1cb4d14718ffadbab41f43f89996a2c7f57e4601909a08bae22d7e84069351ab",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:379:create_pipeline": "621a5f156ac352a671a78e65d7599e5ef974efdc8426829f8975d16af668fe7a",
+    "src/terrain/renderer/orbis_capture.rs:353:create_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:518:create_fullscreen_blit_pipeline": "f87e723f1c79242c109c6e78c82b397d44e37dfee5309b65f45743f637198166",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:655:create_fullscreen_blit_pipeline": "f87e723f1c79242c109c6e78c82b397d44e37dfee5309b65f45743f637198166",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:680:create_fullscreen_blit_pipeline": "8f20e527e5fb4cd3b806eb497dfe3f13f53e7b4097d59fd3b20a4e2e96ebe32a",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:699:create_fullscreen_blit_pipeline": "6410c559346b5258e7cd95e35bac4869613ec5c1967789c7959416b62f87936a",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:723:create_fullscreen_blit_pipeline": "7e1f58290fe2aaf541845521184e56c6b3e3d957515c7191d75988f71768ddc5",
+    "src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/terrain/renderer/pipeline_cache.rs:385:create_labeled_shader_module": "039888d94ce510ecbfe2dc0d0b8642a651a62c3407e8a461299f4689cee2c96f",
+    "src/terrain/renderer/pipeline_cache.rs:451:create_labeled_shader_module": "7bde4ef55be0efb66fa5dc49393a42403cff61cffaab8daed229b1febf08fada",
+    "src/terrain/renderer/pipeline_cache.rs:592:create_labeled_shader_module": "a8c3aa62d4c4661595abc0b6ed9c501f0578e514de1a5de7612c1cf47a91f13e",
+    "src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module": "f4600d5dd9e407d0e2c0b7ee4711202eebc3a20ee09fc097f057b0f92ec1d138",
+    "src/terrain/renderer/shadows/resources.rs:220:create_labeled_shader_module": "228860457ad33e87fa6b6523a947453b1bdd65f09e6795746556b2cae94fc5b3",
+    "src/terrain/renderer/visibility_buffer.rs:872:create_labeled_shader_module": "7a7acf957a3e10465cff1ad4f296a6c9c41e89275e5d2d1755f4c3b1055f2e89",
+    "src/util/debug_pattern.rs:48:create_labeled_shader_module": "f929b42c72f01cda60ef8ea7779a2c8d40019114a15114e4889bb98afc2cd450",
+    "src/vector/coverage/binning.rs:156:create_labeled_shader_module": "0f1404a7fd4158700db95d38bd3f5cae7b914bbe48a2367d2222a879f2b23dad",
+    "src/vector/coverage/raster.rs:104:create_labeled_shader_module": "af73518b84599df3affd7e5f87733e15396e838f4a61e5f7e5a79eb30eb51adb",
+    "src/vector/coverage/resolve.rs:39:create_labeled_shader_module": "46e1c5d2fe8234777a2f321efb7f01076b993b699dbe7fca3ed4bd7b0aa8da1a",
+    "src/vector/gpu_extrusion/pipeline.rs:14:create_labeled_shader_module": "f15c7c6a8230673aa708ad02a4532aebf38f622e7e6b0798cdc65d3adf45ec4d",
+    "src/vector/indirect/init.rs:64:create_labeled_shader_module": "d7cb16e452041e4cffdab8a26abde9ede17066c4630892ee501cf525f1590b5a",
+    "src/vector/line.rs:66:create_labeled_shader_module": "0ebdc403a1ef64bff361ef867fc6ccdf71b3f5367d5a59b7c3c888eb74fde085",
+    "src/vector/oit/pipeline.rs:181:create_labeled_shader_module": "7072f56a0ae357ab08cd6b4fc1f82573b3abf01db331b205f82c0596c678f8de",
+    "src/vector/oit/pipeline.rs:80:create_labeled_shader_module": "934b46d4b65e4911a49ba0b29b6c2deea2662d8eac1db0cab40a78677a88122d",
+    "src/vector/point/pipeline.rs:19:create_labeled_shader_module": "e8159414ae314a3988323cde19c5f4e0ebbc61f01dead822d25e3b386f438dfc",
+    "src/vector/point/renderer/pipelines.rs:32:create_labeled_shader_module": "e8159414ae314a3988323cde19c5f4e0ebbc61f01dead822d25e3b386f438dfc",
+    "src/vector/polygon.rs:55:create_labeled_shader_module": "75693f644f709f14a914b3d0acec9d5c0b5668365363a1eafe08aecd15c75c5a",
+    "src/viewer/init/composite_init.rs:118:create_labeled_shader_module": "369be28bcde64cc9d67f9ce06e03889c6f1616d9add09140b300a00d05e4b2af",
+    "src/viewer/init/fallback_init.rs:26:create_labeled_shader_module": "ef43a0b8f0f79225a2bfa73d9c2c5bf76f25e838f511a4026e7fea10f6465af5",
+    "src/viewer/init/fog_init.rs:196:create_labeled_shader_module": "6ebfea107906d9e9d83bb471afc26a7fa4cf1086d6d9ac9135b0a76b4d56b9e4",
+    "src/viewer/init/fog_init.rs:517:create_labeled_shader_module": "18e8dd0386de09caef3785499de21656e9240ae0c8da0d44f8b285adaa8ad292",
+    "src/viewer/init/gbuffer_init.rs:225:create_labeled_shader_module": "8b7e94a6aa02f1ca53fe783c2c4f2bdb21c66990d30e60c3d1cfded85a496d82",
+    "src/viewer/init/gbuffer_init.rs:320:create_labeled_shader_module": "90e8ea6c52c3e5812d1c08a5f7ab8b650d8a9abe8e0d18c4d246cf9dcfedb1de",
+    "src/viewer/init/gi_baseline_init.rs:100:create_labeled_shader_module": "3f81fd50682cf26dd39440a86f97a5b6cd0c7841300f5ca540f0dd4ae291d7d3",
+    "src/viewer/init/gi_baseline_init.rs:185:create_labeled_shader_module": "8275ac80a6b8b3c5a936a67465d97fbdfe70b0d5ec77ec7e244f2654ee6e4090",
+    "src/viewer/init/lit_init.rs:196:create_labeled_shader_module": "1e49b678122be5035766b31e95916c7a357fb314783484e79cad97b69f938caa",
+    "src/viewer/init/sky_init.rs:111:create_labeled_shader_module": "fa387de74ce34d2171f72cc236ed414739a39a22c29c974b80ec4db109590257",
+    "src/viewer/init/sky_init.rs:187:create_labeled_shader_module": "5ba321048775ca6b6c2ec6353bc6ff2c75239e2418bcc784045569a780b5481f",
+    "src/viewer/init/viewer_new.rs:440:create_labeled_shader_module": "d55b832a66fca1b07893da0310cc9abc941c7845368aa19a6411482e5cb2d81b",
+    "src/viewer/pointcloud/state.rs:40:create_labeled_shader_module": "2ced036929626b5eb23705e8a9fff74e31eaa9f1e5731bb5c54e3bcdcda22eee",
+    "src/viewer/terrain/denoise.rs:37:create_labeled_shader_module": "3cef374707555d24810f864230ef168d0f2ce269e77a47806bb9791393b0efe1",
+    "src/viewer/terrain/dof/pass/setup.rs:61:create_labeled_shader_module": "0933d367484721c790ce2c3f9cf41c258ae010d0148da00c6915a3ae55b5047e",
+    "src/viewer/terrain/motion_blur.rs:72:create_labeled_shader_module": "4a370f10b663ff2cb7d21f6e665cf54592b679d4dd408a6239d188c2bf613987",
+    "src/viewer/terrain/motion_blur_depth.rs:29:create_labeled_shader_module": "8b138b459e676205cc6c9feb8212c8878cc1226d71c27d4d19577934507f1492",
+    "src/viewer/terrain/post_process.rs:84:create_labeled_shader_module": "1dc53e2ebd347c30787055a71d4087f42cb32a8b90e704e067680fad7efeae5a",
+    "src/viewer/terrain/render/motion_blur.rs:358:create_labeled_shader_module": "0686b846424565e97d455f0dd83f53d07980576c5f99e6dda582bcf409cc3c24",
+    "src/viewer/terrain/scene/core.rs:44:create_labeled_shader_module": "6339cd2348dd53ba5ef70151a40046dbbd7e3f7b1409133e909335d35fb977a0",
+    "src/viewer/terrain/scene/pbr_compute.rs:186:create_labeled_shader_module": "344a79dd8b29fe3b865ab6629ff40e7365e96f2fa7249a4ab8c8859cb387fb01",
+    "src/viewer/terrain/scene/pbr_compute.rs:369:create_labeled_shader_module": "0d5cf62a789ebae822f002c2ef2eee65722b6965ff983c39ce527eaabedc76f9",
+    "src/viewer/terrain/scene/pbr_compute.rs:490:create_labeled_shader_module": "8242d92dc3ecc1e8601ff74a134392af79dbc3aba26ffcfb6571fe7a76100bb5",
+    "src/viewer/terrain/scene/pipeline_init.rs:292:create_labeled_shader_module": "5ca34cd732af99589b86a248a6cd0e9d9c75bd7ec5f2157097725ece0871c25f",
+    "src/viewer/terrain/scene/pipeline_init.rs:69:create_labeled_shader_module": "a27bd7dc6a33197ecbafdb26cd87b36383704dffc918de108574334fe3e124c5",
+    "src/viewer/terrain/vector_overlay/pipelines.rs:57:create_labeled_shader_module": "8a58fbace65634139824ba096d291637b15f2e873e286427330515a4de769c2e",
+    "src/viewer/terrain/volumetrics.rs:61:create_labeled_shader_module": "f6599661c4f69460e6dad74ef2faeb4c1a43018b8732aee47b4e5b4db16266b3"
+  },
+  "rust_dynamic_registry_files": [
+    "src/core/shader_registry.rs",
+    "src/path_tracing/hybrid_compute/setup.rs",
+    "src/terrain/renderer/offline.rs",
+    "src/terrain/renderer/pipeline_cache.rs"
+  ],
+  "rust_self_naga_validated_constructions": [],
+  "rust_shader_construction_expressions": [
+    "src/accel/lbvh_gpu/setup.rs:12:create_labeled_shader_module",
+    "src/accel/lbvh_gpu/setup.rs:18:create_labeled_shader_module",
+    "src/accel/lbvh_gpu/setup.rs:24:create_labeled_shader_module",
+    "src/accel/lbvh_gpu/setup.rs:6:create_labeled_shader_module",
+    "src/astro/night_gpu.rs:406:create_labeled_shader_module",
+    "src/astro/night_gpu.rs:57:create_labeled_shader_module",
+    "src/codec/f3dz/gpu.rs:125:create_labeled_shader_module",
+    "src/core/cloud_shadows/renderer.rs:94:create_labeled_shader_module",
+    "src/core/clouds/renderer/init.rs:159:create_labeled_shader_module",
+    "src/core/dd/gpu_exec.rs:67:create_labeled_shader_module",
+    "src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module",
+    "src/core/det_probe.rs:194:create_labeled_shader_module",
+    "src/core/det_probe.rs:66:create_labeled_shader_module",
+    "src/core/dof/pipeline.rs:72:create_labeled_shader_module",
+    "src/core/dual_source_oit/constructor.rs:15:create_labeled_shader_module",
+    "src/core/dual_source_oit/constructor.rs:20:create_labeled_shader_module",
+    "src/core/ground_plane/renderer.rs:86:create_labeled_shader_module",
+    "src/core/ibl/constructor.rs:13:create_labeled_shader_module",
+    "src/core/ibl/constructor.rs:18:create_labeled_shader_module",
+    "src/core/ibl/constructor.rs:23:create_labeled_shader_module",
+    "src/core/overlays.rs:280:create_labeled_shader_module",
+    "src/core/point_spot_lights/creation.rs:14:create_labeled_shader_module",
+    "src/core/screen_space_effects/hzb.rs:57:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:100:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:80:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:85:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:90:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssao/pipelines.rs:95:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module",
+    "src/core/soft_light_radius.rs:171:create_labeled_shader_module",
+    "src/core/taa.rs:118:create_labeled_shader_module",
+    "src/core/text_mesh/renderer.rs:31:create_labeled_shader_module",
+    "src/core/text_overlay.rs:192:create_labeled_shader_module",
+    "src/core/water_surface/constructor.rs:121:create_labeled_shader_module",
+    "src/offscreen/pipeline.rs:130:create_labeled_shader_module",
+    "src/passes/gi/mod.rs:36:create_labeled_shader_module",
+    "src/passes/gi/mod.rs:41:create_labeled_shader_module",
+    "src/path_tracing/compute/setup.rs:10:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/aether_post.rs:239:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/media_reference.rs:208:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/setup.rs:118:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/setup.rs:13:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/setup.rs:98:create_labeled_shader_module",
+    "src/path_tracing/inverse/pipeline.rs:234:create_labeled_shader_module",
+    "src/path_tracing/inverse/pipeline.rs:343:create_labeled_shader_module",
+    "src/path_tracing/inverse/pipeline.rs:364:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:32:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:37:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:42:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:47:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:52:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:57:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:62:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:67:create_labeled_shader_module",
+    "src/path_tracing/wavefront/pipeline.rs:72:create_labeled_shader_module",
+    "src/picking/id_buffer.rs:146:create_labeled_shader_module",
+    "src/picking/tile_id.rs:146:create_labeled_shader_module",
+    "src/pipeline/hdr_offscreen/pipeline.rs:175:create_labeled_shader_module",
+    "src/pipeline/normal_mapping.rs:63:create_labeled_shader_module",
+    "src/pipeline/pbr/rendering.rs:240:create_labeled_shader_module",
+    "src/py_functions/diagnostics.rs:122:create_labeled_shader_module",
+    "src/render/mesh_instanced.rs:165:create_labeled_shader_module",
+    "src/scene/ssao/setup.rs:30:create_labeled_shader_module",
+    "src/shadows/blur_pass.rs:54:create_labeled_shader_module",
+    "src/shadows/moment_pass.rs:73:create_labeled_shader_module",
+    "src/terrain/analysis/viewshed.rs:246:create_labeled_shader_module",
+    "src/terrain/analysis/viewshed.rs:486:create_labeled_shader_module",
+    "src/terrain/bloom_processor/constructor.rs:127:create_labeled_shader_module",
+    "src/terrain/bloom_processor/constructor.rs:132:create_labeled_shader_module",
+    "src/terrain/bloom_processor/constructor.rs:137:create_labeled_shader_module",
+    "src/terrain/bloom_processor/constructor.rs:142:create_labeled_shader_module",
+    "src/terrain/clipmap/gpu_lod.rs:409:create_labeled_shader_module",
+    "src/terrain/culling/two_phase.rs:453:create_labeled_shader_module",
+    "src/terrain/pipeline/creation.rs:259:create_labeled_shader_module",
+    "src/terrain/pipeline/creation.rs:265:create_labeled_shader_module",
+    "src/terrain/renderer/atmosphere.rs:115:create_labeled_shader_module",
+    "src/terrain/renderer/atmosphere.rs:185:create_labeled_shader_module",
+    "src/terrain/renderer/height_ao/pipelines.rs:7:create_labeled_shader_module",
+    "src/terrain/renderer/height_ao/pipelines.rs:92:create_labeled_shader_module",
+    "src/terrain/renderer/media.rs:1303:create_labeled_shader_module",
+    "src/terrain/renderer/media.rs:741:create_labeled_shader_module",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module",
+    "src/terrain/renderer/orbis_capture.rs:353:create_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:385:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:451:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:592:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module",
+    "src/terrain/renderer/shadows/resources.rs:220:create_labeled_shader_module",
+    "src/terrain/renderer/visibility_buffer.rs:872:create_labeled_shader_module",
+    "src/util/debug_pattern.rs:48:create_labeled_shader_module",
+    "src/vector/coverage/binning.rs:156:create_labeled_shader_module",
+    "src/vector/coverage/raster.rs:104:create_labeled_shader_module",
+    "src/vector/coverage/resolve.rs:39:create_labeled_shader_module",
+    "src/vector/gpu_extrusion/pipeline.rs:14:create_labeled_shader_module",
+    "src/vector/indirect/init.rs:64:create_labeled_shader_module",
+    "src/vector/line.rs:66:create_labeled_shader_module",
+    "src/vector/oit/pipeline.rs:181:create_labeled_shader_module",
+    "src/vector/oit/pipeline.rs:80:create_labeled_shader_module",
+    "src/vector/point/pipeline.rs:19:create_labeled_shader_module",
+    "src/vector/point/renderer/pipelines.rs:32:create_labeled_shader_module",
+    "src/vector/polygon.rs:55:create_labeled_shader_module",
+    "src/viewer/init/composite_init.rs:118:create_labeled_shader_module",
+    "src/viewer/init/fallback_init.rs:26:create_labeled_shader_module",
+    "src/viewer/init/fog_init.rs:196:create_labeled_shader_module",
+    "src/viewer/init/fog_init.rs:517:create_labeled_shader_module",
+    "src/viewer/init/gbuffer_init.rs:225:create_labeled_shader_module",
+    "src/viewer/init/gbuffer_init.rs:320:create_labeled_shader_module",
+    "src/viewer/init/gi_baseline_init.rs:100:create_labeled_shader_module",
+    "src/viewer/init/gi_baseline_init.rs:185:create_labeled_shader_module",
+    "src/viewer/init/lit_init.rs:196:create_labeled_shader_module",
+    "src/viewer/init/sky_init.rs:111:create_labeled_shader_module",
+    "src/viewer/init/sky_init.rs:187:create_labeled_shader_module",
+    "src/viewer/init/viewer_new.rs:440:create_labeled_shader_module",
+    "src/viewer/pointcloud/state.rs:40:create_labeled_shader_module",
+    "src/viewer/terrain/denoise.rs:37:create_labeled_shader_module",
+    "src/viewer/terrain/dof/pass/setup.rs:61:create_labeled_shader_module",
+    "src/viewer/terrain/motion_blur.rs:72:create_labeled_shader_module",
+    "src/viewer/terrain/motion_blur_depth.rs:29:create_labeled_shader_module",
+    "src/viewer/terrain/post_process.rs:84:create_labeled_shader_module",
+    "src/viewer/terrain/render/motion_blur.rs:358:create_labeled_shader_module",
+    "src/viewer/terrain/scene/core.rs:44:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pbr_compute.rs:186:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pbr_compute.rs:369:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pbr_compute.rs:490:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pipeline_init.rs:292:create_labeled_shader_module",
+    "src/viewer/terrain/scene/pipeline_init.rs:69:create_labeled_shader_module",
+    "src/viewer/terrain/vector_overlay/pipelines.rs:57:create_labeled_shader_module",
+    "src/viewer/terrain/volumetrics.rs:61:create_labeled_shader_module"
+  ],
+  "rust_shader_construction_files": [
+    "src/accel/lbvh_gpu/setup.rs",
+    "src/astro/night_gpu.rs",
+    "src/codec/f3dz/gpu.rs",
+    "src/core/cloud_shadows/renderer.rs",
+    "src/core/clouds/renderer/init.rs",
+    "src/core/dd/gpu_exec.rs",
+    "src/core/dd/jitter_pipeline.rs",
+    "src/core/det_probe.rs",
+    "src/core/dof/pipeline.rs",
+    "src/core/dual_source_oit/constructor.rs",
+    "src/core/ground_plane/renderer.rs",
+    "src/core/ibl/constructor.rs",
+    "src/core/overlays.rs",
+    "src/core/point_spot_lights/creation.rs",
+    "src/core/screen_space_effects/hzb.rs",
+    "src/core/screen_space_effects/ssao/pipelines.rs",
+    "src/core/screen_space_effects/ssgi/constructor/pipelines.rs",
+    "src/core/screen_space_effects/ssr/constructor/pipelines.rs",
+    "src/core/shader_registry.rs",
+    "src/core/soft_light_radius.rs",
+    "src/core/taa.rs",
+    "src/core/text_mesh/renderer.rs",
+    "src/core/text_overlay.rs",
+    "src/core/water_surface/constructor.rs",
+    "src/offscreen/pipeline.rs",
+    "src/passes/gi/mod.rs",
+    "src/path_tracing/compute/setup.rs",
+    "src/path_tracing/hybrid_compute/aether_post.rs",
+    "src/path_tracing/hybrid_compute/media_reference.rs",
+    "src/path_tracing/hybrid_compute/setup.rs",
+    "src/path_tracing/inverse/pipeline.rs",
+    "src/path_tracing/wavefront/pipeline.rs",
+    "src/picking/id_buffer.rs",
+    "src/picking/tile_id.rs",
+    "src/pipeline/hdr_offscreen/pipeline.rs",
+    "src/pipeline/normal_mapping.rs",
+    "src/pipeline/pbr/rendering.rs",
+    "src/py_functions/diagnostics.rs",
+    "src/render/mesh_instanced.rs",
+    "src/scene/ssao/setup.rs",
+    "src/shadows/blur_pass.rs",
+    "src/shadows/moment_pass.rs",
+    "src/terrain/analysis/viewshed.rs",
+    "src/terrain/bloom_processor/constructor.rs",
+    "src/terrain/clipmap/gpu_lod.rs",
+    "src/terrain/culling/two_phase.rs",
+    "src/terrain/pipeline/creation.rs",
+    "src/terrain/renderer/atmosphere.rs",
+    "src/terrain/renderer/height_ao/pipelines.rs",
+    "src/terrain/renderer/media.rs",
+    "src/terrain/renderer/offline.rs",
+    "src/terrain/renderer/orbis_capture.rs",
+    "src/terrain/renderer/pipeline_cache.rs",
+    "src/terrain/renderer/shadows/resources.rs",
+    "src/terrain/renderer/visibility_buffer.rs",
+    "src/util/debug_pattern.rs",
+    "src/vector/coverage/binning.rs",
+    "src/vector/coverage/raster.rs",
+    "src/vector/coverage/resolve.rs",
+    "src/vector/gpu_extrusion/pipeline.rs",
+    "src/vector/indirect/init.rs",
+    "src/vector/line.rs",
+    "src/vector/oit/pipeline.rs",
+    "src/vector/point/pipeline.rs",
+    "src/vector/point/renderer/pipelines.rs",
+    "src/vector/polygon.rs",
+    "src/viewer/init/composite_init.rs",
+    "src/viewer/init/fallback_init.rs",
+    "src/viewer/init/fog_init.rs",
+    "src/viewer/init/gbuffer_init.rs",
+    "src/viewer/init/gi_baseline_init.rs",
+    "src/viewer/init/lit_init.rs",
+    "src/viewer/init/sky_init.rs",
+    "src/viewer/init/viewer_new.rs",
+    "src/viewer/pointcloud/state.rs",
+    "src/viewer/terrain/denoise.rs",
+    "src/viewer/terrain/dof/pass/setup.rs",
+    "src/viewer/terrain/motion_blur.rs",
+    "src/viewer/terrain/motion_blur_depth.rs",
+    "src/viewer/terrain/post_process.rs",
+    "src/viewer/terrain/render/motion_blur.rs",
+    "src/viewer/terrain/scene/core.rs",
+    "src/viewer/terrain/scene/pbr_compute.rs",
+    "src/viewer/terrain/scene/pipeline_init.rs",
+    "src/viewer/terrain/vector_overlay/pipelines.rs",
+    "src/viewer/terrain/volumetrics.rs"
+  ],
+  "rust_shader_construction_wrappers": [
+    "src/core/shader_registry.rs:144:create_shader_module",
+    "src/path_tracing/hybrid_compute/setup.rs:13:create_labeled_shader_module",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module"
+  ],
+  "rust_shader_source_files": [
+    "src/core/shader_registry.rs",
+    "src/path_tracing/adjudication.rs",
+    "src/path_tracing/hybrid_compute/terrain_heightfield.rs",
+    "src/terrain/page_table/gpu/gpu_probe_tests.rs",
+    "src/terrain/renderer/media.rs",
+    "src/terrain/renderer/orbis_capture.rs",
+    "src/viewer/terrain/motion_blur_depth/tests.rs"
+  ],
+  "rust_shader_wrapper_invocations": [
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:12:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:18:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:24:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/accel/lbvh_gpu/setup.rs:6:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/astro/night_gpu.rs:406:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/astro/night_gpu.rs:57:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/codec/f3dz/gpu.rs:125:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/cloud_shadows/renderer.rs:94:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/clouds/renderer/init.rs:159:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/gpu_exec.rs:67:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dd/jitter_pipeline.rs:29:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/det_probe.rs:194:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/det_probe.rs:66:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dof/pipeline.rs:72:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dual_source_oit/constructor.rs:15:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/dual_source_oit/constructor.rs:20:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ground_plane/renderer.rs:86:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:13:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:18:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/ibl/constructor.rs:23:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/overlays.rs:280:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/point_spot_lights/creation.rs:14:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/hzb.rs:57:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:100:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:80:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:85:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:90:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssao/pipelines.rs:95:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssgi/constructor/pipelines.rs:92:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/screen_space_effects/ssr/constructor/pipelines.rs:80:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/soft_light_radius.rs:171:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/taa.rs:118:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/text_mesh/renderer.rs:31:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/text_overlay.rs:192:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/core/water_surface/constructor.rs:121:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/offscreen/pipeline.rs:130:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/passes/gi/mod.rs:36:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/passes/gi/mod.rs:41:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/compute/setup.rs:10:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/aether_post.rs:239:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/media_reference.rs:208:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:118:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:13:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:98:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:234:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:343:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/inverse/pipeline.rs:364:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:32:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:37:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:42:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:47:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:52:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:57:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:62:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:67:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/wavefront/pipeline.rs:72:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/picking/id_buffer.rs:146:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/picking/tile_id.rs:146:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/hdr_offscreen/pipeline.rs:175:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/normal_mapping.rs:63:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/pipeline/pbr/rendering.rs:240:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/py_functions/diagnostics.rs:122:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/render/mesh_instanced.rs:165:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/scene/ssao/setup.rs:30:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/shadows/blur_pass.rs:54:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/shadows/moment_pass.rs:73:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/analysis/viewshed.rs:246:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/analysis/viewshed.rs:486:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:127:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:132:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:137:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/bloom_processor/constructor.rs:142:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/clipmap/gpu_lod.rs:409:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/culling/two_phase.rs:453:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/pipeline/creation.rs:259:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/pipeline/creation.rs:265:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/atmosphere.rs:115:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/atmosphere.rs:185:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/height_ao/pipelines.rs:7:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/height_ao/pipelines.rs:92:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/media.rs:1303:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/media.rs:741:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/offline.rs:91:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:385:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:451:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:592:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/shadows/resources.rs:220:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/visibility_buffer.rs:872:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/util/debug_pattern.rs:48:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/binning.rs:156:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/raster.rs:104:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/coverage/resolve.rs:39:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/gpu_extrusion/pipeline.rs:14:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/indirect/init.rs:64:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/line.rs:66:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/oit/pipeline.rs:181:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/oit/pipeline.rs:80:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/point/pipeline.rs:19:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/point/renderer/pipelines.rs:32:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/vector/polygon.rs:55:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/composite_init.rs:118:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fallback_init.rs:26:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fog_init.rs:196:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/fog_init.rs:517:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gbuffer_init.rs:225:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gbuffer_init.rs:320:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gi_baseline_init.rs:100:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/gi_baseline_init.rs:185:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/lit_init.rs:196:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/sky_init.rs:111:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/sky_init.rs:187:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/init/viewer_new.rs:440:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/pointcloud/state.rs:40:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/denoise.rs:37:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/dof/pass/setup.rs:61:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/motion_blur.rs:72:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/motion_blur_depth.rs:29:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/post_process.rs:84:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/render/motion_blur.rs:358:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/core.rs:44:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:186:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:369:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pbr_compute.rs:490:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pipeline_init.rs:292:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/scene/pipeline_init.rs:69:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/vector_overlay/pipelines.rs:57:create_labeled_shader_module",
+    "src/core/shader_registry.rs:144:create_shader_module<-src/viewer/terrain/volumetrics.rs:61:create_labeled_shader_module",
+    "src/path_tracing/hybrid_compute/setup.rs:13:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:158:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:202:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:246:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:290:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:334:create_pipeline",
+    "src/terrain/renderer/offline.rs:91:create_labeled_shader_module<-src/terrain/renderer/offline.rs:379:create_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:518:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:655:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:680:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:699:create_fullscreen_blit_pipeline",
+    "src/terrain/renderer/pipeline_cache.rs:15:create_labeled_shader_module<-src/terrain/renderer/pipeline_cache.rs:723:create_fullscreen_blit_pipeline"
+  ],
+  "rust_wgsl_include_edges": [
+    {
+      "rust": "src/accel/lbvh_gpu/setup.rs",
+      "wgsl": "src/shaders/bvh_refit.wgsl"
+    },
+    {
+      "rust": "src/accel/lbvh_gpu/setup.rs",
+      "wgsl": "src/shaders/lbvh_link.wgsl"
+    },
+    {
+      "rust": "src/accel/lbvh_gpu/setup.rs",
+      "wgsl": "src/shaders/lbvh_morton.wgsl"
+    },
+    {
+      "rust": "src/accel/lbvh_gpu/setup.rs",
+      "wgsl": "src/shaders/radix_sort_pairs.wgsl"
+    },
+    {
+      "rust": "src/astro/night.rs",
+      "wgsl": "src/shaders/stars.wgsl"
+    },
+    {
+      "rust": "src/astro/night_gpu.rs",
+      "wgsl": "src/shaders/stars.wgsl"
+    },
+    {
+      "rust": "src/codec/f3dz/gpu.rs",
+      "wgsl": "src/shaders/f3dz_decode.wgsl"
+    },
+    {
+      "rust": "src/codec/f3dz/gpu.rs",
+      "wgsl": "src/shaders/f3dz_decode.wgsl"
+    },
+    {
+      "rust": "src/codec/f3dz/gpu.rs",
+      "wgsl": "src/shaders/f3dz_decode.wgsl"
+    },
+    {
+      "rust": "src/core/atmosphere/bake.rs",
+      "wgsl": "src/shaders/atmosphere/evaluation_core.wgsl"
+    },
+    {
+      "rust": "src/core/atmosphere/bake.rs",
+      "wgsl": "src/shaders/atmosphere/scattering.wgsl"
+    },
+    {
+      "rust": "src/core/atmosphere/bake.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/core/cloud_shadows/renderer.rs",
+      "wgsl": "src/shaders/cloud_shadows.wgsl"
+    },
+    {
+      "rust": "src/core/cloud_shadows/renderer.rs",
+      "wgsl": "src/shaders/cloud_shadows.wgsl"
+    },
+    {
+      "rust": "src/core/clouds/renderer/init.rs",
+      "wgsl": "src/shaders/clouds.wgsl"
+    },
+    {
+      "rust": "src/core/dd/gpu_exec.rs",
+      "wgsl": "src/shaders/dd_harness.wgsl"
+    },
+    {
+      "rust": "src/core/dd/gpu_exec.rs",
+      "wgsl": "src/shaders/includes/dd.wgsl"
+    },
+    {
+      "rust": "src/core/dd/gpu_exec.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/core/dd/jitter_pipeline.rs",
+      "wgsl": "src/shaders/dd_jitter.wgsl"
+    },
+    {
+      "rust": "src/core/dof/mod.rs",
+      "wgsl": "src/shaders/dof.wgsl"
+    },
+    {
+      "rust": "src/core/dof/pipeline.rs",
+      "wgsl": "src/shaders/dof.wgsl"
+    },
+    {
+      "rust": "src/core/dual_source_oit/constructor.rs",
+      "wgsl": "src/shaders/oit_dual_source.wgsl"
+    },
+    {
+      "rust": "src/core/dual_source_oit/constructor.rs",
+      "wgsl": "src/shaders/oit_dual_source_compose.wgsl"
+    },
+    {
+      "rust": "src/core/ground_plane/renderer.rs",
+      "wgsl": "src/shaders/ground_plane.wgsl"
+    },
+    {
+      "rust": "src/core/overlays.rs",
+      "wgsl": "src/shaders/overlays.wgsl"
+    },
+    {
+      "rust": "src/core/point_spot_lights/creation.rs",
+      "wgsl": "src/shaders/point_spot_lights.wgsl"
+    },
+    {
+      "rust": "src/core/reflections.rs",
+      "wgsl": "src/shaders/planar_reflections.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects.rs",
+      "wgsl": "src/shaders/ssao/common.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects.rs",
+      "wgsl": "src/shaders/ssao/common.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects.rs",
+      "wgsl": "src/shaders/ssao/composite.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects.rs",
+      "wgsl": "src/shaders/ssao/gtao.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects.rs",
+      "wgsl": "src/shaders/ssao/ssao.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/hzb.rs",
+      "wgsl": "src/shaders/hzb_build.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssao/pipelines.rs",
+      "wgsl": "src/shaders/filters/bilateral_separable.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssao/pipelines.rs",
+      "wgsl": "src/shaders/temporal/resolve_ao.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssgi/constructor/pipelines.rs",
+      "wgsl": "src/shaders/filters/edge_aware_upsample.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssgi/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssgi/composite.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssgi/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssgi/resolve_temporal.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssgi/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssgi/shade.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssgi/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssgi/trace.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssr/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssr/composite.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssr/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssr/fallback_env.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssr/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssr/shade.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssr/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssr/temporal.wgsl"
+    },
+    {
+      "rust": "src/core/screen_space_effects/ssr/constructor/pipelines.rs",
+      "wgsl": "src/shaders/ssr/trace.wgsl"
+    },
+    {
+      "rust": "src/core/soft_light_radius.rs",
+      "wgsl": "src/shaders/soft_light_radius.wgsl"
+    },
+    {
+      "rust": "src/core/taa.rs",
+      "wgsl": "src/shaders/taa.wgsl"
+    },
+    {
+      "rust": "src/core/text_mesh/renderer.rs",
+      "wgsl": "src/shaders/mesh_basic.wgsl"
+    },
+    {
+      "rust": "src/core/text_overlay.rs",
+      "wgsl": "src/shaders/text_overlay.wgsl"
+    },
+    {
+      "rust": "src/core/water_surface/constructor.rs",
+      "wgsl": "src/shaders/water_surface.wgsl"
+    },
+    {
+      "rust": "src/offscreen/adjudication_raster.rs",
+      "wgsl": "src/shaders/ibl_brdf.wgsl"
+    },
+    {
+      "rust": "src/offscreen/adjudication_raster.rs",
+      "wgsl": "src/shaders/ibl_equirect.wgsl"
+    },
+    {
+      "rust": "src/offscreen/adjudication_raster.rs",
+      "wgsl": "src/shaders/ibl_prefilter.wgsl"
+    },
+    {
+      "rust": "src/offscreen/adjudication_raster.rs",
+      "wgsl": "src/shaders/mesh_instanced.wgsl"
+    },
+    {
+      "rust": "src/offscreen/pipeline.rs",
+      "wgsl": "src/shaders/brdf_tile.wgsl"
+    },
+    {
+      "rust": "src/p5/meta/mod.rs",
+      "wgsl": "src/shaders/filters/bilateral_separable.wgsl"
+    },
+    {
+      "rust": "src/p5/meta/mod.rs",
+      "wgsl": "src/shaders/ssao/common.wgsl"
+    },
+    {
+      "rust": "src/p5/meta/mod.rs",
+      "wgsl": "src/shaders/ssao/composite.wgsl"
+    },
+    {
+      "rust": "src/p5/meta/mod.rs",
+      "wgsl": "src/shaders/ssao/gtao.wgsl"
+    },
+    {
+      "rust": "src/p5/meta/mod.rs",
+      "wgsl": "src/shaders/ssao/ssao.wgsl"
+    },
+    {
+      "rust": "src/p5/meta/mod.rs",
+      "wgsl": "src/shaders/temporal/resolve_ao.wgsl"
+    },
+    {
+      "rust": "src/passes/gi/mod.rs",
+      "wgsl": "src/shaders/gi/composite.wgsl"
+    },
+    {
+      "rust": "src/passes/gi/mod.rs",
+      "wgsl": "src/shaders/gi/debug.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/adjudication.rs",
+      "wgsl": "src/shaders/pt_scatter.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/adjudication.rs",
+      "wgsl": "src/shaders/pt_shade.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/adjudication.rs",
+      "wgsl": "src/shaders/pt_shadow.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/compute/setup.rs",
+      "wgsl": "src/shaders/pt_kernel.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/hybrid_compute/aether_reference.rs",
+      "wgsl": "src/shaders/atmosphere/prometheus_spectral_reference.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/hybrid_compute/media_reference.rs",
+      "wgsl": "src/shaders/nephele_terrain_trace_adapter.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/hybrid_compute/setup.rs",
+      "wgsl": "src/shaders/pt_restir_spatial.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/hybrid_compute/setup.rs",
+      "wgsl": "src/shaders/pt_restir_temporal.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/inverse/pipeline.rs",
+      "wgsl": "src/shaders/pt_restir_spatial.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/inverse/pipeline.rs",
+      "wgsl": "src/shaders/pt_restir_temporal.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/ao_from_aovs.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/pt_intersect.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/pt_raygen.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/pt_restir_init.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/pt_restir_spatial.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/pt_restir_temporal.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/pt_scatter.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/pt_shade.wgsl"
+    },
+    {
+      "rust": "src/path_tracing/wavefront/pipeline.rs",
+      "wgsl": "src/shaders/pt_shadow.wgsl"
+    },
+    {
+      "rust": "src/pipeline/normal_mapping.rs",
+      "wgsl": "src/shaders/normal_mapping_vertex.wgsl"
+    },
+    {
+      "rust": "src/pipeline/pbr/tone_mapping.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/pipeline/pbr/tone_mapping.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/pipeline/pbr/tone_mapping.rs",
+      "wgsl": "src/shaders/tone_map.wgsl"
+    },
+    {
+      "rust": "src/render/mesh_instanced.rs",
+      "wgsl": "src/shaders/mesh_instanced.wgsl"
+    },
+    {
+      "rust": "src/scene/ssao/setup.rs",
+      "wgsl": "src/shaders/ssao.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/evaluation_core.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/evaluation_core.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/evaluation_core.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/evaluation_core.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/prometheus_aerial.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/prometheus_aerial.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/prometheus_spectral_reference.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/prometheus_spectral_reference.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/scattering.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/atmosphere/scattering.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/ashikhmin_shirley.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/ashikhmin_shirley.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/ashikhmin_shirley.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/cook_torrance.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/cook_torrance.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/cook_torrance.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/disney_principled.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/disney_principled.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/disney_principled.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/dispatch.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/dispatch.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/dispatch.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/lambert.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/lambert.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/lambert.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/minnaert.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/minnaert.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/minnaert.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/oren_nayar.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/oren_nayar.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/oren_nayar.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/phong.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/phong.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/phong.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/toon.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/toon.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/toon.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/ward.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/ward.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/brdf/ward.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/det_probe.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/det_raster.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/hybrid_kernel.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/hybrid_terrain_traversal.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/hybrid_traversal.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/ibl_brdf.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/ibl_equirect.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/ibl_prefilter.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lighting.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lighting.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lighting.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lighting_ibl.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lighting_ibl.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lighting_ibl.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lights.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lights.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/lights.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/orbis_globe_background.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/pbr.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/pbr.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/postprocess_tonemap.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/pt_edge_sample.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/pt_inverse_loss.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/pt_inverse_shade.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/sdf_operations.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/sdf_primitives.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/shadows.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/shadows.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/sky.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/sky.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_aether_blit.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_noise.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_pbr_pom.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_pbr_pom.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_probes.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_shadow_depth.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_viewshed.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_visbuffer_resolve.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_visbuffer_write.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_visbuffer_write.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_visibility_fullscreen.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/terrain_visibility_fullscreen.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/tone_map.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/tonemap_terrain_offline.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/vector_coverage_bin.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/vector_coverage_raster.wgsl"
+    },
+    {
+      "rust": "src/shader_sources.rs",
+      "wgsl": "src/shaders/vector_coverage_resolve.wgsl"
+    },
+    {
+      "rust": "src/shadows/blur_pass.rs",
+      "wgsl": "src/shaders/shadow_blur.wgsl"
+    },
+    {
+      "rust": "src/shadows/blur_pass.rs",
+      "wgsl": "src/shaders/shadow_blur.wgsl"
+    },
+    {
+      "rust": "src/shadows/blur_pass.rs",
+      "wgsl": "src/shaders/shadow_blur.wgsl"
+    },
+    {
+      "rust": "src/shadows/blur_pass.rs",
+      "wgsl": "src/shaders/shadow_blur.wgsl"
+    },
+    {
+      "rust": "src/shadows/blur_pass.rs",
+      "wgsl": "src/shaders/shadow_blur.wgsl"
+    },
+    {
+      "rust": "src/shadows/blur_pass.rs",
+      "wgsl": "src/shaders/shadow_blur.wgsl"
+    },
+    {
+      "rust": "src/shadows/blur_pass.rs",
+      "wgsl": "src/shaders/shadow_blur.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/shadows/mod.rs",
+      "wgsl": "src/shaders/shadows.wgsl"
+    },
+    {
+      "rust": "src/shadows/moment_pass.rs",
+      "wgsl": "src/shaders/moment_generation.wgsl"
+    },
+    {
+      "rust": "src/shadows/moment_pass.rs",
+      "wgsl": "src/shaders/moment_generation.wgsl"
+    },
+    {
+      "rust": "src/shadows/moment_pass.rs",
+      "wgsl": "src/shaders/moment_generation.wgsl"
+    },
+    {
+      "rust": "src/shadows/moment_pass.rs",
+      "wgsl": "src/shaders/moment_generation.wgsl"
+    },
+    {
+      "rust": "src/shadows/moment_pass.rs",
+      "wgsl": "src/shaders/moment_generation.wgsl"
+    },
+    {
+      "rust": "src/shadows/moment_pass.rs",
+      "wgsl": "src/shaders/moment_generation.wgsl"
+    },
+    {
+      "rust": "src/shadows/moment_pass.rs",
+      "wgsl": "src/shaders/shadow_blur.wgsl"
+    },
+    {
+      "rust": "src/terrain/bloom_processor/constructor.rs",
+      "wgsl": "src/shaders/bloom_blur_h.wgsl"
+    },
+    {
+      "rust": "src/terrain/bloom_processor/constructor.rs",
+      "wgsl": "src/shaders/bloom_blur_v.wgsl"
+    },
+    {
+      "rust": "src/terrain/bloom_processor/constructor.rs",
+      "wgsl": "src/shaders/bloom_brightpass.wgsl"
+    },
+    {
+      "rust": "src/terrain/bloom_processor/constructor.rs",
+      "wgsl": "src/shaders/bloom_composite.wgsl"
+    },
+    {
+      "rust": "src/terrain/clipmap/gpu_lod.rs",
+      "wgsl": "src/shaders/clipmap_lod_select.wgsl"
+    },
+    {
+      "rust": "src/terrain/clipmap/gpu_lod/tests.rs",
+      "wgsl": "src/shaders/clipmap_lod_select.wgsl"
+    },
+    {
+      "rust": "src/terrain/clipmap/gpu_lod/tests.rs",
+      "wgsl": "src/shaders/clipmap_lod_select.wgsl"
+    },
+    {
+      "rust": "src/terrain/clipmap/gpu_lod/tests.rs",
+      "wgsl": "src/shaders/hzb_cull.wgsl"
+    },
+    {
+      "rust": "src/terrain/clipmap/vertex.rs",
+      "wgsl": "src/shaders/terrain_pbr_pom.wgsl"
+    },
+    {
+      "rust": "src/terrain/culling/two_phase.rs",
+      "wgsl": "src/shaders/hzb_cull.wgsl"
+    },
+    {
+      "rust": "src/terrain/pipeline/creation.rs",
+      "wgsl": "src/shaders/terrain.wgsl"
+    },
+    {
+      "rust": "src/terrain/pipeline/creation.rs",
+      "wgsl": "src/shaders/terrain_minimal.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/draw/execute.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/draw/execute.rs",
+      "wgsl": "src/shaders/postprocess_tonemap.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/height_ao/pipelines.rs",
+      "wgsl": "src/shaders/heightfield_ao.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/height_ao/pipelines.rs",
+      "wgsl": "src/shaders/heightfield_sun_vis.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_froxel.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_froxel.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_froxel.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_froxel.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_froxel.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_froxel.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_realtime_terrain_trace.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_realtime_terrain_trace.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/nephele_terrain_trace_adapter.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/postprocess_tonemap.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/terrain_pbr_pom.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/shaders/volumetric.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/media.rs",
+      "wgsl": "src/viewer/terrain/shader_pbr/terrain_pbr.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/offline.rs",
+      "wgsl": "src/shaders/offline_accumulate.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/offline.rs",
+      "wgsl": "src/shaders/offline_depth_expand.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/offline.rs",
+      "wgsl": "src/shaders/offline_depth_extract.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/offline.rs",
+      "wgsl": "src/shaders/offline_luminance.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/offline.rs",
+      "wgsl": "src/shaders/offline_resolve.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/pipeline_cache.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/pipeline_cache.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/pipeline_cache.rs",
+      "wgsl": "src/shaders/postprocess_tonemap.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/pipeline_cache.rs",
+      "wgsl": "src/shaders/terrain_blit.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/pipeline_cache.rs",
+      "wgsl": "src/shaders/terrain_blit.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/pipeline_cache.rs",
+      "wgsl": "src/shaders/terrain_normal_blit.wgsl"
+    },
+    {
+      "rust": "src/terrain/renderer/visibility_buffer.rs",
+      "wgsl": "src/shaders/terrain_visbuffer_resolve.wgsl"
+    },
+    {
+      "rust": "src/vector/gpu_extrusion/pipeline.rs",
+      "wgsl": "src/shaders/extrusion.wgsl"
+    },
+    {
+      "rust": "src/vector/indirect/init.rs",
+      "wgsl": "src/shaders/culling_compute.wgsl"
+    },
+    {
+      "rust": "src/vector/line.rs",
+      "wgsl": "src/shaders/line_aa.wgsl"
+    },
+    {
+      "rust": "src/vector/oit/pipeline.rs",
+      "wgsl": "src/shaders/oit_compose.wgsl"
+    },
+    {
+      "rust": "src/vector/oit/pipeline.rs",
+      "wgsl": "src/shaders/point_edl.wgsl"
+    },
+    {
+      "rust": "src/vector/point/pipeline.rs",
+      "wgsl": "src/shaders/point_instanced.wgsl"
+    },
+    {
+      "rust": "src/vector/point/renderer/pipelines.rs",
+      "wgsl": "src/shaders/point_instanced.wgsl"
+    },
+    {
+      "rust": "src/vector/polygon.rs",
+      "wgsl": "src/shaders/polygon_fill.wgsl"
+    },
+    {
+      "rust": "src/verify/ir/engine.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/verify/ir/tests.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/verify/ir/tests.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/verify/ir/tests.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/verify/ir/tests.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/brdf_tile.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/gi/composite.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/includes/tonemap_common.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/line_aa.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/overlays.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/polygon_fill.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/pt_shade.wgsl"
+    },
+    {
+      "rust": "src/verify/mod.rs",
+      "wgsl": "src/shaders/water_surface.wgsl"
+    },
+    {
+      "rust": "src/viewer/init/fog_init.rs",
+      "wgsl": "src/shaders/fog_upsample.wgsl"
+    },
+    {
+      "rust": "src/viewer/init/fog_init.rs",
+      "wgsl": "src/shaders/volumetric.wgsl"
+    },
+    {
+      "rust": "src/viewer/init/sky_init.rs",
+      "wgsl": "src/shaders/sky.wgsl"
+    },
+    {
+      "rust": "src/viewer/pointcloud/shader.rs",
+      "wgsl": "src/viewer/pointcloud/pointcloud.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/denoise.rs",
+      "wgsl": "src/shaders/denoise_atrous.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/dof/shader.rs",
+      "wgsl": "src/viewer/terrain/dof/dof.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/scene/pbr_compute.rs",
+      "wgsl": "src/shaders/heightfield_ao.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/scene/pbr_compute.rs",
+      "wgsl": "src/shaders/heightfield_sun_vis.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/scene/pipeline_init.rs",
+      "wgsl": "src/viewer/terrain/shader_pbr/terrain_shadow_depth.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/shader_pbr.rs",
+      "wgsl": "src/shaders/includes/determinism.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/shader_pbr.rs",
+      "wgsl": "src/shaders/includes/shadow_moments.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/shader_pbr.rs",
+      "wgsl": "src/viewer/terrain/shader_pbr/terrain_pbr.wgsl"
+    },
+    {
+      "rust": "src/viewer/terrain/volumetrics.rs",
+      "wgsl": "src/shaders/viewer_volumetrics.wgsl"
+    }
+  ],
+  "schema": "forge3d.nephele.gate5_static/5",
+  "stale_disabled_shadow_comments": 0,
+  "tool_sha256": "579774e9a6a4dd4ab8ca6d7a7e3386d7ff9df465a14a70bc0980704ee1c5bd33",
+  "tracked_wgsl_files": [
+    "src/shaders/adjudication_raster.wgsl",
+    "src/shaders/ao_from_aovs.wgsl",
+    "src/shaders/atmosphere/evaluation_core.wgsl",
+    "src/shaders/atmosphere/prometheus_aerial.wgsl",
+    "src/shaders/atmosphere/prometheus_spectral_reference.wgsl",
+    "src/shaders/atmosphere/scattering.wgsl",
+    "src/shaders/bloom_blur_h.wgsl",
+    "src/shaders/bloom_blur_v.wgsl",
+    "src/shaders/bloom_brightpass.wgsl",
+    "src/shaders/bloom_composite.wgsl",
+    "src/shaders/brdf/ashikhmin_shirley.wgsl",
+    "src/shaders/brdf/common.wgsl",
+    "src/shaders/brdf/cook_torrance.wgsl",
+    "src/shaders/brdf/disney_principled.wgsl",
+    "src/shaders/brdf/dispatch.wgsl",
+    "src/shaders/brdf/lambert.wgsl",
+    "src/shaders/brdf/minnaert.wgsl",
+    "src/shaders/brdf/oren_nayar.wgsl",
+    "src/shaders/brdf/phong.wgsl",
+    "src/shaders/brdf/toon.wgsl",
+    "src/shaders/brdf/ward.wgsl",
+    "src/shaders/brdf_tile.wgsl",
+    "src/shaders/bvh_refit.wgsl",
+    "src/shaders/clipmap_lod_select.wgsl",
+    "src/shaders/cloud_shadows.wgsl",
+    "src/shaders/clouds.wgsl",
+    "src/shaders/culling_compute.wgsl",
+    "src/shaders/dd_harness.wgsl",
+    "src/shaders/dd_jitter.wgsl",
+    "src/shaders/denoise_atrous.wgsl",
+    "src/shaders/det_probe.wgsl",
+    "src/shaders/det_raster.wgsl",
+    "src/shaders/dof.wgsl",
+    "src/shaders/extrusion.wgsl",
+    "src/shaders/f3dz_decode.wgsl",
+    "src/shaders/filters/bilateral_separable.wgsl",
+    "src/shaders/filters/edge_aware_upsample.wgsl",
+    "src/shaders/fog_upsample.wgsl",
+    "src/shaders/gbuffer/common.wgsl",
+    "src/shaders/gi/composite.wgsl",
+    "src/shaders/gi/debug.wgsl",
+    "src/shaders/ground_plane.wgsl",
+    "src/shaders/heightfield_ao.wgsl",
+    "src/shaders/heightfield_sun_vis.wgsl",
+    "src/shaders/hybrid_kernel.wgsl",
+    "src/shaders/hybrid_terrain_traversal.wgsl",
+    "src/shaders/hybrid_traversal.wgsl",
+    "src/shaders/hzb_build.wgsl",
+    "src/shaders/hzb_cull.wgsl",
+    "src/shaders/ibl.wgsl",
+    "src/shaders/ibl_brdf.wgsl",
+    "src/shaders/ibl_equirect.wgsl",
+    "src/shaders/ibl_prefilter.wgsl",
+    "src/shaders/includes/dd.wgsl",
+    "src/shaders/includes/determinism.wgsl",
+    "src/shaders/includes/shadow_moments.wgsl",
+    "src/shaders/includes/tonemap_common.wgsl",
+    "src/shaders/lbvh_link.wgsl",
+    "src/shaders/lbvh_morton.wgsl",
+    "src/shaders/lighting.wgsl",
+    "src/shaders/lighting_ibl.wgsl",
+    "src/shaders/lights.wgsl",
+    "src/shaders/line_aa.wgsl",
+    "src/shaders/mesh_basic.wgsl",
+    "src/shaders/mesh_instanced.wgsl",
+    "src/shaders/moment_generation.wgsl",
+    "src/shaders/nephele_froxel.wgsl",
+    "src/shaders/nephele_realtime_terrain_trace.wgsl",
+    "src/shaders/nephele_terrain_trace_adapter.wgsl",
+    "src/shaders/normal_mapping_vertex.wgsl",
+    "src/shaders/offline_accumulate.wgsl",
+    "src/shaders/offline_depth_expand.wgsl",
+    "src/shaders/offline_depth_extract.wgsl",
+    "src/shaders/offline_luminance.wgsl",
+    "src/shaders/offline_resolve.wgsl",
+    "src/shaders/oit_compose.wgsl",
+    "src/shaders/oit_dual_source.wgsl",
+    "src/shaders/oit_dual_source_compose.wgsl",
+    "src/shaders/orbis_globe_background.wgsl",
+    "src/shaders/overlays.wgsl",
+    "src/shaders/pbr.wgsl",
+    "src/shaders/planar_reflections.wgsl",
+    "src/shaders/point_edl.wgsl",
+    "src/shaders/point_instanced.wgsl",
+    "src/shaders/point_spot_lights.wgsl",
+    "src/shaders/polygon_fill.wgsl",
+    "src/shaders/postprocess_tonemap.wgsl",
+    "src/shaders/pt_edge_sample.wgsl",
+    "src/shaders/pt_intersect.wgsl",
+    "src/shaders/pt_inverse_loss.wgsl",
+    "src/shaders/pt_inverse_shade.wgsl",
+    "src/shaders/pt_kernel.wgsl",
+    "src/shaders/pt_raygen.wgsl",
+    "src/shaders/pt_restir_init.wgsl",
+    "src/shaders/pt_restir_spatial.wgsl",
+    "src/shaders/pt_restir_temporal.wgsl",
+    "src/shaders/pt_scatter.wgsl",
+    "src/shaders/pt_shade.wgsl",
+    "src/shaders/pt_shadow.wgsl",
+    "src/shaders/radix_sort_pairs.wgsl",
+    "src/shaders/restir_spatial.wgsl",
+    "src/shaders/restir_temporal.wgsl",
+    "src/shaders/sdf_operations.wgsl",
+    "src/shaders/sdf_primitives.wgsl",
+    "src/shaders/shadow_blur.wgsl",
+    "src/shaders/shadows.wgsl",
+    "src/shaders/sky.wgsl",
+    "src/shaders/soft_light_radius.wgsl",
+    "src/shaders/ssao/common.wgsl",
+    "src/shaders/ssao/composite.wgsl",
+    "src/shaders/ssao/gtao.wgsl",
+    "src/shaders/ssao/ssao.wgsl",
+    "src/shaders/ssao.wgsl",
+    "src/shaders/ssgi/composite.wgsl",
+    "src/shaders/ssgi/resolve_temporal.wgsl",
+    "src/shaders/ssgi/shade.wgsl",
+    "src/shaders/ssgi/trace.wgsl",
+    "src/shaders/ssr/composite.wgsl",
+    "src/shaders/ssr/fallback_env.wgsl",
+    "src/shaders/ssr/shade.wgsl",
+    "src/shaders/ssr/temporal.wgsl",
+    "src/shaders/ssr/trace.wgsl",
+    "src/shaders/stars.wgsl",
+    "src/shaders/taa.wgsl",
+    "src/shaders/temporal/resolve_ao.wgsl",
+    "src/shaders/terrain.wgsl",
+    "src/shaders/terrain_aether_blit.wgsl",
+    "src/shaders/terrain_blit.wgsl",
+    "src/shaders/terrain_minimal.wgsl",
+    "src/shaders/terrain_noise.wgsl",
+    "src/shaders/terrain_normal_blit.wgsl",
+    "src/shaders/terrain_pbr_pom.wgsl",
+    "src/shaders/terrain_probes.wgsl",
+    "src/shaders/terrain_shadow_depth.wgsl",
+    "src/shaders/terrain_viewshed.wgsl",
+    "src/shaders/terrain_visbuffer_resolve.wgsl",
+    "src/shaders/terrain_visbuffer_write.wgsl",
+    "src/shaders/terrain_visibility_fullscreen.wgsl",
+    "src/shaders/text_overlay.wgsl",
+    "src/shaders/tone_map.wgsl",
+    "src/shaders/tonemap_terrain_offline.wgsl",
+    "src/shaders/vector_coverage_bin.wgsl",
+    "src/shaders/vector_coverage_raster.wgsl",
+    "src/shaders/vector_coverage_resolve.wgsl",
+    "src/shaders/velocity.wgsl",
+    "src/shaders/viewer_volumetrics.wgsl",
+    "src/shaders/volumetric.wgsl",
+    "src/shaders/water_surface.wgsl",
+    "src/viewer/pointcloud/pointcloud.wgsl",
+    "src/viewer/terrain/dof/dof.wgsl",
+    "src/viewer/terrain/shader_pbr/terrain_pbr.wgsl",
+    "src/viewer/terrain/shader_pbr/terrain_shadow_depth.wgsl"
+  ],
+  "unresolved_source_expressions": [],
+  "violating_compute_entries": []
+}

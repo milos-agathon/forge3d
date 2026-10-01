@@ -1,0 +1,43 @@
+{
+  "accumulators": {
+    "off": {
+      "count": 1000000,
+      "maximum": 0.800000011920929,
+      "minimum": 0.0,
+      "sum": 314603.204687953,
+      "sum_squares": 251682.56750072484
+    },
+    "on": {
+      "count": 1000000,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "sum": 314637.0,
+      "sum_squares": 267534.5
+    }
+  },
+  "analytic_oracle": 0.3147754722298932,
+  "producer_tool": {
+    "path": "scripts/nephele_heterogeneous_comparator.py",
+    "sha256": "496f2a69b86937581767fcaeef52cedd0a6f047df966c7034113099d031cc1a4"
+  },
+  "raw_output": {
+    "encoding": "little-endian-f64-rr-on-off-pairs",
+    "pairs": 1000000,
+    "path": "rr-contributions.bin",
+    "sha256": "f3148fbb3a0c428beede63b50c09b8db9e6d72a7897a80b02a2e752713351d48"
+  },
+  "sample_mapping": {
+    "algorithm": "canonical-delta-track-single-scatter-rr-v1",
+    "parameters": {
+      "columns": [
+        "rr_on",
+        "rr_off"
+      ],
+      "encoding": "little-endian-f64",
+      "rr_trials_per_collision": 4
+    },
+    "sha256": "c84c620bcd3b80c423e866a50a6e352b319fea4cdaedaf4fc9e03dc143e5fda0"
+  },
+  "schema": "forge3d.nephele.russian_roulette_evidence/3",
+  "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819"
+}
