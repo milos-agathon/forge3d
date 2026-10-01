@@ -52,13 +52,16 @@ def capture(repo: Path, output: Path, label: str, *, isotropic=False, occlusion=
         hdr = Path(temporary) / "environment.hdr"
         _write_hdr(hdr)
         ibl = f3d.IBL.from_hdr(str(hdr), intensity=atmosphere["environment_intensity"])
+        capture_components = not include_no_medium
         raw = renderer._capture_nephele_acceptance(material, ibl, params, terrain,
-            terrain_occlusion_in_media=occlusion, capture_scatter_components=True,
+            terrain_occlusion_in_media=occlusion, capture_scatter_components=capture_components,
             include_no_medium=include_no_medium)
     expected_camera = b1._json(repo / "tests/nephele/fixture/reference-provenance.json")["camera_contract"]
     if _camera_contract(raw["camera_contract"]) != expected_camera:
         raise RuntimeError("shadow diagnostic camera differs from the frozen reference")
-    keys = ("beauty", "in_scatter", "transmittance", "cloud_shadow", "in_scatter_multiple_luminance")
+    keys = ("beauty", "in_scatter", "transmittance", "cloud_shadow")
+    if capture_components:
+        keys += ("in_scatter_multiple_luminance",)
     if include_no_medium:
         keys += ("no_medium_beauty",)
     arrays = {key: _crop(np.asarray(raw[key]), crop) for key in keys}
@@ -67,8 +70,9 @@ def capture(repo: Path, output: Path, label: str, *, isotropic=False, occlusion=
             raise RuntimeError(f"non-finite GPU readback: {key}")
         np.save(output / f"{label}-{key}.npy", array, allow_pickle=False)
     # The alpha channel and the native aggregate must describe the same GPU frame.
-    np.testing.assert_allclose(float(arrays["in_scatter_multiple_luminance"].mean()),
-        raw["diagnostics"]["multiple_scatter_luminance"], rtol=0, atol=np.finfo(np.float32).eps)
+    if capture_components:
+        np.testing.assert_allclose(float(arrays["in_scatter_multiple_luminance"].mean()),
+            raw["diagnostics"]["multiple_scatter_luminance"], rtol=0, atol=np.finfo(np.float32).eps)
     return arrays, raw["diagnostics"]
 
 

@@ -1,0 +1,34 @@
+{
+  "schema": "forge3d.nephele.background_harness_validation/1",
+  "physical_acceptance": false,
+  "rendering_source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+  "local_validation_base_revision": "57cfdfc352ab6bd5437bf7935a302ec687c7b0cb",
+  "harness_tracked_worktree_clean": false,
+  "diagnostic_producer_sha256": "ff2993e3d470cc4659512028f3e032fa179fd496131ff9fb220b883f0a66e1e3",
+  "previous_broader_core_run": 36819717059,
+  "previous_full_linux_result": {
+    "failed": 1,
+    "passed": 3804,
+    "skipped": 316,
+    "deselected": 55
+  },
+  "previous_failure": "tests/test_nephele_environment_defects.py::test_camera_visible_uniform_environment_readback: native dual-frame capture SIGSEGV",
+  "background_requests_extra_scattering_component": false,
+  "component_test_requests_extra_scattering_component": true,
+  "corrected_local_result": {
+    "passed": 2,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "artifact_hashes": {
+    "round1-background-only.log": {
+      "bytes": 100,
+      "sha256": "5b753fcf4cffe0a12412aa778a89c2aad823e97b333d58e391fb459aba97a88b"
+    },
+    "round1-background-only-junit.xml": {
+      "bytes": 508,
+      "sha256": "0998952806ee0152b9458c7e1e541840546988ee56e3b6af709951af35171f94"
+    }
+  }
+}
