@@ -398,6 +398,13 @@ fn parse_virtual_texture(
         .unwrap_or(camera_mode)
         .trim()
         .eq_ignore_ascii_case("mesh");
+    // Same frame rule as the renderer's visible_uv_rect: a `north` camera
+    // target is geographic (+Y north) and mesh UV v runs south.
+    let target = if crate::terrain::renderer::is_north_up_camera_mode(camera_mode) {
+        crate::terrain::renderer::north_up_to_world(target)
+    } else {
+        target
+    };
     let (uv_min, uv_max) = if is_mesh {
         let aspect = render_w as f32 / render_h.max(1) as f32;
         let center = [

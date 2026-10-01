@@ -1374,7 +1374,30 @@ def _mapscene_effective_camera_mode(recipe: "SceneRecipe") -> str:
     camera_mode = str(cli_params.get("camera_mode") or camera.get("camera_mode") or "screen")
     if camera_mode == "screen":
         camera_mode = _mapscene_clipmap_camera_mode(_mapscene_clipmap_config(recipe)) or camera_mode
+    return _mapscene_north_up_camera_mode(camera_mode)
+
+
+def _camera_mode_options(camera_mode: str) -> list[str]:
+    return [part.strip().lower() for part in str(camera_mode).split(":")[1:]]
+
+
+def _mapscene_north_up_camera_mode(camera_mode: str) -> str:
+    """3D MapScene views are geographic: +X east, +Y north, +Z up.
+
+    Mesh rows run south along +Y, so a bare ``zup`` camera renders the map
+    mirrored north-south. MapScene always adds the native ``north`` option to
+    Z-up modes; ``camera.target`` and the camera azimuth are read in that
+    north-up frame.
+    """
+    options = _camera_mode_options(camera_mode)
+    if "zup" in options and "north" not in options:
+        return f"{camera_mode}:north"
     return camera_mode
+
+
+def _is_north_up_camera_mode(camera_mode: str) -> bool:
+    options = _camera_mode_options(camera_mode)
+    return "zup" in options and "north" in options
 
 
 def _build_mapscene_terrain_params(
@@ -1430,6 +1453,12 @@ def _build_mapscene_terrain_params(
         domain=domain,
     )
     azimuth, elevation = _sun_angles_from_direction(recipe.lighting.sun_direction)
+    camera_mode = _mapscene_effective_camera_mode(recipe)
+    if _is_north_up_camera_mode(camera_mode):
+        # sun_direction carries a compass azimuth (0 = north, 90 = east). The
+        # renderer reads a math angle from +X toward world +Y, and mesh world
+        # +Y runs south, so compass A maps to A - 90.
+        azimuth = azimuth - 90.0
     renderer_config_data = settings.get("renderer_config") if isinstance(settings.get("renderer_config"), Mapping) else None
     renderer_config = load_renderer_config(renderer_config_data)
     ibl = settings.get("ibl") if isinstance(settings.get("ibl"), Mapping) else {}
@@ -1473,11 +1502,13 @@ def _build_mapscene_terrain_params(
         sun_intensity=float(recipe.lighting.intensity),
         sun_color=sun.get("color"),
         ibl_intensity=float(ibl.get("intensity", 1.0)),
+        cam_target=_mapscene_camera_target(recipe),
         cam_radius=float(recipe.camera.distance),
         cam_phi_deg=float(recipe.camera.azimuth_deg),
         cam_theta_deg=float(recipe.camera.elevation_deg),
         fov_y_deg=float(recipe.camera.fov_deg),
         camera_mode=camera_mode,
+        **_mapscene_lighting_extras(settings),
         clip=(0.1, clip_far),
         shadows=_mapscene_shadow_settings(renderer_config.shadows),
         overlays=[overlay],
@@ -1503,6 +1534,49 @@ def _build_mapscene_terrain_params(
     if chronos_frame_json is not None:
         config.chronos_frame_json = chronos_frame_json
     return f3d.TerrainRenderParams(config)
+
+
+def _mapscene_camera_target(recipe: "SceneRecipe") -> tuple[float, float, float]:
+    """``camera.target`` for the renderer (north-up scene metres in 3D modes)."""
+    target = recipe.camera.target or (0.0, 0.0, 0.0)
+    values = [float(target[i]) if i < len(target) else 0.0 for i in range(3)]
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError(f"camera.target must be finite, got {tuple(target)!r}")
+    return (values[0], values[1], values[2])
+
+
+# Public ``LightingPreset.settings`` keys forwarded to native terrain settings.
+_MAPSCENE_LIGHTING_EXTRAS = {
+    "sky": "SkySettings",
+    "sun_visibility": "SunVisibilitySettings",
+    "height_ao": "HeightAoSettings",
+    "fog": "FogSettings",
+    "tonemap": "TonemapSettings",
+    "bloom": "BloomSettings",
+}
+
+
+def _mapscene_lighting_extras(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Build native sky/haze/shadow/AO/fog/tonemap/bloom settings.
+
+    Each key is either absent (renderer default) or a mapping of that native
+    settings class's fields; anything else raises so a misspelled or malformed
+    setting can never be silently dropped.
+    """
+    from . import terrain_params
+
+    extras: dict[str, Any] = {}
+    for key, class_name in _MAPSCENE_LIGHTING_EXTRAS.items():
+        value = settings.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, Mapping):
+            raise TypeError(f"LightingPreset.settings[{key!r}] must be a mapping, got {type(value).__name__}")
+        try:
+            extras[key] = getattr(terrain_params, class_name)(**dict(value))
+        except TypeError as exc:
+            raise ValueError(f"LightingPreset.settings[{key!r}] is not a valid {class_name}: {exc}") from exc
+    return extras
 
 
 def _frame_to_rgba(frame: Any, output: "OutputSpec") -> Any:
@@ -3712,6 +3786,43 @@ def _needs_native_building_composite(recipe: "SceneRecipe") -> bool:
     return _building_scene_bounds(building_layers) is not None
 
 
+def _is_3d_camera_mode(camera_mode: str) -> bool:
+    return str(camera_mode).split(":", 1)[0].strip().lower() in {"mesh", "clipmap"}
+
+
+def _screen_space_layer_blocks_for_3d(recipe: "SceneRecipe") -> list[dict[str, Any]]:
+    """Block layers that are only placed in 2D screen space when the camera is 3D.
+
+    RasterOverlay pixels are resized to the whole frame and vector geometry is
+    mapped from its bounds to the frame, ignoring the terrain camera. In a
+    perspective view that draws them in the wrong place, so they block until
+    they are draped/projected through the terrain camera (SUTURA: block,
+    never draw wrong).
+    """
+    if not _is_3d_camera_mode(_mapscene_effective_camera_mode(recipe)):
+        return []
+    blocks: list[dict[str, Any]] = []
+    for layer in recipe.layers:
+        if isinstance(layer, RasterOverlay):
+            kind, required = "RasterOverlay", "terrain-UV raster drape (SUTURA stage 2)"
+        elif isinstance(layer, VectorOverlay):
+            kind, required = "VectorOverlay", "vector projection through the terrain camera (SUTURA stage 3)"
+        else:
+            continue
+        blocks.append(
+            diagnostic_block(
+                layer=_layer_id(layer, "layer"),
+                reason=(
+                    f"{kind} is composited in 2D screen space, which is only correct for a "
+                    "top-down screen camera; in a 3D camera mode it would be drawn in the "
+                    "wrong place"
+                ),
+                required_native=required,
+            )
+        )
+    return blocks
+
+
 def _native_composite_blocks(
     recipe: "SceneRecipe",
     *,
@@ -3850,6 +3961,7 @@ def _render_native_offscreen_result(
         plans=plans,
     )
     blocks.extend(raster_blocks)
+    blocks.extend(_screen_space_layer_blocks_for_3d(recipe))
     if blocks:
         raise MapSceneNativeUnavailable(blocks)
 

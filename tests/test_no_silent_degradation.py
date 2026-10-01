@@ -391,6 +391,8 @@ def test_e_sutura_integrity_gate_runs_in_full_and_hardware_lanes():
 
     targets = {
         "tests/test_mapscene_sutura_integrity.py",
+        # Geometric integrity: 3D orientation, sun, target, settings honoured.
+        "tests/test_mapscene_geometric_integrity.py",
     }
     full_lane = set(ci_pytest_lane.full_lane_files())
     unrun = set(ci_pytest_lane.unrun_files())
