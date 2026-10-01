@@ -307,20 +307,15 @@ pub(super) fn is_clipmap_camera_mode(camera_mode: &str) -> bool {
     terrain_camera_mode_tag(camera_mode).eq_ignore_ascii_case("clipmap")
 }
 
-/// True when the camera mode carries the `zup` option (e.g. `"mesh:zup"`).
-///
-/// Mesh-mode terrain lives in the world XY plane with heights along +Z, but
-/// the legacy orbit camera is parameterized around +Y with `up = Vec3::Y` —
-/// a grid axis — so oblique views render rolled and north-south inverted.
-/// `zup` opts into a Z-up orbit (theta = polar angle from +Z, 0 looks straight
-/// down; phi = azimuth in the terrain plane) with `up = Vec3::Z`, matching the
-/// interactive viewer's terrain semantics. Kept as an opt-in suffix so
-/// existing `"mesh"` callers keep byte-identical output.
-pub(super) fn is_zup_camera_mode(camera_mode: &str) -> bool {
-    camera_mode
-        .split(':')
-        .skip(1)
-        .any(|part| part.trim().eq_ignore_ascii_case("zup"))
+pub(crate) use crate::terrain::camera_mode::{
+    is_north_up_camera_mode, is_zup_camera_mode, north_up_to_world,
+};
+
+/// View matrix for a `north` camera: look at the scene in the geographic
+/// frame, through the world's Y reflection.
+pub(super) fn north_up_view(eye: glam::Vec3, target: glam::Vec3, up: glam::Vec3) -> glam::Mat4 {
+    glam::Mat4::look_at_rh(eye, target, up)
+        * glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0))
 }
 
 pub(super) fn clipmap_camera_config(
@@ -566,5 +561,37 @@ mod camera_mode_tests {
         assert!(is_clipmap_camera_mode("clipmap:4:64"));
         assert!(!is_zup_camera_mode("clipmap:4:64"));
         assert!(is_zup_camera_mode("clipmap:4:64:zup"));
+    }
+
+    #[test]
+    fn north_option_requires_zup() {
+        use super::is_north_up_camera_mode;
+        assert!(is_north_up_camera_mode("mesh:zup:north"));
+        assert!(is_north_up_camera_mode("clipmap:7:32:32:10:0.3:zup:NORTH"));
+        assert!(!is_north_up_camera_mode("mesh:zup"));
+        assert!(!is_north_up_camera_mode("mesh:north"));
+        assert!(!is_north_up_camera_mode("screen"));
+    }
+
+    #[test]
+    fn north_up_view_puts_north_up_and_east_right() {
+        use super::{north_up_to_world, north_up_view};
+        use glam::{Vec3, Vec4};
+        // Geographic camera south of the origin looking north and down.
+        let view = north_up_view(Vec3::new(0.0, -300.0, 200.0), Vec3::ZERO, Vec3::Z);
+        let in_view =
+            |geo: [f32; 3]| view * Vec4::from((Vec3::from_array(north_up_to_world(geo)), 1.0));
+        let near = in_view([0.0, 0.0, 0.0]);
+        let north = in_view([0.0, 200.0, 0.0]);
+        let east = in_view([100.0, 0.0, 0.0]);
+        assert!(
+            north.y > near.y,
+            "a point further north must sit higher on screen"
+        );
+        assert!(east.x > near.x, "a point to the east must sit to the right");
+        assert!(
+            north.z < near.z,
+            "north is further from a camera looking north"
+        );
     }
 }
