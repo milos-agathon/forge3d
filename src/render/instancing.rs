@@ -390,13 +390,13 @@ pub fn geometry_instance_mesh_gpu_render_py(
     g.queue.submit(Some(encoder.finish()));
 
     // Map and pack rows without padding
-    g.device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&g.device);
     let slice = readback.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| {
         let _ = tx.send(res);
     });
-    g.device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&g.device);
     rx.recv()
         .unwrap()
         .map_err(|e| PyValueError::new_err(format!("Failed to map readback buffer: {:?}", e)))?;

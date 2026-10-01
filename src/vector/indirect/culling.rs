@@ -177,7 +177,7 @@ impl IndirectRenderer {
     }
 
     pub fn read_culling_stats(&self, device: &wgpu::Device) -> Result<CullingStats, RenderError> {
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let buffer_slice = self.readback_buffer.slice(..);
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -186,7 +186,7 @@ impl IndirectRenderer {
             sender.send(result).unwrap();
         });
 
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         receiver.recv().unwrap().map_err(|e| {
             RenderError::Readback(format!("Failed to map culling stats buffer: {:?}", e))
         })?;

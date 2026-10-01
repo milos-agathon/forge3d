@@ -236,7 +236,7 @@ impl FeedbackBuffer {
             sender.send(result).unwrap();
         });
 
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         receiver
             .recv()
@@ -279,7 +279,7 @@ impl FeedbackBuffer {
             sender.send(result).unwrap();
         });
 
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         receiver
             .recv()
@@ -313,7 +313,7 @@ impl FeedbackBuffer {
             }
         };
 
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         receiver
             .recv()

@@ -1,5 +1,7 @@
 # NEPHELE bounded remediation round — 2026-10-01
 
+> **Round 2 update (same day):** the sky-attenuation change described below was reverted, and B1 reproduces 1,546/1,558. A validated first-order split shows that no single physical fix can pass G3/G4, so NEPHELE stays NOT_PROVEN. The hosted-Linux segfault came from a wgpu-core 0.19 wait defect and is fixed. See [Round 2](#round-2--revert-first-order-split-and-hosted-linux-crash). The sections before Round 2 record round 1 as it happened.
+
 **Round complete; physical acceptance NOT_PROVEN. NEPHELE remains unreleased and targets 1.41.0.** G3 and G4 still fail after the two lighting changes and the conditional shadow-mask diagnosis. The authorized stop rule has been applied: no further quality changes, fixture edits, H1 dispatch or H2 sequencing in this round.
 
 The clean source snapshot is `48d6a052d3b05ef2db16ab3d33fe8028e07d3819`. The final release-profile 1.41.0 wheel SHA-256 is `3870d78f55ea11da2ac05e702d657cb27fb1cbb8e53e74e3e7056929f0e49e1b`; its actually imported native SHA-256 is `b3ceff207d1eb3f001d7156a237fe2b61bc56ee7f39bff7b5eceda4286b53f84`. Capture A and B used separate processes, this clean source, the same fixed fixture, and the independently retained reference wheel. Observed adapter: Windows X64, NVIDIA RTX 3070, Vulkan, NVIDIA 610.60.
@@ -88,3 +90,111 @@ Required PR core [36822973299](https://github.com/milos-agathon/forge3d/actions/
 OD-10 is recorded as **NOT_PROVEN / NEPHELE unreleased**. A larger viewport with the same crop would require an explicitly authorized new fixture revision, regenerated reference and approval. That authority was not supplied, and no fixture change was made. H1 and H2 were not run because the local G3/G4 prerequisite failed. Cross-backend physical portability is ABSENT; D3D/Metal/WASM physical render lanes were not exercised. Branch core CI is reported separately after push and cannot convert these failed physical gates into delivery.
 
 Execution and final review were parent-only; no subagents were used. The reusable workflow gap is that strict capture rejects untracked audit outputs, while newly authored scripts match repository ignore rules. A small note in the local validation guide about staging output under `.tmp` until capture completes, force-adding intended new scripts, using explicit UTF-8 reads on Windows, and invoking the installed `maturin` CLI would prevent the observed false starts. No agent contract, skill or registry was changed.
+
+## Round 2 — revert, first-order split and hosted-Linux crash
+
+Round 2 had one diagnosis budget: decide one physically defined fix, with no fitting. If G3/G4 still failed after it, NEPHELE stays NOT_PROVEN. The fixture, masks, thresholds, frozen 640-spp reference, registered 320-spp control and goldens are unchanged.
+
+### Sky-attenuation revert
+
+Commit `7945d1b0` restores the terrain shader, its contract, the group-4 layout/binding, the render-graph input, the media sky volume and the verifier pin (`0xe3539a322a87b8cc`) to `48d6a052^`. The terrain shader is byte-identical to `9e5cbb96`. The atmosphere test again asserts five `@group(4)` occurrences (one ownership comment plus four resources). The optional scattering-component readback, its diagnostic and the background fix are kept.
+
+| Check (release wheel `b870961b…`, RTX 3070, Vulkan, NVIDIA 610.60) | Result |
+|---|---|
+| B1 against the registered 320-spp control | 1,546/1,558 (99.2297818%); mean 0.33803308, p95 0.86612297, max 6.53942811. Identical to round 1. |
+| Rust `verify::` + `terrain::renderer::` (proof, ablation, source pins, renderer contracts) | 177 passed, 1 ignored (existing inspection-only test) |
+| `tests/test_shader_proofs.py` | 8 passed |
+| Nine NVIDIA goldens, albedo regression, both readbacks, atmosphere contract | 41 passed |
+| NEPHELE suite (evidence report, fixture contracts, public API) | 155 passed |
+
+None of these runs skipped anything. They used the round-1 environment variables plus `FORGE3D_TERRAIN_GOLDEN_VARIANT=nvidia-vulkan` for the goldens. No golden-update flag was set.
+
+### First-order split
+
+[`round2/nephele_first_order.py`](nephele-bounded-round-2026-10-01/round2/nephele_first_order.py) is a deterministic quadrature over the frozen fixture: 48 camera steps and 48 sphere directions. It was validated against the reference AOVs:
+
+- terrain-hit mask: 2/4,096 mismatches;
+- camera transmittance: mean |ΔT| 0.006;
+- cloud-shadow transmittance: mean |Δ| 0.007.
+
+[`first_order_compare.py`](nephele-bounded-round-2026-10-01/round2/first_order_compare.py) recovers linear radiance by inverting the fixture's sRGB8 + ACES presentation; the round trip of the captured frame is exact. The real-time terms are the medium-only arrays of the reverted state. The table gives mean luminance ([comparison.json](nephele-bounded-round-2026-10-01/round2/first-order/comparison.json)).
+
+| Term | Cloud-shadowed terrain (1,557 px) | Sky/cloud (2,538 px) |
+|---|---:|---:|
+| Reference beauty | 0.2642 | 0.3607 |
+| Real-time beauty | 0.2458 | 0.3482 |
+| First-order total | 0.1536 | 0.2441 |
+| **Higher-order remainder** (reference − first order) | **0.1106** | **0.1167** |
+| Camera transmittance, first order / real time | 0.7064 / 0.7012 | 0.3485 / 0.3528 |
+| Single scatter, first order (sun + sky) | 0.0464 (0.0309 + 0.0155) | 0.1569 (0.1068 + 0.0502) |
+| Single scatter, real time | 0.0721 | 0.2009 |
+| Multiple scatter, real time | 0.0262 | 0.0594 |
+| Surface radiance, first order (sun + attenuated sky) | 0.1538 (0.0648 + 0.0891) | — |
+| Surface radiance, real time | 0.2147 | — |
+
+Reading the split:
+
+1. **Real-time single scatter versus first order.** These are not like for like. In `cs_nephele_inject_single`, the real-time "single" term takes one phase sample per froxel. When that sample hits terrain, it adds lit-terrain radiance (`terminal_radiance`), which is a surface-to-medium second-order path. The surplus of 0.026 on terrain and 0.044 on sky is therefore not evidence of a single-scatter bias.
+2. **Real-time surface versus first order.** The surplus of 0.061 is entirely unattenuated sky irradiance: the real-time sky term is about 0.150, against an attenuated first-order 0.089. In this medium, with single-scattering albedo about 0.85, out-scattered sky light is mostly replaced by in-scattered light. That is why attenuation alone (round 1) went to G4 6.5%.
+3. **Remainder.** The remainder is 0.111 on terrain and 0.117 on sky. It holds multiple scattering, interreflection, and light scattered from the sunlit medium onto the terrain. One of these terms was computed by [`surface_cloudlight.py`](nephele-bounded-round-2026-10-01/round2/surface_cloudlight.py): sun single-scattered by the medium onto the terrain hit point, with 192 directions. After camera transmittance it gives 0.0180, which matches the real-time terrain luminance deficit of 0.0184. It is the best-defined missing physical term.
+
+**Decision: no fix applied.** [`oracle_bounds.py`](nephele-bounded-round-2026-10-01/round2/oracle_bounds.py) scores candidates with the production ΔE and the unchanged masks ([oracle-bounds.json](nephele-bounded-round-2026-10-01/round2/first-order/oracle-bounds.json)):
+
+| Candidate | G4 shadow ΔE<2 (≥95%) | G3 sky ΔE<2.5 (≥95%) |
+|---|---:|---:|
+| Real time, reverted state | 46.56% | 91.69% |
+| Reference noise floor (320 vs 640 spp) | 99.61% | 100% |
+| Real time + the medium-to-terrain sun term (predicted) | 60.18% | 91.69% |
+| Oracle: best per-channel gain over all terrain | 71.36% | — |
+| Oracle: best per-channel gain over all sky | — | 94.37% |
+| Oracle: best per-channel gain per 8×8 froxel tile | 83.69% | 97.20% |
+
+The oracle rows choose gains from the reference itself, so they bound every correction of that form:
+
+- No spatially uniform correction, and no correction that is constant within a froxel tile, can reach G4's 95%.
+- The best physical candidate is predicted at 60.2%.
+- G4 also requires terrain-occlusion-ablation SSIM below 0.80, measured at 0.958. Surface or energy terms do not change that.
+
+Implementing the candidate would require a new terrain pin, goldens and B1 without any prospect of passing. The stop rule therefore applies: **NEPHELE remains NOT_PROVEN / unreleased; OD-10 still needs fresh evidence.** The sub-tile G4 error is consistent with the froxel-resolution concern, but this does not prove that resolution is the only cause. H1 was not run.
+
+### Hosted-Linux segfault: root cause and fix
+
+The CI-identical environment was a WSL Ubuntu 24.04 with `mesa-vulkan-drivers 25.2.8-0ubuntu0.24.04.3` (llvmpipe, LLVM 20.1.2), the exact CI package, and a cold shader cache. In it, the hosted CI wheel crashed in both `include_no_medium=False` and `True` captures. The reverted-source Linux build `3f208f88…` crashed the same way.
+
+Evidence, in [round2/linux-crash/](nephele-bounded-round-2026-10-01/round2/linux-crash/):
+
+- **gdb with matching Mesa debug symbols:** SIGSEGV in lavapipe's queue thread at `lvp_execute.c:4956`, while iterating the command list of a submitted command buffer.
+- **Valgrind:** an invalid read in JIT vertex code, at an address that is "not stack'd, malloc'd or free'd".
+- **Khronos validation:** 15× `VUID-vkResetCommandPool-commandPool-00040` (pool reset while a command buffer is pending) and 3× `VUID-vkDestroyBuffer-buffer-00922` (buffer destroyed while in use).
+
+Root cause: wgpu-core 0.19.4 `Device::maintain` (`device/resource.rs:322-338`) handles `Maintain::Wait` like this:
+
+1. It waits at most `CLEANUP_WAIT_MS` (5,000 ms).
+2. It discards the timed-out result.
+3. It sets `last_done_index` to the waited index.
+4. `triage_submissions` then resets those command pools and frees resources.
+
+On lavapipe with a cold LLVM shader cache, a single submission takes more than 5 s. The queue thread then executes freed memory. This explains why the crash depends on the shader cache and only appears on hosted CI. Native drivers keep their own references, which also hides the defect there.
+
+Fix (no dependency change):
+
+- `crate::core::gpu::wait_for_device_idle` repeats `Maintain::Poll` until the queue is empty. Poll reads the real fence value, so no unfinished submission is ever retired.
+- All 121 statement-form `poll(Maintain::Wait)` calls in the native crate use it.
+- Three `Maintain::Wait` calls inside `resource_tracker.rs` unit tests stay, because that file is also compiled for wasm.
+- The 16 `WaitForSubmissionIndex` calls, in vector/fence-tracker code outside this capture path, keep the same latent 5 s defect. They are unchanged and unproven.
+
+Results with the fixed Linux build `cb5c33cc…` on the same CI-identical Mesa and cold cache:
+
+- `media_only` and dual captures: pass.
+- Khronos validation: 0 VUIDs.
+- `tests/test_nephele_environment_defects.py`: both tests pass (2 passed, 112.6 s), with the background pixel assertion unchanged and active.
+
+Results with the fixed Windows wheel `1e95fe05…`:
+
+- B1 frame bytes identical to the pre-fix capture.
+- Rust `verify::`/`terrain::renderer::`/`core::gpu`: 183 passed, 1 ignored.
+- Goldens, readbacks, atmosphere, API contracts and source contracts: 266 passed. The 7 skips are 6 ORBIS lanes gated on `FORGE3D_RUN_ORBIS_GPU`, plus one shader-proof case skipped by process ordering.
+- `test_shader_proofs` alone: 8 passed.
+
+The local Linux interpreter was Python 3.12.3; CI uses 3.11 with the same abi3 wheel. Hosted results are reported after push.
+

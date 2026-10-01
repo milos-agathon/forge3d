@@ -920,7 +920,7 @@ mod tests {
             }
         }
         queue.submit(Some(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         // Read back layer 0.
         let receiver = &meshes[0];
@@ -969,13 +969,13 @@ mod tests {
             },
         );
         queue.submit(Some(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         let slice = readback.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         rx.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
         let layer_stride = (map_size * map_size) as usize;

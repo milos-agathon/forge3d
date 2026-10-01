@@ -722,7 +722,7 @@ fn read_buffer(
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     pollster::block_on(receiver.receive())
         .ok_or_else(|| F3dzError::GpuUnavailable("GPU readback was cancelled".to_string()))?
         .map_err(|error| F3dzError::GpuUnavailable(format!("GPU readback failed: {error}")))?;

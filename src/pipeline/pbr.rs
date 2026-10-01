@@ -109,7 +109,7 @@ mod tests {
             PbrPipelineWithShadows::new(&device, &queue, PbrMaterial::default(), true).unwrap();
         pipeline.ensure_pipeline(&device, TextureFormat::Rgba16Float);
         pipeline.ensure_instanced_pipeline(&device, TextureFormat::Rgba16Float);
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         let degradations = crate::core::degradation::finish_degradation_capture();
         assert!(degradations.is_empty(), "{degradations:?}");
     }

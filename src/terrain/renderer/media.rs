@@ -2735,7 +2735,7 @@ impl crate::terrain::renderer::TerrainScene {
             )?,
         };
         self.queue.submit(Some(capture_encoder.finish()));
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
         Ok(captures)
     }
 }
@@ -3266,7 +3266,7 @@ mod tests {
             )
             .expect("live viewer media encode must reach dispatch");
             queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&device);
             let read = |texture: &wgpu::Texture| {
                 crate::core::hdr::read_hdr_texture(
                     &device,
@@ -4167,7 +4167,7 @@ mod tests {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).unwrap();
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         receiver.recv().unwrap().unwrap();
         let mapped = slice.get_mapped_range();
         let hits = bytemuck::cast_slice::<u8, GpuTerrainHit>(&mapped);

@@ -1,0 +1,116 @@
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+[New Thread 0x7fffc47ff6c0 (LWP 419)]
+[New Thread 0x7fffc3ffe6c0 (LWP 420)]
+[New Thread 0x7fffc37fd6c0 (LWP 421)]
+[New Thread 0x7fffc2ffc6c0 (LWP 422)]
+[New Thread 0x7fffc27fb6c0 (LWP 423)]
+[New Thread 0x7fffc1ffa6c0 (LWP 424)]
+[New Thread 0x7fffc17f96c0 (LWP 425)]
+[New Thread 0x7fffc0ff86c0 (LWP 426)]
+[New Thread 0x7fffc07f76c0 (LWP 427)]
+[New Thread 0x7fffbfff66c0 (LWP 428)]
+[New Thread 0x7fffbf7f56c0 (LWP 429)]
+[New Thread 0x7fffbeff46c0 (LWP 430)]
+[New Thread 0x7fffbe7f36c0 (LWP 431)]
+[New Thread 0x7fffbdff26c0 (LWP 432)]
+[New Thread 0x7fffbd7f16c0 (LWP 433)]
+[New Thread 0x7fffbcff06c0 (LWP 434)]
+[New Thread 0x7fffbc7ef6c0 (LWP 435)]
+[New Thread 0x7fffbbfee6c0 (LWP 436)]
+[New Thread 0x7fffbb7ed6c0 (LWP 437)]
+[New Thread 0x7fffbafec6c0 (LWP 438)]
+[New Thread 0x7fffba7eb6c0 (LWP 439)]
+[New Thread 0x7fffb9fea6c0 (LWP 440)]
+[New Thread 0x7fffb97e96c0 (LWP 441)]
+[New Thread 0x7fffa97ff6c0 (LWP 442)]
+
+Thread 25 "python" received signal SIGSEGV, Segmentation fault.
+[Switching to Thread 0x7fffa97ff6c0 (LWP 442)]
+0x00007fffb44f4227 in lvp_execute_cmd_buffer (cmds=<optimized out>, state=state@entry=0x174a3c8, print_cmds=<optimized out>) at ../src/gallium/frontends/lavapipe/lvp_execute.c:4956
+warning: 4956	../src/gallium/frontends/lavapipe/lvp_execute.c: No such file or directory
+#0  0x00007fffb44f4227 in lvp_execute_cmd_buffer (cmds=<optimized out>, state=state@entry=0x174a3c8, print_cmds=<optimized out>) at ../src/gallium/frontends/lavapipe/lvp_execute.c:4956
+#1  0x00007fffb44f808a in lvp_execute_cmds (device=0x17489f0, queue=queue@entry=0x174a0a0, cmd_buffer=<optimized out>) at ../src/gallium/frontends/lavapipe/lvp_execute.c:5410
+#2  0x00007fffb44e4c4c in lvp_queue_submit (submit=0x438cc00, vk_queue=0x174a0a0) at ../src/gallium/frontends/lavapipe/lvp_device.c:1723
+#3  lvp_queue_submit (vk_queue=0x174a0a0, submit=0x438cc00) at ../src/gallium/frontends/lavapipe/lvp_device.c:1688
+#4  0x00007fffb4486da6 in vk_queue_submit_final (queue=queue@entry=0x174a0a0, submit=submit@entry=0x438cc00) at ../src/vulkan/runtime/vk_queue.c:717
+#5  0x00007fffb448705e in vk_queue_submit_thread_func (_data=_data@entry=0x174a0a0) at ../src/vulkan/runtime/vk_queue.c:832
+#6  0x00007fffb457eb0c in impl_thrd_routine (p=<optimized out>) at ../src/c11/impl/threads_posix.c:43
+#7  0x00007ffff7c9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#8  0x00007ffff7d29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+rip            0x7fffb44f4227      0x7fffb44f4227 <lvp_execute_cmd_buffer+87>
+   0x7fffb44f421b <lvp_execute_cmd_buffer+75>:	rex.X add %al,-0x77(%rbp)
+   0x7fffb44f421f <lvp_execute_cmd_buffer+79>:	in     (%dx),%al
+   0x7fffb44f4220 <lvp_execute_cmd_buffer+80>:	mov    -0x138(%rbp),%rax
+=> 0x7fffb44f4227 <lvp_execute_cmd_buffer+87>:	mov    0x10(%rax),%eax
+   0x7fffb44f422a <lvp_execute_cmd_buffer+90>:	cmp    $0xdd,%eax
+   0x7fffb44f422f <lvp_execute_cmd_buffer+95>:	jbe    0x7fffb44f44f0 <lvp_execute_cmd_buffer+800>
+From                To                  Syms Read   Shared Object Library
+0x00007ffff7fc6000  0x00007ffff7ff0195  Yes         /lib64/ld-linux-x86-64.so.2
+0x00007ffff7ede420  0x00007ffff7f5c3a6  Yes         /lib/x86_64-linux-gnu/libm.so.6
+0x00007ffff7eb4260  0x00007ffff7ec5c60  Yes (*)     /lib/x86_64-linux-gnu/libz.so.1
+0x00007ffff7e88210  0x00007ffff7ea6473  Yes (*)     /lib/x86_64-linux-gnu/libexpat.so.1
+0x00007ffff7c28800  0x00007ffff7db0039  Yes         /lib/x86_64-linux-gnu/libc.so.6
+0x00007ffff7e1b5c0  0x00007ffff7e1d46f  Yes (*)     /usr/lib/python3.12/lib-dynload/_bz2.cpython-312-x86_64-linux-gnu.so
+0x00007ffff798c280  0x00007ffff7998ff3  Yes (*)     /lib/x86_64-linux-gnu/libbz2.so.1.0
+0x00007ffff7980940  0x00007ffff7984379  Yes (*)     /usr/lib/python3.12/lib-dynload/_lzma.cpython-312-x86_64-linux-gnu.so
+0x00007ffff794e400  0x00007ffff796f5ef  Yes (*)     /lib/x86_64-linux-gnu/liblzma.so.5
+0x00007ffff6e2d500  0x00007ffff75df821  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/numpy/_core/_multiarray_umath.cpython-312-x86_64-linux-gnu.so
+0x00007ffff568a800  0x00007ffff69bcf50  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/numpy/_core/../../numpy.libs/libscipy_openblas64_-f48b354e.so
+0x00007ffff52a55c0  0x00007ffff53e4ce2  Yes (*)     /lib/x86_64-linux-gnu/libstdc++.so.6
+0x00007ffff7821780  0x00007ffff7844745  Yes (*)     /lib/x86_64-linux-gnu/libgcc_s.so.1
+0x00007ffff7819040  0x00007ffff7819105  Yes         /lib/x86_64-linux-gnu/libpthread.so.0
+0x00007ffff4c1d570  0x00007ffff4e4da7b  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/numpy/_core/../../numpy.libs/libgfortran-83c28eba-468e71e5.so.5.0.0
+0x00007ffff48028d0  0x00007ffff482a30d  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/numpy/_core/../../numpy.libs/libquadmath-2284e583-a9307bba.so.0.0.0
+0x00007ffff7e150a0  0x00007ffff7e151e9  Yes (*)     /usr/lib/python3.12/lib-dynload/_contextvars.cpython-312-x86_64-linux-gnu.so
+0x00007ffff77c94c0  0x00007ffff77d9575  Yes (*)     /usr/lib/python3.12/lib-dynload/_ctypes.cpython-312-x86_64-linux-gnu.so
+0x00007ffff6cf6460  0x00007ffff6cfc07a  Yes (*)     /lib/x86_64-linux-gnu/libffi.so.8
+0x00007ffff6cc6a00  0x00007ffff6ce9850  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/numpy/linalg/_umath_linalg.cpython-312-x86_64-linux-gnu.so
+0x00007ffff6cb76a0  0x00007ffff6cbd60d  Yes (*)     /usr/lib/python3.12/lib-dynload/_json.cpython-312-x86_64-linux-gnu.so
+0x00007ffff6ca8c80  0x00007ffff6cadf80  Yes (*)     /usr/lib/python3.12/lib-dynload/_hashlib.cpython-312-x86_64-linux-gnu.so
+0x00007fffb88b5000  0x00007fffb8be6202  Yes (*)     /lib/x86_64-linux-gnu/libcrypto.so.3
+0x00007fffb7111e80  0x00007fffb85f58a1  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/forge3d/_forge3d.abi3.so
+0x00007ffff77fe8a0  0x00007ffff780dd4b  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/_context.cpython-312-x86_64-linux-gnu.so
+0x00007fffb5e7cd80  0x00007fffb6160e20  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/../pyproj.libs/libproj-bde9a34c.so.25.9.8.1
+0x00007ffff77f0040  0x00007ffff77f0105  Yes         /lib/x86_64-linux-gnu/libdl.so.2
+0x00007fffb5ce1b50  0x00007fffb5dcc924  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/../pyproj.libs/libsqlite3-59ea7a87.so.3.53.4
+0x00007ffff4a69a30  0x00007ffff4acb8a3  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/../pyproj.libs/libtiff-7452557f.so.6.3.0
+0x00007fffb5682000  0x00007fffb5a62332  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/../pyproj.libs/libcurl-27c1359b.so.4.8.0
+0x00007ffff6c79340  0x00007ffff6c8e00d  Yes (*)     /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/../pyproj.libs/libnghttp2-d2324274.so.14.29.5
+0x00007ffff548d5e0  0x00007ffff5492765  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/_compat.cpython-312-x86_64-linux-gnu.so
+0x00007ffff50f3620  0x00007ffff50f8eba  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/_network.cpython-312-x86_64-linux-gnu.so
+0x00007ffff77e82b0  0x00007ffff77e94c9  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/_version.cpython-312-x86_64-linux-gnu.so
+0x00007fffb8d7bcc0  0x00007fffb8dc83b1  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/_crs.cpython-312-x86_64-linux-gnu.so
+0x00007ffff50ce8c0  0x00007ffff50e4b7e  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/_geod.cpython-312-x86_64-linux-gnu.so
+0x00007ffff50bb5a0  0x00007ffff50c1395  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/list.cpython-312-x86_64-linux-gnu.so
+0x00007fffb8d52880  0x00007fffb8d65963  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/database.cpython-312-x86_64-linux-gnu.so
+0x00007fffb86c9bc0  0x00007fffb86ef663  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/_transformer.cpython-312-x86_64-linux-gnu.so
+0x00007ffff54dd850  0x00007ffff54e7803  Yes (*)     /usr/lib/python3.12/lib-dynload/_ssl.cpython-312-x86_64-linux-gnu.so
+0x00007fffb5c49ed0  0x00007fffb5ca7702  Yes (*)     /lib/x86_64-linux-gnu/libssl.so.3
+0x00007ffff6c68520  0x00007ffff6c6ba3d  Yes         /root/nephele-lvp-venv/lib/python3.12/site-packages/pyproj/_sync.cpython-312-x86_64-linux-gnu.so
+0x00007fffb509d740  0x00007fffb50e8b3c  Yes (*)     /lib/x86_64-linux-gnu/libvulkan.so.1
+0x00007fffb445fd80  0x00007fffb486a9d2  Yes         /lib/x86_64-linux-gnu/libvulkan_lvp.so
+0x00007fffac861cc0  0x00007fffb04828d2  Yes (*)     /lib/x86_64-linux-gnu/libLLVM.so.20.1
+0x00007fffb4fe1400  0x00007fffb50877b2  Yes (*)     /lib/x86_64-linux-gnu/libzstd.so.1
+0x00007ffff54b7760  0x00007ffff54c27c1  Yes (*)     /lib/x86_64-linux-gnu/libdrm.so.2
+0x00007fffb8d30660  0x00007fffb8d42ebe  Yes (*)     /lib/x86_64-linux-gnu/libxcb.so.1
+0x00007ffff54a80c0  0x00007ffff54acc57  Yes (*)     /lib/x86_64-linux-gnu/libxcb-randr.so.0
+0x00007ffff77be040  0x00007ffff77be11f  Yes (*)     /lib/x86_64-linux-gnu/libX11-xcb.so.1
+0x00007ffff549c0e0  0x00007ffff549d14c  Yes (*)     /lib/x86_64-linux-gnu/libxcb-dri3.so.0
+0x00007ffff54860a0  0x00007ffff54868ba  Yes (*)     /lib/x86_64-linux-gnu/libxcb-present.so.0
+0x00007ffff4a5b0a0  0x00007ffff4a5d789  Yes (*)     /lib/x86_64-linux-gnu/libxcb-xfixes.so.0
+0x00007ffff4a52100  0x00007ffff4a542c6  Yes (*)     /lib/x86_64-linux-gnu/libxcb-sync.so.1
+0x00007ffff54810e0  0x00007ffff5481b07  Yes (*)     /lib/x86_64-linux-gnu/libxcb-shm.so.0
+0x00007ffff4a4b180  0x00007ffff4a4b450  Yes (*)     /lib/x86_64-linux-gnu/libxshmfence.so.1
+0x00007fffb8d1a580  0x00007fffb8d1fb84  Yes (*)     /lib/x86_64-linux-gnu/libwayland-client.so.0
+0x00007fffb62cf050  0x00007fffb62eccd0  Yes (*)     /lib/x86_64-linux-gnu/libedit.so.2
+0x00007fffab84de70  0x00007fffab9b2d0e  Yes (*)     /lib/x86_64-linux-gnu/libxml2.so.2
+0x00007ffff4a45360  0x00007ffff4a46042  Yes (*)     /lib/x86_64-linux-gnu/libXau.so.6
+0x00007fffb86bd1a0  0x00007fffb86bea89  Yes (*)     /lib/x86_64-linux-gnu/libXdmcp.so.6
+0x00007fffb4fb7840  0x00007fffb4fc9b68  Yes (*)     /lib/x86_64-linux-gnu/libtinfo.so.6
+0x00007fffb86a9de0  0x00007fffb86b44f6  Yes (*)     /lib/x86_64-linux-gnu/libbsd.so.0
+0x00007fffab668940  0x00007fffab76cbea  Yes (*)     /lib/x86_64-linux-gnu/libicuuc.so.74
+0x00007fffb62b9160  0x00007fffb62c1a7a  Yes (*)     /lib/x86_64-linux-gnu/libmd.so.0
+0x00007fffa9801040  0x00007fffa98010f9  Yes (*)     /lib/x86_64-linux-gnu/libicudata.so.74
+0x00007fffb62a0e90  0x00007fffb62ae702  Yes         /lib/x86_64-linux-gnu/libVkLayer_MESA_device_select.so
+(*): Shared library is missing debugging information.

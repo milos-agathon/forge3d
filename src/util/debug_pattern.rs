@@ -138,7 +138,7 @@ pub fn render_debug_pattern(
     timing.resolve(&mut encoder);
 
     queue.submit(std::iter::once(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     if !timing.record_into_certificate() {
         crate::core::certificate::record_pass("debug_pattern", 0.0, 1);

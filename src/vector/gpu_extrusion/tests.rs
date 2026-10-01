@@ -61,7 +61,7 @@ fn gpu_matches_cpu_for_square() {
         index_sender.send(result).ok();
     });
 
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     pollster::block_on(pos_receiver.receive()).unwrap().unwrap();
     pollster::block_on(norm_receiver.receive())
         .unwrap()

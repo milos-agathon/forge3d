@@ -1,0 +1,30 @@
+VUID-vkResetCommandPool-commandPool-00040(ERROR / SPEC): msgNum: -1254218959 - Validation Error: [ VUID-vkResetCommandPool-commandPool-00040 ] Object 0: handle = 0x54e812f0, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x9be00000009be, type = VK_OBJECT_TYPE_COMMAND_POOL; | MessageID = 0xb53e2331 | vkResetCommandPool():  (VkCommandBuffer 0x54e812f0[]) is in use. The Vulkan spec states: All VkCommandBuffer objects allocated from commandPool must not be in the pending state (https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VUID-vkResetCommandPool-commandPool-00040)
+    Objects: 2
+        [0] 0x54e812f0, type: 6, name: NULL
+        [1] 0x9be00000009be, type: 25, name: NULL
+VUID-vkResetCommandPool-commandPool-00040(ERROR / SPEC): msgNum: -1254218959 - Validation Error: [ VUID-vkResetCommandPool-commandPool-00040 ] Object 0: handle = 0x54e34cf0, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x9be00000009be, type = VK_OBJECT_TYPE_COMMAND_POOL; | MessageID = 0xb53e2331 | vkResetCommandPool():  (VkCommandBuffer 0x54e34cf0[]) is in use. The Vulkan spec states: All VkCommandBuffer objects allocated from commandPool must not be in the pending state (https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VUID-vkResetCommandPool-commandPool-00040)
+    Objects: 2
+        [0] 0x54e34cf0, type: 6, name: NULL
+        [1] 0x9be00000009be, type: 25, name: NULL
+VUID-vkResetCommandPool-commandPool-00040(ERROR / SPEC): msgNum: -1254218959 - Validation Error: [ VUID-vkResetCommandPool-commandPool-00040 ] Object 0: handle = 0x549906b0, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x9be00000009be, type = VK_OBJECT_TYPE_COMMAND_POOL; | MessageID = 0xb53e2331 | vkResetCommandPool():  (VkCommandBuffer 0x549906b0[]) is in use. The Vulkan spec states: All VkCommandBuffer objects allocated from commandPool must not be in the pending state (https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VUID-vkResetCommandPool-commandPool-00040)
+    Objects: 2
+        [0] 0x549906b0, type: 6, name: NULL
+        [1] 0x9be00000009be, type: 25, name: NULL
+VUID-vkResetCommandPool-commandPool-00040(ERROR / SPEC): msgNum: -1254218959 - Validation Error: [ VUID-vkResetCommandPool-commandPool-00040 ] Object 0: handle = 0x4cb6e2a0, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x9be00000009be, type = VK_OBJECT_TYPE_COMMAND_POOL; | MessageID = 0xb53e2331 | vkResetCommandPool():  (VkCommandBuffer 0x4cb6e2a0[]) is in use. The Vulkan spec states: All VkCommandBuffer objects allocated from commandPool must not be in the pending state (https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VUID-vkResetCommandPool-commandPool-00040)
+    Objects: 2
+        [0] 0x4cb6e2a0, type: 6, name: NULL
+        [1] 0x9be00000009be, type: 25, name: NULL
+VUID-vkResetCommandPool-commandPool-00040(ERROR / SPEC): msgNum: -1254218959 - Validation Error: [ VUID-vkResetCommandPool-commandPool-00040 ] Object 0: handle = 0x54c4bf10, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x9be00000009be, type = VK_OBJECT_TYPE_COMMAND_POOL; | MessageID = 0xb53e2331 | vkResetCommandPool():  (VkCommandBuffer 0x54c4bf10[]) is in use. The Vulkan spec states: All VkCommandBuffer objects allocated from commandPool must not be in the pending state (https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VUID-vkResetCommandPool-commandPool-00040)
+    Objects: 2
+        [0] 0x54c4bf10, type: 6, name: NULL
+        [1] 0x9be00000009be, type: 25, name: NULL
+VUID-vkDestroyBuffer-buffer-00922(ERROR / SPEC): msgNum: -464217071 - Validation Error: [ VUID-vkDestroyBuffer-buffer-00922 ] | MessageID = 0xe4549c11 | vkDestroyBuffer():  can't be called on VkBuffer 0xa550000000a55[] that is currently in use by VkCommandBuffer 0x3295fce0[]. The Vulkan spec states: All submitted commands that refer to buffer, either directly or via a VkBufferView, must have completed execution (https://www.khronos.org/registry/vulkan/specs/1.3-extensions/html/vkspec.html#VUID-vkDestroyBuffer-buffer-00922)
+    Objects: 0
+Fatal Python error: Segmentation fault
+
+Thread 0x0000714893b0e080 (most recent call first):
+  File "/mnt/d/forge3d/.worktrees/nephele-172-completion/.tmp/nephele-round2/handoff/lvp_bisect.py", line 89 in run
+  File "/mnt/d/forge3d/.worktrees/nephele-172-completion/.tmp/nephele-round2/handoff/lvp_bisect.py", line 96 in <module>
+
+Extension modules: numpy._core._multiarray_umath, numpy.linalg._umath_linalg, pyproj._compat, pyproj._context, pyproj._network, pyproj._version, pyproj._geod, pyproj.list, pyproj._crs, pyproj.database, pyproj._transformer, pyproj._sync (total: 12)
+timeout: the monitored command dumped core

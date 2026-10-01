@@ -77,7 +77,7 @@ impl Scene {
 
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
-        g.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&g.device);
         let data = slice.get_mapped_range();
         let mut pixels = Vec::with_capacity((unpadded * self.height) as usize);
         for row in 0..self.height {

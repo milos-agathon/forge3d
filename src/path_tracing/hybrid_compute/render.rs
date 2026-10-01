@@ -380,14 +380,14 @@ impl HybridPathTracer {
         );
 
         queue.submit([enc.finish()]);
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let slice = read_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = tx.send(res);
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         rx.recv()
             .map_err(|_| RenderError::Readback("map_async channel closed".into()))?
             .map_err(|e| RenderError::Readback(format!("MapAsync failed: {:?}", e)))?;

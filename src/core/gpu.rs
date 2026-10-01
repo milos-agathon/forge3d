@@ -42,6 +42,23 @@ pub fn ctx_if_initialized() -> Option<&'static GpuContext> {
     CTX.get()
 }
 
+/// Block until every submission on `device` has actually completed.
+///
+/// Use this instead of `device.poll(wgpu::Maintain::Wait)`. wgpu-core 0.19
+/// waits at most `CLEANUP_WAIT_MS` (5 s) for `Maintain::Wait`, ignores the
+/// timeout, and then retires every active submission: it resets command pools
+/// and destroys buffers that the device may still be executing. Software
+/// Vulkan (lavapipe) can take longer than 5 s for one submission and then runs
+/// freed command buffers (`VUID-vkResetCommandPool-commandPool-00040`). A
+/// `Maintain::Poll` reads the real fence value, so polling until the queue is
+/// empty never retires unfinished work. On WebGPU, `poll` reports an empty
+/// queue immediately because the browser polls the device.
+pub fn wait_for_device_idle(device: &wgpu::Device) {
+    while !device.poll(wgpu::Maintain::Poll).is_queue_empty() {
+        std::thread::yield_now();
+    }
+}
+
 /// Backend name of the already-initialized GPU context, if one exists.
 ///
 /// Returns `None` when no context has been created yet (peeks `CTX` without

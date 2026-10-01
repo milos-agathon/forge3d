@@ -1127,7 +1127,7 @@ impl TerrainScene {
 
         if media_enabled {
             self.queue.submit(Some(encoder.finish()));
-            self.device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&self.device);
             encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1150,7 +1150,7 @@ impl TerrainScene {
                 });
             }
             self.queue.submit(Some(encoder.finish()));
-            self.device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&self.device);
             encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1193,7 +1193,7 @@ impl TerrainScene {
         }
         if media_enabled {
             self.queue.submit(Some(encoder.finish()));
-            self.device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&self.device);
             encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1243,7 +1243,7 @@ impl TerrainScene {
             // submission order preserves the compiled graph dependency while
             // making render-attachment writes visible to media sampling.
             self.queue.submit(Some(encoder.finish()));
-            self.device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&self.device);
             encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1285,7 +1285,7 @@ impl TerrainScene {
             // persistent AOV copies. Submit them before those transfer/read
             // consumers so Metal observes the storage-to-sampled/copy edge.
             self.queue.submit(Some(encoder.finish()));
-            self.device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&self.device);
             media_tonemap_input = Some(self.realtime_media_composite_view()?);
             encoder = self
                 .device
@@ -1356,7 +1356,7 @@ impl TerrainScene {
                     });
                 let tonemap = std::mem::replace(&mut encoder, next);
                 self.queue.submit(Some(tonemap.finish()));
-                self.device.poll(wgpu::Maintain::Wait);
+                crate::core::gpu::wait_for_device_idle(&self.device);
             }
 
             let albedo_texture = aov_targets

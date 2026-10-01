@@ -1,0 +1,6 @@
+..                                                                       [100%]
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/test_nephele_environment_defects.py::test_camera_visible_uniform_environment_readback
+PASSED tests/test_nephele_environment_defects.py::test_shadow_scattering_component_readback
+2 passed in 112.60s (0:01:52)

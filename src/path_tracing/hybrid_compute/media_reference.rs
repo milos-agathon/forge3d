@@ -358,7 +358,7 @@ impl TerrainTraceReferenceScene {
             timing.resolve(&mut encoder);
         }
         self.queue.submit([encoder.finish()]);
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
         let mut copy_encoder =
             self.device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -377,7 +377,7 @@ impl TerrainTraceReferenceScene {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
         receiver
             .recv()
             .map_err(|error| MediaError::InvalidTransport(error.to_string()))?

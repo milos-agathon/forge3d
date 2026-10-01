@@ -307,7 +307,7 @@ fn production_shader_samples_regional_overview_at_two_global_positions() {
     slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).ok();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     pollster::block_on(receiver.receive()).unwrap().unwrap();
     let mapped = slice.get_mapped_range();
     let actual = bytemuck::cast_slice::<u8, f32>(&mapped).to_vec();
@@ -352,7 +352,7 @@ fn production_shader_samples_regional_overview_at_two_global_positions() {
     slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).ok();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     pollster::block_on(receiver.receive()).unwrap().unwrap();
     let mapped = slice.get_mapped_range();
     let resident_actual = bytemuck::cast_slice::<u8, f32>(&mapped).to_vec();
