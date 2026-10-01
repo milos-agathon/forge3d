@@ -1034,7 +1034,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-       vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
+       contains(fromJSON('["1", "true"]'), vars.FORGE3D_RUN_METAL_DIAGNOSTIC)
     outputs:
       aether_lane: ${{ steps.aether-absent.outputs.aether_lane || steps.aether-ran.outputs.aether_lane || steps.aether-software-absent.outputs.aether_lane || 'unknown' }}
     env:
@@ -1548,7 +1548,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')) &&
-      vars.FORGE3D_RUN_METAL_DIAGNOSTIC == '1'
+      contains(fromJSON('["1", "true"]'), vars.FORGE3D_RUN_METAL_DIAGNOSTIC)
     runs-on: macos-14
     timeout-minutes: 30
     env:
