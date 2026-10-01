@@ -1158,11 +1158,19 @@ impl TerrainScene {
                 });
         }
 
+        let uniform_environment_background = sky_texture.is_none()
+            && self.clear_uniform_environment_background(
+                &mut encoder,
+                &render_targets,
+                params,
+                env_maps.hdr_image().map(AsRef::as_ref),
+                media::ibl_mean_radiance(env_maps),
+            );
         if let Some(sky) = sky_texture.as_ref() {
             let bg_scope = ts_begin(&mut timing, &mut encoder, "terrain.background");
             self.blit_background_texture(&mut encoder, &render_targets, &sky.view, sky.linear_hdr)?;
             ts_end(&mut timing, &mut encoder, bg_scope, 1);
-        } else if media_enabled {
+        } else if media_enabled && !uniform_environment_background {
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain.aov.background-preinitialize"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1222,7 +1230,7 @@ impl TerrainScene {
                 &pass_bind_groups.fog,
                 &water_reflection_bind_group,
                 &pass_bind_groups.material_layer,
-                sky_texture.is_some(),
+                sky_texture.is_some() || uniform_environment_background,
                 media_enabled,
             )?;
             ts_end(&mut timing, &mut encoder, main_scope, 1);
