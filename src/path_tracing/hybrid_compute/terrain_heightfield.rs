@@ -2114,7 +2114,7 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
-        crate::core::gpu::wait_for_device_idle(&device);
+        device.poll(wgpu::Maintain::Wait);
         receiver
             .recv()
             .map_err(|error| error.to_string())?

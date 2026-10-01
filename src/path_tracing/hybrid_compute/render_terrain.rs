@@ -928,7 +928,7 @@ fn read_texture_pixels(
     queue.submit([enc.finish()]);
     let slice = staging.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    crate::core::gpu::wait_for_device_idle(&device);
+    device.poll(wgpu::Maintain::Wait);
     let out = {
         let data = slice.get_mapped_range();
         let mut rows = Vec::with_capacity((unpadded as usize) * (height as usize));
@@ -970,7 +970,7 @@ fn read_buffer(
     queue.submit([enc.finish()]);
     let slice = staging.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    crate::core::gpu::wait_for_device_idle(&device);
+    device.poll(wgpu::Maintain::Wait);
     let out = {
         let data = slice.get_mapped_range();
         data.to_vec()
@@ -1925,7 +1925,7 @@ impl HybridPathTracer {
 
             let window_full = frames.is_multiple_of(WELFORD_WINDOW);
             if (window_full || frames == desc.max_frames) && frames >= 2 {
-                crate::core::gpu::wait_for_device_idle(&device);
+                device.poll(wgpu::Maintain::Wait);
                 let stats_bytes = read_buffer(device, queue, &welford_buf, px_count * stats_size)?;
                 let stats = parse_terrain_statistics(&stats_bytes)?;
                 let mut vmax = 0.0f32;
@@ -1941,7 +1941,7 @@ impl HybridPathTracer {
                 }
             }
         }
-        crate::core::gpu::wait_for_device_idle(&device);
+        device.poll(wgpu::Maintain::Wait);
         if !converged {
             return Err(RenderError::Render(format!(
                 "terrain PT did not converge: estimated variance of the mean frame \
@@ -2013,7 +2013,7 @@ impl HybridPathTracer {
             post_timing.end(&mut encoder, scope, 1);
             post_timing.resolve(&mut encoder);
             queue.submit([encoder.finish()]);
-            crate::core::gpu::wait_for_device_idle(&device);
+            device.poll(wgpu::Maintain::Wait);
             // Record only after the already-executed base scopes below so the
             // certificate preserves queue execution order.
             aether_post_timing = Some(post_timing);

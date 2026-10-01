@@ -179,7 +179,8 @@ On lavapipe with a cold LLVM shader cache, a single submission takes more than 5
 Fix (no dependency change):
 
 - `crate::core::gpu::wait_for_device_idle` repeats `Maintain::Poll` until the queue is empty. Poll reads the real fence value, so no unfinished submission is ever retired.
-- All 121 statement-form `poll(Maintain::Wait)` calls in the native crate use it.
+- 113 statement-form `poll(Maintain::Wait)` calls in the native crate use it.
+- Eight calls stay in three frozen reference-transport sources: `media_reference.rs`, `render_terrain.rs` and `terrain_heightfield.rs` under `src/path_tracing/hybrid_compute/`. The live-source provenance check rejects any edit to those files, and none of the eight runs during the real-time capture. They keep the latent defect for offline reference/hybrid renders on slow devices.
 - Three `Maintain::Wait` calls inside `resource_tracker.rs` unit tests stay, because that file is also compiled for wasm.
 - The 16 `WaitForSubmissionIndex` calls, in vector/fence-tracker code outside this capture path, keep the same latent 5 s defect. They are unchanged and unproven.
 
@@ -196,5 +197,7 @@ Results with the fixed Windows wheel `1e95fe05…`:
 - Goldens, readbacks, atmosphere, API contracts and source contracts: 266 passed. The 7 skips are 6 ORBIS lanes gated on `FORGE3D_RUN_ORBIS_GPU`, plus one shader-proof case skipped by process ordering.
 - `test_shader_proofs` alone: 8 passed.
 
-The local Linux interpreter was Python 3.12.3; CI uses 3.11 with the same abi3 wheel. Hosted results are reported after push.
+The local Linux interpreter was Python 3.12.3; CI uses 3.11 with the same abi3 wheel.
+
+The first push (`5b6a875d`) also edited the three frozen reference sources. In broader run [36845903178](https://github.com/milos-agathon/forge3d/actions/runs/36845903178), both `test_nephele_environment_defects` tests passed on hosted Linux. The three live-reference-source provenance checks failed: 3 failed, 3,802 passed, 316 skipped, 55 deselected. The follow-up commit restores those three files byte-for-byte. With that source, the NEPHELE suite passes locally (155 passed, zero skips). The Linux and Windows wheel checks above were built before this restore. The restored files are outside the real-time capture path. Hosted results for the final head are reported separately.
 
