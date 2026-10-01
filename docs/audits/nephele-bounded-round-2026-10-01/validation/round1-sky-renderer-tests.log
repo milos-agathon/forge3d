@@ -1,0 +1,127 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
+     Running unittests src\lib.rs (target\debug\deps\forge3d-2666d59f0fff9e0c.exe)
+
+running 69 tests
+test terrain::renderer::aov::output_mask_tests::depth_only_capture_selects_only_the_depth_attachment ... ok
+test terrain::renderer::anamnesis::tests::depth_rle_is_lossless_and_rejects_bad_runs ... ok
+test terrain::renderer::aov::output_mask_tests::explicit_capture_uses_channel_flags_when_master_switch_is_off ... ok
+test terrain::renderer::anamnesis::tests::pass_blob_descriptor_is_self_validating ... ok
+test terrain::renderer::aov::output_mask_tests::scaled_media_capture_uses_public_frame_dimensions ... ok
+test terrain::renderer::aov::tests::visibility_aov_is_rejected_instead_of_silently_rendering_forward ... ok
+test terrain::renderer::geometry::multi_draw_degradation_tests::absent_multi_draw_count_records_the_cpu_loop_fallback ... ok
+test terrain::renderer::aov::output_mask_tests::media_capture_selectors_require_an_attached_canonical_medium ... ok
+test terrain::renderer::core::camera_mode_tests::zup_suffix_is_detected_and_tag_helpers_still_match ... ok
+test terrain::renderer::geometry::multi_draw_degradation_tests::absent_indirect_first_instance_records_the_cpu_loop_fallback ... ok
+test terrain::renderer::aov::tests::media_draw_loads_only_after_attachment_preinitialization ... ok
+test terrain::renderer::draw::execute::media_tonemap_tests::realtime_media_honors_configured_aces_instead_of_legacy_filmic ... ok
+test terrain::renderer::msaa::tests::msaa_prefers_requested_when_supported ... ok
+test terrain::renderer::geometry::tests::hzb_height_bounds_follow_height_curve ... ok
+test terrain::renderer::draw::execute::media_tonemap_tests::realtime_media_uses_authoritative_tonemap_contract ... ok
+test terrain::renderer::draw::execute::media_tonemap_tests::enabled_and_acceptance_no_medium_share_one_presentation_resolver ... ok
+test terrain::renderer::core::camera_mode_tests::yup_suffix_is_mesh_only_and_never_selects_the_fullscreen_triangle ... ok
+test terrain::renderer::draw::setup::pipeline::tests::disabled_media_preserves_legacy_renderer_format_and_presentation_route ... ok
+test terrain::renderer::msaa::tests::msaa_downgrades_to_best_available_non_one ... ok
+test terrain::renderer::msaa::tests::msaa_downgrades_to_four_when_available ... ok
+test terrain::renderer::geometry::multi_draw_degradation_tests::capable_adapter_takes_multi_draw_and_records_nothing ... ok
+test terrain::renderer::msaa::tests::select_effective_msaa_downgrades_8_for_rgba8unorm ... ok
+test terrain::renderer::msaa::tests::msaa_defaults_to_one_when_needed ... ok
+test terrain::renderer::msaa::tests::select_effective_msaa_never_returns_8_for_rgba8unorm_without_support ... ok
+test terrain::renderer::offline::tests::test_offline_depth_reference_uses_scalar_r32 ... ok
+test terrain::renderer::offline::tests::test_resolve_offline_jitter_sequence_samples_defaults_to_aa_samples ... ok
+test terrain::renderer::offline::tests::test_resolve_offline_jitter_sequence_samples_uses_explicit_override ... ok
+test terrain::renderer::py_api::nephele_acceptance_tests::termination_slice_resolves_to_public_capture_dimensions ... ok
+test terrain::renderer::offline::tests::test_offline_tonemap_output_stays_linear_rgba8 ... ok
+test terrain::renderer::runtime_contract::tests::terrain_extent_above_65536_is_in_contract_but_exaggeration_is_not ... ok
+test terrain::renderer::offline::tests::test_resolve_offline_jitter_sequence_samples_rejects_zero ... ok
+test terrain::renderer::render_graph::tests::media_disabled_preserves_graph ... ok
+test terrain::renderer::runtime_contract::tests::detail_blend_encoding_is_bounded_but_exaggeration_stays_nonnegative ... ok
+test terrain::renderer::shadows::setup::tests::active_terrain_pcss_params_preserve_texel_controls ... ok
+test terrain::renderer::streaming::tests::loader_worker_count_is_bounded_before_thread_construction ... ok
+test terrain::renderer::render_graph::tests::media_order_includes_temporal_commit_before_resolve ... ok
+test terrain::renderer::runtime_contract::tests::terrain_runtime_observation_checks_uploaded_uniforms_and_height_texture ... ok
+test terrain::renderer::streaming::tests::coarse_prefill_flag_has_observable_async_root_demand ... ok
+test terrain::renderer::streaming::tests::capacity_limited_batch_never_marks_a_displaced_preparation_resident ... ok
+test terrain::renderer::runtime_contract::tests::physical_base_color_is_finite_linear_reflectance_and_flag ... ok
+test terrain::renderer::streaming::tests::dem_slice_reader_reproduces_linear_ramp ... ok
+test terrain::renderer::streaming::tests::flat_lod_above_safe_maximum_is_rejected_before_mapping ... ok
+test terrain::renderer::render_graph::tests::media_aov_injection_reuses_forward_shadow_transition_and_order_stays_strict ... ok
+test terrain::renderer::streaming::tests::height_upload_capacity_admits_configured_max_batch_exactly ... ok
+test terrain::renderer::streaming::tests::height_upload_rejects_oversize_in_flight_before_layout_allocation ... ok
+test terrain::renderer::shadows::setup::tests::legacy_world_radius_is_encoded_for_per_cascade_conversion ... ok
+test terrain::renderer::streaming::tests::overview_switch_budget_reserves_old_and_candidate_textures ... ok
+test terrain::renderer::streaming::tests::map_tile_to_fixed_lod_covers_all_cases ... ok
+test terrain::renderer::streaming::tests::upsample_bilinear_preserves_corners_and_range ... ok
+test terrain::renderer::virtual_texture::bounded_feedback_tests::acceptance_camera_feedback_footprint_is_bounded ... ok
+test terrain::renderer::streaming::tests::rainier_leaf_resolves_to_nearest_loaded_local_ancestor ... ok
+test terrain::renderer::virtual_texture::bounded_feedback_tests::captured_feedback_keys_fail_closed_outside_runtime_bounds ... ok
+test terrain::renderer::virtual_texture::bounded_feedback_tests::acceptance_page_table_packs_mips_without_a_mipmapped_image ... ok
+test terrain::renderer::virtual_texture::bounded_feedback_tests::non_power_of_two_page_grids_keep_the_coarsest_mip ... ok
+test terrain::renderer::virtual_texture::bounded_feedback_tests::odd_logical_page_grids_fit_every_physical_mip ... ok
+test terrain::renderer::virtual_texture::bounded_feedback_tests::provenance_feedback_overflow_fails_closed ... ok
+test terrain::renderer::virtual_texture::bounded_feedback_tests::vt_uniform_buffer_covers_gpu_struct ... ok
+test terrain::renderer::visibility_buffer::tests::homogeneous_clipping_bounds_a_near_plane_crossing_triangle ... ok
+test terrain::renderer::visibility_buffer::tests::cpu_oracle_rejects_hits_beyond_the_far_clip_plane ... ok
+test terrain::renderer::visibility_buffer::tests::raster_projection_keeps_shader_view_then_projection_order ... ok
+test terrain::renderer::visibility_buffer::tests::clipped_raster_mesh_preserves_source_primitive_identity ... ok
+test terrain::renderer::visibility_buffer::tests::cpu_oracle_traverses_the_postorder_bvh_root ... ok
+test terrain::renderer::visibility_buffer::tests::raster_top_left_rule_assigns_a_shared_diagonal_once ... ok
+test terrain::renderer::streaming::tests::flat_lod_safe_maximum_maps_the_live_root_footprint ... ok
+test terrain::renderer::geometry::tests::hzb_chunking_preserves_every_source_triangle ... ok
+test terrain::renderer::atmosphere::luts::tests::shipped_lut_metadata_matches_gpu_packing ... ok
+Validation Warning: [ WARNING-vkGetDeviceProcAddr-device ] | MessageID = 0x22b1fbac
+vkGetDeviceProcAddr(): pName is trying to grab vkGetPhysicalDevicePresentRectanglesKHR which is an instance level function
+
+test terrain::renderer::bind_groups::layouts::tests::terrain_shadow_bind_group_layout_is_gpu_valid ... ok
+test terrain::renderer::bind_groups::layouts::tests::atmosphere_layout_accepts_nephele_light_transmittance_binding ... ok
+Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ] | MessageID = 0x9805298c
+vkCreateGraphicsPipelines(): pCreateInfos[0] Inside the fragment shader, it writes to output Location 1 but there is no VkSubpassDescription::pColorAttachments[1] and this write is unused.
+Spec information at https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput
+Objects: 1
+    [0] VkShaderModule 0x8a000000008a
+
+Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ] | MessageID = 0x9805298c
+vkCreateGraphicsPipelines(): pCreateInfos[0] Inside the fragment shader, it writes to output Location 2 but there is no VkSubpassDescription::pColorAttachments[2] and this write is unused.
+Spec information at https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput
+Objects: 1
+    [0] VkShaderModule 0x8a000000008a
+
+Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ] | MessageID = 0x9805298c
+vkCreateGraphicsPipelines(): pCreateInfos[0] Inside the fragment shader, it writes to output Location 3 but there is no VkSubpassDescription::pColorAttachments[3] and this write is unused.
+Spec information at https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput
+Objects: 1
+    [0] VkShaderModule 0x8a000000008a
+
+Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ] | MessageID = 0x9805298c
+vkCreateGraphicsPipelines(): pCreateInfos[0] Inside the fragment shader, it writes to output Location 4 but there is no VkSubpassDescription::pColorAttachments[4] and this write is unused.
+Spec information at https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput
+Objects: 1
+    [0] VkShaderModule 0x8a000000008a
+
+Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ] | MessageID = 0x9805298c
+vkCreateGraphicsPipelines(): pCreateInfos[0] Inside the fragment shader, it writes to output Location 1 but there is no VkSubpassDescription::pColorAttachments[1] and this write is unused.
+Spec information at https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput
+Objects: 1
+    [0] VkShaderModule 0x8f000000008f
+
+Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ] | MessageID = 0x9805298c
+vkCreateGraphicsPipelines(): pCreateInfos[0] Inside the fragment shader, it writes to output Location 2 but there is no VkSubpassDescription::pColorAttachments[2] and this write is unused.
+Spec information at https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput
+Objects: 1
+    [0] VkShaderModule 0x8f000000008f
+
+Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ] | MessageID = 0x9805298c
+vkCreateGraphicsPipelines(): pCreateInfos[0] Inside the fragment shader, it writes to output Location 3 but there is no VkSubpassDescription::pColorAttachments[3] and this write is unused.
+Spec information at https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput
+Objects: 1
+    [0] VkShaderModule 0x8f000000008f
+
+Validation Warning: [ Undefined-Value-ShaderOutputNotConsumed ] | MessageID = 0x9805298c
+vkCreateGraphicsPipelines(): pCreateInfos[0] Inside the fragment shader, it writes to output Location 4 but there is no VkSubpassDescription::pColorAttachments[4] and this write is unused.
+Spec information at https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput
+Objects: 1
+    [0] VkShaderModule 0x8f000000008f
+
+test terrain::renderer::aov::output_mask_tests::scaled_media_capture_executes_resolve_and_public_dimension_readback ... ok
+
+test result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 1608 filtered out; finished in 14.80s
+

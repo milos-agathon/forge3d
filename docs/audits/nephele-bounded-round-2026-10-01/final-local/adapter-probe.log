@@ -1,0 +1,2 @@
+terrain-ci-probe backend='vulkan' probe={'status': 'ok', 'name': 'NVIDIA GeForce RTX 3070', 'vendor': 4318, 'device': 9348, 'device_type': 'DiscreteGpu', 'backend': 'Vulkan', 'driver': 'NVIDIA', 'driver_info': '610.60', 'software_fallback': False}
+Terrain CI lane is supported on this adapter.

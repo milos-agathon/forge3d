@@ -1,0 +1,21 @@
+{
+  "sky_cloud_delta_e_pass_fraction": 0.9168636721828212,
+  "godray_roi_ssim": 0.9056682492550964,
+  "cloud_shadow_delta_e_pass_fraction": 0.06486833654463713,
+  "medium_ablation_changed_fraction": 0.7830551989730423,
+  "terrain_occlusion_ablation_ssim": 0.9566974834371695,
+  "gate3_pass": false,
+  "gate4_pass": false,
+  "reference_in_scatter_shadow_mean_rgb": [
+    0.1903056800365448,
+    0.17367225885391235,
+    0.15249106287956238
+  ],
+  "realtime_in_scatter_shadow_mean_rgb": [
+    0.10694349557161331,
+    0.09706578403711319,
+    0.0850052461028099
+  ],
+  "physical_acceptance": false,
+  "reason": "Diagnostic visual recomputation; the full local physical verifier separately binds identity and all six gates."
+}
