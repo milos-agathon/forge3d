@@ -29,3 +29,18 @@ def test_camera_visible_uniform_environment_readback(tmp_path: Path) -> None:
     background = hit == 0
     assert np.any(background)
     np.testing.assert_array_equal(actual[background], np.broadcast_to(expected, actual[background].shape))
+
+def test_shadow_scattering_component_readback(tmp_path: Path) -> None:
+    output = tmp_path / "shadow-components"
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.nephele_shadow_inscatter_diagnostic", "--repo", str(ROOT),
+         "--output", str(output)], cwd=ROOT, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["physical_acceptance"] is False
+    assert report["mask_pixels"] > 0
+    for label in ("primary", "isotropic", "occlusion-disabled"):
+        assert report[label]["shadow_single_luminance"] > 0
+        assert report[label]["shadow_multiple_luminance"] > 0
+        assert report[label]["diagnostics"]["executed_multi_scatter"] is True

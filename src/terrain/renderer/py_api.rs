@@ -431,7 +431,7 @@ impl TerrainRenderer {
     /// Acceptance-only deterministic capture for NEPHELE physical gates.
     /// This deliberately remains a private native method rather than a stable
     /// public rendering API.
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, *, terrain_occlusion_in_media=true, include_no_medium=false, capture_radiance_provider=false))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, *, terrain_occlusion_in_media=true, include_no_medium=false, capture_radiance_provider=false, capture_scatter_components=false))]
     fn _capture_nephele_acceptance<'py>(
         &mut self,
         py: Python<'py>,
@@ -442,6 +442,7 @@ impl TerrainRenderer {
         terrain_occlusion_in_media: bool,
         include_no_medium: bool,
         capture_radiance_provider: bool,
+        capture_scatter_components: bool,
     ) -> PyResult<PyObject> {
         let media = params.media.as_ref().ok_or_else(|| {
             PyRuntimeError::new_err("NEPHELE acceptance capture requires TerrainRenderParams.media")
@@ -572,13 +573,16 @@ impl TerrainRenderer {
             None
         };
 
-        let (beauty, media_aovs, no_medium_beauty) = py
+        let (beauty, media_aovs, no_medium_beauty, multiple_scatter_luminance) = py
             .allow_threads(|| {
                 Ok::<_, anyhow::Error>((
                     frame.read_rgb_u8()?,
                     aov_frame.read_all_media_rgb()?,
                     no_medium_frame
                         .map(|frame| frame.read_rgb_u8())
+                        .transpose()?,
+                    capture_scatter_components
+                        .then(|| aov_frame.read_in_scatter_multiple_luminance())
                         .transpose()?,
                 ))
             })
@@ -668,6 +672,9 @@ impl TerrainRenderer {
         .zip(media_aovs)
         {
             result.set_item(name, array.into_pyarray_bound(py))?;
+        }
+        if let Some(luminance) = multiple_scatter_luminance {
+            result.set_item("in_scatter_multiple_luminance", luminance.into_pyarray_bound(py))?;
         }
         result.set_item("termination_slice", termination.into_pyarray_bound(py))?;
         result.set_item("froxel_depth", froxel_depth)?;

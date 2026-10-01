@@ -369,6 +369,8 @@ pub(super) struct TerrainMediaResources {
     pub(super) in_scatter: Arc<TrackedTexture>,
     /// RGB transmittance over the complete canonical medium/sun segment.
     pub(super) light_transmittance: Arc<TrackedTexture>,
+    /// Cosine-weighted upward sky transmission through the complete medium.
+    pub(super) sky_transmittance: Arc<TrackedTexture>,
     pub(super) integrated: Arc<TrackedTexture>,
     pub(super) transmittance: Arc<TrackedTexture>,
     pub(super) cloud_shadow: Arc<TrackedTexture>,
@@ -848,6 +850,10 @@ impl TerrainMediaResources {
             wgpu::TextureFormat::Rgba16Float,
             froxel_usage,
         )?;
+        let (sky_transmittance, sky_bytes) = tracked_texture(
+            device, "nephele.media.froxel.sky_transmittance", grid.extent(),
+            wgpu::TextureDimension::D3, wgpu::TextureFormat::Rgba16Float, froxel_usage,
+        )?;
         let out = wgpu::Extent3d {
             width: viewport.0,
             height: viewport.1,
@@ -990,6 +996,7 @@ impl TerrainMediaResources {
                 + b
                 + single_bytes
                 + light_bytes
+                + sky_bytes
                 + c
                 + d
                 + e
@@ -1005,7 +1012,7 @@ impl TerrainMediaResources {
             staging_bytes: u64::from(grid.width)
                 * u64::from(grid.height)
                 * u64::from(grid.depth)
-                * 16,
+                * 24,
             history_key: None,
             last_history_decision: HistoryDecision::RejectMissing,
             medium_identity: None,
@@ -1027,6 +1034,7 @@ impl TerrainMediaResources {
             single_scatter,
             in_scatter: Arc::new(in_scatter),
             light_transmittance: Arc::new(light_transmittance),
+            sky_transmittance: Arc::new(sky_transmittance),
             integrated: Arc::new(integrated),
             transmittance: Arc::new(transmittance),
             cloud_shadow: Arc::new(cloud_shadow),
@@ -1070,9 +1078,10 @@ impl TerrainMediaResources {
         let count =
             u64::from(self.grid.width) * u64::from(self.grid.height) * u64::from(self.grid.depth);
         let _staging =
-            tracked_host_allocation(count * 16, "nephele.media.staging.extinction_and_light")?;
+            tracked_host_allocation(count * 24, "nephele.media.staging.extinction_light_and_sky")?;
         let mut texels: Vec<u16> = Vec::with_capacity(count as usize * 4);
         let mut light_texels: Vec<u16> = Vec::with_capacity(count as usize * 4);
+        let mut sky_texels: Vec<u16> = Vec::with_capacity(count as usize * 4);
         let mut density_froxel_count = 0;
         let mut sun_transmittance_diagnostic = SunTransmittanceDiagnostic::default();
         for z in 0..self.grid.depth {
@@ -1097,6 +1106,9 @@ impl TerrainMediaResources {
                     sun_transmittance_diagnostic.record(diagnostic);
                     light_texels.extend(light_t.map(|v| half::f16::from_f32(v).to_bits()));
                     light_texels.push(half::f16::ONE.to_bits());
+                    let sky_t = canonical_sky_transmittance(medium, world)?;
+                    sky_texels.extend(sky_t.map(|v| half::f16::from_f32(v).to_bits()));
+                    sky_texels.push(half::f16::ONE.to_bits());
                 }
             }
         }
@@ -1126,6 +1138,18 @@ impl TerrainMediaResources {
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(self.grid.width * 8),
+                rows_per_image: Some(self.grid.height),
+            },
+            self.grid.extent(),
+        );
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.sky_transmittance, mip_level: 0,
+                origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&sky_texels),
+            wgpu::ImageDataLayout {
+                offset: 0, bytes_per_row: Some(self.grid.width * 8),
                 rows_per_image: Some(self.grid.height),
             },
             self.grid.extent(),
@@ -2328,6 +2352,7 @@ impl crate::terrain::renderer::TerrainScene {
             handles.light_transmittance,
             resources.light_transmittance.clone(),
         )?;
+        execution.bind_texture(handles.sky_transmittance, resources.sky_transmittance.clone())?;
         execution.bind_texture(handles.in_scatter, resources.in_scatter.clone())?;
         execution.bind_texture(handles.integrated, resources.integrated.clone())?;
         execution.bind_texture(handles.transmittance, resources.transmittance.clone())?;
@@ -2818,6 +2843,25 @@ fn froxel_xy_for_uv(grid: FroxelGrid, uv: glam::Vec2, jitter: glam::Vec2) -> [u3
         position.x.floor().clamp(0.0, (grid.width - 1) as f32) as u32,
         position.y.floor().clamp(0.0, (grid.height - 1) as f32) as u32,
     ]
+}
+
+// Equal-area disk midpoint cubature under cosine-weighted hemisphere sampling:
+// r^2=1/2, phi=(2k+1)PI/4 gives four unit directions and weights 1/4.
+// Media terrain transport is explicitly Y-up. Each segment uses the same
+// canonical density and complete bounded integration as the sunlight volume.
+fn canonical_sky_transmittance(
+    medium: &crate::media::Medium,
+    origin: glam::Vec3,
+) -> crate::core::error::RenderResult<[f32; 3]> {
+    let up = std::f32::consts::FRAC_1_SQRT_2;
+    let mut mean = [0.0; 3];
+    for (x, z) in [(0.5, 0.5), (-0.5, 0.5), (-0.5, -0.5), (0.5, -0.5)] {
+        let (transmittance, _) = canonical_sun_transmittance(
+            medium, origin, glam::Vec3::new(x, up, z),
+        )?;
+        for channel in 0..3 { mean[channel] += transmittance[channel] * 0.25; }
+    }
+    Ok(mean)
 }
 
 fn canonical_sun_transmittance(
@@ -3573,6 +3617,32 @@ mod tests {
     }
 
     #[test]
+    fn sky_transmittance_matches_an_analytic_uniform_slab_and_vacuum() {
+        let density = crate::media::DensityField::Grid3D(
+            crate::media::Grid3D::new(
+                crate::media::SpatialTransform {
+                    bounds: crate::media::Bounds3 {
+                        min: [-100.0, 0.0, -100.0],
+                        max: [100.0, 1.0, 100.0],
+                    },
+                },
+                [2, 2, 2], vec![1.0; 8],
+                crate::media::DensityMapping { physical_density_per_authored_unit: 1.0 },
+            ).unwrap(),
+        );
+        for extinction in [[0.1, 0.2, 0.3], [0.0; 3]] {
+            let medium = crate::media::Medium::new(
+                extinction, [0.0; 3], crate::media::Phase::Isotropic, density.clone(),
+            ).unwrap();
+            let actual = canonical_sky_transmittance(&medium, glam::Vec3::ZERO).unwrap();
+            for channel in 0..3 {
+                let expected = (-extinction[channel] * std::f32::consts::SQRT_2).exp();
+                assert!((actual[channel] - expected).abs() <= f32::EPSILON);
+            }
+        }
+    }
+
+    #[test]
     fn homogeneous_sun_transmittance_integrates_the_complete_unbounded_segment() {
         let medium = crate::media::Medium::new(
             [0.1, 0.2, 0.3],
@@ -3920,6 +3990,7 @@ mod tests {
             "radiance_provider",
             "extinction",
             "light_transmittance",
+            "sky_transmittance",
             "in_scatter",
             "integrated",
             "transmittance",

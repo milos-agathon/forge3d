@@ -20,6 +20,7 @@ pub(in crate::terrain) struct TerrainMediaGraphHandles {
     pub(in crate::terrain) radiance_provider: ResourceHandle,
     pub(in crate::terrain) extinction: ResourceHandle,
     pub(in crate::terrain) light_transmittance: ResourceHandle,
+    pub(in crate::terrain) sky_transmittance: ResourceHandle,
     pub(in crate::terrain) in_scatter: ResourceHandle,
     pub(in crate::terrain) integrated: ResourceHandle,
     pub(in crate::terrain) transmittance: ResourceHandle,
@@ -222,6 +223,9 @@ pub(super) fn build_terrain_render_graph(
             height: media.froxel_grid.height,
             depth_or_array_layers: media.froxel_grid.depth,
         });
+        let mut sky = light.clone();
+        sky.name = "nephele.media.froxel.sky_transmittance".into();
+        let sky_transmittance = builder.add_resource(sky);
         let light_transmittance = builder.add_resource(light);
         let mut scatter = texture_resource(
             "nephele.media.froxel.in_scatter",
@@ -290,6 +294,7 @@ pub(super) fn build_terrain_render_graph(
             radiance_provider,
             extinction,
             light_transmittance,
+            sky_transmittance,
             in_scatter,
             integrated,
             transmittance,
@@ -372,6 +377,7 @@ pub(super) fn build_terrain_render_graph(
             // segment before the view-ray integration exists. Forward setup also
             // populates the directional linear-HDR radiance consumed by injection.
             pass.read(m.light_transmittance)
+                .read(m.sky_transmittance)
                 .write(m.scene_depth)
                 .write(m.radiance_provider);
         }

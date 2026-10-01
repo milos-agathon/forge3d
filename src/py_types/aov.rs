@@ -262,6 +262,16 @@ impl AovFrame {
         ])
     }
 
+    /// Read the actual integrated GPU multiple-scatter luminance (alpha).
+    pub(crate) fn read_in_scatter_multiple_luminance(&self) -> anyhow::Result<ndarray::Array2<f32>> {
+        let rgba = self.read_media_data(self.in_scatter_texture.as_ref(), "In-scatter")?;
+        let values: Vec<f32> = rgba.chunks_exact(4).map(|pixel| pixel[3]).collect();
+        anyhow::ensure!(values.iter().all(|v| v.is_finite() && *v >= 0.0),
+            "multiple-scatter GPU readback must be finite and nonnegative");
+        ndarray::Array2::from_shape_vec((self.height as usize, self.width as usize), values)
+            .map_err(|_| anyhow::anyhow!("failed to reshape multiple-scatter luminance"))
+    }
+
     pub(crate) fn media_diagnostics_value(&self) -> anyhow::Result<serde_json::Value> {
         serde_json::from_str(
             self.media_diagnostics_json
