@@ -211,8 +211,9 @@ impl GlobeScene {
             64,
             8,
             true,
-            Some(GPU_VISIBLE_BUDGET),
+            None,
             Some(tile_bounds),
+            Some(GPU_VISIBLE_BUDGET),
         )
         .map_err(|error| {
             source_error(

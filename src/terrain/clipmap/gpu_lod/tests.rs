@@ -605,6 +605,115 @@ fn adapter_unavailable_skip_accepts_only_the_actual_typed_error() {
     }
 }
 
+#[test]
+#[ignore = "requires a physical GPU; the TESSELLA lane runs this exact test"]
+fn gpu_and_cpu_select_identical_tile_sets_for_1000_cameras() {
+    let context = crate::core::gpu::try_ctx()
+        .expect("TESSELLA GPU/CPU differential requires a physical GPU adapter");
+    let config = GpuLodConfig {
+        pixel_error_budget: 256.0,
+        terrain_width: 2048.0,
+        tile_size: 256.0,
+        max_lod: 4,
+        ..Default::default()
+    };
+    let selector = GpuLodSelector::new(&context.device, config.clone());
+    let tiles: Vec<_> = (0..8)
+        .flat_map(|y| {
+            (0..8).map(move |x| {
+                let min = Vec2::new(-1024.0 + x as f32 * 256.0, -1024.0 + y as f32 * 256.0);
+                TileInfo::new(0, x, y, min, min + Vec2::splat(256.0))
+            })
+        })
+        .collect();
+    let templates: Vec<_> = tiles
+        .iter()
+        .flat_map(|tile| {
+            (0..=config.max_lod).map(move |_| IndirectDrawTemplate {
+                index_count: 3,
+                first_index: 0,
+                base_vertex: 0,
+                tile_id: tile.tile_id,
+            })
+        })
+        .collect();
+    let resources = selector
+        .create_draw_resources(&context.device, &tiles, &templates)
+        .expect("create GPU LOD draw resources");
+
+    let mut state = 0xA511_E9B3_u32;
+    let cameras: Vec<_> = (0..1000)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let angle = (state as f32 / u32::MAX as f32) * std::f32::consts::TAU;
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let radius = 900.0 + (state as f32 / u32::MAX as f32) * 900.0;
+            let eye = Vec3::new(angle.cos() * radius, angle.sin() * radius, 1200.0);
+            let target = Vec3::new(0.0, 0.0, 400.0);
+            let view = Mat4::look_at_rh(eye, target, Vec3::Z);
+            let proj = Mat4::perspective_rh(config.fov_y, 16.0 / 9.0, 1.0, 5000.0);
+            (proj * view, eye)
+        })
+        .collect();
+
+    let mut visible_sets = std::collections::BTreeSet::new();
+    let mut selected_lods = std::collections::BTreeSet::new();
+    for (camera_index, &(view_proj, eye)) in cameras.iter().enumerate() {
+        let mut encoder = context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("flat_lod_parity"),
+            });
+        let provenance = LodSelectionProvenance(camera_index as u64 + 1);
+        let ticket = selector
+            .encode_indirect_tracked(
+                &context.queue,
+                &mut encoder,
+                &resources,
+                view_proj,
+                eye,
+                false,
+                (0.0, 1000.0),
+                true,
+                provenance,
+            )
+            .expect("a readback slot must be available after the prior result completes");
+        context.queue.submit(Some(encoder.finish()));
+        assert!(resources.mark_selection_submitted(ticket));
+        context.device.poll(wgpu::Maintain::Wait);
+        let gpu_result = resources
+            .try_read_selection(&context.device)
+            .expect("flat selection readback")
+            .expect("a submitted selection must complete after a device wait")
+            .into_selection_for(provenance)
+            .expect("completed selection must retain its originating camera provenance");
+        let cpu_result = cpu_lod_select(&tiles, view_proj, eye, &config, (0.0, 1000.0));
+        let mut cpu_ids: Vec<_> = cpu_result
+            .visible_tiles
+            .iter()
+            .map(|tile| (tile.tile_id, tile.selected_lod))
+            .collect();
+        let mut gpu_ids: Vec<_> = gpu_result
+            .visible_tiles
+            .iter()
+            .map(|tile| (tile.tile_id, tile.selected_lod))
+            .collect();
+        cpu_ids.sort_unstable();
+        gpu_ids.sort_unstable();
+        assert_eq!(gpu_ids, cpu_ids, "camera {camera_index}");
+        visible_sets.insert(gpu_ids.iter().map(|&(id, _)| id).collect::<Vec<_>>());
+        selected_lods.extend(gpu_ids.iter().map(|&(_, lod)| lod));
+    }
+    assert!(
+        visible_sets.len() > 1,
+        "camera sweep must exercise multiple visible tile sets"
+    );
+    assert!(
+        selected_lods.len() > 1,
+        "camera sweep must exercise multiple selected LODs"
+    );
+}
+
 #[cfg(feature = "enable-globe")]
 #[test]
 fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {

@@ -962,6 +962,7 @@ class TerrainRenderer:
         dem: Optional[np.ndarray] = ...,
         coarse_prefill: bool = ...,
         max_resident_bytes: Optional[int] = ...,
+        max_gpu_visible_bytes: Optional[int] = ...,
     ) -> None: ...
     def enable_height_streaming_cog(
         self,
@@ -976,6 +977,7 @@ class TerrainRenderer:
         coarse_prefill: bool = ...,
         max_resident_bytes: Optional[int] = ...,
         overview_lonlat_bounds: Optional[Tuple[float, float, float, float]] = ...,
+        max_gpu_visible_bytes: Optional[int] = ...,
     ) -> None: ...
     def enable_height_streaming_cog_globe(
         self,
@@ -990,6 +992,7 @@ class TerrainRenderer:
         coarse_prefill: bool = ...,
         max_resident_bytes: Optional[int] = ...,
         overview_lonlat_bounds: Optional[Tuple[float, float, float, float]] = ...,
+        max_gpu_visible_bytes: Optional[int] = ...,
     ) -> None: ...
     def disable_height_streaming(self) -> None: ...
     def stream_height_tiles(

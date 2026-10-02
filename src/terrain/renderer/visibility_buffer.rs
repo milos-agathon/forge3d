@@ -20,6 +20,17 @@ use crate::core::resource_tracker::{
 use bytemuck::{Pod, Zeroable};
 use std::sync::{Mutex, OnceLock};
 
+/// Inputs of a submitted frustum-culled visibility frame whose exact GPU tile
+/// selection had not completed when the render returned. The oracle is built
+/// from them on the first CPU query, after that selection completes.
+pub(in crate::terrain::renderer) struct PendingCpuVisibilityOracle {
+    pub(in crate::terrain::renderer) params: crate::terrain::render_params::TerrainRenderParams,
+    pub(in crate::terrain::renderer) heightmap: Vec<f32>,
+    pub(in crate::terrain::renderer) height_dims: (u32, u32),
+    pub(in crate::terrain::renderer) provenance:
+        crate::terrain::clipmap::gpu_lod::LodSelectionProvenance,
+}
+
 pub(in crate::terrain::renderer) struct CpuVisibilityOracle {
     mesh: crate::accel::cpu_bvh::MeshCPU,
     bvh: crate::accel::cpu_bvh::BvhCPU,
@@ -1106,6 +1117,7 @@ impl super::TerrainScene {
         &self,
         pixels: &[(u32, u32)],
     ) -> anyhow::Result<Vec<Option<(u32, u32)>>> {
+        self.resolve_pending_cpu_visibility_oracle()?;
         let oracle = self
             .cpu_visibility_oracle
             .lock()
