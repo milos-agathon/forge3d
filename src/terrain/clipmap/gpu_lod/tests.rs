@@ -625,6 +625,9 @@ fn adapter_unavailable_skip_accepts_only_the_actual_typed_error() {
 #[cfg(feature = "enable-globe")]
 #[test]
 fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
+    use glam::DVec3;
+    use std::time::{Duration, Instant};
+
     let context = match crate::core::gpu::try_ctx() {
         Ok(context) => context,
         Err(error) if is_adapter_unavailable(&error) => {
@@ -633,16 +636,176 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
         }
         Err(error) => panic!("planetary LOD adapter setup failed: {error}"),
     };
-    assert_planetary_lod_parity_sweep(
-        &context.device,
-        &context.queue,
-        &context.adapter.get_info(),
-    );
+    let default_lane: (&wgpu::Device, &wgpu::Queue, _) =
+        (&context.device, &context.queue, context.adapter.get_info());
+    #[cfg(windows)]
+    let warp = warp_device();
+    #[cfg(windows)]
+    let lanes = [default_lane, (&warp.0, &warp.1, warp.2.clone())];
+    #[cfg(not(windows))]
+    let lanes = [default_lane];
+    for (device, queue, adapter) in lanes {
+        let adapter = format!("{} ({:?}, {:?})", adapter.name, adapter.backend, adapter.device_type);
+        let config = GpuLodConfig {
+            pixel_error_budget: 128.0,
+            terrain_width: 10_000.0,
+            tile_size: 50.0,
+            max_lod: 4,
+            ..Default::default()
+        };
+        let selector = GpuLodSelector::new(device, config.clone());
+        let radius = 5_000.0_f64;
+        let world_tiles: Vec<_> = (0..5)
+            .flat_map(|lat_index| {
+                (0..24).map(move |lon_index| {
+                    let lon = lon_index as f64 * 15.0;
+                    let lat = -60.0 + lat_index as f64 * 30.0;
+                    (lon_index, lat_index, lon, lat)
+                })
+            })
+            .collect();
+        let seed_frame =
+            crate::terrain::clipmap::globe::GlobeFrame::globe(radius, DVec3::X * (radius + 200.0))
+                .unwrap();
+        let make_tiles = |frame: &crate::terrain::clipmap::globe::GlobeFrame| {
+            let mut tiles = world_tiles
+                .iter()
+                .map(|&(x, y, lon, lat)| {
+                    let center_ecef = frame.lonlat_alt_to_ecef(lon, lat, 0.0).unwrap();
+                    let center_relative = frame.camera_relative(center_ecef).unwrap().position;
+                    let half_extent = radius as f32 * 8.0_f32.to_radians();
+                    TileInfo::new(
+                        0,
+                        x,
+                        y,
+                        center_relative.truncate() - Vec2::splat(half_extent),
+                        center_relative.truncate() + Vec2::splat(half_extent),
+                    )
+                    .with_height_bounds(
+                        center_relative.z - half_extent,
+                        center_relative.z + half_extent,
+                    )
+                    .with_globe_center(frame, center_ecef, 8.0_f32.to_radians())
+                    .unwrap()
+                })
+                .collect::<Vec<_>>();
+            let antipodal_ecef = -frame.camera_anchor().normalize() * radius;
+            tiles.push(
+                TileInfo::new(0, 31, 31, Vec2::splat(-40_000.0), Vec2::splat(40_000.0))
+                    .with_height_bounds(-40_000.0, 40_000.0)
+                    .with_globe_center(frame, antipodal_ecef, std::f32::consts::PI)
+                    .unwrap(),
+            );
+            tiles
+        };
+        let seed_tiles = make_tiles(&seed_frame);
+        let templates: Vec<_> = seed_tiles
+            .iter()
+            .flat_map(|tile| {
+                (0..=config.max_lod).map(move |_| IndirectDrawTemplate {
+                    index_count: 3,
+                    first_index: 0,
+                    base_vertex: 0,
+                    tile_id: tile.tile_id,
+                })
+            })
+            .collect();
+        let resources = selector
+            .create_draw_resources(device, &seed_tiles, &templates)
+            .unwrap();
+        let view = Mat4::look_at_rh(Vec3::ZERO, Vec3::NEG_Z, Vec3::Y);
+        let projection = Mat4::perspective_rh(config.fov_y, 16.0 / 9.0, 1.0, 40_000.0);
+        let view_proj = projection * view;
+        let mut visible_sets = std::collections::BTreeSet::new();
+        let mut selected_lods = std::collections::BTreeSet::new();
+        let mut state = 0xA511_E9B3_u32;
+
+        for camera_index in 0..64 {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let lon = (state as f64 / u32::MAX as f64) * 360.0;
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let lat = -50.0 + (state as f64 / u32::MAX as f64) * 100.0;
+            let altitude = 200.0 + camera_index as f64 * 300.0;
+            let anchor = seed_frame.lonlat_alt_to_ecef(lon, lat, altitude).unwrap();
+            let frame = crate::terrain::clipmap::globe::GlobeFrame::globe(radius, anchor).unwrap();
+            let tiles = make_tiles(&frame);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("planetary_lod_parity"),
+                });
+            let provenance = LodSelectionProvenance(1_000 + camera_index as u64);
+            let ticket = selector
+                .encode_indirect_globe_tracked(
+                    queue,
+                    &mut encoder,
+                    &resources,
+                    &tiles,
+                    view_proj,
+                    &frame,
+                    false,
+                    (-40_000.0, 40_000.0),
+                    true,
+                    provenance,
+                )
+                .expect("valid globe frame must produce planetary LOD parameters")
+                .expect("a readback slot must be available after the prior result completes");
+            queue.submit(Some(encoder.finish()));
+            assert!(resources.mark_selection_submitted(ticket));
+            let started = Instant::now();
+            let completed = loop {
+                if let Some(completed) = resources
+                    .try_read_selection(device)
+                    .expect("planetary selection readback")
+                {
+                    break completed;
+                }
+                assert!(
+                    started.elapsed() < Duration::from_secs(10),
+                    "camera {camera_index} GPU readback timed out on {adapter}"
+                );
+                std::thread::yield_now();
+            };
+            let gpu_result = completed
+                .into_selection_for(provenance)
+                .expect("completed selection must retain its originating camera provenance");
+            let cpu_result =
+                cpu_lod_select_globe(&tiles, view_proj, &config, (-40_000.0, 40_000.0), &frame)
+                    .unwrap();
+            let mut cpu_ids: Vec<_> = cpu_result
+                .visible_tiles
+                .iter()
+                .map(|tile| (tile.tile_id, tile.selected_lod))
+                .collect();
+            let mut gpu_ids: Vec<_> = gpu_result
+                .visible_tiles
+                .iter()
+                .map(|tile| (tile.tile_id, tile.selected_lod))
+                .collect();
+            cpu_ids.sort_unstable();
+            gpu_ids.sort_unstable();
+            assert_eq!(gpu_ids, cpu_ids, "camera {camera_index} on {adapter}");
+            assert!(
+                gpu_ids
+                    .iter()
+                    .any(|&(tile_id, _)| tile_id == TileInfo::pack_id(0, 31, 31)),
+                "wide antipodal bound must survive the GPU horizon test for camera {camera_index} on {adapter}"
+            );
+            visible_sets.insert(gpu_ids.iter().map(|&(id, _)| id).collect::<Vec<_>>());
+            selected_lods.extend(gpu_ids.iter().map(|&(_, lod)| lod));
+        }
+
+        assert!(
+            visible_sets.len() > 1,
+            "camera sweep must exercise multiple visible tile sets"
+        );
+        assert!(
+            selected_lods.len() > 1,
+            "camera sweep must exercise multiple selected LODs"
+        );
+    }
 }
 
 #[cfg(all(feature = "enable-globe", windows))]
-#[test]
-fn gpu_and_cpu_select_identical_planetary_tile_ids_on_warp() {
+fn warp_device() -> (wgpu::Device, wgpu::Queue, wgpu::AdapterInfo) {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::DX12,
         ..Default::default()
@@ -664,174 +827,7 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_on_warp() {
         None,
     ))
     .expect("WARP device");
-    assert_planetary_lod_parity_sweep(&device, &queue, &info);
-}
-
-#[cfg(feature = "enable-globe")]
-fn assert_planetary_lod_parity_sweep(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    adapter: &wgpu::AdapterInfo,
-) {
-    use glam::DVec3;
-    use std::time::{Duration, Instant};
-
-    let adapter = format!("{} ({:?}, {:?})", adapter.name, adapter.backend, adapter.device_type);
-    let config = GpuLodConfig {
-        pixel_error_budget: 128.0,
-        terrain_width: 10_000.0,
-        tile_size: 50.0,
-        max_lod: 4,
-        ..Default::default()
-    };
-    let selector = GpuLodSelector::new(device, config.clone());
-    let radius = 5_000.0_f64;
-    let world_tiles: Vec<_> = (0..5)
-        .flat_map(|lat_index| {
-            (0..24).map(move |lon_index| {
-                let lon = lon_index as f64 * 15.0;
-                let lat = -60.0 + lat_index as f64 * 30.0;
-                (lon_index, lat_index, lon, lat)
-            })
-        })
-        .collect();
-    let seed_frame =
-        crate::terrain::clipmap::globe::GlobeFrame::globe(radius, DVec3::X * (radius + 200.0))
-            .unwrap();
-    let make_tiles = |frame: &crate::terrain::clipmap::globe::GlobeFrame| {
-        let mut tiles = world_tiles
-            .iter()
-            .map(|&(x, y, lon, lat)| {
-                let center_ecef = frame.lonlat_alt_to_ecef(lon, lat, 0.0).unwrap();
-                let center_relative = frame.camera_relative(center_ecef).unwrap().position;
-                let half_extent = radius as f32 * 8.0_f32.to_radians();
-                TileInfo::new(
-                    0,
-                    x,
-                    y,
-                    center_relative.truncate() - Vec2::splat(half_extent),
-                    center_relative.truncate() + Vec2::splat(half_extent),
-                )
-                .with_height_bounds(
-                    center_relative.z - half_extent,
-                    center_relative.z + half_extent,
-                )
-                .with_globe_center(frame, center_ecef, 8.0_f32.to_radians())
-                .unwrap()
-            })
-            .collect::<Vec<_>>();
-        let antipodal_ecef = -frame.camera_anchor().normalize() * radius;
-        tiles.push(
-            TileInfo::new(0, 31, 31, Vec2::splat(-40_000.0), Vec2::splat(40_000.0))
-                .with_height_bounds(-40_000.0, 40_000.0)
-                .with_globe_center(frame, antipodal_ecef, std::f32::consts::PI)
-                .unwrap(),
-        );
-        tiles
-    };
-    let seed_tiles = make_tiles(&seed_frame);
-    let templates: Vec<_> = seed_tiles
-        .iter()
-        .flat_map(|tile| {
-            (0..=config.max_lod).map(move |_| IndirectDrawTemplate {
-                index_count: 3,
-                first_index: 0,
-                base_vertex: 0,
-                tile_id: tile.tile_id,
-            })
-        })
-        .collect();
-    let resources = selector
-        .create_draw_resources(device, &seed_tiles, &templates)
-        .unwrap();
-    let view = Mat4::look_at_rh(Vec3::ZERO, Vec3::NEG_Z, Vec3::Y);
-    let projection = Mat4::perspective_rh(config.fov_y, 16.0 / 9.0, 1.0, 40_000.0);
-    let view_proj = projection * view;
-    let mut visible_sets = std::collections::BTreeSet::new();
-    let mut selected_lods = std::collections::BTreeSet::new();
-    let mut state = 0xA511_E9B3_u32;
-
-    for camera_index in 0..64 {
-        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let lon = (state as f64 / u32::MAX as f64) * 360.0;
-        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let lat = -50.0 + (state as f64 / u32::MAX as f64) * 100.0;
-        let altitude = 200.0 + camera_index as f64 * 300.0;
-        let anchor = seed_frame.lonlat_alt_to_ecef(lon, lat, altitude).unwrap();
-        let frame = crate::terrain::clipmap::globe::GlobeFrame::globe(radius, anchor).unwrap();
-        let tiles = make_tiles(&frame);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("planetary_lod_parity"),
-            });
-        let provenance = LodSelectionProvenance(1_000 + camera_index as u64);
-        let ticket = selector
-            .encode_indirect_globe_tracked(
-                queue,
-                &mut encoder,
-                &resources,
-                &tiles,
-                view_proj,
-                &frame,
-                false,
-                (-40_000.0, 40_000.0),
-                true,
-                provenance,
-            )
-            .expect("valid globe frame must produce planetary LOD parameters")
-            .expect("a readback slot must be available after the prior result completes");
-        queue.submit(Some(encoder.finish()));
-        assert!(resources.mark_selection_submitted(ticket));
-        let started = Instant::now();
-        let completed = loop {
-            if let Some(completed) = resources
-                .try_read_selection(device)
-                .expect("planetary selection readback")
-            {
-                break completed;
-            }
-            assert!(
-                started.elapsed() < Duration::from_secs(10),
-                "camera {camera_index} GPU readback timed out on {adapter}"
-            );
-            std::thread::yield_now();
-        };
-        let gpu_result = completed
-            .into_selection_for(provenance)
-            .expect("completed selection must retain its originating camera provenance");
-        let cpu_result =
-            cpu_lod_select_globe(&tiles, view_proj, &config, (-40_000.0, 40_000.0), &frame)
-                .unwrap();
-        let mut cpu_ids: Vec<_> = cpu_result
-            .visible_tiles
-            .iter()
-            .map(|tile| (tile.tile_id, tile.selected_lod))
-            .collect();
-        let mut gpu_ids: Vec<_> = gpu_result
-            .visible_tiles
-            .iter()
-            .map(|tile| (tile.tile_id, tile.selected_lod))
-            .collect();
-        cpu_ids.sort_unstable();
-        gpu_ids.sort_unstable();
-        assert_eq!(gpu_ids, cpu_ids, "camera {camera_index} on {adapter}");
-        assert!(
-            gpu_ids
-                .iter()
-                .any(|&(tile_id, _)| tile_id == TileInfo::pack_id(0, 31, 31)),
-            "wide antipodal bound must survive the GPU horizon test for camera {camera_index} on {adapter}"
-        );
-        visible_sets.insert(gpu_ids.iter().map(|&(id, _)| id).collect::<Vec<_>>());
-        selected_lods.extend(gpu_ids.iter().map(|&(_, lod)| lod));
-    }
-
-    assert!(
-        visible_sets.len() > 1,
-        "camera sweep must exercise multiple visible tile sets"
-    );
-    assert!(
-        selected_lods.len() > 1,
-        "camera sweep must exercise multiple selected LODs"
-    );
+    (device, queue, info)
 }
 
 #[cfg(feature = "enable-globe")]
