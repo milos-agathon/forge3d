@@ -157,9 +157,9 @@ def aligned_raster_metrics(dem, out, capture_path=None):
     _, frame = renderer.render_with_aov(material, environment, f3d.TerrainRenderParams(config), raster_dem)
     if capture_path:
         np.savez_compressed(capture_path, normal=frame.normal(), depth=frame.depth(), albedo=frame.albedo())
+    # Published AOV frame (+X east, +Y up, +Z south); the PT frame has +Z north.
     normal = frame.normal().astype(np.float64)
-    normal[normal[..., 2] < 0] *= -1
-    normal = normal[..., [0, 2, 1]]
+    normal[normal[..., 1] < 0] *= -1
     normal[..., 2] *= -1
     raw_depth = frame.depth().astype(np.float64)
     hit = np.linalg.norm(normal, axis=-1) > 0.5
@@ -173,7 +173,7 @@ def aligned_raster_metrics(dem, out, capture_path=None):
     pt_albedo = out["albedo"].astype(np.float64)
     pt_linear = np.where(pt_albedo <= 0.04045, pt_albedo / 12.92, ((pt_albedo + 0.055) / 1.055) ** 2.4)
     metrics = aov_metrics({**out, "albedo": pt_linear}, {"normal": normal, "depth": depth, "albedo": albedo})
-    metrics["normal_contract"] = "Geometric raster normals (debug mode 25), outward hemisphere, rotated from Z-up to Y-up; not stylized shading normals."
+    metrics["normal_contract"] = "Geometric raster normals (debug mode 25) in the published AOV frame (+X east, +Y up, +Z south), outward hemisphere, Z flipped to the PT frame; not stylized shading normals."
     metrics["camera_contract"] = "Identical eye/target via mesh:zup and (x,-z,y); raster height centering and normalized near/far depth undone."
     metrics["sampling_contract"] = "The same bilinear DEM surface is evaluated on the rasterizer's fixed 512-vertex mesh grid (upload.rs build_uniforms_with_matrices); nearest texture sampling then selects those vertex heights. Rows are reversed by coordinate rotation."
     return metrics

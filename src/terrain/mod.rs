@@ -63,6 +63,7 @@ pub use analysis::{
 pub mod accumulation;
 pub use accumulation::{frame_seed, AccumulationBuffer, AccumulationConfig, JitterSequence};
 
+pub(crate) mod camera_mode;
 pub mod frame_compiler;
 pub use frame_compiler::{CompiledFrame, FrameCompiler, FrozenLabelSet, LABEL_FADE_FRAMES};
 

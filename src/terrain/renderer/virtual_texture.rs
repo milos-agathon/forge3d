@@ -2794,9 +2794,14 @@ impl TerrainMaterialVTRuntime {
     ) -> ([f32; 2], [f32; 2]) {
         if super::core::is_mesh_camera_mode(&params.camera_mode) {
             let aspect = params.size_px.0 as f32 / params.size_px.1.max(1) as f32;
+            let target = if super::core::is_north_up_camera_mode(&params.camera_mode) {
+                super::core::north_up_to_world(params.cam_target)
+            } else {
+                params.cam_target
+            };
             let center = [
-                (params.cam_target[0] / params.terrain_span.max(1e-3)) + 0.5,
-                (params.cam_target[1] / params.terrain_span.max(1e-3)) + 0.5,
+                (target[0] / params.terrain_span.max(1e-3)) + 0.5,
+                (target[1] / params.terrain_span.max(1e-3)) + 0.5,
             ];
             let half_height =
                 params.cam_radius.max(1.0) * (params.fov_y_deg.to_radians() * 0.5).tan();

@@ -62,6 +62,7 @@ mod water_reflection;
 
 pub(crate) use self::core::is_yup_camera_mode;
 pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
+pub(crate) use self::core::is_north_up_camera_mode;
 #[cfg(feature = "enable-globe")]
 pub(crate) use self::orbis_globe_background::ORBIS_EARTH_TEXTURE_MAX_WIDTH;
 

@@ -137,14 +137,23 @@ impl TerrainScene {
         let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
         let target = glam::Vec3::from_array(params.cam_target);
         let up = glam::Vec3::Y;
-        let view_matrix = glam::Mat4::look_at_rh(eye, target, up);
         let aspect = params.size_px.0 as f32 / params.size_px.1 as f32;
-        let proj_matrix = glam::Mat4::perspective_rh(
-            params.fov_y_deg.to_radians(),
-            aspect,
-            params.clip.0,
-            params.clip.1,
-        );
+        let (view_matrix, proj_matrix) =
+            if crate::terrain::renderer::is_north_up_camera_mode(&params.camera_mode) {
+                // Fit cascades to the camera that actually renders the frame.
+                let (_, view, proj) = Self::build_camera_matrices(params);
+                (view, proj)
+            } else {
+                (
+                    glam::Mat4::look_at_rh(eye, target, up),
+                    glam::Mat4::perspective_rh(
+                        params.fov_y_deg.to_radians(),
+                        aspect,
+                        params.clip.0,
+                        params.clip.1,
+                    ),
+                )
+            };
 
         let sun_direction =
             -media::terrain_light_direction(&params.camera_mode, decoded.light.direction);

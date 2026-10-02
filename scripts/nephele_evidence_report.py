@@ -43,9 +43,12 @@ else:
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
-# Milos's reviewed exception: CHRONOS re-exports, not transport changes.
+# Milos's reviewed exceptions, not transport changes: CHRONOS re-exports and
+# the SUTURA `camera_mode` module declaration (terrain/mod.rs), and the
+# manual-bilinear tap-count test (shader_sources.rs).
 REFERENCE_SOURCE_ALLOWLIST = {
-    "src/terrain/mod.rs": "154b5c88a739e3331615976a1497621bbfd6fa79afec215543356b98daf51698",
+    "src/terrain/mod.rs": "4562b11c06b55edc88265f4b31a5a088261b574b18ec55619b9394a56e8e3377",
+    "src/shader_sources.rs": "28b090ef71315c6edd9b21fd346f3494ae4ec96656c476910f89b1ac0082a1e2",
 }
 
 

@@ -12,6 +12,20 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ### Fixed
 - Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Waits for all GPU work in the native library now last until the device has really finished; on the GL backend they keep wgpu's own wait, because GL defers freeing objects still in use. Some waits are unchanged: waits for one specific submission in the vector code and the fence tracker (`src/core/fence_tracker.rs`), the frozen offline reference/hybrid path-tracer sources, the `policies` benchmark binary (`bench/upload_policies/policies.rs`), and three resource-tracker unit tests. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
 
+## [1.40.1] - 2026-10-01
+### Changed
+- Bumped the package and PyPI version to `1.40.1`.
+
+### Fixed
+- Terrain hillshade now follows the sun in every camera mode, including the default 2D `MapScene` view. The shader built its shading normal in a Y-up frame but dotted it with a Z-up sun and view vector, so south-facing slopes were always lit and north-facing slopes always dark. The normal AOV keeps its published frame. (#196)
+- 3D `MapScene` views are no longer mirrored north-south, and `OrbitCamera.target` reaches the renderer instead of every 3D camera orbiting the tile centre. (#196)
+
+### Compatibility
+- Terrain renders differ from 1.40.0 wherever hillshade is visible: slopes facing the sun are lit and slopes facing away are dark. A `MapScene` compass sun azimuth (0 = north, 90 = east) is now honoured in every camera mode. On the ORBIS globe, slope edge lighting is now measured against the geodetic up, so globe ground renders slightly darker. The affected NVIDIA terrain and ORBIS goldens are re-rendered; canonical recipe goldens and certificates are pending an owner decision. (#196)
+- 3D `MapScene` camera modes render north-up: `MapScene` adds the native `north` option to every Z-up camera mode, and `camera.target` and the camera azimuth are read with +X east, +Y north, +Z up. Bare native `zup` callers and ORBIS camera framing are unchanged. (#196)
+- `LightingPreset.settings` keys `sky`, `sun_visibility`, `height_ao`, `fog`, `tonemap` and `bloom` are now forwarded to the renderer and validated; a malformed value raises instead of being ignored. `ibl.intensity` raises unless `renderer_config.gi.modes` includes `ibl`, because it has no effect otherwise. (#196)
+- `RasterOverlay` and `VectorOverlay` in a 3D camera mode stop `MapScene.render` with a `MapSceneNativeUnavailable` diagnostic block. They are composited in 2D screen space and were drawn in the wrong place over 3D terrain. (#196)
+
 ## [1.40.0] - 2026-09-30
 ### Added
 - Terrain material bands can be placed where you want them: the `material_layer_centers` lighting setting (and `TerrainRenderParams.material_layer_centers`) sets each texture layer's centre as a fraction of the height range, instead of spacing the layers evenly. (#194)

@@ -28,7 +28,7 @@ ORBIS_GOLDEN = (
     / "orbis_rainier_ground.nvidia-vulkan.png"
 )
 ORBIS_SELECTED = os.environ.get("FORGE3D_RUN_ORBIS_GPU") == "1"
-# The physical baseline has 36 RGB colors and a 93.32% non-modal fraction since
+# The physical baseline has 36 RGB colors and an 88.20% non-modal fraction since
 # globe shading builds its height normals in each fragment's east/north/up frame
 # at metric scale (the flat Y-up normal was ~1000x over-steep and left the ground
 # nearly unlit); these lower bounds retain broad rendering tolerance while

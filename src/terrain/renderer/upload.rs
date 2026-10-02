@@ -412,13 +412,22 @@ impl TerrainScene {
         };
 
         let eye = target + eye_offset;
-        let view = glam::Mat4::look_at_rh(eye, target, up);
         let proj = glam::Mat4::perspective_rh(
             params.fov_y_deg.to_radians(),
             aspect,
             params.clip.0,
             params.clip.1,
         );
+        if super::core::is_north_up_camera_mode(&params.camera_mode) {
+            // Target and eye are geographic (+Y north); mesh rows run along
+            // +Y south. Viewing the world through the Y reflection renders the
+            // terrain north-up and un-mirrored; the returned eye is in world
+            // space for lighting, depth and picking.
+            let view = super::core::north_up_view(eye, target, up);
+            let world_eye = glam::Vec3::from_array(super::core::north_up_to_world(eye.to_array()));
+            return (world_eye, view, proj);
+        }
+        let view = glam::Mat4::look_at_rh(eye, target, up);
         (eye, view, proj)
     }
 
