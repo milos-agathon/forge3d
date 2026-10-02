@@ -669,7 +669,9 @@ jobs:
           RUST_TEST_THREADS: 1
 
       - name: Run AETHER offline-bake acceptance tests
-        if: matrix.os == 'ubuntu-latest'
+        # Runs even when the preceding workspace cargo test fails, so an
+        # unrelated failure cannot hide AETHER's own bake/convergence gates.
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
         run: cargo test --workspace --features atmosphere-bake core::atmosphere -- --test-threads=1
         env:
           RUST_TEST_THREADS: 1
@@ -1205,6 +1207,7 @@ jobs:
     outputs:
       lane: ${{ steps.golden-pass.outputs.golden_lane || 'unknown' }}
       sidera_lane: ${{ steps.sidera-pass.outputs.sidera_lane || 'unknown' }}
+      aether_lane: ${{ steps.aether-nvidia-ran.outputs.aether_lane || 'unknown' }}
       orbis_lane: ${{ steps.orbis-pass.outputs.orbis_lane || 'unknown' }}
     env:
       WGPU_BACKEND: vulkan
@@ -1233,6 +1236,7 @@ jobs:
           "FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR=$(Join-Path $root 'recipe-goldens')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_SUBSTRATIA_ARTIFACT_DIR=$(Join-Path $root 'substratia')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_SIDERA_ARTIFACT_DIR=$(Join-Path $root 'sidera')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FORGE3D_AETHER_ARTIFACT_DIR=$(Join-Path $root 'aether')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_ORBIS_ARTIFACT_DIR=$(Join-Path $root 'orbis')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_INVERSE_ARTIFACT_DIR=$(Join-Path $root 'inverse')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FORGE3D_OBLIQUA_ARTIFACT_DIR=$(Join-Path $root 'obliqua')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -1355,6 +1359,48 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE
+
+      # Owner decision AETHER-NV-01 (2026-10-01): the AETHER spectral closure
+      # (189-sample DeltaE2000 < 2, saturation falloff <= 10%, sunset golden)
+      # is qualified on this physical NVIDIA Vulkan runner with unchanged
+      # thresholds. Hosted macOS exposes no physical Metal adapter, so the
+      # optional Metal job above cannot prove it. This lane is required:
+      # a missing adapter or any skip fails; there is no ABSENT path.
+      - name: Probe AETHER NVIDIA Vulkan closure backend
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:FORGE3D_AETHER_ARTIFACT_DIR | Out-Null
+          python scripts/terrain_ci_probe.py --mode aether-vulkan --json (Join-Path $env:FORGE3D_AETHER_ARTIFACT_DIR "adapter-probe.json")
+          exit $LASTEXITCODE
+
+      - name: Verify exact AETHER wheel custom-bake provenance on NVIDIA Vulkan
+        if: ${{ !cancelled() }}
+        id: aether_nvidia_custom_bake
+        shell: pwsh
+        run: |
+          python -c 'from forge3d._native import get_native_module; h=get_native_module().atmosphere_bake_luts(ozone_du=321.0, mie_g=0.71, ground_albedo=0.42, scattering_orders=2); assert h.precomputed is False'
+          exit $LASTEXITCODE
+
+      - name: Run AETHER NVIDIA Vulkan closure and golden gates
+        if: ${{ !cancelled() && steps.aether_nvidia_custom_bake.outcome == 'success' }}
+        id: aether-nvidia-ran
+        shell: pwsh
+        env:
+          FORGE3D_AETHER_PHYSICAL_BACKEND: vulkan
+          FORGE3D_AETHER_PHYSICAL_REQUIRED: '1'
+        run: |
+          $dir = $env:FORGE3D_AETHER_ARTIFACT_DIR
+          $env:FORGE3D_AETHER_METRICS_PATH = Join-Path $dir "metrics.json"
+          (git rev-parse HEAD).Trim() | Set-Content -Encoding ascii (Join-Path $dir "checked-out-head.txt")
+          $junit = Join-Path $dir "junit.xml"
+          python -m pytest tests/test_atmosphere_spectral.py tests/test_atmosphere_reference.py tests/test_atmosphere_pt_reference.py tests/test_atmosphere_golden.py tests/test_atmosphere_lut_handoff.py -v --tb=short --junitxml="$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/aether_acceptance_evidence.py "$dir" --head-sha "$env:FORGE3D_SUBSTRATIA_CANDIDATE_SHA" --repository '${{ github.repository }}' --run-id '${{ github.run_id }}' --run-attempt '${{ github.run_attempt }}' --job '${{ github.job }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "aether_lane=ran" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Run ORBIS NVIDIA Vulkan descent acceptance
         shell: pwsh
@@ -2814,6 +2860,12 @@ jobs:
             echo "SIDERA physical NVIDIA Vulkan lane: $sidera_lane"
             if [ "$sidera_lane" != "ran" ]; then
               echo "::error::SIDERA physical NVIDIA Vulkan lane was selected but reported $sidera_lane"
+              failed=1
+            fi
+            aether_lane='${{ needs.test-golden-images-nvidia.outputs.aether_lane }}'
+            echo "AETHER physical NVIDIA Vulkan closure lane: $aether_lane"
+            if [ "$aether_lane" != "ran" ]; then
+              echo "::error::AETHER physical NVIDIA Vulkan closure lane was selected but reported $aether_lane"
               failed=1
             fi
           fi

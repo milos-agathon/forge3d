@@ -103,6 +103,99 @@ def test_summary_rejects_unproven_adapter(tmp_path: Path, mutation, match: str) 
         _summary(tmp_path)
 
 
+NVIDIA_VULKAN_RECORD = {
+    "status": "passed",
+    "mode": "aether-vulkan",
+    "requested_backend": "vulkan",
+    "probe": {
+        "status": "ok",
+        "name": "NVIDIA GeForce RTX 3070",
+        "backend": "Vulkan",
+        "device_type": "DiscreteGpu",
+        "vendor": 0x10DE,
+        "software_fallback": False,
+    },
+}
+
+
+def _write_adapter(directory: Path, record: dict) -> None:
+    (directory / "adapter-probe.json").write_text(json.dumps(record), encoding="utf-8")
+
+
+def test_summary_accepts_physical_nvidia_vulkan_closure(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    _write_adapter(tmp_path, NVIDIA_VULKAN_RECORD)
+    summary = _summary(tmp_path)
+    assert summary["status"] == "passed"
+    assert summary["backend"] == "vulkan"
+    assert summary["adapter"]["name"] == "NVIDIA GeForce RTX 3070"
+    assert summary["thresholds"]["delta_e_2000_strict_upper_bound"] == 2.0
+    assert summary["thresholds"]["saturation_relative_error_upper_bound"] == 0.10
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        (lambda data: data["probe"].update(vendor=0x1002, name="AMD Radeon RX 6800"), "not an NVIDIA"),
+        (lambda data: data["probe"].update(device_type="IntegratedGpu"), "not a discrete"),
+        (lambda data: data["probe"].update(software_fallback=True), "software fallback"),
+        (lambda data: data["probe"].update(backend="Dx12"), "not a successful Vulkan"),
+        (lambda data: data.update(requested_backend="metal"), "requested backend must be Vulkan"),
+        (lambda data: data.update(mode="aether-dx12"), "did not pass"),
+    ],
+)
+def test_summary_rejects_unqualified_vulkan_adapter(tmp_path: Path, mutation, match: str) -> None:
+    _fixture(tmp_path)
+    record = json.loads(json.dumps(NVIDIA_VULKAN_RECORD))
+    mutation(record)
+    _write_adapter(tmp_path, record)
+    with pytest.raises(ValueError, match=match):
+        _summary(tmp_path)
+
+
+def test_workflow_runs_required_aether_closure_on_nvidia_vulkan() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = workflow.split("\n  test-golden-images-nvidia:\n", 1)[1].split("\n  test-substratia-gpu:\n", 1)[0]
+    assert "aether_lane: ${{ steps.aether-nvidia-ran.outputs.aether_lane || 'unknown' }}" in job
+    blocks: dict[str, str] = {}
+    for step_name in (
+        "Probe AETHER NVIDIA Vulkan closure backend",
+        "Verify exact AETHER wheel custom-bake provenance on NVIDIA Vulkan",
+        "Run AETHER NVIDIA Vulkan closure and golden gates",
+    ):
+        marker = f"      - name: {step_name}"
+        assert marker in job
+        block = job.split(marker, 1)[1].split("\n      - name:", 1)[0]
+        assert "!cancelled()" in block, f"{step_name} can be suppressed by an unrelated failure"
+        assert "continue-on-error" not in block
+        blocks[step_name] = block
+    probe = blocks["Probe AETHER NVIDIA Vulkan closure backend"]
+    closure = blocks["Run AETHER NVIDIA Vulkan closure and golden gates"]
+    assert "--mode aether-vulkan" in probe
+    assert "steps.aether_nvidia_custom_bake.outcome == 'success'" in closure
+    assert "FORGE3D_AETHER_PHYSICAL_BACKEND: vulkan" in closure
+    assert "FORGE3D_AETHER_PHYSICAL_REQUIRED: '1'" in closure
+    for test_file in (
+        "tests/test_atmosphere_spectral.py",
+        "tests/test_atmosphere_reference.py",
+        "tests/test_atmosphere_pt_reference.py",
+        "tests/test_atmosphere_golden.py",
+        "tests/test_atmosphere_lut_handoff.py",
+    ):
+        assert test_file in closure
+    assert "python scripts/assert_junit_zero_skips.py" in closure
+    assert "python scripts/aether_acceptance_evidence.py" in closure
+    assert '"aether_lane=ran"' in closure
+    assert "ABSENT" not in closure
+
+    summary = workflow.split("\n  full-acceptance-summary:\n", 1)[1]
+    assert "needs.test-golden-images-nvidia.outputs.aether_lane" in summary
+    assert "AETHER physical NVIDIA Vulkan closure lane was selected but reported" in summary
+
+    bake = workflow.split("      - name: Run AETHER offline-bake acceptance tests", 1)[1].split("\n      - name:", 1)[0]
+    assert "!cancelled()" in bake
+
+
 @pytest.mark.parametrize(
     ("field", "value", "match"),
     [

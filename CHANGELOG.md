@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+### Fixed
+- The PROMETHEUS terrain reference no longer fails its runtime contract check when exposure, sun intensity, sun color or environment intensity is extreme. The renderer clamps these to the binary16 range so they cannot blacken the image; the contract check now compares against those clamped, uploaded values instead of the raw request.
+
+### Changed
+- AETHER's spectral closure (DeltaE2000 < 2 at all 189 sky samples, terrain saturation falloff within 10%, and the GPU sunset golden) now runs on the physical NVIDIA Vulkan CI runner and is required for full acceptance. Hosted CI has no physical Metal adapter, so the Metal-only gate never ran there. Thresholds are unchanged; Metal remains supported. Adds `tests/golden/atmosphere/aether_gpu_sunset_sweep.nvidia-vulkan.png`. Owner decision, 2026-10-01.
+- CI: AETHER's offline-bake tests now run even when the preceding workspace `cargo test` step fails.
 
 ## [1.40.1] - 2026-10-01
 ### Changed

@@ -15,8 +15,9 @@ import pytest
 import forge3d as f3d
 from _aether_quadrature import (
     SUN_ELEVATIONS_DEG,
+    aether_physical_backend,
     filmic_terrain_srgb,
-    physical_metal_probe,
+    physical_aether_probe,
     saturation,
     write_constant_hdr,
 )
@@ -111,25 +112,34 @@ def _disabled_shadows() -> ShadowSettings:
     )
 
 
-def _require_physical_metal() -> dict:
-    physical, probe = physical_metal_probe()
-    required = os.environ.get("FORGE3D_AETHER_PHYSICAL_METAL") == "1"
+def _physical_adapter_required() -> bool:
+    return (
+        os.environ.get("FORGE3D_AETHER_PHYSICAL_REQUIRED") == "1"
+        or os.environ.get("FORGE3D_AETHER_PHYSICAL_METAL") == "1"
+    )
+
+
+def _require_physical_adapter() -> dict:
+    backend = aether_physical_backend()
+    physical, probe = physical_aether_probe(backend)
+    required = _physical_adapter_required()
     if not physical:
-        message = f"AETHER physical Metal reference unavailable: {probe}"
+        message = f"AETHER physical {backend} reference unavailable: {probe}"
         if required:
             pytest.fail(message)
         pytest.skip(message)
     if not terrain_rendering_available():
-        message = f"AETHER terrain runtime unavailable on physical Metal: {probe}"
+        message = f"AETHER terrain runtime unavailable on physical {backend}: {probe}"
         if required:
             pytest.fail(message)
         pytest.skip(message)
     return probe
 
 
-def _make_metal_runtime(hdr_path: Path) -> tuple[object, object, object, dict]:
-    probe = dict(f3d.device_probe("metal"))
-    session = f3d.Session(window=False)
+def _make_physical_runtime(hdr_path: Path) -> tuple[object, object, object, dict]:
+    backend = aether_physical_backend()
+    probe = dict(f3d.device_probe(backend))
+    session = f3d.Session(window=False, backend=backend)
     renderer = f3d.TerrainRenderer(session)
     material = f3d.MaterialSet.custom((0.78, 0.24, 0.08), 0.0, 0.75, 1.0, 0.0, 4.0)
     ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
@@ -349,7 +359,7 @@ def _render_prometheus_reference_samples(
 
 
 def test_sky_delta_e2000_under_two_for_full_sun_elevation_sweep() -> None:
-    _require_physical_metal()
+    _require_physical_adapter()
     scores: dict[str, float] = {}
     comparisons: dict[str, dict] = {}
     for elevation in SUN_ELEVATIONS_DEG:
@@ -548,9 +558,9 @@ def test_terrain_display_roundtrip_uses_exact_iec_srgb_transfer() -> None:
 
 
 def _measure_terrain_saturation(
-    metal_runtime: tuple[object, object, object, dict],
+    physical_runtime: tuple[object, object, object, dict],
 ) -> dict:
-    renderer, material, ibl, _ = metal_runtime
+    renderer, material, ibl, _ = physical_runtime
     heightmap = np.zeros((32, 32), dtype=np.float32)
     baseline_frame = renderer.render_terrain_pbr_pom(
         material, ibl, _terrain_params(aether=False), heightmap
@@ -616,9 +626,9 @@ def _measure_terrain_saturation(
 
 
 def _measure_terrain_exposure_scaling(
-    metal_runtime: tuple[object, object, object, dict],
+    physical_runtime: tuple[object, object, object, dict],
 ) -> dict:
-    renderer, material, ibl, _ = metal_runtime
+    renderer, material, ibl, _ = physical_runtime
     heightmap = np.zeros((32, 32), dtype=np.float32)
     displays: list[np.ndarray] = []
     for exposure in (0.0, 1.0, 2.0):
@@ -662,9 +672,9 @@ def _measure_terrain_exposure_scaling(
 
 
 def _measure_high_exposure_sky_hdr(
-    metal_runtime: tuple[object, object, object, dict],
+    physical_runtime: tuple[object, object, object, dict],
 ) -> dict:
-    renderer, material, ibl, _ = metal_runtime
+    renderer, material, ibl, _ = physical_runtime
     # These are valid finite f32 inputs far above the old proof assumption.
     # The sun is centered inside the camera frustum so the solar-disc term is
     # exercised, not merely the diffuse sky background.
@@ -700,7 +710,7 @@ def _measure_high_exposure_sky_hdr(
 
 
 def test_high_exposure_sun_aligned_sky_hdr_stays_finite() -> None:
-    _require_physical_metal()
+    _require_physical_adapter()
     physical = _run_aether_physical_process("high-exposure")
     assert physical["mode"] == "high-exposure"
     measurement = physical["measurement"]
@@ -715,7 +725,7 @@ def test_high_exposure_sun_aligned_sky_hdr_stays_finite() -> None:
 
 
 def test_terrain_aether_inscatter_scales_with_sky_exposure() -> None:
-    _require_physical_metal()
+    _require_physical_adapter()
     physical = _run_aether_physical_process("exposure")
     assert physical["mode"] == "exposure"
     measurement = physical["measurement"]
@@ -732,7 +742,7 @@ def test_terrain_aether_inscatter_scales_with_sky_exposure() -> None:
 
 
 def test_terrain_saturation_falloff_matches_scattering_law_within_ten_percent() -> None:
-    _require_physical_metal()
+    _require_physical_adapter()
     physical = _run_aether_physical_process("saturation")
     assert physical["mode"] == "saturation"
     measurement = physical["measurement"]
@@ -869,7 +879,7 @@ np.savez(
 def test_prometheus_aerial_post_preserves_aovs_and_transports_hits_and_misses(
     tmp_path: Path,
 ) -> None:
-    _require_physical_metal()
+    _require_physical_adapter()
     # PROMETHEUS's native GPU context is process-global. Isolated processes
     # keep this paired evidence independent of any prior reference render.
     baseline = _run_prometheus_aerial_process(tmp_path / "baseline.npz", enabled=False)
@@ -927,7 +937,7 @@ def test_prometheus_aerial_post_preserves_aovs_and_transports_hits_and_misses(
 def test_prometheus_aerial_extreme_radiometric_inputs_do_not_blacken_hits_or_misses(
     tmp_path: Path,
 ) -> None:
-    _require_physical_metal()
+    _require_physical_adapter()
     extreme = _run_prometheus_aerial_process(
         tmp_path / "aether-extreme.npz",
         enabled=True,

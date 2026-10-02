@@ -1,4 +1,8 @@
-"""Fresh-process physical Metal probes for AETHER hard acceptance gates."""
+"""Fresh-process physical-adapter probes for AETHER hard acceptance gates.
+
+The adapter is physical Metal or physical NVIDIA Vulkan, selected by
+FORGE3D_AETHER_PHYSICAL_BACKEND (see _aether_quadrature.aether_physical_backend).
+"""
 
 from __future__ import annotations
 
@@ -7,9 +11,9 @@ from pathlib import Path
 import sys
 import tempfile
 
-from _aether_quadrature import physical_metal_probe, write_constant_hdr
+from _aether_quadrature import aether_physical_backend, physical_aether_probe, write_constant_hdr
 from test_atmosphere_reference import (
-    _make_metal_runtime,
+    _make_physical_runtime,
     _measure_high_exposure_sky_hdr,
     _measure_terrain_exposure_scaling,
     _measure_terrain_saturation,
@@ -21,19 +25,20 @@ from test_atmosphere_reference import (
 RESULT_PREFIX = "AETHER_PHYSICAL_RESULT="
 
 
-def _require_physical_metal() -> dict:
-    physical, probe = physical_metal_probe()
+def _require_physical_adapter() -> dict:
+    backend = aether_physical_backend()
+    physical, probe = physical_aether_probe(backend)
     if not physical:
-        raise RuntimeError(f"physical Metal adapter required, got {probe}")
+        raise RuntimeError(f"physical {backend} adapter required, got {probe}")
     return probe
 
 
 def _sky_lut_probe(elevation: float) -> dict:
-    probe = _require_physical_metal()
+    probe = _require_physical_adapter()
     with tempfile.TemporaryDirectory(prefix="aether-sky-") as directory:
         hdr_path = Path(directory) / "constant.hdr"
         write_constant_hdr(hdr_path)
-        runtime = _make_metal_runtime(hdr_path)
+        runtime = _make_physical_runtime(hdr_path)
         samples = _render_lut_sky_samples(runtime, elevation).tolist()
     return {
         "mode": "sky-lut",
@@ -44,7 +49,7 @@ def _sky_lut_probe(elevation: float) -> dict:
 
 
 def _sky_prometheus_probe(elevation: float) -> dict:
-    probe = _require_physical_metal()
+    probe = _require_physical_adapter()
     samples, reference = _render_prometheus_reference_samples(elevation)
     return {
         "mode": "sky-prometheus",
@@ -56,31 +61,31 @@ def _sky_prometheus_probe(elevation: float) -> dict:
 
 
 def _saturation_probe() -> dict:
-    probe = _require_physical_metal()
+    probe = _require_physical_adapter()
     with tempfile.TemporaryDirectory(prefix="aether-saturation-") as directory:
         hdr_path = Path(directory) / "constant.hdr"
         write_constant_hdr(hdr_path)
-        runtime = _make_metal_runtime(hdr_path)
+        runtime = _make_physical_runtime(hdr_path)
         measurement = _measure_terrain_saturation(runtime)
     return {"mode": "saturation", "probe": probe, "measurement": measurement}
 
 
 def _exposure_probe() -> dict:
-    probe = _require_physical_metal()
+    probe = _require_physical_adapter()
     with tempfile.TemporaryDirectory(prefix="aether-exposure-") as directory:
         hdr_path = Path(directory) / "constant.hdr"
         write_constant_hdr(hdr_path)
-        runtime = _make_metal_runtime(hdr_path)
+        runtime = _make_physical_runtime(hdr_path)
         measurement = _measure_terrain_exposure_scaling(runtime)
     return {"mode": "exposure", "probe": probe, "measurement": measurement}
 
 
 def _high_exposure_probe() -> dict:
-    probe = _require_physical_metal()
+    probe = _require_physical_adapter()
     with tempfile.TemporaryDirectory(prefix="aether-high-exposure-") as directory:
         hdr_path = Path(directory) / "constant.hdr"
         write_constant_hdr(hdr_path)
-        runtime = _make_metal_runtime(hdr_path)
+        runtime = _make_physical_runtime(hdr_path)
         measurement = _measure_high_exposure_sky_hdr(runtime)
     return {"mode": "high-exposure", "probe": probe, "measurement": measurement}
 

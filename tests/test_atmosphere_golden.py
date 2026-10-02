@@ -11,23 +11,27 @@ import pytest
 
 from _aether_quadrature import (
     SUNSET_DISPLAY_ORDER_DEG,
+    aether_physical_backend,
     horizon_sun_signature,
     sunset_strip,
     write_constant_hdr,
 )
 from test_atmosphere_reference import (
     SIZE,
-    _make_metal_runtime,
-    _require_physical_metal,
+    _make_physical_runtime,
+    _require_physical_adapter,
     _sky_params,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "tests" / "golden" / "atmosphere" / "aether_sunset_sweep.png"
-GPU_GOLDEN = (
-    ROOT / "tests" / "golden" / "atmosphere" / "aether_gpu_sunset_sweep.png"
-)
+GPU_GOLDENS = {
+    # Physical Apple M4 Metal render (PR #161).
+    "metal": ROOT / "tests" / "golden" / "atmosphere" / "aether_gpu_sunset_sweep.png",
+    # Physical NVIDIA Vulkan render (owner decision AETHER-NV-01, 2026-10-01).
+    "vulkan": ROOT / "tests" / "golden" / "atmosphere" / "aether_gpu_sunset_sweep.nvidia-vulkan.png",
+}
 
 
 def _update_goldens_enabled() -> bool:
@@ -67,10 +71,10 @@ def test_aether_sunset_sweep_matches_committed_golden() -> None:
 
 
 def test_active_gpu_sky_matches_committed_sunset_golden(tmp_path: Path) -> None:
-    _require_physical_metal()
+    _require_physical_adapter()
     hdr_path = tmp_path / "black.hdr"
     write_constant_hdr(hdr_path)
-    renderer, material, ibl, _ = _make_metal_runtime(hdr_path)
+    renderer, material, ibl, _ = _make_physical_runtime(hdr_path)
     heightmap = np.zeros((8, 8), dtype=np.float32)
     panels = []
     for elevation in SUNSET_DISPLAY_ORDER_DEG:
@@ -83,7 +87,9 @@ def test_active_gpu_sky_matches_committed_sunset_golden(tmp_path: Path) -> None:
         panels.append(
             np.asarray(frame.to_numpy(), dtype=np.uint8)[:SIZE, :SIZE, :3]
         )
-    _assert_or_update_golden(np.concatenate(panels, axis=1), GPU_GOLDEN)
+    _assert_or_update_golden(
+        np.concatenate(panels, axis=1), GPU_GOLDENS[aether_physical_backend()]
+    )
 
 
 def test_corrupt_refresh_candidate_cannot_mutate_or_pass_committed_golden(

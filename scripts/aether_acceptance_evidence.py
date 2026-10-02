@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build fail-closed, exact-head evidence for the AETHER Metal closure lane."""
+"""Build fail-closed, exact-head evidence for the AETHER physical closure lanes.
+
+Accepted adapters: physical Metal (mode aether-metal) or physical NVIDIA Vulkan
+(mode aether-vulkan; owner decision AETHER-NV-01, 2026-10-01).
+"""
 
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ else:
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 PHYSICAL_METAL_TYPES = {"discretegpu", "integratedgpu"}
+NVIDIA_VENDOR_ID = 0x10DE
 SOFTWARE_TOKENS = ("basic render driver", "lavapipe", "llvmpipe", "swiftshader", "warp")
 SUN_ELEVATION_LABELS = ("-5", "0", "5", "10", "30", "60", "89")
 SKY_CASE_LABELS = tuple(
@@ -61,13 +66,36 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _require_physical_metal(record: dict[str, Any]) -> dict[str, Any]:
+def _require_physical_adapter(record: dict[str, Any]) -> dict[str, Any]:
     probe = record.get("probe")
     if not isinstance(probe, dict):
         raise ValueError("adapter-probe.json: probe must be an object")
-    name = str(probe.get("name", ""))
-    if record.get("status") != "passed" or record.get("mode") != "aether-metal":
+    if record.get("status") != "passed" or record.get("mode") not in {"aether-metal", "aether-vulkan"}:
         raise ValueError("adapter-probe.json: AETHER probe did not pass")
+    if record.get("mode") == "aether-vulkan":
+        return _require_physical_nvidia_vulkan(record, probe)
+    return _require_physical_metal(record, probe)
+
+
+def _require_physical_nvidia_vulkan(record: dict[str, Any], probe: dict[str, Any]) -> dict[str, Any]:
+    name = str(probe.get("name", ""))
+    if str(record.get("requested_backend", "")).lower() != "vulkan":
+        raise ValueError("adapter-probe.json: requested backend must be Vulkan")
+    if probe.get("status") != "ok" or str(probe.get("backend", "")).lower() != "vulkan":
+        raise ValueError("adapter-probe.json: active adapter is not a successful Vulkan device")
+    if str(probe.get("device_type", "")).lower() != "discretegpu":
+        raise ValueError("adapter-probe.json: device is not a discrete GPU")
+    if probe.get("vendor") != NVIDIA_VENDOR_ID or "nvidia" not in name.lower():
+        raise ValueError("adapter-probe.json: device is not an NVIDIA GPU")
+    if probe.get("software_fallback") is not False:
+        raise ValueError("adapter-probe.json: software fallback cannot prove AETHER")
+    if any(token in name.lower() for token in SOFTWARE_TOKENS):
+        raise ValueError("adapter-probe.json: adapter name identifies software")
+    return probe
+
+
+def _require_physical_metal(record: dict[str, Any], probe: dict[str, Any]) -> dict[str, Any]:
+    name = str(probe.get("name", ""))
     if str(record.get("requested_backend", "")).lower() != "metal":
         raise ValueError("adapter-probe.json: requested backend must be Metal")
     if probe.get("status") != "ok" or str(probe.get("backend", "")).lower() != "metal":
@@ -188,7 +216,8 @@ def build_summary(
     adapter_path = artifact_dir / "adapter-probe.json"
     junit_path = artifact_dir / "junit.xml"
     metrics_path = artifact_dir / "metrics.json"
-    adapter = _require_physical_metal(_read_object(adapter_path))
+    adapter_record = _read_object(adapter_path)
+    adapter = _require_physical_adapter(adapter_record)
     counts = verify_junit(junit_path)
     _require_junit_cases(junit_path)
     thresholds = _require_metrics(_read_object(metrics_path))
@@ -202,6 +231,7 @@ def build_summary(
         "run_id": str(run_id),
         "run_attempt": str(run_attempt),
         "job": job,
+        "backend": str(adapter_record["requested_backend"]).lower(),
         "adapter": adapter,
         "junit": counts.as_dict(),
         "thresholds": {

@@ -164,7 +164,7 @@ def _smoke_render(mode: str) -> None:
     material_set = f3d.MaterialSet.terrain_default()
     heightmap = _build_heightmap()
     params = _build_params(
-        with_aov=mode == "terrain-aov", with_aether=mode == "aether-metal"
+        with_aov=mode == "terrain-aov", with_aether=mode in {"aether-metal", "aether-vulkan"}
     )
 
     with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp_hdr:
@@ -201,7 +201,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=("terrain", "terrain-aov", "sidera-metal", "aether-metal"),
+        choices=("terrain", "terrain-aov", "sidera-metal", "aether-metal", "aether-vulkan"),
         required=True,
     )
     parser.add_argument("--json", type=Path, help="write exact adapter/probe evidence")
@@ -212,11 +212,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    backend = (
-        "metal"
-        if args.mode in {"sidera-metal", "aether-metal"}
-        else os.environ.get("WGPU_BACKEND")
-    )
+    if args.mode in {"sidera-metal", "aether-metal"}:
+        backend = "metal"
+    elif args.mode == "aether-vulkan":
+        backend = "vulkan"
+    else:
+        backend = os.environ.get("WGPU_BACKEND")
     probe = f3d.device_probe(backend)
     print(f"terrain-ci-probe backend={backend!r} probe={probe}")
 
@@ -262,6 +263,28 @@ def main() -> int:
             return 3
         write_evidence("passed")
         print("AETHER closure lane executed a live spectral terrain render on Metal.")
+        return 0
+
+    if args.mode == "aether-vulkan":
+        # Owner decision AETHER-NV-01 (2026-10-01): the AETHER closure is
+        # qualified on the physical NVIDIA Vulkan runner. This lane is
+        # required, so a missing adapter is a failure, never ABSENT.
+        if not _adapter_is_ci_safe(probe, required_backend="vulkan", require_nvidia=True):
+            write_evidence("failed")
+            print("AETHER NVIDIA Vulkan closure probe: FAIL — no physical NVIDIA Vulkan adapter.")
+            return 3
+        try:
+            _smoke_render(args.mode)
+        except Exception as exc:
+            evidence["error"] = str(exc)
+            write_evidence("failed")
+            print(
+                "AETHER NVIDIA Vulkan closure probe: CRASH — physical NVIDIA adapter present "
+                f"but the live spectral terrain smoke failed: {exc}"
+            )
+            return 3
+        write_evidence("passed")
+        print("AETHER closure lane executed a live spectral terrain render on NVIDIA Vulkan.")
         return 0
 
     # Exit-code contract (CENSOR audit F-10). CI must not conflate "this

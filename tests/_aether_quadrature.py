@@ -8,6 +8,7 @@ Display conversion mirrors FILMIC_TERRAIN followed by IEC 61966-2-1 sRGB.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -89,19 +90,49 @@ def write_constant_hdr(path: Path, value: int = 128) -> None:
     path.write_bytes(bytes(payload))
 
 
-def physical_metal_probe() -> tuple[bool, dict]:
-    probe = dict(f3d.device_probe("metal"))
-    backend = str(probe.get("backend", "")).lower()
+AETHER_PHYSICAL_BACKENDS = ("metal", "vulkan")
+
+
+def aether_physical_backend() -> str:
+    """Backend qualified for the AETHER closure: Metal, or NVIDIA Vulkan.
+
+    NVIDIA Vulkan qualification is the owner decision of 2026-10-01
+    (roadmap decision AETHER-NV-01); Metal remains the default.
+    """
+
+    backend = os.environ.get("FORGE3D_AETHER_PHYSICAL_BACKEND", "metal").strip().lower()
+    if backend not in AETHER_PHYSICAL_BACKENDS:
+        raise ValueError(
+            f"FORGE3D_AETHER_PHYSICAL_BACKEND must be one of {AETHER_PHYSICAL_BACKENDS}, got {backend!r}"
+        )
+    return backend
+
+
+def physical_aether_probe(backend: str | None = None) -> tuple[bool, dict]:
+    backend = aether_physical_backend() if backend is None else backend
+    probe = dict(f3d.device_probe(backend))
     device_type = str(probe.get("device_type", "")).lower()
     name = str(probe.get("name", "")).lower()
     physical = (
         probe.get("status") == "ok"
-        and backend == "metal"
-        and device_type in {"integratedgpu", "discretegpu"}
+        and str(probe.get("backend", "")).lower() == backend
         and not bool(probe.get("software_fallback", False))
         and not any(token in name for token in ("software", "swiftshader", "llvmpipe", "virtual"))
     )
+    if backend == "metal":
+        physical = physical and device_type in {"integratedgpu", "discretegpu"}
+    else:
+        physical = (
+            physical
+            and device_type == "discretegpu"
+            and int(probe.get("vendor", 0)) == 0x10DE
+            and "nvidia" in name
+        )
     return physical, probe
+
+
+def physical_metal_probe() -> tuple[bool, dict]:
+    return physical_aether_probe("metal")
 
 
 __all__ = [
@@ -111,6 +142,9 @@ __all__ = [
     "horizon_sun_signature",
     "independent_reference_environment",
     "lut_environment",
+    "AETHER_PHYSICAL_BACKENDS",
+    "aether_physical_backend",
+    "physical_aether_probe",
     "physical_metal_probe",
     "saturation",
     "sunset_strip",
