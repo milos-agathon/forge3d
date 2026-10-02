@@ -167,6 +167,46 @@ def test_matches_committed_golden(tmp_path):
     )
 
 
+def test_deterministic_rgba16f_to_numpy_matches_canonical_png(tmp_path):
+    """Deterministic RGBA16F ``Frame.to_numpy`` exposes the canonical PNG's RGBA bytes.
+
+    ANAMNESIS portability hashes ``frame.to_numpy()`` of the deterministic
+    terrain frame, so it must equal what ``Frame.save(".png")`` writes.
+    """
+    env = dict(os.environ)
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=_local_backend())
+    if env.get("FORGE3D_TEST_INSTALLED_WHEEL") != "1":
+        source_python = Path(__file__).parents[1] / "python"
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_python), env["PYTHONPATH"]]
+            if env.get("PYTHONPATH")
+            else [str(source_python)]
+        )
+    png = tmp_path / "canonical.png"
+    script = (
+        "import json, os, tempfile; import numpy as np; import forge3d as f3d; "
+        "from forge3d.determinism import _canonical_params_config, canonical_heightmap, write_canonical_hdr; "
+        "d = tempfile.mkdtemp(); hdr = os.path.join(d, 'env.hdr'); write_canonical_hdr(hdr); "
+        "frame = f3d.TerrainRenderer(f3d.Session(window=False)).render_terrain_pbr_pom("
+        "f3d.MaterialSet.terrain_default(), f3d.IBL.from_hdr(hdr, intensity=1.0), "
+        "f3d.TerrainRenderParams(_canonical_params_config()(64, 64)), canonical_heightmap()); "
+        f"frame.save({str(png)!r}); arr = frame.to_numpy(); "
+        f"ref = f3d.png_to_numpy({str(png)!r}); "
+        "print(json.dumps({'format': frame.format(), 'dtype': str(arr.dtype), 'shape': list(arr.shape), "
+        "'equal': bool(np.array_equal(arr, ref))}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True
+    )
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert report == {
+        "format": "Rgba16Float",
+        "dtype": "uint8",
+        "shape": [64, 64, 4],
+        "equal": True,
+    }, report
+
+
 def test_sidera_night_golden_is_in_the_determinism_inventory():
     """SIDERA's NVIDIA/Vulkan reference joins this inventory at zero-byte tolerance.
 
