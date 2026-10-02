@@ -390,12 +390,12 @@ fn height_page_sample_covered(entry: HeightPageTableEntry, uv: vec2<f32>) -> vec
     let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
     let tile_origin = vec2<f32>(f32(entry.x), f32(entry.y));
     let local_uv = clamp(
-        bounded_uv * f32(axis) - tile_origin,
+        det_barrier2(bounded_uv * f32(axis)) - tile_origin,
         vec2<f32>(0.0),
         vec2<f32>(1.0),
     );
-    let atlas_texel_x = f32(atlas_min_x) + local_uv.x * f32(atlas_max_x - atlas_min_x);
-    let atlas_texel_y = f32(atlas_min_y) + local_uv.y * f32(atlas_max_y - atlas_min_y);
+    let atlas_texel_x = det_barrier(f32(atlas_min_x) + det_barrier(local_uv.x * f32(atlas_max_x - atlas_min_x)));
+    let atlas_texel_y = det_barrier(f32(atlas_min_y) + det_barrier(local_uv.y * f32(atlas_max_y - atlas_min_y)));
     let atlas_0 = vec2<i32>(i32(floor(atlas_texel_x)), i32(floor(atlas_texel_y)));
     let atlas_1 = vec2<i32>(
         min(atlas_0.x + 1, i32(atlas_max_x)),
@@ -414,13 +414,13 @@ fn height_page_sample_covered(entry: HeightPageTableEntry, uv: vec2<f32>) -> vec
     let c10 = height_coverage_atlas_load(vec2<i32>(atlas_1.x, atlas_0.y));
     let c01 = height_coverage_atlas_load(vec2<i32>(atlas_0.x, atlas_1.y));
     let c11 = height_coverage_atlas_load(atlas_1);
-    let w00 = (1.0 - atlas_blend.x) * (1.0 - atlas_blend.y);
-    let w10 = atlas_blend.x * (1.0 - atlas_blend.y);
-    let w01 = (1.0 - atlas_blend.x) * atlas_blend.y;
-    let w11 = atlas_blend.x * atlas_blend.y;
+    let w00 = det_barrier((1.0 - atlas_blend.x) * (1.0 - atlas_blend.y));
+    let w10 = det_barrier(atlas_blend.x * (1.0 - atlas_blend.y));
+    let w01 = det_barrier((1.0 - atlas_blend.x) * atlas_blend.y);
+    let w11 = det_barrier(atlas_blend.x * atlas_blend.y);
     return vec2<f32>(
-        a00 * c00 * w00 + a10 * c10 * w10 + a01 * c01 * w01 + a11 * c11 * w11,
-        clamp(c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11, 0.0, 1.0),
+        det_barrier(det_barrier(det_barrier(det_barrier(a00 * c00) * w00) + det_barrier(det_barrier(a10 * c10) * w10)) + det_barrier(det_barrier(a01 * c01) * w01)) + det_barrier(det_barrier(a11 * c11) * w11),
+        clamp(det_barrier(det_barrier(det_barrier(c00 * w00) + det_barrier(c10 * w10)) + det_barrier(c01 * w01)) + det_barrier(c11 * w11), 0.0, 1.0),
     );
 }
 
@@ -496,10 +496,10 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
     let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), level).r;
     let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), level).r;
     let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), level).r;
-    let overview_height = overview_mapping.z * det_mix(
+    let overview_height = det_barrier(overview_mapping.z * det_mix(
         det_mix(h00, h10, blend.x),
         det_mix(h01, h11, blend.x),
-        blend.y,
+        blend.y),
     );
     if (height_pages.header.enabled != 0u) {
         let rounded_lod = u32(max(floor(lod + 0.5), 0.0));
@@ -520,20 +520,20 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
             let entry = height_page_lookup(requested_lod, tile_xy.x, tile_xy.y);
             if (entry.lod != HEIGHT_PAGE_EMPTY) {
                 let covered = height_page_sample_covered(entry, bounded_uv);
-                accumulated_height = accumulated_height + remaining_weight * covered.x;
-                remaining_weight = remaining_weight * (1.0 - covered.y);
+                accumulated_height = det_barrier(accumulated_height + det_barrier(remaining_weight * covered.x));
+                remaining_weight = det_barrier(remaining_weight * (1.0 - det_barrier(covered.y)));
             }
             if (requested_lod == 0u || remaining_weight <= 0.000001) {
                 break;
             }
             requested_lod = requested_lod - 1u;
         }
-        var detail_height = accumulated_height + remaining_weight * overview_height;
+        var detail_height = accumulated_height + det_barrier(remaining_weight * overview_height);
         // Where part of the footprint is COG nodata (and no overview backs
         // it), renormalize by the covered weight so the surface keeps its
         // real height up to the data edge instead of sagging towards 0 m.
         // Fully covered footprints (every flat path) are left bit-exact.
-        let covered_total = (1.0 - remaining_weight) + remaining_weight * overview_mapping.z;
+        let covered_total = (det_barrier(1.0 - remaining_weight)) + det_barrier(remaining_weight * overview_mapping.z);
         if (covered_total > 0.000001 && covered_total < 0.999999) {
             detail_height = det_div(detail_height, covered_total);
         }
@@ -553,7 +553,7 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
 }
 
 fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
-    return sample_height_bilinear_level(uv, 0.0);
+    return sample_height_bilinear_level(det_barrier2(uv), 0.0);
 }
 
 @group(0) @binding(3)
@@ -2154,14 +2154,14 @@ fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
     let offset_y = vec2<f32>(0.0, texel_uv.y);
 
     // All 9 samples at the SAME LOD level
-    let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) - offset_y, lod));
-    let t  = sample_height_geom_level(uv - offset_y, lod);
-    let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) - offset_y, lod));
-    let l  = sample_height_geom_level(uv - offset_x, lod);
-    let r  = sample_height_geom_level(uv + offset_x, lod);
-    let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) + offset_y, lod));
-    let b  = sample_height_geom_level(uv + offset_y, lod);
-    let br = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) + offset_y, lod));
+    let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - offset_x) - offset_y), lod));
+    let t  = sample_height_geom_level(det_barrier2(uv - offset_y), lod);
+    let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + offset_x) - offset_y), lod));
+    let l  = sample_height_geom_level(det_barrier2(uv - offset_x), lod);
+    let r  = sample_height_geom_level(det_barrier2(uv + offset_x), lod);
+    let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - offset_x) + offset_y), lod));
+    let b  = sample_height_geom_level(det_barrier2(uv + offset_y), lod);
+    let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + offset_x) + offset_y), lod));
 
     // Sobel gradients
     let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
@@ -2242,14 +2242,14 @@ fn orbis_skirt_source_coverage(uv: vec2<f32>, clip_morph: vec2<f32>) -> f32 {
     if (clip_morph.y >= 0.0 || clip_morph.x >= 0.0) {
         return 1.0;
     }
-    let ring = -clip_morph.y - 1.0;
+    let ring = det_barrier(-clip_morph.y - 1.0);
     let step = det_div2(
         vec2<f32>(det_exp2(ring + 4.0)),
         max(logical_height_dimensions(), vec2<f32>(1.0)),
     );
     for (var dy = -1; dy <= 1; dy = dy + 1) {
         for (var dx = -1; dx <= 1; dx = dx + 1) {
-            let probe = uv + vec2<f32>(f32(dx), f32(dy)) * step;
+            let probe = det_barrier2(uv + det_barrier2(vec2<f32>(f32(dx), f32(dy)) * step));
             if (orbis_source_coverage(probe) < 0.5) {
                 return 0.0;
             }
@@ -2274,21 +2274,21 @@ fn orbis_globe_height_normal(uv: vec2<f32>, up: vec3<f32>) -> vec3<f32> {
     let offset_x = vec2<f32>(texel_uv.x, 0.0);
     let offset_y = vec2<f32>(0.0, texel_uv.y);
 
-    let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) - offset_y, lod));
-    let t  = sample_height_geom_level(uv - offset_y, lod);
-    let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) - offset_y, lod));
-    let l  = sample_height_geom_level(uv - offset_x, lod);
-    let r  = sample_height_geom_level(uv + offset_x, lod);
-    let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) + offset_y, lod));
-    let b  = sample_height_geom_level(uv + offset_y, lod);
-    let br = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) + offset_y, lod));
+    let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - offset_x) - offset_y), lod));
+    let t  = sample_height_geom_level(det_barrier2(uv - offset_y), lod);
+    let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + offset_x) - offset_y), lod));
+    let l  = sample_height_geom_level(det_barrier2(uv - offset_x), lod);
+    let r  = sample_height_geom_level(det_barrier2(uv + offset_x), lod);
+    let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - offset_x) + offset_y), lod));
+    let b  = sample_height_geom_level(det_barrier2(uv + offset_y), lod);
+    let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + offset_x) + offset_y), lod));
     // +u is east, +v is south.
     let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
     let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
 
     let latitude = det_fma(-uv.y, ORBIS_PI, ORBIS_PI * 0.5);
     let east_step_m = max(
-        det_barrier(texel_uv.x * 2.0 * ORBIS_PI * ORBIS_EARTH_RADIUS_M) * abs(det_cos(latitude)),
+        det_barrier(det_barrier(det_barrier(texel_uv.x * 2.0) * ORBIS_PI) * ORBIS_EARTH_RADIUS_M) * abs(det_cos(latitude)),
         1e-3,
     );
     let north_step_m = max(det_barrier(texel_uv.y * ORBIS_PI) * ORBIS_EARTH_RADIUS_M, 1e-3);
@@ -2305,7 +2305,7 @@ fn orbis_globe_height_normal(uv: vec2<f32>, up: vec3<f32>) -> vec3<f32> {
     }
     east = det_normalize3(east);
     let north = det_cross3(up, east);
-    return det_normalize3(up - east * slope_east + north * slope_south);
+    return det_normalize3(det_barrier3(up - det_barrier3(east * slope_east)) + det_barrier3(north * slope_south));
 }
 
 /// Sprint 2: Multi-scale height normal for enhanced edge visibility.
@@ -2327,14 +2327,14 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
         let oct_texel = texel_uv;
         let off_x = vec2<f32>(oct_texel.x, 0.0);
         let off_y = vec2<f32>(0.0, oct_texel.y);
-        let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) - off_y, oct_lod));
-        let t  = sample_height_geom_level(uv - off_y, oct_lod);
-        let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) - off_y, oct_lod));
-        let l  = sample_height_geom_level(uv - off_x, oct_lod);
-        let r  = sample_height_geom_level(uv + off_x, oct_lod);
-        let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) + off_y, oct_lod));
-        let b  = sample_height_geom_level(uv + off_y, oct_lod);
-        let br = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) + off_y, oct_lod));
+        let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) - off_y), oct_lod));
+        let t  = sample_height_geom_level(det_barrier2(uv - off_y), oct_lod);
+        let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) - off_y), oct_lod));
+        let l  = sample_height_geom_level(det_barrier2(uv - off_x), oct_lod);
+        let r  = sample_height_geom_level(det_barrier2(uv + off_x), oct_lod);
+        let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) + off_y), oct_lod));
+        let b  = sample_height_geom_level(det_barrier2(uv + off_y), oct_lod);
+        let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) + off_y), oct_lod));
         let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
         let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
         let world_texel = oct_texel * spacing;
@@ -2348,14 +2348,14 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
         let oct_texel = det_barrier2(texel_uv * 2.0);
         let off_x = det_barrier2(vec2<f32>(oct_texel.x, 0.0));
         let off_y = det_barrier2(vec2<f32>(0.0, oct_texel.y));
-        let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) - off_y, oct_lod));
-        let t  = sample_height_geom_level(uv - off_y, oct_lod);
-        let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) - off_y, oct_lod));
-        let l  = sample_height_geom_level(uv - off_x, oct_lod);
-        let r  = sample_height_geom_level(uv + off_x, oct_lod);
-        let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) + off_y, oct_lod));
-        let b  = sample_height_geom_level(uv + off_y, oct_lod);
-        let br = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) + off_y, oct_lod));
+        let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) - off_y), oct_lod));
+        let t  = sample_height_geom_level(det_barrier2(uv - off_y), oct_lod);
+        let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) - off_y), oct_lod));
+        let l  = sample_height_geom_level(det_barrier2(uv - off_x), oct_lod);
+        let r  = sample_height_geom_level(det_barrier2(uv + off_x), oct_lod);
+        let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) + off_y), oct_lod));
+        let b  = sample_height_geom_level(det_barrier2(uv + off_y), oct_lod);
+        let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) + off_y), oct_lod));
         let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
         let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
         let world_texel = oct_texel * spacing;
@@ -2369,14 +2369,14 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
         let oct_texel = det_barrier2(texel_uv * 4.0);
         let off_x = det_barrier2(vec2<f32>(oct_texel.x, 0.0));
         let off_y = det_barrier2(vec2<f32>(0.0, oct_texel.y));
-        let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) - off_y, oct_lod));
-        let t  = sample_height_geom_level(uv - off_y, oct_lod);
-        let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) - off_y, oct_lod));
-        let l  = sample_height_geom_level(uv - off_x, oct_lod);
-        let r  = sample_height_geom_level(uv + off_x, oct_lod);
-        let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) + off_y, oct_lod));
-        let b  = sample_height_geom_level(uv + off_y, oct_lod);
-        let br = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) + off_y, oct_lod));
+        let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) - off_y), oct_lod));
+        let t  = sample_height_geom_level(det_barrier2(uv - off_y), oct_lod);
+        let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) - off_y), oct_lod));
+        let l  = sample_height_geom_level(det_barrier2(uv - off_x), oct_lod);
+        let r  = sample_height_geom_level(det_barrier2(uv + off_x), oct_lod);
+        let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) + off_y), oct_lod));
+        let b  = sample_height_geom_level(det_barrier2(uv + off_y), oct_lod);
+        let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) + off_y), oct_lod));
         let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
         let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
         let world_texel = oct_texel * spacing;
@@ -2397,14 +2397,14 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
     let offset_x = vec2<f32>(texel_size.x, 0.0);
     let offset_y = vec2<f32>(0.0, texel_size.y);
 
-    let tl = det_barrier(sample_height_geom(det_barrier2(uv - offset_x) - offset_y));
-    let t = sample_height_geom(uv - offset_y);
-    let tr = det_barrier(sample_height_geom(det_barrier2(uv + offset_x) - offset_y));
-    let l = sample_height_geom(uv - offset_x);
-    let r = sample_height_geom(uv + offset_x);
-    let bl = det_barrier(sample_height_geom(det_barrier2(uv - offset_x) + offset_y));
-    let b = sample_height_geom(uv + offset_y);
-    let br = det_barrier(sample_height_geom(det_barrier2(uv + offset_x) + offset_y));
+    let tl = det_barrier(sample_height_geom(det_barrier2(det_barrier2(uv - offset_x) - offset_y)));
+    let t = sample_height_geom(det_barrier2(uv - offset_y));
+    let tr = det_barrier(sample_height_geom(det_barrier2(det_barrier2(uv + offset_x) - offset_y)));
+    let l = sample_height_geom(det_barrier2(uv - offset_x));
+    let r = sample_height_geom(det_barrier2(uv + offset_x));
+    let bl = det_barrier(sample_height_geom(det_barrier2(det_barrier2(uv - offset_x) + offset_y)));
+    let b = sample_height_geom(det_barrier2(uv + offset_y));
+    let br = det_barrier(sample_height_geom(det_barrier2(det_barrier2(uv + offset_x) + offset_y)));
 
     let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
     let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
@@ -5788,7 +5788,7 @@ fn fs_aov_main(input : VertexOutput) -> FragmentOutput {
 fn clipmap_decode_octahedral(encoded: vec2<f32>) -> vec3<f32> {
     var normal = vec3<f32>(
         encoded,
-        1.0 - abs(encoded.x) - abs(encoded.y),
+        det_barrier(1.0 - abs(encoded.x)) - abs(encoded.y),
     );
     if (normal.z < 0.0) {
         let old_x = normal.x;
@@ -5820,7 +5820,7 @@ fn clipmap_sample_height_level(
         max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0)),
     );
     let level_cell = det_div2(uv, level_step);
-    let level_base = floor(level_cell) * level_step;
+    let level_base = det_barrier2(floor(level_cell) * level_step);
     let level_t = fract(level_cell);
     let h00 = sample_height_bilinear(level_base);
     let h10 = sample_height_bilinear(det_barrier2(level_base) + vec2<f32>(level_step.x, 0.0));
@@ -5862,15 +5862,15 @@ fn clipmap_resolve_vertex(
         clip_morph.y < 0.0,
     );
     let skirt_offset = select(0.0, skirt_depth, clip_morph.x < 0.0);
-    let world_z_centered = (det_barrier(det_barrier(h_disp) - det_barrier(h_center)) - skirt_offset) * h_exag;
-    let world_z_original = (det_barrier(h_disp) - skirt_offset) * h_exag;
-    let instance_base = instance_transform * vec4<f32>(clip_position, 1.0);
+    let world_z_centered = det_barrier((det_barrier(det_barrier(h_disp) - det_barrier(h_center)) - skirt_offset) * h_exag);
+    let world_z_original = det_barrier((det_barrier(h_disp) - skirt_offset) * h_exag);
+    let instance_base = det_mat4_mul_vec4(instance_transform, vec4<f32>(clip_position, 1.0));
     let geodetic_up = det_normalize3(
-        (instance_transform * vec4<f32>(clipmap_decode_octahedral(clip_normal_oct), 0.0)).xyz,
+        (det_mat4_mul_vec4(instance_transform, vec4<f32>(clipmap_decode_octahedral(clip_normal_oct), 0.0))).xyz,
     );
     var out: ClipmapResolvedVertex;
-    out.world_position = instance_base.xyz + geodetic_up * world_z_original;
-    out.centered_position = instance_base.xyz + geodetic_up * world_z_centered;
+    out.world_position = det_barrier3(instance_base.xyz) + det_barrier3(geodetic_up * world_z_original);
+    out.centered_position = det_barrier3(instance_base.xyz) + det_barrier3(geodetic_up * world_z_centered);
     out.geodetic_up = geodetic_up;
     out.uv = uv;
     return out;
@@ -5888,11 +5888,13 @@ fn clipmap_raster_position(
 
 @fragment
 fn fs_main(input : VertexOutput) -> FragmentOutput {
+    det_seed(input.clip_position.x);
     return forward_shade_with_feedback(input);
 }
 
 @fragment
 fn fs_orbis_coverage(input : VertexOutput) -> OrbisCoverageOutput {
+    det_seed(input.clip_position.x);
     let shaded = forward_shade_with_feedback(input);
     var out: OrbisCoverageOutput;
     out.color = shaded.color;
@@ -5958,7 +5960,7 @@ fn vs_clipmap_main(
 
 fn orbis_project(matrix: mat4x4<f32>, position: vec3<f32>) -> vec4<f32> {
     let clip = det_mat4_mul_vec4(matrix, vec4<f32>(position, 1.0));
-    return vec4<f32>(clip.xy / clip.w, clip.w, 0.0);
+    return vec4<f32>(det_div2(clip.xy, vec2<f32>(clip.w)), clip.w, 0.0);
 }
 
 // The indirect index stream can reference a vertex many times.  Give each
@@ -5990,6 +5992,7 @@ fn orbis_vertex_is_selected(vertex_index: u32) -> bool {
 
 @compute @workgroup_size(64)
 fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    det_seed(f32(invocation.x));
     let index = invocation.x;
     if (index >= arrayLength(&orbis_projection_samples)) {
         return;
@@ -6034,7 +6037,7 @@ fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
     // This is the naive implementation the production camera-relative path
     // must materially outperform.
     let absolute = orbis_probe.anchor_abs.xyz
-        + (orbis_probe.local_to_ecef * vec4<f32>(raster_position, 0.0)).xyz;
+        + det_barrier3((det_mat4_mul_vec4(orbis_probe.local_to_ecef, vec4<f32>(raster_position, 0.0))).xyz);
     let production_clip = det_mat4_mul_vec4(
         u_terrain.proj,
         det_mat4_mul_vec4(
@@ -6043,9 +6046,9 @@ fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
         ),
     );
     var sample: OrbisProjectionSample;
-    sample.production = orbis_project(u_terrain.proj * u_terrain.view, raster_position);
+    sample.production = orbis_project(det_mat4_mul_mat4(u_terrain.proj, u_terrain.view), raster_position);
     sample.naive = orbis_project(orbis_probe.absolute_view_proj, absolute);
-    sample.naive.w = production_clip.z / production_clip.w;
+    sample.naive.w = det_div(production_clip.z, production_clip.w);
     sample.resolved_local = vec4<f32>(raster_position, 1.0);
     sample.production.w = select(0.0, 1.0, clip_morph.x < 0.0);
     orbis_projection_samples[index] = sample;
