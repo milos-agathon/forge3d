@@ -406,9 +406,8 @@ fn lod_uniform_carries_planet_fields_in_the_existing_binding() {
     assert_eq!(params.planet_params, [10.0, 2.0, 1.0, 0.0]);
     assert_eq!(params.camera_up, [0.0, 0.0, 1.0, 0.0]);
 
-    let module =
-        naga::front::wgsl::parse_str(include_str!("../../../shaders/clipmap_lod_select.wgsl"))
-            .expect("valid terrain LOD WGSL");
+    let module = naga::front::wgsl::parse_str(&crate::shader_sources::clipmap_lod_select())
+        .expect("valid terrain LOD WGSL");
     let shader_span = module
         .types
         .iter()
@@ -445,13 +444,31 @@ fn every_tile_storage_consumer_matches_the_rust_stride() {
     let rust_stride = std::mem::size_of::<TileInfo>() as u32;
     assert_eq!(rust_stride, 56);
     assert_eq!(
-        tile_info_span(include_str!("../../../shaders/clipmap_lod_select.wgsl")),
+        tile_info_span(&crate::shader_sources::clipmap_lod_select()),
         rust_stride
     );
     assert_eq!(
         tile_info_span(include_str!("../../../shaders/hzb_cull.wgsl")),
         rust_stride
     );
+}
+
+#[test]
+fn globe_frustum_test_is_det_pinned_and_seeded() {
+    let source = crate::shader_sources::clipmap_lod_select();
+    let (module, _, violations) =
+        crate::verify::determinism_lint::analyze_source("clipmap_lod_select", &source);
+    assert!(module.is_some(), "{violations:#?}");
+    let pinned: Vec<_> = violations
+        .iter()
+        .filter(|violation| {
+            violation.function == "globe_frustum_visible"
+                || (violation.function == "cs_main" && violation.kind == "missing_det_seed")
+        })
+        .map(ToString::to_string)
+        .collect();
+    assert!(pinned.is_empty(), "{pinned:#?}");
+    assert!(source.contains("fn globe_frustum_visible("));
 }
 
 #[test]
@@ -608,9 +625,6 @@ fn adapter_unavailable_skip_accepts_only_the_actual_typed_error() {
 #[cfg(feature = "enable-globe")]
 #[test]
 fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
-    use glam::DVec3;
-    use std::time::{Duration, Instant};
-
     let context = match crate::core::gpu::try_ctx() {
         Ok(context) => context,
         Err(error) if is_adapter_unavailable(&error) => {
@@ -619,6 +633,50 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
         }
         Err(error) => panic!("planetary LOD adapter setup failed: {error}"),
     };
+    assert_planetary_lod_parity_sweep(
+        &context.device,
+        &context.queue,
+        &context.adapter.get_info(),
+    );
+}
+
+#[cfg(all(feature = "enable-globe", windows))]
+#[test]
+fn gpu_and_cpu_select_identical_planetary_tile_ids_on_warp() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::DX12,
+        ..Default::default()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::LowPower,
+        compatible_surface: None,
+        force_fallback_adapter: true,
+    }))
+    .expect("Windows ships the WARP DX12 software adapter");
+    let info = adapter.get_info();
+    assert_eq!(info.device_type, wgpu::DeviceType::Cpu, "{info:?}");
+    let (device, queue) = pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            label: Some("planetary_lod_parity_warp"),
+            required_features: wgpu::Features::empty(),
+            required_limits: adapter.limits(),
+        },
+        None,
+    ))
+    .expect("WARP device");
+    assert_planetary_lod_parity_sweep(&device, &queue, &info);
+}
+
+#[cfg(feature = "enable-globe")]
+fn assert_planetary_lod_parity_sweep(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    adapter: &wgpu::AdapterInfo,
+) {
+    use glam::DVec3;
+    use std::time::{Duration, Instant};
+
+    let adapter = format!("{} ({:?}, {:?})", adapter.name, adapter.backend, adapter.device_type);
     let config = GpuLodConfig {
         pixel_error_budget: 128.0,
         terrain_width: 10_000.0,
@@ -626,7 +684,7 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
         max_lod: 4,
         ..Default::default()
     };
-    let selector = GpuLodSelector::new(&context.device, config.clone());
+    let selector = GpuLodSelector::new(device, config.clone());
     let radius = 5_000.0_f64;
     let world_tiles: Vec<_> = (0..5)
         .flat_map(|lat_index| {
@@ -684,7 +742,7 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
         })
         .collect();
     let resources = selector
-        .create_draw_resources(&context.device, &seed_tiles, &templates)
+        .create_draw_resources(device, &seed_tiles, &templates)
         .unwrap();
     let view = Mat4::look_at_rh(Vec3::ZERO, Vec3::NEG_Z, Vec3::Y);
     let projection = Mat4::perspective_rh(config.fov_y, 16.0 / 9.0, 1.0, 40_000.0);
@@ -702,15 +760,13 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
         let anchor = seed_frame.lonlat_alt_to_ecef(lon, lat, altitude).unwrap();
         let frame = crate::terrain::clipmap::globe::GlobeFrame::globe(radius, anchor).unwrap();
         let tiles = make_tiles(&frame);
-        let mut encoder = context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("planetary_lod_parity"),
             });
         let provenance = LodSelectionProvenance(1_000 + camera_index as u64);
         let ticket = selector
             .encode_indirect_globe_tracked(
-                &context.queue,
+                queue,
                 &mut encoder,
                 &resources,
                 &tiles,
@@ -723,19 +779,19 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
             )
             .expect("valid globe frame must produce planetary LOD parameters")
             .expect("a readback slot must be available after the prior result completes");
-        context.queue.submit(Some(encoder.finish()));
+        queue.submit(Some(encoder.finish()));
         assert!(resources.mark_selection_submitted(ticket));
         let started = Instant::now();
         let completed = loop {
             if let Some(completed) = resources
-                .try_read_selection(&context.device)
+                .try_read_selection(device)
                 .expect("planetary selection readback")
             {
                 break completed;
             }
             assert!(
                 started.elapsed() < Duration::from_secs(10),
-                "camera {camera_index} GPU readback timed out"
+                "camera {camera_index} GPU readback timed out on {adapter}"
             );
             std::thread::yield_now();
         };
@@ -757,12 +813,12 @@ fn gpu_and_cpu_select_identical_planetary_tile_ids_for_adapter_sweep() {
             .collect();
         cpu_ids.sort_unstable();
         gpu_ids.sort_unstable();
-        assert_eq!(gpu_ids, cpu_ids, "camera {camera_index}");
+        assert_eq!(gpu_ids, cpu_ids, "camera {camera_index} on {adapter}");
         assert!(
             gpu_ids
                 .iter()
                 .any(|&(tile_id, _)| tile_id == TileInfo::pack_id(0, 31, 31)),
-            "wide antipodal bound must survive the GPU horizon test for camera {camera_index}"
+            "wide antipodal bound must survive the GPU horizon test for camera {camera_index} on {adapter}"
         );
         visible_sets.insert(gpu_ids.iter().map(|&(id, _)| id).collect::<Vec<_>>());
         selected_lods.extend(gpu_ids.iter().map(|&(_, lod)| lod));
