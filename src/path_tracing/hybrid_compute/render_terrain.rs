@@ -214,6 +214,8 @@ fn observe_runtime_contract(
         );
         check("terrain_height_tex.samples", &desc.heights, 0.0, 0.0);
     } else {
+        let (uploaded_exposure, uploaded_sun_intensity, uploaded_sun_color, uploaded_env_intensity) =
+            uploaded_radiometry(desc);
         let mut exact = |name: &str, values: &[f32], expected: &[f32]| {
             for (axis, (&value, &target)) in values.iter().zip(expected).enumerate() {
                 let name = if values.len() == 1 {
@@ -281,7 +283,7 @@ fn observe_runtime_contract(
         exact(
             "uniforms.cam_exposure",
             &[base.cam_exposure],
-            &[desc.exposure],
+            &[uploaded_exposure],
         );
         exact(
             "uniforms.frame_index",
@@ -338,7 +340,7 @@ fn observe_runtime_contract(
         exact(
             "lighting.light_color",
             &lighting.light_color,
-            &desc.sun_color.map(|c| c * desc.sun_intensity),
+            &uploaded_sun_color.map(|c| c * uploaded_sun_intensity),
         );
         exact(
             "lighting.shadows_enabled",
@@ -359,7 +361,7 @@ fn observe_runtime_contract(
         exact(
             "terrain.h_params",
             &terrain.h_params,
-            &[h_min, h_max, desc.exaggeration, desc.env_intensity],
+            &[h_min, h_max, desc.exaggeration, uploaded_env_intensity],
         );
         exact(
             "terrain.albedo_pad",
@@ -995,6 +997,20 @@ fn finite3(v: [f32; 3]) -> bool {
     v.iter().all(|x| x.is_finite())
 }
 
+/// Exposure, sun intensity, sun color and environment intensity exactly as
+/// uploaded: AETHER clamps extreme radiometric scales to the binary16 range so
+/// they cannot blacken hits or misses. The runtime contract compares the
+/// observed uniforms against these values, not the unclamped request.
+fn uploaded_radiometry(desc: &TerrainReferenceDesc) -> (f32, f32, [f32; 3], f32) {
+    let clamp = |value: f32| value.clamp(0.0, AETHER_RADIOMETRIC_SCALE_MAX);
+    (
+        clamp(desc.exposure),
+        clamp(desc.sun_intensity),
+        desc.sun_color.map(clamp),
+        clamp(desc.env_intensity),
+    )
+}
+
 fn factor_sun_lighting(sun_intensity: f32, sun_color: [f32; 3]) -> ([f32; 3], f32, [f32; 3]) {
     (
         [
@@ -1216,12 +1232,7 @@ impl HybridPathTracer {
         let queue = &try_ctx()?.queue;
         let (width, height) = (desc.width, desc.height);
         validate_desc(desc)?;
-        let exposure = desc.exposure.clamp(0.0, AETHER_RADIOMETRIC_SCALE_MAX);
-        let sun_intensity = desc.sun_intensity.clamp(0.0, AETHER_RADIOMETRIC_SCALE_MAX);
-        let sun_color = desc
-            .sun_color
-            .map(|value| value.clamp(0.0, AETHER_RADIOMETRIC_SCALE_MAX));
-        let env_intensity = desc.env_intensity.clamp(0.0, AETHER_RADIOMETRIC_SCALE_MAX);
+        let (exposure, sun_intensity, sun_color, env_intensity) = uploaded_radiometry(desc);
         let mut tracked = TrackedGpu::new();
 
         // --- Terrain scene: min-max pyramid + env map (validates the DEM,
