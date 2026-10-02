@@ -1,0 +1,6 @@
+{
+  "code": "junit_error",
+  "message": "junit.xml: physical lane requires zero failures, errors, and skips",
+  "schema": "forge3d.nephele.verification_error/1",
+  "status": "FAIL"
+}

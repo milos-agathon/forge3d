@@ -5,3 +5,50 @@ assets/swiss-legend.png filter=lfs diff=lfs merge=lfs -text
 assets/astro/*.dat text eol=lf
 tests/data/horizons_vectors.dat text eol=lf
 tests/data/prometheus/gore_range_dem.json text eol=lf
+
+# NEPHELE committed blue-noise bytes are hash-bound across platforms.
+assets/media/nephele_blue_noise_8x8.txt text eol=lf
+
+# NEPHELE evidence binds these source and fixture bytes to Git blobs.
+python/forge3d/media.py text eol=lf
+scripts/generate_media_fixture.py text eol=lf
+scripts/nephele_fixture_masks.py text eol=lf
+scripts/nephele_heterogeneous_comparator.py text eol=lf
+scripts/nephele_majorant_domain_probe.py text eol=lf
+scripts/nephele_shader_analyzer.py text eol=lf
+scripts/record_media_reference_convergence.py text eol=lf
+scripts/run_media_physical_capture.py text eol=lf
+scripts/nephele_b1_diagnostic.py text eol=lf
+scripts/nephele_b6_environment_diagnostic.py text eol=lf
+scripts/nephele_b8_occlusion_diagnostic.py text eol=lf
+# Diagnostic arrays, capture scripts and registrations are bound by raw hashes.
+docs/audits/nephele-*/** -text
+docs/audits/nephele-*.json -text
+src/media/density.rs text eol=lf
+src/media/diagnostics.rs text eol=lf
+src/media/lighting.rs text eol=lf
+src/media/mod.rs text eol=lf
+src/media/model.rs text eol=lf
+src/media/reference.rs text eol=lf
+src/media/tests.rs text eol=lf
+src/media/tracking.rs text eol=lf
+src/media_py.rs text eol=lf
+src/path_tracing/hybrid_compute/media_reference.rs text eol=lf
+src/path_tracing/hybrid_compute/render_terrain.rs text eol=lf
+src/path_tracing/hybrid_compute/terrain_heightfield.rs text eol=lf
+src/shader_sources.rs text eol=lf
+src/shaders/atmosphere/prometheus_spectral_reference.wgsl text eol=lf
+src/shaders/hybrid_terrain_traversal.wgsl text eol=lf
+src/shaders/nephele_terrain_trace_adapter.wgsl text eol=lf
+src/shaders/sdf_primitives.wgsl text eol=lf
+src/terrain/camera.rs text eol=lf
+src/terrain/mod.rs text eol=lf
+tests/nephele/*.json text eol=lf
+tests/nephele/fixture/*.json text eol=lf
+
+scripts/generate_media_blue_noise.py text eol=lf
+assets/media/nephele_blue_noise_provenance.json text eol=lf
+
+# Preserve the bounded-round raw evidence and diagnostic producer hashes.
+docs/audits/nephele-bounded-round-2026-10-01/** -text
+scripts/nephele_shadow_inscatter_diagnostic.py -text

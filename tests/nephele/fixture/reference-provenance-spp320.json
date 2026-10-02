@@ -1,0 +1,509 @@
+{
+  "acceptance_eligible": true,
+  "algorithm": "integrated-hybrid-terrain-spectral-ratio-delta-tracking-surface-env-mis-v3",
+  "assembled_sources": {
+    "terrain_media_reference_module_sha256": "805fb9d2fcddab6c11c183629bddbcc8934e1c34fe34b18a264c14de2d1958ea"
+  },
+  "camera_contract": {
+    "forward": [
+      4.2862541960175804e-08,
+      -0.196116104722023,
+      -0.9805806875228882
+    ],
+    "fov_y": 45.0,
+    "look_at": [
+      0.0,
+      15.0,
+      0.0
+    ],
+    "origin": [
+      -2.185569428547751e-06,
+      24.999998092651367,
+      50.0
+    ],
+    "right": [
+      1.0,
+      -0.0,
+      4.371138828673793e-08
+    ],
+    "up": [
+      8.572507148585373e-09,
+      0.9805806875228882,
+      -0.196116104722023
+    ]
+  },
+  "crop": [
+    0,
+    0,
+    64,
+    64
+  ],
+  "diagnostic_reason": null,
+  "diagnostics": {
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "density_device_local_bytes": 0,
+    "driver": "NVIDIA 610.60",
+    "energy_accounting_residual": null,
+    "executed_multi_scatter": true,
+    "froxel_device_local_bytes": 0,
+    "host_visible_bytes": 270336,
+    "majorant_device_local_bytes": 0,
+    "majorant_proof": "TrilinearConvexHull",
+    "majorant_valid": true,
+    "multiple_scatter_luminance": null,
+    "sample_count": 1310720,
+    "single_scatter_luminance": null,
+    "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+    "staging_readback_bytes": 0,
+    "step_count": 14882610,
+    "temporal_history_decision": "not_applicable",
+    "temporal_history_reason": "independent reference samples do not reuse temporal history"
+  },
+  "full_viewport": [
+    64,
+    64
+  ],
+  "native_runtime": {
+    "native_sha256": "7661b8f81f6a5253d035b8d2e6241ccf73e8b1c001c4db6981b5c65a3012607f",
+    "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+    "wheel_filename": "forge3d-1.40.0-cp310-abi3-win_amd64.whl",
+    "wheel_native_member": "forge3d/_forge3d.pyd",
+    "wheel_sha256": "e1e1f8444ff0300bf63ec24963b70a1578871647be2a3a9753e7b3a26dd7928e"
+  },
+  "runtime_partition": {
+    "kind": "process_pool_max_workers",
+    "value": 1
+  },
+  "sample_identity": {
+    "algorithm": "per-pixel-absolute-sample-index-v1",
+    "range": [
+      0,
+      320
+    ],
+    "seed": 1313165384
+  },
+  "samples_per_pixel": 320,
+  "scene_inputs": {
+    "atmosphere": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47",
+    "camera": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1",
+    "crop": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04",
+    "exposure": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31",
+    "material": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789",
+    "medium": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9",
+    "sun": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02",
+    "terrain": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315",
+    "terrain_dem": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+    "tonemap": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034"
+  },
+  "schema": "forge3d.nephele.reference_provenance/2",
+  "seed": 1313165384,
+  "source_inputs": {
+    "python/forge3d/media.py": "aa59e0aad1c65f75ccea2f7be7ef5356aca3f072828003806c97a91c7a8febab",
+    "scripts/generate_media_fixture.py": "f202aa0fd3f6a6454f4cb10483b725bfa3789bf41efd466c5a5c5491394bcb2e",
+    "src/media/density.rs": "c4a5e1fbe4efaf04bf0414e807f414296bfb4083dd26be90bef6ee43b91e5b68",
+    "src/media/diagnostics.rs": "396d38375e9b5fbfed470daf70213761d235b7f57ba67afa57d4e0c86d2ef259",
+    "src/media/lighting.rs": "f226f6c1dc2cd185528d00bd4c5af53d9293102093ef8b2ee5d33ab0127242c4",
+    "src/media/mod.rs": "19fcbb13f2ace3f5c0bc339b40d35e6bfd82aa69fff3c2e8d2522147e64455cc",
+    "src/media/model.rs": "f0c22c976aee8691a404bcbbfbed5d71884222eb4bbc396b13c5b18a14bbd996",
+    "src/media/reference.rs": "c0ae6463b8acccc3be58d576e148b0e4aae93754be1de0da8fa9df39325c671c",
+    "src/media/tests.rs": "384b2f6819eee8a89dd3cdb08c5e404a7f091df6a2f7cb2fc4d2eabbe35072f3",
+    "src/media/tracking.rs": "4d4ed205602d42444cb9fafd61bbe9fa601862200aa10f7882f065bf633a9491",
+    "src/media_py.rs": "1cc2373940262b3b6abe43aca0878b2710145fb8e90f05e2dc67ddaef66e16c3",
+    "src/path_tracing/hybrid_compute/media_reference.rs": "1ad86fc34810e3dfc7c4d35a1c8a1922c93f398157a65f15a92a5a66f76f2b2b",
+    "src/path_tracing/hybrid_compute/render_terrain.rs": "f49a4f0bd1a4c2e2ed33339f1d7dffb68b8d8bb799dbc35d1a508b557ec15b99",
+    "src/path_tracing/hybrid_compute/terrain_heightfield.rs": "a2ead69860f26c5b8a2e837bcad6ec4c282e785933c8751f02742c68f79a27fd",
+    "src/shader_sources.rs": "e4b8888f070537de2d04883d935ac7dbcf0c3af286a1b6481c25b6e1e9e5a8a5",
+    "src/shaders/hybrid_terrain_traversal.wgsl": "f1a62cf69ef4fc19e3177e63b2c5ef66da297bb3da5001454735541d9e1743e2",
+    "src/shaders/nephele_terrain_trace_adapter.wgsl": "25e7e14a796ec9dd9de12c265a1cfc3d97a961e8dda538caadb6f25b9761ac8b",
+    "src/terrain/camera.rs": "52275122317af35fb853c1fcc05df2854720a6a4a575bd1d7c2597496b4ee81b",
+    "src/terrain/mod.rs": "47d3eceb024097448855feddd1b0df3f135d0ebbed09eef5c9c73310890b181e"
+  },
+  "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+  "spatial_tiles": [
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 1
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 2
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 3
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 4
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 5
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 6
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 7
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 8
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 9
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 10
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 11
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 12
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 13
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 14
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 15
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 16
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 17
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 18
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 19
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 20
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 21
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 22
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 23
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 24
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 25
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 26
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 27
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 28
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 29
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 30
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 31
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 32
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 33
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 34
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 35
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 36
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 37
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 38
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 39
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 40
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 41
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 42
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 43
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 44
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 45
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 46
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 47
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 48
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 49
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 50
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 51
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 52
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 53
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 54
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 55
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 56
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 57
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 58
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 59
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 60
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 61
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 62
+    },
+    {
+      "height": 1,
+      "width": 64,
+      "x": 0,
+      "y": 63
+    }
+  ]
+}

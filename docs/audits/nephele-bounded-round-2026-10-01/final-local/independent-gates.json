@@ -1,0 +1,368 @@
+{
+  "schema": "forge3d.nephele.bounded_round_gate_diagnostics/1",
+  "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+  "physical_acceptance": false,
+  "reason": "Independent local measurements; six-case physical acceptance and the full verifier retain their own failures.",
+  "gates": {
+    "gate1": {
+      "status": "passed",
+      "metrics": {
+        "homogeneous": {
+          "count": 1000000,
+          "mean": 0.605711,
+          "variance": 0.2388254233044233,
+          "standard_error": 0.0004886976808870933,
+          "analytic": 0.6065306597126334,
+          "three_standard_error_pass": true
+        },
+        "heterogeneous": {
+          "count": 1000000,
+          "mean": 0.4323316609017278,
+          "variance": 0.08198887506688385,
+          "standard_error": 0.0002863369956308193,
+          "reference": {
+            "count": 100000000,
+            "mean": 0.43241938,
+            "variance": 0.24543286225474423,
+            "standard_error": 4.9541181077437406e-05
+          },
+          "relative_error": 0.00020285653772550573
+        },
+        "majorant": {
+          "probe_count": 1000000,
+          "violation_count": 0,
+          "max_excess": -5.960464477539063e-08,
+          "measured_representation_error": 0.0
+        },
+        "russian_roulette": {
+          "on": {
+            "count": 1000000,
+            "mean": 0.314637,
+            "variance": 0.16853822676922678,
+            "standard_error": 0.0004105340750403391,
+            "confidence_95": [
+              0.3138323532129209,
+              0.3154416467870791
+            ]
+          },
+          "off": {
+            "count": 1000000,
+            "mean": 0.314603204687953,
+            "variance": 0.1527075438083386,
+            "standard_error": 0.00039077812606175716,
+            "confidence_95": [
+              0.31383727956087193,
+              0.31536912981503407
+            ]
+          },
+          "relative_difference": 0.00010742202095659897,
+          "analytic_oracle": 0.3147754722298932
+        }
+      }
+    },
+    "gate2": {
+      "status": "passed",
+      "metrics": {
+        "terms": {
+          "transmitted": {
+            "count": 10000000,
+            "mean": 0.7216797,
+            "variance": 0.20085813069372305,
+            "standard_error": 0.00014172442650923765
+          },
+          "scattered_out": {
+            "count": 10000000,
+            "mean": 0.2144632,
+            "variance": 0.16846875269263528,
+            "standard_error": 0.00012979551328633638
+          },
+          "absorbed": {
+            "count": 10000000,
+            "mean": 0.0641738,
+            "variance": 0.06005552939911294,
+            "standard_error": 7.74955027076494e-05
+          },
+          "incident": {
+            "count": 10000000,
+            "mean": 1.0,
+            "variance": 0.0,
+            "standard_error": 0.0
+          },
+          "closure_residual": {
+            "count": 10000000,
+            "mean": 0.0003167,
+            "variance": 0.42943364264447426,
+            "standard_error": 0.00020722780765246594
+          }
+        },
+        "relative_residual": 0.0003166999999999476,
+        "sample_count": 10000000,
+        "uncertainty": {
+          "residual_standard_error": 0.0002072154465249807,
+          "normal_approximation_false_fail_probability": 1.3937588586528972e-06
+        },
+        "sample_count_derivation": {
+          "rule": "For variance sum V and threshold tau=1e-3, SE=sqrt(V/N), k=tau/SE, and N=k^2*V/tau^2. The owner selected N; k and the normal-approximation false-fail probability are measured consequences, not additional acceptance thresholds.",
+          "owner_selected_N": 10000000,
+          "estimated_variance_sum": 0.4293824127854713,
+          "threshold": 0.001,
+          "threshold_in_standard_errors": 4.8258950612518445
+        }
+      }
+    },
+    "gate6": {
+      "status": "passed",
+      "metrics": {
+        "frame_hashes": [
+          "70e8cb1636d570028eb187fd409e11f0bee40889dbbf9b0774ea1a167c5cf673",
+          "70e8cb1636d570028eb187fd409e11f0bee40889dbbf9b0774ea1a167c5cf673"
+        ],
+        "run_manifests": [
+          {
+            "adapter_identity_sha256": "550270326858ab8c46d87274a88370db231d0be7c244ce0973358ab50c6df736",
+            "backend": "vulkan",
+            "camera_contract": {
+              "look_at": [
+                0.0,
+                15.0,
+                0.0
+              ],
+              "right": [
+                1.0,
+                -0.0,
+                4.371138828673793e-08
+              ],
+              "up": [
+                8.572507148585373e-09,
+                0.9805806875228882,
+                -0.196116104722023
+              ],
+              "forward": [
+                4.2862541960175804e-08,
+                -0.196116104722023,
+                -0.9805806875228882
+              ],
+              "origin": [
+                -2.185569428547751e-06,
+                24.999998092651367,
+                50.0
+              ],
+              "fov_y": 45.0
+            },
+            "diagnostics": {
+              "adapter": "NVIDIA GeForce RTX 3070",
+              "backend": "Vulkan",
+              "density_device_local_bytes": 51200,
+              "driver": "NVIDIA 610.60",
+              "energy_accounting_residual": 2.980232238769531e-07,
+              "executed_multi_scatter": true,
+              "froxel_device_local_bytes": 913248,
+              "host_visible_bytes": 0,
+              "majorant_device_local_bytes": 0,
+              "majorant_proof": "TrilinearConvexHull",
+              "majorant_valid": true,
+              "multiple_scatter_dispatches": 1,
+              "multiple_scatter_luminance": 0.046786740320385434,
+              "sample_count": 4096,
+              "single_scatter_dispatches": 1,
+              "single_scatter_luminance": 0.1519101150141786,
+              "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+              "staging_readback_bytes": 153600,
+              "step_count": 341665,
+              "sun_transmittance_bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+              "sun_transmittance_executed_steps": 36723,
+              "sun_transmittance_max_abs_error": 0.008301794528961182,
+              "sun_transmittance_max_segment_length": 68.22770690917969,
+              "sun_transmittance_method": "bounded_nested_midpoint",
+              "temporal_history_decision": "rejected",
+              "temporal_history_reason": "no prior media history exists",
+              "terrain_shading_model": "lambert_physical",
+              "terrain_trace_queries": 1244
+            },
+            "fixture_manifest_sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817",
+            "frame_file": "froxel-frame-run-a.npy",
+            "frame_sha256": "70e8cb1636d570028eb187fd409e11f0bee40889dbbf9b0774ea1a167c5cf673",
+            "head_sha": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+            "input_bundle_sha256": "7cabc3bf1f21ace7424015fb33aadceb25105185792f2487eaa43c5a4e602b8a",
+            "medium_disabled_rgb_sha256": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+            "presentation_identity": {
+              "capture_api": "TerrainRenderer._capture_nephele_acceptance",
+              "color_pipeline": [
+                "white_balance",
+                "exposure",
+                "aces",
+                "lut",
+                "iec_61966_2_1_srgb8"
+              ],
+              "no_medium_same_call": true
+            },
+            "process_id": 26376,
+            "run_nonce": "fbd5bb7feddf3206c9f6c6703c235d75734dfc0784d160e961e2985842051bd7",
+            "schema": "forge3d.nephele.clean_run/1",
+            "tracked_worktree_clean": true
+          },
+          {
+            "adapter_identity_sha256": "550270326858ab8c46d87274a88370db231d0be7c244ce0973358ab50c6df736",
+            "backend": "vulkan",
+            "camera_contract": {
+              "look_at": [
+                0.0,
+                15.0,
+                0.0
+              ],
+              "right": [
+                1.0,
+                -0.0,
+                4.371138828673793e-08
+              ],
+              "up": [
+                8.572507148585373e-09,
+                0.9805806875228882,
+                -0.196116104722023
+              ],
+              "forward": [
+                4.2862541960175804e-08,
+                -0.196116104722023,
+                -0.9805806875228882
+              ],
+              "origin": [
+                -2.185569428547751e-06,
+                24.999998092651367,
+                50.0
+              ],
+              "fov_y": 45.0
+            },
+            "diagnostics": {
+              "adapter": "NVIDIA GeForce RTX 3070",
+              "backend": "Vulkan",
+              "density_device_local_bytes": 51200,
+              "driver": "NVIDIA 610.60",
+              "energy_accounting_residual": 2.980232238769531e-07,
+              "executed_multi_scatter": true,
+              "froxel_device_local_bytes": 913248,
+              "host_visible_bytes": 0,
+              "majorant_device_local_bytes": 0,
+              "majorant_proof": "TrilinearConvexHull",
+              "majorant_valid": true,
+              "multiple_scatter_dispatches": 1,
+              "multiple_scatter_luminance": 0.046786740320385434,
+              "sample_count": 4096,
+              "single_scatter_dispatches": 1,
+              "single_scatter_luminance": 0.1519101150141786,
+              "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+              "staging_readback_bytes": 153600,
+              "step_count": 341665,
+              "sun_transmittance_bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+              "sun_transmittance_executed_steps": 36723,
+              "sun_transmittance_max_abs_error": 0.008301794528961182,
+              "sun_transmittance_max_segment_length": 68.22770690917969,
+              "sun_transmittance_method": "bounded_nested_midpoint",
+              "temporal_history_decision": "rejected",
+              "temporal_history_reason": "no prior media history exists",
+              "terrain_shading_model": "lambert_physical",
+              "terrain_trace_queries": 1244
+            },
+            "fixture_manifest_sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817",
+            "frame_file": "froxel-frame-run-b.npy",
+            "frame_sha256": "70e8cb1636d570028eb187fd409e11f0bee40889dbbf9b0774ea1a167c5cf673",
+            "head_sha": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+            "input_bundle_sha256": "7cabc3bf1f21ace7424015fb33aadceb25105185792f2487eaa43c5a4e602b8a",
+            "medium_disabled_rgb_sha256": null,
+            "presentation_identity": {
+              "capture_api": "TerrainRenderer._capture_nephele_acceptance",
+              "color_pipeline": [
+                "white_balance",
+                "exposure",
+                "aces",
+                "lut",
+                "iec_61966_2_1_srgb8"
+              ],
+              "no_medium_same_call": false
+            },
+            "process_id": 18160,
+            "run_nonce": "f3948d7295d9ef643c1b838d52ae6b585194f9e6441413cc9a2b0febb21b2bfa",
+            "schema": "forge3d.nephele.clean_run/1",
+            "tracked_worktree_clean": true
+          }
+        ],
+        "sun_transmittance": {
+          "method": "bounded_nested_midpoint",
+          "bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+          "max_segment_length": 68.22770690917969,
+          "executed_steps": 36723,
+          "max_abs_error": 0.008301794528961182
+        },
+        "memory": {
+          "readback_bytes": 262144,
+          "staging_bytes": 153600,
+          "peak_host_visible_bytes": 171008,
+          "froxel_device_local_bytes": 913248,
+          "density_majorant_device_local_bytes": 51200
+        },
+        "aov_hashes_non_gating": {
+          "transmittance": "63e9e1a8990b3236552c6c822ced995eedb588b3fea24f3530a6514f9b2580b8",
+          "in_scatter": "bb4fe1048220408db98f59e0a7e4fd3c69b34c7a8ef4d1e953c47a2f609a587c",
+          "cloud_shadow": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60",
+          "optical_depth": "ee626fcab328f64326dacf2bc4b2da229ded37a7b1b37c655166ac466134720b"
+        }
+      }
+    },
+    "gate3": {
+      "status": "failed",
+      "metrics": {
+        "sky_cloud_delta_e_pass_fraction": 0.9168636721828212,
+        "godray_roi_ssim": 0.9056682492550964,
+        "cloud_shadow_delta_e_pass_fraction": 0.06486833654463713,
+        "medium_ablation_changed_fraction": 0.7830551989730423,
+        "terrain_occlusion_ablation_ssim": 0.9566974834371695,
+        "gate3_pass": false,
+        "gate4_pass": false,
+        "reference_in_scatter_shadow_mean_rgb": [
+          0.1903056800365448,
+          0.17367225885391235,
+          0.15249106287956238
+        ],
+        "realtime_in_scatter_shadow_mean_rgb": [
+          0.10694349557161331,
+          0.09706578403711319,
+          0.0850052461028099
+        ],
+        "physical_acceptance": false,
+        "reason": "Diagnostic visual recomputation; the full local physical verifier separately binds identity and all six gates."
+      }
+    },
+    "gate4": {
+      "status": "failed",
+      "metrics": {
+        "sky_cloud_delta_e_pass_fraction": 0.9168636721828212,
+        "godray_roi_ssim": 0.9056682492550964,
+        "cloud_shadow_delta_e_pass_fraction": 0.06486833654463713,
+        "medium_ablation_changed_fraction": 0.7830551989730423,
+        "terrain_occlusion_ablation_ssim": 0.9566974834371695,
+        "gate3_pass": false,
+        "gate4_pass": false,
+        "reference_in_scatter_shadow_mean_rgb": [
+          0.1903056800365448,
+          0.17367225885391235,
+          0.15249106287956238
+        ],
+        "realtime_in_scatter_shadow_mean_rgb": [
+          0.10694349557161331,
+          0.09706578403711319,
+          0.0850052461028099
+        ],
+        "physical_acceptance": false,
+        "reason": "Diagnostic visual recomputation; the full local physical verifier separately binds identity and all six gates."
+      }
+    },
+    "gate5": {
+      "status": "passed",
+      "metrics": {
+        "tracked_exhaustive_analysis_matches": true,
+        "naga_validated_assemblies": 303,
+        "ridgeline_within_one_slice_fraction": 1.0
+      }
+    }
+  },
+  "producer_sha256": "bfa888ac78d87e189b8a9debae1a62e28e75e0ac01e81e2832cbb9712057dd76"
+}

@@ -85,7 +85,7 @@ impl TimestampResources {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).ok();
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         match pollster::block_on(receiver.receive()) {
             Some(Ok(())) => {}
             _ => return None,

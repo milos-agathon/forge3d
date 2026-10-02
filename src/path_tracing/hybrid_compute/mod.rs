@@ -19,6 +19,7 @@ use crate::sdf::HybridScene;
 mod aether_post;
 mod aether_reference;
 mod layouts;
+mod media_reference;
 mod render;
 mod render_terrain;
 mod sdf_scene;
@@ -26,6 +27,7 @@ mod setup;
 pub mod terrain_heightfield;
 
 pub use aether_reference::{AetherSpectralReferenceDesc, AetherSpectralReferenceOutput};
+pub use media_reference::TerrainMediaReferenceOutput;
 pub use render_terrain::{CameraModel, TerrainReferenceDesc, TerrainReferenceOutput};
 pub use terrain_heightfield::{AlbedoSampling, TerrainPtScene};
 

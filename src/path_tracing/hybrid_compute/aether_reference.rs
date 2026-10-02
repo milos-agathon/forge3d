@@ -174,7 +174,7 @@ fn read_buffer(
     queue.submit([encoder.finish()]);
     let slice = staging.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     let bytes = slice.get_mapped_range().to_vec();
     staging.unmap();
     Ok(bytes)
@@ -520,7 +520,7 @@ impl HybridPathTracer {
             timing.resolve(&mut encoder);
         }
         queue.submit([encoder.finish()]);
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         if let Some(error) = pollster::block_on(device.pop_error_scope()) {
             return Err(RenderError::Render(format!(
                 "AETHER spectral reference dispatch failed GPU validation: {error}"

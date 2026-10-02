@@ -1,0 +1,13 @@
+{
+  "run_id": 36785284320,
+  "head_sha": "ddbdcc086b401fe1842a9725f32c5e493d5c65cf",
+  "status": "FAILED",
+  "failed_step": "Execute exhaustive statistical and shader producers",
+  "error": "Object of type int64 is not JSON serializable",
+  "six_case_suite_executed": false,
+  "physical_candidate_frames_rendered": false,
+  "physical_acceptance": "NOT_PROVEN",
+  "raw_artifact_id": 11130632018,
+  "raw_artifact_url": "https://github.com/milos-agathon/forge3d/actions/runs/36785284320/artifacts/11130632018",
+  "downloaded_native_hash_verified": true
+}

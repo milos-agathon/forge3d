@@ -313,7 +313,7 @@ fn compute_visibility(
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     receiver
         .recv()
         .map_err(|error| RenderError::readback(format!("viewshed callback failed: {error}")))?
@@ -554,7 +554,7 @@ pub fn compute_shadow_mask(
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     receiver
         .recv()
         .map_err(|error| RenderError::readback(format!("shadow-mask callback failed: {error}")))?

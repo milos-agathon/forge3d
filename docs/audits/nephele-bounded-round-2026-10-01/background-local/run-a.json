@@ -1,0 +1,83 @@
+{
+  "adapter_identity_sha256": "550270326858ab8c46d87274a88370db231d0be7c244ce0973358ab50c6df736",
+  "backend": "vulkan",
+  "camera_contract": {
+    "forward": [
+      4.2862541960175804e-08,
+      -0.196116104722023,
+      -0.9805806875228882
+    ],
+    "fov_y": 45.0,
+    "look_at": [
+      0.0,
+      15.0,
+      0.0
+    ],
+    "origin": [
+      -2.185569428547751e-06,
+      24.999998092651367,
+      50.0
+    ],
+    "right": [
+      1.0,
+      -0.0,
+      4.371138828673793e-08
+    ],
+    "up": [
+      8.572507148585373e-09,
+      0.9805806875228882,
+      -0.196116104722023
+    ]
+  },
+  "diagnostics": {
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "density_device_local_bytes": 51200,
+    "driver": "NVIDIA 610.60",
+    "energy_accounting_residual": 2.980232238769531e-07,
+    "executed_multi_scatter": true,
+    "froxel_device_local_bytes": 862048,
+    "host_visible_bytes": 0,
+    "majorant_device_local_bytes": 0,
+    "majorant_proof": "TrilinearConvexHull",
+    "majorant_valid": true,
+    "multiple_scatter_dispatches": 1,
+    "multiple_scatter_luminance": 0.046786740320385434,
+    "sample_count": 4096,
+    "single_scatter_dispatches": 1,
+    "single_scatter_luminance": 0.1519101150141786,
+    "source_revision": "710e73e44de3cf7961fb0bea3ad70c78eb65fbd1",
+    "staging_readback_bytes": 102400,
+    "step_count": 341665,
+    "sun_transmittance_bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+    "sun_transmittance_executed_steps": 36723,
+    "sun_transmittance_max_abs_error": 0.008301794528961182,
+    "sun_transmittance_max_segment_length": 68.22770690917969,
+    "sun_transmittance_method": "bounded_nested_midpoint",
+    "temporal_history_decision": "rejected",
+    "temporal_history_reason": "no prior media history exists",
+    "terrain_shading_model": "lambert_physical",
+    "terrain_trace_queries": 1244
+  },
+  "fixture_manifest_sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817",
+  "frame_file": "froxel-frame-run-a.npy",
+  "frame_sha256": "1f3a14adc6d6d3c50025aff0dc5b257bca8dda415bb69b863dac7afbe3828abd",
+  "head_sha": "710e73e44de3cf7961fb0bea3ad70c78eb65fbd1",
+  "input_bundle_sha256": "7cabc3bf1f21ace7424015fb33aadceb25105185792f2487eaa43c5a4e602b8a",
+  "medium_disabled_rgb_sha256": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+  "presentation_identity": {
+    "capture_api": "TerrainRenderer._capture_nephele_acceptance",
+    "color_pipeline": [
+      "white_balance",
+      "exposure",
+      "aces",
+      "lut",
+      "iec_61966_2_1_srgb8"
+    ],
+    "no_medium_same_call": true
+  },
+  "process_id": 22500,
+  "run_nonce": "b82c2c6fdfe6d80f82f787c4dd60414eebf64ae820565fffce45000fc597641c",
+  "schema": "forge3d.nephele.clean_run/1",
+  "tracked_worktree_clean": true
+}

@@ -1,0 +1,21 @@
+{
+  "b1": {
+    "below_delta_e_2": 1546,
+    "pixels": 1558,
+    "fraction": 0.9922978177150192,
+    "mean": 0.33803307521373716,
+    "maximum": 6.539428108757824
+  },
+  "b6": {
+    "below_delta_e_2": 34,
+    "pixels": 1557,
+    "fraction": 0.021836865767501604,
+    "mean": 3.8068944766457222,
+    "maximum": 9.419990812675556
+  },
+  "b8": {
+    "godray_roi_ssim": 0.9381720464798508
+  },
+  "source_revision": "aeda3a8e4d7ba927d23cc978ad3c4678e6e79039",
+  "method": "Recomputed from saved candidate/control/reference arrays and committed masks through canonical DeltaE2000 and ROI SSIM; captures not re-executed."
+}

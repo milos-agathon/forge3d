@@ -1,0 +1,12 @@
+{
+  "purpose": "T4/B1 diagnostic only; not G1-G6 acceptance",
+  "files": {
+    "b1-report.json": "dbf8bd6b0c7120bddf4e85b4685a50a380871b96a412eabde8225b487f0455f2",
+    "camera-contract.json": "6d67db569eda0ec58acaf5664010179a281a826bffda85354d95a868d7a50b2a",
+    "candidate-diagnostics.json": "69706ba7fae000d3023f61e3859844386aa0b4097e73bec65dbfa5404d7d9a37",
+    "diagnostic.py": "8e9aa9079af51177367123efc35f04dc8b0e5130a36c45b7e99d38d314726bae",
+    "medium-disabled-rgb.npy": "15127d4b92e3bde7551748827ff96b120a5d7edae4b626d035efda21f139a4ec",
+    "vacuum-reference-spp20.npy": "77ab7c21162afd13b04d10682667a0447c2f9d572b8e69ca858a5aa5c923f894",
+    "vacuum-reference-spp40.npy": "cf36f955d766dbf742ec01fcd01afba5e7e875ffad6eec7b02c9c6f3e8a999c2"
+  }
+}

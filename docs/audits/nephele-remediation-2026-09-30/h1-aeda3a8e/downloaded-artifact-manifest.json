@@ -1,0 +1,318 @@
+{
+  "adapter-probe-raw.json": {
+    "bytes": 355,
+    "sha256": "b7f42787858f5e0438d9c4e80a326bf962e2e054c3fd8c42a5df200b90546f5e"
+  },
+  "adapter-probe.json": {
+    "bytes": 365,
+    "sha256": "607c6c209b3a45b78256f506235e41b125c1b20c5de0287d4e42cffafda9b379"
+  },
+  "adapter-probe.log": {
+    "bytes": 296,
+    "sha256": "65fe28d511c37f615c4e26acea142bc59402f368c19f37fecc11660b18192a9b"
+  },
+  "atmosphere.json": {
+    "bytes": 118,
+    "sha256": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47"
+  },
+  "camera.json": {
+    "bytes": 240,
+    "sha256": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1"
+  },
+  "checked-out-head.txt": {
+    "bytes": 42,
+    "sha256": "49762a44fcdebc0c79694cbe296b0a84666fe21761ae913a81256ad7a9a4ddb4"
+  },
+  "cloud-shadow-aov.npy": {
+    "bytes": 49280,
+    "sha256": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60"
+  },
+  "cloud-shadow-mask.npy": {
+    "bytes": 4224,
+    "sha256": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e"
+  },
+  "crop.json": {
+    "bytes": 133,
+    "sha256": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04"
+  },
+  "dependency-install.log": {
+    "bytes": 1594,
+    "sha256": "2c2f63cf8050a2b5e8bd86afba8a03308e3a96802cf096bcac6281ad39cbfe64"
+  },
+  "exposure.json": {
+    "bytes": 61,
+    "sha256": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31"
+  },
+  "fixture-manifest.json": {
+    "bytes": 5894,
+    "sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817"
+  },
+  "forge3d-1.40.0-cp310-abi3-win_amd64.whl": {
+    "bytes": 16080929,
+    "sha256": "e1ef6e5e19be51e57b35f8bbf9e0f5a4cc4953d852c671ae0f5af19c126d349b"
+  },
+  "froxel-frame-run-a.npy": {
+    "bytes": 12416,
+    "sha256": "0daeaed52ba10b76df0284884897819b81d910765db858c7f2257691dfbb89ab"
+  },
+  "froxel-frame-run-b.npy": {
+    "bytes": 12416,
+    "sha256": "0daeaed52ba10b76df0284884897819b81d910765db858c7f2257691dfbb89ab"
+  },
+  "gate1-statistics.json": {
+    "bytes": 2994,
+    "sha256": "5a5f1b618b166c9f7b5084756ddf9767ff4ecd29565a805d35d1252838a76dec"
+  },
+  "gate2-energy-samples.bin": {
+    "bytes": 30000000,
+    "sha256": "440bb91f46328e6ba84a9dbf24d5b677322d05907844590cce0fdd23f76f4488"
+  },
+  "gate2-energy.json": {
+    "bytes": 2007,
+    "sha256": "f6797ea5b61b5a04630a75a5ca8561ff258511ccb86fe7a3bbf6dc3df4dbc273"
+  },
+  "gate4-policy.json": {
+    "bytes": 824,
+    "sha256": "90f6687a34e0338adfc86f9a06e0053cd2a3c3061072fcb769b90b42d006fd05"
+  },
+  "gate5-static.json": {
+    "bytes": 162475,
+    "sha256": "afff0b25185d2e9cb4116381d40d01385b3e54d567af49aa2228a76ecd22ecb5"
+  },
+  "godray-roi-mask.npy": {
+    "bytes": 4224,
+    "sha256": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20"
+  },
+  "heterogeneous-comparator.json": {
+    "bytes": 2243,
+    "sha256": "07a1c1e3f677cbbc24718d58828e443fa1c7b6c61cfcce6f9e1827a9f049cbd1"
+  },
+  "heterogeneous-comparator.samples.bin": {
+    "bytes": 12500000,
+    "sha256": "31889c6ae015d144ac39070c0cd72aa0758c21f3d26aaf28379c4354edd2fc4b"
+  },
+  "heterogeneous-ratio-samples.bin": {
+    "bytes": 8000000,
+    "sha256": "0fc37c4567961a530e59b57d62aaa5eaacff99107dbf68f332c58e43fdc90704"
+  },
+  "homogeneous-ratio-samples.bin": {
+    "bytes": 8000000,
+    "sha256": "bf925fadbc2395475bfe486be3ffd6ed295593828fdec2b6a230511fbc288566"
+  },
+  "homogeneous-slab.json": {
+    "bytes": 295,
+    "sha256": "cf1ff1ad3f68706fad3b1df00113bffc47918c5c4a0abb86082fd17ecce6c6a4"
+  },
+  "in-scatter.npy": {
+    "bytes": 49280,
+    "sha256": "bb4fe1048220408db98f59e0a7e4fd3c69b34c7a8ef4d1e953c47a2f609a587c"
+  },
+  "installed-wheel-runtime.json": {
+    "bytes": 570,
+    "sha256": "eb42209d6511f76053c9f93938b112871d2d0981fc6dd5f831fcdc0c2809b457"
+  },
+  "junit-zero-skip.log": {
+    "bytes": 99,
+    "sha256": "46372e3b52af1cd24a3f191c8343d36df80e28ae3c11ed5d87c797e399fe4410"
+  },
+  "junit.xml": {
+    "bytes": 4807,
+    "sha256": "62ee1cd2168c598fb51389bd083713af3b6b446c7a14522aba94539e318fbade"
+  },
+  "majorant-domain-probe.json": {
+    "bytes": 2682,
+    "sha256": "212fe02d39d8dff258003bf504930d42afdb0ee4f5df174ef26f63abe3cff168"
+  },
+  "majorant-domain-probe.pairs.bin": {
+    "bytes": 8000000,
+    "sha256": "e20072e3352cd5a370e38fea8862029dd679719a5421d183b7f54182e06ca0a0"
+  },
+  "material.json": {
+    "bytes": 264,
+    "sha256": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789"
+  },
+  "medium-disabled-rgb.npy": {
+    "bytes": 12416,
+    "sha256": "f833a79cc03506c8a9342eb2fd114f0b8baf727fe0d11298589135833bc8eb50"
+  },
+  "medium.json": {
+    "bytes": 2272,
+    "sha256": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9"
+  },
+  "memory.json": {
+    "bytes": 408,
+    "sha256": "a9826b3c2cd37c99c96f9edf3d2ab67cdae2f149bdb7c95309f53aced8c366fe"
+  },
+  "native-extension.bin": {
+    "bytes": 38504960,
+    "sha256": "394280024793c75712d87fd8f8b1951be99151f992acdb9e71a9ce4a6c6c1f02"
+  },
+  "nephele_blue_noise_8x8.txt": {
+    "bytes": 318,
+    "sha256": "c4690ee9c66e9b2d1a608537cdc6c5384c93e69a42602093a6ce480606e780ea"
+  },
+  "nephele_blue_noise_provenance.json": {
+    "bytes": 846,
+    "sha256": "c0c5dc445e96641340ace0ee891c35effb4522f61897278163061fff1aee14ea"
+  },
+  "optical-depth.npy": {
+    "bytes": 49280,
+    "sha256": "ee626fcab328f64326dacf2bc4b2da229ded37a7b1b37c655166ac466134720b"
+  },
+  "pytest.log": {
+    "bytes": 6034,
+    "sha256": "497c06215cb19aca27ba8df8ee1ffb4e9313ec369a9f2273f8cd9e4b5e9d00ee"
+  },
+  "realtime-rgb.npy": {
+    "bytes": 12416,
+    "sha256": "0daeaed52ba10b76df0284884897819b81d910765db858c7f2257691dfbb89ab"
+  },
+  "realtime-termination-slice.npy": {
+    "bytes": 16512,
+    "sha256": "f8ac2be8633e58cdea5934a80d354fcd59fc7466f27cf6481daf844aef23e23b"
+  },
+  "record_media_reference_convergence.py": {
+    "bytes": 9468,
+    "sha256": "3c733e32558e464bc907f77990683afa100d8ad9dc19d5c73228be7f31b112c9"
+  },
+  "reference-cloud-shadow-aov-spp320.npy": {
+    "bytes": 49280,
+    "sha256": "04dd3fc04c71f6269c481451404c1df81e5d63537c6d81efdf4ae4fbf99cceff"
+  },
+  "reference-cloud-shadow-aov.npy": {
+    "bytes": 49280,
+    "sha256": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667"
+  },
+  "reference-convergence.json": {
+    "bytes": 3273,
+    "sha256": "5f9a1c4d6a3187a22a785929c0b4850fd7f87feb6698523df81d7832a486c9ce"
+  },
+  "reference-in-scatter-spp320.npy": {
+    "bytes": 49280,
+    "sha256": "d778b1a58e930677e40b2e1d0210da857fac4b620e51c316e0170b5f8ecea856"
+  },
+  "reference-in-scatter.npy": {
+    "bytes": 49280,
+    "sha256": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e"
+  },
+  "reference-media-lighting-visibility-spp320.npy": {
+    "bytes": 4224,
+    "sha256": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159"
+  },
+  "reference-media-lighting-visibility.npy": {
+    "bytes": 4224,
+    "sha256": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159"
+  },
+  "reference-optical-depth-spp320.npy": {
+    "bytes": 49280,
+    "sha256": "ee7fa9a309077021ac05c8df91b110421c59eb6c74c37b6f0c7d023dae16c31b"
+  },
+  "reference-optical-depth.npy": {
+    "bytes": 49280,
+    "sha256": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6"
+  },
+  "reference-provenance-spp320.json": {
+    "bytes": 10363,
+    "sha256": "13ec3a4f8c0419440ee2c33e2888e1cd6bf55de0f1a99da11a7844db03b7657a"
+  },
+  "reference-provenance.json": {
+    "bytes": 10363,
+    "sha256": "9650034250479e286b1455d7c19df8c971cd845f996a346bb63456975023979b"
+  },
+  "reference-rgb-spp320.npy": {
+    "bytes": 12416,
+    "sha256": "faed5d5f8d5aec7ede7d30c7f8363e24737825ddf8393207b3f33d6038807dac"
+  },
+  "reference-rgb.npy": {
+    "bytes": 12416,
+    "sha256": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd"
+  },
+  "reference-terrain-hit-spp320.npy": {
+    "bytes": 4224,
+    "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+  },
+  "reference-terrain-hit.npy": {
+    "bytes": 4224,
+    "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+  },
+  "reference-terrain-slice-spp320.npy": {
+    "bytes": 16512,
+    "sha256": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5"
+  },
+  "reference-terrain-slice.npy": {
+    "bytes": 16512,
+    "sha256": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5"
+  },
+  "reference-transmittance-spp320.npy": {
+    "bytes": 49280,
+    "sha256": "922c7305e0fe0d0f2260446a0f6e26747023ca2ca05533f087569f250d3382fd"
+  },
+  "reference-transmittance.npy": {
+    "bytes": 49280,
+    "sha256": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20"
+  },
+  "reference-wheel/e1e1f8444ff0300bf63ec24963b70a1578871647be2a3a9753e7b3a26dd7928e/forge3d-1.40.0-cp310-abi3-win_amd64.whl": {
+    "bytes": 16041281,
+    "sha256": "e1e1f8444ff0300bf63ec24963b70a1578871647be2a3a9753e7b3a26dd7928e"
+  },
+  "rr-contributions.bin": {
+    "bytes": 16000000,
+    "sha256": "f3148fbb3a0c428beede63b50c09b8db9e6d72a7897a80b02a2e752713351d48"
+  },
+  "rr-evidence.json": {
+    "bytes": 1220,
+    "sha256": "5f38979787bc6000101a1a337af76e675d7e656ac81adaa74e8a7346e7d3d5d8"
+  },
+  "run-a.json": {
+    "bytes": 2788,
+    "sha256": "d15067f6da03e4e54fbb37d7bf6a1a3c7acfa1bb4f89a2ca7d33aff41b7875d1"
+  },
+  "run-b.json": {
+    "bytes": 2727,
+    "sha256": "c1ae7a46fb89c59333cdc17367dfe90978f8bd5060db6da69f0d67f82742a416"
+  },
+  "run-context.json": {
+    "bytes": 691,
+    "sha256": "5b9991904d0c936d921d32e71c3d0ac72888007b90dc9a3cdd613f1dfcc01906"
+  },
+  "shaft-mask.npy": {
+    "bytes": 4224,
+    "sha256": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177"
+  },
+  "sky-cloud-mask.npy": {
+    "bytes": 4224,
+    "sha256": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2"
+  },
+  "sun.json": {
+    "bytes": 155,
+    "sha256": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02"
+  },
+  "terrain-dem.npy": {
+    "bytes": 1152,
+    "sha256": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf"
+  },
+  "terrain-mask.npy": {
+    "bytes": 4224,
+    "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+  },
+  "terrain-occlusion-disabled-rgb.npy": {
+    "bytes": 12416,
+    "sha256": "012e464c44c53a06c171ea53343f6504434ac13f41b0bf7885b13ef02a5b2e03"
+  },
+  "terrain.json": {
+    "bytes": 254,
+    "sha256": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315"
+  },
+  "tonemap.json": {
+    "bytes": 221,
+    "sha256": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034"
+  },
+  "transmittance.npy": {
+    "bytes": 49280,
+    "sha256": "63e9e1a8990b3236552c6c822ced995eedb588b3fea24f3530a6514f9b2580b8"
+  },
+  "wheel-install.log": {
+    "bytes": 741,
+    "sha256": "219e8c87db1bb027f243a054742b141886d133378621397ea68d6f4a77fcd756"
+  }
+}

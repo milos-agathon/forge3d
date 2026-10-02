@@ -558,7 +558,7 @@ mod tests {
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let mut blur = ShadowBlurPass::new(device).expect("blur pass");
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         if let Some(error) = pollster::block_on(device.pop_error_scope()) {
             panic!("blur pipeline raised a GPU validation error: {error}");
         }
@@ -579,7 +579,7 @@ mod tests {
         )
         .expect("blur execute");
         queue.submit(Some(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         if let Some(error) = pollster::block_on(device.pop_error_scope()) {
             panic!("blur dispatch raised a GPU validation error: {error}");
         }

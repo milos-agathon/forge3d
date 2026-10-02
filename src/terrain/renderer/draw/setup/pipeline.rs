@@ -21,6 +21,18 @@ pub(in crate::terrain::renderer) struct RenderTargets {
     pub(in crate::terrain::renderer) internal_height: u32,
     pub(in crate::terrain::renderer) needs_scaling: bool,
     pub(in crate::terrain::renderer) sample_count: u32,
+    pub(in crate::terrain::renderer) linear_hdr: bool,
+}
+
+pub(in crate::terrain::renderer) fn terrain_internal_color_format(
+    media_enabled: bool,
+    legacy_format: wgpu::TextureFormat,
+) -> wgpu::TextureFormat {
+    if media_enabled {
+        wgpu::TextureFormat::Rgba16Float
+    } else {
+        legacy_format
+    }
 }
 
 impl TerrainScene {
@@ -83,12 +95,15 @@ impl TerrainScene {
         &self,
         effective_msaa: u32,
         needs_clipmap: bool,
+        color_format: wgpu::TextureFormat,
     ) -> Result<()> {
         let mut pipeline_cache = self
             .pipeline
             .lock()
             .map_err(|_| anyhow!("TerrainRenderer pipeline mutex poisoned"))?;
-        if pipeline_cache.sample_count != effective_msaa {
+        if pipeline_cache.sample_count != effective_msaa
+            || pipeline_cache.color_format != color_format
+        {
             let light_buffer = self
                 .light_buffer
                 .lock()
@@ -102,7 +117,7 @@ impl TerrainScene {
                 &self.fog_bind_group_layout,
                 &self.water_reflection_bind_group_layout,
                 &self.material_layer_bind_group_layout,
-                self.color_format,
+                color_format,
                 effective_msaa,
             );
             // Invalidate so the clipmap variant is rebuilt at the new sample
@@ -111,6 +126,7 @@ impl TerrainScene {
             pipeline_cache.visibility_write_pipeline = None;
             pipeline_cache.visibility_resolve_pipeline = None;
             pipeline_cache.sample_count = effective_msaa;
+            pipeline_cache.color_format = color_format;
         }
         if needs_clipmap && pipeline_cache.clipmap_pipeline.is_none() {
             let light_buffer = self
@@ -126,7 +142,7 @@ impl TerrainScene {
                 &self.fog_bind_group_layout,
                 &self.water_reflection_bind_group_layout,
                 &self.material_layer_bind_group_layout,
-                self.color_format,
+                color_format,
                 effective_msaa,
             ));
         }
@@ -146,8 +162,8 @@ impl TerrainScene {
             *self
                 .orbis_coverage_pipeline
                 .lock()
-                .map_err(|_| anyhow!("ORBIS coverage pipeline mutex poisoned"))? = Some(
-                Self::create_orbis_coverage_pipeline(
+                .map_err(|_| anyhow!("ORBIS coverage pipeline mutex poisoned"))? =
+                Some(Self::create_orbis_coverage_pipeline(
                     self.device.as_ref(),
                     &self.bind_group_layout,
                     light_buffer.bind_group_layout(),
@@ -157,8 +173,7 @@ impl TerrainScene {
                     &self.water_reflection_bind_group_layout,
                     &self.material_layer_bind_group_layout,
                     self.color_format,
-                ),
-            );
+                ));
         }
         if needs_clipmap
             && effective_msaa == 1
@@ -184,7 +199,7 @@ impl TerrainScene {
                     &self.water_reflection_bind_group_layout,
                     &self.material_layer_bind_group_layout,
                     &self.visibility_resolve_bind_group_layout,
-                    self.color_format,
+                    color_format,
                 ));
         }
         Ok(())
@@ -278,6 +293,7 @@ impl TerrainScene {
                 dimension: wgpu::TextureDimension::D2,
                 format: TERRAIN_DEPTH_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
                     | if effective_msaa == 1 {
                         wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC
                     } else {
@@ -290,7 +306,10 @@ impl TerrainScene {
 
         #[cfg(feature = "enable-globe")]
         let orbis_coverage_texture = if self.orbis_capture_request.is_some() {
-            anyhow::ensure!(effective_msaa == 1, "ORBIS coverage capture requires one sample");
+            anyhow::ensure!(
+                effective_msaa == 1,
+                "ORBIS coverage capture requires one sample"
+            );
             Some(Arc::new(tracked_create_texture(
                 self.device.as_ref(),
                 &wgpu::TextureDescriptor {
@@ -304,8 +323,7 @@ impl TerrainScene {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::R8Unorm,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::COPY_SRC,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                     view_formats: &[],
                 },
             )?))
@@ -392,6 +410,65 @@ impl TerrainScene {
             internal_height,
             needs_scaling,
             sample_count: effective_msaa,
+            linear_hdr: false,
         })
+    }
+
+    pub(in crate::terrain::renderer) fn create_realtime_media_render_targets(
+        &self,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+    ) -> Result<RenderTargets> {
+        if params.msaa_samples.max(1) != 1 {
+            return Err(anyhow!(
+                "realtime media requires msaa_samples=1 so authoritative depth can be sampled"
+            ));
+        }
+        if (params.render_scale - 1.0).abs() > f32::EPSILON {
+            return Err(anyhow!(
+                "realtime media requires render_scale=1.0 until HDR presentation resampling is available"
+            ));
+        }
+        let mut targets =
+            self.create_render_targets_for_format(params, 1, 1, wgpu::TextureFormat::Rgba16Float)?;
+        let resolved_texture = Arc::new(tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some("nephele.media.output.single_tonemap"),
+                size: wgpu::Extent3d {
+                    width: targets.out_width,
+                    height: targets.out_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+        )?);
+        targets.resolved_view =
+            resolved_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        targets.resolved_texture = resolved_texture;
+        targets.linear_hdr = true;
+        Ok(targets)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_media_preserves_legacy_renderer_format_and_presentation_route() {
+        assert_eq!(
+            terrain_internal_color_format(false, wgpu::TextureFormat::Rgba8Unorm),
+            wgpu::TextureFormat::Rgba8Unorm
+        );
+        assert_eq!(FogUniforms::disabled().media_params[0], 0.0);
     }
 }

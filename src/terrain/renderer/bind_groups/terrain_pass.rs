@@ -226,6 +226,29 @@ impl TerrainScene {
                 ]
             })
             .unwrap_or([6_360_000.0, 6_460_000.0, 2.0, 2.0]);
+        let media_resources = self
+            .media_resources
+            .lock()
+            .map_err(|_| anyhow!("media_resources mutex poisoned"))?;
+        let media_light_transmittance_view = media_resources.as_ref().map(|r| {
+            r.light_transmittance
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        });
+        let media_grid =
+            media_resources
+                .as_ref()
+                .map(|r| r.grid)
+                .unwrap_or(super::super::media::FroxelGrid {
+                    width: 3,
+                    height: 3,
+                    depth: 1,
+                });
+        let media_depth = media_resources
+            .as_ref()
+            .map(|r| r.depth_transform)
+            .map(Ok)
+            .unwrap_or_else(|| super::super::media::FroxelDepthTransform::new(0.1, 1.0))
+            .map_err(|error| anyhow!(error))?;
         let fog_uniforms = FogUniforms {
             params0: [
                 decoded.fog.density,
@@ -277,6 +300,17 @@ impl TerrainScene {
                 0.0,
             ],
             aether_planet_lut,
+            media_params: [
+                if media_resources.is_some() { 1.0 } else { 0.0 },
+                media_grid.visible_width() as f32,
+                media_grid.visible_height() as f32,
+                media_grid.depth as f32,
+            ],
+            media_depth: {
+                let mut values = media_depth.wgsl_params();
+                values[3] = super::super::media::FROXEL_OFF_AXIS_BORDER as f32;
+                values
+            },
         };
         self.queue.write_buffer(
             &self.fog_uniform_buffer,
@@ -299,8 +333,17 @@ impl TerrainScene {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(atmosphere_scattering_view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(
+                        media_light_transmittance_view
+                            .as_ref()
+                            .unwrap_or(&self.media_light_transmittance_fallback_view),
+                    ),
+                },
             ],
         });
+        drop(media_resources);
 
         let materials = &decoded.materials;
         let variation = &materials.variation;

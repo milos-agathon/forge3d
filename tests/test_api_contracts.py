@@ -91,6 +91,7 @@ class TestNativeModuleSymbols:
         "OverlayLayer",
         "TerrainRenderParams",
         "TerrainRenderer",
+        "Medium",
         "AovFrame",
         "HdrFrame",
         "OfflineBatchResult",
@@ -142,6 +143,8 @@ class TestNativeModuleSymbols:
     # ---- Registered free functions (wrap_pyfunction in lib.rs) ----
 
     EXPECTED_FUNCTIONS = [
+        "_render_volumetric_reference",
+        "_nephele_physical_samples",
         "open_viewer",
         "open_terrain_viewer",
         "enumerate_adapters",
@@ -1432,6 +1435,9 @@ class TestSsgiSsrSettingsWiring:
         """TerrainRenderParams must expose decoded SSAO/SSGI/SSR/TAA settings."""
         assert hasattr(_native.TerrainRenderParams, "screen_space_settings")
         assert callable(getattr(_native.TerrainRenderParams, "screen_space_settings"))
+
+    def test_terrain_params_exposes_terrain_shading_model(self):
+        assert hasattr(_native.TerrainRenderParams, "terrain_shading_model")
 
 
 # ===========================================================================

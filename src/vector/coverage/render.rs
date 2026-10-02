@@ -415,7 +415,7 @@ fn map_buffer<T: bytemuck::Pod>(
     slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).ok();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     pollster::block_on(receiver.receive())
         .ok_or_else(|| RenderError::Readback("LIMES map callback was cancelled".into()))?
         .map_err(|error| RenderError::Readback(format!("LIMES map failed: {error}")))?;

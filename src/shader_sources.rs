@@ -981,6 +981,9 @@ mod tests {
             source.matches("sample_height_bilinear(level_base").count()
                 + source
                     .matches("sample_height_bilinear(det_barrier2(level_base)")
+                    .count()
+                + source
+                    .matches("sample_height_bilinear(det_barrier2(det_barrier2(level_base)")
                     .count(),
             4
         );

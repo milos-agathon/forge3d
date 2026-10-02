@@ -1,0 +1,42 @@
+{
+  "schema": "forge3d.nephele.diagnostic_artifact_hashes/1",
+  "physical_acceptance": false,
+  "files": {
+    "b1-report.json": {
+      "sha256": "301eb48b4d31345de69fbdf9dac20a2794f206c5bf0110e9769851df1943d211",
+      "bytes": 5748
+    },
+    "camera-contract.json": {
+      "sha256": "b57b44158d5382cd545a8403fc9fd5619de4228fc19970ea7aed9957e168c611",
+      "bytes": 395
+    },
+    "candidate-diagnostics.json": {
+      "sha256": "5df918011e5bba1333d893b629ead9b72cf5e8f2818a2f000fdbc4e19c27ed84",
+      "bytes": 1200
+    },
+    "cloud-shadow-aov.npy": {
+      "sha256": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60",
+      "bytes": 49280
+    },
+    "in-scatter.npy": {
+      "sha256": "bb4fe1048220408db98f59e0a7e4fd3c69b34c7a8ef4d1e953c47a2f609a587c",
+      "bytes": 49280
+    },
+    "medium-disabled-rgb.npy": {
+      "sha256": "f833a79cc03506c8a9342eb2fd114f0b8baf727fe0d11298589135833bc8eb50",
+      "bytes": 12416
+    },
+    "optical-depth.npy": {
+      "sha256": "ee626fcab328f64326dacf2bc4b2da229ded37a7b1b37c655166ac466134720b",
+      "bytes": 49280
+    },
+    "realtime-rgb.npy": {
+      "sha256": "0daeaed52ba10b76df0284884897819b81d910765db858c7f2257691dfbb89ab",
+      "bytes": 12416
+    },
+    "transmittance.npy": {
+      "sha256": "63e9e1a8990b3236552c6c822ced995eedb588b3fea24f3530a6514f9b2580b8",
+      "bytes": 49280
+    }
+  }
+}

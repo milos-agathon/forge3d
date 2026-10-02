@@ -180,6 +180,7 @@ struct TerrainShadingUniforms {
     clamp1 : vec4<f32>,           // ambient_min, ambient_max, shadow_min, shadow_max
     clamp2 : vec4<f32>,           // occlusion_min, occlusion_max, lod_level, anisotropy
     height_curve : vec4<f32>,     // x=mode, y=strength, z=power, w=lambert_contrast (P5-L)
+    physical_base_color : vec4<f32>, // authored linear rgb, w=single untextured material enabled
 };
 
 struct OverlayUniforms {
@@ -190,7 +191,7 @@ struct OverlayUniforms {
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
-    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, reserved
+    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, terrain_shading_model
 };
 
 struct IblUniforms {
@@ -390,12 +391,12 @@ fn height_page_sample_covered(entry: HeightPageTableEntry, uv: vec2<f32>) -> vec
     let bounded_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(0.99999994));
     let tile_origin = vec2<f32>(f32(entry.x), f32(entry.y));
     let local_uv = clamp(
-        bounded_uv * f32(axis) - tile_origin,
+        det_barrier2(bounded_uv * f32(axis)) - tile_origin,
         vec2<f32>(0.0),
         vec2<f32>(1.0),
     );
-    let atlas_texel_x = f32(atlas_min_x) + local_uv.x * f32(atlas_max_x - atlas_min_x);
-    let atlas_texel_y = f32(atlas_min_y) + local_uv.y * f32(atlas_max_y - atlas_min_y);
+    let atlas_texel_x = det_barrier(f32(atlas_min_x) + det_barrier(local_uv.x * f32(atlas_max_x - atlas_min_x)));
+    let atlas_texel_y = det_barrier(f32(atlas_min_y) + det_barrier(local_uv.y * f32(atlas_max_y - atlas_min_y)));
     let atlas_0 = vec2<i32>(i32(floor(atlas_texel_x)), i32(floor(atlas_texel_y)));
     let atlas_1 = vec2<i32>(
         min(atlas_0.x + 1, i32(atlas_max_x)),
@@ -414,13 +415,13 @@ fn height_page_sample_covered(entry: HeightPageTableEntry, uv: vec2<f32>) -> vec
     let c10 = height_coverage_atlas_load(vec2<i32>(atlas_1.x, atlas_0.y));
     let c01 = height_coverage_atlas_load(vec2<i32>(atlas_0.x, atlas_1.y));
     let c11 = height_coverage_atlas_load(atlas_1);
-    let w00 = (1.0 - atlas_blend.x) * (1.0 - atlas_blend.y);
-    let w10 = atlas_blend.x * (1.0 - atlas_blend.y);
-    let w01 = (1.0 - atlas_blend.x) * atlas_blend.y;
-    let w11 = atlas_blend.x * atlas_blend.y;
+    let w00 = det_barrier((1.0 - atlas_blend.x) * (1.0 - atlas_blend.y));
+    let w10 = det_barrier(atlas_blend.x * (1.0 - atlas_blend.y));
+    let w01 = det_barrier((1.0 - atlas_blend.x) * atlas_blend.y);
+    let w11 = det_barrier(atlas_blend.x * atlas_blend.y);
     return vec2<f32>(
-        a00 * c00 * w00 + a10 * c10 * w10 + a01 * c01 * w01 + a11 * c11 * w11,
-        clamp(c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11, 0.0, 1.0),
+        det_barrier(det_barrier(det_barrier(det_barrier(a00 * c00) * w00) + det_barrier(det_barrier(a10 * c10) * w10)) + det_barrier(det_barrier(a01 * c01) * w01)) + det_barrier(det_barrier(a11 * c11) * w11),
+        clamp(det_barrier(det_barrier(det_barrier(c00 * w00) + det_barrier(c10 * w10)) + det_barrier(c01 * w01)) + det_barrier(c11 * w11), 0.0, 1.0),
     );
 }
 
@@ -496,10 +497,10 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
     let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), level).r;
     let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), level).r;
     let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), level).r;
-    let overview_height = overview_mapping.z * det_mix(
+    let overview_height = det_barrier(overview_mapping.z * det_mix(
         det_mix(h00, h10, blend.x),
         det_mix(h01, h11, blend.x),
-        blend.y,
+        blend.y),
     );
     if (height_pages.header.enabled != 0u) {
         let rounded_lod = u32(max(floor(lod + 0.5), 0.0));
@@ -520,20 +521,20 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
             let entry = height_page_lookup(requested_lod, tile_xy.x, tile_xy.y);
             if (entry.lod != HEIGHT_PAGE_EMPTY) {
                 let covered = height_page_sample_covered(entry, bounded_uv);
-                accumulated_height = accumulated_height + remaining_weight * covered.x;
-                remaining_weight = remaining_weight * (1.0 - covered.y);
+                accumulated_height = det_barrier(accumulated_height + det_barrier(remaining_weight * covered.x));
+                remaining_weight = det_barrier(remaining_weight * (1.0 - det_barrier(covered.y)));
             }
             if (requested_lod == 0u || remaining_weight <= 0.000001) {
                 break;
             }
             requested_lod = requested_lod - 1u;
         }
-        var detail_height = accumulated_height + remaining_weight * overview_height;
+        var detail_height = accumulated_height + det_barrier(remaining_weight * overview_height);
         // Where part of the footprint is COG nodata (and no overview backs
         // it), renormalize by the covered weight so the surface keeps its
         // real height up to the data edge instead of sagging towards 0 m.
         // Fully covered footprints (every flat path) are left bit-exact.
-        let covered_total = (1.0 - remaining_weight) + remaining_weight * overview_mapping.z;
+        let covered_total = (det_barrier(1.0 - remaining_weight)) + det_barrier(remaining_weight * overview_mapping.z);
         if (covered_total > 0.000001 && covered_total < 0.999999) {
             detail_height = det_div(detail_height, covered_total);
         }
@@ -746,6 +747,10 @@ struct FogUniforms {
     aether_sun_direction: vec4<f32>,
     // x=bottom radius, y=top radius, z=scattering height count, w=nu count.
     aether_planet_lut: vec4<f32>,
+    // x=NEPHELE enabled, y/z=visible froxel width/height, w=depth slices.
+    media_params: vec4<f32>,
+    // x=near, y=far, z=log(far/near), w=off-axis froxel border.
+    media_depth: vec4<f32>,
 }
 
 @group(4) @binding(0)
@@ -756,6 +761,23 @@ var sky_atmosphere_tex: texture_2d<f32>;
 
 @group(4) @binding(2)
 var aether_accumulated_scattering_tex: texture_3d<f32>;
+
+@group(4) @binding(3)
+var nephele_light_transmittance_tex: texture_3d<f32>;
+
+fn nephele_same_medium_direct_transmittance(screen_position: vec2<f32>, distance_m: f32) -> vec3<f32> {
+    if (fog_uniforms.media_params.x < 0.5) { return vec3<f32>(1.0); }
+    let dimensions = max(vec3<f32>(textureDimensions(nephele_light_transmittance_tex)), vec3<f32>(1.0));
+    // The canonical froxel grid stores one XY sample per 8x8 framebuffer
+    // tile plus one off-axis border texel on every side.
+    let xy = det_div2(screen_position, vec2<f32>(8.0)) + vec2<f32>(fog_uniforms.media_depth.w);
+    let near = max(fog_uniforms.media_depth.x, 1e-6);
+    let distance_ratio = max(det_div(distance_m, near), 1.0);
+    let log2_range = max(fog_uniforms.media_depth.z * 1.4426950408889634, 1e-6);
+    let unit_depth = clamp(det_div(det_log2(distance_ratio), log2_range), 0.0, 1.0);
+    let froxel_coord = clamp(vec3<f32>(det_div2(xy, dimensions.xy), unit_depth), vec3<f32>(0.0), vec3<f32>(1.0));
+    return clamp(textureSampleLevel(nephele_light_transmittance_tex, material_samp, froxel_coord, 0.0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // P4: Water Planar Reflection Uniforms (@group(5))
@@ -1275,7 +1297,8 @@ fn sample_water_reflection(
     // Wave-based UV distortion
     // Wave normal deviation from flat (0,0,1) creates UV offset (Z up)
     let wave_strength = water_reflection_uniforms.reflection_params.z;
-    let wave_distortion = det_barrier2((wave_normal.xy - vec2<f32>(0.0, 0.0)) * wave_strength);
+    let wave_horizontal = select(wave_normal.xy, wave_normal.xz, terrain_yup_active());
+    let wave_distortion = det_barrier2((wave_horizontal - vec2<f32>(0.0, 0.0)) * wave_strength);
 
     // Shore attenuation: reduce distortion near shore (calmer water at edges)
     let shore_atten_width = water_reflection_uniforms.reflection_params.w;
@@ -1736,8 +1759,13 @@ fn normalize_for_shadow(tex_coord: vec2<f32>) -> vec3<f32> {
 
     // Compute shadow-normalized Z (matches shadow depth shader: world_z = h_curved * h_exag)
     let shadow_z = h_curved * h_exag;
-
-    return vec3<f32>(world_xy.x, world_xy.y, shadow_z);
+    
+    let shadow_height = det_fma(h_curved, h_max - h_min, h_min) * h_exag;
+    return select(
+        vec3<f32>(world_xy.x, world_xy.y, shadow_z),
+        vec3<f32>(world_xy.x, shadow_height, world_xy.y),
+        u_terrain.camera_mode_params.x == 2.0,
+    );
 }
 
 /// Calculate shadow visibility for terrain
@@ -1947,8 +1975,8 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     let grid_size = u32(max(u_terrain.camera_mode_params.y, 64.0));
 
     var uv : vec2<f32>;
-
-    if (camera_mode == 1u) {
+    
+    if (camera_mode != 0u) {
         // MESH MODE: Use grid coordinates for perspective-correct terrain rendering
         // Generate triangle mesh from vertex_id
         // For a grid_size x grid_size grid, we have (grid_size-1)^2 quads, each with 2 triangles
@@ -2021,16 +2049,28 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
 
     // Use centered Z for mesh mode clip position, but keep original for world_position
     // (world_position is used for lighting which expects real elevation)
-    let world_pos = vec3<f32>(world_xy.x, world_xy.y, world_z_original);
+    let world_pos = select(
+        vec3<f32>(world_xy.x, world_xy.y, world_z_original),
+        vec3<f32>(world_xy.x, world_z_original, world_xy.y),
+        camera_mode == 2u,
+    );
     out.world_position = world_pos;
-    out.world_normal = vec3<f32>(0.0, 0.0, 1.0); // Z-up, recalculated in fragment shader
+    out.world_normal = select(
+        vec3<f32>(0.0, 0.0, 1.0),
+        vec3<f32>(0.0, 1.0, 0.0),
+        camera_mode == 2u,
+    );
     out.tex_coord = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
     out.tile_id = 0u;
-
-    if (camera_mode == 1u) {
+    
+    if (camera_mode != 0u) {
         // MESH MODE: Apply view and projection matrices for proper perspective
         // Use centered Z for clip position so terrain is visible from camera at origin
-        let mesh_world_pos = vec3<f32>(world_xy.x, world_xy.y, world_z_centered);
+        let mesh_world_pos = select(
+            vec3<f32>(world_xy.x, world_xy.y, world_z_centered),
+            vec3<f32>(world_xy.x, world_z_original, world_xy.y),
+            camera_mode == 2u,
+        );
         out.clip_position = det_mat4_mul_vec4(
             u_terrain.proj,
             det_mat4_mul_vec4(u_terrain.view, vec4<f32>(mesh_world_pos, 1.0)),
@@ -2052,6 +2092,48 @@ fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
     return det_fma(apply_height_curve01(t), h_max - h_min, h_min);
+}
+
+// Geometric normal of the exact bilinear DEM cell under uv. In the Y-up
+// terrain mode this mirrors hybrid_terrain_traversal.wgsl::terrain_normal_at:
+// the same four corner heights, exaggeration, cell spacing, and analytic
+// bilinear derivatives are used by the production reference surface.
+fn terrain_reference_geometric_normal(uv: vec2<f32>) -> vec3<f32> {
+    let dimensions = max(logical_height_dimensions(), vec2<f32>(2.0));
+    let cell_count = max(dimensions - vec2<f32>(1.0), vec2<f32>(1.0));
+    let texel = det_barrier2(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * cell_count);
+    let cell = min(floor(texel), cell_count - vec2<f32>(1.0));
+    let local = texel - cell;
+
+    let uv00 = det_div2(cell, cell_count);
+    let uv10 = det_div2(cell + vec2<f32>(1.0, 0.0), cell_count);
+    let uv01 = det_div2(cell + vec2<f32>(0.0, 1.0), cell_count);
+    let uv11 = det_div2(cell + vec2<f32>(1.0, 1.0), cell_count);
+    let exaggeration = u_terrain.spacing_h_exag.z;
+    let h00 = det_barrier(sample_height_geom_level(uv00, 0.0) * exaggeration);
+    let h10 = det_barrier(sample_height_geom_level(uv10, 0.0) * exaggeration);
+    let h01 = det_barrier(sample_height_geom_level(uv01, 0.0) * exaggeration);
+    let h11 = det_barrier(sample_height_geom_level(uv11, 0.0) * exaggeration);
+    let dh_du = det_mix(h10 - h00, h11 - h01, local.y);
+    let dh_dv = det_mix(h01 - h00, h11 - h10, local.x);
+    let cell_spacing = max(
+        det_div2(u_terrain.spacing_h_exag.xy, cell_count),
+        // Keep the reciprocal out of zero/denormal inputs, matching the
+        // minimum normal f32 used by the deterministic normalization helper.
+        vec2<f32>(1.17549435e-38),
+    );
+
+    let z_up = vec3<f32>(
+        -det_div(dh_du, cell_spacing.x),
+        -det_div(dh_dv, cell_spacing.y),
+        1.0,
+    );
+    let y_up = vec3<f32>(
+        -det_div(dh_du, cell_spacing.x),
+        1.0,
+        -det_div(dh_dv, cell_spacing.y),
+    );
+    return det_normalize3(select(z_up, y_up, u32(u_terrain.camera_mode_params.x) == 2u));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2154,14 +2236,14 @@ fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
     let offset_y = vec2<f32>(0.0, texel_uv.y);
 
     // All 9 samples at the SAME LOD level
-    let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) - offset_y, lod));
-    let t  = sample_height_geom_level(uv - offset_y, lod);
-    let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) - offset_y, lod));
-    let l  = sample_height_geom_level(uv - offset_x, lod);
-    let r  = sample_height_geom_level(uv + offset_x, lod);
-    let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) + offset_y, lod));
-    let b  = sample_height_geom_level(uv + offset_y, lod);
-    let br = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) + offset_y, lod));
+    let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - offset_x) - offset_y), lod));
+    let t  = sample_height_geom_level(det_barrier2(uv - offset_y), lod);
+    let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + offset_x) - offset_y), lod));
+    let l  = sample_height_geom_level(det_barrier2(uv - offset_x), lod);
+    let r  = sample_height_geom_level(det_barrier2(uv + offset_x), lod);
+    let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - offset_x) + offset_y), lod));
+    let b  = sample_height_geom_level(det_barrier2(uv + offset_y), lod);
+    let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + offset_x) + offset_y), lod));
 
     // Sobel gradients
     let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
@@ -2175,11 +2257,11 @@ fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
     let vertical_scale = max(u_terrain.spacing_h_exag.z * 0.5, 1e-3);
     // Geometry frame (+X east, +Y south = +v, +Z up), the frame of world
     // positions, the sun and the view vector.
-    return det_normalize3(vec3<f32>(
+    return det_normalize3(terrain_zup_to_geometry(vec3<f32>(
         -det_div(dx, world_texel.x),
         -det_div(dy, world_texel.y),
         vertical_scale,
-    ));
+    )));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2242,14 +2324,14 @@ fn orbis_skirt_source_coverage(uv: vec2<f32>, clip_morph: vec2<f32>) -> f32 {
     if (clip_morph.y >= 0.0 || clip_morph.x >= 0.0) {
         return 1.0;
     }
-    let ring = -clip_morph.y - 1.0;
+    let ring = det_barrier(-clip_morph.y - 1.0);
     let step = det_div2(
         vec2<f32>(det_exp2(ring + 4.0)),
         max(logical_height_dimensions(), vec2<f32>(1.0)),
     );
     for (var dy = -1; dy <= 1; dy = dy + 1) {
         for (var dx = -1; dx <= 1; dx = dx + 1) {
-            let probe = uv + vec2<f32>(f32(dx), f32(dy)) * step;
+            let probe = det_barrier2(uv + det_barrier2(vec2<f32>(f32(dx), f32(dy)) * step));
             if (orbis_source_coverage(probe) < 0.5) {
                 return 0.0;
             }
@@ -2274,21 +2356,21 @@ fn orbis_globe_height_normal(uv: vec2<f32>, up: vec3<f32>) -> vec3<f32> {
     let offset_x = vec2<f32>(texel_uv.x, 0.0);
     let offset_y = vec2<f32>(0.0, texel_uv.y);
 
-    let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) - offset_y, lod));
-    let t  = sample_height_geom_level(uv - offset_y, lod);
-    let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) - offset_y, lod));
-    let l  = sample_height_geom_level(uv - offset_x, lod);
-    let r  = sample_height_geom_level(uv + offset_x, lod);
-    let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - offset_x) + offset_y, lod));
-    let b  = sample_height_geom_level(uv + offset_y, lod);
-    let br = det_barrier(sample_height_geom_level(det_barrier2(uv + offset_x) + offset_y, lod));
+    let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - offset_x) - offset_y), lod));
+    let t  = sample_height_geom_level(det_barrier2(uv - offset_y), lod);
+    let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + offset_x) - offset_y), lod));
+    let l  = sample_height_geom_level(det_barrier2(uv - offset_x), lod);
+    let r  = sample_height_geom_level(det_barrier2(uv + offset_x), lod);
+    let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - offset_x) + offset_y), lod));
+    let b  = sample_height_geom_level(det_barrier2(uv + offset_y), lod);
+    let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + offset_x) + offset_y), lod));
     // +u is east, +v is south.
     let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
     let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
 
     let latitude = det_fma(-uv.y, ORBIS_PI, ORBIS_PI * 0.5);
     let east_step_m = max(
-        det_barrier(texel_uv.x * 2.0 * ORBIS_PI * ORBIS_EARTH_RADIUS_M) * abs(det_cos(latitude)),
+        det_barrier(det_barrier(det_barrier(texel_uv.x * 2.0) * ORBIS_PI) * ORBIS_EARTH_RADIUS_M) * abs(det_cos(latitude)),
         1e-3,
     );
     let north_step_m = max(det_barrier(texel_uv.y * ORBIS_PI) * ORBIS_EARTH_RADIUS_M, 1e-3);
@@ -2305,7 +2387,7 @@ fn orbis_globe_height_normal(uv: vec2<f32>, up: vec3<f32>) -> vec3<f32> {
     }
     east = det_normalize3(east);
     let north = det_cross3(up, east);
-    return det_normalize3(up - east * slope_east + north * slope_south);
+    return det_normalize3(det_barrier3(up - det_barrier3(east * slope_east)) + det_barrier3(north * slope_south));
 }
 
 /// Sprint 2: Multi-scale height normal for enhanced edge visibility.
@@ -2327,14 +2409,14 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
         let oct_texel = texel_uv;
         let off_x = vec2<f32>(oct_texel.x, 0.0);
         let off_y = vec2<f32>(0.0, oct_texel.y);
-        let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) - off_y, oct_lod));
-        let t  = sample_height_geom_level(uv - off_y, oct_lod);
-        let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) - off_y, oct_lod));
-        let l  = sample_height_geom_level(uv - off_x, oct_lod);
-        let r  = sample_height_geom_level(uv + off_x, oct_lod);
-        let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) + off_y, oct_lod));
-        let b  = sample_height_geom_level(uv + off_y, oct_lod);
-        let br = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) + off_y, oct_lod));
+        let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) - off_y), oct_lod));
+        let t  = sample_height_geom_level(det_barrier2(uv - off_y), oct_lod);
+        let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) - off_y), oct_lod));
+        let l  = sample_height_geom_level(det_barrier2(uv - off_x), oct_lod);
+        let r  = sample_height_geom_level(det_barrier2(uv + off_x), oct_lod);
+        let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) + off_y), oct_lod));
+        let b  = sample_height_geom_level(det_barrier2(uv + off_y), oct_lod);
+        let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) + off_y), oct_lod));
         let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
         let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
         let world_texel = oct_texel * spacing;
@@ -2348,14 +2430,14 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
         let oct_texel = det_barrier2(texel_uv * 2.0);
         let off_x = det_barrier2(vec2<f32>(oct_texel.x, 0.0));
         let off_y = det_barrier2(vec2<f32>(0.0, oct_texel.y));
-        let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) - off_y, oct_lod));
-        let t  = sample_height_geom_level(uv - off_y, oct_lod);
-        let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) - off_y, oct_lod));
-        let l  = sample_height_geom_level(uv - off_x, oct_lod);
-        let r  = sample_height_geom_level(uv + off_x, oct_lod);
-        let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) + off_y, oct_lod));
-        let b  = sample_height_geom_level(uv + off_y, oct_lod);
-        let br = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) + off_y, oct_lod));
+        let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) - off_y), oct_lod));
+        let t  = sample_height_geom_level(det_barrier2(uv - off_y), oct_lod);
+        let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) - off_y), oct_lod));
+        let l  = sample_height_geom_level(det_barrier2(uv - off_x), oct_lod);
+        let r  = sample_height_geom_level(det_barrier2(uv + off_x), oct_lod);
+        let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) + off_y), oct_lod));
+        let b  = sample_height_geom_level(det_barrier2(uv + off_y), oct_lod);
+        let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) + off_y), oct_lod));
         let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
         let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
         let world_texel = oct_texel * spacing;
@@ -2369,14 +2451,14 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
         let oct_texel = det_barrier2(texel_uv * 4.0);
         let off_x = det_barrier2(vec2<f32>(oct_texel.x, 0.0));
         let off_y = det_barrier2(vec2<f32>(0.0, oct_texel.y));
-        let tl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) - off_y, oct_lod));
-        let t  = sample_height_geom_level(uv - off_y, oct_lod);
-        let tr = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) - off_y, oct_lod));
-        let l  = sample_height_geom_level(uv - off_x, oct_lod);
-        let r  = sample_height_geom_level(uv + off_x, oct_lod);
-        let bl = det_barrier(sample_height_geom_level(det_barrier2(uv - off_x) + off_y, oct_lod));
-        let b  = sample_height_geom_level(uv + off_y, oct_lod);
-        let br = det_barrier(sample_height_geom_level(det_barrier2(uv + off_x) + off_y, oct_lod));
+        let tl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) - off_y), oct_lod));
+        let t  = sample_height_geom_level(det_barrier2(uv - off_y), oct_lod);
+        let tr = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) - off_y), oct_lod));
+        let l  = sample_height_geom_level(det_barrier2(uv - off_x), oct_lod);
+        let r  = sample_height_geom_level(det_barrier2(uv + off_x), oct_lod);
+        let bl = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv - off_x) + off_y), oct_lod));
+        let b  = sample_height_geom_level(det_barrier2(uv + off_y), oct_lod);
+        let br = det_barrier(sample_height_geom_level(det_barrier2(det_barrier2(uv + off_x) + off_y), oct_lod));
         let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
         let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
         let world_texel = oct_texel * spacing;
@@ -2388,7 +2470,7 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
     combined_dy = det_div(combined_dy, total_weight);
 
     // Geometry frame (+X east, +Y south, +Z up), matching calculate_normal_lod_aware.
-    return det_normalize3(vec3<f32>(-combined_dx, -combined_dy, vertical_scale));
+    return det_normalize3(terrain_zup_to_geometry(vec3<f32>(-combined_dx, -combined_dy, vertical_scale)));
 }
 
 /// Calculate normal from height map using Sobel filter (LEGACY - not LOD-aware).
@@ -2397,21 +2479,21 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
     let offset_x = vec2<f32>(texel_size.x, 0.0);
     let offset_y = vec2<f32>(0.0, texel_size.y);
 
-    let tl = det_barrier(sample_height_geom(det_barrier2(uv - offset_x) - offset_y));
-    let t = sample_height_geom(uv - offset_y);
-    let tr = det_barrier(sample_height_geom(det_barrier2(uv + offset_x) - offset_y));
-    let l = sample_height_geom(uv - offset_x);
-    let r = sample_height_geom(uv + offset_x);
-    let bl = det_barrier(sample_height_geom(det_barrier2(uv - offset_x) + offset_y));
-    let b = sample_height_geom(uv + offset_y);
-    let br = det_barrier(sample_height_geom(det_barrier2(uv + offset_x) + offset_y));
+    let tl = det_barrier(sample_height_geom(det_barrier2(det_barrier2(uv - offset_x) - offset_y)));
+    let t = sample_height_geom(det_barrier2(uv - offset_y));
+    let tr = det_barrier(sample_height_geom(det_barrier2(det_barrier2(uv + offset_x) - offset_y)));
+    let l = sample_height_geom(det_barrier2(uv - offset_x));
+    let r = sample_height_geom(det_barrier2(uv + offset_x));
+    let bl = det_barrier(sample_height_geom(det_barrier2(det_barrier2(uv - offset_x) + offset_y)));
+    let b = sample_height_geom(det_barrier2(uv + offset_y));
+    let br = det_barrier(sample_height_geom(det_barrier2(det_barrier2(uv + offset_x) + offset_y)));
 
     let dx = (det_barrier(det_barrier(tr + det_barrier(2.0 * r)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * l)) + bl));
     let dy = (det_barrier(det_barrier(bl + det_barrier(2.0 * b)) + br)) - (det_barrier(det_barrier(tl + det_barrier(2.0 * t)) + tr));
 
     let vertical_scale = max(u_terrain.spacing_h_exag.z * 0.5, 1e-3);
     // Geometry frame (+X east, +Y south, +Z up), matching calculate_normal_lod_aware.
-    return det_normalize3(vec3<f32>(-dx, -dy, vertical_scale));
+    return det_normalize3(terrain_zup_to_geometry(vec3<f32>(-dx, -dy, vertical_scale)));
 }
 
 /// Compute geometric normal from screen-space derivatives of world position.
@@ -3364,11 +3446,27 @@ fn apply_dem_detail_normal(
     return det_normalize3(det_mat3_mul_vec3(tbn, blended));
 }
 
-/// Terrain geometry frame (+X east, +Y south, +Z up) to the Y-up environment
-/// cubemap frame (+X east, +Y up, +Z south). The ORBIS globe keeps its own
-/// render frame unchanged.
+/// True for the `mesh:yup` terrain mode, whose geometry frame is already Y-up
+/// (+X east, +Y up, +Z south).
+fn terrain_yup_active() -> bool {
+    return u32(u_terrain.camera_mode_params.x) == 2u;
+}
+
+/// Z-up terrain vector (+X east, +Y south, +Z up) to the active geometry
+/// frame: unchanged in Z-up modes, swizzled to Y-up in `mesh:yup`.
+fn terrain_zup_to_geometry(v: vec3<f32>) -> vec3<f32> {
+    return select(v, vec3<f32>(v.x, v.z, v.y), terrain_yup_active());
+}
+
+/// Terrain geometry frame to the Y-up environment cubemap frame (+X east,
+/// +Y up, +Z south). The ORBIS globe keeps its own render frame and the
+/// `mesh:yup` geometry frame already is the environment frame.
 fn terrain_to_env(v: vec3<f32>) -> vec3<f32> {
-    return select(vec3<f32>(v.x, v.z, v.y), v, orbis_globe_active());
+    return select(
+        vec3<f32>(v.x, v.z, v.y),
+        v,
+        orbis_globe_active() || terrain_yup_active(),
+    );
 }
 
 fn rotate_y(v : vec3<f32>, sin_theta : f32, cos_theta : f32) -> vec3<f32> {
@@ -3934,7 +4032,9 @@ fn apply_atmospheric_fog(
     screen_pos: vec2<f32>,
 ) -> vec3<f32> {
     let density_raw = fog_uniforms.params0.x;
-    let fog_enabled = density_raw > 0.0;
+    // NEPHELE owns spatial-media transport. Keep the analytic-sky/AETHER
+    // boundary, but bypass the independent legacy height-fog density model.
+    let fog_enabled = density_raw > 0.0 && fog_uniforms.media_params.x < 0.5;
     let sky_enabled = fog_uniforms.sky_params0.x > 0.5;
     let sky_aerial_enabled = sky_enabled && fog_uniforms.sky_params0.z > 0.5;
     let aether_enabled = fog_uniforms.fog_inscatter.w > 0.5;
@@ -4068,6 +4168,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         discard;
     }
     let debug_mode = u32(u_overlay.params1.y + 0.5);
+    let lambert_physical = u_overlay.params6.w > 0.5;
 
     // Compute all normal variants for diagnostics
     let base_normal = det_normalize3(input.world_normal);
@@ -4445,7 +4546,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         let wave_dy = det_barrier((det_barrier(det_barrier(wave1) + det_barrier(wave2)) + det_barrier(wave3)) * wind_sin) + det_barrier(det_barrier(cross_wave) * wind_cos);
 
         // Build perturbed normal in the terrain geometry frame (Z is up)
-        shading_normal = det_normalize3(vec3<f32>(wave_dx, wave_dy, 1.0));
+        shading_normal = det_normalize3(terrain_zup_to_geometry(vec3<f32>(wave_dx, wave_dy, 1.0)));
     }
 
     if (!is_water) {
@@ -4525,6 +4626,11 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let overlay_rgb = textureSample(colormap_tex, colormap_samp, lut_uv).rgb;
 
     // Apply overlay blend to material albedo (if overlay is active)
+    if (lambert_physical && !is_water && u_shading.physical_base_color.w > 0.5) {
+        // Preserve the authored f32 reflectance for a single constant material;
+        // the sRGB8 material texture remains available for all general cases.
+        albedo = u_shading.physical_base_color.rgb;
+    }
     var material_albedo = albedo; // Store original triplanar albedo
     if (overlay_strength_raw > 1e-5) {
         let strength = clamp(overlay_strength_raw, 0.0, 1.0);
@@ -4581,7 +4687,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // P4: Apply slope+elevation hue variation to increase h_std metric
     // Combines slope (steep=redder, flat=yellower) and elevation spread
     // The caller can set strength to zero when the supplied palette must remain authoritative.
-    if (!is_water) {
+    if (!is_water && !lambert_physical) {
         let hue_variation_strength = clamp(u_overlay.params3.z, 0.0, 0.2);
         albedo = det_barrier3(apply_slope_hue_variation(albedo, slope_factor, height_norm, hue_variation_strength));
     }
@@ -4708,8 +4814,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             lambert_k,           // P5-L: Lambert contrast parameter
         );
     }
-    lighting = det_barrier3(lighting) * u_terrain.sun_exposure.w;
-    lighting = det_barrier3(lighting) * u_shading.light_params.rgb;
+    lighting = det_barrier3(det_barrier3(lighting) * u_terrain.sun_exposure.w);
+    lighting = det_barrier3(det_barrier3(lighting) * u_shading.light_params.rgb);
 
     // P3-10: Apply CSM shadow visibility (optional, gated by TERRAIN_USE_SHADOWS)
     var shadow_debug_color = vec3<f32>(0.0);
@@ -4736,7 +4842,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         // shadow_visibility: 0.0 = fully shadowed, 1.0 = fully lit
         // Map to [SHADOW_MIN, 1.0] for softer shadows that don't go pitch black
         let direct_shadow = det_mix(SHADOW_MIN, 1.0, shadow_visibility);
-        lighting = det_barrier3(lighting) * direct_shadow;
+        lighting = det_barrier3(det_barrier3(lighting) * direct_shadow);
 
         // Compute factor for IBL shadow (used below)
         shadow_factor = det_mix(1.0 - SHADOW_IBL_FACTOR, 1.0, shadow_visibility);
@@ -4744,9 +4850,13 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         // Legacy POM-based shadow factor (preserved for backward compatibility)
         if (shadow_enabled && pom_enabled) {
             let shadow_factor = clamp(det_mix(0.4, 1.0, occlusion), u_shading.clamp1.z, u_shading.clamp1.w);
-            lighting = det_barrier3(lighting) * shadow_factor;
+            lighting = det_barrier3(det_barrier3(lighting) * shadow_factor);
         }
     }
+    // Every direct-light path consumes the light-ray transmittance produced
+    // from the same canonical 3-D medium as the froxel integration.
+    let same_medium_direct_t = nephele_same_medium_direct_transmittance(input.clip_position.xy, view_distance);
+    lighting = lighting * same_medium_direct_t;
 
     // Apply IBL rotation (terrain-specific feature)
     let rotated_normal = rotate_y(terrain_to_env(shading_normal), u_ibl.sin_theta, u_ibl.cos_theta);
@@ -5348,7 +5458,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // Sun contribution - NO artificial boost; proper GGX + low roughness = natural glints
             let sun_color = vec3<f32>(1.0, 0.98, 0.95); // Slightly warm sun
             let sun_intensity = u_shading.light_params.z; // Use actual sun intensity (no boost!)
-            let sun_spec = det_barrier3(det_barrier3(direct_spec * sun_color) * sun_intensity) * n_dot_l;
+            let sun_spec = det_barrier3(det_barrier3(det_barrier3(direct_spec * sun_color) * sun_intensity) * n_dot_l) * same_medium_direct_t;
 
             // ─────────────────────────────────────────────────────────────────────
             // P4: Planar Reflection Integration
@@ -5412,6 +5522,58 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
                 WATER_BASE_TINT * WATER_BASE_TINT_SCALE) +
                 det_barrier3(det_barrier3(water_scatter) * WATER_SCATTER_SCALE);
 
+        } else if (lambert_physical) {
+            // OD-9c physical terrain surface. The planar/Y-up normal is the
+            // exact analytic bilinear-cell normal used by the reference
+            // traversal. ORBIS retains its displaced globe geometric normal.
+            let physical_normal = select(
+                terrain_reference_geometric_normal(uv),
+                height_normal_lod,
+                orbis_globe,
+            );
+            let n_dot_l = max(det_dot3(physical_normal, light_dir), 0.0);
+
+            // V_terrain is the raw product of the two production visibility
+            // estimators. Do not apply the stylized shadow or AO floors.
+            let sun_vis_uv = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
+            let sun_vis_tex_size = vec2<f32>(textureDimensions(sun_vis_tex, 0));
+            let sun_vis_pixel = vec2<i32>(sun_vis_uv * sun_vis_tex_size);
+            let sun_vis_clamped_pixel = clamp(
+                sun_vis_pixel,
+                vec2<i32>(0),
+                vec2<i32>(sun_vis_tex_size) - vec2<i32>(1),
+            );
+            let sun_vis_sample = textureLoad(sun_vis_tex, sun_vis_clamped_pixel, 0).r;
+            let terrain_visibility = det_barrier(shadow_visibility * sun_vis_sample);
+
+            // light_params.rgb is sun_color * intensity in radiance units.
+            // The terrain IBL cube stores normalized irradiance E_env / PI.
+            // Convert it back to irradiance so the physical equation divides
+            // by PI exactly once below.
+            let lambert_brdf = det_div3(albedo, vec3<f32>(PI));
+            let direct_radiance = det_barrier3(
+                det_barrier3(
+                    det_barrier3(lambert_brdf * u_shading.light_params.rgb) * n_dot_l
+                ) * same_medium_direct_t
+            ) * terrain_visibility;
+            let rotated_physical_normal = rotate_y(
+                physical_normal,
+                u_ibl.sin_theta,
+                u_ibl.cos_theta,
+            );
+            let environment_irradiance = textureSampleLevel(
+                envIrradiance,
+                envSampler,
+                rotated_physical_normal,
+                0.0,
+            ).rgb;
+            let environment_radiance = det_div3(
+                det_barrier3(albedo * det_barrier3(
+                    det_barrier3(environment_irradiance * u_ibl.intensity) * PI
+                )),
+                vec3<f32>(PI),
+            );
+            shaded = det_barrier3(direct_radiance) + det_barrier3(environment_radiance);
         } else {
             // ══════════════════════════════════════════════════════════════════════
             // P2-S4: Terrain Lighting Composition (structure locked per spec)
@@ -5509,8 +5671,10 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // Direct product for full contrast range (no sqrt compression)
             // P3 requires lf_max/lf_min >= 4.5
             // Use combined_shadow which includes both CSM and heightfield sun visibility
-            let ao_shadow_factor = det_barrier(ao_clamped) * det_barrier(combined_shadow); // Range [0.195, 1.0]
-            let diffuse_lit = diffuse_raw * det_barrier(ao_shadow_factor);
+            // NEPHELE direct lighting consumes canonical medium transmittance.
+            let direct_shadow = combined_shadow;
+            let ao_shadow_factor = det_barrier(ao_clamped) * det_barrier(direct_shadow); // Range [0.195, 1.0]
+            let diffuse_lit = det_barrier(diffuse_raw * det_barrier(ao_shadow_factor));
 
             // P3-S1: IBL term adds minimal fill light
             // Reduced to allow deeper shadows while preventing pitch-black
@@ -5518,18 +5682,18 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             let ibl_diffuse_biased = blended_diffuse;
             let ibl_diffuse_factor = det_barrier(det_length3(ibl_diffuse_biased) * u_ibl.intensity);
             let ibl_term = det_barrier(det_barrier(ibl_diffuse_factor) * AMBIENT_FLOOR) * 0.35;
-            let terrain_sss = evaluate_terrain_subsurface(
+            let terrain_sss = det_barrier3(evaluate_terrain_subsurface(
                 terrain_subsurface,
                 albedo,
                 shading_normal,
                 view_dir,
                 light_dir,
-                combined_shadow,
-                ibl_diffuse_factor,
+                direct_shadow,
+                ibl_diffuse_factor),
             );
 
             // P2-S4: lighting_factor = diffuse_lit + ibl_term
-            let lighting_factor = det_barrier(diffuse_lit) + det_barrier(ibl_term);
+            let lighting_factor = det_barrier3(diffuse_lit * same_medium_direct_t) + vec3<f32>(det_barrier(ibl_term));
 
             // Apply lighting factor to albedo
             // Spec H-03: Lighting modulates brightness, not colormap lookup
@@ -5541,7 +5705,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             let spec_capped = min(spec_contrib, albedo * 0.20);
 
             // Final terrain shading
-            shaded = det_barrier3(det_barrier3(lit_albedo) + spec_capped) + det_barrier3(terrain_sss);
+            shaded = det_barrier3(det_barrier3(lit_albedo) + spec_capped) + det_barrier3(terrain_sss * same_medium_direct_t);
         }
 
         let exposure = max(u_shading.light_params.w, 0.0);
@@ -5788,7 +5952,7 @@ fn fs_aov_main(input : VertexOutput) -> FragmentOutput {
 fn clipmap_decode_octahedral(encoded: vec2<f32>) -> vec3<f32> {
     var normal = vec3<f32>(
         encoded,
-        1.0 - abs(encoded.x) - abs(encoded.y),
+        det_barrier(1.0 - abs(encoded.x)) - abs(encoded.y),
     );
     if (normal.z < 0.0) {
         let old_x = normal.x;
@@ -5820,12 +5984,12 @@ fn clipmap_sample_height_level(
         max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0)),
     );
     let level_cell = det_div2(uv, level_step);
-    let level_base = floor(level_cell) * level_step;
+    let level_base = det_barrier2(floor(level_cell) * level_step);
     let level_t = fract(level_cell);
     let h00 = sample_height_bilinear(level_base);
-    let h10 = sample_height_bilinear(det_barrier2(level_base) + vec2<f32>(level_step.x, 0.0));
-    let h01 = sample_height_bilinear(det_barrier2(level_base) + vec2<f32>(0.0, level_step.y));
-    let h11 = sample_height_bilinear(det_barrier2(level_base) + level_step);
+    let h10 = sample_height_bilinear(det_barrier2(det_barrier2(level_base) + vec2<f32>(level_step.x, 0.0)));
+    let h01 = sample_height_bilinear(det_barrier2(det_barrier2(level_base) + vec2<f32>(0.0, level_step.y)));
+    let h11 = sample_height_bilinear(det_barrier2(det_barrier2(level_base) + level_step));
     return det_mix(det_mix(h00, h10, level_t.x), det_mix(h01, h11, level_t.x), level_t.y);
 }
 
@@ -5862,15 +6026,15 @@ fn clipmap_resolve_vertex(
         clip_morph.y < 0.0,
     );
     let skirt_offset = select(0.0, skirt_depth, clip_morph.x < 0.0);
-    let world_z_centered = (det_barrier(det_barrier(h_disp) - det_barrier(h_center)) - skirt_offset) * h_exag;
-    let world_z_original = (det_barrier(h_disp) - skirt_offset) * h_exag;
-    let instance_base = instance_transform * vec4<f32>(clip_position, 1.0);
+    let world_z_centered = det_barrier((det_barrier(det_barrier(h_disp) - det_barrier(h_center)) - skirt_offset) * h_exag);
+    let world_z_original = det_barrier((det_barrier(h_disp) - skirt_offset) * h_exag);
+    let instance_base = det_mat4_mul_vec4(instance_transform, vec4<f32>(clip_position, 1.0));
     let geodetic_up = det_normalize3(
-        (instance_transform * vec4<f32>(clipmap_decode_octahedral(clip_normal_oct), 0.0)).xyz,
+        (det_mat4_mul_vec4(instance_transform, vec4<f32>(clipmap_decode_octahedral(clip_normal_oct), 0.0))).xyz,
     );
     var out: ClipmapResolvedVertex;
-    out.world_position = instance_base.xyz + geodetic_up * world_z_original;
-    out.centered_position = instance_base.xyz + geodetic_up * world_z_centered;
+    out.world_position = det_barrier3(instance_base.xyz) + det_barrier3(geodetic_up * world_z_original);
+    out.centered_position = det_barrier3(instance_base.xyz) + det_barrier3(geodetic_up * world_z_centered);
     out.geodetic_up = geodetic_up;
     out.uv = uv;
     return out;
@@ -5888,11 +6052,13 @@ fn clipmap_raster_position(
 
 @fragment
 fn fs_main(input : VertexOutput) -> FragmentOutput {
+    det_seed(input.clip_position.x);
     return forward_shade_with_feedback(input);
 }
 
 @fragment
 fn fs_orbis_coverage(input : VertexOutput) -> OrbisCoverageOutput {
+    det_seed(input.clip_position.x);
     let shaded = forward_shade_with_feedback(input);
     var out: OrbisCoverageOutput;
     out.color = shaded.color;
@@ -5958,7 +6124,7 @@ fn vs_clipmap_main(
 
 fn orbis_project(matrix: mat4x4<f32>, position: vec3<f32>) -> vec4<f32> {
     let clip = det_mat4_mul_vec4(matrix, vec4<f32>(position, 1.0));
-    return vec4<f32>(clip.xy / clip.w, clip.w, 0.0);
+    return vec4<f32>(det_div2(clip.xy, vec2<f32>(clip.w)), clip.w, 0.0);
 }
 
 // The indirect index stream can reference a vertex many times.  Give each
@@ -5990,6 +6156,7 @@ fn orbis_vertex_is_selected(vertex_index: u32) -> bool {
 
 @compute @workgroup_size(64)
 fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    det_seed(f32(invocation.x));
     let index = invocation.x;
     if (index >= arrayLength(&orbis_projection_samples)) {
         return;
@@ -6034,7 +6201,7 @@ fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
     // This is the naive implementation the production camera-relative path
     // must materially outperform.
     let absolute = orbis_probe.anchor_abs.xyz
-        + (orbis_probe.local_to_ecef * vec4<f32>(raster_position, 0.0)).xyz;
+        + det_barrier3((det_mat4_mul_vec4(orbis_probe.local_to_ecef, vec4<f32>(raster_position, 0.0))).xyz);
     let production_clip = det_mat4_mul_vec4(
         u_terrain.proj,
         det_mat4_mul_vec4(
@@ -6043,9 +6210,9 @@ fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
         ),
     );
     var sample: OrbisProjectionSample;
-    sample.production = orbis_project(u_terrain.proj * u_terrain.view, raster_position);
+    sample.production = orbis_project(det_mat4_mul_mat4(u_terrain.proj, u_terrain.view), raster_position);
     sample.naive = orbis_project(orbis_probe.absolute_view_proj, absolute);
-    sample.naive.w = production_clip.z / production_clip.w;
+    sample.naive.w = det_div(production_clip.z, production_clip.w);
     sample.resolved_local = vec4<f32>(raster_position, 1.0);
     sample.production.w = select(0.0, 1.0, clip_morph.x < 0.0);
     orbis_projection_samples[index] = sample;

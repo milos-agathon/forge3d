@@ -1167,14 +1167,14 @@ mod tests {
             },
         );
         queue.submit(Some(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let slice = readback.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         rx.recv().ok()?.ok()?;
 
         let data = slice.get_mapped_range();

@@ -1,0 +1,18 @@
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	﻿2026-09-30T22:50:06.8142957Z ##[group]Run python -m scripts.run_media_physical_capture produce --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/producer.log"
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8145078Z [36;1mpython -m scripts.run_media_physical_capture produce --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/producer.log"[0m
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8146237Z [36;1mexit $LASTEXITCODE[0m
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8223640Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8224073Z env:
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8224287Z   CARGO_TERM_COLOR: always
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8224560Z   RUST_BACKTRACE: 1
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8224718Z   FORGE3D_NO_BOOTSTRAP: 1
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8224878Z   FORGE3D_TEST_INSTALLED_WHEEL: 1
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8225087Z   FORGE3D_NEPHELE_LANE: windows-nvidia-vulkan
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8225365Z   FORGE3D_NEPHELE_CANDIDATE_SHA: ddbdcc086b401fe1842a9725f32c5e493d5c65cf
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8225773Z   FORGE3D_NEPHELE_REFERENCE_WHEEL_DIR: tests/nephele/acceptance-runtime/reference-wheel
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8226067Z   WGPU_BACKEND: vulkan
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8226217Z   WGPU_BACKENDS: vulkan
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8226475Z   FORGE3D_NEPHELE_ARTIFACT_DIR: C:\actions-runner\_work\_temp\forge3d-nephele-36785284320-1
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:50:06.8226767Z ##[endgroup]
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:51:02.8764786Z [31;1mNEPHELE physical capture failed: Object of type int64 is not JSON serializable[0m
+NEPHELE (NVIDIA Vulkan)	Execute exhaustive statistical and shader producers	2026-09-30T22:51:02.8961685Z ##[error]Process completed with exit code 1.

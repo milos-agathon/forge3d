@@ -258,7 +258,7 @@ fn test_visibility_entry() {{
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).expect("map callback receiver");
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         receiver.recv().expect("map callback").expect("map result");
         let mapped = slice.get_mapped_range();
         let result = *bytemuck::from_bytes::<[f32; 5]>(&mapped);
@@ -384,7 +384,7 @@ fn test_evsm_half_uniform(@builtin(global_invocation_id) id: vec3<u32>) {{
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).expect("map callback receiver");
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         receiver.recv().expect("map callback").expect("map result");
         let mapped = slice.get_mapped_range();
         let result = bytemuck::cast_slice::<u8, f32>(&mapped).to_vec();

@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.47s
+     Running unittests src\lib.rs (target\debug\deps\forge3d-037a749b21360b0c.exe)
+
+running 4 tests
+test terrain::renderer::runtime_contract::tests::terrain_runtime_observation_checks_uploaded_uniforms_and_height_texture ... ok
+test terrain::renderer::runtime_contract::tests::detail_blend_encoding_is_bounded_but_exaggeration_stays_nonnegative ... ok
+test terrain::renderer::runtime_contract::tests::terrain_extent_above_65536_is_in_contract_but_exaggeration_is_not ... ok
+test terrain::renderer::runtime_contract::tests::physical_base_color_is_finite_linear_reflectance_and_flag ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1652 filtered out; finished in 0.00s
+

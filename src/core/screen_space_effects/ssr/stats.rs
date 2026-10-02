@@ -20,7 +20,7 @@ impl SsrRenderer {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let map_result = block_on(receiver.receive()).ok_or_else(|| {
             RenderError::Readback("failed to receive SSR stats map signal".to_string())

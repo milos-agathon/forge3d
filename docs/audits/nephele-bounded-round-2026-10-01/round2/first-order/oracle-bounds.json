@@ -1,0 +1,46 @@
+{
+  "terrain_mean_rgb_reference_minus_realtime": [
+    0.024062004274030834,
+    0.017636511490305096,
+    0.009325756179471269
+  ],
+  "terrain_mean_rgb_T_times_surface_sun_inscatter": [
+    0.018921479086913457,
+    0.0177623587907206,
+    0.015813202889936193
+  ],
+  "rows": {
+    "realtime_background_fix_state": {
+      "g4_shadow_fraction_below_2": 0.46563904945407836,
+      "g3_sky_cloud_fraction_below_2_5": 0.9168636721828212
+    },
+    "reference_320spp_vs_640spp_noise_floor": {
+      "g4_shadow_fraction_below_2": 0.9961464354527938,
+      "g3_sky_cloud_fraction_below_2_5": 1.0
+    },
+    "predicted_realtime_plus_T_times_surface_sun_inscatter": {
+      "g4_shadow_fraction_below_2": 0.6017983301220295,
+      "g3_sky_cloud_fraction_below_2_5": 0.9168636721828212
+    },
+    "mean_matched_realtime_global_rgb_gain_on_terrain": {
+      "g4_shadow_fraction_below_2": 0.7135517019910084,
+      "g3_sky_cloud_fraction_below_2_5": 0.9168636721828212
+    },
+    "mean_matched_realtime_global_rgb_gain_on_sky": {
+      "g4_shadow_fraction_below_2": 0.46563904945407836,
+      "g3_sky_cloud_fraction_below_2_5": 0.9436564223798266
+    },
+    "mean_matched_realtime_8x8_tile_rgb_gain": {
+      "g4_shadow_fraction_below_2": 0.8368657675016057,
+      "g3_sky_cloud_fraction_below_2_5": 0.9720252167060678
+    },
+    "mean_matched_first_order_structure_8x8_tile_gain": {
+      "g4_shadow_fraction_below_2": 0.7925497752087347,
+      "g3_sky_cloud_fraction_below_2_5": 0.9956658786446021
+    },
+    "mean_matched_first_order_plus_surface_sun_inscatter_8x8_tile_gain": {
+      "g4_shadow_fraction_below_2": 0.8246628131021194,
+      "g3_sky_cloud_fraction_below_2_5": 0.9956658786446021
+    }
+  }
+}

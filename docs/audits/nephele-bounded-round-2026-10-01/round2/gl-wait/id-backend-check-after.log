@@ -1,0 +1,21 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 47.08s
+     Running unittests src\lib.rs (D:\forge3d\artifacts\build\main\target\debug\deps\forge3d-10871d8d066131ec.exe)
+
+running 7 tests
+test core::gpu::backend_request_tests::backend_request_is_exact_and_rejects_ambiguous_or_substring_values ... ok
+test core::gpu_timing::tests::certificate_gpu_ms_zeros_invalid_timestamps ... ok
+test core::gpu::backend_request_tests::proof_hardware_classifier_requires_a_physical_gpu_type ... ok
+test core::gpu::backend_request_tests::proof_hardware_classifier_recognizes_virtualized_adapter_names ... ok
+test core::gpu_timing::tests::one_shot_failure_is_render_local_degradation ... ok
+Validation Warning: [ WARNING-vkGetDeviceProcAddr-device ] | MessageID = 0x22b1fbac
+vkGetDeviceProcAddr(): pName is trying to grab vkGetPhysicalDevicePresentRectanglesKHR which is an instance level function
+
+test core::gpu_timing::tests::gpu_timing_double_buffered_measures_copy ... ok
+wait_for_device_idle ok on Vulkan (NVIDIA GeForce RTX 3070)
+wait_for_device_idle ok on Dx12 (NVIDIA GeForce RTX 3070)
+wait_for_device_idle ok on Dx12 (Microsoft Basic Render Driver)
+wait_for_device_idle ok on Gl (NVIDIA GeForce RTX 3070/PCIe/SSE2)
+test core::gpu::backend_request_tests::wait_for_device_idle_classifies_gl_and_returns_after_real_work ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 1648 filtered out; finished in 0.77s
+

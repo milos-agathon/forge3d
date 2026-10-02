@@ -128,14 +128,14 @@ fn read_texture_bytes(
         },
     );
     g.queue.submit([enc.finish()]);
-    g.device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&g.device);
 
     let slice = read_buf.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| {
         let _ = tx.send(res);
     });
-    g.device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&g.device);
     rx.recv()
         .map_err(|_| RenderError::Readback("map_async channel closed".into()))?
         .map_err(|e| RenderError::Readback(format!("MapAsync failed: {:?}", e)))?;

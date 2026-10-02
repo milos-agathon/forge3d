@@ -21,7 +21,7 @@ fn read_measurements(
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     receiver
         .recv()
         .map_err(|error| RenderError::readback(format!("jitter callback failed: {error}")))?
@@ -191,7 +191,7 @@ pub fn jitter_demo(frames: u32) -> RenderResult<DdJitterReport> {
     timing.end(&mut encoder, timing_scope, 2);
     timing.resolve(&mut encoder);
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     crate::core::shader_registry::record_shader_use(LABEL);
     if !timing.record_into_certificate() {
         crate::core::certificate::record_pass("dupla.dd_jitter", 0.0, 2);
@@ -221,7 +221,7 @@ pub fn jitter_demo(frames: u32) -> RenderResult<DdJitterReport> {
         pass.draw(0..3, 0..1);
     }
     queue.submit(Some(second.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     let dd_hash_b = hash_render(device, queue, &target, 64, 64)?;
 
     let metrics = reduce_measurements(&measured, &model)?;

@@ -1,0 +1,10 @@
+{
+  "installed_native_path": "C:\\Users\\milos\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\forge3d\\_forge3d.pyd",
+  "native_sha256": "394280024793c75712d87fd8f8b1951be99151f992acdb9e71a9ce4a6c6c1f02",
+  "package_version": "1.40.0",
+  "schema": "forge3d.nephele.installed_runtime/1",
+  "source_revision": "aeda3a8e4d7ba927d23cc978ad3c4678e6e79039",
+  "wheel_filename": "forge3d-1.40.0-cp310-abi3-win_amd64.whl",
+  "wheel_native_member": "forge3d/_forge3d.pyd",
+  "wheel_sha256": "e1ef6e5e19be51e57b35f8bbf9e0f5a4cc4953d852c671ae0f5af19c126d349b"
+}

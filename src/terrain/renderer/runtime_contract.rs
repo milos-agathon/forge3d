@@ -10,7 +10,7 @@ pub(super) fn build_observation(
     width: u32,
     height: u32,
 ) -> Result<RuntimeContractObservation, String> {
-    if terrain.len() != 44 || shading.len() != 44 {
+    if terrain.len() != 44 || shading.len() != 48 {
         return Err("terrain contract uniforms have an unexpected ABI length".to_string());
     }
     if width == 0 || height == 0 || heightmap.len() != width as usize * height as usize {
@@ -26,6 +26,14 @@ pub(super) fn build_observation(
         "src/shaders/terrain_pbr_pom.wgsl",
         "fs_main",
         "shaders/contracts/terrain_pbr_pom.toml",
+    );
+    check_slice(
+        &mut observation,
+        "u_overlay.params6.w",
+        8,
+        &overlay.params6[3..4],
+        0.0,
+        1.0,
     );
     check_slice(
         &mut observation,
@@ -100,6 +108,7 @@ pub(super) fn build_observation(
         ("u_shading.clamp1", 32..36, (0.0, 65_536.0)),
         ("u_shading.clamp2", 36..40, (0.0, 65_536.0)),
         ("u_shading.height_curve", 40..44, (0.0, 65_536.0)),
+        ("u_shading.physical_base_color", 44..48, (0.0, 1.0)),
     ] {
         check_slice(
             &mut observation,
@@ -191,12 +200,16 @@ fn check_slice(
     allowed_min: f32,
     allowed_max: f32,
 ) {
-    let (observed_min, observed_max) = values
+    let (mut observed_min, mut observed_max) = values
         .iter()
         .copied()
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), value| {
             (min.min(value), max.max(value))
         });
+    if values.iter().any(|value| !value.is_finite()) {
+        observed_min = f32::NAN;
+        observed_max = f32::NAN;
+    }
     observation.check_range(
         "uniform",
         name,
@@ -218,7 +231,7 @@ mod tests {
         terrain[32..36].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
         terrain[36..40].copy_from_slice(&[1.0, 1.0, 1.0, 1.0]);
         terrain[40..44].copy_from_slice(&[0.0, 64.0, 0.1, 1_000.0]);
-        let mut shading = vec![0.0; 44];
+        let mut shading = vec![0.0; 48];
         shading[0..4].copy_from_slice(&[1.0, 4.0, 1.0, 0.0]);
         shading[8..12].copy_from_slice(&[0.0, 0.33, 0.66, 1.0]);
         shading[12..16].fill(0.5);
@@ -228,6 +241,7 @@ mod tests {
         shading[32..36].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
         shading[36..40].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
         shading[40..44].copy_from_slice(&[0.0, 1.0, 1.0, 0.5]);
+        shading[44..48].copy_from_slice(&[0.6, 0.4, 0.2, 1.0]);
 
         let observation = build_observation(
             "terrain.render_internal",
@@ -254,16 +268,24 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert!(names.contains("u_terrain.view"));
         assert!(names.contains("u_shading.clamp0.height_range"));
+        assert!(names.contains("u_shading.physical_base_color"));
         assert!(names.contains("height_tex.samples"));
         assert_eq!(observation.status, "passed");
     }
 
     fn observe_spacing(spacing_h_exag: [f32; 4]) -> RuntimeContractObservation {
+        observe_uniforms(spacing_h_exag, [0.0; 4])
+    }
+
+    fn observe_uniforms(
+        spacing_h_exag: [f32; 4],
+        physical_base_color: [f32; 4],
+    ) -> RuntimeContractObservation {
         let mut terrain = vec![0.0; 44];
         terrain[32..36].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
         terrain[36..40].copy_from_slice(&spacing_h_exag);
         terrain[40..44].copy_from_slice(&[0.0, 64.0, 0.1, 1_000.0]);
-        let mut shading = vec![0.0; 44];
+        let mut shading = vec![0.0; 48];
         shading[0..4].copy_from_slice(&[1.0, 4.0, 1.0, 0.0]);
         shading[8..12].copy_from_slice(&[0.0, 0.33, 0.66, 1.0]);
         shading[12..16].fill(0.5);
@@ -273,6 +295,7 @@ mod tests {
         shading[32..36].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
         shading[36..40].copy_from_slice(&[0.0, 1.0, 0.0, 1.0]);
         shading[40..44].copy_from_slice(&[0.0, 1.0, 1.0, 0.5]);
+        shading[44..48].copy_from_slice(&physical_base_color);
         build_observation(
             "terrain.render_internal",
             &terrain,
@@ -291,6 +314,22 @@ mod tests {
             2,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn physical_base_color_is_finite_linear_reflectance_and_flag() {
+        let spacing = [1.0; 4];
+        assert_eq!(
+            observe_uniforms(spacing, [0.6, 0.4, 0.2, 1.0]).status,
+            "passed"
+        );
+        for invalid in [-1.0, 2.0, f32::NAN, f32::INFINITY] {
+            for channel in 0..4 {
+                let mut color = [0.6, 0.4, 0.2, 1.0];
+                color[channel] = invalid;
+                assert_eq!(observe_uniforms(spacing, color).status, "failed");
+            }
+        }
     }
 
     #[test]

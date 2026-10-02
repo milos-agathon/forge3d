@@ -1,0 +1,37 @@
+{
+  "schema": "forge3d.nephele.ci_harness_validation/1",
+  "physical_acceptance": false,
+  "rendering_source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+  "local_validation_base_revision": "009b6ef6d4ddb2a393d24258b2fd5a361016ae99",
+  "test_harness_tracked_worktree_clean": false,
+  "diagnostic_producer_sha256": "c1e21928cc235277820a78c16546f164ad395b82dc7b5d034cb06f33ab74f819",
+  "initial_broader_core_run": 36816534089,
+  "initial_full_linux_result": {
+    "failed": 3,
+    "passed": 3802,
+    "skipped": 316,
+    "deselected": 55
+  },
+  "initial_failures": [
+    "tests/test_atmosphere_spectral.py::test_terrain_group_four_is_the_dedicated_shared_atmosphere_group",
+    "tests/test_nephele_environment_defects.py::test_camera_visible_uniform_environment_readback",
+    "tests/test_nephele_environment_defects.py::test_shadow_scattering_component_readback"
+  ],
+  "corrected_local_result": {
+    "passed": 31,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "unchanged_default_gpu_array_count": 15,
+  "artifact_hashes": {
+    "round1-ci-integration.log": {
+      "bytes": 101,
+      "sha256": "81efb235464d5b234604d8e692484fa1b29b1406bbc2be45c71d21a520d0e87b"
+    },
+    "round1-ci-integration-junit.xml": {
+      "bytes": 4665,
+      "sha256": "ceacb07c4e56706d6dc24186b9429ca597de8e9d6fcaf77bf5b4d223ef55d14b"
+    }
+  }
+}

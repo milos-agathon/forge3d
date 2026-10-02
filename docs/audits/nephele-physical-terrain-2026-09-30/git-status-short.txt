@@ -1,0 +1,37 @@
+ M .github/workflows/ci.yml
+ M .github/workflows/test-python-wheel.yml
+ M .gitignore
+ M docs/api/media.md
+ M docs/audits/nephele-b1-2026-09-30/diagnostic.py
+ M docs/audits/nephele-reference-convergence-2026-09-30.md
+ M python/forge3d/__init__.pyi
+ M python/forge3d/media.pyi
+ M python/forge3d/terrain_params.py
+ M scripts/nephele_evidence_report.py
+ M scripts/run_media_physical_capture.py
+ M shaders/contracts/terrain_pbr_pom.toml
+ M src/render/material_set/core.rs
+ M src/render/material_set/gpu.rs
+ M src/render/material_set/gpu_helpers.rs
+ M src/shaders/terrain_pbr_pom.wgsl
+ M src/terrain/render_params/core.rs
+ M src/terrain/render_params/decode_core.rs
+ M src/terrain/render_params/private_impl.rs
+ M src/terrain/render_params/py_api.rs
+ M src/terrain/renderer/draw/setup/context.rs
+ M src/terrain/renderer/media.rs
+ M src/terrain/renderer/py_api.rs
+ M src/terrain/renderer/runtime_contract.rs
+ M src/terrain/renderer/uniforms.rs
+ M src/terrain/renderer/upload.rs
+ M tests/nephele/evidence-inventory.json
+ M tests/shader_proofs_ledger.toml
+ M tests/test_api_contracts.py
+ M tests/test_nephele_evidence_report.py
+ M tests/test_nephele_fixture_contracts.py
+ M tests/test_nephele_public_api.py
+ M tests/test_no_silent_degradation.py
+ M tests/test_terrain_visual_goldens.py
+?? docs/audits/nephele-b2-2026-09-30.json
+?? docs/audits/nephele-physical-terrain-2026-09-30.md
+?? docs/audits/nephele-physical-terrain-2026-09-30/

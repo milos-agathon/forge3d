@@ -480,7 +480,8 @@ impl GpuTimingManager {
     /// Get timing results for the slot just resolved + submitted (offline single-shot).
     ///
     /// Reads the current slot (`frame_parity`) and blocks on device work with an
-    /// explicit `Maintain::Wait`. Intended for single-submit offline renders.
+    /// explicit [`crate::core::gpu::wait_for_device_idle`]. Intended for
+    /// single-submit offline renders.
     ///
     /// Consumes and resets the current slot on success: this is the offline
     /// counterpart to `finish_frame`'s per-slot reset, so a caller that repeats
@@ -559,7 +560,7 @@ impl GpuTimingManager {
             sender.send(result).ok();
         });
 
-        self.device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
 
         match receiver.receive().await {
             Some(Ok(())) => {
@@ -842,7 +843,7 @@ mod tests {
 
         manager.resolve_queries(&mut encoder);
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let results = manager.get_results_blocking().expect("get results");
         assert_eq!(results.len(), 1, "expected exactly one timed scope");
@@ -873,7 +874,7 @@ mod tests {
         manager.end_scope_with_draws(&mut encoder2, scope2, 1);
         manager.resolve_queries(&mut encoder2);
         queue.submit(std::iter::once(encoder2.finish()));
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let results2 = manager
             .get_results_blocking()
@@ -896,7 +897,7 @@ mod tests {
         drop(manager);
         drop(src);
         drop(dst);
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         std::mem::forget(device);
         std::mem::forget(queue);
     }

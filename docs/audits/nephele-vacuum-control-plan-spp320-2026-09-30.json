@@ -1,0 +1,95 @@
+{
+  "camera_contract": {
+    "forward": [
+      4.2862541960175804e-08,
+      -0.196116104722023,
+      -0.9805806875228882
+    ],
+    "fov_y": 45.0,
+    "look_at": [
+      0.0,
+      15.0,
+      0.0
+    ],
+    "origin": [
+      -2.185569428547751e-06,
+      24.999998092651367,
+      50.0
+    ],
+    "right": [
+      1.0,
+      -0.0,
+      4.371138828673793e-08
+    ],
+    "up": [
+      8.572507148585373e-09,
+      0.9805806875228882,
+      -0.196116104722023
+    ]
+  },
+  "criterion": {
+    "delta_e_strict_upper_bound": 2.0,
+    "minimum": 0.95
+  },
+  "expected_diagnostics": {
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "driver": "NVIDIA 610.60",
+    "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0"
+  },
+  "fixture_manifest_sha256": "e1535f441d2a5711f5c90129e1858b873b088a7de053d7a474c4208dd0961817",
+  "generator": {
+    "artifact": "nephele_b1_diagnostic.py",
+    "path": "scripts/nephele_b1_diagnostic.py",
+    "sha256": "f486469a27fe904d42bde7b7f041099c935d3548da68aeaf97ee310481c4c410"
+  },
+  "medium_coefficients": {
+    "sigma_a": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "sigma_s": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "native_runtime": {
+    "native_sha256": "7661b8f81f6a5253d035b8d2e6241ccf73e8b1c001c4db6981b5c65a3012607f",
+    "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+    "wheel_filename": "forge3d-1.40.0-cp310-abi3-win_amd64.whl",
+    "wheel_native_member": "forge3d/_forge3d.pyd",
+    "wheel_sha256": "e1e1f8444ff0300bf63ec24963b70a1578871647be2a3a9753e7b3a26dd7928e"
+  },
+  "native_wheel": {
+    "artifact": "forge3d-1.40.0-cp310-abi3-win_amd64.whl",
+    "path": "tests/nephele/acceptance-runtime/reference-wheel/forge3d-1.40.0-cp310-abi3-win_amd64.whl",
+    "sha256": "e1e1f8444ff0300bf63ec24963b70a1578871647be2a3a9753e7b3a26dd7928e"
+  },
+  "outputs": {
+    "reference": {
+      "artifact": "vacuum-reference-spp320.npy",
+      "path": "docs/audits/nephele-vacuum-control-spp320-2026-09-30/vacuum-reference-spp320.npy"
+    },
+    "registration": {
+      "artifact": "vacuum-control-spp320.json",
+      "path": "docs/audits/nephele-vacuum-control-spp320-2026-09-30/vacuum-control-spp320.json"
+    }
+  },
+  "reference_path": "docs/audits/nephele-vacuum-control-spp320-2026-09-30/vacuum-reference-spp320.npy",
+  "reference_provenance": {
+    "artifact": "reference-provenance.json",
+    "path": "tests/nephele/fixture/reference-provenance.json",
+    "sha256": "9650034250479e286b1455d7c19df8c971cd845f996a346bb63456975023979b"
+  },
+  "samples_per_pixel": 320,
+  "schema": "forge3d.nephele.vacuum_control_plan/1",
+  "seed": 1313165384,
+  "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+  "terrain_mask": {
+    "artifact": "terrain-mask.npy",
+    "path": "tests/nephele/fixture/terrain-mask.npy",
+    "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+  }
+}

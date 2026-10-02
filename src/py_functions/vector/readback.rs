@@ -10,7 +10,7 @@ fn wait_for_buffer_map(
     slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).ok();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     let recv = pollster::block_on(receiver.receive())
         .ok_or_else(|| PyRuntimeError::new_err(cancel_message))?;
     if let Err(error) = recv {
@@ -73,7 +73,7 @@ pub(super) fn read_rgba_texture_to_vec(
         },
     );
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     let slice = buffer.slice(..);
     wait_for_buffer_map(device, &slice, cancel_message)?;
@@ -162,7 +162,7 @@ pub(super) fn read_u32_texture_to_py(
         },
     );
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     let slice = buffer.slice(..);
     wait_for_buffer_map(device, &slice, cancel_message)?;
@@ -227,7 +227,7 @@ pub(super) fn read_single_u32_pixel(
         },
     );
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     let slice = buffer.slice(..);
     wait_for_buffer_map(device, &slice, cancel_message)?;

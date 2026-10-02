@@ -36,6 +36,7 @@ pub(in crate::terrain::renderer) struct PreparedMaterials {
     pub(in crate::terrain::renderer) overlay_binding: OverlayBinding,
     pub(in crate::terrain::renderer) fallback_colormap_view: Option<wgpu::TextureView>,
     pub(in crate::terrain::renderer) material_maps: MaterialMapResources,
+    pub(in crate::terrain::renderer) terrain_trace_albedo: [f32; 3],
 }
 
 impl PreparedMaterials {
@@ -173,15 +174,6 @@ impl TerrainScene {
         })
     }
 
-    pub(in crate::terrain::renderer) fn prepare_material_context(
-        &self,
-        material_set: &crate::render::material_set::MaterialSet,
-        params: &crate::terrain::render_params::TerrainRenderParams,
-        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
-    ) -> Result<PreparedMaterials> {
-        self.prepare_material_context_with_mode(material_set, params, decoded, false)
-    }
-
     pub(in crate::terrain::renderer) fn prepare_material_context_with_mode(
         &self,
         material_set: &crate::render::material_set::MaterialSet,
@@ -189,11 +181,14 @@ impl TerrainScene {
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         offline_hdr_output: bool,
     ) -> Result<PreparedMaterials> {
-        let gpu_materials = material_set
-            .gpu(self.device.as_ref(), self.queue.as_ref())
-            .map_err(|err| {
-                PyRuntimeError::new_err(format!("Failed to prepare material textures: {err:#}"))
-            })?;
+        let gpu_materials = if params.terrain_shading_model == "lambert_physical" {
+            material_set.gpu_physical(self.device.as_ref(), self.queue.as_ref())
+        } else {
+            material_set.gpu(self.device.as_ref(), self.queue.as_ref())
+        }
+        .map_err(|err| {
+            PyRuntimeError::new_err(format!("Failed to prepare material textures: {err:#}"))
+        })?;
         let material_maps = self.prepare_material_map_resources(&decoded.materials)?;
 
         let shading_uniforms =
@@ -246,6 +241,16 @@ impl TerrainScene {
             overlay_binding,
             fallback_colormap_view,
             material_maps,
+            terrain_trace_albedo: material_set
+                .materials()
+                .first()
+                .map_or([1.0; 3], |material| {
+                    [
+                        material.base_color[0],
+                        material.base_color[1],
+                        material.base_color[2],
+                    ]
+                }),
         })
     }
 

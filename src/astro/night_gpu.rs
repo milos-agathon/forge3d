@@ -309,7 +309,7 @@ pub fn render_test_frame(
         timing.resolve(&mut encoder);
     }
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     crate::core::certificate::record_model(
         "astro.twilight",
         "SIDERA civil-to-astronomical smoothstep; solar altitude -4 to -18 degrees; rendering visibility model",
