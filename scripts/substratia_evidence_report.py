@@ -4,9 +4,10 @@
 The test ledger is useful context, but it is not proof by itself.  This verifier
 binds every claim to an explicit clean candidate commit and physical adapter,
 loads the candidate's golden bytes directly from Git, decodes the PNGs (including
-CRC and filter validation), recomputes the image metrics, and checks the exact
-four moonshot acceptance tests in JUnit.  A PASS report and lane marker are only
-written after every independent check succeeds.
+CRC and filter validation), recomputes the image metrics, checks every recorded
+per-render host-visible peak against 512 MiB alongside total tracked bytes, and
+checks the exact four moonshot acceptance tests in JUnit.  A PASS report and
+lane marker are only written after every independent check succeeds.
 """
 
 from __future__ import annotations
@@ -42,6 +43,14 @@ CORE_TESTS = (
     "test_missing_family_is_fatal",
     "test_partial_normal_residency_degrades_gracefully",
 )
+# Minimum per-render memory samples per gate: the renders each test performs
+# (baseline + normal; two feedback cameras + upload; baseline, full, partial).
+RENDER_MEMORY_MIN_RENDERS = {
+    "normal_lighting_ssim": 2,
+    "family_residency_budget": 3,
+    "partial_normal_residency": 3,
+}
+RENDER_MEMORY_SOURCE = "forge3d.diagnostics.render_certificate.allocations"
 PNG_NAMES = (
     "actual_baseline.png",
     "actual_normal.png",
@@ -449,6 +458,58 @@ def _validate_non_image_gates(gates: dict) -> dict:
     }
 
 
+def _byte_count(value: object, label: str) -> int:
+    _require(type(value) is int and value >= 0, f"{label} is not a non-negative integer byte count")
+    return value
+
+
+def _validate_render_memory(gates: dict) -> dict:
+    """Check every rendering gate's per-render certificate allocation peaks."""
+    peak_by_gate = {}
+    total_by_gate = {}
+    render_count = 0
+    for name, min_renders in RENDER_MEMORY_MIN_RENDERS.items():
+        memory = _pass_gate(gates, name).get("render_memory")
+        _require(isinstance(memory, dict), f"{name} has no render_memory evidence")
+        _require(memory.get("source") == RENDER_MEMORY_SOURCE, f"{name} render_memory source drift")
+        _require(memory.get("memory_limit_bytes") == MEMORY_LIMIT_BYTES, f"{name} render memory ceiling drift")
+        renders = memory.get("renders")
+        _require(isinstance(renders, list) and renders, f"{name} recorded no per-render memory samples")
+        _require(
+            len(renders) >= min_renders,
+            f"{name} recorded {len(renders)} render memory samples, expected at least {min_renders}",
+        )
+        host_peaks = []
+        totals = []
+        for index, render in enumerate(renders):
+            label = f"{name} render {index}"
+            _require(isinstance(render, dict), f"{label} memory sample is not an object")
+            host = _byte_count(render.get("peak_host_visible_bytes"), f"{label} peak_host_visible_bytes")
+            device = _byte_count(render.get("peak_device_local_bytes"), f"{label} peak_device_local_bytes")
+            total = _byte_count(render.get("total_tracked_bytes"), f"{label} total_tracked_bytes")
+            _require(total == host + device, f"{label} total_tracked_bytes is inconsistent")
+            _require(total > 0, f"{label} tracked no allocations")
+            readback = _byte_count(render.get("readback_staging_bytes"), f"{label} readback_staging_bytes")
+            _require(0 < readback <= host, f"{label} readback staging is outside its host-visible peak")
+            host_peaks.append(host)
+            totals.append(total)
+        peak = _byte_count(memory.get("peak_host_visible_bytes"), f"{name} peak_host_visible_bytes")
+        total = _byte_count(memory.get("total_tracked_bytes"), f"{name} total_tracked_bytes")
+        _require(peak == max(host_peaks), f"{name} host-visible peak is inconsistent with its renders")
+        _require(total == max(totals), f"{name} total tracked bytes are inconsistent with its renders")
+        _require(peak <= MEMORY_LIMIT_BYTES, f"{name} host-visible peak exceeds the 512 MiB contract")
+        peak_by_gate[name] = peak
+        total_by_gate[name] = total
+        render_count += len(renders)
+    return {
+        "render_peak_host_visible_bytes": max(peak_by_gate.values()),
+        "render_total_tracked_bytes": max(total_by_gate.values()),
+        "render_peak_host_visible_bytes_by_gate": peak_by_gate,
+        "render_total_tracked_bytes_by_gate": total_by_gate,
+        "render_memory_sample_count": render_count,
+    }
+
+
 def _validate_junit(path: Path) -> dict:
     try:
         root = ET.parse(path).getroot()
@@ -483,6 +544,7 @@ def verify(args: argparse.Namespace) -> dict:
     normal = _pass_gate(gates, "normal_lighting_ssim")
     image_metrics = _validate_images(artifact_dir, repository, args.candidate_sha, adapter, normal)
     gate_metrics = _validate_non_image_gates(gates)
+    memory_metrics = _validate_render_memory(gates)
     junit = _validate_junit(args.junit.resolve())
     report = {
         "schema": REPORT_SCHEMA,
@@ -490,7 +552,7 @@ def verify(args: argparse.Namespace) -> dict:
         "candidate_sha": args.candidate_sha,
         "adapter": adapter,
         "render_adapter": render_adapter,
-        "metrics": {**image_metrics, **gate_metrics},
+        "metrics": {**image_metrics, **gate_metrics, **memory_metrics},
         "junit": junit,
         "inputs": {
             "results_sha256": hashlib.sha256(results_path.read_bytes()).hexdigest(),

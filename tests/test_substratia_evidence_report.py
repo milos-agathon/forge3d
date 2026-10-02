@@ -73,6 +73,28 @@ def _junit(status: str = "pass", *, omitted: str | None = None) -> str:
     return f'<?xml version="1.0"?><testsuites><testsuite>{"".join(cases)}</testsuite></testsuites>'
 
 
+READBACK_BYTES = 256 * 256 * 4
+
+
+def _render_memory(*samples: tuple[int, int]) -> dict:
+    renders = [
+        {
+            "peak_host_visible_bytes": host,
+            "peak_device_local_bytes": device,
+            "total_tracked_bytes": host + device,
+            "readback_staging_bytes": min(READBACK_BYTES, host),
+        }
+        for host, device in samples
+    ]
+    return {
+        "source": reporter.RENDER_MEMORY_SOURCE,
+        "renders": renders,
+        "peak_host_visible_bytes": max(render["peak_host_visible_bytes"] for render in renders),
+        "total_tracked_bytes": max(render["total_tracked_bytes"] for render in renders),
+        "memory_limit_bytes": reporter.MEMORY_LIMIT_BYTES,
+    }
+
+
 def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
     repo = tmp_path / "repo"
     artifacts = repo / "artifacts"
@@ -140,6 +162,7 @@ def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
                 "actual_normal_rgba_sha256": hashlib.sha256(
                     normal.tobytes()
                 ).hexdigest(),
+                "render_memory": _render_memory((4 << 20, 96 << 20), (6 << 20, 128 << 20)),
             },
             "family_residency_budget": {
                 "status": "PASS",
@@ -152,6 +175,9 @@ def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
                 "total_resident_bytes": 786432,
                 "configured_budget_bytes": 100663296,
                 "memory_limit_bytes": reporter.MEMORY_LIMIT_BYTES,
+                "render_memory": _render_memory(
+                    (8 << 20, 160 << 20), (8 << 20, 160 << 20), (40 << 20, 200 << 20)
+                ),
             },
             "missing_family_fatal": {
                 "status": "PASS",
@@ -162,6 +188,9 @@ def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
                 "fallback_coverage": 0.25,
                 "mean_luminance_error": 0.005,
                 "error_threshold": 0.02,
+                "render_memory": _render_memory(
+                    (4 << 20, 64 << 20), (4 << 20, 72 << 20), (4 << 20, 80 << 20)
+                ),
             },
         },
     }
@@ -207,6 +236,123 @@ def test_valid_physical_evidence_writes_bound_pass_and_lane_marker(tmp_path: Pat
     assert marker["status"] == "RAN"
     assert marker["verifier_status"] == "PASS"
     assert marker["candidate_sha"] == args.candidate_sha
+    metrics = report["metrics"]
+    assert metrics["render_peak_host_visible_bytes"] == 40 << 20
+    assert metrics["render_total_tracked_bytes"] == 240 << 20
+    assert metrics["render_peak_host_visible_bytes_by_gate"] == {
+        "normal_lighting_ssim": 6 << 20,
+        "family_residency_budget": 40 << 20,
+        "partial_normal_residency": 4 << 20,
+    }
+    assert metrics["render_memory_sample_count"] == 8
+
+
+def test_render_memory_at_exact_limit_passes(tmp_path: Path) -> None:
+    args, results = _make_fixture(tmp_path)
+    results["gates"]["partial_normal_residency"]["render_memory"] = _render_memory(
+        (reporter.MEMORY_LIMIT_BYTES, 0), (1 << 20, 0), (1 << 20, 0)
+    )
+    _rewrite_results(args, results)
+    assert reporter.verify(args)["metrics"]["render_peak_host_visible_bytes"] == (
+        reporter.MEMORY_LIMIT_BYTES
+    )
+
+
+def _mutate_render_memory(memory: dict, mutation: str) -> None:
+    render = memory["renders"][0]
+    if mutation == "missing_peak":
+        memory.pop("peak_host_visible_bytes")
+    elif mutation == "missing_total":
+        memory.pop("total_tracked_bytes")
+    elif mutation == "missing_render_peak":
+        render.pop("peak_host_visible_bytes")
+    elif mutation == "missing_render_total":
+        render.pop("total_tracked_bytes")
+    elif mutation == "float_peak":
+        memory["peak_host_visible_bytes"] = float(memory["peak_host_visible_bytes"])
+    elif mutation == "string_total":
+        memory["total_tracked_bytes"] = str(memory["total_tracked_bytes"])
+    elif mutation == "bool_render_device":
+        render["peak_device_local_bytes"] = True
+    elif mutation == "negative_render_host":
+        render["peak_host_visible_bytes"] = -1
+    elif mutation == "over_limit":
+        host = reporter.MEMORY_LIMIT_BYTES + 1
+        render["peak_host_visible_bytes"] = host
+        render["total_tracked_bytes"] = host + render["peak_device_local_bytes"]
+        memory["peak_host_visible_bytes"] = host
+        memory["total_tracked_bytes"] = max(
+            sample["total_tracked_bytes"] for sample in memory["renders"]
+        )
+    elif mutation == "render_total_mismatch":
+        render["total_tracked_bytes"] += 1
+    elif mutation == "aggregate_peak_understated":
+        memory["peak_host_visible_bytes"] -= 1
+    elif mutation == "aggregate_total_mismatch":
+        memory["total_tracked_bytes"] += 1
+    elif mutation == "empty_renders":
+        memory["renders"] = []
+    elif mutation == "zero_tracked":
+        render.update(
+            peak_host_visible_bytes=0, peak_device_local_bytes=0, total_tracked_bytes=0
+        )
+    elif mutation == "limit_drift":
+        memory["memory_limit_bytes"] = reporter.MEMORY_LIMIT_BYTES * 2
+    elif mutation == "source_drift":
+        memory["source"] = "forge3d.memory_metrics"
+    elif mutation == "too_few_renders":
+        memory["renders"] = memory["renders"][:1]
+        memory["peak_host_visible_bytes"] = memory["renders"][0]["peak_host_visible_bytes"]
+        memory["total_tracked_bytes"] = memory["renders"][0]["total_tracked_bytes"]
+    elif mutation == "missing_readback":
+        render.pop("readback_staging_bytes")
+    elif mutation == "zero_readback":
+        render["readback_staging_bytes"] = 0
+    elif mutation == "readback_over_host_peak":
+        render["readback_staging_bytes"] = render["peak_host_visible_bytes"] + 1
+    else:
+        raise AssertionError(mutation)
+
+
+@pytest.mark.parametrize("gate", tuple(reporter.RENDER_MEMORY_MIN_RENDERS))
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing_block", "no render_memory evidence"),
+        ("missing_peak", "peak_host_visible_bytes is not a non-negative integer"),
+        ("missing_total", "total_tracked_bytes is not a non-negative integer"),
+        ("missing_render_peak", "render 0 peak_host_visible_bytes is not"),
+        ("missing_render_total", "render 0 total_tracked_bytes is not"),
+        ("float_peak", "peak_host_visible_bytes is not a non-negative integer"),
+        ("string_total", "total_tracked_bytes is not a non-negative integer"),
+        ("bool_render_device", "render 0 peak_device_local_bytes is not"),
+        ("negative_render_host", "render 0 peak_host_visible_bytes is not"),
+        ("over_limit", "exceeds the 512 MiB contract"),
+        ("render_total_mismatch", "render 0 total_tracked_bytes is inconsistent"),
+        ("aggregate_peak_understated", "host-visible peak is inconsistent"),
+        ("aggregate_total_mismatch", "total tracked bytes are inconsistent"),
+        ("empty_renders", "no per-render memory samples"),
+        ("zero_tracked", "tracked no allocations"),
+        ("limit_drift", "render memory ceiling drift"),
+        ("source_drift", "render_memory source drift"),
+        ("too_few_renders", "expected at least"),
+        ("missing_readback", "render 0 readback_staging_bytes is not"),
+        ("zero_readback", "readback staging is outside"),
+        ("readback_over_host_peak", "readback staging is outside"),
+    ],
+)
+def test_render_memory_evidence_has_hard_negative_controls(
+    tmp_path: Path, gate: str, mutation: str, message: str
+) -> None:
+    args, results = _make_fixture(tmp_path)
+    if mutation == "missing_block":
+        results["gates"][gate].pop("render_memory")
+    else:
+        _mutate_render_memory(results["gates"][gate]["render_memory"], mutation)
+    _rewrite_results(args, results)
+    with pytest.raises(reporter.EvidenceError, match=message):
+        reporter.verify(args)
+    assert not (args.artifact_dir / "lane-ran.json").exists()
 
 
 @pytest.mark.parametrize("candidate", ["HEAD", "abc123", "A" * 40, "0" * 40])

@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 import numpy as np
 
@@ -18,6 +19,82 @@ RESULT_KEYS = (
     "missing_family_fatal",
     "partial_normal_residency",
 )
+RENDER_MEMORY_SOURCE = "forge3d.diagnostics.render_certificate.allocations"
+READBACK_STAGING_LABEL = "forge3d-readback-staging"
+
+
+@contextmanager
+def captured_render_memory(samples: list[dict[str, int]]) -> Iterator[None]:
+    """Record one render *and its readbacks* as a single certificate capture.
+
+    The native render capture closes before ``Frame.to_numpy()`` allocates its
+    host-visible staging buffer, so the body (render + readback) runs inside an
+    outer capture. The nested renderer capture joins it with the renderer's
+    owned allocations; every allocation made in the body is added, while
+    unrelated live allocations from other tests are not.
+    """
+    from forge3d._native import get_native_module
+    from forge3d.certificate import _render_capture
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "begin_render_execution_capture"):
+        raise AssertionError("render memory evidence requires native certificate capture")
+    with _render_capture("substratia.render_and_readback", "substratia.readback"):
+        yield
+    samples.append(render_memory_sample())
+
+
+def render_memory_sample() -> dict[str, int]:
+    """Return tracked-allocation peaks of the LAST completed certificate capture.
+
+    ``total_tracked_bytes`` is host-visible peak + device-local peak: device-
+    local memory never appears in the host-visible number, and the certificate
+    does not expose a simultaneous total, so this sum bounds it from above.
+    ``readback_staging_bytes`` proves the capture spanned the frame readback.
+    """
+    from forge3d.diagnostics import render_certificate
+
+    allocations = render_certificate(sign=False).get("allocations")
+    if not isinstance(allocations, dict):
+        raise AssertionError("render certificate has no allocations ledger")
+    sample = {}
+    for key in ("peak_host_visible_bytes", "peak_device_local_bytes"):
+        value = allocations.get(key)
+        if type(value) is not int or value < 0:
+            raise AssertionError(f"render certificate {key} is not a byte count: {value!r}")
+        sample[key] = value
+    sample["total_tracked_bytes"] = (
+        sample["peak_host_visible_bytes"] + sample["peak_device_local_bytes"]
+    )
+    by_label = allocations.get("by_label")
+    readback = by_label.get(READBACK_STAGING_LABEL) if isinstance(by_label, dict) else None
+    if type(readback) is not int or readback <= 0:
+        raise AssertionError(
+            f"render certificate does not include the {READBACK_STAGING_LABEL!r} readback"
+        )
+    sample["readback_staging_bytes"] = readback
+    return sample
+
+
+def summarize_render_memory(
+    samples: list[dict[str, int]], limit_bytes: int
+) -> dict[str, Any]:
+    """Assert the per-render host-visible peak ceiling and build gate evidence."""
+    if not samples:
+        raise AssertionError("no completed SUBSTRATIA render recorded allocation peaks")
+    renders = [dict(sample) for sample in samples]
+    peak = max(render["peak_host_visible_bytes"] for render in renders)
+    total = max(render["total_tracked_bytes"] for render in renders)
+    assert peak <= limit_bytes, (
+        f"per-render host-visible peak {peak} B exceeds the {limit_bytes} B ceiling"
+    )
+    return {
+        "source": RENDER_MEMORY_SOURCE,
+        "renders": renders,
+        "peak_host_visible_bytes": peak,
+        "total_tracked_bytes": total,
+        "memory_limit_bytes": limit_bytes,
+    }
 
 
 def _artifact_dir() -> Path | None:
