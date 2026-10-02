@@ -1211,8 +1211,9 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
 
     The fully resident renderer produces both camera positions, independently
     validating the exact registration direction. A second renderer keeps
-    nearly every height tile at its real coarse-prefill fallback and renders
-    the displaced camera; registration must retain that production change.
+    nearly every height tile at its real root-only asynchronous coarse
+    fallback (ORBIS #141) and renders the displaced camera; registration must
+    retain that production change.
     """
     dem = fractal_dem(DEM_SIZE, DEM_OCTAVES, DEM_GAIN, DEM_SEED)
     center = _center_at(0)
@@ -1256,14 +1257,23 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
 
         fallback_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         _enable_streaming(fallback_renderer, dem)
-        fallback_stats = fallback_renderer.stream_height_tiles(
-            (center[0], STREAM_ALTITUDE_M, center[1]), max_uploads=0
-        )
-        assert fallback_stats["coarse_prefilled"] == STREAM_TOTAL_TILES, fallback_stats
-        # `drain_completed(max_uploads)` deliberately clamps its budget to one,
-        # so a fast local reader may upload a single tile even when callers pass
-        # zero.  The control is still a real coarse-prefill fallback whenever it
-        # has not converged: most of the 64 physical mosaic slots remain coarse.
+        # ORBIS #141 requests only the root, asynchronously, at enable time.
+        # Until it is resident every pass renders the caller's full-resolution
+        # overview, which is not a fallback, so wait for the root itself.
+        # `max_uploads=0` drains nothing, so admit one completed tile per step:
+        # fine tiles may arrive alongside the root, but the control is still a
+        # real coarse fallback while most of the 64 tiles remain non-resident.
+        steps = 0
+        while True:
+            fallback_stats = fallback_renderer.stream_height_tiles(
+                (center[0], STREAM_ALTITUDE_M, center[1]), max_uploads=1
+            )
+            if fallback_stats["coarse_prefilled"] == 1:
+                break
+            steps += 1
+            if steps >= MAX_WARMUP_STEPS:
+                pytest.fail(f"root height tile never became resident: {fallback_stats}")
+        assert fallback_stats["coarse_prefilled"] == 1, fallback_stats
         assert fallback_stats["resident_fine_tiles"] < STREAM_TOTAL_TILES, fallback_stats
         assert fallback_stats["converged"] is False, fallback_stats
         fallback, fallback_depth = render_rgba_depth(
@@ -1339,24 +1349,22 @@ def test_visibility_shading_is_identical_and_hole_free_at_flythrough_settings():
         material_set = f3d.MaterialSet.terrain_default()
         overlay = build_overlay()
 
-        forward_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
-        _enable_streaming(forward_renderer, dem)
-        # Both renderers must reach identical mosaics or the bitwise comparison
-        # would be measuring streaming luck rather than shading equivalence.
-        _warm_streaming_to_full_residency(forward_renderer, center)
+        renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        _enable_streaming(renderer, dem)
+        # Both shading paths sample the same resident mosaic. Since ORBIS #141
+        # the sparse atlas makes two separately warmed renderers differ by
+        # 1 LSB in a few pixels, which would measure streaming state rather
+        # than shading equivalence.
+        _warm_streaming_to_full_residency(renderer, center)
         forward = render_rgba(
-            forward_renderer,
+            renderer,
             _params(z_scale=Z_SCALE, overlay=overlay),
             dem,
             ibl,
             material_set,
         )
-
-        visibility_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
-        _enable_streaming(visibility_renderer, dem)
-        _warm_streaming_to_full_residency(visibility_renderer, center)
         visibility = render_rgba(
-            visibility_renderer,
+            renderer,
             _params(z_scale=Z_SCALE, overlay=overlay, shading="visibility"),
             dem,
             ibl,
