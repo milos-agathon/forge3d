@@ -33,19 +33,23 @@ use forge3d::path_tracing::fused_reference::{
     ShadowIou,
 };
 use forge3d::path_tracing::hybrid_compute::{
-    FusedRenderDesc, FusedRenderOutput, FusedTerrainDesc, HybridPathTracer,
+    AlbedoSampling, FusedRenderDesc, FusedRenderOutput, FusedTerrainDesc, HybridPathTracer,
+    MinMaxPrecision, TerrainAlbedoMap, TerrainPtScene,
 };
 use forge3d::splat::bvh::Aabb;
 use forge3d::splat::fixture::{FixtureManifest, FixtureScene};
 use forge3d::splat::fusion::{
     FusedScene, FusionParams, PagingPolicy, REQUIRED_STORAGE_BUFFERS_PER_STAGE,
 };
-use forge3d::splat::kernel::{ray_gaussian, sphelet_coverage, splat_transmittance};
+use forge3d::splat::kernel::{
+    disc_coverage, ray_gaussian, sphelet_coverage, splat_transmittance, terrain_smooth_normal,
+};
 use forge3d::splat::load_gaussian_splats;
 use forge3d::splat::stream::{
-    write_synthetic_point_field, CopcPageSource, PagePayload, PageSource, PageStoreFile,
-    PointCloudFrame, SplatCloudSource, SyntheticFieldDesc,
+    write_synthetic_point_field, CopcPageSource, DecodedPage, PageKind, PageSource, PageStoreFile,
+    PageStoreWriter, PointCloudFrame, SplatCloudSource, SyntheticFieldDesc,
 };
+use forge3d::splat::surfel::{oct_decode, SURFEL_SPHERE};
 use forge3d::splat::GaussianSplatCloud;
 
 const SIZE: u32 = 256;
@@ -162,6 +166,10 @@ fn terrain_desc(fixture: &FixtureScene) -> FusedTerrainDesc {
         spacing: (m.dem_spacing[0], m.dem_spacing[1]),
         exaggeration: 1.0,
         albedo: m.terrain_albedo,
+        // The shipped setting, so the acceptance suite exercises it.
+        minmax_precision: MinMaxPrecision::F16Conservative,
+        albedo_map: None,
+        albedo_sampling: AlbedoSampling::Bilinear,
     }
 }
 
@@ -213,7 +221,7 @@ fn fused_desc<'a>(
     let m = &fixture.manifest;
     FusedRenderDesc {
         scene,
-        terrain: Some(terrain_desc(fixture)),
+        terrain: Some(Arc::new(terrain_desc(fixture))),
         cam_origin: m.cam_origin,
         cam_look_at: m.cam_look_at,
         cam_up: m.cam_up,
@@ -231,6 +239,8 @@ fn fused_desc<'a>(
         seed: 7,
         spp,
         frames,
+        tile: None,
+        aovs: true,
     }
 }
 
@@ -627,14 +637,21 @@ fn fused_transmittance_matches_brute_force_cpu_oracle() {
     // Every primitive, resident on the CPU, no acceleration structure.
     let cloud = load_cloud(&fixture);
     let copc = open_copc(&fixture, &params);
+    // The exact records the GPU pool holds: positions plus the per-page
+    // surfel normal (or SURFEL_SPHERE) of `DecodedPage::from_payload`.
     let mut points = Vec::new();
     for page in 0..copc.page_count() {
-        let PagePayload::Points { positions, .. } = copc.load(page).unwrap() else {
-            panic!("COPC pages decode to points");
-        };
-        points.extend(positions);
+        let payload = copc.load(page).unwrap();
+        let decoded =
+            DecodedPage::from_payload(page, &payload, params.lidar_radius, params.lidar_surfels)
+                .unwrap();
+        points.extend(decoded.points.iter().copied());
     }
     assert_eq!(points.len() as u32, m.copc_point_count);
+    let surfels = points
+        .iter()
+        .filter(|p| p.normal_oct != SURFEL_SPHERE)
+        .count();
 
     let sun = toward_sun(m);
     let epsilon = params.transmittance_epsilon;
@@ -668,15 +685,33 @@ fn fused_transmittance_matches_brute_force_cpu_oracle() {
         }
         let mut t_lidar = 1.0f32;
         for point in &points {
-            let coverage = sphelet_coverage(
-                origin,
-                sun,
-                1e-3,
-                1e30,
-                *point,
-                params.lidar_radius,
-                params.lidar_opacity,
-            )
+            let centre = [
+                point.pos_radius[0],
+                point.pos_radius[1],
+                point.pos_radius[2],
+            ];
+            let coverage = if point.normal_oct == SURFEL_SPHERE {
+                sphelet_coverage(
+                    origin,
+                    sun,
+                    1e-3,
+                    1e30,
+                    centre,
+                    params.lidar_radius,
+                    params.lidar_opacity,
+                )
+            } else {
+                disc_coverage(
+                    origin,
+                    sun,
+                    1e-3,
+                    1e30,
+                    centre,
+                    oct_decode(point.normal_oct),
+                    params.lidar_radius,
+                    params.lidar_opacity,
+                )
+            }
             .coverage;
             t_lidar *= 1.0 - coverage.clamp(0.0, 1.0);
         }
@@ -707,6 +742,10 @@ fn fused_transmittance_matches_brute_force_cpu_oracle() {
     eprintln!(
         "CPU oracle: {compared} shadow rays compared, {splat_shadowed} splat-shadowed, \
          {lidar_shadowed} LiDAR-shadowed, {early_outs} early-outs, worst |GPU - CPU| = {worst:.2e}"
+    );
+    eprintln!(
+        "CPU oracle LiDAR records: {surfels} of {} are surfels",
+        points.len()
     );
     assert!(compared > 4000, "{compared}");
     assert!(splat_shadowed > 100 && lidar_shadowed > 100);
@@ -1047,4 +1086,614 @@ fn fused_fixture_matches_golden_image() {
         mean_abs <= GOLDEN_MEAN_ABS_MAX,
         "fused golden drift: mean abs {mean_abs:.4}"
     );
+}
+fn bits(v: &[f32]) -> Vec<u32> {
+    v.iter().map(|x| x.to_bits()).collect()
+}
+
+#[test]
+fn terrain_f16_minmax_changes_no_output_bit() {
+    if !gpu_available() {
+        return;
+    }
+    let fixture = FixtureScene::load(fixture_dir()).unwrap();
+    let params = fixture_params(&fixture);
+    let scene = FusedScene::new(fixture_sources(&fixture, &params), params).unwrap();
+    let tracer = HybridPathTracer::new_fused().unwrap();
+    let mut desc = fused_desc(&scene, &fixture, 160, 2, 4);
+    Arc::make_mut(desc.terrain.as_mut().unwrap()).minmax_precision = MinMaxPrecision::F32;
+    let a = tracer.render_fused(&desc).unwrap();
+    Arc::make_mut(desc.terrain.as_mut().unwrap()).minmax_precision =
+        MinMaxPrecision::F16Conservative;
+    let b = tracer.render_fused(&desc).unwrap();
+    assert!(!a.terrain_minmax_f16 && b.terrain_minmax_f16);
+    assert_eq!(a.rgba, b.rgba);
+    assert_eq!(a.hit_kind, b.hit_kind);
+    for (name, x, y) in [
+        ("radiance", &a.radiance, &b.radiance),
+        ("depth", &a.depth, &b.depth),
+        ("transmittance", &a.transmittance, &b.transmittance),
+        ("normal", &a.normal, &b.normal),
+    ] {
+        assert_eq!(bits(x), bits(y), "{name} differs");
+    }
+    println!(
+        "fixture terrain scene bytes: with f32 pyramid {} B, with f16 pyramid {} B",
+        a.terrain_bytes, b.terrain_bytes
+    );
+}
+
+#[test]
+fn terrain_f16_minmax_halves_the_pyramid_bytes() {
+    if !gpu_available() {
+        return;
+    }
+    // Lauterbrunnen-shaped DEM: 1250 x 2500 (pow2-padded to 2048 x 4096 cells).
+    let (w, h) = (1250u32, 2500u32);
+    let heights: Vec<f32> = (0..w * h)
+        .map(|i| 700.0 + ((i % w) as f32 * 0.37).sin() * 900.0 + (i / w) as f32 * 0.5)
+        .collect();
+    let ctx = forge3d::core::gpu::try_ctx().unwrap();
+    let mk = |p| {
+        TerrainPtScene::new_with_options(
+            &ctx.device,
+            &ctx.queue,
+            &heights,
+            w,
+            h,
+            (6.0, 6.0),
+            1.0,
+            [0.4; 3],
+            None,
+            1.0,
+            TerrainAlbedoMap::None,
+            AlbedoSampling::Nearest,
+            1.0,
+            p,
+        )
+        .unwrap()
+    };
+    let full = mk(MinMaxPrecision::F32);
+    let half = mk(MinMaxPrecision::F16Conservative);
+    assert_eq!(
+        half.minmax_bytes() * 2,
+        full.minmax_bytes(),
+        "f16 pyramid must be exactly half"
+    );
+    assert_eq!(
+        full.byte_size() - half.byte_size(),
+        half.minmax_bytes(),
+        "nothing else may change"
+    );
+    // pow2-padded 2048 x 4096 level 0 -> 8 B/texel (f32) over the full mip chain.
+    assert!(full.minmax_bytes() >= 2048 * 4096 * 8);
+    assert!(half.minmax_is_f16() && !full.minmax_is_f16());
+    println!(
+        "1250x2500 DEM: min-max pyramid f32 {} B, f16 {} B; terrain total f32 {} B, f16 {} B",
+        full.minmax_bytes(),
+        half.minmax_bytes(),
+        full.byte_size(),
+        half.byte_size()
+    );
+}
+fn srgb_to_linear(c: u8) -> f32 {
+    let c = f32::from(c) / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb_u8(v: f32) -> i32 {
+    let v = v.clamp(0.0, 1.0);
+    let s = if v <= 0.0031308 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    };
+    (s * 255.0).round() as i32
+}
+
+#[test]
+fn terrain_albedo_map_drives_the_albedo_aov() {
+    if !gpu_available() {
+        return;
+    }
+    let fixture = FixtureScene::load(fixture_dir()).unwrap();
+    let params = fixture_params(&fixture);
+    let scene = FusedScene::new(fixture_sources(&fixture, &params), params).unwrap();
+    let m = &fixture.manifest;
+    let (w, h) = (m.dem_width as usize, m.dem_height as usize);
+    let stripes = [[200u8, 40, 40], [40, 60, 200]];
+    let mut map = vec![0u8; w * h * 4];
+    for r in 0..h {
+        for c in 0..w {
+            let s = stripes[(c / 8) % 2];
+            let alpha = if r < h / 2 { 255 } else { 0 }; // southern half: masked -> uniform albedo
+            map[(r * w + c) * 4..(r * w + c) * 4 + 4].copy_from_slice(&[s[0], s[1], s[2], alpha]);
+        }
+    }
+    let mut desc = fused_desc(&scene, &fixture, 192, 1, 1);
+    let t = Arc::make_mut(desc.terrain.as_mut().unwrap());
+    t.albedo_map = Some(map);
+    t.albedo_sampling = AlbedoSampling::Nearest;
+    let out = HybridPathTracer::new_fused()
+        .unwrap()
+        .render_fused(&desc)
+        .unwrap();
+    let (sx, sz) = (m.dem_spacing[0], m.dem_spacing[1]);
+    let (ox, oz) = (
+        -0.5 * (m.dem_width - 1) as f32 * sx,
+        -0.5 * (m.dem_height - 1) as f32 * sz,
+    );
+    let (mut mapped, mut masked) = (0, 0);
+    for i in 0..out.hit_kind.len() {
+        if out.hit_kind[i] != HIT_TERRAIN {
+            continue;
+        }
+        let col = (out.position[3 * i] - ox) / sx;
+        let row = (out.position[3 * i + 2] - oz) / sz;
+        let (cn, rn) = (col.round() as usize, row.round() as usize);
+        let in_stripe = (col.round() - col).abs() < 0.4 && (1..7).contains(&(cn % 8));
+        if !in_stripe || rn == h / 2 || rn + 1 == h / 2 {
+            continue;
+        }
+        let rgb = [
+            out.albedo[3 * i],
+            out.albedo[3 * i + 1],
+            out.albedo[3 * i + 2],
+        ];
+        let expect: [u8; 3] = if rn < h / 2 {
+            mapped += 1;
+            stripes[(cn / 8) % 2]
+        } else {
+            masked += 1;
+            m.terrain_albedo.map(|v| linear_to_srgb_u8(v) as u8)
+        };
+        for ch in 0..3 {
+            assert!(
+                (linear_to_srgb_u8(rgb[ch]) - i32::from(expect[ch])).abs() <= 1,
+                "pixel {i} ch {ch}: albedo {} (sRGB {}) vs expected sRGB {}",
+                rgb[ch],
+                linear_to_srgb_u8(rgb[ch]),
+                expect[ch]
+            );
+        }
+    }
+    println!(
+        "albedo map: {mapped} mapped and {masked} masked terrain pixels within +-1 sRGB code; \
+         sRGB 128 decodes to {}",
+        srgb_to_linear(128)
+    );
+    assert!(
+        mapped >= 500 && masked >= 300,
+        "mapped {mapped} masked {masked}"
+    );
+}
+/// DEM cell `(cx, cz)` and in-cell `(u, v)` of a world-space terrain point.
+fn terrain_cell_of(m: &FixtureManifest, x: f32, z: f32) -> (usize, usize, f32, f32) {
+    let (sx, sz) = (m.dem_spacing[0], m.dem_spacing[1]);
+    let ox = -0.5 * (m.dem_width - 1) as f32 * sx;
+    let oz = -0.5 * (m.dem_height - 1) as f32 * sz;
+    let fx = ((x - ox) / sx).clamp(0.0, (m.dem_width - 1) as f32);
+    let fz = ((z - oz) / sz).clamp(0.0, (m.dem_height - 1) as f32);
+    let cx = (fx.floor() as usize).min(m.dem_width as usize - 2);
+    let cz = (fz.floor() as usize).min(m.dem_height as usize - 2);
+    (cx, cz, fx - cx as f32, fz - cz as f32)
+}
+
+#[test]
+fn gpu_smooth_terrain_normal_matches_cpu_mirror() {
+    if !gpu_available() {
+        return;
+    }
+    let fixture = FixtureScene::load(fixture_dir()).unwrap();
+    let params = fixture_params(&fixture);
+    let scene = FusedScene::new(fixture_sources(&fixture, &params), params).unwrap();
+    let desc = fused_desc(&scene, &fixture, 160, 1, 1);
+    let out = HybridPathTracer::new_fused()
+        .unwrap()
+        .render_fused(&desc)
+        .unwrap();
+    let m = &fixture.manifest;
+    let (w, h) = (m.dem_width as usize, m.dem_height as usize);
+    let (mut checked, mut worst) = (0usize, 0.0f32);
+    for i in 0..out.hit_kind.len() {
+        if out.hit_kind[i] != HIT_TERRAIN {
+            continue;
+        }
+        let (cx, cz, u, v) = terrain_cell_of(m, out.position[3 * i], out.position[3 * i + 2]);
+        let cpu = terrain_smooth_normal(
+            &fixture.heights,
+            w,
+            h,
+            (m.dem_spacing[0], m.dem_spacing[1]),
+            1.0,
+            u,
+            v,
+            cx,
+            cz,
+        );
+        let gpu = [
+            out.normal[3 * i],
+            out.normal[3 * i + 1],
+            out.normal[3 * i + 2],
+        ];
+        let cos = (cpu[0] * gpu[0] + cpu[1] * gpu[1] + cpu[2] * gpu[2]).clamp(-1.0, 1.0);
+        let err = cos.acos();
+        worst = worst.max(err);
+        assert!(
+            err <= 1e-3,
+            "pixel {i}: {err} rad (gpu {gpu:?}, cpu {cpu:?})"
+        );
+        checked += 1;
+    }
+    println!("smooth terrain normal: {checked} terrain pixels, worst GPU-CPU angle {worst:e} rad");
+    assert!(checked >= 2000, "only {checked} terrain pixels");
+}
+
+#[test]
+fn smooth_terrain_normals_add_no_self_shadow_acne() {
+    if !gpu_available() {
+        return;
+    }
+    let fixture = FixtureScene::load(fixture_dir()).unwrap();
+    let tracer = HybridPathTracer::new_fused().unwrap();
+    let render = |smooth: bool| {
+        let params = FusionParams {
+            terrain_smooth_normals: smooth,
+            ..fixture_params(&fixture)
+        };
+        let scene = FusedScene::new(fixture_sources(&fixture, &params), params).unwrap();
+        tracer
+            .render_fused(&fused_desc(&scene, &fixture, 160, 1, 1))
+            .unwrap()
+    };
+    let off = render(false);
+    let on = render(true);
+    let (mut terrain, mut newly) = (0usize, 0usize);
+    for i in 0..off.hit_kind.len() {
+        if off.hit_kind[i] != HIT_TERRAIN || on.hit_kind[i] != HIT_TERRAIN {
+            continue;
+        }
+        terrain += 1;
+        if off.transmittance[4 * i + 3] == 1.0 && on.transmittance[4 * i + 3] < 1.0 {
+            newly += 1;
+        }
+    }
+    let share = newly as f64 / terrain as f64;
+    println!(
+        "smooth normals: {newly} of {terrain} terrain pixels newly terrain-shadowed ({:.4}%)",
+        100.0 * share
+    );
+    assert!(terrain >= 2000);
+    assert!(share <= 0.001, "{newly} of {terrain} newly shadowed");
+}
+/// A point page store at `path` holding `points` (pages of 4096).
+fn point_store(path: &Path, points: &[[f32; 3]]) -> PageStoreFile {
+    let mut writer = PageStoreWriter::create(path, PageKind::Points, 4096, 0).unwrap();
+    for chunk in points.chunks(4096) {
+        let rgba = vec![[120u8, 120, 120, 2]; chunk.len()];
+        writer.push_point_page(chunk, &rgba).unwrap();
+    }
+    writer.finish().unwrap();
+    PageStoreFile::open(path).unwrap()
+}
+
+/// A terrain-free fused render of a point store.
+fn points_render(
+    store: PageStoreFile,
+    surfels: bool,
+    lidar_self_bias_radii: f32,
+    cam_origin: [f32; 3],
+    cam_look_at: [f32; 3],
+    sun_azimuth_deg: f32,
+    sun_elevation_deg: f32,
+) -> FusedRenderOutput {
+    let params = FusionParams {
+        lidar_radius: 0.85,
+        lidar_opacity: 1.0,
+        lidar_surfels: surfels,
+        lidar_self_bias_radii,
+        policy: PagingPolicy::Exact,
+        ..FusionParams::default()
+    };
+    let sources: Vec<Arc<dyn PageSource>> = vec![Arc::new(store)];
+    let scene = FusedScene::new(sources, params).unwrap();
+    HybridPathTracer::new_fused()
+        .unwrap()
+        .render_fused(&FusedRenderDesc {
+            scene: &scene,
+            terrain: None,
+            cam_origin,
+            cam_look_at,
+            cam_up: [0.0, 1.0, 0.0],
+            fov_y_deg: 50.0,
+            exposure: 1.0,
+            sun_azimuth_deg,
+            sun_elevation_deg,
+            sun_intensity: 2.5,
+            sun_color: [1.0, 0.97, 0.92],
+            sky_turbidity: 2.5,
+            sky_ground_albedo: 0.2,
+            sky_intensity: 0.35,
+            width: 192,
+            height: 192,
+            seed: 7,
+            spp: 1,
+            frames: 1,
+            tile: None,
+            aovs: true,
+        })
+        .unwrap()
+}
+
+fn dense_plane() -> Vec<[f32; 3]> {
+    let mut points = Vec::new();
+    for i in 0..120i32 {
+        for k in 0..120i32 {
+            points.push([(i - 60) as f32, 0.0, (k - 60) as f32]);
+        }
+    }
+    points
+}
+
+#[test]
+fn dense_lidar_plane_does_not_shadow_itself() {
+    if !gpu_available() {
+        return;
+    }
+    let dir = work_dir("dense-plane");
+    let plane = dense_plane();
+    let mean_t_lidar = |surfels: bool, elevation: f32| {
+        let path = dir.join(format!("plane-{surfels}-{elevation}.f3dpages"));
+        // No self-shadow bias: on an exactly flat grid the default one-radius
+        // skip already lifts sphelet shadow rays over their neighbours' tops
+        // (measured T_lidar 1.0 for spheres at 10 and 22 deg), which would
+        // hide the difference this test is about. Surfels need no bias.
+        let out = points_render(
+            point_store(&path, &plane),
+            surfels,
+            0.0,
+            [0.0, 60.0, -70.0],
+            [0.0, 0.0, 0.0],
+            45.0,
+            elevation,
+        );
+        let (mut sum, mut n) = (0.0f64, 0usize);
+        for i in 0..out.hit_kind.len() {
+            let (x, z) = (out.position[3 * i], out.position[3 * i + 2]);
+            if out.hit_kind[i] == HIT_LIDAR && x.abs() <= 50.0 && z.abs() <= 50.0 {
+                sum += f64::from(out.transmittance[4 * i + 2]);
+                n += 1;
+            }
+        }
+        assert!(n >= 2000, "only {n} LiDAR pixels");
+        (sum / n as f64, n)
+    };
+    for elevation in [5.0f32, 10.0, 22.0, 40.0] {
+        let (t, n) = mean_t_lidar(true, elevation);
+        println!("dense plane, surfels, sun {elevation} deg: mean T_lidar {t:.4} over {n} px");
+        assert!(t >= 0.98, "surfels at {elevation} deg: mean T_lidar {t}");
+    }
+    // Sensitivity: the same plane as sphelets shadows itself at grazing sun
+    // (unbiased: 0.97 at 22 deg, 0.90 at 10 deg, 0.78 at 5 deg).
+    let (t, n) = mean_t_lidar(false, 5.0);
+    println!("dense plane, spheres, sun 5 deg: mean T_lidar {t:.4} over {n} px");
+    assert!(
+        t <= 0.90,
+        "sphelets at 5 deg should self-shadow: mean T_lidar {t}"
+    );
+}
+
+#[test]
+fn lidar_wall_still_casts_its_shadow() {
+    if !gpu_available() {
+        return;
+    }
+    let dir = work_dir("lidar-wall");
+    let mut points = dense_plane();
+    for iy in 0..=16i32 {
+        for iz in -40..=40i32 {
+            points.push([0.0, iy as f32 * 0.5, iz as f32 * 0.5]);
+        }
+    }
+    let out = points_render(
+        point_store(&dir.join("wall.f3dpages"), &points),
+        true,
+        FusionParams::default().lidar_self_bias_radii,
+        [-7.0, 60.0, -50.0],
+        [-7.0, 0.0, 0.0],
+        0.0,
+        30.0,
+    );
+    let (mut total, mut dark) = (0usize, 0usize);
+    for i in 0..out.hit_kind.len() {
+        let (x, y, z) = (
+            out.position[3 * i],
+            out.position[3 * i + 1],
+            out.position[3 * i + 2],
+        );
+        if out.hit_kind[i] == HIT_LIDAR
+            && (-12.0..=-2.0).contains(&x)
+            && z.abs() <= 15.0
+            && y.abs() < 0.1
+        {
+            total += 1;
+            if out.transmittance[4 * i + 2] <= 0.05 {
+                dark += 1;
+            }
+        }
+    }
+    println!("LiDAR wall shadow: {dark} of {total} ground pixels have T_lidar <= 0.05");
+    assert!(total >= 200, "only {total} shadow pixels");
+    assert!(dark * 100 >= total * 95, "{dark} of {total}");
+}
+#[test]
+fn tiled_fused_render_equals_the_monolithic_render_bit_for_bit() {
+    if !gpu_available() {
+        return;
+    }
+    let fixture = FixtureScene::load(fixture_dir()).unwrap();
+    let params = fixture_params(&fixture);
+    let scene = FusedScene::new(fixture_sources(&fixture, &params), params).unwrap();
+    let tracer = HybridPathTracer::new_fused().unwrap();
+    let mut desc = fused_desc(&scene, &fixture, 0, 2, 4);
+    desc.width = 300;
+    desc.height = 200;
+    let whole = tracer.render_fused(&desc).unwrap();
+    for tile in [(150, 100), (128, 96)] {
+        desc.tile = Some(tile);
+        let tiled = tracer.render_fused(&desc).unwrap();
+        assert_eq!(whole.rgba, tiled.rgba, "{tile:?} rgba");
+        assert_eq!(whole.hit_kind, tiled.hit_kind, "{tile:?} hit_kind");
+        for (name, a, b) in [
+            ("radiance", &whole.radiance, &tiled.radiance),
+            ("albedo", &whole.albedo, &tiled.albedo),
+            ("normal", &whole.normal, &tiled.normal),
+            ("position", &whole.position, &tiled.position),
+            ("direct", &whole.direct, &tiled.direct),
+            ("transmittance", &whole.transmittance, &tiled.transmittance),
+            ("depth", &whole.depth, &tiled.depth),
+            ("sun_cosine", &whole.sun_cosine, &tiled.sun_cosine),
+            ("self_bias", &whole.self_bias, &tiled.self_bias),
+            (
+                "reservoir_visibility",
+                &whole.reservoir_visibility,
+                &tiled.reservoir_visibility,
+            ),
+        ] {
+            assert_eq!(bits(a), bits(b), "{tile:?} {name}");
+        }
+        assert_eq!(whole.variance.to_bits(), tiled.variance.to_bits());
+        assert_eq!(whole.reservoir_valid_count, tiled.reservoir_valid_count);
+        println!(
+            "tile {tile:?}: {} tiles, bit-identical to the monolithic 300x200 render",
+            tiled.tiles
+        );
+    }
+}
+
+#[test]
+fn fused_peak_memory_does_not_grow_with_output_resolution() {
+    if !gpu_available() {
+        return;
+    }
+    let fixture = FixtureScene::load(fixture_dir()).unwrap();
+    let params = fixture_params(&fixture);
+    let scene = FusedScene::new(fixture_sources(&fixture, &params), params).unwrap();
+    let tracer = HybridPathTracer::new_fused().unwrap();
+    let run = |w: u32, h: u32, tile: Option<(u32, u32)>, aovs: bool| {
+        let mut d = fused_desc(&scene, &fixture, 0, 1, 1);
+        d.width = w;
+        d.height = h;
+        d.tile = tile;
+        d.aovs = aovs;
+        let out = tracer.render_fused(&d).unwrap();
+        assert_eq!(out.rgba.len(), (w * h * 4) as usize);
+        println!(
+            "{w}x{h} tile {tile:?} aovs {aovs}: {} tiles, render peak {} B ({:.1} MiB)",
+            out.tiles,
+            out.peak_total_bytes,
+            out.peak_total_bytes as f64 / 1048576.0
+        );
+        out.peak_total_bytes
+    };
+    const MIB: u64 = 1 << 20;
+    let base = run(960, 540, None, true);
+    assert!(run(1920, 1080, Some((960, 540)), true) <= base + MIB);
+    let base_lean = run(960, 540, None, false);
+    assert!(run(3840, 2160, Some((960, 540)), false) <= base_lean + MIB);
+    // The output layout still binds seven 1x1 placeholder AOV targets
+    // (48 bytes), so the saving is 48 B for every pixel but one.
+    assert!(
+        base_lean + 48 * (960 * 540 - 1) <= base,
+        "AOV textures must be freed when aovs = false: saved {} B",
+        base - base_lean
+    );
+    assert!(base <= BUDGET_BYTES);
+}
+
+#[test]
+fn aov_opt_out_leaves_the_beauty_untouched() {
+    if !gpu_available() {
+        return;
+    }
+    let fixture = FixtureScene::load(fixture_dir()).unwrap();
+    let params = fixture_params(&fixture);
+    let scene = FusedScene::new(fixture_sources(&fixture, &params), params).unwrap();
+    let tracer = HybridPathTracer::new_fused().unwrap();
+    let mut d = fused_desc(&scene, &fixture, 192, 2, 4);
+    let with = tracer.render_fused(&d).unwrap();
+    d.aovs = false;
+    let without = tracer.render_fused(&d).unwrap();
+    assert_eq!(with.rgba, without.rgba);
+    assert!(without.hit_kind.is_empty() && without.albedo.is_empty());
+}
+
+/// A sequence uploads the terrain once and swaps only each view's sky: a sun
+/// sweep sharing one `Arc` terrain must equal the standalone renders bit for
+/// bit, and a view whose terrain differs in any field is rejected.
+#[test]
+fn sequence_shares_one_terrain_and_swaps_the_sky_per_view() {
+    if !gpu_available() {
+        return;
+    }
+    let fixture = FixtureScene::load(fixture_dir()).unwrap();
+    let params = fixture_params(&fixture);
+    let scene = FusedScene::new(fixture_sources(&fixture, &params), params).unwrap();
+    let tracer = HybridPathTracer::new_fused().unwrap();
+    let base = fused_desc(&scene, &fixture, 96, 2, 4);
+    let views: Vec<_> = [
+        (150.0f32, 12.0f32, 0.2f32),
+        (172.0, 36.0, 0.35),
+        (200.0, 60.0, 0.5),
+    ]
+    .iter()
+    .map(|&(az, el, sky)| {
+        let mut d = base.clone();
+        d.sun_azimuth_deg = az;
+        d.sun_elevation_deg = el;
+        d.sky_intensity = sky;
+        d
+    })
+    .collect();
+    // Every view shares the one terrain allocation.
+    for view in &views {
+        assert!(Arc::ptr_eq(
+            view.terrain.as_ref().unwrap(),
+            base.terrain.as_ref().unwrap()
+        ));
+    }
+    let sequence = tracer.render_fused_sequence(&views).unwrap();
+    for (i, (view, got)) in views.iter().zip(&sequence).enumerate() {
+        let alone = tracer.render_fused(view).unwrap();
+        assert!(
+            got.rgba == alone.rgba,
+            "view {i}: rgba differs from its standalone render"
+        );
+        assert_eq!(
+            bits(&got.radiance),
+            bits(&alone.radiance),
+            "view {i} radiance"
+        );
+        assert_eq!(got.terrain_bytes, alone.terrain_bytes);
+    }
+    assert!(
+        sequence[0].rgba != sequence[2].rgba,
+        "the sun sweep must change the image"
+    );
+
+    // The terrain scene is built from the first view: a different colour map
+    // (or any other terrain field) cannot join the sequence.
+    let mut mapped = base.clone();
+    let m = &fixture.manifest;
+    Arc::make_mut(mapped.terrain.as_mut().unwrap()).albedo_map =
+        Some(vec![255u8; (m.dem_width * m.dem_height * 4) as usize]);
+    let error = tracer
+        .render_fused_sequence(&[base.clone(), mapped])
+        .err()
+        .unwrap();
+    assert!(format!("{error}").contains("one terrain"), "{error}");
 }

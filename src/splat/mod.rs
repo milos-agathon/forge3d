@@ -15,6 +15,7 @@ pub mod fusion;
 pub mod kernel;
 pub mod load;
 pub mod stream;
+pub mod surfel;
 
 use crate::core::error::RenderError;
 use crate::core::resource_tracker::{tracked_host_allocation, ResourceHandle};
@@ -45,7 +46,6 @@ const SH_C3: [f32; 7] = [
 /// Integer-to-f32 conversions used by the fused path: counts, indices and
 /// grid coordinates only. World positions never pass through these.
 pub(crate) mod num {
-    #[cfg(test)]
     #[inline]
     pub fn f32_from_usize(value: usize) -> f32 {
         value as f32
@@ -303,6 +303,27 @@ impl GaussianSplatCloud {
         self.rebuild_inverse_covariance();
         Ok(())
     }
+
+    /// A copy of this cloud under a similarity transform (uniform scale,
+    /// rotation `(w, x, y, z)`, translation). The source cloud is untouched;
+    /// the copy registers its own host bytes with the memory tracker.
+    pub fn transformed(
+        &self,
+        scale: f32,
+        rotation: [f32; 4],
+        translation: [f32; 3],
+    ) -> Result<Self, RenderError> {
+        let mut out = Self::from_parts(
+            self.positions.clone(),
+            self.scales.clone(),
+            self.rotations.clone(),
+            self.opacities.clone(),
+            self.sh0.clone(),
+            self.sh_rest.clone(),
+        )?;
+        out.apply_similarity(scale, rotation, translation)?;
+        Ok(out)
+    }
 }
 
 /// Hamilton product `a * b` of two `(w, x, y, z)` quaternions.
@@ -438,6 +459,23 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn transformed_copies_and_leaves_the_source_untouched() {
+        let cloud = cloud_of([0.5, 1.5, 0.25], [0.6, 0.2, -0.5, 0.4]);
+        let moved = cloud
+            .transformed(2.0, [0.7, 0.1, 0.7, -0.1], [10.0, -4.0, 3.0])
+            .unwrap();
+        assert_eq!(cloud.positions[0], [1.0, 2.0, 3.0]);
+        assert_eq!(moved.scales[0], [1.0, 3.0, 0.5]);
+        assert_eq!(
+            moved.inv_cov()[0],
+            inverse_covariance(moved.scales[0], moved.rotations[0])
+        );
+        assert!(cloud
+            .transformed(0.0, [1.0, 0.0, 0.0, 0.0], [0.0; 3])
+            .is_err());
     }
 
     fn mat_mul(a: [[f32; 3]; 3], b: [[f32; 3]; 3]) -> [[f32; 3]; 3] {

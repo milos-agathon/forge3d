@@ -98,8 +98,8 @@ const RIDGE_X: f32 = -20.0;
 const RIDGE_HEIGHT: f32 = 9.0;
 const RIDGE_WIDTH: f32 = 3.5;
 const LIDAR_RADIUS: f32 = 0.22;
-const COPC_ORIGIN: [f64; 3] = [500_000.0, 4_000_000.0, 1_200.0];
-const COPC_HALFSIZE: f64 = 40.0;
+pub const COPC_ORIGIN: [f64; 3] = [500_000.0, 4_000_000.0, 1_200.0];
+pub const COPC_HALFSIZE: f64 = 40.0;
 
 /// Terrain height at world (x, z): gentle undulation plus a ridge running
 /// along z that shadows everything immediately down-sun of it.

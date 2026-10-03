@@ -72,7 +72,8 @@ struct FusionInvCov {
 
 struct FusionPoint {
     pos_radius: vec4<f32>,
-    color: vec4<f32>,
+    color: vec3<f32>,
+    normal_oct: u32,   // octahedral surfel normal; FUSION_SURFEL_SPHERE = sphelet
 }
 
 struct FusionUniforms {
@@ -281,8 +282,40 @@ struct FusionSphelet {
 }
 
 // Fixed-radius disc/sphelet coverage of one LiDAR return.
+const FUSION_SURFEL_SPHERE: u32 = 0xffffffffu;
+
+// Inverse of `surfel::oct_encode` (2 x 16-bit octahedral normal).
+fn fusion_oct_decode(packed: u32) -> vec3<f32> {
+    let e = vec2<f32>(f32(packed & 0xffffu), f32(packed >> 16u)) * (2.0 / 65535.0) - vec2<f32>(1.0);
+    var n = vec3<f32>(e.x, e.y, 1.0 - abs(e.x) - abs(e.y));
+    let t = max(-n.z, 0.0);
+    n.x = n.x + select(t, -t, n.x >= 0.0);
+    n.y = n.y + select(t, -t, n.y >= 0.0);
+    return normalize(n);
+}
+
 fn fusion_sphelet(ray: Ray, point: FusionPoint) -> FusionSphelet {
     var out: FusionSphelet;
+    if (point.normal_oct != FUSION_SURFEL_SPHERE) {
+        // Oriented surfel: a disc of the sphelet radius in the plane of the
+        // estimated surface; coverage falls off radially as for a sphelet.
+        let n = fusion_oct_decode(point.normal_oct);
+        let denom = dot(ray.direction, n);
+        out.coverage = 0.0;
+        out.t_hit = 1e30;
+        if (abs(denom) < 1e-6) {
+            return out;
+        }
+        let t = dot(point.pos_radius.xyz - ray.origin, n) / denom;
+        let q = ray.origin + t * ray.direction - point.pos_radius.xyz;
+        let b2 = dot(q, q);
+        let r2d = point.pos_radius.w * point.pos_radius.w;
+        if (t > ray.tmin && t < ray.tmax && b2 < r2d) {
+            out.coverage = fusion.optics.y * (1.0 - b2 / r2d);
+        }
+        out.t_hit = t;
+        return out;
+    }
     let oc = point.pos_radius.xyz - ray.origin;
     let t_closest = dot(oc, ray.direction);
     let perp = oc - t_closest * ray.direction;
@@ -335,9 +368,14 @@ fn fusion_point_page_closest(
             if (t >= (*best).t) { continue; }
             if (!fusion_accept(s.coverage, seed, id)) { continue; }
             let p = ray.origin + ray.direction * t;
-            var n = p - point.pos_radius.xyz;
-            let len = length(n);
-            if (len > 1e-20) { n = n / len; } else { n = -ray.direction; }
+            var n: vec3<f32>;
+            if (point.normal_oct != FUSION_SURFEL_SPHERE) {
+                n = fusion_oct_decode(point.normal_oct);
+            } else {
+                n = p - point.pos_radius.xyz;
+                let len = length(n);
+                if (len > 1e-20) { n = n / len; } else { n = -ray.direction; }
+            }
             if (dot(n, ray.direction) > 0.0) { n = -n; }
             (*best).hit = 1u;
             (*best).t = t;
@@ -346,7 +384,7 @@ fn fusion_point_page_closest(
             (*best).material_id = id;
             (*best).hit_type = FUSION_HIT_LIDAR;
             fusion_hit_bias = fusion.surface.y * point.pos_radius.w;
-            (*best)._pad = fusion_pack_color(point.color.rgb);
+            (*best)._pad = fusion_pack_color(point.color);
         }
     }
 }
@@ -769,4 +807,49 @@ fn fusion_write_aovs(coord: vec2<i32>, hit: HybridHitResult, albedo: vec3<f32>, 
     if (aov_enabled(AOV_EMISSION_BIT)) {
         textureStore(aov_emission, coord, vec4<f32>(kind, ndotl, missed, fusion_self_bias));
     }
+}
+// ---------------------------------------------------------------------------
+// Smooth terrain shading normals (fused override of `terrain_normal_at`; the
+// base patch normal is renamed `terrain_normal_at_base` at assembly).
+// ---------------------------------------------------------------------------
+
+const FUSION_FLAG_SMOOTH_TERRAIN: u32 = 4u;
+
+// Central-difference normal at DEM vertex (ix, iz), clamped at the borders.
+fn fusion_terrain_vertex_normal(ix: i32, iz: i32) -> vec3<f32> {
+    let w = i32(terrain.dims.x);
+    let h = i32(terrain.dims.y);
+    let x0 = clamp(ix - 1, 0, w - 1);
+    let x1 = clamp(ix + 1, 0, w - 1);
+    let z0 = clamp(iz - 1, 0, h - 1);
+    let z1 = clamp(iz + 1, 0, h - 1);
+    let ex = terrain.h_params.z;
+    let hx0 = textureLoad(terrain_height_tex, vec2<i32>(x0, iz), 0).r * ex;
+    let hx1 = textureLoad(terrain_height_tex, vec2<i32>(x1, iz), 0).r * ex;
+    let hz0 = textureLoad(terrain_height_tex, vec2<i32>(ix, z0), 0).r * ex;
+    let hz1 = textureLoad(terrain_height_tex, vec2<i32>(ix, z1), 0).r * ex;
+    let dhdx = (hx1 - hx0) / (f32(max(x1 - x0, 1)) * terrain.origin_spacing.z);
+    let dhdz = (hz1 - hz0) / (f32(max(z1 - z0, 1)) * terrain.origin_spacing.w);
+    return normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
+}
+
+// Fused shading normal: the four cell-corner vertex normals interpolated
+// bilinearly (C0-continuous across cells). The hit itself stays the exact
+// bilinear-patch intersection; a smooth normal facing away from the patch
+// falls back to the patch normal.
+fn terrain_normal_at(p: vec3<f32>, cx: u32, cz: u32) -> vec3<f32> {
+    let base = terrain_normal_at_base(p, cx, cz);
+    if ((fusion.pools.w & FUSION_FLAG_SMOOTH_TERRAIN) == 0u) {
+        return base;
+    }
+    let u = clamp((p.x - terrain.origin_spacing.x) / terrain.origin_spacing.z - f32(cx), 0.0, 1.0);
+    let v = clamp((p.z - terrain.origin_spacing.y) / terrain.origin_spacing.w - f32(cz), 0.0, 1.0);
+    let ix = i32(cx);
+    let iz = i32(cz);
+    let n = mix(
+        mix(fusion_terrain_vertex_normal(ix, iz), fusion_terrain_vertex_normal(ix + 1, iz), u),
+        mix(fusion_terrain_vertex_normal(ix, iz + 1), fusion_terrain_vertex_normal(ix + 1, iz + 1), u),
+        v);
+    let s = normalize(n);
+    return select(base, s, dot(s, base) > 0.0);
 }

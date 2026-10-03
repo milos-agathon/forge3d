@@ -16,7 +16,8 @@ use crate::path_tracing::fused_reference::{
     render_fused_reference, FusedReferenceDesc, ReceiverClass,
 };
 use crate::path_tracing::hybrid_compute::{
-    FusedRenderDesc, FusedRenderOutput, FusedTerrainDesc, HybridPathTracer,
+    AlbedoSampling, FusedRenderDesc, FusedRenderOutput, FusedTerrainDesc, HybridPathTracer,
+    MinMaxPrecision,
 };
 use crate::splat::bvh::Aabb;
 use crate::splat::fusion::{
@@ -194,6 +195,33 @@ impl PyGaussianSplatCloud {
         Ok(crate::splat::save_gaussian_splats(path, &self.inner)?)
     }
 
+    /// Copy of the cloud under a similarity transform: uniform `scale`,
+    /// unit-quaternion `rotation` (w, x, y, z), `translation`.
+    fn transformed(
+        &self,
+        scale: f32,
+        rotation: [f32; 4],
+        translation: [f32; 3],
+    ) -> PyResult<Self> {
+        if !(scale.is_finite() && scale > 0.0) {
+            return Err(PyValueError::new_err(format!(
+                "scale must be finite and > 0, got {scale}"
+            )));
+        }
+        let norm = rotation.iter().map(|v| v * v).sum::<f32>().sqrt();
+        if !(norm.is_finite() && norm > 1e-12) {
+            return Err(PyValueError::new_err(
+                "rotation must be a finite, non-zero quaternion (w, x, y, z)",
+            ));
+        }
+        if translation.iter().any(|v| !v.is_finite()) {
+            return Err(PyValueError::new_err("translation must be finite"));
+        }
+        Ok(Self {
+            inner: Arc::new(self.inner.transformed(scale, rotation, translation)?),
+        })
+    }
+
     /// Write the cloud as an out-of-core page store; returns its summary.
     #[pyo3(signature = (path, page_capacity = 4096))]
     fn write_page_store(
@@ -364,7 +392,7 @@ fn brdf_index(name: &str) -> PyResult<u32> {
 /// Inputs shared by the fused render and its reference.
 struct SceneInputs {
     scene: FusedScene,
-    terrain: Option<FusedTerrainDesc>,
+    terrain: Option<Arc<FusedTerrainDesc>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -377,8 +405,19 @@ fn build_scene(
     spacing: (f32, f32),
     exaggeration: f32,
     terrain_albedo: (f32, f32, f32),
+    terrain_albedo_map: Option<PyReadonlyArray3<'_, u8>>,
+    terrain_albedo_sampling: &str,
     params: FusionParams,
 ) -> PyResult<SceneInputs> {
+    let albedo_sampling = match terrain_albedo_sampling {
+        "bilinear" => AlbedoSampling::Bilinear,
+        "nearest" => AlbedoSampling::Nearest,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown terrain albedo_sampling {other:?}; expected 'bilinear' or 'nearest'"
+            )))
+        }
+    };
     params.validate()?;
     let mut sources: Vec<Arc<dyn PageSource>> = Vec::new();
     if let Some(cloud) = splats {
@@ -432,19 +471,49 @@ fn build_scene(
             )?));
         }
     }
+    if heights.is_none() && terrain_albedo_map.is_some() {
+        return Err(PyValueError::new_err(
+            "terrain albedo_map was given without terrain heights",
+        ));
+    }
     let terrain = match heights {
         None => None,
         Some(array) => {
             let view = array.as_array();
             let (rows, cols) = (view.shape()[0], view.shape()[1]);
-            Some(FusedTerrainDesc {
+            let albedo_map = match terrain_albedo_map {
+                None => None,
+                Some(map) => {
+                    let map = map.as_array();
+                    let shape = map.shape();
+                    if shape[0] != rows || shape[1] != cols || !(shape[2] == 3 || shape[2] == 4) {
+                        return Err(PyValueError::new_err(format!(
+                            "terrain albedo_map shape {shape:?} must be ({rows}, {cols}, 3|4)"
+                        )));
+                    }
+                    let mut rgba = Vec::with_capacity(rows * cols * 4);
+                    for r in 0..rows {
+                        for c in 0..cols {
+                            for ch in 0..3 {
+                                rgba.push(map[[r, c, ch]]);
+                            }
+                            rgba.push(if shape[2] == 4 { map[[r, c, 3]] } else { 255 });
+                        }
+                    }
+                    Some(rgba)
+                }
+            };
+            Some(Arc::new(FusedTerrainDesc {
                 heights: view.iter().copied().collect(),
                 width: cols as u32,
                 height: rows as u32,
                 spacing,
                 exaggeration,
                 albedo: [terrain_albedo.0, terrain_albedo.1, terrain_albedo.2],
-            })
+                minmax_precision: MinMaxPrecision::F16Conservative,
+                albedo_map,
+                albedo_sampling,
+            }))
         }
     };
     if sources.is_empty() && terrain.is_none() {
@@ -479,34 +548,43 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
         "rgba",
         PyArray1::from_vec_bound(py, out.rgba).reshape([h, w, 4])?,
     )?;
-    for (name, values) in [
-        ("radiance", out.radiance),
-        ("albedo", out.albedo),
-        ("normal", out.normal),
-        ("direct", out.direct),
-        ("position", out.position),
-    ] {
+    d.set_item(
+        "radiance",
+        PyArray1::from_vec_bound(py, out.radiance).reshape([h, w, 3])?,
+    )?;
+    // Without AOVs (`aovs=False`) the render reads back only the beauty.
+    let has_aovs = !out.hit_kind.is_empty();
+    d.set_item("aovs", has_aovs)?;
+    if has_aovs {
+        for (name, values) in [
+            ("albedo", out.albedo),
+            ("normal", out.normal),
+            ("direct", out.direct),
+            ("position", out.position),
+        ] {
+            d.set_item(
+                name,
+                PyArray1::from_vec_bound(py, values).reshape([h, w, 3])?,
+            )?;
+        }
         d.set_item(
-            name,
-            PyArray1::from_vec_bound(py, values).reshape([h, w, 3])?,
+            "transmittance",
+            PyArray1::from_vec_bound(py, out.transmittance).reshape([h, w, 4])?,
+        )?;
+        for (name, values) in [
+            ("depth", out.depth),
+            ("sun_cosine", out.sun_cosine),
+            ("self_bias", out.self_bias),
+            ("reservoir_visibility", out.reservoir_visibility),
+        ] {
+            d.set_item(name, PyArray1::from_vec_bound(py, values).reshape([h, w])?)?;
+        }
+        d.set_item(
+            "hit_kind",
+            PyArray1::from_vec_bound(py, out.hit_kind).reshape([h, w])?,
         )?;
     }
-    d.set_item(
-        "transmittance",
-        PyArray1::from_vec_bound(py, out.transmittance).reshape([h, w, 4])?,
-    )?;
-    for (name, values) in [
-        ("depth", out.depth),
-        ("sun_cosine", out.sun_cosine),
-        ("self_bias", out.self_bias),
-        ("reservoir_visibility", out.reservoir_visibility),
-    ] {
-        d.set_item(name, PyArray1::from_vec_bound(py, values).reshape([h, w])?)?;
-    }
-    d.set_item(
-        "hit_kind",
-        PyArray1::from_vec_bound(py, out.hit_kind).reshape([h, w])?,
-    )?;
+    d.set_item("tiles", out.tiles)?;
     d.set_item("frames", out.frames)?;
     d.set_item("restarts", out.restarts)?;
     d.set_item("stale_frames", out.stale_frames)?;
@@ -514,6 +592,8 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
     d.set_item("logical_primitives", out.logical_primitives)?;
     d.set_item("page_count", out.page_count)?;
     d.set_item("tlas_node_count", out.tlas_node_count)?;
+    d.set_item("terrain_bytes", out.terrain_bytes)?;
+    d.set_item("terrain_minmax_f16", out.terrain_minmax_f16)?;
     d.set_item("reservoir_valid_count", out.reservoir_valid_count)?;
     d.set_item("paging", paging_dict(py, &out.paging)?)?;
     d.set_item("peak_host_visible_bytes", out.peak_host_visible_bytes)?;
@@ -543,6 +623,8 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
     spacing = (1.0, 1.0),
     exaggeration = 1.0,
     terrain_albedo = (0.5, 0.5, 0.5),
+    terrain_albedo_map = None,
+    terrain_albedo_sampling = "bilinear",
     cam_up = (0.0, 1.0, 0.0),
     fov_y_deg = 45.0,
     spp = 2,
@@ -563,6 +645,8 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
     sun_angular_radius_deg = 0.2665,
     splat_self_bias_sigmas = 2.0,
     lidar_self_bias_radii = 1.0,
+    terrain_smooth_normals = true,
+    lidar_surfels = true,
     brdf = "lambert",
     roughness = 0.6,
     metallic = 0.0,
@@ -574,6 +658,9 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
     point_slots = 96,
     policy = "exact",
     loader_threads = 2,
+    tile_width = None,
+    tile_height = None,
+    aovs = true,
     certificate = None,
     cache = None,
 ))]
@@ -591,6 +678,8 @@ pub(crate) fn render_fused(
     spacing: (f32, f32),
     exaggeration: f32,
     terrain_albedo: (f32, f32, f32),
+    terrain_albedo_map: Option<PyReadonlyArray3<'_, u8>>,
+    terrain_albedo_sampling: &str,
     cam_up: (f32, f32, f32),
     fov_y_deg: f32,
     spp: u32,
@@ -611,6 +700,8 @@ pub(crate) fn render_fused(
     sun_angular_radius_deg: f32,
     splat_self_bias_sigmas: f32,
     lidar_self_bias_radii: f32,
+    terrain_smooth_normals: bool,
+    lidar_surfels: bool,
     brdf: &str,
     roughness: f32,
     metallic: f32,
@@ -622,49 +713,46 @@ pub(crate) fn render_fused(
     point_slots: u32,
     policy: &str,
     loader_threads: usize,
+    tile_width: Option<u32>,
+    tile_height: Option<u32>,
+    aovs: bool,
     certificate: Option<Bound<'_, PyAny>>,
     cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyDict>> {
+    let tile = match (tile_width, tile_height) {
+        (None, None) => None,
+        (Some(tw), Some(th)) => Some((tw, th)),
+        _ => {
+            return Err(PyValueError::new_err(
+                "tile_width and tile_height must be given together",
+            ))
+        }
+    };
     // Accepted for the ANAMNESIS render contract; the fused integrator has no
     // render-graph cache (its paged scene is streamed per view).
     let _ = cache;
     let policy_name = policy;
-    let policy = match policy {
-        "exact" => PagingPolicy::Exact,
-        "progressive" => PagingPolicy::Progressive,
-        other => {
-            return Err(PyValueError::new_err(format!(
-                "unknown paging policy {other:?}; expected 'exact' or 'progressive'"
-            )))
-        }
-    };
-    let params = FusionParams {
+    let params = fusion_params(
         kappa,
         lidar_radius,
         lidar_opacity,
-        transmittance_epsilon: FusionParams::default().transmittance_epsilon,
         ibl_occlusion_distance,
         sun_angular_radius_deg,
-        restir_defensive: FusionParams::default().restir_defensive,
         splat_self_bias_sigmas,
         lidar_self_bias_radii,
-        shading: ShadingParams {
-            brdf: brdf_index(brdf)?,
-            metallic,
-            roughness,
-            ..ShadingParams::default()
-        },
-        media: MediaParams {
-            density: fog_density,
-            height_falloff: fog_height_falloff,
-            phase_g: 0.0,
-        },
+        terrain_smooth_normals,
+        lidar_surfels,
+        brdf,
+        roughness,
+        metallic,
+        fog_density,
+        fog_height_falloff,
         page_capacity,
         splat_slots,
         point_slots,
         policy,
         loader_threads,
-    };
+    )?;
     let inputs = build_scene(
         splats,
         splat_page_size,
@@ -674,6 +762,8 @@ pub(crate) fn render_fused(
         spacing,
         exaggeration,
         terrain_albedo,
+        terrain_albedo_map,
+        terrain_albedo_sampling,
         params,
     )?;
     let certificate_capture = crate::core::certificate::begin_render_capture("render_fused");
@@ -691,6 +781,7 @@ pub(crate) fn render_fused(
         ("fused.kappa", kappa.to_string()),
         ("fused.lidar_radius", lidar_radius.to_string()),
         ("fused.lidar_opacity", lidar_opacity.to_string()),
+        ("fused.lidar_surfels", lidar_surfels.to_string()),
         ("fused.seed", seed.to_string()),
         ("fused.spp", spp.to_string()),
         ("fused.frames", frames.to_string()),
@@ -720,6 +811,8 @@ pub(crate) fn render_fused(
             seed,
             spp,
             frames,
+            tile,
+            aovs,
         })
     })?;
     let dict = output_dict(py, out)?;
@@ -727,6 +820,351 @@ pub(crate) fn render_fused(
     certificate_capture.finish();
     crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(dict)
+}
+
+/// The fused integrator's parameters from the binding's keyword arguments.
+#[allow(clippy::too_many_arguments)]
+fn fusion_params(
+    kappa: f32,
+    lidar_radius: f32,
+    lidar_opacity: f32,
+    ibl_occlusion_distance: f32,
+    sun_angular_radius_deg: f32,
+    splat_self_bias_sigmas: f32,
+    lidar_self_bias_radii: f32,
+    terrain_smooth_normals: bool,
+    lidar_surfels: bool,
+    brdf: &str,
+    roughness: f32,
+    metallic: f32,
+    fog_density: f32,
+    fog_height_falloff: f32,
+    page_capacity: u32,
+    splat_slots: u32,
+    point_slots: u32,
+    policy: &str,
+    loader_threads: usize,
+) -> PyResult<FusionParams> {
+    let policy = match policy {
+        "exact" => PagingPolicy::Exact,
+        "progressive" => PagingPolicy::Progressive,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown paging policy {other:?}; expected 'exact' or 'progressive'"
+            )))
+        }
+    };
+    Ok(FusionParams {
+        kappa,
+        lidar_radius,
+        lidar_opacity,
+        transmittance_epsilon: FusionParams::default().transmittance_epsilon,
+        ibl_occlusion_distance,
+        sun_angular_radius_deg,
+        restir_defensive: FusionParams::default().restir_defensive,
+        splat_self_bias_sigmas,
+        lidar_self_bias_radii,
+        terrain_smooth_normals,
+        lidar_surfels,
+        shading: ShadingParams {
+            brdf: brdf_index(brdf)?,
+            metallic,
+            roughness,
+            ..ShadingParams::default()
+        },
+        media: MediaParams {
+            density: fog_density,
+            height_falloff: fog_height_falloff,
+            phase_g: 0.0,
+        },
+        page_capacity,
+        splat_slots,
+        point_slots,
+        policy,
+        loader_threads,
+    })
+}
+
+/// One view of a fused sequence (camera, sun, exposure, seed).
+struct SequenceView {
+    cam_origin: [f32; 3],
+    cam_look_at: [f32; 3],
+    cam_up: [f32; 3],
+    fov_y_deg: f32,
+    sun_azimuth_deg: f32,
+    sun_elevation_deg: f32,
+    sun_intensity: f32,
+    sun_color: [f32; 3],
+    exposure: f32,
+    seed: u32,
+}
+
+const SEQUENCE_VIEW_KEYS: [&str; 10] = [
+    "cam_origin",
+    "cam_look_at",
+    "cam_up",
+    "fov_y_deg",
+    "sun_azimuth_deg",
+    "sun_elevation_deg",
+    "sun_intensity",
+    "sun_color",
+    "exposure",
+    "seed",
+];
+
+fn sequence_view(index: usize, view: &Bound<'_, PyDict>) -> PyResult<SequenceView> {
+    for key in view.keys() {
+        let key: String = key.extract()?;
+        if !SEQUENCE_VIEW_KEYS.contains(&key.as_str()) {
+            return Err(PyValueError::new_err(format!(
+                "unknown view key {key:?} in view {index}; expected {SEQUENCE_VIEW_KEYS:?}"
+            )));
+        }
+    }
+    let triple = |key: &str, default: Option<[f32; 3]>| -> PyResult<[f32; 3]> {
+        match view.get_item(key)? {
+            Some(value) => {
+                let (a, b, c): (f32, f32, f32) = value.extract()?;
+                Ok([a, b, c])
+            }
+            None => default.ok_or_else(|| {
+                PyValueError::new_err(format!("view {index} requires {key:?}"))
+            }),
+        }
+    };
+    let scalar = |key: &str, default: f32| -> PyResult<f32> {
+        match view.get_item(key)? {
+            Some(value) => value.extract(),
+            None => Ok(default),
+        }
+    };
+    Ok(SequenceView {
+        cam_origin: triple("cam_origin", None)?,
+        cam_look_at: triple("cam_look_at", None)?,
+        cam_up: triple("cam_up", Some([0.0, 1.0, 0.0]))?,
+        fov_y_deg: scalar("fov_y_deg", 45.0)?,
+        sun_azimuth_deg: scalar("sun_azimuth_deg", 135.0)?,
+        sun_elevation_deg: scalar("sun_elevation_deg", 45.0)?,
+        sun_intensity: scalar("sun_intensity", 2.5)?,
+        sun_color: triple("sun_color", Some([1.0, 0.97, 0.92]))?,
+        exposure: scalar("exposure", 1.0)?,
+        seed: match view.get_item("seed")? {
+            Some(value) => value.extract()?,
+            None => 0,
+        },
+    })
+}
+
+/// Render several views of one fused scene through a single residency pool
+/// (pages streamed for one view stay resident for the next; LRU eviction).
+/// Each view is a dict with `cam_origin`, `cam_look_at` and optional
+/// `cam_up`, `fov_y_deg`, `sun_azimuth_deg`, `sun_elevation_deg`,
+/// `sun_intensity`, `sun_color`, `exposure`, `seed`. Low-level seam; see
+/// `forge3d.splat.render_fused_sequence`.
+#[pyfunction]
+#[pyo3(signature = (
+    *,
+    views,
+    width = 512,
+    height = 512,
+    splats = None,
+    splat_stores = Vec::new(),
+    pointclouds = Vec::new(),
+    heights = None,
+    spacing = (1.0, 1.0),
+    exaggeration = 1.0,
+    terrain_albedo = (0.5, 0.5, 0.5),
+    terrain_albedo_map = None,
+    terrain_albedo_sampling = "bilinear",
+    spp = 2,
+    frames = 32,
+    sky_turbidity = 2.5,
+    sky_ground_albedo = 0.2,
+    sky_intensity = 0.35,
+    kappa = 4.0,
+    lidar_radius = 0.2,
+    lidar_opacity = 1.0,
+    ibl_occlusion_distance = 12.0,
+    sun_angular_radius_deg = 0.2665,
+    splat_self_bias_sigmas = 2.0,
+    lidar_self_bias_radii = 1.0,
+    terrain_smooth_normals = true,
+    lidar_surfels = true,
+    brdf = "lambert",
+    roughness = 0.6,
+    metallic = 0.0,
+    fog_density = 0.0,
+    fog_height_falloff = 0.0,
+    page_capacity = 4096,
+    splat_page_size = None,
+    splat_slots = 96,
+    point_slots = 96,
+    policy = "exact",
+    loader_threads = 2,
+    tile_width = None,
+    tile_height = None,
+    aovs = true,
+    certificate = None,
+    cache = None,
+))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_fused_sequence(
+    py: Python<'_>,
+    views: Vec<Bound<'_, PyDict>>,
+    width: u32,
+    height: u32,
+    splats: Option<PyRef<'_, PyGaussianSplatCloud>>,
+    splat_stores: Vec<String>,
+    pointclouds: Vec<(String, (f64, f64, f64), bool)>,
+    heights: Option<PyReadonlyArray2<'_, f32>>,
+    spacing: (f32, f32),
+    exaggeration: f32,
+    terrain_albedo: (f32, f32, f32),
+    terrain_albedo_map: Option<PyReadonlyArray3<'_, u8>>,
+    terrain_albedo_sampling: &str,
+    spp: u32,
+    frames: u32,
+    sky_turbidity: f32,
+    sky_ground_albedo: f32,
+    sky_intensity: f32,
+    kappa: f32,
+    lidar_radius: f32,
+    lidar_opacity: f32,
+    ibl_occlusion_distance: f32,
+    sun_angular_radius_deg: f32,
+    splat_self_bias_sigmas: f32,
+    lidar_self_bias_radii: f32,
+    terrain_smooth_normals: bool,
+    lidar_surfels: bool,
+    brdf: &str,
+    roughness: f32,
+    metallic: f32,
+    fog_density: f32,
+    fog_height_falloff: f32,
+    page_capacity: u32,
+    splat_page_size: Option<u32>,
+    splat_slots: u32,
+    point_slots: u32,
+    policy: &str,
+    loader_threads: usize,
+    tile_width: Option<u32>,
+    tile_height: Option<u32>,
+    aovs: bool,
+    certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
+) -> PyResult<Py<pyo3::types::PyList>> {
+    // Accepted for the ANAMNESIS render contract; the fused integrator has no
+    // render-graph cache.
+    let _ = cache;
+    if views.is_empty() {
+        return Err(PyValueError::new_err(
+            "render_fused_sequence requires at least one view",
+        ));
+    }
+    let views = views
+        .iter()
+        .enumerate()
+        .map(|(index, view)| sequence_view(index, view))
+        .collect::<PyResult<Vec<_>>>()?;
+    let tile = match (tile_width, tile_height) {
+        (None, None) => None,
+        (Some(tw), Some(th)) => Some((tw, th)),
+        _ => {
+            return Err(PyValueError::new_err(
+                "tile_width and tile_height must be given together",
+            ))
+        }
+    };
+    let params = fusion_params(
+        kappa,
+        lidar_radius,
+        lidar_opacity,
+        ibl_occlusion_distance,
+        sun_angular_radius_deg,
+        splat_self_bias_sigmas,
+        lidar_self_bias_radii,
+        terrain_smooth_normals,
+        lidar_surfels,
+        brdf,
+        roughness,
+        metallic,
+        fog_density,
+        fog_height_falloff,
+        page_capacity,
+        splat_slots,
+        point_slots,
+        policy,
+        loader_threads,
+    )?;
+    let inputs = build_scene(
+        splats,
+        splat_page_size,
+        splat_stores,
+        pointclouds,
+        heights,
+        spacing,
+        exaggeration,
+        terrain_albedo,
+        terrain_albedo_map,
+        terrain_albedo_sampling,
+        params,
+    )?;
+    let certificate_capture =
+        crate::core::certificate::begin_render_capture("render_fused_sequence");
+    crate::core::gpu::try_ctx()?;
+    crate::core::certificate::record_model(
+        "splat_fusion.unified_occlusion",
+        "shadow_transmittance = T_splat * T_lidar * T_terrain; analytic ray/Gaussian response \
+         T = exp(-kappa * alpha * exp(-g*/2)); stochastic alpha acceptance on scattering rays",
+    );
+    for (key, value) in [
+        ("fused.page_count", inputs.scene.page_count().to_string()),
+        ("fused.logical_primitives", inputs.scene.logical_primitive_count().to_string()),
+        ("fused.paging_policy", policy.to_string()),
+        ("fused.views", views.len().to_string()),
+        ("fused.spp", spp.to_string()),
+        ("fused.frames", frames.to_string()),
+    ] {
+        crate::core::certificate::record_input(key, value);
+    }
+    let outputs = py.allow_threads(
+        || -> Result<Vec<FusedRenderOutput>, crate::core::error::RenderError> {
+            let descs: Vec<FusedRenderDesc> = views
+                .iter()
+                .map(|view| FusedRenderDesc {
+                    scene: &inputs.scene,
+                    terrain: inputs.terrain.clone(),
+                    cam_origin: view.cam_origin,
+                    cam_look_at: view.cam_look_at,
+                    cam_up: view.cam_up,
+                    fov_y_deg: view.fov_y_deg,
+                    exposure: view.exposure,
+                    sun_azimuth_deg: view.sun_azimuth_deg,
+                    sun_elevation_deg: view.sun_elevation_deg,
+                    sun_intensity: view.sun_intensity,
+                    sun_color: view.sun_color,
+                    sky_turbidity,
+                    sky_ground_albedo,
+                    sky_intensity,
+                    width,
+                    height,
+                    seed: view.seed,
+                    spp,
+                    frames,
+                    tile,
+                    aovs,
+                })
+                .collect();
+            HybridPathTracer::new_fused()?.render_fused_sequence(&descs)
+        },
+    )?;
+    let list = pyo3::types::PyList::empty_bound(py);
+    for out in outputs {
+        list.append(output_dict(py, out)?)?;
+    }
+    certificate_capture.finish();
+    crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+    Ok(list.into())
 }
 
 /// Render the hard-proxy path-traced occlusion reference of a fused scene
@@ -750,6 +1188,8 @@ pub(crate) fn render_fused(
     heights = None,
     spacing = (1.0, 1.0),
     exaggeration = 1.0,
+    terrain_albedo_map = None,
+    terrain_albedo_sampling = "bilinear",
     cam_up = (0.0, 1.0, 0.0),
     fov_y_deg = 45.0,
     frames = 64,
@@ -764,6 +1204,7 @@ pub(crate) fn render_fused(
     page_capacity = 4096,
     splat_page_size = None,
     min_sun_cosine = 0.15,
+    lidar_surfels = true,
     certificate = None,
     cache = None,
 ))]
@@ -782,6 +1223,8 @@ pub(crate) fn render_fused_reference_py(
     heights: Option<PyReadonlyArray2<'_, f32>>,
     spacing: (f32, f32),
     exaggeration: f32,
+    terrain_albedo_map: Option<PyReadonlyArray3<'_, u8>>,
+    terrain_albedo_sampling: &str,
     cam_up: (f32, f32, f32),
     fov_y_deg: f32,
     frames: u32,
@@ -796,6 +1239,7 @@ pub(crate) fn render_fused_reference_py(
     page_capacity: u32,
     splat_page_size: Option<u32>,
     min_sun_cosine: f32,
+    lidar_surfels: bool,
     certificate: Option<Bound<'_, PyAny>>,
     cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyDict>> {
@@ -807,6 +1251,7 @@ pub(crate) fn render_fused_reference_py(
         lidar_radius,
         lidar_opacity,
         page_capacity,
+        lidar_surfels,
         ..FusionParams::default()
     };
     let inputs = build_scene(
@@ -818,6 +1263,8 @@ pub(crate) fn render_fused_reference_py(
         spacing,
         exaggeration,
         (0.5, 0.5, 0.5),
+        terrain_albedo_map,
+        terrain_albedo_sampling,
         params,
     )?;
     let certificate_capture =
@@ -847,7 +1294,7 @@ pub(crate) fn render_fused_reference_py(
             &ctx.queue,
             &FusedReferenceDesc {
                 scene: &inputs.scene,
-                terrain: inputs.terrain.as_ref(),
+                terrain: inputs.terrain.as_deref(),
                 region: Aabb::new([lo.0, lo.1, lo.2], [hi.0, hi.1, hi.2]),
                 cam_origin: [cam_origin.0, cam_origin.1, cam_origin.2],
                 cam_look_at: [cam_look_at.0, cam_look_at.1, cam_look_at.2],

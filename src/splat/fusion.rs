@@ -132,6 +132,14 @@ pub struct FusionParams {
     pub splat_self_bias_sigmas: f32,
     /// The same for LiDAR returns, in sphelet radii.
     pub lidar_self_bias_radii: f32,
+    /// Render LiDAR returns on locally planar neighbourhoods as oriented
+    /// discs (surfels) instead of spheres, so dense surface swaths do not
+    /// shadow themselves at grazing sun angles.
+    pub lidar_surfels: bool,
+    /// Shade terrain with C0-continuous interpolated vertex normals instead
+    /// of the per-cell bilinear-patch normal (removes cell-edge streaks on
+    /// steep slopes; intersection stays the exact patch).
+    pub terrain_smooth_normals: bool,
     pub shading: ShadingParams,
     pub media: MediaParams,
     pub page_capacity: u32,
@@ -153,6 +161,8 @@ impl Default for FusionParams {
             restir_defensive: 0.25,
             splat_self_bias_sigmas: 2.0,
             lidar_self_bias_radii: 1.0,
+            terrain_smooth_normals: true,
+            lidar_surfels: true,
             shading: ShadingParams::default(),
             media: MediaParams::default(),
             page_capacity: DEFAULT_PAGE_CAPACITY,
@@ -376,7 +386,12 @@ impl FusedScene {
 
     /// Synchronously decode one page into its GPU records.
     pub fn decode_page(&self, page: u32) -> Result<DecodedPage, RenderError> {
-        DecodedPage::from_payload(page, &self.load_page(page)?, self.params.lidar_radius)
+        DecodedPage::from_payload(
+            page,
+            &self.load_page(page)?,
+            self.params.lidar_radius,
+            self.params.lidar_surfels,
+        )
     }
 
     /// Human-readable source list for diagnostics.
@@ -544,7 +559,8 @@ impl FusedGpu {
                 params.splat_slots,
                 params.point_slots,
                 params.page_capacity,
-                u32::from(!terrain_tiles.is_empty()),
+                u32::from(!terrain_tiles.is_empty())
+                    | (u32::from(params.terrain_smooth_normals) << 2),
             ],
             optics: [
                 params.kappa,
@@ -625,6 +641,7 @@ impl FusedGpu {
             loader: PageLoader::new(
                 scene.sources.clone(),
                 params.lidar_radius,
+                params.lidar_surfels,
                 params.loader_threads,
                 owner,
             ),

@@ -14,6 +14,7 @@ import forge3d as f3d
 from forge3d import splat
 
 cloud = f3d.load_gaussian_splats("scene.ply")          # 3DGS .ply
+cloud = cloud.transformed(scale, (w, x, y, z), (tx, ty, tz))  # place a capture in the scene frame
 image = f3d.render_fused(
     splats=cloud,
     pointcloud="swath.copc.laz",
@@ -25,8 +26,48 @@ image = f3d.render_fused(
 
 `return_aovs=True` returns a `FusedRenderResult` with radiance, albedo, normal,
 position, depth, the per-pixel transmittance split
-`(T_total, T_splat, T_lidar, T_terrain)`, the hit kind and paging/memory
-statistics.
+`(T_total, T_splat, T_lidar, T_terrain)`, the hit kind, the self-shadow bias
+and paging/memory statistics.
+
+## Options
+
+* `tile=(w, h)`: the frame is rendered in seamless tiles. Every fused render
+  is seamless (global-pixel camera rays and seeds, self-only spatial ReSTIR
+  reuse), so a tiled render equals the single-tile render bit for bit. The
+  default is the whole frame up to one megapixel, otherwise 1024 x 1024 tiles.
+  Per-pixel GPU memory is bounded by one tile, so 1080p and 4K fit the
+  512 MiB budget. Without `return_aovs` only the beauty is read back and the
+  AOV targets are not allocated (48 B per pixel less).
+* `FusedTerrain(albedo_map=..., albedo_sampling="bilinear" | "nearest")`:
+  a `(rows, cols, 3|4)` uint8 sRGB colour map on the DEM grid, stored as
+  RGBA8 sRGB (4 B per cell). With four channels, alpha 255 marks a mapped
+  cell and any other alpha falls back to the uniform `albedo`.
+* `terrain_smooth_normals=True`: terrain is shaded with central-difference
+  vertex normals interpolated across each cell, continuous across cell
+  edges. A normal that would face away from the cell's bilinear patch falls
+  back to the patch normal. The intersection is the exact patch either way.
+  `False` reproduces the per-cell patch normal.
+* `lidar_surfels=True`: a LiDAR return whose page neighbourhood (within three
+  sphelet radii, at least six neighbours) is planar becomes an oriented disc
+  (surfel) instead of a sphere. Grazing shadow rays then no longer clip
+  neighbouring returns of the same surface. Other returns stay sphelets.
+  Normals are estimated per page, so a return at a page boundary sees only
+  part of its neighbourhood, and the surfel classification can change with
+  `page_capacity` (a large COPC node is split into runs of that size).
+* `splat_self_bias_sigmas`, `lidar_self_bias_radii`: secondary rays leaving a
+  splat (point) skip the stretch in which they rise this many standard
+  deviations (sphelet radii) along the hit normal.
+* `GaussianSplatCloud.transformed(scale, (w, x, y, z), (tx, ty, tz))`: a
+  copy of the cloud under a similarity transform, used to georeference a
+  capture.
+* `render_fused_sequence(views=[FusedView(camera, sun..., exposure, seed),
+  ...])`: renders several views of one scene with one kernel, one residency
+  pool and one terrain upload (heights, min-max pyramid and colour map are
+  built once; each view only swaps in its sky). Pages stay resident across
+  views and are evicted LRU; each result equals `render_fused` of that view.
+* Terrain is stored with a conservative half-float min-max pyramid
+  (`stats["terrain_minmax_f16"]`), which halves terrain memory without
+  changing any output bit. COPC nodes smaller than half a page share pages.
 
 ## Occlusion model
 
@@ -52,8 +93,10 @@ shadow_transmittance(ray) = T_splat * T_lidar * T_terrain
 ```
 
 * `T_splat` is the product of the per-splat transmittances above.
-* `T_lidar` is the product of `1 - c` over LiDAR sphelets with coverage
-  `c = opacity * (1 - b^2 / r^2)` at impact parameter `b`.
+* `T_lidar` is the product of `1 - c` over LiDAR returns with coverage
+  `c = opacity * (1 - b^2 / r^2)`. For a sphelet, `b` is the ray's distance
+  to the point; for a surfel (`lidar_surfels`), `b` is the distance from the
+  disc centre at which the ray crosses the disc plane.
 * `T_terrain` is the exact height-field any-hit (0 or 1).
 
 Primary and bounce rays accept a splat or sphelet stochastically with
@@ -123,13 +166,41 @@ shader stage. They run on the NVIDIA Vulkan lane
 (`FORGE3D_SPLAT_FUSION_REQUIRED_GPU=1` forbids skipping) and skip on software
 and virtualized adapters.
 
+## Measured
+
+Local NVIDIA RTX 3070, Vulkan (`docs/superpowers/plans/2026-10-03-splat-fused-limits-evidence.md`):
+
+| | |
+|---|---|
+| 1920x1080 fixture render, default tiles | 4 tiles, peak 471.0 MiB |
+| 1080p and 4K, 960x540 tiles | peak equal to the single 960x540 render (272.5 MiB; 248.8 MiB without AOVs) |
+| Mount St. Helens, 1920x1080, 64 spp | 9.7 s, peak 473.3 MiB |
+| Lauterbrunnen, 1920x1080, 64 spp, 6 m DEM + colour map | 39.6 s, peak 467.1 MiB, terrain 67.0 MiB |
+| Min-max pyramid, 1250 x 2500 DEM | 89.5 MB -> 44.7 MB, output bit-identical |
+| Lauterbrunnen COPC at 3.3 m, capacity 2700 | 12,959 -> 1,228 pages |
+| Smooth terrain normals vs analytic surface | mean error 0.48 deg (patch normal 1.42 deg) |
+| Dense LiDAR plane, sun 5-40 deg | mean T_lidar 1.000 with surfels (0.78 as unbiased spheres at 5 deg) |
+| Mount St. Helens crater LiDAR (ground returns), default settings, sun 22 deg | T_lidar 0.705-0.788 -> 0.753-0.822 with surfels, LiDAR radiance +8 to +25 % |
+
 ## Limits
 
-* The fused path needs `max_storage_buffers_per_shader_stage >= 13`; on a
-  smaller adapter `render_fused` raises a capability diagnostic.
 * Splat colour on the GPU uses spherical-harmonic bands 0 and 1. Higher bands
   are loaded, stored and evaluated on the CPU (`GaussianSplatCloud.color`).
+* The terrain min-max pyramid is padded to powers of two per axis (the shared
+  traversal assumes power-of-two node coordinates).
+* Heightfields cannot represent overhangs: cliffs stay 2.5D even with smooth
+  shading normals.
 * Splats are treated as emission-free scattering surfaces lit by the scene sun
-  and sky; baked-in capture lighting in the SH colour is used as albedo.
-* LRU eviction only happens across views (`render_fused_sequence` in Rust): in
-  a single static view every resident page is in use.
+  and sky; capture lighting baked into the SH colour is used as albedo.
+
+The fused path needs `max_storage_buffers_per_shader_stage >= 13`; on a
+smaller adapter `render_fused` raises a capability diagnostic.
+
+**LiDAR at low sun.** Surfels fix the self-shadowing of ground and roof
+returns. On the Mount St. Helens crater (ground returns, default
+self-shadow bias, sun 22 degrees) mean T_lidar rises from 0.705-0.788 to
+0.753-0.822 and LiDAR radiance by 8-25 % across the cameras and sun
+azimuths measured. Tree canopy stays dark: on the Lauterbrunnen cloud
+(trees and buildings) mean T_lidar is 0.533 without surfels and 0.532 with
+them, because the canopy is a volume whose returns occlude each other,
+which is largely physical shadowing rather than a model artefact.

@@ -15,13 +15,16 @@
 // RELEVANT FILES: src/splat/fusion.rs, src/shaders/fusion/unified_occlusion.wgsl,
 //                 src/path_tracing/hybrid_compute/render_terrain.rs
 
+use std::sync::Arc;
+
 use super::render_terrain::TerrainStatistics;
 use super::terrain_heightfield::{
-    build_minmax_mips, AlbedoSampling, EarthCurvatureUniforms, TerrainPtScene,
+    build_minmax_mips, AlbedoSampling, EarthCurvatureUniforms, MinMaxPrecision,
+    TerrainAlbedoMap, TerrainPtScene,
 };
 use super::*;
 use crate::core::memory_tracker::global_tracker;
-use crate::core::resource_tracker::AllocationOwner;
+use crate::core::resource_tracker::{AllocationOwner, TrackedBuffer};
 use crate::path_tracing::lighting::{GpuAreaLight, GpuDirectionalLight};
 use crate::path_tracing::restir::{
     create_reservoir_buffer, create_restir_gbuffer, create_restir_gbuffer_pos, Reservoir,
@@ -32,7 +35,7 @@ use crate::splat::num::f32_from_u32;
 use crate::viewer::viewer_types::SkyUniforms;
 
 /// Terrain heightfield input of a fused render.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FusedTerrainDesc {
     /// Row-major heights, `width * height` samples.
     pub heights: Vec<f32>,
@@ -42,13 +45,23 @@ pub struct FusedTerrainDesc {
     pub spacing: (f32, f32),
     pub exaggeration: f32,
     pub albedo: [f32; 3],
+    /// Storage precision of the min-max pyramid (`F16Conservative` halves
+    /// terrain memory without changing any output bit).
+    pub minmax_precision: MinMaxPrecision,
+    /// Optional colour map: RGBA8 sRGB, `width * height * 4` bytes,
+    /// row-major, row 0 = first heights row. Alpha 255 = mapped; any other
+    /// alpha uses `albedo`.
+    pub albedo_map: Option<Vec<u8>>,
+    pub albedo_sampling: AlbedoSampling,
 }
 
 /// Full description of a fused render.
 #[derive(Clone)]
 pub struct FusedRenderDesc<'a> {
     pub scene: &'a FusedScene,
-    pub terrain: Option<FusedTerrainDesc>,
+    /// Shared, so the views of a sequence reference one heightfield (and
+    /// colour map) instead of each holding a copy.
+    pub terrain: Option<Arc<FusedTerrainDesc>>,
     pub cam_origin: [f32; 3],
     pub cam_look_at: [f32; 3],
     pub cam_up: [f32; 3],
@@ -70,6 +83,13 @@ pub struct FusedRenderDesc<'a> {
     pub spp: u32,
     /// Accumulation frames.
     pub frames: u32,
+    /// Seamless tile size (pixels); `None` uses `default_tile`. Every tile
+    /// renders exactly the pixels a monolithic render would.
+    pub tile: Option<(u32, u32)>,
+    /// Read back the AOVs (albedo, normal, position, transmittance, hit
+    /// kind, ...). `false` frees their per-pixel GPU memory; the beauty is
+    /// unchanged.
+    pub aovs: bool,
 }
 
 /// Output of a fused render.
@@ -112,10 +132,17 @@ pub struct FusedRenderOutput {
     pub stale_frames: u32,
     /// Maximum per-pixel estimated variance of the mean frame luminance.
     pub variance: f32,
+    /// Seamless tiles the view was rendered in.
+    pub tiles: u32,
     pub logical_primitives: u64,
     pub page_count: u32,
     pub tlas_node_count: u32,
     pub paging: PagingStats,
+    /// Tracked GPU bytes of the terrain scene (heights, min-max pyramid,
+    /// environment, albedo map).
+    pub terrain_bytes: u64,
+    /// Whether the terrain min-max pyramid was stored as half floats.
+    pub terrain_minmax_f16: bool,
     /// Peaks of every allocation this render made (ledger owner capture).
     pub peak_host_visible_bytes: u64,
     pub peak_device_local_bytes: u64,
@@ -139,6 +166,14 @@ fn validate(desc: &FusedRenderDesc) -> Result<(), RenderError> {
     }
     if desc.spp == 0 || desc.spp > 64 {
         return fail(format!("spp must be in 1..=64, got {}", desc.spp));
+    }
+    if let Some((tw, th)) = desc.tile {
+        if tw == 0 || th == 0 || tw > desc.width || th > desc.height {
+            return fail(format!(
+                "tile {tw}x{th} must be at least 1x1 and fit the {}x{} image",
+                desc.width, desc.height
+            ));
+        }
     }
     if desc.scene.page_count() == 0 && desc.terrain.is_none() {
         return fail(
@@ -472,15 +507,11 @@ impl HybridPathTracer {
         };
         for desc in descs {
             validate(desc)?;
+            // The terrain scene is uploaded once from the first view, so
+            // every field (heights, colour map, pyramid precision) must match.
             let same_terrain = match (&desc.terrain, &first.terrain) {
                 (None, None) => true,
-                (Some(a), Some(b)) => {
-                    a.width == b.width
-                        && a.height == b.height
-                        && a.spacing == b.spacing
-                        && a.exaggeration == b.exaggeration
-                        && a.heights == b.heights
-                }
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b) || **a == **b,
                 _ => false,
             };
             if !std::ptr::eq(desc.scene, first.scene) || !same_terrain {
@@ -511,12 +542,58 @@ impl HybridPathTracer {
             &tiles,
             Some(owner.clone()),
         )?;
+        // --- Terrain scene: heights, min-max pyramid and colour map are
+        // uploaded once for the whole sequence; each view only swaps in its
+        // own sky environment. A render without terrain still needs the
+        // environment the kernel samples, so it binds a flat placeholder DEM
+        // with the terrain flag cleared: nothing is traced against it and no
+        // tile enters the top-level structure.
+        let placeholder = FusedTerrainDesc {
+            heights: vec![0.0; 4],
+            width: 2,
+            height: 2,
+            spacing: (1.0, 1.0),
+            exaggeration: 1.0,
+            albedo: [0.0; 3],
+            minmax_precision: MinMaxPrecision::F32,
+            albedo_map: None,
+            albedo_sampling: AlbedoSampling::Nearest,
+        };
+        let terrain_desc = first.terrain.as_deref().unwrap_or(&placeholder);
+        let mut terrain_scene = TerrainPtScene::new_with_options(
+            device,
+            queue,
+            &terrain_desc.heights,
+            terrain_desc.width,
+            terrain_desc.height,
+            terrain_desc.spacing,
+            terrain_desc.exaggeration,
+            terrain_desc.albedo,
+            None,
+            first.sky_intensity,
+            match &terrain_desc.albedo_map {
+                Some(map) => TerrainAlbedoMap::Rgba8Srgb(map),
+                None => TerrainAlbedoMap::None,
+            },
+            terrain_desc.albedo_sampling,
+            // The baked sky already carries the turbidity; the kernel's own
+            // aerosol term stays at its clean-air identity.
+            1.0,
+            terrain_desc.minmax_precision,
+        )?;
+
         // Monotone service tick: the residency pool's notion of "frame".
         let mut tick = 0u64;
         let mut outputs = Vec::with_capacity(descs.len());
         for desc in descs {
-            outputs.push(self.render_fused_view(desc, &mut fused, &mut tick)?);
+            outputs.push(self.render_fused_view(
+                desc,
+                &mut fused,
+                &mut terrain_scene,
+                &mut tick,
+            )?);
         }
+        drop(terrain_scene);
         drop(fused);
 
         let report = capture.finish();
@@ -548,12 +625,12 @@ impl HybridPathTracer {
         &self,
         desc: &FusedRenderDesc,
         fused: &mut FusedGpu,
+        terrain_scene: &mut TerrainPtScene,
         tick: &mut u64,
     ) -> Result<FusedRenderOutput, RenderError> {
         let device = &try_ctx()?.device;
         let queue = &try_ctx()?.queue;
         let (width, height) = (desc.width, desc.height);
-        let policy = desc.scene.params().policy;
         fused.begin_view(queue);
 
         // --- Sun + Hosek-Wilkie sky environment ---
@@ -563,49 +640,37 @@ impl HybridPathTracer {
         let light_dir = [az.cos() * el.cos(), el.sin(), az.sin() * el.cos()];
         let env = bake_sky_environment(light_dir, desc.sky_turbidity, desc.sky_ground_albedo);
 
-        // --- Terrain: the heightfield pyramid of the terrain reference. A
-        // render without terrain still needs the environment the kernel
-        // samples, so it binds a flat placeholder DEM with the terrain flag
-        // cleared: nothing is traced against it and no tile enters the
-        // top-level structure.
-        let placeholder = FusedTerrainDesc {
-            heights: vec![0.0; 4],
-            width: 2,
-            height: 2,
-            spacing: (1.0, 1.0),
-            exaggeration: 1.0,
-            albedo: [0.0; 3],
-        };
-        let terrain_desc = desc.terrain.as_ref().unwrap_or(&placeholder);
-        let terrain_scene = TerrainPtScene::new_with_albedo(
+        // --- Terrain: the sequence's shared heightfield scene with this
+        // view's sky environment swapped in.
+        terrain_scene.set_environment(
             device,
             queue,
-            &terrain_desc.heights,
-            terrain_desc.width,
-            terrain_desc.height,
-            terrain_desc.spacing,
-            terrain_desc.exaggeration,
-            terrain_desc.albedo,
             Some((env.as_slice(), ENV_WIDTH, ENV_HEIGHT)),
             desc.sky_intensity,
-            None,
-            AlbedoSampling::Nearest,
-            // The baked sky already carries the turbidity; the kernel's own
-            // aerosol term stays at its clean-air identity.
-            1.0,
         )?;
+        let terrain_bytes = terrain_scene.byte_size();
+        let terrain_minmax_f16 = desc.terrain.is_some() && terrain_scene.minmax_is_f16();
         drop(env);
         let mut terrain_uniforms = terrain_scene.uniforms(desc.spp, 1);
         if desc.terrain.is_none() {
             terrain_uniforms.mips[1] &= !1;
         }
+        // A mapped terrain keeps its albedo map (bit 1) but not the base
+        // kernel's spectral residual reservoir (bit 2): that candidate path
+        // is not routed through `shadow_transmittance`, so the fused
+        // integrator always uses its visibility-aware sun candidate.
+        terrain_uniforms.mips[1] &= !4;
 
-        // --- Camera + lighting uniforms (identical to the terrain reference) ---
+        // --- Camera + lighting uniforms. Every fused render is seamless
+        // (camera_flags = 1): rays are generated on the full sensor from the
+        // global pixel, spatial ReSTIR reuse is self-only, and a tiled render
+        // equals the monolithic one bit for bit. Per-tile fields (extent,
+        // offset, sensor rectangle) are filled by `render_fused_tile`.
         let origin = glam::Vec3::from(desc.cam_origin);
         let forward = (glam::Vec3::from(desc.cam_look_at) - origin).normalize();
         let right = forward.cross(glam::Vec3::from(desc.cam_up)).normalize();
         let up = right.cross(forward).normalize();
-        let mut base = Uniforms {
+        let base = Uniforms {
             width,
             height,
             frame_index: 0,
@@ -628,7 +693,7 @@ impl HybridPathTracer {
             pixel_offset_x: 0,
             pixel_offset_y: 0,
             ortho_half_height: 1.0,
-            camera_flags: 0,
+            camera_flags: 1,
             sensor_rect: [0.0, 0.0, 1.0, 1.0],
         };
         let uniform = |label: &'static str, bytes: &[u8], extra: wgpu::BufferUsages| {
@@ -727,6 +792,230 @@ impl HybridPathTracer {
             },
         )?;
 
+        // --- View-level bind groups ---
+        let bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("hybrid-pt-fused-bg0"),
+            layout: &self.layouts.uniforms,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: base_ubo.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: lighting_ubo.as_entire_binding(),
+                },
+            ],
+        });
+        let mut bg1_entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: scene_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: hybrid_ubo.as_entire_binding(),
+            },
+        ];
+        bg1_entries.extend(
+            hybrid_scene
+                .get_mesh_bind_entries()?
+                .into_iter()
+                .enumerate()
+                .map(|(i, mut entry)| {
+                    entry.binding = (i + 2) as u32;
+                    entry
+                }),
+        );
+        bg1_entries.extend(fused.bind_entries());
+        let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("hybrid-pt-fused-bg1"),
+            layout: &self.layouts.scene,
+            entries: &bg1_entries,
+        });
+        drop(bg1_entries);
+        let view = |texture: &wgpu::Texture| {
+            texture.create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        let height_view = view(&terrain_scene.pyramid.height_texture);
+        let minmax_view = view(&terrain_scene.pyramid.minmax_texture);
+        let env_view = view(&terrain_scene.env_texture);
+        let albedo_view = view(&terrain_scene.albedo_texture);
+        let resources = FusedViewResources {
+            base,
+            base_ubo,
+            bg0,
+            bg1,
+            height_view,
+            minmax_view,
+            env_view,
+            albedo_view,
+            terrain_ubo,
+            earth_curvature_ubo,
+            dir_lights_buf,
+            area_lights_buf,
+        };
+
+        // --- Seamless tiles: per-pixel GPU memory is bounded by one tile ---
+        let tile = desc.tile.unwrap_or_else(|| default_tile(width, height));
+        let rects = fused_tiles(width, height, tile);
+        let px_usize = (u64::from(width) * u64::from(height)) as usize;
+        let aov_len = |channels: usize| if desc.aovs { px_usize * channels } else { 0 };
+        let mut rgba = vec![0u8; px_usize * 4];
+        let mut radiance = vec![0.0f32; px_usize * 3];
+        let mut albedo = vec![0.0f32; aov_len(3)];
+        let mut normal = vec![0.0f32; aov_len(3)];
+        let mut depth = vec![0.0f32; aov_len(1)];
+        let mut direct = vec![0.0f32; aov_len(3)];
+        let mut transmittance = vec![0.0f32; aov_len(4)];
+        let mut hit_kind = vec![0u8; aov_len(1)];
+        let mut sun_cosine = vec![0.0f32; aov_len(1)];
+        let mut self_bias = vec![0.0f32; aov_len(1)];
+        let mut position = vec![0.0f32; aov_len(3)];
+        let mut reservoir_visibility = vec![0.0f32; aov_len(1)];
+        let (mut frames, mut restarts, mut stale_frames) = (0u32, 0u32, 0u32);
+        let mut variance = 0.0f32;
+        let mut reservoir_valid_count = 0u64;
+        // CENSOR F-04: live per-pass timing for the certificate. The first
+        // tile's first G-buffer pass and first accumulation frame are each
+        // bracketed on the encoder that executes them (one scope per label);
+        // without timestamp queries the fallback below records the same
+        // labels in the same order with 0.0.
+        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+        for (index, &rect) in rects.iter().enumerate() {
+            let tile_out = self.render_fused_tile(
+                &resources,
+                desc,
+                fused,
+                tick,
+                rect,
+                if index == 0 { Some(&mut timing) } else { None },
+            )?;
+            let (x, y, tw, th) = rect;
+            let blit = |dst: &mut [f32], src: &[f32], channels: usize| {
+                blit_rows(dst, src, channels, width, (x, y, tw, th));
+            };
+            blit_rows(&mut rgba, &tile_out.rgba, 4, width, rect);
+            blit(&mut radiance, &tile_out.radiance, 3);
+            if desc.aovs {
+                blit(&mut albedo, &tile_out.albedo, 3);
+                blit(&mut normal, &tile_out.normal, 3);
+                blit(&mut depth, &tile_out.depth, 1);
+                blit(&mut direct, &tile_out.direct, 3);
+                blit(&mut transmittance, &tile_out.transmittance, 4);
+                blit_rows(&mut hit_kind, &tile_out.hit_kind, 1, width, rect);
+                blit(&mut sun_cosine, &tile_out.sun_cosine, 1);
+                blit(&mut self_bias, &tile_out.self_bias, 1);
+                blit(&mut position, &tile_out.position, 3);
+                blit(&mut reservoir_visibility, &tile_out.reservoir_visibility, 1);
+            }
+            frames = tile_out.frames;
+            restarts += tile_out.restarts;
+            stale_frames += tile_out.stale_frames;
+            let s = tile_out.moment;
+            if frames >= 2 {
+                let n = f64::from(frames);
+                variance = variance.max((f64::from(s.y) / (n * (n - 1.0))) as f32);
+            }
+            reservoir_valid_count += tile_out.reservoir_valid_count;
+        }
+        if !timing.record_into_certificate() {
+            crate::core::certificate::record_pass("hybrid_pt.fused_gbuffer", 0.0, 1);
+            crate::core::certificate::record_pass("hybrid_pt.fused", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.restir_temporal", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.restir_spatial", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.fused_publish", 0.0, frames);
+        }
+
+        let lit_scene = desc.sun_elevation_deg > 0.0
+            && desc.sun_intensity > 0.0
+            && desc.sun_color.iter().any(|c| *c > 0.0)
+            && hit_kind.iter().any(|kind| *kind != 0);
+        if desc.aovs && lit_scene && frames >= 2 && reservoir_valid_count == 0 {
+            return Err(RenderError::Render(
+                "fused render ReSTIR reuse chain produced no valid reservoirs for a sun-lit \
+                 scene; temporal reuse is broken"
+                    .into(),
+            ));
+        }
+
+        Ok(FusedRenderOutput {
+            width,
+            height,
+            rgba,
+            radiance,
+            albedo,
+            normal,
+            depth,
+            direct,
+            transmittance,
+            hit_kind,
+            sun_cosine,
+            self_bias,
+            position,
+            reservoir_visibility,
+            reservoir_valid_count,
+            frames,
+            restarts,
+            stale_frames,
+            variance,
+            tiles: u32::try_from(rects.len()).unwrap_or(u32::MAX),
+            logical_primitives: desc.scene.logical_primitive_count(),
+            page_count: desc.scene.page_count(),
+            tlas_node_count: fused.tlas_node_count(),
+            paging: fused.stats(),
+            terrain_bytes,
+            terrain_minmax_f16,
+            peak_host_visible_bytes: 0,
+            peak_device_local_bytes: 0,
+            peak_total_bytes: 0,
+            tracker_host_visible_bytes: 0,
+            tracker_peak_host_visible_bytes: 0,
+            tracker_limit_bytes: 0,
+        })
+    }
+
+    /// Render one seamless tile `(x, y, tw, th)` of a view: allocate the
+    /// tile's accumulation, reservoir, G-buffer and output targets, stream
+    /// the pages its rays touch, accumulate, and read the tile back. All
+    /// per-pixel GPU memory is released when the tile returns.
+    fn render_fused_tile(
+        &self,
+        view: &FusedViewResources,
+        desc: &FusedRenderDesc,
+        fused: &mut FusedGpu,
+        tick: &mut u64,
+        rect: (u32, u32, u32, u32),
+        mut timing: Option<&mut crate::core::gpu_timing::OneShotTiming>,
+    ) -> Result<FusedTileOutput, RenderError> {
+        let device = &try_ctx()?.device;
+        let queue = &try_ctx()?.queue;
+        let policy = desc.scene.params().policy;
+        let (x, y, width, height) = rect;
+        let (full_w, full_h) = (desc.width, desc.height);
+        let mut base = view.base;
+        base.width = width;
+        base.height = height;
+        base.full_width = full_w;
+        base.full_height = full_h;
+        base.pixel_offset_x = x;
+        base.pixel_offset_y = y;
+        base.cam_aspect = f32_from_u32(full_w) / f32_from_u32(full_h);
+        base.sensor_rect = [
+            f32_from_u32(x) / f32_from_u32(full_w),
+            f32_from_u32(y) / f32_from_u32(full_h),
+            f32_from_u32(x + width) / f32_from_u32(full_w),
+            f32_from_u32(y + height) / f32_from_u32(full_h),
+        ];
+        if width == 0 || height == 0 || x + width > full_w || y + height > full_h {
+            return Err(RenderError::Render(format!(
+                "fused tile {width}x{height} at ({x},{y}) exceeds the {full_w}x{full_h} image"
+            )));
+        }
+        let aov_flags = if desc.aovs { 0xFF } else { 0 };
+        base.aov_flags = aov_flags;
+        queue.write_buffer(&view.base_ubo, 0, bytemuck::bytes_of(&base));
+
         // --- Accumulation, statistics, canonical ReSTIR reservoirs, G-buffer ---
         let px_count = u64::from(width) * u64::from(height);
         let px_usize = px_count as usize;
@@ -785,7 +1074,10 @@ impl HybridPathTracer {
             AovKind::Emission,
             AovKind::Visibility,
         ];
-        let aov_frames = AovFrames::new(device, width, height, &aovs_all)?;
+        // Without AOVs the output layout still needs bound targets; 1x1
+        // placeholders are never written (aov_flags = 0 on every frame).
+        let (aov_w, aov_h) = if desc.aovs { (width, height) } else { (1, 1) };
+        let aov_frames = AovFrames::new(device, aov_w, aov_h, &aovs_all)?;
         let aov_views: Vec<wgpu::TextureView> = aovs_all
             .iter()
             .map(|kind| {
@@ -806,55 +1098,7 @@ impl HybridPathTracer {
             )));
         }
 
-        // --- Bind groups ---
-        let bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hybrid-pt-fused-bg0"),
-            layout: &self.layouts.uniforms,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: base_ubo.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: lighting_ubo.as_entire_binding(),
-                },
-            ],
-        });
-        let mut bg1_entries = vec![
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: scene_buf.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: hybrid_ubo.as_entire_binding(),
-            },
-        ];
-        bg1_entries.extend(
-            hybrid_scene
-                .get_mesh_bind_entries()?
-                .into_iter()
-                .enumerate()
-                .map(|(i, mut entry)| {
-                    entry.binding = (i + 2) as u32;
-                    entry
-                }),
-        );
-        bg1_entries.extend(fused.bind_entries());
-        let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hybrid-pt-fused-bg1"),
-            layout: &self.layouts.scene,
-            entries: &bg1_entries,
-        });
-        drop(bg1_entries);
-        let view = |texture: &wgpu::Texture| {
-            texture.create_view(&wgpu::TextureViewDescriptor::default())
-        };
-        let height_view = view(&terrain_scene.pyramid.height_texture);
-        let minmax_view = view(&terrain_scene.pyramid.minmax_texture);
-        let env_view = view(&terrain_scene.env_texture);
-        let albedo_view = view(&terrain_scene.albedo_texture);
+        // --- Tile bind groups ---
         let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-fused-bg2"),
             layout: &self.layouts.accum,
@@ -865,15 +1109,15 @@ impl HybridPathTracer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&height_view),
+                    resource: wgpu::BindingResource::TextureView(&view.height_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&minmax_view),
+                    resource: wgpu::BindingResource::TextureView(&view.minmax_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: terrain_ubo.as_entire_binding(),
+                    resource: view.terrain_ubo.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
@@ -885,7 +1129,7 @@ impl HybridPathTracer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 6,
-                    resource: wgpu::BindingResource::TextureView(&env_view),
+                    resource: wgpu::BindingResource::TextureView(&view.env_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
@@ -893,11 +1137,11 @@ impl HybridPathTracer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: earth_curvature_ubo.as_entire_binding(),
+                    resource: view.earth_curvature_ubo.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: wgpu::BindingResource::TextureView(&albedo_view),
+                    resource: wgpu::BindingResource::TextureView(&view.albedo_view),
                 },
             ],
         });
@@ -922,15 +1166,15 @@ impl HybridPathTracer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&height_view),
+                    resource: wgpu::BindingResource::TextureView(&view.height_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&minmax_view),
+                    resource: wgpu::BindingResource::TextureView(&view.minmax_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: terrain_ubo.as_entire_binding(),
+                    resource: view.terrain_ubo.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 8,
@@ -942,7 +1186,7 @@ impl HybridPathTracer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: earth_curvature_ubo.as_entire_binding(),
+                    resource: view.earth_curvature_ubo.as_entire_binding(),
                 },
             ],
         });
@@ -975,11 +1219,11 @@ impl HybridPathTracer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: area_lights_buf.as_entire_binding(),
+                    resource: view.area_lights_buf.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 5,
-                    resource: dir_lights_buf.as_entire_binding(),
+                    resource: view.dir_lights_buf.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 10,
@@ -1014,21 +1258,14 @@ impl HybridPathTracer {
         // --- ReSTIR G-buffer pass. The centre rays traverse the fused scene,
         // so pages they miss are streamed in and the pass repeats until its
         // rays saw every page (exact) or once (progressive). ---
-        // CENSOR F-04: live per-pass timing for the certificate. The first
-        // G-buffer pass and the first accumulation frame's four dispatches
-        // are each bracketed on the encoder that executes them (one scope per
-        // label); without timestamp queries the fallback below records the
-        // same labels in the same order with 0.0.
-        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
         let mut gbuffer_passes = 0u32;
         loop {
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("hybrid-pt-fused-gbuffer-enc"),
             });
-            let gbuffer_scope = if gbuffer_passes == 0 {
-                timing.begin(&mut enc, "hybrid_pt.fused_gbuffer")
-            } else {
-                None
+            let gbuffer_scope = match timing.as_deref_mut() {
+                Some(t) if gbuffer_passes == 0 => t.begin(&mut enc, "hybrid_pt.fused_gbuffer"),
+                _ => None,
             };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1037,13 +1274,15 @@ impl HybridPathTracer {
                 });
                 crate::core::shader_registry::record_shader_use("hybrid-pt-kernel");
                 cpass.set_pipeline(&self.pipeline_terrain_gbuffer);
-                cpass.set_bind_group(0, &bg0, &[]);
-                cpass.set_bind_group(1, &bg1, &[]);
+                cpass.set_bind_group(0, &view.bg0, &[]);
+                cpass.set_bind_group(1, &view.bg1, &[]);
                 cpass.set_bind_group(2, &bg_gbuffer, &[]);
                 cpass.dispatch_workgroups(wg_x, wg_y, 1);
             }
-            if gbuffer_passes == 0 {
-                timing.end(&mut enc, gbuffer_scope, 1);
+            if let Some(t) = timing.as_deref_mut() {
+                if gbuffer_passes == 0 {
+                    t.end(&mut enc, gbuffer_scope, 1);
+                }
             }
             queue.submit([enc.finish()]);
             *tick += 1;
@@ -1063,20 +1302,19 @@ impl HybridPathTracer {
         let mut frames = 0u32;
         let mut restarts = 0u32;
         let mut stale_frames = 0u32;
-        let mut timed = false;
+        let mut timed = timing.is_none();
         while frames < desc.frames {
             base.frame_index = frames;
-            base.aov_flags = if frames == 0 { 0xFF } else { 0 };
-            queue.write_buffer(&base_ubo, 0, bytemuck::bytes_of(&base));
+            base.aov_flags = if frames == 0 { aov_flags } else { 0 };
+            queue.write_buffer(&view.base_ubo, 0, bytemuck::bytes_of(&base));
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("hybrid-pt-fused-frame"),
             });
-            // Only the first submitted frame carries timing scopes.
+            // Only the first submitted frame of the first tile is timed.
             let time_this_frame = !timed;
-            let scope = if time_this_frame {
-                timing.begin(&mut enc, "hybrid_pt.fused")
-            } else {
-                None
+            let scope_fused = match timing.as_deref_mut() {
+                Some(t) if time_this_frame => t.begin(&mut enc, "hybrid_pt.fused"),
+                _ => None,
             };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1085,19 +1323,18 @@ impl HybridPathTracer {
                 });
                 crate::core::shader_registry::record_shader_use("hybrid-pt-kernel");
                 cpass.set_pipeline(&self.pipeline_terrain);
-                cpass.set_bind_group(0, &bg0, &[]);
-                cpass.set_bind_group(1, &bg1, &[]);
+                cpass.set_bind_group(0, &view.bg0, &[]);
+                cpass.set_bind_group(1, &view.bg1, &[]);
                 cpass.set_bind_group(2, &bg2, &[]);
                 cpass.set_bind_group(3, &bg3, &[]);
                 cpass.dispatch_workgroups(wg_x, wg_y, 1);
             }
-            if time_this_frame {
-                timing.end(&mut enc, scope, 1);
+            if let (Some(t), true) = (timing.as_deref_mut(), time_this_frame) {
+                t.end(&mut enc, scope_fused, 1);
             }
-            let scope = if time_this_frame {
-                timing.begin(&mut enc, "hybrid_pt.restir_temporal")
-            } else {
-                None
+            let scope_temporal = match timing.as_deref_mut() {
+                Some(t) if time_this_frame => t.begin(&mut enc, "hybrid_pt.restir_temporal"),
+                _ => None,
             };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1106,18 +1343,17 @@ impl HybridPathTracer {
                 });
                 crate::core::shader_registry::record_shader_use("hybrid-pt-restir-temporal");
                 cpass.set_pipeline(&self.pipeline_restir_temporal);
-                cpass.set_bind_group(0, &bg0, &[]);
+                cpass.set_bind_group(0, &view.bg0, &[]);
                 cpass.set_bind_group(1, &bg_empty, &[]);
                 cpass.set_bind_group(2, &bg_temporal, &[]);
                 cpass.dispatch_workgroups(px_wg_x, px_wg_y, 1);
             }
-            if time_this_frame {
-                timing.end(&mut enc, scope, 1);
+            if let (Some(t), true) = (timing.as_deref_mut(), time_this_frame) {
+                t.end(&mut enc, scope_temporal, 1);
             }
-            let scope = if time_this_frame {
-                timing.begin(&mut enc, "hybrid_pt.restir_spatial")
-            } else {
-                None
+            let scope_spatial = match timing.as_deref_mut() {
+                Some(t) if time_this_frame => t.begin(&mut enc, "hybrid_pt.restir_spatial"),
+                _ => None,
             };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1126,18 +1362,17 @@ impl HybridPathTracer {
                 });
                 crate::core::shader_registry::record_shader_use("hybrid-pt-restir-spatial");
                 cpass.set_pipeline(&self.pipeline_restir_spatial);
-                cpass.set_bind_group(0, &bg0, &[]);
+                cpass.set_bind_group(0, &view.bg0, &[]);
                 cpass.set_bind_group(1, &bg_spatial_scene, &[]);
                 cpass.set_bind_group(2, &bg_spatial_reuse, &[]);
                 cpass.dispatch_workgroups(px_wg_x, px_wg_y, 1);
             }
-            if time_this_frame {
-                timing.end(&mut enc, scope, 1);
+            if let (Some(t), true) = (timing.as_deref_mut(), time_this_frame) {
+                t.end(&mut enc, scope_spatial, 1);
             }
-            let scope = if time_this_frame {
-                timing.begin(&mut enc, "hybrid_pt.fused_publish")
-            } else {
-                None
+            let scope_publish = match timing.as_deref_mut() {
+                Some(t) if time_this_frame => t.begin(&mut enc, "hybrid_pt.fused_publish"),
+                _ => None,
             };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1146,15 +1381,15 @@ impl HybridPathTracer {
                 });
                 crate::core::shader_registry::record_shader_use("hybrid-pt-kernel");
                 cpass.set_pipeline(&self.pipeline_terrain_publish);
-                cpass.set_bind_group(0, &bg0, &[]);
-                cpass.set_bind_group(1, &bg1, &[]);
+                cpass.set_bind_group(0, &view.bg0, &[]);
+                cpass.set_bind_group(1, &view.bg1, &[]);
                 cpass.set_bind_group(2, &bg2, &[]);
                 cpass.set_bind_group(3, &bg3, &[]);
                 cpass.dispatch_workgroups(wg_x, wg_y, 1);
             }
-            if time_this_frame {
-                timing.end(&mut enc, scope, 1);
-                timing.resolve(&mut enc);
+            if let (Some(t), true) = (timing.as_deref_mut(), time_this_frame) {
+                t.end(&mut enc, scope_publish, 1);
+                t.resolve(&mut enc);
                 timed = true;
             }
             queue.submit([enc.finish()]);
@@ -1196,18 +1431,40 @@ impl HybridPathTracer {
             }
         }
         device.poll(wgpu::Maintain::Wait);
-        if !timing.record_into_certificate() {
-            crate::core::certificate::record_pass("hybrid_pt.fused_gbuffer", 0.0, 1);
-            crate::core::certificate::record_pass("hybrid_pt.fused", 0.0, frames);
-            crate::core::certificate::record_pass("hybrid_pt.restir_temporal", 0.0, frames);
-            crate::core::certificate::record_pass("hybrid_pt.restir_spatial", 0.0, frames);
-            crate::core::certificate::record_pass("hybrid_pt.fused_publish", 0.0, frames);
-        }
+        // Release what the readbacks do not need before any staging buffer
+        // is allocated, so the tile peak is the render footprint, not the
+        // render footprint plus readback staging.
+        drop((bg2, bg3, bg_gbuffer, bg_temporal, bg_spatial_scene, bg_spatial_reuse));
+        drop(reservoir_curr);
+        drop(reservoir_out);
 
         // --- Readbacks ---
+        // ReSTIR reservoir validity + the visibility the chain carries.
+        let mut reservoir_valid_count = 0u64;
+        let mut reservoir_visibility = Vec::new();
+        if desc.aovs {
+            let res_stride = std::mem::size_of::<Reservoir>() as u64;
+            let res_bytes = read_buffer(device, queue, &reservoir_prev, px_count * res_stride)?;
+            let reservoirs: &[Reservoir] = bytemuck::cast_slice(&res_bytes);
+            reservoir_visibility.reserve(px_usize);
+            for r in reservoirs {
+                if !(r.w_sum.is_finite() && r.weight.is_finite() && r.target_pdf.is_finite()) {
+                    return Err(RenderError::Render(
+                        "fused render reservoir bookkeeping produced non-finite values".into(),
+                    ));
+                }
+                if r.m > 0 && r.weight > 0.0 && r.target_pdf > 0.0 {
+                    reservoir_valid_count += 1;
+                    reservoir_visibility.push(r.sample.intensity);
+                } else {
+                    reservoir_visibility.push(-1.0);
+                }
+            }
+        }
+        drop(reservoir_prev);
         let stats_bytes = read_buffer(device, queue, &welford_buf, px_count * stats_size)?;
         let stats: &[TerrainStatistics] = bytemuck::cast_slice(&stats_bytes);
-        let mut variance = 0.0f32;
+        let mut moment = FrameMoment { y: 0.0 };
         for s in stats {
             if s.overflow != 0 {
                 return Err(RenderError::render(
@@ -1219,11 +1476,10 @@ impl HybridPathTracer {
                     "fused render produced invalid frame-radiance moments",
                 ));
             }
-            if frames >= 2 {
-                let n = f64::from(frames);
-                variance = variance.max((f64::from(s.y) / (n * (n - 1.0))) as f32);
-            }
+            moment.y = moment.y.max(s.y);
         }
+        drop(stats_bytes);
+        drop(welford_buf);
         let accum_bytes = read_buffer(device, queue, &accum_buf, px_count * 16)?;
         let accum: &[f32] = bytemuck::cast_slice(&accum_bytes);
         let mut radiance = Vec::with_capacity(px_usize * 3);
@@ -1239,6 +1495,8 @@ impl HybridPathTracer {
                 radiance.push(mean);
             }
         }
+        drop(accum_bytes);
+        drop(accum_buf);
         let beauty = read_texture(device, queue, &out_tex, width, height, 8)?;
         let mut rgba = vec![0u8; px_usize * 4];
         for (i, px) in beauty.chunks_exact(8).enumerate() {
@@ -1247,6 +1505,22 @@ impl HybridPathTracer {
                 rgba[i * 4 + c] = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
             }
             rgba[i * 4 + 3] = 255;
+        }
+        drop(beauty);
+        drop(out_tex);
+        let mut out = FusedTileOutput {
+            rgba,
+            radiance,
+            frames,
+            restarts,
+            stale_frames,
+            moment,
+            reservoir_valid_count,
+            reservoir_visibility,
+            ..FusedTileOutput::default()
+        };
+        if !desc.aovs {
+            return Ok(out);
         }
         let aov = |kind: AovKind, bytes_per_pixel: u32| {
             read_texture(
@@ -1258,90 +1532,151 @@ impl HybridPathTracer {
                 bytes_per_pixel,
             )
         };
-        let albedo = decode_f16(&aov(AovKind::Albedo, 8)?, 3);
-        let depth: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&aov(AovKind::Depth, 4)?).to_vec();
-        let direct = decode_f16(&aov(AovKind::Direct, 8)?, 3);
-        let transmittance = decode_f16(&aov(AovKind::Indirect, 8)?, 4);
+        out.albedo = decode_f16(&aov(AovKind::Albedo, 8)?, 3);
+        out.depth = bytemuck::cast_slice::<u8, f32>(&aov(AovKind::Depth, 4)?).to_vec();
+        out.direct = decode_f16(&aov(AovKind::Direct, 8)?, 3);
+        out.transmittance = decode_f16(&aov(AovKind::Indirect, 8)?, 4);
         let emission = decode_f16(&aov(AovKind::Emission, 8)?, 4);
-        let mut hit_kind = Vec::with_capacity(px_usize);
-        let mut sun_cosine = Vec::with_capacity(px_usize);
-        let mut self_bias = Vec::with_capacity(px_usize);
+        out.hit_kind.reserve(px_usize);
         for px in emission.chunks_exact(4) {
-            hit_kind.push(px[0].round().clamp(0.0, 255.0) as u8);
-            sun_cosine.push(px[1]);
-            self_bias.push(px[3]);
+            out.hit_kind.push(px[0].round().clamp(0.0, 255.0) as u8);
+            out.sun_cosine.push(px[1]);
+            out.self_bias.push(px[3]);
         }
-        let position_bytes = read_buffer(device, queue, &gbuffer_pos, px_count * 16)?;
         let xyz = |bytes: &[u8]| -> Vec<f32> {
             bytemuck::cast_slice::<u8, f32>(bytes)
                 .chunks_exact(4)
                 .flat_map(|p| [p[0], p[1], p[2]])
                 .collect()
         };
-        let position = xyz(&position_bytes);
-        let normal = xyz(&read_buffer(device, queue, &gbuffer_nr, px_count * 16)?);
+        out.position = xyz(&read_buffer(device, queue, &gbuffer_pos, px_count * 16)?);
+        out.normal = xyz(&read_buffer(device, queue, &gbuffer_nr, px_count * 16)?);
+        Ok(out)
+    }
+}
 
-        // --- ReSTIR reservoir validity + the visibility the chain carries ---
-        let res_stride = std::mem::size_of::<Reservoir>() as u64;
-        let res_bytes = read_buffer(device, queue, &reservoir_prev, px_count * res_stride)?;
-        let reservoirs: &[Reservoir] = bytemuck::cast_slice(&res_bytes);
-        let mut reservoir_valid_count = 0u64;
-        let mut reservoir_visibility = Vec::with_capacity(px_usize);
-        for r in reservoirs {
-            if !(r.w_sum.is_finite() && r.weight.is_finite() && r.target_pdf.is_finite()) {
-                return Err(RenderError::Render(
-                    "fused render reservoir bookkeeping produced non-finite values".into(),
-                ));
-            }
-            if r.m > 0 && r.weight > 0.0 && r.target_pdf > 0.0 {
-                reservoir_valid_count += 1;
-                reservoir_visibility.push(r.sample.intensity);
-            } else {
-                reservoir_visibility.push(-1.0);
-            }
-        }
-        let lit_scene = desc.sun_elevation_deg > 0.0
-            && desc.sun_intensity > 0.0
-            && desc.sun_color.iter().any(|c| *c > 0.0)
-            && hit_kind.iter().any(|kind| *kind != 0);
-        if lit_scene && frames >= 2 && reservoir_valid_count == 0 {
-            return Err(RenderError::Render(
-                "fused render ReSTIR reuse chain produced no valid reservoirs for a sun-lit \
-                 scene — temporal/spatial reuse is broken"
-                    .into(),
-            ));
-        }
+/// View-level GPU state shared by every tile of one fused view (owned, so
+/// the struct needs no lifetime parameter).
+struct FusedViewResources {
+    /// Camera/seed template; tiles fill extent, offset and sensor rect.
+    base: Uniforms,
+    base_ubo: TrackedBuffer,
+    bg0: wgpu::BindGroup,
+    bg1: wgpu::BindGroup,
+    height_view: wgpu::TextureView,
+    minmax_view: wgpu::TextureView,
+    env_view: wgpu::TextureView,
+    albedo_view: wgpu::TextureView,
+    terrain_ubo: TrackedBuffer,
+    earth_curvature_ubo: TrackedBuffer,
+    dir_lights_buf: TrackedBuffer,
+    area_lights_buf: TrackedBuffer,
+}
 
-        Ok(FusedRenderOutput {
-            width,
-            height,
-            rgba,
-            radiance,
-            albedo,
-            normal,
-            depth,
-            direct,
-            transmittance,
-            hit_kind,
-            sun_cosine,
-            self_bias,
-            position,
-            reservoir_visibility,
-            reservoir_valid_count,
-            frames,
-            restarts,
-            stale_frames,
-            variance,
-            logical_primitives: desc.scene.logical_primitive_count(),
-            page_count: desc.scene.page_count(),
-            tlas_node_count: fused.tlas_node_count(),
-            paging: fused.stats(),
-            peak_host_visible_bytes: 0,
-            peak_device_local_bytes: 0,
-            peak_total_bytes: 0,
-            tracker_host_visible_bytes: 0,
-            tracker_peak_host_visible_bytes: 0,
-            tracker_limit_bytes: 0,
-        })
+/// One tile's read-back outputs (AOV vectors empty when AOVs are off).
+#[derive(Default)]
+struct FusedTileOutput {
+    rgba: Vec<u8>,
+    radiance: Vec<f32>,
+    albedo: Vec<f32>,
+    normal: Vec<f32>,
+    depth: Vec<f32>,
+    direct: Vec<f32>,
+    transmittance: Vec<f32>,
+    hit_kind: Vec<u8>,
+    sun_cosine: Vec<f32>,
+    self_bias: Vec<f32>,
+    position: Vec<f32>,
+    reservoir_visibility: Vec<f32>,
+    frames: u32,
+    restarts: u32,
+    stale_frames: u32,
+    /// Largest per-pixel second moment of the frame radiance.
+    moment: FrameMoment,
+    reservoir_valid_count: u64,
+}
+
+/// The second-moment term of the per-pixel Welford statistics.
+#[derive(Clone, Copy, Default)]
+struct FrameMoment {
+    y: f32,
+}
+
+/// Copy a tile's row-major `channels`-interleaved pixels into the full
+/// image (`full_width` pixels per row) at `rect = (x, y, tw, th)`.
+fn blit_rows<T: Copy>(
+    dst: &mut [T],
+    src: &[T],
+    channels: usize,
+    full_width: u32,
+    rect: (u32, u32, u32, u32),
+) {
+    let (x, y, tw, th) = rect;
+    let row = tw as usize * channels;
+    for r in 0..th as usize {
+        let d = ((y as usize + r) * full_width as usize + x as usize) * channels;
+        dst[d..d + row].copy_from_slice(&src[r * row..(r + 1) * row]);
+    }
+}
+
+/// Largest tile (pixels) a fused render dispatches at once. Larger frames
+/// are split into seamless tiles of at most 1024 x 1024.
+pub(crate) const MAX_TILE_PIXELS: u64 = 1 << 20;
+
+/// The tile a fused render uses when none is requested: the whole frame up
+/// to one megapixel, otherwise 1024 x 1024 (clamped to the frame).
+pub(crate) fn default_tile(w: u32, h: u32) -> (u32, u32) {
+    if u64::from(w) * u64::from(h) <= MAX_TILE_PIXELS {
+        (w, h)
+    } else {
+        (w.min(1024), h.min(1024))
+    }
+}
+
+/// Row-major tiles `(x, y, tw, th)` covering a `w` x `h` frame; the last
+/// column and row may be smaller than `tile`.
+pub(crate) fn fused_tiles(w: u32, h: u32, tile: (u32, u32)) -> Vec<(u32, u32, u32, u32)> {
+    let (tile_w, tile_h) = (tile.0.max(1), tile.1.max(1));
+    let mut rects = Vec::new();
+    let mut y = 0;
+    while y < h {
+        let th = tile_h.min(h - y);
+        let mut x = 0;
+        while x < w {
+            let tw = tile_w.min(w - x);
+            rects.push((x, y, tw, th));
+            x += tw;
+        }
+        y += th;
+    }
+    rects
+}
+#[cfg(test)]
+mod tiling_tests {
+    use super::*;
+
+    #[test]
+    fn fused_tiles_cover_every_pixel_exactly_once() {
+        for (w, h, tile) in [(300u32, 200u32, (128u32, 96u32)), (1920, 1080, (1024, 1024)), (7, 5, (7, 5))] {
+            let mut count = vec![0u8; (w * h) as usize];
+            for (x, y, tw, th) in fused_tiles(w, h, tile) {
+                assert!(tw >= 1 && th >= 1 && tw <= tile.0 && th <= tile.1);
+                assert!(x + tw <= w && y + th <= h, "tile ({x},{y},{tw},{th}) out of {w}x{h}");
+                for py in y..y + th {
+                    for px in x..x + tw {
+                        count[(py * w + px) as usize] += 1;
+                    }
+                }
+            }
+            assert!(count.iter().all(|c| *c == 1), "{w}x{h} tile {tile:?}");
+        }
+    }
+
+    #[test]
+    fn default_tile_is_single_up_to_one_megapixel() {
+        assert_eq!(default_tile(1024, 1024), (1024, 1024));
+        assert_eq!(default_tile(640, 480), (640, 480));
+        assert_eq!(default_tile(1920, 1080), (1024, 1024));
+        assert_eq!(default_tile(3840, 2160), (1024, 1024));
     }
 }

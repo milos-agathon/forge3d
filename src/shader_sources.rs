@@ -118,6 +118,26 @@ fn extract_block(
 /// the fused occlusion model: (what, from, to). Each must match exactly once.
 #[cfg(feature = "splat-fusion")]
 const FUSED_TERRAIN_EDITS: &[(&str, &str, &str)] = &[
+    // Every fused render is seamless (camera_flags = 1): spatial reuse is
+    // self-only (pt_restir_spatial.wgsl) and temporal reuse is per pixel, so
+    // the reservoir's sun-disc sample is tile-safe. Without this edit tiles
+    // would shade from the disc centre only (hard shadows).
+    (
+        "seamless reservoir sun direction",
+        concat!(
+            "        if (uniforms.camera_flags == 0u && prev_valid) {\n",
+            "            sun_dir = normalize(prev_r.sample.direction);",
+        ),
+        concat!(
+            "        if (prev_valid) {\n",
+            "            sun_dir = normalize(prev_r.sample.direction);",
+        ),
+    ),
+    (
+        "terrain shading normal seam",
+        "fn terrain_normal_at(p: vec3<f32>, cx: u32, cz: u32) -> vec3<f32> {",
+        "fn terrain_normal_at_base(p: vec3<f32>, cx: u32, cz: u32) -> vec3<f32> {",
+    ),
     (
         "ReSTIR candidate target function",
         concat!(
@@ -1403,6 +1423,29 @@ mod fused_kernel_tests {
         for projected in ["textureSample", "@vertex", "@fragment", "@group"] {
             assert!(!gaussian.contains(projected), "{projected}");
         }
+    }
+
+    #[test]
+    fn fused_kernel_uses_the_reservoir_sun_sample_in_seamless_mode() {
+        let source = fused_kernel().unwrap();
+        let main_terrain = body(&source, "main_terrain");
+        assert!(main_terrain
+            .contains("if (prev_valid) {\n            sun_dir = normalize(prev_r.sample.direction);"));
+        assert!(!main_terrain.contains("camera_flags == 0u && prev_valid"));
+        assert!(hybrid_kernel().contains("camera_flags == 0u && prev_valid"));
+    }
+
+    #[test]
+    fn fused_kernel_overrides_the_terrain_shading_normal() {
+        let source = fused_kernel().unwrap();
+        assert_eq!(source.matches("fn terrain_normal_at_base(").count(), 1);
+        assert_eq!(source.matches("fn terrain_normal_at(").count(), 1);
+        let fused = body(&source, "terrain_normal_at");
+        assert!(fused.contains("terrain_normal_at_base(p, cx, cz)"));
+        assert!(fused.contains("FUSION_FLAG_SMOOTH_TERRAIN"));
+        let base = hybrid_kernel();
+        assert!(base.contains("fn terrain_normal_at("));
+        assert!(!base.contains("terrain_normal_at_base"));
     }
 
     #[test]

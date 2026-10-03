@@ -313,10 +313,12 @@ from .splat import (
     FusedPointCloud,
     FusedRenderResult,
     FusedTerrain,
+    FusedView,
     GaussianSplatCloud,
     SplatFusionUnavailable,
     load_gaussian_splats,
     render_fused,
+    render_fused_sequence,
 )
 from . import splat
 
@@ -785,6 +787,8 @@ __all__ = [
     "splat",
     "load_gaussian_splats",
     "render_fused",
+    "render_fused_sequence",
+    "FusedView",
     "GaussianSplatCloud",
     "FusedCamera",
     "FusedTerrain",

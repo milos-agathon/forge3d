@@ -199,6 +199,7 @@ class TestNativeModuleSymbols:
         "load_gaussian_splats",
         "render_fused",
         "render_fused_reference",
+        "render_fused_sequence",
         "build_splat_page_store",
         "write_synthetic_point_field",
         "splat_ray_gaussian",

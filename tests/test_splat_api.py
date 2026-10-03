@@ -518,3 +518,176 @@ def test_render_fused_reference_emits_a_certificate():
     certificate = render_certificate(sign=False)
     assert [entry["label"] for entry in certificate["passes"]] == ["fused_reference.path_trace"]
     assert "splat_fusion.hard_proxy_reference" in certificate["models"]
+
+
+# ---------------------------------------------------------------------------
+# Section 7: SPLAT-FUSED limits remediation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not gpu_available(), reason="no usable GPU adapter for the fused render")
+def test_self_bias_parameters_reach_the_kernel():
+    m = manifest()
+    kw = scene_kwargs(m)
+    common = dict(samples=4, width=96, height=96, return_aovs=True)
+    a = splat.render_fused(**kw, **common, splat_self_bias_sigmas=2.0, lidar_self_bias_radii=1.0)
+    b = splat.render_fused(**kw, **common, splat_self_bias_sigmas=0.5, lidar_self_bias_radii=3.0)
+    lidar = (a.hit_kind == splat.HIT_LIDAR) & (b.hit_kind == splat.HIT_LIDAR)
+    assert lidar.sum() > 50
+    # The self_bias AOV is stored in the Rgba16Float emission AOV; WGSL leaves
+    # the f32 -> f16 storage rounding to the implementation, so the bound is
+    # one half-float ulp (2**-10 relative).
+    f16_ulp = 2.0**-10
+    np.testing.assert_allclose(a.self_bias[lidar], 1.0 * m["lidar_radius"], rtol=f16_ulp)
+    np.testing.assert_allclose(b.self_bias[lidar], 3.0 * m["lidar_radius"], rtol=f16_ulp)
+    splats = (a.hit_kind == splat.HIT_SPLAT) & (b.hit_kind == splat.HIT_SPLAT)
+    assert splats.sum() > 50
+    np.testing.assert_allclose(b.self_bias[splats], 0.25 * a.self_bias[splats], rtol=1e-5)
+    assert np.all(a.self_bias[a.hit_kind == splat.HIT_TERRAIN] == 0.0)
+    with pytest.raises(RuntimeError, match="self-shadow bias"):
+        splat.render_fused(**kw, **common, lidar_self_bias_radii=-1.0)
+
+
+def _quat_mul(a, b):
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return np.array(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ]
+    )
+
+
+def test_transformed_applies_a_similarity_without_mutating_the_source():
+    cloud = splat.load_gaussian_splats(FIXTURE_DIR / manifest()["splat_file"])
+    before = np.array(cloud.positions, copy=True)
+    q = np.array([0.9, 0.1, -0.3, 0.2])
+    q /= np.linalg.norm(q)
+    t = np.array([100.0, -20.0, 7.0])
+    moved = cloud.transformed(2.5, tuple(q), tuple(t))
+    R = _quat_to_matrix(q)
+    np.testing.assert_allclose(moved.positions, 2.5 * before @ R.T + t, rtol=0, atol=1e-3)
+    np.testing.assert_allclose(moved.scales, 2.5 * np.asarray(cloud.scales), rtol=1e-6)
+    for qi, qm in zip(np.asarray(cloud.rotations), np.asarray(moved.rotations)):
+        assert abs(np.dot(_quat_mul(q, qi), qm)) >= 1.0 - 1e-6
+    np.testing.assert_array_equal(np.asarray(cloud.positions), before)
+    assert moved.count == cloud.count
+    for bad in (dict(scale=0.0), dict(scale=float("nan"))):
+        with pytest.raises(ValueError, match="scale"):
+            cloud.transformed(bad["scale"], (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+    with pytest.raises(ValueError, match="rotation"):
+        cloud.transformed(1.0, (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+def _srgb_to_linear(c):
+    c = np.asarray(c, dtype=np.float64) / 255.0
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def _linear_to_srgb_u8(v):
+    v = np.clip(np.asarray(v, dtype=np.float64), 0.0, 1.0)
+    s = np.where(v <= 0.0031308, v * 12.92, 1.055 * v ** (1.0 / 2.4) - 0.055)
+    return np.round(s * 255.0).astype(np.int64)
+
+
+def test_terrain_albedo_map_is_validated():
+    h = np.zeros((6, 5), np.float32)
+    with pytest.raises(TypeError, match="uint8"):
+        splat.render_fused(
+            terrain=splat.FusedTerrain(heights=h, albedo_map=np.zeros(h.shape + (3,), np.float32)),
+            camera=splat.FusedCamera(origin=(0, 5, 10), look_at=(0, 0, 0)),
+        )
+    with pytest.raises(ValueError, match="albedo_map shape"):
+        splat.render_fused(
+            terrain=splat.FusedTerrain(heights=h, albedo_map=np.zeros((7, 5, 3), np.uint8)),
+            camera=splat.FusedCamera(origin=(0, 5, 10), look_at=(0, 0, 0)),
+        )
+    with pytest.raises(ValueError, match="albedo_map shape"):
+        splat.render_fused(
+            terrain=splat.FusedTerrain(heights=h, albedo_map=np.zeros((6, 5, 2), np.uint8)),
+            camera=splat.FusedCamera(origin=(0, 5, 10), look_at=(0, 0, 0)),
+        )
+    with pytest.raises(ValueError, match="albedo_sampling"):
+        splat.render_fused(
+            terrain=splat.FusedTerrain(
+                heights=h, albedo_map=np.zeros((6, 5, 3), np.uint8), albedo_sampling="cubic"
+            ),
+            camera=splat.FusedCamera(origin=(0, 5, 10), look_at=(0, 0, 0)),
+        )
+
+
+@pytest.mark.skipif(not gpu_available(), reason="no usable GPU adapter for the fused render")
+def test_terrain_albedo_map_sets_the_terrain_albedo():
+    m = manifest()
+    kw = scene_kwargs(m)
+    t = kw["terrain"]
+    grey = np.full(t.heights.shape + (3,), 128, np.uint8)
+    kw["terrain"] = splat.FusedTerrain(
+        heights=t.heights, spacing=t.spacing, albedo=t.albedo, albedo_map=grey
+    )
+    out = splat.render_fused(**kw, samples=2, width=96, height=96, return_aovs=True)
+    terrain = out.hit_kind == splat.HIT_TERRAIN
+    assert terrain.sum() > 500
+    codes = _linear_to_srgb_u8(out.albedo[terrain])
+    assert np.abs(codes - 128).max() <= 1, np.unique(codes)
+    assert out.stats["terrain_bytes"] > 0
+@pytest.mark.skipif(not gpu_available(), reason="no usable GPU adapter for the fused render")
+def test_render_fused_1080p_fits_the_budget():
+    m = manifest()
+    out = splat.render_fused(
+        **scene_kwargs(m), samples=2, width=1920, height=1080, return_aovs=True
+    )
+    assert out.rgba.shape == (1080, 1920, 4)
+    assert out.albedo.shape == (1080, 1920, 3)
+    assert out.hit_kind.shape == (1080, 1920)
+    assert out.transmittance.shape == (1080, 1920, 4)
+    assert out.stats["tiles"] == 4  # default 1024x1024 tiles
+    assert out.stats["peak_total_bytes"] <= 512 * 1024 * 1024
+    print(
+        f"\n1920x1080 fused render: {out.stats['tiles']} tiles, peak "
+        f"{out.stats['peak_total_bytes'] / 2**20:.1f} MiB"
+    )
+
+
+def test_render_fused_rejects_invalid_tiles():
+    camera = splat.FusedCamera(origin=(0, 5, 10), look_at=(0, 0, 0))
+    flat = np.zeros((4, 4), np.float32)
+    for tile in ((0, 10), (10, 0), (65, 10), (10, 65)):
+        with pytest.raises(ValueError, match="tile"):
+            splat.render_fused(terrain=flat, camera=camera, width=64, height=64, tile=tile)
+
+
+@pytest.mark.skipif(not gpu_available(), reason="no usable GPU adapter for the fused render")
+def test_render_fused_sequence_matches_independent_renders_and_reuses_pages():
+    m = manifest()
+    kw = scene_kwargs(m)
+    cam = kw.pop("camera")
+    sun = {k: kw.pop(k) for k in ("sun_azimuth_deg", "sun_elevation_deg", "sun_intensity", "sun_color")}
+    other = splat.FusedCamera(
+        origin=tuple(np.array(cam.origin) + [6.0, 0.0, -4.0]),
+        look_at=cam.look_at,
+        up=cam.up,
+        fov_y_deg=cam.fov_y_deg,
+    )
+    views = [
+        splat.FusedView(camera=cam, **sun),
+        splat.FusedView(camera=other, **sun),
+        splat.FusedView(camera=cam, **sun),
+    ]
+    common = dict(samples=8, width=128, height=128, return_aovs=True)
+    seq = splat.render_fused_sequence(**kw, views=views, **common)
+    assert len(seq) == 3
+    for view, got in zip(views, seq):
+        alone = splat.render_fused(**kw, camera=view.camera, **sun, **common)
+        np.testing.assert_array_equal(got.rgba, alone.rgba)
+        np.testing.assert_array_equal(got.radiance.view(np.uint32), alone.radiance.view(np.uint32))
+    loads = [r.stats["paging"]["loads"] for r in seq]  # cumulative over the sequence
+    assert loads[2] == loads[1], f"repeated view re-streamed pages: {loads}"
+    assert max(r.stats["peak_total_bytes"] for r in seq) <= 512 * 1024 * 1024
+    print(f"\nsequence paging loads (cumulative): {loads}")
+    with pytest.raises(ValueError, match="unknown view key"):
+        splat._native("render_fused_sequence")(
+            views=[{"cam_origin": (0, 1, 2), "cam_look_at": (0, 0, 0), "bogus": 1}],
+            heights=np.zeros((4, 4), np.float32),
+        )

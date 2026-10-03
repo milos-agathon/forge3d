@@ -264,6 +264,11 @@ impl CopcDataset {
     pub fn bounds(&self) -> OctreeBounds {
         self.root_bounds
     }
+
+    /// Parsed LAS 1.4 public header of the file.
+    pub fn header(&self) -> &CopcHeader {
+        &self.header
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,16 +300,11 @@ fn read_las_header<R: Read + Seek>(reader: &mut R) -> PointCloudResult<CopcHeade
         f64::from_le_bytes(buf[163..171].try_into().unwrap()),
         f64::from_le_bytes(buf[171..179].try_into().unwrap()),
     ];
-    let max_bounds = [
-        f64::from_le_bytes(buf[179..187].try_into().unwrap()),
-        f64::from_le_bytes(buf[203..211].try_into().unwrap()),
-        f64::from_le_bytes(buf[227..235].try_into().unwrap()),
-    ];
-    let min_bounds = [
-        f64::from_le_bytes(buf[187..195].try_into().unwrap()),
-        f64::from_le_bytes(buf[211..219].try_into().unwrap()),
-        f64::from_le_bytes(buf[235..243].try_into().unwrap()),
-    ];
+    // LAS 1.4 public header: max X @179, min X @187, max Y @195, min Y @203,
+    // max Z @211, min Z @219.
+    let f = |at: usize| f64::from_le_bytes(buf[at..at + 8].try_into().unwrap());
+    let max_bounds = [f(179), f(195), f(211)];
+    let min_bounds = [f(187), f(203), f(219)];
 
     Ok(CopcHeader {
         point_count,
@@ -377,4 +377,63 @@ fn parse_copc_info(content: &[u8]) -> PointCloudResult<CopcInfo> {
         gpstime_minimum: f64::from_le_bytes(content[56..64].try_into().unwrap()),
         gpstime_maximum: f64::from_le_bytes(content[64..72].try_into().unwrap()),
     })
+}
+
+#[cfg(test)]
+mod header_bounds_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn las14_bounds_are_read_from_their_specified_offsets() {
+        // LAS 1.4 public header: max X @179, min X @187, max Y @195,
+        // min Y @203, max Z @211, min Z @219.
+        let mut buf = vec![0u8; 375];
+        buf[0..4].copy_from_slice(b"LASF");
+        for (at, v) in [
+            (179, 11.0f64),
+            (187, 1.0),
+            (195, 22.0),
+            (203, 2.0),
+            (211, 33.0),
+            (219, 3.0),
+        ] {
+            buf[at..at + 8].copy_from_slice(&v.to_le_bytes());
+        }
+        let header = read_las_header(&mut Cursor::new(buf)).unwrap();
+        assert_eq!(header.max_bounds, [11.0, 22.0, 33.0]);
+        assert_eq!(header.min_bounds, [1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn fixture_header_bounds_enclose_exactly_the_decoded_points() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/splat_fusion/swath.copc.laz");
+        let dataset = CopcDataset::open(&path).unwrap();
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for node in dataset.nodes() {
+            let data = dataset.read_points(&node.key).unwrap();
+            for p in data.positions.chunks_exact(3) {
+                for a in 0..3 {
+                    lo[a] = lo[a].min(p[a]);
+                    hi[a] = hi[a].max(p[a]);
+                }
+            }
+        }
+        let header = dataset.header();
+        for a in 0..3 {
+            assert!(
+                (header.min_bounds[a] - lo[a]).abs() <= 1e-3,
+                "min axis {a}: {} vs {}",
+                header.min_bounds[a],
+                lo[a]
+            );
+            assert!(
+                (header.max_bounds[a] - hi[a]).abs() <= 1e-3,
+                "max axis {a}: {} vs {}",
+                header.max_bounds[a],
+                hi[a]
+            );
+        }
+    }
 }

@@ -241,12 +241,19 @@ class FusedTerrain:
     ``heights`` is a ``(rows, cols)`` float array centred on the world
     origin: column ``c`` sits at ``x = (c - (cols - 1) / 2) * spacing[0]``,
     row ``r`` at ``z = (r - (rows - 1) / 2) * spacing[1]``, height along y.
+
+    ``albedo_map`` is an optional ``(rows, cols, 3|4)`` uint8 sRGB colour map
+    on the same grid (4 bytes per cell on the GPU). With four channels, alpha
+    255 marks a mapped cell and any other alpha falls back to ``albedo``.
+    ``albedo_sampling`` is ``"bilinear"`` or ``"nearest"`` (categorical maps).
     """
 
     heights: np.ndarray
     spacing: Tuple[float, float] = (1.0, 1.0)
     exaggeration: float = 1.0
     albedo: Tuple[float, float, float] = (0.5, 0.5, 0.5)
+    albedo_map: Optional[np.ndarray] = None
+    albedo_sampling: str = "bilinear"
 
 
 @dataclass(frozen=True)
@@ -280,6 +287,9 @@ class FusedRenderResult:
         sun_cosine: (H, W) float32 N.L at the hit.
         reservoir_visibility: (H, W) float32 last-known sun visibility
             carried by each pixel's merged ReSTIR reservoir (-1 if empty).
+        self_bias: (H, W) float32 self-shadow skip distance (world units)
+            applied to secondary rays leaving the centre-ray hit (0 on
+            terrain and misses).
         stats: frames, restarts, stale_frames, variance, logical_primitives,
             page_count, tlas_node_count, reservoir_valid_count, ``paging``
             (miss_events, loads, evictions, peak_resident_pages, pool_bytes,
@@ -298,6 +308,7 @@ class FusedRenderResult:
     hit_kind: np.ndarray
     sun_cosine: np.ndarray
     reservoir_visibility: np.ndarray
+    self_bias: np.ndarray
     stats: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -381,11 +392,30 @@ def _resolve_terrain(terrain: Any) -> Optional[FusedTerrain]:
         )
     if not np.isfinite(heights).all():
         raise ValueError("terrain heights contain non-finite samples")
+    albedo_map = terrain.albedo_map
+    if albedo_map is not None:
+        albedo_map = np.asarray(albedo_map)
+        if albedo_map.dtype != np.uint8:
+            raise TypeError(
+                f"terrain albedo_map must be uint8 sRGB, got dtype {albedo_map.dtype}"
+            )
+        if albedo_map.ndim != 3 or albedo_map.shape[:2] != heights.shape or albedo_map.shape[2] not in (3, 4):
+            raise ValueError(
+                f"terrain albedo_map shape {albedo_map.shape} must be "
+                f"({heights.shape[0]}, {heights.shape[1]}, 3|4)"
+            )
+        albedo_map = np.ascontiguousarray(albedo_map)
+    if terrain.albedo_sampling not in ("bilinear", "nearest"):
+        raise ValueError(
+            f"terrain albedo_sampling must be 'bilinear' or 'nearest', got {terrain.albedo_sampling!r}"
+        )
     return FusedTerrain(
         heights=heights,
         spacing=(float(terrain.spacing[0]), float(terrain.spacing[1])),
         exaggeration=float(terrain.exaggeration),
         albedo=tuple(float(v) for v in terrain.albedo),
+        albedo_map=albedo_map,
+        albedo_sampling=terrain.albedo_sampling,
     )
 
 
@@ -428,6 +458,8 @@ def _scene_kwargs(
             heights=resolved_terrain.heights,
             spacing=resolved_terrain.spacing,
             exaggeration=resolved_terrain.exaggeration,
+            terrain_albedo_map=resolved_terrain.albedo_map,
+            terrain_albedo_sampling=resolved_terrain.albedo_sampling,
         )
     return kwargs, resolved_terrain
 
@@ -463,6 +495,11 @@ def render_fused(
     lidar_opacity: float = 1.0,
     ibl_occlusion_distance: float = 12.0,
     sun_angular_radius_deg: float = 0.2665,
+    splat_self_bias_sigmas: float = 2.0,
+    lidar_self_bias_radii: float = 1.0,
+    terrain_smooth_normals: bool = True,
+    lidar_surfels: bool = True,
+    tile: Optional[Tuple[int, int]] = None,
     brdf: str = "lambert",
     roughness: float = 0.6,
     metallic: float = 0.0,
@@ -501,6 +538,15 @@ def render_fused(
             coverage of a LiDAR return.
         ibl_occlusion_distance: splats/points occlude sky light only within
             this distance (terrain occludes at any distance).
+        splat_self_bias_sigmas, lidar_self_bias_radii: secondary rays leaving
+            a splat (point) skip the stretch in which they rise this many
+            standard deviations (sphelet radii) along the hit normal.
+        lidar_surfels: render LiDAR returns on locally planar neighbourhoods
+            (ground, roofs, walls) as oriented discs instead of spheres, so a
+            dense surface swath does not shadow itself at low sun.
+        terrain_smooth_normals: shade terrain with interpolated vertex
+            normals (continuous across DEM cells) instead of the per-cell
+            patch normal; the intersection is the exact patch either way.
         brdf: surface response evaluated through the shared BRDF dispatcher
             (``lambert``, ``oren_nayar``, ``cook_torrance_ggx``, ...).
         fog_density, fog_height_falloff: exponential height fog along sun
@@ -516,7 +562,14 @@ def render_fused(
             error) or ``"progressive"`` (missing pages are requested
             asynchronously and affected samples reuse the reservoir's
             last-known visibility).
+        tile: ``(width, height)`` of the seamless tiles the frame is rendered
+            in (default: the whole frame up to one megapixel, else 1024x1024).
+            Per-pixel GPU memory is bounded by one tile, so the output size
+            is not limited by the 512 MiB budget; a tiled render equals the
+            single-tile render bit for bit.
         return_aovs: return a :class:`FusedRenderResult` instead of the image.
+            Without it only the beauty is read back and the AOV targets are
+            not allocated.
         certificate: ``True`` assembles the signed CENSOR render certificate
             of this render (read it with
             :func:`forge3d.diagnostics.render_certificate`); a path also
@@ -549,6 +602,14 @@ def render_fused(
     if not 1 <= spp <= 64:
         raise ValueError(f"samples_per_frame must be in 1..=64, got {spp}")
     frames = int(math.ceil(samples / spp))
+    tile_kwargs: Dict[str, int] = {}
+    if tile is not None:
+        tw, th = (int(v) for v in tile)
+        if not (1 <= tw <= width and 1 <= th <= height):
+            raise ValueError(
+                f"tile {tw}x{th} must be at least 1x1 and fit the {width}x{height} image"
+            )
+        tile_kwargs = dict(tile_width=tw, tile_height=th)
     out = native(
         cam_origin=cam.origin,
         cam_look_at=cam.look_at,
@@ -575,6 +636,10 @@ def render_fused(
         lidar_opacity=float(lidar_opacity),
         ibl_occlusion_distance=float(ibl_occlusion_distance),
         sun_angular_radius_deg=float(sun_angular_radius_deg),
+        splat_self_bias_sigmas=float(splat_self_bias_sigmas),
+        lidar_self_bias_radii=float(lidar_self_bias_radii),
+        terrain_smooth_normals=bool(terrain_smooth_normals),
+        lidar_surfels=bool(lidar_surfels),
         brdf=str(brdf),
         roughness=float(roughness),
         metallic=float(metallic),
@@ -585,28 +650,183 @@ def render_fused(
         splat_slots=int(splat_slots),
         point_slots=int(point_slots),
         policy=str(policy),
+        aovs=bool(return_aovs),
         certificate=_certificate_arg(certificate),
         cache=cache,
+        **tile_kwargs,
         **scene,
     )
+    return _fused_result(out, return_aovs)
+
+
+_RESULT_ARRAYS = (
+    "rgba",
+    "radiance",
+    "albedo",
+    "normal",
+    "position",
+    "direct",
+    "depth",
+    "transmittance",
+    "hit_kind",
+    "sun_cosine",
+    "reservoir_visibility",
+    "self_bias",
+)
+
+
+def _fused_result(out: Mapping[str, Any], return_aovs: bool) -> Union[np.ndarray, FusedRenderResult]:
+    """The public result of one native fused render dict."""
     if not return_aovs:
         return out["rgba"]
-    arrays = (
-        "rgba",
-        "radiance",
-        "albedo",
-        "normal",
-        "position",
-        "direct",
-        "depth",
-        "transmittance",
-        "hit_kind",
-        "sun_cosine",
-        "reservoir_visibility",
-    )
-    stats = {key: value for key, value in out.items() if key not in arrays and key != "self_bias"}
+    stats = {key: value for key, value in out.items() if key not in _RESULT_ARRAYS}
     stats["paging"] = dict(stats["paging"])
-    return FusedRenderResult(**{name: out[name] for name in arrays}, stats=stats)
+    return FusedRenderResult(**{name: out[name] for name in _RESULT_ARRAYS}, stats=stats)
+
+
+@dataclass(frozen=True)
+class FusedView:
+    """One view of :func:`render_fused_sequence`: camera, sun, exposure and
+    seed (everything else is shared by the sequence)."""
+
+    camera: FusedCamera
+    sun_azimuth_deg: float = 135.0
+    sun_elevation_deg: float = 45.0
+    sun_intensity: float = 2.5
+    sun_color: Tuple[float, float, float] = (1.0, 0.97, 0.92)
+    exposure: float = 1.0
+    seed: int = 0
+
+
+def render_fused_sequence(
+    *,
+    splats: Any = None,
+    pointcloud: Any = None,
+    terrain: Any = None,
+    views: Sequence[FusedView],
+    samples: int = 64,
+    samples_per_frame: Optional[int] = None,
+    width: int = 512,
+    height: int = 512,
+    sky_turbidity: float = 2.5,
+    sky_ground_albedo: float = 0.2,
+    sky_intensity: float = 0.35,
+    kappa: float = 4.0,
+    lidar_radius: float = 0.2,
+    lidar_opacity: float = 1.0,
+    ibl_occlusion_distance: float = 12.0,
+    sun_angular_radius_deg: float = 0.2665,
+    splat_self_bias_sigmas: float = 2.0,
+    lidar_self_bias_radii: float = 1.0,
+    terrain_smooth_normals: bool = True,
+    lidar_surfels: bool = True,
+    tile: Optional[Tuple[int, int]] = None,
+    brdf: str = "lambert",
+    roughness: float = 0.6,
+    metallic: float = 0.0,
+    fog_density: float = 0.0,
+    fog_height_falloff: float = 0.0,
+    page_capacity: int = 4096,
+    splat_page_size: Optional[int] = None,
+    splat_slots: int = 96,
+    point_slots: int = 96,
+    policy: str = "exact",
+    return_aovs: bool = False,
+    certificate: "bool | str | os.PathLike[str]" = False,
+    cache: Optional[str] = None,
+) -> List[Union[np.ndarray, FusedRenderResult]]:
+    """Render several views of one fused scene (a fly-through or sun sweep).
+
+    The scene is built once, the fused kernel is compiled once, and every
+    view shares one residency pool: pages streamed in for one view stay
+    resident for the next and are evicted least-recently-used when the pool
+    is full. Each result equals :func:`render_fused` of that view on its own
+    (exact policy). Options mean what they mean for :func:`render_fused`;
+    ``stats["paging"]`` counters are cumulative over the sequence and the
+    memory peaks cover the whole sequence.
+
+    Returns:
+        One ``(height, width, 4)`` uint8 image, or one
+        :class:`FusedRenderResult` with ``return_aovs``, per view.
+    """
+    native = _native("render_fused_sequence")
+    if samples < 1:
+        raise ValueError(f"samples must be >= 1, got {samples}")
+    if width < 1 or height < 1:
+        raise ValueError(f"width and height must be >= 1, got {width}x{height}")
+    views = list(views)
+    if not views:
+        raise ValueError("render_fused_sequence needs at least one view")
+    native_views = []
+    for index, view in enumerate(views):
+        if not isinstance(view, FusedView):
+            raise TypeError(f"views[{index}] must be a FusedView, got {type(view).__name__}")
+        cam = _resolve_camera(view.camera)
+        native_views.append(
+            dict(
+                cam_origin=tuple(float(v) for v in cam.origin),
+                cam_look_at=tuple(float(v) for v in cam.look_at),
+                cam_up=tuple(float(v) for v in cam.up),
+                fov_y_deg=float(cam.fov_y_deg),
+                sun_azimuth_deg=float(view.sun_azimuth_deg),
+                sun_elevation_deg=float(view.sun_elevation_deg),
+                sun_intensity=float(view.sun_intensity),
+                sun_color=tuple(float(v) for v in view.sun_color),
+                exposure=float(view.exposure),
+                seed=int(view.seed),
+            )
+        )
+    scene, resolved_terrain = _scene_kwargs(splats, pointcloud, terrain)
+    spp = min(int(samples), 4) if samples_per_frame is None else int(samples_per_frame)
+    if not 1 <= spp <= 64:
+        raise ValueError(f"samples_per_frame must be in 1..=64, got {spp}")
+    frames = int(math.ceil(samples / spp))
+    tile_kwargs: Dict[str, int] = {}
+    if tile is not None:
+        tw, th = (int(v) for v in tile)
+        if not (1 <= tw <= width and 1 <= th <= height):
+            raise ValueError(
+                f"tile {tw}x{th} must be at least 1x1 and fit the {width}x{height} image"
+            )
+        tile_kwargs = dict(tile_width=tw, tile_height=th)
+    outs = native(
+        views=native_views,
+        width=int(width),
+        height=int(height),
+        spp=spp,
+        frames=frames,
+        terrain_albedo=(
+            resolved_terrain.albedo if resolved_terrain is not None else (0.5, 0.5, 0.5)
+        ),
+        sky_turbidity=float(sky_turbidity),
+        sky_ground_albedo=float(sky_ground_albedo),
+        sky_intensity=float(sky_intensity),
+        kappa=float(kappa),
+        lidar_radius=float(lidar_radius),
+        lidar_opacity=float(lidar_opacity),
+        ibl_occlusion_distance=float(ibl_occlusion_distance),
+        sun_angular_radius_deg=float(sun_angular_radius_deg),
+        splat_self_bias_sigmas=float(splat_self_bias_sigmas),
+        lidar_self_bias_radii=float(lidar_self_bias_radii),
+        terrain_smooth_normals=bool(terrain_smooth_normals),
+        lidar_surfels=bool(lidar_surfels),
+        brdf=str(brdf),
+        roughness=float(roughness),
+        metallic=float(metallic),
+        fog_density=float(fog_density),
+        fog_height_falloff=float(fog_height_falloff),
+        page_capacity=int(page_capacity),
+        splat_page_size=None if splat_page_size is None else int(splat_page_size),
+        splat_slots=int(splat_slots),
+        point_slots=int(point_slots),
+        policy=str(policy),
+        aovs=bool(return_aovs),
+        certificate=_certificate_arg(certificate),
+        cache=cache,
+        **tile_kwargs,
+        **scene,
+    )
+    return [_fused_result(out, return_aovs) for out in outs]
 
 
 def render_fused_reference(
@@ -630,6 +850,7 @@ def render_fused_reference(
     page_capacity: int = 4096,
     splat_page_size: Optional[int] = None,
     min_sun_cosine: float = 0.15,
+    lidar_surfels: bool = True,
     certificate: "bool | str | os.PathLike[str]" = False,
     cache: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -677,6 +898,7 @@ def render_fused_reference(
             page_capacity=int(page_capacity),
             splat_page_size=None if splat_page_size is None else int(splat_page_size),
             min_sun_cosine=float(min_sun_cosine),
+            lidar_surfels=bool(lidar_surfels),
             certificate=_certificate_arg(certificate),
             cache=cache,
             **scene,

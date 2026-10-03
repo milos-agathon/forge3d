@@ -39,6 +39,7 @@ use crate::splat::kernel::{hard_proxy_level, sphelet_proxy_radius};
 use crate::splat::num::f32_from_u32;
 use crate::splat::quat_to_mat3;
 use crate::splat::stream::PagePayload;
+use crate::splat::surfel::{estimate_point_surfels, oct_decode, SURFEL_SPHERE};
 
 /// Material slots (and therefore albedo AOV values) of the three classes.
 pub const REFERENCE_ALBEDO_TERRAIN: [f32; 3] = [0.5, 0.5, 0.5];
@@ -336,6 +337,10 @@ pub fn render_fused_reference(
     let ellipsoid_scale = silhouette_scale(&ellipsoid.0, &ellipsoid.1);
     let sphere = icosphere(0);
     let sphere_scale = silhouette_scale(&sphere.0, &sphere.1);
+    // Surfels: a two-sided 16-gon of the half-coverage radius, scaled to the
+    // circle's area.
+    let disc = polygon_disc(DISC_SIDES);
+    let disc_scale = disc_area_scale(DISC_SIDES);
     let lidar_radius = sphelet_proxy_radius(params.lidar_radius, params.lidar_opacity);
     let mut splat_mesh = ProxyMesh::new();
     let mut lidar_mesh = ProxyMesh::new();
@@ -366,15 +371,34 @@ pub fn render_fused_reference(
                 let Some(radius) = lidar_radius else {
                     continue;
                 };
-                let radius = radius * sphere_scale;
-                for p in positions {
-                    lidar_mesh.push(&sphere, |v| {
-                        [
-                            p[0] + radius * v[0],
-                            p[1] + radius * v[1],
-                            p[2] + radius * v[2],
-                        ]
-                    });
+                // The same per-page surfel estimate the fused decoder makes.
+                let normals = if params.lidar_surfels {
+                    estimate_point_surfels(&positions, params.lidar_radius)
+                } else {
+                    vec![SURFEL_SPHERE; positions.len()]
+                };
+                let sphere_radius = radius * sphere_scale;
+                let disc_radius = radius * disc_scale;
+                for (p, packed) in positions.iter().zip(normals) {
+                    if packed == SURFEL_SPHERE {
+                        lidar_mesh.push(&sphere, |v| {
+                            [
+                                p[0] + sphere_radius * v[0],
+                                p[1] + sphere_radius * v[1],
+                                p[2] + sphere_radius * v[2],
+                            ]
+                        });
+                    } else {
+                        let n = oct_decode(packed);
+                        let (t, b) = disc_basis(n);
+                        lidar_mesh.push(&disc, |v| {
+                            [
+                                p[0] + disc_radius * (v[0] * t[0] + v[1] * b[0]),
+                                p[1] + disc_radius * (v[0] * t[1] + v[1] * b[1]),
+                                p[2] + disc_radius * (v[0] * t[2] + v[1] * b[2]),
+                            ]
+                        });
+                    }
                 }
             }
         }
@@ -760,9 +784,56 @@ pub fn shadow_iou(fused: &[bool], reference: &[bool], valid: &[bool]) -> ShadowI
     score
 }
 
+/// Sides of the polygon that stands in for a LiDAR surfel disc.
+const DISC_SIDES: u32 = 16;
+
+/// Two-sided regular polygon in the xy plane (unit circumradius): a centre
+/// vertex and `sides` rim vertices, fanned in both windings.
+fn polygon_disc(sides: u32) -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {
+    let mut vertices = vec![[0.0, 0.0, 0.0]];
+    for k in 0..sides {
+        let a = std::f32::consts::TAU * f32_from_u32(k) / f32_from_u32(sides);
+        vertices.push([a.cos(), a.sin(), 0.0]);
+    }
+    let mut indices = Vec::new();
+    for k in 0..sides {
+        let (a, b) = (1 + k, 1 + (k + 1) % sides);
+        indices.push([0, a, b]);
+        indices.push([0, b, a]);
+    }
+    (vertices, indices)
+}
+
+/// Circumradius factor that gives a regular `sides`-gon the area of the
+/// unit circle: `sqrt(2 pi / (sides sin(2 pi / sides)))`.
+fn disc_area_scale(sides: u32) -> f32 {
+    let n = f32_from_u32(sides);
+    (std::f32::consts::TAU / (n * (std::f32::consts::TAU / n).sin())).sqrt()
+}
+
+/// Orthonormal tangent pair spanning the plane with unit normal `n`.
+fn disc_basis(n: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    let helper = if n[1].abs() < 0.9 {
+        [0.0, 1.0, 0.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    let cross = |a: [f32; 3], b: [f32; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let t = crate::splat::kernel::normalize3(cross(helper, n));
+    let b = cross(n, t);
+    (t, b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::path_tracing::hybrid_compute::{AlbedoSampling, MinMaxPrecision};
 
     #[test]
     fn icosphere_is_closed_outward_and_unit() {
@@ -795,6 +866,9 @@ mod tests {
             spacing: (2.0, 3.0),
             exaggeration: 1.5,
             albedo: [0.5; 3],
+            minmax_precision: MinMaxPrecision::F32,
+            albedo_map: None,
+            albedo_sampling: AlbedoSampling::Bilinear,
         };
         let mesh = terrain_mesh(&terrain);
         assert_eq!(mesh.triangle_count(), 4);
@@ -814,6 +888,9 @@ mod tests {
             spacing: (1.0, 1.0),
             exaggeration: 1.0,
             albedo: [0.5; 3],
+            minmax_precision: MinMaxPrecision::F32,
+            albedo_map: None,
+            albedo_sampling: AlbedoSampling::Bilinear,
         };
         let mesh = terrain_mesh(&terrain);
         let bvh = root_first_bvh(&mesh);

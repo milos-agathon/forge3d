@@ -56,12 +56,14 @@ pub struct InvCovGpu {
     pub m1: [f32; 4],
 }
 
-/// GPU record of one LiDAR return: position + sphelet radius, linear colour.
+/// GPU record of one LiDAR return: position + sphelet radius, linear colour
+/// and the octahedral surfel normal (`SURFEL_SPHERE` = isotropic sphelet).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable, PartialEq)]
 pub struct PointGpu {
     pub pos_radius: [f32; 4],
-    pub color: [f32; 4],
+    pub color: [f32; 3],
+    pub normal_oct: u32,
 }
 
 /// Highest SH band the GPU shading path evaluates. Higher bands stay on the
@@ -1123,15 +1125,101 @@ impl PointCloudFrame {
     }
 }
 
-struct CopcPage {
+/// A run of points `[first, first + count)` of one octree node.
+struct CopcPart {
     key: OctreeKey,
     first: u32,
+    count: u32,
+}
+
+/// One page: a run of a large node, or several small nodes of one depth.
+struct CopcPage {
+    parts: Vec<CopcPart>,
     count: u32,
     aabb: Aabb,
 }
 
-/// COPC octree nodes as pages. A node larger than the page capacity is split
-/// into consecutive runs that share the node's bounds.
+/// Morton code of an octree node's cell coordinates (21 bits per axis).
+fn node_morton(key: &OctreeKey) -> u64 {
+    spread_bits_21(u64::from(key.x))
+        | (spread_bits_21(u64::from(key.y)) << 1)
+        | (spread_bits_21(u64::from(key.z)) << 2)
+}
+
+/// Page layout of a COPC hierarchy (`(key, point count, scene-frame cell)` per
+/// non-empty node). Nodes holding at least half a page keep standalone pages:
+/// runs of at most `capacity` points sharing the node's cell. Smaller nodes
+/// are packed per depth in Morton order into shared pages whose box is the
+/// union of the member cells. Standalone pages come first, ordered by
+/// `(depth, x, y, z, first)`; packed pages follow in creation order.
+fn pack_copc_nodes(nodes: Vec<(OctreeKey, u32, Aabb)>, capacity: u32) -> Vec<CopcPage> {
+    let mut pages = Vec::new();
+    let mut small: Vec<(OctreeKey, u32, Aabb)> = Vec::new();
+    let mut big: Vec<(OctreeKey, u32, Aabb)> = Vec::new();
+    for node in nodes {
+        if node.1 >= capacity / 2 {
+            big.push(node)
+        } else if node.1 > 0 {
+            small.push(node)
+        }
+    }
+    big.sort_by_key(|a| (a.0.depth, a.0.x, a.0.y, a.0.z));
+    for (key, count, aabb) in big {
+        let mut first = 0;
+        while first < count {
+            let run = (count - first).min(capacity);
+            pages.push(CopcPage {
+                parts: vec![CopcPart {
+                    key: key.clone(),
+                    first,
+                    count: run,
+                }],
+                count: run,
+                aabb,
+            });
+            first += run;
+        }
+    }
+    small.sort_by(|a, b| {
+        (a.0.depth, node_morton(&a.0), a.0.x, a.0.y, a.0.z).cmp(&(
+            b.0.depth,
+            node_morton(&b.0),
+            b.0.x,
+            b.0.y,
+            b.0.z,
+        ))
+    });
+    let mut open: Option<CopcPage> = None;
+    let mut open_depth = u32::MAX;
+    for (key, count, aabb) in small {
+        let fits = open
+            .as_ref()
+            .is_some_and(|p| open_depth == key.depth && p.count + count <= capacity);
+        if !fits {
+            pages.extend(open.take());
+            open = Some(CopcPage {
+                parts: Vec::new(),
+                count: 0,
+                aabb: Aabb::EMPTY,
+            });
+            open_depth = key.depth;
+        }
+        let page = open.as_mut().unwrap();
+        page.parts.push(CopcPart {
+            key,
+            first: 0,
+            count,
+        });
+        page.count += count;
+        page.aabb = page.aabb.union(aabb);
+    }
+    pages.extend(open);
+    pages
+}
+
+/// COPC octree nodes as pages. A node holding at least half a page is split
+/// into consecutive runs that share the node's bounds; smaller nodes are
+/// packed together (see `pack_copc_nodes`).
 pub struct CopcPageSource {
     dataset: CopcDataset,
     frame: PointCloudFrame,
@@ -1172,7 +1260,7 @@ impl CopcPageSource {
             RenderError::Upload(format!("COPC {}: {e}", path.display()))
         })?;
         let anchor = frame.anchor();
-        let mut pages = Vec::new();
+        let mut nodes = Vec::new();
         let mut total = 0u64;
         for node in dataset.nodes() {
             if node.point_count == 0 {
@@ -1193,29 +1281,21 @@ impl CopcPageSource {
                 ))
             })?;
             total += u64::from(count);
-            let mut first = 0u32;
-            while first < count {
-                let run = (count - first).min(page_capacity);
-                pages.push(CopcPage {
-                    key: node.key.clone(),
-                    first,
-                    count: run,
-                    aabb,
-                });
-                first += run;
-            }
+            nodes.push((node.key.clone(), count, aabb));
         }
+        if page_capacity == 0 {
+            return Err(RenderError::Upload(
+                "COPC page capacity must be > 0".into(),
+            ));
+        }
+        // Deterministic layout regardless of hash-map iteration.
+        let pages = pack_copc_nodes(nodes, page_capacity);
         if pages.is_empty() {
             return Err(RenderError::Upload(format!(
                 "COPC {}: the hierarchy contains no points",
                 path.display()
             )));
         }
-        // Deterministic page order regardless of hash-map iteration.
-        pages.sort_by(|a, b| {
-            (a.key.depth, a.key.x, a.key.y, a.key.z, a.first)
-                .cmp(&(b.key.depth, b.key.x, b.key.y, b.key.z, b.first))
-        });
         Ok(Self {
             dataset,
             frame,
@@ -1295,22 +1375,28 @@ impl PageSource for CopcPageSource {
 
     fn load(&self, page: u32) -> Result<PagePayload, RenderError> {
         let page = &self.pages[page as usize];
-        let node = self.decode_node(&page.key)?;
-        let PagePayload::Points { positions, colors } = node.as_ref() else {
-            unreachable!("COPC nodes decode to point payloads");
-        };
-        let (first, end) = (page.first as usize, (page.first + page.count) as usize);
-        if end > positions.len() {
-            return Err(RenderError::Upload(format!(
-                "COPC {}: node {} decoded {} points but the hierarchy promised {end}",
-                self.path.display(),
-                page.key.to_string(),
-                positions.len()
-            )));
+        let mut out_positions = Vec::with_capacity(page.count as usize);
+        let mut out_colors = Vec::with_capacity(page.count as usize);
+        for part in &page.parts {
+            let node = self.decode_node(&part.key)?;
+            let PagePayload::Points { positions, colors } = node.as_ref() else {
+                unreachable!("COPC nodes decode to point payloads");
+            };
+            let (first, end) = (part.first as usize, (part.first + part.count) as usize);
+            if end > positions.len() {
+                return Err(RenderError::Upload(format!(
+                    "COPC {}: node {} decoded {} points but the hierarchy promised {end}",
+                    self.path.display(),
+                    part.key.to_string(),
+                    positions.len()
+                )));
+            }
+            out_positions.extend_from_slice(&positions[first..end]);
+            out_colors.extend_from_slice(&colors[first..end]);
         }
         Ok(PagePayload::Points {
-            positions: positions[first..end].to_vec(),
-            colors: colors[first..end].to_vec(),
+            positions: out_positions,
+            colors: out_colors,
         })
     }
 
@@ -1359,10 +1445,14 @@ impl DecodedPage {
     /// ellipsoid AABB for splats, sphelet box for points), build the per-page
     /// tree over the proxies, and emit records in leaf order with the packed
     /// inverse covariance precomputed.
+    /// `surfels` estimates an oriented disc per LiDAR return on locally
+    /// planar neighbourhoods of this page (see `surfel::estimate_point_surfels`);
+    /// otherwise every return is an isotropic sphelet.
     pub fn from_payload(
         page: u32,
         payload: &PagePayload,
         lidar_radius: f32,
+        surfels: bool,
     ) -> Result<Self, RenderError> {
         let count = payload.len();
         if count == 0 {
@@ -1453,6 +1543,11 @@ impl DecodedPage {
                     )));
                 }
                 let bvh = build_bvh(&boxes, BLAS_LEAF_SIZE);
+                let normals = if surfels {
+                    super::surfel::estimate_point_surfels(positions, lidar_radius)
+                } else {
+                    vec![super::surfel::SURFEL_SPHERE; positions.len()]
+                };
                 let points = bvh
                     .order
                     .iter()
@@ -1461,7 +1556,8 @@ impl DecodedPage {
                         let c = colors[i as usize];
                         PointGpu {
                             pos_radius: [p[0], p[1], p[2], lidar_radius],
-                            color: [c[0], c[1], c[2], 1.0],
+                            color: c,
+                            normal_oct: normals[i as usize],
                         }
                     })
                     .collect();
@@ -1630,6 +1726,7 @@ impl PageLoader {
     pub fn new(
         sources: Arc<Vec<Arc<dyn PageSource>>>,
         lidar_radius: f32,
+        lidar_surfels: bool,
         workers: usize,
         owner: Option<AllocationOwner>,
     ) -> Self {
@@ -1655,7 +1752,12 @@ impl PageLoader {
                         let result = sources[source as usize]
                             .load(local)
                             .and_then(|payload| {
-                                DecodedPage::from_payload(job.page, &payload, lidar_radius)
+                                DecodedPage::from_payload(
+                                    job.page,
+                                    &payload,
+                                    lidar_radius,
+                                    lidar_surfels,
+                                )
                             });
                         if done_tx.send((job.page, result)).is_err() {
                             break;
@@ -1726,6 +1828,74 @@ pub fn pages_for(count: u64, capacity: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_copc_nodes_are_packed_without_losing_or_duplicating_points() {
+        use crate::splat::fixture::{write_copc, LasPoint, COPC_HALFSIZE, COPC_ORIGIN};
+        let dir = std::env::temp_dir().join(format!("forge3d-copc-pack-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("many_nodes.copc.laz");
+        let n = 3000u32;
+        let points: Vec<LasPoint> = (0..n)
+            .map(|i| {
+                let u = |k: u32| f64::from(hash_unit(i.wrapping_mul(3).wrapping_add(k))) * 1.98 - 0.99;
+                LasPoint {
+                    xyz: [
+                        COPC_ORIGIN[0] + u(1) * COPC_HALFSIZE,
+                        COPC_ORIGIN[1] + u(2) * COPC_HALFSIZE,
+                        COPC_ORIGIN[2] + u(3) * COPC_HALFSIZE,
+                    ],
+                    rgb: [100, 120, 90],
+                    classification: 2,
+                }
+            })
+            .collect();
+        write_copc(&path, &points).unwrap();
+        let capacity = 512u32;
+        let source = CopcPageSource::open(
+            &path,
+            PointCloudFrame {
+                origin: COPC_ORIGIN,
+                z_up: true,
+            },
+            capacity,
+        )
+        .unwrap();
+        let nodes = crate::pointcloud::CopcDataset::open(&path)
+            .unwrap()
+            .nodes()
+            .iter()
+            .filter(|node| node.point_count > 0)
+            .count() as u32;
+        let pages = source.page_count();
+        let floor = n.div_ceil(capacity);
+        println!("{n} points in {nodes} non-empty nodes -> {pages} pages (floor {floor})");
+        assert!(
+            pages >= floor && pages <= 2 * floor,
+            "pages {pages}, floor {floor}"
+        );
+        assert!(pages < nodes, "pages {pages} must be fewer than nodes {nodes}");
+        let mut loaded: Vec<[u32; 3]> = Vec::new();
+        for page in 0..pages {
+            let meta = source.meta(page);
+            assert!(meta.count <= capacity);
+            let PagePayload::Points { positions, .. } = source.load(page).unwrap() else {
+                panic!()
+            };
+            assert_eq!(positions.len() as u32, meta.count);
+            for p in &positions {
+                for a in 0..3 {
+                    assert!(p[a] >= meta.aabb.min[a] - 1e-3 && p[a] <= meta.aabb.max[a] + 1e-3);
+                }
+                loaded.push(p.map(f32::to_bits));
+            }
+        }
+        assert_eq!(loaded.len() as u32, n);
+        loaded.sort_unstable();
+        loaded.dedup();
+        assert_eq!(loaded.len() as u32, n, "a point was duplicated or lost");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     fn temp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("forge3d-fusion-{tag}-{}", std::process::id()));
@@ -1903,7 +2073,7 @@ mod tests {
         let cloud = Arc::new(test_cloud(700, 1));
         let source = SplatCloudSource::new(cloud.clone(), 512);
         let payload = source.load(0).unwrap();
-        let decoded = DecodedPage::from_payload(0, &payload, 0.1).unwrap();
+        let decoded = DecodedPage::from_payload(0, &payload, 0.1, true).unwrap();
         assert_eq!(decoded.count, 512);
         assert_eq!(decoded.splats.len(), 512);
         assert_eq!(decoded.inv_cov.len(), 512);
@@ -1934,7 +2104,8 @@ mod tests {
                 positions: vec![[0.0; 3]],
                 colors: vec![[1.0; 3]]
             },
-            0.0
+            0.0,
+            true
         )
         .is_err());
     }
@@ -1974,7 +2145,7 @@ mod tests {
         let cloud = Arc::new(test_cloud(2000, 0));
         let source: Arc<dyn PageSource> = Arc::new(SplatCloudSource::new(cloud, 256));
         let pages = source.page_count();
-        let mut loader = PageLoader::new(Arc::new(vec![source]), 0.1, 3, None);
+        let mut loader = PageLoader::new(Arc::new(vec![source]), 0.1, true, 3, None);
         for page in 0..pages {
             loader.request(page, (0, page));
         }

@@ -1699,10 +1699,12 @@ from .splat import (
     FusedPointCloud,
     FusedRenderResult,
     FusedTerrain,
+    FusedView,
     GaussianSplatCloud,
     SplatFusionUnavailable,
     load_gaussian_splats,
     render_fused,
+    render_fused_sequence,
 )
 from . import splat as splat
 

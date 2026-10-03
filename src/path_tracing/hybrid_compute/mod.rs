@@ -25,13 +25,16 @@ mod render_fused;
 mod render_terrain;
 mod sdf_scene;
 mod setup;
+mod terrain_albedo;
 pub mod terrain_heightfield;
 
 pub use aether_reference::{AetherSpectralReferenceDesc, AetherSpectralReferenceOutput};
 #[cfg(feature = "splat-fusion")]
 pub use render_fused::{FusedRenderDesc, FusedRenderOutput, FusedTerrainDesc};
 pub use render_terrain::{CameraModel, TerrainReferenceDesc, TerrainReferenceOutput};
-pub use terrain_heightfield::{AlbedoSampling, TerrainPtScene};
+pub use terrain_heightfield::{
+    AlbedoSampling, MinMaxPrecision, TerrainAlbedoMap, TerrainPtScene,
+};
 
 /// Additional uniforms for hybrid traversal
 #[repr(C)]

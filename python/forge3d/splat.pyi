@@ -53,6 +53,12 @@ class GaussianSplatCloud:
     @property
     def inverse_covariance(self) -> np.ndarray: ...
     def color(self, index: int, direction: Sequence[float]) -> List[float]: ...
+    def transformed(
+        self,
+        scale: float,
+        rotation: Tuple[float, float, float, float],
+        translation: Tuple[float, float, float],
+    ) -> "GaussianSplatCloud": ...
     def save(self, path: str) -> None: ...
     def write_page_store(self, path: str, page_capacity: int = ...) -> Dict[str, int]: ...
     def __len__(self) -> int: ...
@@ -103,6 +109,8 @@ class FusedTerrain:
     spacing: Tuple[float, float] = ...
     exaggeration: float = ...
     albedo: Tuple[float, float, float] = ...
+    albedo_map: Optional[np.ndarray] = ...
+    albedo_sampling: Literal["bilinear", "nearest"] = ...
 
 @dataclass(frozen=True)
 class FusedPointCloud:
@@ -123,6 +131,7 @@ class FusedRenderResult:
     hit_kind: np.ndarray
     sun_cosine: np.ndarray
     reservoir_visibility: np.ndarray
+    self_bias: np.ndarray
     stats: Dict[str, Any] = ...
 
     @property
@@ -164,6 +173,11 @@ def render_fused(
     lidar_opacity: float = ...,
     ibl_occlusion_distance: float = ...,
     sun_angular_radius_deg: float = ...,
+    splat_self_bias_sigmas: float = ...,
+    lidar_self_bias_radii: float = ...,
+    terrain_smooth_normals: bool = ...,
+    lidar_surfels: bool = ...,
+    tile: Optional[Tuple[int, int]] = ...,
     brdf: str = ...,
     roughness: float = ...,
     metallic: float = ...,
@@ -203,6 +217,11 @@ def render_fused(
     lidar_opacity: float = ...,
     ibl_occlusion_distance: float = ...,
     sun_angular_radius_deg: float = ...,
+    splat_self_bias_sigmas: float = ...,
+    lidar_self_bias_radii: float = ...,
+    terrain_smooth_normals: bool = ...,
+    lidar_surfels: bool = ...,
+    tile: Optional[Tuple[int, int]] = ...,
     brdf: str = ...,
     roughness: float = ...,
     metallic: float = ...,
@@ -217,6 +236,53 @@ def render_fused(
     certificate: Union[bool, PathLike] = ...,
     cache: Optional[str] = ...,
 ) -> FusedRenderResult: ...
+@dataclass(frozen=True)
+class FusedView:
+    camera: FusedCamera
+    sun_azimuth_deg: float = ...
+    sun_elevation_deg: float = ...
+    sun_intensity: float = ...
+    sun_color: Tuple[float, float, float] = ...
+    exposure: float = ...
+    seed: int = ...
+
+def render_fused_sequence(
+    *,
+    splats: SplatsInput = ...,
+    pointcloud: PointCloudInput = ...,
+    terrain: TerrainInput = ...,
+    views: Sequence[FusedView],
+    samples: int = ...,
+    samples_per_frame: Optional[int] = ...,
+    width: int = ...,
+    height: int = ...,
+    sky_turbidity: float = ...,
+    sky_ground_albedo: float = ...,
+    sky_intensity: float = ...,
+    kappa: float = ...,
+    lidar_radius: float = ...,
+    lidar_opacity: float = ...,
+    ibl_occlusion_distance: float = ...,
+    sun_angular_radius_deg: float = ...,
+    splat_self_bias_sigmas: float = ...,
+    lidar_self_bias_radii: float = ...,
+    terrain_smooth_normals: bool = ...,
+    lidar_surfels: bool = ...,
+    tile: Optional[Tuple[int, int]] = ...,
+    brdf: str = ...,
+    roughness: float = ...,
+    metallic: float = ...,
+    fog_density: float = ...,
+    fog_height_falloff: float = ...,
+    page_capacity: int = ...,
+    splat_page_size: Optional[int] = ...,
+    splat_slots: int = ...,
+    point_slots: int = ...,
+    policy: Literal["exact", "progressive"] = ...,
+    return_aovs: bool = ...,
+    certificate: Union[bool, PathLike] = ...,
+    cache: Optional[str] = ...,
+) -> List[Union[np.ndarray, FusedRenderResult]]: ...
 def render_fused_reference(
     *,
     splats: SplatsInput = ...,
@@ -238,6 +304,7 @@ def render_fused_reference(
     page_capacity: int = ...,
     splat_page_size: Optional[int] = ...,
     min_sun_cosine: float = ...,
+    lidar_surfels: bool = ...,
     certificate: Union[bool, PathLike] = ...,
     cache: Optional[str] = ...,
 ) -> Dict[str, Any]: ...
