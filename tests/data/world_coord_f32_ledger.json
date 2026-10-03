@@ -1336,5 +1336,65 @@
     "let y = ((n * alpha2) % 1.0) as f32"
    ]
   ]
+ },
+ "splat_fused": {
+  "base_commit": "53acd545",
+  "base_count": 1821,
+  "base_digest": "1b17f3f2ac765a98e747d2bc7ef067aa8fb746a5d2bcf693189586f9b5c1d0c8",
+  "result_count": 1828,
+  "result_digest": "ac609dda139040202a137f8cfb108e515247e9c8e5de2c92c921655208991adc",
+  "review": "PENDING OWNER REVIEW (recorded by the SPLAT-FUSED implementation, not yet approved by Milos). Seven additions, none narrowing an absolute world coordinate: the two crate::splat::num helpers convert u32/usize raster dimensions, grid indices and counts (+2); f32_from_f64_attribute narrows per-splat 3DGS PLY attributes stored as doubles (scale, rotation, opacity, SH; positions do not use it) and is matched once as a cast and once as an f64->f32 helper (+2); PointCloudFrame::to_scene is matched as an f64 helper only because of its DVec3 -> [f32; 3] signature, and its body narrows through Anchor::to_render_f32 (+1); render_fused.rs normalises the baked Hosek sky radiance to half-float range (+1) and reads the accumulated luminance variance telemetry (+1). Splat PLY and COPC positions cross f64 -> f32 only through Anchor::to_render_f32, which stays the sole world-position narrowing owner.",
+  "added": [
+   [
+    "src/path_tracing/hybrid_compute/render_fused.rs",
+    "<module>",
+    "as_f32",
+    1,
+    "*value = (f64::from(*value) * scale).min(65_504.0) as f32"
+   ],
+   [
+    "src/path_tracing/hybrid_compute/render_fused.rs",
+    "render_fused_view",
+    "as_f32",
+    1,
+    "variance = variance.max((f64::from(s.y) / (n * (n - 1.0))) as f32)"
+   ],
+   [
+    "src/splat/load.rs",
+    "f32_from_f64_attribute",
+    "as_f32",
+    1,
+    "value as f32"
+   ],
+   [
+    "src/splat/load.rs",
+    "f32_from_f64_attribute",
+    "f64_helper",
+    1,
+    "} Ok(chunk) } } fn f32_from_f64_attribute(value: f64) -> f32 { value as f32"
+   ],
+   [
+    "src/splat/mod.rs",
+    "f32_from_u32",
+    "as_f32",
+    1,
+    "value as f32"
+   ],
+   [
+    "src/splat/mod.rs",
+    "f32_from_usize",
+    "as_f32",
+    1,
+    "value as f32"
+   ],
+   [
+    "src/splat/stream.rs",
+    "<module>",
+    "f64_helper",
+    1,
+    "anchor } pub fn to_scene(&self, anchor: &crate::camera::Anchor, p: DVec3) -> [f32"
+   ]
+  ],
+  "removed": []
  }
 }

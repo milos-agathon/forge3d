@@ -20,12 +20,16 @@ mod aether_post;
 mod aether_reference;
 mod layouts;
 mod render;
+#[cfg(feature = "splat-fusion")]
+mod render_fused;
 mod render_terrain;
 mod sdf_scene;
 mod setup;
 pub mod terrain_heightfield;
 
 pub use aether_reference::{AetherSpectralReferenceDesc, AetherSpectralReferenceOutput};
+#[cfg(feature = "splat-fusion")]
+pub use render_fused::{FusedRenderDesc, FusedRenderOutput, FusedTerrainDesc};
 pub use render_terrain::{CameraModel, TerrainReferenceDesc, TerrainReferenceOutput};
 pub use terrain_heightfield::{AlbedoSampling, TerrainPtScene};
 
@@ -152,6 +156,10 @@ pub struct HybridPathTracer {
     /// dispatched between terrain accumulation frames.
     pipeline_restir_temporal: wgpu::ComputePipeline,
     pipeline_restir_spatial: wgpu::ComputePipeline,
+    /// Whether the pipelines were compiled from the fused (SPLAT-FUSED)
+    /// kernel with the fused group-1 layout.
+    #[cfg_attr(not(feature = "splat-fusion"), allow(dead_code))]
+    fused: bool,
 }
 
 struct HybridBindGroupLayouts {

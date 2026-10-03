@@ -204,6 +204,21 @@ impl CopcDataset {
         children
     }
 
+    /// Every octree node that holds points, with its cell bounds. Unlike a
+    /// `children` walk this also reaches nodes whose ancestors are empty.
+    pub fn nodes(&self) -> Vec<OctreeNode> {
+        self.hierarchy
+            .iter()
+            .map(|(key, entry)| {
+                OctreeNode::new(
+                    key.clone(),
+                    self.bounds_for_key(key),
+                    entry.point_count as u64,
+                )
+            })
+            .collect()
+    }
+
     fn bounds_for_key(&self, key: &OctreeKey) -> OctreeBounds {
         let mut bounds = self.root_bounds;
         let mut current = OctreeKey::root();

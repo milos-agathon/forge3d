@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+### Added
+- SPLAT-FUSED: `forge3d.render_fused` path-traces 3D Gaussian splats, a COPC LiDAR point cloud and DEM terrain in one ReSTIR pass, so each representation shadows the others: a splat-captured tree shadows the terrain, a ridge shadows the splats and the LiDAR. `forge3d.load_gaussian_splats` reads 3DGS `.ply` files into a `GaussianSplatCloud`. Behind the new `splat-fusion` Cargo feature, which the wheel enables. See `docs/splat-fused.md`.
+- SPLAT-FUSED: splats and points are paged from disk into a fixed GPU pool on demand, so scene size is not limited by GPU memory. The acceptance scene holds 1.0 billion primitives and renders with a tracked peak of about 131 MiB against the 512 MiB budget. `forge3d.build_splat_page_store` converts a `.ply` of any size to a page store.
+- SPLAT-FUSED: on the NVIDIA Vulkan lane the fused shadows are compared with an AEQUITAS path-traced reference (`forge3d.render_fused_reference`); shadow IoU must exceed 0.9 for splat-on-terrain, LiDAR-on-terrain, terrain-on-splat and terrain-on-LiDAR. Adds `tests/golden/splat_fusion/fused_fixture.png`.
+
 ### Fixed
 - The PROMETHEUS terrain reference no longer fails its runtime contract check when exposure, sun intensity, sun color or environment intensity is extreme. The renderer clamps these to the binary16 range so they cannot blacken the image; the contract check now compares against those clamped, uploaded values instead of the raw request.
 

@@ -30,6 +30,15 @@ pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResu
         m.add_function(wrap_pyfunction!(inverse_solve, m)?)?;
         m.add_function(wrap_pyfunction!(inverse_render_primal, m)?)?;
     }
+    #[cfg(feature = "splat-fusion")]
+    {
+        m.add_function(wrap_pyfunction!(load_gaussian_splats, m)?)?;
+        m.add_function(wrap_pyfunction!(build_splat_page_store, m)?)?;
+        m.add_function(wrap_pyfunction!(write_synthetic_point_field_py, m)?)?;
+        m.add_function(wrap_pyfunction!(splat_ray_gaussian, m)?)?;
+        m.add_function(wrap_pyfunction!(render_fused, m)?)?;
+        m.add_function(wrap_pyfunction!(render_fused_reference_py, m)?)?;
+    }
     m.add_function(wrap_pyfunction!(read_laz_points_info_py, m)?)?;
     m.add_function(wrap_pyfunction!(read_laz_point_attributes_py, m)?)?;
     m.add_function(wrap_pyfunction!(copc_read_node_points_py, m)?)?;

@@ -42,6 +42,8 @@ pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLassoState>()?;
     m.add_class::<PyHeightfieldHit>()?;
     m.add_class::<PyPointBuffer>()?;
+    #[cfg(feature = "splat-fusion")]
+    m.add_class::<crate::py_functions::splat::PyGaussianSplatCloud>()?;
     m.add_class::<crate::animation::CameraKeyframe>()?;
     m.add_class::<crate::animation::CameraAnimation>()?;
     m.add_class::<crate::animation::CameraState>()?;

@@ -10,6 +10,18 @@ impl HybridPathTracer {
     /// the shared shader's constant declarations before module creation.
     pub(super) fn new_with_source(shader_src: String) -> Result<Self, RenderError> {
         let device = &try_ctx()?.device;
+        Self::new_with_source_and_scene(shader_src, Self::create_scene_layout(device), false)
+    }
+
+    /// Build all pipelines from an assembled kernel and an explicit group-1
+    /// (scene) layout. The fused path passes the scene layout that carries
+    /// the extra splat/LiDAR/BVH bindings its specialized kernel declares.
+    pub(super) fn new_with_source_and_scene(
+        shader_src: String,
+        scene_layout: wgpu::BindGroupLayout,
+        fused: bool,
+    ) -> Result<Self, RenderError> {
+        let device = &try_ctx()?.device;
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "hybrid-pt-kernel",
@@ -18,7 +30,7 @@ impl HybridPathTracer {
 
         let layouts = HybridBindGroupLayouts {
             uniforms: Self::create_uniforms_layout(device),
-            scene: Self::create_scene_layout(device),
+            scene: scene_layout,
             accum: Self::create_accum_layout(device),
             output: Self::create_output_layout(device),
             terrain_gbuffer: Self::create_terrain_gbuffer_layout(device),
@@ -158,6 +170,7 @@ impl HybridPathTracer {
             pipeline_terrain_gbuffer,
             pipeline_restir_temporal,
             pipeline_restir_spatial,
+            fused,
         })
     }
 }

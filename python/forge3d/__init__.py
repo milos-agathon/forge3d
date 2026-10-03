@@ -308,6 +308,17 @@ from .inverse import (
     recover_scene,
 )
 from . import inverse
+from .splat import (
+    FusedCamera,
+    FusedPointCloud,
+    FusedRenderResult,
+    FusedTerrain,
+    GaussianSplatCloud,
+    SplatFusionUnavailable,
+    load_gaussian_splats,
+    render_fused,
+)
+from . import splat
 
 # -----------------------------------------------------------------------------
 # Interactive Viewer API
@@ -770,6 +781,16 @@ __all__ = [
     "recover_scene",
     "RecoveredScene",
     "InverseSolveUnavailable",
+    # SPLAT-FUSED: path-traced Gaussian splat + LiDAR + terrain fusion
+    "splat",
+    "load_gaussian_splats",
+    "render_fused",
+    "GaussianSplatCloud",
+    "FusedCamera",
+    "FusedTerrain",
+    "FusedPointCloud",
+    "FusedRenderResult",
+    "SplatFusionUnavailable",
     # CENSOR: certified BRDF pixel renders
     "render_brdf_tile",
     "render_brdf_tile_overrides",
