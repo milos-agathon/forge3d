@@ -135,6 +135,8 @@ pub mod sdf; // New SDF module
 pub(crate) mod shader_sources;
 pub mod shadows; // Shadow mapping implementations
 pub mod smoke; // Physical smoke volumes, simulation, and reference rendering
+#[cfg(feature = "splat-fusion")]
+pub mod splat; // SPLAT-FUSED: Gaussian splats + LiDAR + terrain under one ReSTIR integrator
 pub mod terrain;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}

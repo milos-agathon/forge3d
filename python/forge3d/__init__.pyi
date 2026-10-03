@@ -1693,6 +1693,21 @@ from .inverse import (
 )
 from . import inverse as inverse
 
+# SPLAT-FUSED: path-traced Gaussian splat + LiDAR + terrain fusion (splat-fusion)
+from .splat import (
+    FusedCamera,
+    FusedPointCloud,
+    FusedRenderResult,
+    FusedTerrain,
+    FusedView,
+    GaussianSplatCloud,
+    SplatFusionUnavailable,
+    load_gaussian_splats,
+    render_fused,
+    render_fused_sequence,
+)
+from . import splat as splat
+
 def inverse_solve(
     target_rgba: np.ndarray,
     heightmap: np.ndarray,

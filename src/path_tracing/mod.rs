@@ -9,6 +9,8 @@ pub mod alias_table;
 pub mod aov;
 pub mod compute;
 pub mod compute_types;
+#[cfg(feature = "splat-fusion")]
+pub mod fused_reference;
 pub mod hybrid_compute;
 #[cfg(feature = "enable-inverse-pt")]
 pub mod inverse;

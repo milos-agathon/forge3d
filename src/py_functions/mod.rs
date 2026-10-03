@@ -15,6 +15,8 @@ pub mod path_tracing;
 pub mod pointcloud;
 pub mod precision;
 pub mod provenance;
+#[cfg(all(feature = "extension-module", feature = "splat-fusion"))]
+pub mod splat;
 pub mod tiles3d;
 pub mod vector;
 pub mod viewer;
@@ -36,6 +38,8 @@ pub(crate) use path_tracing::*;
 pub(crate) use pointcloud::*;
 pub(crate) use precision::*;
 pub(crate) use provenance::*;
+#[cfg(all(feature = "extension-module", feature = "splat-fusion"))]
+pub(crate) use splat::*;
 pub(crate) use tiles3d::*;
 pub(crate) use vector::*;
 pub(crate) use viewer::*;
