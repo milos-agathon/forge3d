@@ -106,6 +106,43 @@ fn horizon_visible(
     camera_up.dot(center_from_planet.normalize()) >= conservative_threshold
 }
 
+fn planetary_tile_decision(
+    tile: &TileInfo,
+    config: &GpuLodConfig,
+    planet: PlanetLodParams,
+) -> TileInfo {
+    let center = Vec3::from(tile.camera_relative_center);
+    let distance = center.length();
+    TileInfo {
+        distance,
+        visible: u32::from(horizon_visible(center, tile.angular_radius, planet)),
+        selected_lod: select_lod_cpu(distance, config),
+        ..*tile
+    }
+}
+
+fn globe_frustum_visible(
+    tile: &TileInfo,
+    height_min: f32,
+    height_max: f32,
+    frustum: &FrustumPlanes,
+) -> bool {
+    let center = tile.camera_relative_center;
+    let half_x = (tile.bounds_max[0] - tile.bounds_min[0]).abs() * 0.5;
+    let half_y = (tile.bounds_max[1] - tile.bounds_min[1]).abs() * 0.5;
+    let half_z = (height_max - height_min).abs() * 0.5;
+    let lo = [center[0] - half_x, center[1] - half_y, center[2] - half_z];
+    let hi = [center[0] + half_x, center[1] + half_y, center[2] + half_z];
+    for plane in frustum.to_array() {
+        let p = [0, 1, 2].map(|axis| if plane[axis] >= 0.0 { hi[axis] } else { lo[axis] });
+        let dot = plane[0] * p[0] + plane[1] * p[1] + plane[2] * p[2];
+        if dot + plane[3] < 0.0 {
+            return false;
+        }
+    }
+    true
+}
+
 /// Uniform buffer for LOD selection parameters.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -409,7 +446,7 @@ impl GpuLodSelector {
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "clipmap_lod_select",
-            include_str!("../../shaders/clipmap_lod_select.wgsl"),
+            &crate::shader_sources::clipmap_lod_select(),
         );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -851,8 +888,18 @@ impl GpuLodSelector {
             planet,
         );
         queue.write_buffer(&resources.params, 0, bytemuck::bytes_of(&params));
-        if let Some(tiles) = camera_relative_tiles {
-            queue.write_buffer(&resources.input_tiles, 0, bytemuck::cast_slice(tiles));
+        match (camera_relative_tiles, planet) {
+            (Some(tiles), Some(planet)) => {
+                let decided: Vec<_> = tiles
+                    .iter()
+                    .map(|tile| planetary_tile_decision(tile, &self.config, planet))
+                    .collect();
+                queue.write_buffer(&resources.input_tiles, 0, bytemuck::cast_slice(&decided));
+            }
+            (Some(tiles), None) => {
+                queue.write_buffer(&resources.input_tiles, 0, bytemuck::cast_slice(tiles));
+            }
+            (None, _) => {}
         }
         encoder.clear_buffer(&resources.output_header, 0, None);
         encoder.clear_buffer(&resources.indirect_buffer, 0, None);
@@ -960,47 +1007,29 @@ fn cpu_lod_select_in_space(
         } else {
             height_bounds
         };
-        let center_relative = Vec3::from(tile.camera_relative_center);
-        let (frustum_min, frustum_max, frustum_height_min, frustum_height_max) =
-            if planet.is_some() {
-                let half_xy = (bounds_max - bounds_min).abs() * 0.5;
-                let half_z = ((height_max - height_min).abs() * 0.5).max(0.0);
-                (
-                    center_relative.truncate() - half_xy,
-                    center_relative.truncate() + half_xy,
-                    center_relative.z - half_z,
-                    center_relative.z + half_z,
-                )
-            } else {
-                (bounds_min, bounds_max, height_min, height_max)
-            };
-        let visible = frustum_test_aabb(
-            frustum_min,
-            frustum_max,
-            frustum_height_min,
-            frustum_height_max,
-            &frustum,
-        )
-            && planet.map_or(true, |planet| {
-                horizon_visible(center_relative, tile.angular_radius, planet)
-            });
-
-        if !visible {
-            culled_count += 1;
-            continue;
-        }
-
-        // Calculate distance and select LOD
-        let distance = if planet.is_some() {
-            center_relative.length()
+        let mut selected_tile = if let Some(planet) = planet {
+            let decided = planetary_tile_decision(tile, config, planet);
+            if decided.visible == 0
+                || !globe_frustum_visible(&decided, height_min, height_max, &frustum)
+            {
+                culled_count += 1;
+                continue;
+            }
+            decided
         } else {
-            camera_pos_2d.distance(center)
+            if !frustum_test_aabb(bounds_min, bounds_max, height_min, height_max, &frustum) {
+                culled_count += 1;
+                continue;
+            }
+            // Calculate distance and select LOD
+            let distance = camera_pos_2d.distance(center);
+            TileInfo {
+                distance,
+                selected_lod: select_lod_cpu(distance, config),
+                ..*tile
+            }
         };
-        let selected_lod = select_lod_cpu(distance, config);
-
-        let mut selected_tile = *tile;
-        selected_tile.distance = distance;
-        selected_tile.selected_lod = selected_lod;
+        let selected_lod = selected_tile.selected_lod;
         selected_tile.visible = 1;
 
         // Calculate triangle count for this LOD

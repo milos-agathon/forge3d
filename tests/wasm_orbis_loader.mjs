@@ -36,6 +36,10 @@ assert.equal(e.forge3d_orbis_loader_request(handle, 1, 2, 0), 0,
 assert.equal(e.forge3d_orbis_loader_cancel(handle, 1, 0xffffffff, 0), 0);
 assert.equal(e.forge3d_orbis_loader_resolve_page(handle, 32, 0, 0, 0), -1);
 assert.equal(e.forge3d_orbis_loader_request(handle, 1, 0, 0), 1);
+assert.equal(e.forge3d_orbis_loader_pending(handle), 1,
+  "request returns before any payload exists; the tile stays in flight");
+assert.equal(e.forge3d_orbis_loader_resolve_page(handle, 1, 0, 0, 0), -1,
+  "an in-flight tile is not reported resident while its fetch is outstanding");
 assert.equal(e.forge3d_orbis_loader_request(handle, 1, 0, 0), 0, "dedup");
 assert.equal(e.forge3d_orbis_loader_request(handle, 1, 1, 0), 0, "bounded");
 assert.equal(e.forge3d_orbis_loader_poll_request(handle), 1);
