@@ -942,6 +942,7 @@ class TerrainRenderer:
     def pick_visibility_pixels_cpu(
         self, pixels: Sequence[Tuple[int, int]]
     ) -> List[Optional[Tuple[int, int]]]: ...
+    def _visibility_cpu_frame(self) -> str: ...
     def read_contributing_tiles(self) -> List[Dict[str, Any]]: ...
     def resolve_captured_vt_feedback_provenance(
         self, feedback: Sequence[Tuple[int, int, int, int, int]]
@@ -950,6 +951,8 @@ class TerrainRenderer:
         self, schedule: Sequence[Tuple[str, int, int, int, int]]
     ) -> None: ...
     # BOP-P2-02: runtime height-tile streaming for clipmap terrain.
+    # max_resident_bytes limits resident tile texels; max_gpu_visible_bytes
+    # limits all height GPU allocations and never exceeds the ORBIS ceiling.
     def enable_height_streaming(
         self,
         terrain_extent_m: float,
@@ -962,6 +965,7 @@ class TerrainRenderer:
         dem: Optional[np.ndarray] = ...,
         coarse_prefill: bool = ...,
         max_resident_bytes: Optional[int] = ...,
+        max_gpu_visible_bytes: Optional[int] = ...,
     ) -> None: ...
     def enable_height_streaming_cog(
         self,
@@ -976,6 +980,7 @@ class TerrainRenderer:
         coarse_prefill: bool = ...,
         max_resident_bytes: Optional[int] = ...,
         overview_lonlat_bounds: Optional[Tuple[float, float, float, float]] = ...,
+        max_gpu_visible_bytes: Optional[int] = ...,
     ) -> None: ...
     def enable_height_streaming_cog_globe(
         self,
@@ -990,6 +995,7 @@ class TerrainRenderer:
         coarse_prefill: bool = ...,
         max_resident_bytes: Optional[int] = ...,
         overview_lonlat_bounds: Optional[Tuple[float, float, float, float]] = ...,
+        max_gpu_visible_bytes: Optional[int] = ...,
     ) -> None: ...
     def disable_height_streaming(self) -> None: ...
     def stream_height_tiles(

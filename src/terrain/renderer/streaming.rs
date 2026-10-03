@@ -778,6 +778,7 @@ impl HeightVtFamilyRuntime {
         reader: Arc<dyn HeightReader>,
         coarse_prefill: bool,
         max_resident_bytes: Option<u64>,
+        max_gpu_visible_bytes: Option<u64>,
         globe_mode: bool,
         overview: OverviewUvTransform,
     ) -> Result<Self> {
@@ -791,9 +792,28 @@ impl HeightVtFamilyRuntime {
         let tile_bytes = u64::from(tile_resolution)
             * u64::from(tile_resolution)
             * (std::mem::size_of::<f32>() as u64 + 1);
-        let gpu_visible_budget_bytes = max_resident_bytes
+        // Two independent limits. `max_gpu_visible_bytes` is the hard ceiling
+        // on every tracked `orbis.height` allocation (atlas, page table,
+        // upload ring, overview double residency), never above the ORBIS cap.
+        // `max_resident_bytes` bounds only the height-tile working set
+        // (resident tile slots x per-tile texel bytes).
+        let gpu_visible_budget_bytes = max_gpu_visible_bytes
             .unwrap_or(ORBIS_GPU_VISIBLE_CAP_BYTES)
             .min(ORBIS_GPU_VISIBLE_CAP_BYTES);
+        let max_slots_from_residency = match max_resident_bytes {
+            Some(budget) => {
+                let slots = budget / tile_bytes.max(1);
+                ensure!(
+                    slots > 0,
+                    "height streaming max_resident_bytes={budget} cannot hold one {tile_bytes}-byte height tile"
+                );
+                slots
+            }
+            None => u64::MAX,
+        };
+        let resident_budget_bytes = max_resident_bytes
+            .unwrap_or(gpu_visible_budget_bytes)
+            .min(gpu_visible_budget_bytes);
         let max_in_flight = validate_max_in_flight(max_in_flight)?;
         let pool_size = validate_pool_size(pool_size)?;
         let padded_tile_row = (u64::from(tile_resolution) * 4).div_ceil(256) * 256;
@@ -835,6 +855,7 @@ impl HeightVtFamilyRuntime {
         let mut slots = virtual_tiles
             .saturating_add(1)
             .min(max_slots_from_texels)
+            .min(max_slots_from_residency)
             .min(u64::from(u32::MAX)) as u32;
         let (mosaic_tiles_x, mosaic_tiles_y, upload_buffer_size, prebudget_total) = loop {
             let tiles_x = (slots as f64).sqrt().ceil().max(1.0) as u32;
@@ -969,7 +990,7 @@ impl HeightVtFamilyRuntime {
             resident_ancestors: HashSet::new(),
             feedback_requests: Default::default(),
             family_residency: FamilyResidencyTracker::new(
-                gpu_visible_budget_bytes,
+                resident_budget_bytes,
                 1u32 << crate::terrain::vt::HEIGHT_FAMILY,
                 u64::from(tile_resolution) * u64::from(tile_resolution) * 5,
             ),

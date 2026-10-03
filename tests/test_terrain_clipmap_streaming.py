@@ -174,6 +174,7 @@ def test_legacy_cog_streaming_stays_flat_when_globe_support_is_compiled(tmp_path
         pool_size=1,
         coarse_prefill=False,
         max_resident_bytes=1024 * 1024,
+        max_gpu_visible_bytes=1024 * 1024,
     )
 
     stats = renderer.stream_height_tiles((250.0, 500.0, -125.0), max_uploads=0)
@@ -181,6 +182,91 @@ def test_legacy_cog_streaming_stays_flat_when_globe_support_is_compiled(tmp_path
     assert stats["center"] == pytest.approx((312.5, -156.25))
     with pytest.raises(RuntimeError, match="flat height streaming requires"):
         renderer.stream_height_tiles_globe((6_372_000.0, 0.0, 0.0), max_uploads=0)
+
+
+@requires_terrain
+def test_tile_residency_and_gpu_visible_ceiling_are_independent_limits():
+    budget = 1024 * 1024
+    kwargs = dict(
+        terrain_extent_m=TERRAIN_SPAN_M,
+        ring_count=2,
+        ring_resolution=16,
+        lod=3,
+        tile_resolution=32,
+        max_in_flight=32,
+        pool_size=1,
+        dem=_steep_dem(64),
+        coarse_prefill=False,
+    )
+    renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+    renderer.enable_height_streaming(**kwargs, max_resident_bytes=budget)
+    stats = renderer.stream_height_tiles((0.0, 500.0, 0.0), max_uploads=0)
+    assert f3d.terrain_vt_stats()["budget_bytes_height"] == budget
+    assert stats["resident_height_bytes"] <= budget
+    assert stats["gpu_visible_high_water_bytes"] < 512 * 1024 * 1024
+    renderer.disable_height_streaming()
+
+    # These upload flights exceed the original 1 MiB total ceiling even with
+    # one resident tile. The separate total limit must continue to reject it.
+    with pytest.raises(RuntimeError, match="exceeds strict GPU-visible budget 1048576"):
+        renderer.enable_height_streaming(
+            **kwargs, max_resident_bytes=budget, max_gpu_visible_bytes=budget
+        )
+    with pytest.raises(RuntimeError, match="cannot hold one 5120-byte height tile"):
+        renderer.enable_height_streaming(**kwargs, max_resident_bytes=5119)
+
+
+@requires_terrain
+def test_small_tile_residency_limit_binds_at_steady_state():
+    from _tessella_evidence import record_tessella_result
+    from test_flythrough_popping import MAX_WARMUP_STEPS
+
+    # D1: four 32x32 R32-height/R8-coverage tiles out of a 64-tile footprint.
+    # Reuse the flythrough's established async settling policy, not a new cap.
+    k = 4
+    tile_bytes = 5120
+    budget = k * tile_bytes
+    gpu_ceiling = 512 * 1024 * 1024
+    renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+    renderer.enable_height_streaming(
+        terrain_extent_m=TERRAIN_SPAN_M,
+        ring_count=2,
+        ring_resolution=16,
+        lod=3,
+        tile_resolution=32,
+        max_in_flight=32,
+        pool_size=1,
+        dem=_steep_dem(64),
+        coarse_prefill=False,
+        max_resident_bytes=budget,
+    )
+    samples = []
+    for _ in range(MAX_WARMUP_STEPS):
+        stats = renderer.stream_height_tiles((0.0, 500.0, 0.0), max_uploads=32)
+        samples.append(stats)
+        assert stats["resident_fine_tiles"] <= k, stats
+        assert stats["resident_height_bytes"] <= budget, stats
+        assert stats["gpu_visible_current_bytes"] <= gpu_ceiling, stats
+        assert stats["gpu_visible_high_water_bytes"] <= gpu_ceiling, stats
+        time.sleep(0)
+    steady = [row for row in samples if row["tiles_uploaded"] >= row["total_tiles"]]
+    assert stats["total_tiles"] == 64 and k < stats["total_tiles"], stats
+    assert steady, "the bounded loop must exercise replacements beyond initial fill"
+    assert {row["resident_fine_tiles"] for row in steady} == {k}, steady
+    assert f3d.terrain_vt_stats()["budget_bytes_height"] == budget
+    record_tessella_result("height_residency_limit", {
+        "max_resident_bytes": budget,
+        "tile_bytes": tile_bytes,
+        "tile_capacity": k,
+        "steps": len(samples),
+        "steady_samples": len(steady),
+        "peak_resident_fine_tiles": max(row["resident_fine_tiles"] for row in samples),
+        "peak_resident_height_bytes": max(row["resident_height_bytes"] for row in samples),
+        "gpu_visible_high_water_bytes": max(row["gpu_visible_high_water_bytes"] for row in samples),
+        "steady_state": "capacity-saturated LRU at a fixed camera",
+        "final": stats,
+    })
+    renderer.disable_height_streaming()
 
 
 @requires_terrain
@@ -250,6 +336,7 @@ class TestHeightStreamingFlyThrough:
             dem=_steep_dem(64),
             coarse_prefill=False,
             max_resident_bytes=1024 * 1024,
+            max_gpu_visible_bytes=1024 * 1024,
         )
         renderer.stream_height_tiles((0.0, 500.0, 0.0), max_uploads=1)
         active_stats = f3d.terrain_vt_stats()
@@ -286,6 +373,7 @@ class TestHeightStreamingFlyThrough:
             dem=dem,
             coarse_prefill=True,
             max_resident_bytes=8 * 1024 * 1024,
+            max_gpu_visible_bytes=8 * 1024 * 1024,
         )
 
         tiles_axis = 1 << self.LOD
@@ -442,6 +530,7 @@ class TestHeightStreamingFlyThrough:
             pool_size=1,
             coarse_prefill=False,
             max_resident_bytes=8 * 1024 * 1024,
+            max_gpu_visible_bytes=8 * 1024 * 1024,
         )
         # Before the first drain, the globe mesh is already active but the
         # page table is disabled; every path must use the caller's overview.
