@@ -15,27 +15,37 @@ pub mod terrain;
 pub mod core {
     pub mod error {
         #[derive(Debug)]
-        pub struct RenderError(pub String);
+        pub enum RenderError {
+            Device(String),
+            Upload(String),
+            Budget(String),
+        }
 
         impl RenderError {
             pub fn device(message: impl Into<String>) -> Self {
-                Self(message.into())
+                Self::Device(message.into())
             }
 
             pub fn upload(message: impl Into<String>) -> Self {
-                Self(message.into())
+                Self::Upload(message.into())
             }
 
             pub fn budget(message: impl Into<String>) -> Self {
-                Self(message.into())
+                Self::Budget(message.into())
             }
         }
 
-        impl From<String> for RenderError {
-            fn from(value: String) -> Self {
-                Self(value)
+        impl std::fmt::Display for RenderError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    Self::Device(message) => write!(f, "Device error: {message}"),
+                    Self::Upload(message) => write!(f, "Upload error: {message}"),
+                    Self::Budget(message) => write!(f, "Memory budget exceeded: {message}"),
+                }
             }
         }
+
+        impl std::error::Error for RenderError {}
 
         pub type RenderResult<T> = Result<T, RenderError>;
     }
