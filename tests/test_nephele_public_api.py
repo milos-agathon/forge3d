@@ -46,6 +46,8 @@ REALTIME_DIAGNOSTIC_FIELDS = REFERENCE_DIAGNOSTIC_FIELDS + (
     "sun_transmittance_max_segment_length",
     "sun_transmittance_executed_steps",
     "sun_transmittance_max_abs_error",
+    "f16_flushed_sample_count",
+    "f16_flushed_max_value",
 )
 
 
@@ -169,6 +171,23 @@ def test_medium_validation_errors_remain_structured(monkeypatch: pytest.MonkeyPa
         Medium((0.0, 0.0, 0.0), (-1.0, 0.0, 0.0))
 
 
+def test_viewer_media_homogeneous_reach_is_sent_only_when_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(media_module, "_native_module", lambda: _fake_native())
+    medium = Medium((0.1, 0.2, 0.3), (0.4, 0.5, 0.6), 0.75, version=9)
+    handle = object.__new__(ViewerHandle)
+    sent: list[dict[str, Any]] = []
+    handle._send_command = lambda command: sent.append(command) or {"ok": True}  # type: ignore[method-assign]
+
+    handle.set_media(medium, homogeneous_reach=2500)
+    assert sent == [{"cmd": "set_media", "media": medium.to_dict(), "homogeneous_reach": 2500.0}]
+    for bad in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="finite and positive"):
+            handle.set_media(medium, homogeneous_reach=bad)
+    with pytest.raises(ValueError, match="requires a medium"):
+        handle.set_media(None, homogeneous_reach=10.0)
+    assert len(sent) == 1
+
+
 def test_viewer_media_attach_remove_and_type_error_execute(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(media_module, "_native_module", lambda: _fake_native())
     medium = Medium((0.1, 0.2, 0.3), (0.4, 0.5, 0.6), 0.75, version=9)
@@ -289,7 +308,10 @@ def test_media_public_inventory_stubs_and_aov_methods_are_complete() -> None:
     stubs = (ROOT / "python/forge3d/__init__.pyi").read_text(encoding="utf-8")
     viewer_stubs = (ROOT / "python/forge3d/viewer.pyi").read_text(encoding="utf-8")
     media_stubs = (ROOT / "python/forge3d/media.pyi").read_text(encoding="utf-8")
-    assert "def set_media(self, media: Medium | None)" in viewer_stubs
+    assert (
+        "def set_media(self, media: Medium | None, *, homogeneous_reach: float | None = ...)"
+        in viewer_stubs
+    )
     media_stub_module = ast.parse(media_stubs)
     reference_stub = next(
         node
@@ -342,6 +364,8 @@ def test_media_public_inventory_stubs_and_aov_methods_are_complete() -> None:
         "sun_transmittance_max_segment_length": "float | None",
         "sun_transmittance_executed_steps": "int",
         "sun_transmittance_max_abs_error": "float",
+        "f16_flushed_sample_count": "int",
+        "f16_flushed_max_value": "float",
     }
     reference_result_stub = next(
         node

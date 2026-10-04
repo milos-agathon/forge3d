@@ -78,14 +78,18 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             viewer.astro_terrain_revision = viewer.astro_observation_revision;
             true
         }
-        ViewerCmd::SetMedia { medium, version } => {
+        ViewerCmd::SetMedia {
+            medium,
+            version,
+            homogeneous_reach,
+        } => {
             let outcome = viewer
                 .terrain_viewer
                 .as_mut()
                 .ok_or_else(|| "set_media requires a loaded terrain scene".to_string())
                 .and_then(|terrain| {
                     terrain
-                        .set_media(medium.clone(), *version)
+                        .set_media(medium.clone(), *version, *homogeneous_reach)
                         .map_err(|error| error.to_string())
                 });
             if let Err(error) = outcome {

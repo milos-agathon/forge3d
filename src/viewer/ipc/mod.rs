@@ -79,6 +79,7 @@ mod tests {
             crate::viewer::viewer_enums::ViewerCmd::SetMedia {
                 medium: Some(medium),
                 version,
+                homogeneous_reach: None,
             } => {
                 assert_eq!(version, 9);
                 assert!(medium
@@ -96,9 +97,31 @@ mod tests {
             ipc_request_to_viewer_cmd(&remove).unwrap(),
             Some(crate::viewer::viewer_enums::ViewerCmd::SetMedia {
                 medium: None,
-                version: 0
+                version: 0,
+                homogeneous_reach: None,
             })
         ));
+    }
+
+    #[test]
+    fn canonical_media_homogeneous_reach_translates_and_requires_a_medium() {
+        let attach = parse_ipc_request(
+            r#"{"cmd":"set_media","media":{"sigma_a":[0.1,0.1,0.1],"sigma_s":[0.2,0.2,0.2],"phase":"Isotropic","density":{"Homogeneous":{"authored_density":1.0,"mapping":{"physical_density_per_authored_unit":1.0}}}},"homogeneous_reach":2500.0}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            ipc_request_to_viewer_cmd(&attach).unwrap(),
+            Some(crate::viewer::viewer_enums::ViewerCmd::SetMedia {
+                homogeneous_reach: Some(reach),
+                ..
+            }) if reach == 2500.0
+        ));
+        let orphan =
+            parse_ipc_request(r#"{"cmd":"set_media","media":null,"homogeneous_reach":10.0}"#)
+                .unwrap();
+        assert!(ipc_request_to_viewer_cmd(&orphan)
+            .unwrap_err()
+            .contains("homogeneous_reach requires a medium"));
     }
 
     #[test]

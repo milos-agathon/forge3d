@@ -24,6 +24,7 @@ impl ViewerTerrainScene {
                     (width, height),
                     medium,
                     self.canonical_media_version,
+                    self.canonical_media_homogeneous_reach,
                 )
             },
             Ok,
@@ -33,6 +34,8 @@ impl ViewerTerrainScene {
             .as_mut()
             .and_then(|post| post.intermediate_view.take())
             .ok_or_else(|| anyhow::anyhow!("canonical media input target is unavailable"))?;
+        let (media_near, media_far) =
+            self.canonical_media_clip(state.eye, state.render_origin_span, state.shader_z_scale);
         let result = (|| {
             let terrain = self
                 .terrain
@@ -72,8 +75,8 @@ impl ViewerTerrainScene {
                 state.eye,
                 state.view_mat,
                 state.proj,
-                1.0,
-                state.cam_radius * 10.0,
+                media_near,
+                media_far,
                 state.sun_dir,
                 [terrain.sun_intensity; 3],
                 terrain.revision,

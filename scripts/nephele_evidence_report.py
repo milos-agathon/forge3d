@@ -105,6 +105,8 @@ FIXTURE_FILES = {
 SCENE_INPUT_ROLES = {
     "camera", "terrain_dem", "terrain", "medium", "sun", "atmosphere", "exposure", "tonemap", "crop", "material"
 }
+# Smallest positive f16 subnormal; smaller canonical samples are stored as zero.
+F16_MIN_SUBNORMAL = 2.0 ** -24
 REALTIME_DIAGNOSTIC_KEYS = {
     "terrain_shading_model",
     "majorant_proof", "majorant_valid", "sample_count", "step_count",
@@ -117,6 +119,7 @@ REALTIME_DIAGNOSTIC_KEYS = {
     "energy_accounting_residual", "sun_transmittance_method",
     "sun_transmittance_bias", "sun_transmittance_max_segment_length",
     "sun_transmittance_executed_steps", "sun_transmittance_max_abs_error",
+    "f16_flushed_sample_count", "f16_flushed_max_value",
 }
 RAW_FILES = {
     *FIXTURE_FILES.values(),
@@ -1993,6 +1996,17 @@ def _validate_realtime_diagnostics(
             _fail("schema_error", f"{label}.{key}: expected a finite number")
         if value < 0:
             _fail("schema_error", f"{label}.{key} is negative")
+    flushed_count = _integer(
+        diagnostics["f16_flushed_sample_count"], f"{label}.f16_flushed_sample_count", minimum=0
+    )
+    flushed_max = diagnostics["f16_flushed_max_value"]
+    if (
+        type(flushed_max) is not float
+        or not math.isfinite(flushed_max)
+        or not 0.0 <= flushed_max < F16_MIN_SUBNORMAL
+        or (flushed_count == 0) != (flushed_max == 0.0)
+    ):
+        _fail("schema_error", f"{label}: f16 flush diagnostics are invalid")
     return _sun_transmittance_diagnostics(diagnostics, label)
 
 

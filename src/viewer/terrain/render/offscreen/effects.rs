@@ -33,10 +33,16 @@ impl ViewerTerrainScene {
                         (width, height),
                         medium,
                         self.canonical_media_version,
+                        self.canonical_media_homogeneous_reach,
                     )
                 },
                 Ok,
             )?;
+            let (media_near, media_far) = self.canonical_media_clip(
+                state.eye,
+                state.render_origin_span,
+                state.shader_z_scale,
+            );
             let terrain = self
                 .terrain
                 .as_ref()
@@ -67,8 +73,8 @@ impl ViewerTerrainScene {
                 state.eye,
                 state.view_mat,
                 state.proj,
-                1.0,
-                terrain.cam_radius * 10.0,
+                media_near,
+                media_far,
                 state.sun_dir,
                 [terrain.sun_intensity; 3],
                 terrain.revision,

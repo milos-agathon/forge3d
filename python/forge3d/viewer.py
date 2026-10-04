@@ -262,16 +262,36 @@ class ViewerHandle:
         """Send a raw IPC command to the viewer and return the decoded response."""
         return self._send_command(cmd)
 
-    def set_media(self, media: Optional["Medium"]) -> None:
-        """Attach a canonical NEPHELE medium, or remove it with ``None``."""
+    def set_media(
+        self,
+        media: Optional["Medium"],
+        *,
+        homogeneous_reach: Optional[float] = None,
+    ) -> None:
+        """Attach a canonical NEPHELE medium, or remove it with ``None``.
+
+        ``homogeneous_reach`` bounds a homogeneous medium to that distance along
+        every camera and sun ray, like ``render_volumetric_reference``'s
+        ``homogeneous_medium_reach``. Without it a homogeneous medium is
+        unbounded and blocks all direct sunlight. It is rejected for bounded
+        (grid or noise) media.
+        """
         if media is None:
+            if homogeneous_reach is not None:
+                raise ValueError("homogeneous_reach requires a medium")
             self._send_command({"cmd": "set_media", "media": None})
             return
         from .media import Medium
 
         if not isinstance(media, Medium):
             raise TypeError("media must be forge3d.media.Medium or None")
-        self._send_command({"cmd": "set_media", "media": media.to_dict()})
+        command: Dict[str, Any] = {"cmd": "set_media", "media": media.to_dict()}
+        if homogeneous_reach is not None:
+            reach = float(homogeneous_reach)
+            if not math.isfinite(reach) or reach <= 0.0:
+                raise ValueError("homogeneous_reach must be finite and positive")
+            command["homogeneous_reach"] = reach
+        self._send_command(command)
 
     def _allocate_label_id(self) -> int:
         return int(getattr(self, "_next_public_label_id", 1))

@@ -52,7 +52,12 @@ pub enum IpcRequest {
     ClearTerrainScatter,
     GetTerrainParams,
     GetTerrainVolumetricsReport,
-    SetMedia { #[serde(default)] media: Option<serde_json::Value> },
+    SetMedia {
+        #[serde(default)]
+        media: Option<serde_json::Value>,
+        #[serde(default)]
+        homogeneous_reach: Option<f32>,
+    },
     SetTerrainPbr {
         #[serde(default)] enabled: Option<bool>, #[serde(default)] hdr_path: Option<String>, #[serde(default)] ibl_intensity: Option<f32>,
         #[serde(default, alias = "hdr_rotate")] hdr_rotate_deg: Option<f32>,

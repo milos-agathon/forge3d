@@ -264,6 +264,7 @@ pub struct ViewerTerrainScene {
     /// Canonical NEPHELE attachment; legacy viewer fog is bypassed while set.
     pub(super) canonical_media: Option<crate::media::Medium>,
     pub(super) canonical_media_version: u64,
+    pub(super) canonical_media_homogeneous_reach: Option<f32>,
     pub(super) canonical_media_pass: Option<crate::terrain::realtime_media::ViewerMediaPass>,
     pub(super) canonical_media_diagnostics:
         Option<crate::terrain::realtime_media::MediaExecutionDiagnostics>,

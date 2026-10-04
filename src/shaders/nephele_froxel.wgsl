@@ -44,7 +44,14 @@ fn visible_grid()->vec2<u32>{return media.grid.xy-vec2<u32>(2u);}
 fn froxel_world(id:vec3<u32>)->vec3<f32>{let uv=(vec2<f32>(id.xy)+0.5-vec2<f32>(1.0))/vec2<f32>(visible_grid());let ndc=vec2<f32>(uv.x*2.0-1.0,1.0-uv.y*2.0);let h=media.inv_view_proj*vec4<f32>(ndc,1.0,1.0);let ray=normalize(h.xyz/h.w-media.camera.xyz);return media.camera.xyz+ray*froxel_distance((f32(id.z)+0.5)/f32(media.grid.z));}
 fn froxel_coord(world:vec3<f32>)->vec3<i32>{let clip=media.view_proj*vec4<f32>(world,1.0);let ndc=clip.xyz/clip.w;let uv=vec2<f32>(ndc.x*0.5+0.5,0.5-ndc.y*0.5);let xy=uv*vec2<f32>(visible_grid())+vec2<f32>(1.0);let z=froxel_unit_depth(length(world-media.camera.xyz))*f32(media.grid.z);return vec3<i32>(vec3<u32>(clamp(vec3<f32>(xy,z),vec3<f32>(0.0),vec3<f32>(media.grid.xyz)-1.0)));}
 fn phase_value(cos_theta:f32)->f32{if(media.scattering.w<0.5){return 0.07957747154594767;}let g=media.scattering.z;let d=max(1.0+g*g-2.0*g*clamp(cos_theta,-1.0,1.0),1e-12);return(1.0-g*g)/(12.566370614359172*d*sqrt(d));}
-fn blue_noise(pixel:vec2<u32>)->f32{let tile=vec2<u32>(textureDimensions(blue_noise_ranks));let offset=vec2<u32>(media.grid.w,media.grid.w*3u);let rank=textureLoad(blue_noise_ranks,vec2<i32>((pixel+offset)%tile),0).r;return(f32(rank)+0.5)/64.0;}
+// Bilinear reconstruction across the four froxel columns around a pixel. A
+// static per-pixel dither between nearest columns leaves a fixed 8x8 dot
+// pattern whenever temporal history does not average it away.
+struct FroxelFootprint { base:vec2<i32>, weight:vec2<f32> }
+fn froxel_footprint(uv:vec2<f32>)->FroxelFootprint{let centre=uv*vec2<f32>(visible_grid())+vec2<f32>(0.5);let limit=vec2<f32>(media.grid.xy-vec2<u32>(2u));let base=clamp(floor(centre),vec2<f32>(0.0),limit);return FroxelFootprint(vec2<i32>(base),clamp(centre-base,vec2<f32>(0.0),vec2<f32>(1.0)));}
+fn bilinear_extinction(f:FroxelFootprint,z:i32)->vec3<f32>{let a=mix(textureLoad(froxel_extinction,vec3<i32>(f.base,z),0).rgb,textureLoad(froxel_extinction,vec3<i32>(f.base+vec2<i32>(1,0),z),0).rgb,f.weight.x);let b=mix(textureLoad(froxel_extinction,vec3<i32>(f.base+vec2<i32>(0,1),z),0).rgb,textureLoad(froxel_extinction,vec3<i32>(f.base+vec2<i32>(1,1),z),0).rgb,f.weight.x);return max(mix(a,b,f.weight.y),vec3<f32>(0.0));}
+fn bilinear_scatter(f:FroxelFootprint,z:i32)->vec3<f32>{let a=mix(textureLoad(froxel_scatter,vec3<i32>(f.base,z),0).rgb,textureLoad(froxel_scatter,vec3<i32>(f.base+vec2<i32>(1,0),z),0).rgb,f.weight.x);let b=mix(textureLoad(froxel_scatter,vec3<i32>(f.base+vec2<i32>(0,1),z),0).rgb,textureLoad(froxel_scatter,vec3<i32>(f.base+vec2<i32>(1,1),z),0).rgb,f.weight.x);return max(mix(a,b,f.weight.y),vec3<f32>(0.0));}
+fn bilinear_single_source(f:FroxelFootprint,z:i32)->vec3<f32>{let a=mix(textureLoad(froxel_single_source,vec3<i32>(f.base,z),0).rgb,textureLoad(froxel_single_source,vec3<i32>(f.base+vec2<i32>(1,0),z),0).rgb,f.weight.x);let b=mix(textureLoad(froxel_single_source,vec3<i32>(f.base+vec2<i32>(0,1),z),0).rgb,textureLoad(froxel_single_source,vec3<i32>(f.base+vec2<i32>(1,1),z),0).rgb,f.weight.x);return max(mix(a,b,f.weight.y),vec3<f32>(0.0));}
 // Depth32Float stores one IEEE-754 f32 code. Reprojection is also evaluated as
 // f32, so accepting the immediately adjacent code covers the sole texture
 // quantization boundary without admitting a second representable depth step.
@@ -81,16 +88,20 @@ fn manual_csm_visibility(world:vec3<f32>,normal:vec3<f32>)->f32 {
 fn terminal_radiance(hit:NepheleTerrainHit,direction:vec3<f32>,occlusion:bool)->vec3<f32>{if(hit.normal_hit.w<0.5||!occlusion){return directional_radiance(direction);}let n=normalize(hit.normal_hit.xyz);let sun_t=clamp(textureLoad(canonical_light_transmittance,froxel_coord(hit.point_t.xyz),0).rgb,vec3<f32>(0.0),vec3<f32>(1.0));let sun=max(dot(n,normalize(media.sun.xyz)),0.0)*manual_csm_visibility(hit.point_t.xyz,n)*media.sun_radiance.rgb*media.sun_radiance.a*sun_t;let diffuse=max(media.diffuse_ibl.rgb,vec3<f32>(0.0));return max(media.terrain_albedo.rgb,vec3<f32>(0.0))*(sun+diffuse)*0.3183098861837907;}
 fn continuation_transmittance(world:vec3<f32>,direction:vec3<f32>,reach:f32)->vec3<f32>{let step=reach/f32(media.grid.z);var tau=vec3<f32>(0.0);for(var i=0u;i<media.grid.z;i=i+1u){let c=froxel_coord(world+direction*((f32(i)+0.5)*step));tau+=max(textureLoad(canonical_extinction,c,0).rgb,vec3<f32>(0.0))*step;}return exp(-tau);}
 @compute @workgroup_size(4,4,4) fn cs_nephele_inject_single(@builtin(global_invocation_id) id:vec3<u32>){if(any(id>=media.grid.xyz)){return;}let canonical=textureLoad(canonical_extinction,vec3<i32>(id),0);let density=max(canonical.a,0.0);if(!(density>0.0)){textureStore(froxel_single_scatter,id,vec4<f32>(0.0));return;}let world=froxel_world(id);let incident=normalize(world-media.camera.xyz);let continuation=phase_direction(incident,id);let index=trace_index(id);let enabled=media.scattering.x>0.5;let sun_visible=!enabled||sun_terrain_hits[index].normal_hit.w<0.5;let light_t=clamp(textureLoad(canonical_light_transmittance,vec3<i32>(id),0).rgb,vec3<f32>(0.0),vec3<f32>(1.0));let direct=media.sigma_s.rgb*density*phase_value(dot(incident,normalize(media.sun.xyz)))*media.sun_radiance.rgb*media.sun_radiance.a*f32(sun_visible)*light_t;let hit=phase_terrain_hits[index];let reaches_terrain=enabled&&hit.normal_hit.w>0.5;let reach=select(media.depth.y,min(hit.point_t.w,media.depth.y),reaches_terrain);let phase_pdf=phase_value(dot(incident,continuation));let environment=media.sigma_s.rgb*density*(phase_pdf/max(phase_pdf,1e-20))*continuation_transmittance(world,continuation,reach)*terminal_radiance(hit,continuation,enabled);textureStore(froxel_single_scatter,id,vec4<f32>(direct+environment,0.0));}
+// Each froxel's single-scatter source comes from one stochastic continuation
+// direction drawn from an 8x8 blue-noise tile, so neighbouring froxels differ
+// strongly and the periodic tile shows as a crosshatch. A 3x3 tent across
+// froxel columns of the same slice, restricted to froxels that hold medium,
+// averages nine decorrelated estimates before multiple scattering and
+// integration consume the source.
+@compute @workgroup_size(4,4,4) fn cs_nephele_filter_single(@builtin(global_invocation_id) id:vec3<u32>){if(any(id>=media.grid.xyz)){return;}let centre=vec3<i32>(id);if(!(max(textureLoad(froxel_extinction,centre,0).r,max(textureLoad(froxel_extinction,centre,0).g,textureLoad(froxel_extinction,centre,0).b))>0.0)){textureStore(froxel_single_scatter,id,vec4<f32>(0.0));return;}let limit=vec2<i32>(media.grid.xy)-vec2<i32>(1);var sum=vec3<f32>(0.0);var weight=0.0;for(var dy=-1;dy<=1;dy=dy+1){for(var dx=-1;dx<=1;dx=dx+1){let c=vec3<i32>(clamp(centre.xy+vec2<i32>(dx,dy),vec2<i32>(0),limit),centre.z);let ext=textureLoad(froxel_extinction,c,0).rgb;if(max(ext.r,max(ext.g,ext.b))>0.0){let w=f32((2-abs(dx))*(2-abs(dy)));sum+=w*max(textureLoad(froxel_single_source,c,0).rgb,vec3<f32>(0.0));weight+=w;}}}textureStore(froxel_single_scatter,id,vec4<f32>(sum/max(weight,1.0),0.0));}
 @compute @workgroup_size(4,4,4) fn cs_nephele_inject_multiple(@builtin(global_invocation_id) id:vec3<u32>){if(any(id>=media.grid.xyz)){return;}let canonical=textureLoad(canonical_extinction,vec3<i32>(id),0);let density=max(canonical.a,0.0);let single=max(textureLoad(froxel_single_source,vec3<i32>(id),0).rgb,vec3<f32>(0.0));if(!(density>0.0)){textureStore(froxel_in_scatter,id,vec4<f32>(single,0.0));return;}let world=froxel_world(id);let incident=normalize(world-media.camera.xyz);let continuation=phase_direction(incident,id);let hit=phase_terrain_hits[trace_index(id)];let reaches_terrain=media.scattering.x>0.5&&hit.normal_hit.w>0.5;let reach=select(media.depth.y,min(hit.point_t.w,media.depth.y),reaches_terrain);let step=reach/f32(media.grid.z);var t=vec3<f32>(1.0);var gathered=vec3<f32>(0.0);for(var i=0u;i<media.grid.z;i=i+1u){let sample_world=world+continuation*((f32(i)+0.5)*step);let c=froxel_coord(sample_world);let ext=max(textureLoad(froxel_extinction,c,0).rgb,vec3<f32>(0.0));let source=max(textureLoad(froxel_single_source,c,0).rgb,vec3<f32>(0.0));let st=exp(-ext*step);gathered+=t*source*(vec3<f32>(1.0)-st)/max(ext,vec3<f32>(1e-6));t*=st;}let pdf=phase_value(dot(incident,continuation));let multiple=media.sigma_s.rgb*density*(phase_value(dot(incident,continuation))/max(pdf,1e-20))*gathered;textureStore(froxel_in_scatter,id,vec4<f32>(single+multiple,dot(multiple,vec3<f32>(0.2126,0.7152,0.0722))));}
 @compute @workgroup_size(8,8,1)
 fn cs_nephele_integrate(@builtin(global_invocation_id) gid:vec3<u32>) {
     let pixel=gid.xy;
     if(any(pixel>=media.viewport.xy)){return;}
     let uv=(vec2<f32>(pixel)+0.5)/vec2<f32>(media.viewport.xy);
-    let grid_size=vec2<f32>(visible_grid());
-    let jitter=vec2<f32>(blue_noise(pixel),blue_noise(pixel.yx))-0.5;
-    let froxel_position=uv*grid_size+jitter+vec2<f32>(1.0);
-    let xy=vec2<u32>(clamp(floor(froxel_position),vec2<f32>(0.0),vec2<f32>(media.grid.xy-1u)));
+    let footprint=froxel_footprint(uv);
     let sampled_depth=textureLoad(scene_depth,vec2<i32>(pixel),0);
     // NaN fails both ordered comparisons. Exact zero is the camera plane and
     // cannot be a physically visible terrain sample, so fail closed to the
@@ -111,10 +122,9 @@ fn cs_nephele_integrate(@builtin(global_invocation_id) gid:vec3<u32>) {
         let distance=froxel_distance((f32(z)+1.0)/f32(media.grid.z));
         let step=max(min(distance,scene_distance)-previous,0.0);
         previous=distance;
-        let c=vec3<i32>(vec3<u32>(xy,z));
-        let ext=max(textureLoad(froxel_extinction,c,0).rgb,vec3<f32>(0.0));
-        let source=max(textureLoad(froxel_scatter,c,0).rgb,vec3<f32>(0.0));
-        let single_source=max(textureLoad(froxel_single_source,c,0).rgb,vec3<f32>(0.0));
+        let ext=bilinear_extinction(footprint,i32(z));
+        let source=bilinear_scatter(footprint,i32(z));
+        let single_source=bilinear_single_source(footprint,i32(z));
         let multiple_rgb=max(source-single_source,vec3<f32>(0.0));
         let st=exp(-ext*step);
         let segment_weight=t*(vec3<f32>(1.0)-st)/max(ext,vec3<f32>(1e-6));

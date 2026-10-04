@@ -28,6 +28,7 @@ impl ViewerTerrainScene {
                     viewport,
                     medium,
                     self.canonical_media_version,
+                    self.canonical_media_homogeneous_reach,
                 )
             },
             Ok,
@@ -63,6 +64,45 @@ impl ViewerTerrainScene {
         })();
         self.canonical_media_pass = Some(pass);
         result
+    }
+
+    /// Froxel clip range fitted to the attached medium's scene: the terrain box
+    /// plus the medium's own bounds (unbounded media use the terrain alone).
+    ///
+    /// The 64 logarithmic froxel slices span `near..far`; a camera-relative
+    /// range such as `1..10*radius` puts slices thousands of units deep at the
+    /// terrain, collapsing thin layers like valley mist into one or two slices.
+    /// Every prepare and encode call for a frame must use this same range.
+    pub(in crate::viewer::terrain) fn canonical_media_clip(
+        &self,
+        eye: glam::Vec3,
+        render_origin_span: [f32; 4],
+        z_scale: f32,
+    ) -> (f32, f32) {
+        // Legacy viewer near plane; also the fallback when the camera is inside the box.
+        const MIN_NEAR: f32 = 1.0;
+        let relief = self
+            .terrain
+            .as_ref()
+            .map_or(0.0, |terrain| terrain.height_range() * z_scale);
+        let mut min = glam::Vec3::new(render_origin_span[0], 0.0, render_origin_span[1]);
+        let mut max = glam::Vec3::new(
+            render_origin_span[0] + render_origin_span[2],
+            relief,
+            render_origin_span[1] + render_origin_span[3],
+        );
+        let medium_bounds = self.canonical_media.as_ref().and_then(|medium| {
+            match medium.density() {
+                crate::media::DensityField::Homogeneous(_) => None,
+                crate::media::DensityField::PerlinWorley(field) => Some(field.transform.bounds),
+                crate::media::DensityField::Grid3D(field) => Some(field.transform().bounds),
+            }
+        });
+        if let Some(bounds) = medium_bounds {
+            min = min.min(glam::Vec3::from_array(bounds.min));
+            max = max.max(glam::Vec3::from_array(bounds.max));
+        }
+        canonical_media_clip_for_box(eye, min, max, MIN_NEAR)
     }
 
     fn ensure_media_light_transmittance_fallback(&mut self) -> anyhow::Result<()> {
@@ -879,5 +919,62 @@ impl ViewerTerrainScene {
                 pass.dispatch_workgroups((sv_width + 7) / 8, (sv_height + 7) / 8, 1);
             }
         }
+    }
+}
+
+/// Nearest and farthest distances from `eye` to the box `min..max`, as a froxel
+/// clip range. `near` never drops below `min_near`, and `far` stays past it.
+fn canonical_media_clip_for_box(
+    eye: glam::Vec3,
+    min: glam::Vec3,
+    max: glam::Vec3,
+    min_near: f32,
+) -> (f32, f32) {
+    let nearest = eye.clamp(min, max);
+    let farthest = glam::Vec3::select(
+        (eye - min).cmpgt(max - eye),
+        min,
+        max,
+    );
+    let near = eye.distance(nearest).max(min_near);
+    let far = eye.distance(farthest).max(near + min_near);
+    (near, far)
+}
+
+#[cfg(test)]
+mod canonical_media_clip_tests {
+    use super::canonical_media_clip_for_box;
+    use glam::Vec3;
+
+    #[test]
+    fn clip_hugs_the_box_seen_from_outside() {
+        let (near, far) = canonical_media_clip_for_box(
+            Vec3::new(0.0, 0.0, -100.0),
+            Vec3::new(-10.0, -10.0, -10.0),
+            Vec3::new(10.0, 10.0, 10.0),
+            1.0,
+        );
+        assert!((near - 90.0).abs() < 1e-4, "near {near}");
+        let expected_far = Vec3::new(10.0, 10.0, 110.0).length();
+        assert!((far - expected_far).abs() < 1e-3, "far {far}");
+    }
+
+    #[test]
+    fn camera_inside_box_keeps_minimum_near() {
+        let (near, far) = canonical_media_clip_for_box(
+            Vec3::ZERO,
+            Vec3::splat(-10.0),
+            Vec3::splat(10.0),
+            1.0,
+        );
+        assert_eq!(near, 1.0);
+        assert!((far - Vec3::splat(10.0).length()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn degenerate_box_still_orders_near_before_far() {
+        let (near, far) =
+            canonical_media_clip_for_box(Vec3::new(0.0, 0.0, 50.0), Vec3::ZERO, Vec3::ZERO, 1.0);
+        assert!(far > near);
     }
 }

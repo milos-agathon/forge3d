@@ -88,11 +88,18 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
             target: *target,
         })),
         IpcRequest::GetTerrainParams => Ok(Some(ViewerCmd::GetTerrainParams)),
-        IpcRequest::SetMedia { media } => {
+        IpcRequest::SetMedia {
+            media,
+            homogeneous_reach,
+        } => {
             let Some(value) = media else {
+                if homogeneous_reach.is_some() {
+                    return Err("homogeneous_reach requires a medium".to_string());
+                }
                 return Ok(Some(ViewerCmd::SetMedia {
                     medium: None,
                     version: 0,
+                    homogeneous_reach: None,
                 }));
             };
             let mut value = value.clone();
@@ -111,6 +118,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
             Ok(Some(ViewerCmd::SetMedia {
                 medium: Some(medium),
                 version,
+                homogeneous_reach: *homogeneous_reach,
             }))
         }
         IpcRequest::SetTerrainScatter { batches } => Ok(Some(ViewerCmd::SetTerrainScatter {

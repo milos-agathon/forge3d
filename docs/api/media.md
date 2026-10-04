@@ -136,6 +136,18 @@ render parameters to remove the medium. For an interactive terrain already
 loaded through ``open_viewer_async``, call ``viewer.set_media(medium)`` to
 attach it and ``viewer.set_media(None)`` to remove it.
 
+A homogeneous medium is unbounded unless you give it a reach, and an
+unbounded medium blocks all direct sunlight. Pass
+``viewer.set_media(medium, homogeneous_reach=distance)`` to fill only that
+distance along every camera and sun ray, matching
+``render_volumetric_reference(..., homogeneous_medium_reach=distance)``.
+Grid and noise media are bounded by their own ``bounds`` and reject a reach.
+
+Each froxel's single-scatter estimate uses one stochastic continuation
+direction. Before multiple scattering and integration, the real-time path
+averages it over a 3x3 tent of neighbouring froxel columns in the same depth
+slice, using only froxels that contain medium.
+
 The reference result contains `beauty`, `transmittance`, `in_scatter`,
 `cloud_shadow`, and `optical_depth` arrays with shape `(height, width, 3)`, plus
 the additive `terrain_slice` acceptance array with shape `(height, width)`.
@@ -150,6 +162,12 @@ multiple-scattering transport executed. Invalid spectra, density, phase,
 majorant, camera, or transport input raises `forge3d.media.MediaError`; no
 medium is silently clamped or disabled.
 
+The real-time froxel path stores sampled density and extinction as f16. A
+positive sample below the smallest f16 subnormal (2^-24, about 6e-8), which
+occurs where an interpolated density field fades to zero, is stored as zero
+and counted: real-time diagnostics report `f16_flushed_sample_count` and
+`f16_flushed_max_value`. Values too large for f16 still raise.
+
 The returned AOV frame exposes the same `has_*`, readback, and `save_*` methods
 for all four media AOVs, plus `media_diagnostics`.
 Requesting one without `TerrainRenderParams.media` fails instead of returning a
@@ -157,7 +175,9 @@ placeholder texture.
 
 `TerrainRenderParams.media = None` preserves the existing non-media renderer.
 While a canonical medium is attached to the interactive viewer, its independent
-legacy height-fog volumetric pass is bypassed. Analytic sky configuration stays
+legacy height-fog volumetric pass is bypassed. Its froxel depth range spans the
+nearest to farthest point of the terrain box joined with the medium bounds
+(the terrain alone for homogeneous media), so thin layers keep depth resolution. Analytic sky configuration stays
 independent and remains valid. `viewer.get_stats()` reports
 `media_diagnostics` after a successful media frame and `media_render_error`
 after a failed media frame. Passing `None` to `viewer.set_media` removes the

@@ -41,7 +41,13 @@ impl ViewerTerrainScene {
 
         {
             let terrain = self.terrain.as_ref().unwrap();
-            let bg = terrain.background_color;
+            let bg = if self.canonical_media.is_some() {
+                crate::viewer::terrain::post_process::linear_hdr_for_display(
+                    terrain.background_color,
+                )
+            } else {
+                terrain.background_color
+            };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain_viewer.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

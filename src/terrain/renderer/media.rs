@@ -188,6 +188,10 @@ pub(crate) struct MediaExecutionDiagnostics {
     /// Maximum absolute RGB difference between the executed fine estimate and
     /// its nested coarse estimate.
     pub sun_transmittance_max_abs_error: f64,
+    /// Positive canonical density/extinction samples below the smallest f16
+    /// subnormal that were stored as zero, and the largest such sample.
+    pub f16_flushed_sample_count: u64,
+    pub f16_flushed_max_value: f64,
     pub single_scatter_luminance: f64,
     pub multiple_scatter_luminance: f64,
     /// Maximum dimensionless difference between the executed product of
@@ -257,6 +261,15 @@ impl SunTransmittanceDiagnostic {
         self.executed_steps += executed.executed_steps;
         self.measured_abs_error = self.measured_abs_error.max(executed.measured_abs_error);
     }
+
+    /// Folds a slice total recorded from the default state, giving the same
+    /// result as recording that slice's froxels here in order.
+    fn merge(&mut self, slice: Self) {
+        if slice == Self::default() {
+            return;
+        }
+        self.record(slice);
+    }
 }
 
 #[cfg(test)]
@@ -322,7 +335,7 @@ struct InjectBindGroups {
         wgpu::Id<wgpu::Buffer>,
         wgpu::Id<wgpu::Buffer>,
     ),
-    groups: [wgpu::BindGroup; 5],
+    groups: [wgpu::BindGroup; 8],
 }
 struct IntegrateBindGroups {
     key: (
@@ -366,6 +379,8 @@ pub(super) struct TerrainMediaResources {
     pub(super) blue_noise_identity: u64,
     pub(super) extinction: Arc<TrackedTexture>,
     pub(super) single_scatter: TrackedTexture,
+    /// Spatially filtered single scatter consumed by multiple scatter and integration.
+    pub(super) single_filtered: TrackedTexture,
     pub(super) in_scatter: Arc<TrackedTexture>,
     /// RGB transmittance over the complete canonical medium/sun segment.
     pub(super) light_transmittance: Arc<TrackedTexture>,
@@ -385,12 +400,14 @@ pub(super) struct TerrainMediaResources {
     single_scatter_dispatches: u64,
     multiple_scatter_dispatches: u64,
     density_froxel_count: u64,
+    f16_flush: F16FlushDiagnostic,
     termination_readback: Option<TerminationReadback>,
     pending_history: Option<(MediaHistoryKey, HistoryDecision, glam::Mat4)>,
 }
 
 pub(super) struct RealtimeMediaPipelines {
     pub(super) inject_single: wgpu::ComputePipeline,
+    pub(super) filter_single: wgpu::ComputePipeline,
     pub(super) inject_multiple: wgpu::ComputePipeline,
     pub(super) integrate: wgpu::ComputePipeline,
     pub(super) composite_linear_hdr: wgpu::ComputePipeline,
@@ -401,6 +418,10 @@ pub(crate) struct ViewerMediaPass {
     resources: TerrainMediaResources,
     medium: crate::media::Medium,
     version: u64,
+    /// Distance a homogeneous medium fills along every ray (camera and sun),
+    /// matching the reference renderer's `homogeneous_medium_reach`. `None`
+    /// keeps the medium unbounded, which blocks all direct sunlight.
+    homogeneous_reach: Option<f32>,
     viewer_terrain_key: Option<u64>,
     viewer_terrain_albedo: [f32; 3],
     prepared_medium_identity: Option<crate::media::MediumIdentity>,
@@ -450,14 +471,18 @@ impl ViewerMediaPass {
         viewport: (u32, u32),
         medium: crate::media::Medium,
         version: u64,
+        homogeneous_reach: Option<f32>,
     ) -> crate::core::error::RenderResult<Self> {
         medium
             .validate()
+            .map_err(crate::core::error::RenderError::render)?;
+        validate_homogeneous_reach(&medium, homogeneous_reach)
             .map_err(crate::core::error::RenderError::render)?;
         Ok(Self {
             resources: TerrainMediaResources::new(device, queue, viewport, version)?,
             medium,
             version,
+            homogeneous_reach,
             viewer_terrain_key: None,
             viewer_terrain_albedo: [0.0; 3],
             prepared_medium_identity: None,
@@ -494,6 +519,7 @@ impl ViewerMediaPass {
             queue,
             &self.medium,
             self.version,
+            self.homogeneous_reach,
             preparation.camera_position,
             preparation.inverse_view_projection,
             preparation.depth,
@@ -523,6 +549,7 @@ impl ViewerMediaPass {
             queue,
             &self.medium,
             self.version,
+            self.homogeneous_reach,
             preparation.camera_position,
             preparation.inverse_view_projection,
             preparation.depth,
@@ -628,10 +655,12 @@ impl ViewerMediaPass {
                 "viewer media frame was not prepared before terrain direct lighting",
             )
         })?;
-        encoder.clear_texture(
+        fill_radiance_provider(
+            queue,
             &self.resources.radiance_provider,
-            &wgpu::ImageSubresourceRange::default(),
-        );
+            self.resources.viewport,
+            [0.0; 3],
+        )?;
         let phase = match self.resources.phase {
             crate::media::Phase::Isotropic => (0.0, 0.0),
             crate::media::Phase::HenyeyGreenstein { g } => (g, 1.0),
@@ -758,6 +787,10 @@ impl RealtimeMediaPipelines {
                 "nephele.media.inject.single.pipeline",
                 "cs_nephele_inject_single",
             )?,
+            filter_single: pipeline(
+                "nephele.media.filter.single.pipeline",
+                "cs_nephele_filter_single",
+            )?,
             inject_multiple: pipeline(
                 "nephele.media.inject.multiple.pipeline",
                 "cs_nephele_inject_multiple",
@@ -835,6 +868,14 @@ impl TerrainMediaResources {
         let (single_scatter, single_bytes) = tracked_texture(
             device,
             "nephele.media.froxel.single_scatter",
+            grid.extent(),
+            wgpu::TextureDimension::D3,
+            wgpu::TextureFormat::Rgba16Float,
+            froxel_usage,
+        )?;
+        let (single_filtered, single_filtered_bytes) = tracked_texture(
+            device,
+            "nephele.media.froxel.single_filtered",
             grid.extent(),
             wgpu::TextureDimension::D3,
             wgpu::TextureFormat::Rgba16Float,
@@ -989,6 +1030,7 @@ impl TerrainMediaResources {
             device_local_bytes: a
                 + b
                 + single_bytes
+                + single_filtered_bytes
                 + light_bytes
                 + c
                 + d
@@ -1025,6 +1067,7 @@ impl TerrainMediaResources {
             blue_noise_identity,
             extinction: Arc::new(extinction),
             single_scatter,
+            single_filtered,
             in_scatter: Arc::new(in_scatter),
             light_transmittance: Arc::new(light_transmittance),
             integrated: Arc::new(integrated),
@@ -1043,6 +1086,7 @@ impl TerrainMediaResources {
             single_scatter_dispatches: 0,
             multiple_scatter_dispatches: 0,
             density_froxel_count: 0,
+            f16_flush: F16FlushDiagnostic::default(),
             termination_readback: None,
             pending_history: None,
             inject_bind_groups: None,
@@ -1057,6 +1101,7 @@ impl TerrainMediaResources {
         queue: &wgpu::Queue,
         medium: &crate::media::Medium,
         density_version: u64,
+        homogeneous_reach: Option<f32>,
         camera_position: glam::Vec3,
         inverse_view_projection: glam::Mat4,
         depth: FroxelDepthTransform,
@@ -1071,34 +1116,87 @@ impl TerrainMediaResources {
             u64::from(self.grid.width) * u64::from(self.grid.height) * u64::from(self.grid.depth);
         let _staging =
             tracked_host_allocation(count * 16, "nephele.media.staging.extinction_and_light")?;
-        let mut texels: Vec<u16> = Vec::with_capacity(count as usize * 4);
-        let mut light_texels: Vec<u16> = Vec::with_capacity(count as usize * 4);
-        let mut density_froxel_count = 0;
-        let mut sun_transmittance_diagnostic = SunTransmittanceDiagnostic::default();
-        for z in 0..self.grid.depth {
-            for y in 0..self.grid.height {
-                for x in 0..self.grid.width {
+        let grid = self.grid;
+        // Each froxel's density sample and CPU sun-transmittance integral is
+        // independent, so depth slices run on scoped threads. Slices are merged
+        // in z order, so texels and diagnostics match a sequential pass exactly.
+        let slice = |z: u32| -> crate::core::error::RenderResult<CanonicalUploadSlice> {
+            let mut out = CanonicalUploadSlice::with_capacity(grid.width * grid.height);
+            for y in 0..grid.height {
+                for x in 0..grid.width {
                     let world = froxel_world_position(
-                        self.grid,
+                        grid,
                         [x, y, z],
                         camera_position,
                         inverse_view_projection,
                         depth,
                     );
-                    let physical_density = medium.density().physical_density(world.to_array());
-                    density_froxel_count += u64::from(physical_density > 0.0);
-                    let extinction = medium.extinction_at(world.to_array()).components();
+                    let within_reach = homogeneous_reach
+                        .is_none_or(|reach| world.distance(camera_position) <= reach);
+                    let (physical_density, extinction) = if within_reach {
+                        (
+                            medium.density().physical_density(world.to_array()),
+                            medium.extinction_at(world.to_array()).components(),
+                        )
+                    } else {
+                        (0.0, [0.0; 3])
+                    };
+                    out.density_froxel_count += u64::from(physical_density > 0.0);
                     for value in extinction {
-                        texels.push(required_positive_f16(value, "extinction")?);
+                        out.texels
+                            .push(required_positive_f16(value, "extinction", &mut out.f16_flush)?);
                     }
-                    texels.push(required_positive_f16(physical_density, "density")?);
+                    out.texels.push(required_positive_f16(
+                        physical_density,
+                        "density",
+                        &mut out.f16_flush,
+                    )?);
                     let (light_t, diagnostic) =
-                        canonical_sun_transmittance(medium, world, sun_direction)?;
-                    sun_transmittance_diagnostic.record(diagnostic);
-                    light_texels.extend(light_t.map(|v| half::f16::from_f32(v).to_bits()));
-                    light_texels.push(half::f16::ONE.to_bits());
+                        canonical_sun_transmittance(medium, world, sun_direction, homogeneous_reach)?;
+                    out.sun.record(diagnostic);
+                    out.light_texels
+                        .extend(light_t.map(|v| half::f16::from_f32(v).to_bits()));
+                    out.light_texels.push(half::f16::ONE.to_bits());
                 }
             }
+            Ok(out)
+        };
+        let workers = std::thread::available_parallelism()
+            .map_or(1, std::num::NonZeroUsize::get)
+            .min(grid.depth as usize)
+            .max(1);
+        let slices: Vec<crate::core::error::RenderResult<CanonicalUploadSlice>> =
+            std::thread::scope(|scope| {
+                let handles = (0..workers)
+                    .map(|worker| {
+                        let slice = &slice;
+                        scope.spawn(move || {
+                            (worker as u32..grid.depth)
+                                .step_by(workers)
+                                .map(|z| (z, slice(z)))
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let mut ordered = handles
+                    .into_iter()
+                    .flat_map(|handle| handle.join().expect("media upload worker panicked"))
+                    .collect::<Vec<_>>();
+                ordered.sort_by_key(|(z, _)| *z);
+                ordered.into_iter().map(|(_, result)| result).collect()
+            });
+        let mut texels: Vec<u16> = Vec::with_capacity(count as usize * 4);
+        let mut light_texels: Vec<u16> = Vec::with_capacity(count as usize * 4);
+        let mut density_froxel_count = 0;
+        let mut f16_flush = F16FlushDiagnostic::default();
+        let mut sun_transmittance_diagnostic = SunTransmittanceDiagnostic::default();
+        for result in slices {
+            let part = result?;
+            texels.extend_from_slice(&part.texels);
+            light_texels.extend_from_slice(&part.light_texels);
+            density_froxel_count += part.density_froxel_count;
+            f16_flush.merge(part.f16_flush);
+            sun_transmittance_diagnostic.merge(part.sun);
         }
         queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -1131,6 +1229,7 @@ impl TerrainMediaResources {
             self.grid.extent(),
         );
         self.density_froxel_count = density_froxel_count;
+        self.f16_flush = f16_flush;
         self.sun_transmittance_diagnostic = sun_transmittance_diagnostic;
         let identity = medium.identity(density_version);
         self.medium_identity = Some(identity);
@@ -1399,6 +1498,9 @@ impl TerrainMediaResources {
         let single_scatter = self
             .single_scatter
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let single_filtered = self
+            .single_filtered
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let in_scatter = self
             .in_scatter
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -1484,6 +1586,24 @@ impl TerrainMediaResources {
                 layout: &self.pipelines.inject_multiple.get_bind_group_layout(2),
                 entries: &[
                     texture_entry(0, &extinction),
+                    texture_entry(9, &single_filtered),
+                ],
+            });
+            let filter_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.filter.single.group0"),
+                layout: &self.pipelines.filter_single.get_bind_group_layout(0),
+                entries: &[buffer_entry(0, &self.uniforms)],
+            });
+            let filter_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.filter.single.group1"),
+                layout: &self.pipelines.filter_single.get_bind_group_layout(1),
+                entries: &[texture_entry(0, &single_filtered)],
+            });
+            let filter_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("nephele.media.filter.single.group2"),
+                layout: &self.pipelines.filter_single.get_bind_group_layout(2),
+                entries: &[
+                    texture_entry(0, &extinction),
                     texture_entry(9, &single_scatter),
                 ],
             });
@@ -1492,6 +1612,9 @@ impl TerrainMediaResources {
                 groups: [
                     single_group0,
                     single_group1,
+                    filter_group0,
+                    filter_group1,
+                    filter_group2,
                     multiple_group0,
                     multiple_group1,
                     multiple_group2,
@@ -1501,7 +1624,7 @@ impl TerrainMediaResources {
         let cached = self.inject_bind_groups.as_ref().ok_or_else(|| {
             crate::core::error::RenderError::render("media bind group cache was not initialized")
         })?;
-        let [single_group0, single_group1, multiple_group0, multiple_group1, multiple_group2] =
+        let [single_group0, single_group1, filter_group0, filter_group1, filter_group2, multiple_group0, multiple_group1, multiple_group2] =
             &cached.groups;
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1519,6 +1642,23 @@ impl TerrainMediaResources {
             );
         }
         self.single_scatter_dispatches = self.single_scatter_dispatches.wrapping_add(1);
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("nephele.media.filter.single"),
+                timestamp_writes: None,
+            });
+            crate::core::shader_registry::record_shader_use("nephele.media.filter.single.pipeline");
+            pass.set_pipeline(&self.pipelines.filter_single);
+            pass.set_bind_group(0, filter_group0, &[]);
+            pass.set_bind_group(1, filter_group1, &[]);
+            pass.set_bind_group(2, filter_group2, &[]);
+            pass.dispatch_workgroups(
+                self.grid.width.div_ceil(4),
+                self.grid.height.div_ceil(4),
+                self.grid.depth.div_ceil(4),
+            );
+        }
 
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1565,11 +1705,8 @@ impl TerrainMediaResources {
         let light_transmittance = self
             .light_transmittance
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let blue_noise = self
-            .blue_noise
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let single_scatter = self
-            .single_scatter
+        let single_filtered = self
+            .single_filtered
             .create_view(&wgpu::TextureViewDescriptor::default());
         let in_scatter = self
             .in_scatter
@@ -1608,7 +1745,6 @@ impl TerrainMediaResources {
                 layout: &self.pipelines.integrate.get_bind_group_layout(0),
                 entries: &[
                     buffer_entry(0, &self.uniforms),
-                    texture_entry(2, &blue_noise),
                     texture_entry(5, &light_transmittance),
                 ],
             });
@@ -1630,7 +1766,7 @@ impl TerrainMediaResources {
                     texture_entry(6, &integrated),
                     texture_entry(7, &cloud_shadow),
                     texture_entry(8, &optical_depth),
-                    texture_entry(9, &single_scatter),
+                    texture_entry(9, &single_filtered),
                 ],
             });
             self.integrate_bind_groups = Some(IntegrateBindGroups {
@@ -1878,6 +2014,8 @@ impl TerrainMediaResources {
             sun_transmittance_max_abs_error: f64::from(
                 self.sun_transmittance_diagnostic.measured_abs_error,
             ),
+            f16_flushed_sample_count: self.f16_flush.count,
+            f16_flushed_max_value: f64::from(self.f16_flush.max_value),
             single_scatter_luminance: 0.0,
             multiple_scatter_luminance: 0.0,
             energy_accounting_residual: None,
@@ -1930,15 +2068,65 @@ pub(crate) fn acceptance_readback_bytes(
     beauty_rgba8 + media_aovs_rgba16f + no_medium_rgba8 + internal_transfers_rgba16f
 }
 
+/// Positive values below the smallest f16 subnormal that were stored as zero.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct F16FlushDiagnostic {
+    pub(super) count: u64,
+    pub(super) max_value: f32,
+}
+
+impl F16FlushDiagnostic {
+    fn record(&mut self, value: f32) {
+        self.count += 1;
+        self.max_value = self.max_value.max(value);
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.count += other.count;
+        self.max_value = self.max_value.max(other.max_value);
+    }
+}
+
+/// One froxel depth slice of the canonical extinction/light upload.
+struct CanonicalUploadSlice {
+    texels: Vec<u16>,
+    light_texels: Vec<u16>,
+    density_froxel_count: u64,
+    f16_flush: F16FlushDiagnostic,
+    sun: SunTransmittanceDiagnostic,
+}
+
+impl CanonicalUploadSlice {
+    fn with_capacity(froxels: u32) -> Self {
+        Self {
+            texels: Vec::with_capacity(froxels as usize * 4),
+            light_texels: Vec::with_capacity(froxels as usize * 4),
+            density_froxel_count: 0,
+            f16_flush: F16FlushDiagnostic::default(),
+            sun: SunTransmittanceDiagnostic::default(),
+        }
+    }
+}
+
+/// Encodes a canonical density/extinction sample as f16.
+///
+/// Interpolated density fields that fade to zero produce positive samples
+/// below the smallest f16 subnormal (~6e-8). Those are stored as zero and
+/// reported through `flushed` instead of failing the frame; overflow and
+/// non-finite values still fail.
 fn required_positive_f16(
     value: f32,
     quantity: &'static str,
+    flushed: &mut F16FlushDiagnostic,
 ) -> crate::core::error::RenderResult<u16> {
     let represented = half::f16::from_f32(value);
-    if value > 0.0 && (!represented.is_finite() || represented == half::f16::ZERO) {
+    if !represented.is_finite() {
         return Err(crate::core::error::RenderError::render(format!(
-            "positive canonical {quantity} {value} is not representable as finite nonzero f16"
+            "canonical {quantity} {value} is not representable as finite f16"
         )));
+    }
+    if value > 0.0 && represented == half::f16::ZERO {
+        flushed.record(value);
     }
     Ok(represented.to_bits())
 }
@@ -2452,6 +2640,7 @@ impl crate::terrain::renderer::TerrainScene {
             self.queue.as_ref(),
             medium,
             density_version,
+            None,
             camera,
             inverse_view_projection,
             depth,
@@ -2811,24 +3000,61 @@ fn froxel_world_position(
     camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)
 }
 
-fn froxel_xy_for_uv(grid: FroxelGrid, uv: glam::Vec2, jitter: glam::Vec2) -> [u32; 2] {
+/// CPU mirror of WGSL `froxel_footprint`: the lower-left froxel column of the
+/// bilinear 2x2 footprint around `uv`, and the interpolation weights.
+fn froxel_footprint_for_uv(grid: FroxelGrid, uv: glam::Vec2) -> ([u32; 2], glam::Vec2) {
     let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32);
-    let position = uv * visible + jitter + glam::Vec2::splat(FROXEL_OFF_AXIS_BORDER as f32);
-    [
-        position.x.floor().clamp(0.0, (grid.width - 1) as f32) as u32,
-        position.y.floor().clamp(0.0, (grid.height - 1) as f32) as u32,
-    ]
+    let centre = uv * visible + glam::Vec2::splat(FROXEL_OFF_AXIS_BORDER as f32 - 0.5);
+    let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32);
+    let base = centre.floor().clamp(glam::Vec2::ZERO, limit);
+    (
+        [base.x as u32, base.y as u32],
+        (centre - base).clamp(glam::Vec2::ZERO, glam::Vec2::ONE),
+    )
+}
+
+/// Rejects a reach that is not finite and positive, or one given for a
+/// bounded medium (whose own bounds already limit every ray).
+fn validate_homogeneous_reach(
+    medium: &crate::media::Medium,
+    homogeneous_reach: Option<f32>,
+) -> Result<(), String> {
+    let Some(reach) = homogeneous_reach else {
+        return Ok(());
+    };
+    if !matches!(medium.density(), crate::media::DensityField::Homogeneous(_)) {
+        return Err("homogeneous_reach applies only to homogeneous media".into());
+    }
+    if !reach.is_finite() || reach <= 0.0 {
+        return Err(format!("homogeneous_reach must be finite and positive, got {reach}"));
+    }
+    Ok(())
 }
 
 fn canonical_sun_transmittance(
     medium: &crate::media::Medium,
     origin: glam::Vec3,
     direction: glam::Vec3,
+    homogeneous_reach: Option<f32>,
 ) -> crate::core::error::RenderResult<([f32; 3], SunTransmittanceDiagnostic)> {
     let direction = direction.try_normalize().ok_or_else(|| {
         crate::core::error::RenderError::render("media sun direction must be finite and nonzero")
     })?;
     let interval = match medium.density() {
+        crate::media::DensityField::Homogeneous(_) if homogeneous_reach.is_some() => {
+            let reach = homogeneous_reach.unwrap_or_default();
+            let extinction = medium.extinction_at(origin.to_array()).components();
+            return Ok((
+                extinction.map(|sigma_t| (-sigma_t * reach).exp()),
+                SunTransmittanceDiagnostic {
+                    method: "analytic_homogeneous_reach",
+                    bias: "none_exact",
+                    segment_length: Some(reach),
+                    executed_steps: 0,
+                    measured_abs_error: 0.0,
+                },
+            ));
+        }
         crate::media::DensityField::Homogeneous(_) => {
             let extinction = medium.extinction_at(origin.to_array()).components();
             return Ok((
@@ -3526,16 +3752,82 @@ mod tests {
         assert_eq!((grid.width, grid.height), (82, 62));
     }
     #[test]
-    fn edge_jitter_consumes_both_off_axis_border_tiles() {
+    fn homogeneous_reach_bounds_sun_transmittance_like_the_reference() {
+        let medium = crate::media::Medium::new(
+            [0.0; 3],
+            [0.01, 0.02, 0.04],
+            crate::media::Phase::Isotropic,
+            crate::media::DensityField::Homogeneous(crate::media::Homogeneous {
+                authored_density: 1.0,
+                mapping: crate::media::DensityMapping {
+                    physical_density_per_authored_unit: 1.0,
+                },
+            }),
+        )
+        .unwrap();
+        let (unbounded, _) =
+            canonical_sun_transmittance(&medium, glam::Vec3::ZERO, glam::Vec3::Y, None).unwrap();
+        assert_eq!(unbounded, [0.0; 3]);
+        let (reached, diagnostic) =
+            canonical_sun_transmittance(&medium, glam::Vec3::ZERO, glam::Vec3::Y, Some(50.0))
+                .unwrap();
+        for (value, sigma) in reached.iter().zip([0.01_f32, 0.02, 0.04]) {
+            assert!((value - (-sigma * 50.0).exp()).abs() < 1e-6);
+        }
+        assert_eq!(diagnostic.method, "analytic_homogeneous_reach");
+        assert_eq!(diagnostic.segment_length, Some(50.0));
+        assert!(validate_homogeneous_reach(&medium, Some(0.0)).is_err());
+        assert!(validate_homogeneous_reach(&medium, Some(f32::INFINITY)).is_err());
+        assert!(validate_homogeneous_reach(&medium, None).is_ok());
+    }
+    #[test]
+    fn edge_footprint_consumes_both_off_axis_border_tiles() {
         let grid = FroxelGrid::for_viewport(640, 480);
-        assert_eq!(
-            froxel_xy_for_uv(grid, glam::Vec2::ZERO, glam::Vec2::splat(-0.5)),
-            [0, 0]
-        );
-        assert_eq!(
-            froxel_xy_for_uv(grid, glam::Vec2::ONE, glam::Vec2::splat(0.5)),
-            [grid.width - 1, grid.height - 1]
-        );
+        let (low, low_weight) = froxel_footprint_for_uv(grid, glam::Vec2::ZERO);
+        assert_eq!(low, [0, 0]);
+        assert_eq!(low_weight, glam::Vec2::splat(0.5));
+        let (high, high_weight) = froxel_footprint_for_uv(grid, glam::Vec2::ONE);
+        assert_eq!([high[0] + 1, high[1] + 1], [grid.width - 1, grid.height - 1]);
+        assert_eq!(high_weight, glam::Vec2::splat(0.5));
+    }
+    #[test]
+    fn interior_froxel_centre_takes_full_weight_of_its_own_column() {
+        let grid = FroxelGrid::for_viewport(640, 480);
+        // Visible column 10 (grid column 11) has its centre at uv = 10.5 / 80.
+        let uv = glam::Vec2::new(10.5 / 80.0, 20.5 / 60.0);
+        let (base, weight) = froxel_footprint_for_uv(grid, uv);
+        assert_eq!(base, [11, 21]);
+        assert!(weight.abs_diff_eq(glam::Vec2::ZERO, 1e-5), "{weight}");
+    }
+    #[test]
+    fn integration_reconstructs_froxels_bilinearly_without_static_dither() {
+        let shader = include_str!("../../shaders/nephele_froxel.wgsl");
+        assert!(shader.contains("let footprint=froxel_footprint(uv);"));
+        assert!(shader.contains("bilinear_extinction(footprint,i32(z))"));
+        assert!(!shader.contains("fn blue_noise(pixel"));
+    }
+    #[test]
+    fn single_scatter_is_filtered_before_multiple_scatter_and_integration() {
+        let shader = include_str!("../../shaders/nephele_froxel.wgsl");
+        assert!(shader.contains("fn cs_nephele_filter_single"));
+        let rust = include_str!("media.rs")
+            .split("#[cfg(test)]
+mod tests")
+            .next()
+            .unwrap();
+        // The filter reads the raw estimate; both consumers read the filtered copy.
+        assert_eq!(rust.matches("texture_entry(9, &single_scatter)").count(), 1);
+        assert_eq!(rust.matches("texture_entry(9, &single_filtered)").count(), 2);
+        assert!(rust.contains("pass.set_pipeline(&self.pipelines.filter_single)"));
+    }
+    #[test]
+    fn viewer_media_encode_does_not_require_clear_texture_feature() {
+        let rust = include_str!("media.rs")
+            .split("#[cfg(test)]
+mod tests")
+            .next()
+            .unwrap();
+        assert!(!rust.contains("encoder.clear_texture("));
     }
     #[test]
     fn sun_transmittance_integrates_complete_bounded_segment() {
@@ -3563,7 +3855,7 @@ mod tests {
         )
         .unwrap();
         let (transmittance, diagnostic) =
-            canonical_sun_transmittance(&medium, glam::Vec3::ZERO, glam::Vec3::X).unwrap();
+            canonical_sun_transmittance(&medium, glam::Vec3::ZERO, glam::Vec3::X, None).unwrap();
         for (actual, sigma_t) in transmittance.into_iter().zip([0.1, 0.2, 0.3]) {
             assert!((actual - (-sigma_t * 10.0f32).exp()).abs() < 1e-6);
         }
@@ -3587,7 +3879,7 @@ mod tests {
         )
         .unwrap();
         let (transmittance, diagnostic) =
-            canonical_sun_transmittance(&medium, glam::Vec3::ZERO, glam::Vec3::X).unwrap();
+            canonical_sun_transmittance(&medium, glam::Vec3::ZERO, glam::Vec3::X, None).unwrap();
         assert_eq!(transmittance, [0.0; 3]);
         assert_eq!(diagnostic.method, "analytic_unbounded_homogeneous");
         assert_eq!(diagnostic.segment_length, None);
@@ -3615,13 +3907,13 @@ mod tests {
             crate::media::Medium::new([0.1; 3], [0.0; 3], crate::media::Phase::Isotropic, density)
                 .unwrap();
         let diagnostics = [
-            canonical_sun_transmittance(&medium, glam::Vec3::new(-1.0, 0.0, 0.0), glam::Vec3::X)
+            canonical_sun_transmittance(&medium, glam::Vec3::new(-1.0, 0.0, 0.0), glam::Vec3::X, None)
                 .unwrap()
                 .1,
-            canonical_sun_transmittance(&medium, glam::Vec3::new(2.0, 0.0, 0.0), glam::Vec3::X)
+            canonical_sun_transmittance(&medium, glam::Vec3::new(2.0, 0.0, 0.0), glam::Vec3::X, None)
                 .unwrap()
                 .1,
-            canonical_sun_transmittance(&medium, glam::Vec3::new(-1.0, 3.0, 0.0), glam::Vec3::X)
+            canonical_sun_transmittance(&medium, glam::Vec3::new(-1.0, 3.0, 0.0), glam::Vec3::X, None)
                 .unwrap()
                 .1,
         ];
@@ -3658,22 +3950,34 @@ mod tests {
         );
     }
     #[test]
-    fn canonical_f16_transport_rejects_positive_underflow_and_overflow() {
-        assert_eq!(required_positive_f16(0.0, "density").unwrap(), 0);
+    fn canonical_f16_transport_reports_positive_underflow_and_rejects_overflow() {
+        let mut flushed = F16FlushDiagnostic::default();
+        assert_eq!(required_positive_f16(0.0, "density", &mut flushed).unwrap(), 0);
+        assert_eq!(flushed, F16FlushDiagnostic::default());
         let minimum_subnormal = f32::from(half::f16::from_bits(1));
         assert_ne!(
-            required_positive_f16(minimum_subnormal, "density").unwrap(),
+            required_positive_f16(minimum_subnormal, "density", &mut flushed).unwrap(),
             0
         );
-        assert!(required_positive_f16(minimum_subnormal * 0.5, "density").is_err());
-        assert!(required_positive_f16(f32::from(half::f16::MAX), "extinction").is_ok());
+        assert_eq!(flushed.count, 0);
+        let underflow = minimum_subnormal * 0.4;
+        assert_eq!(
+            required_positive_f16(underflow, "density", &mut flushed).unwrap(),
+            0
+        );
+        assert_eq!(flushed.count, 1);
+        assert_eq!(flushed.max_value, underflow);
+        assert!(required_positive_f16(f32::from(half::f16::MAX), "extinction", &mut flushed).is_ok());
         let overflow_boundary = 65_520.0_f32;
         assert!(required_positive_f16(
             f32::from_bits(overflow_boundary.to_bits() - 1),
-            "extinction"
+            "extinction",
+            &mut flushed
         )
         .is_ok());
-        assert!(required_positive_f16(overflow_boundary, "extinction").is_err());
+        assert!(required_positive_f16(overflow_boundary, "extinction", &mut flushed).is_err());
+        assert!(required_positive_f16(f32::NAN, "extinction", &mut flushed).is_err());
+        assert_eq!(flushed.count, 1);
     }
     #[test]
     fn blue_noise_integrity() {
@@ -3711,6 +4015,8 @@ mod tests {
             sun_transmittance_max_segment_length: Some(10.0),
             sun_transmittance_executed_steps: 12,
             sun_transmittance_max_abs_error: 1e-6,
+            f16_flushed_sample_count: 2,
+            f16_flushed_max_value: 3e-8,
             single_scatter_luminance: 0.25,
             multiple_scatter_luminance: 0.125,
             energy_accounting_residual: Some(5.960_464_477_539_063e-8),
@@ -3755,6 +4061,8 @@ mod tests {
                 "sun_transmittance_max_segment_length",
                 "sun_transmittance_executed_steps",
                 "sun_transmittance_max_abs_error",
+                "f16_flushed_sample_count",
+                "f16_flushed_max_value",
                 "multiple_scatter_dispatches",
                 "multiple_scatter_luminance",
                 "energy_accounting_residual",
@@ -3773,6 +4081,8 @@ mod tests {
         assert_eq!(value["sun_transmittance_max_segment_length"], 10.0);
         assert_eq!(value["sun_transmittance_executed_steps"], 12);
         assert_eq!(value["sun_transmittance_max_abs_error"], 1e-6);
+        assert_eq!(value["f16_flushed_sample_count"], 2);
+        assert_eq!(value["f16_flushed_max_value"], 3e-8);
     }
     #[test]
     fn multiple_scatter_is_accounted() {

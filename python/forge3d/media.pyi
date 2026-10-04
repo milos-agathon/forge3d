@@ -28,6 +28,8 @@ class RealtimeMediaDiagnostics(ReferenceMediaDiagnostics):
     sun_transmittance_max_segment_length: float | None
     sun_transmittance_executed_steps: int
     sun_transmittance_max_abs_error: float
+    f16_flushed_sample_count: int
+    f16_flushed_max_value: float
 
 class VolumetricReferenceResult(TypedDict):
     beauty: Any

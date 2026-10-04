@@ -153,12 +153,14 @@ impl ViewerTerrainScene {
         };
         let _ = terrain;
 
+        let (media_near, media_far) =
+            self.canonical_media_clip(eye, render_origin_span, shader_z_scale);
         self.prepare_canonical_media_frame(
             (width, height),
             eye,
             view_proj,
-            1.0,
-            cam_radius * 10.0,
+            media_near,
+            media_far,
             sun_dir,
             render_origin_span,
             shader_z_scale,

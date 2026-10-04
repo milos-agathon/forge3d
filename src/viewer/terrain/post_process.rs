@@ -19,6 +19,32 @@ pub struct PostProcessUniforms {
 }
 
 /// Full-screen post-process pass manager
+/// Linear-HDR value that the canonical-media resolve
+/// (`pow(aces_tonemap(x), 1/2.2)`) maps to `display`.
+///
+/// The legacy viewer clears to `background_color` as a display value that
+/// bypasses the in-shader tonemap. On the media path the clear goes through
+/// the resolve, so clearing with the raw colour lifts a near-black background
+/// to grey. Clearing with this inverse keeps the background identical while
+/// media in front of it still adds in-scatter.
+pub(crate) fn linear_hdr_for_display(display: [f32; 3]) -> [f32; 3] {
+    const A: f32 = 2.51;
+    const B: f32 = 0.03;
+    const C: f32 = 2.43;
+    const D: f32 = 0.59;
+    const E: f32 = 0.14;
+    // The ACES fit saturates at 1.0; stay just below so the root is finite.
+    const MAX_TONEMAPPED: f32 = 1.0 - f32::EPSILON;
+    display.map(|value| {
+        let y = value.clamp(0.0, 1.0).powf(2.2).min(MAX_TONEMAPPED);
+        // y = x(Ax + B) / (x(Cx + D) + E)  =>  (A - yC)x^2 + (B - yD)x - yE = 0
+        let qa = A - y * C;
+        let qb = B - y * D;
+        let qc = -y * E;
+        (-qb + (qb * qb - 4.0 * qa * qc).sqrt()) / (2.0 * qa)
+    })
+}
+
 pub struct PostProcessPass {
     device: Arc<wgpu::Device>,
     pipeline: wgpu::RenderPipeline,
@@ -540,6 +566,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(color, 1.0);
 }
 "#;
+
+#[cfg(test)]
+mod linear_hdr_for_display_tests {
+    use super::linear_hdr_for_display;
+
+    fn resolve(x: f32) -> f32 {
+        let aces = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+        aces.clamp(0.0, 1.0).powf(1.0 / 2.2)
+    }
+
+    #[test]
+    fn resolve_returns_the_display_background() {
+        for display in [0.0_f32, 0.004, 0.009, 0.05, 0.5, 0.9] {
+            let linear = linear_hdr_for_display([display; 3])[0];
+            assert!(linear.is_finite() && linear >= 0.0, "{display} -> {linear}");
+            assert!((resolve(linear) - display).abs() < 1e-4, "{display} -> {}", resolve(linear));
+        }
+    }
+
+    #[test]
+    fn white_background_stays_finite() {
+        assert!(linear_hdr_for_display([1.0; 3])[0].is_finite());
+    }
+}
 
 #[cfg(test)]
 mod tests {
