@@ -282,6 +282,7 @@ def test_throttled_remote_cog_runtime_keeps_io_driven(tmp_path: Path) -> None:
             pool_size=1,
             coarse_prefill=False,
             max_resident_bytes=1024 * 1024,
+            max_gpu_visible_bytes=1024 * 1024,
         )
         del dataset
         gc.collect()

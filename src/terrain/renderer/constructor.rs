@@ -763,6 +763,7 @@ impl TerrainScene {
             material_vt: Mutex::new(super::virtual_texture::TerrainMaterialVT::new()),
             visibility_buffer: Mutex::new(None),
             cpu_visibility_oracle: Mutex::new(None),
+            pending_cpu_visibility_oracle: Mutex::new(None),
             viewer_heightmap: None,
             geometry_provider: None,
             two_phase_culler: None,

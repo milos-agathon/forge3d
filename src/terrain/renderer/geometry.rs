@@ -1136,6 +1136,11 @@ impl TerrainScene {
         height_dims: (u32, u32),
         submitted_tiles: Option<&[TileInfo]>,
     ) -> Result<()> {
+        // Any refresh supersedes a previously deferred frame.
+        *self
+            .pending_cpu_visibility_oracle
+            .lock()
+            .map_err(|_| anyhow!("terrain pending CPU visibility oracle mutex poisoned"))? = None;
         let mut oracle = self
             .cpu_visibility_oracle
             .lock()
@@ -1182,44 +1187,90 @@ impl TerrainScene {
     pub(in crate::terrain::renderer) fn refresh_cpu_visibility_oracle_from_gpu_selection(
         &self,
         params: &crate::terrain::render_params::TerrainRenderParams,
-        heightmap: &[f32],
+        heightmap: Vec<f32>,
         height_dims: (u32, u32),
         rendered_provenance: Option<LodSelectionProvenance>,
     ) -> Result<()> {
         let expected = (params.shading == "visibility" && params.culling == "frustum")
             .then_some(rendered_provenance)
             .flatten();
-        let Some(TerrainGeometryProvider::Clipmap { lod_resources, .. }) =
-            self.geometry_provider.as_ref()
+        match self.drain_completed_lod_selection(expected)? {
+            Some(selection) => self.refresh_cpu_visibility_oracle(
+                params,
+                &heightmap,
+                height_dims,
+                Some(&selection.visible_tiles),
+            ),
+            None => {
+                // The exact selection is still in flight. Defer the oracle to
+                // the first CPU query instead of blocking this frame.
+                *self
+                    .pending_cpu_visibility_oracle
+                    .lock()
+                    .map_err(|_| anyhow!("terrain pending CPU visibility oracle mutex poisoned"))? =
+                    expected.map(|provenance| super::visibility_buffer::PendingCpuVisibilityOracle {
+                        params: params.clone(),
+                        heightmap,
+                        height_dims,
+                        provenance,
+                    });
+                Ok(())
+            }
+        }
+    }
+
+    /// Build the CPU oracle for a deferred frame once its exact submitted GPU
+    /// tile selection completes. Waits only for already-submitted GPU work;
+    /// the oracle stays absent if that frame's selection never arrives.
+    pub(in crate::terrain::renderer) fn resolve_pending_cpu_visibility_oracle(
+        &self,
+    ) -> Result<()> {
+        let Some(pending) = self
+            .pending_cpu_visibility_oracle
+            .lock()
+            .map_err(|_| anyhow!("terrain pending CPU visibility oracle mutex poisoned"))?
+            .take()
         else {
             return Ok(());
         };
-        let selection = loop {
+        self.device.poll(wgpu::Maintain::Wait);
+        let Some(selection) = self.drain_completed_lod_selection(Some(pending.provenance))? else {
+            return Ok(());
+        };
+        self.refresh_cpu_visibility_oracle(
+            &pending.params,
+            &pending.heightmap,
+            pending.height_dims,
+            Some(&selection.visible_tiles),
+        )
+    }
+
+    fn drain_completed_lod_selection(
+        &self,
+        expected: Option<LodSelectionProvenance>,
+    ) -> Result<Option<crate::terrain::clipmap::gpu_lod::LodSelectionResult>> {
+        let Some(TerrainGeometryProvider::Clipmap { lod_resources, .. }) =
+            self.geometry_provider.as_ref()
+        else {
+            return Ok(None);
+        };
+        loop {
             let Some(completed) = lod_resources
                 .try_read_selection(self.device.as_ref())
                 .map_err(anyhow::Error::msg)?
             else {
-                break None;
+                return Ok(None);
             };
             let Some(expected) = expected else {
                 continue;
             };
             if let Some(selection) = completed.into_selection_for(expected) {
-                break Some(selection);
+                return Ok(Some(selection));
             }
             // A completed selection from a different camera/geometry/height
             // frame is drained explicitly and must never be rebuilt using the
             // current frame's inputs.
-        };
-        let Some(selection) = selection else {
-            return Ok(());
-        };
-        self.refresh_cpu_visibility_oracle(
-            params,
-            heightmap,
-            height_dims,
-            Some(&selection.visible_tiles),
-        )
+        }
     }
 
     pub(in crate::terrain::renderer) fn geometry_provider(
