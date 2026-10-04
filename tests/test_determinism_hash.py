@@ -84,12 +84,13 @@ def test_determinism_probe_canary_is_repeatable(tmp_path):
     """
     env = dict(os.environ)
     env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=_local_backend())
-    source_python = Path(__file__).parents[1] / "python"
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(source_python), env["PYTHONPATH"]]
-        if env.get("PYTHONPATH")
-        else [str(source_python)]
-    )
+    if env.get("FORGE3D_TEST_INSTALLED_WHEEL") != "1":
+        source_python = Path(__file__).parents[1] / "python"
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_python), env["PYTHONPATH"]]
+            if env.get("PYTHONPATH")
+            else [str(source_python)]
+        )
     script = (
         "import json; import forge3d; "
         "first = forge3d.determinism_probe(); second = forge3d.determinism_probe(); "
@@ -120,12 +121,13 @@ def test_dupla_dd_demo_is_backend_pinned_and_byte_identical():
     backend = _local_backend()
     env = dict(os.environ)
     env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=backend)
-    source_python = Path(__file__).parents[1] / "python"
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(source_python), env["PYTHONPATH"]]
-        if env.get("PYTHONPATH")
-        else [str(source_python)]
-    )
+    if env.get("FORGE3D_TEST_INSTALLED_WHEEL") != "1":
+        source_python = Path(__file__).parents[1] / "python"
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_python), env["PYTHONPATH"]]
+            if env.get("PYTHONPATH")
+            else [str(source_python)]
+        )
     script = (
         "import json; from forge3d import precision; "
         "r=precision.dd_jitter_demo(1000); "
@@ -301,6 +303,14 @@ def test_cli_attributes_hash_to_requested_backend(monkeypatch, tmp_path, capsys)
         }
 
     monkeypatch.setattr(f3d, "device_probe", probe)
+    # This unit test checks adapter attribution, not canary execution. A real
+    # canary here would latch deterministic GPU mode in the pytest process;
+    # the canary's actual bytes are checked in fresh subprocesses above.
+    monkeypatch.setattr(
+        f3d,
+        "determinism_probe",
+        lambda: {"status": "not_run", "reason": "adapter-attribution unit test"},
+    )
 
     assert determinism._main(["--out-png", str(tmp_path / "unused.png")]) == 0
     assert requested == ["dx12"]
@@ -315,12 +325,13 @@ def test_device_probe_reports_initialized_render_adapter(monkeypatch, tmp_path):
     """A post-render probe reports its process's active adapter, not its argument."""
     env = dict(os.environ)
     env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS="dx12")
-    source_python = Path(__file__).parents[1] / "python"
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(source_python), env["PYTHONPATH"]]
-        if env.get("PYTHONPATH")
-        else [str(source_python)]
-    )
+    if env.get("FORGE3D_TEST_INSTALLED_WHEEL") != "1":
+        source_python = Path(__file__).parents[1] / "python"
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_python), env["PYTHONPATH"]]
+            if env.get("PYTHONPATH")
+            else [str(source_python)]
+        )
     script = (
         "import json; import forge3d as f3d; "
         "from forge3d.determinism import CANONICAL_SCENE, _render_reference_inprocess; "
