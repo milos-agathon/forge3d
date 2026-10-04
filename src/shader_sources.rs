@@ -807,6 +807,17 @@ pub(crate) fn det_probe_parts() -> Vec<SourcePart> {
     .to_vec()
 }
 
+pub(crate) fn clipmap_lod_select_parts() -> [SourcePart; 2] {
+    det_and(
+        "src/shaders/clipmap_lod_select.wgsl",
+        include_str!("shaders/clipmap_lod_select.wgsl"),
+    )
+}
+
+pub(crate) fn clipmap_lod_select() -> String {
+    assemble_parts(&clipmap_lod_select_parts())
+}
+
 pub(crate) fn det_raster_parts() -> Vec<SourcePart> {
     det_and(
         "src/shaders/det_raster.wgsl",

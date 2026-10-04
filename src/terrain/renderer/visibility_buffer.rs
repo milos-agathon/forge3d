@@ -20,10 +20,22 @@ use crate::core::resource_tracker::{
 use bytemuck::{Pod, Zeroable};
 use std::sync::{Mutex, OnceLock};
 
+/// Inputs of a submitted frustum-culled visibility frame whose exact GPU tile
+/// selection had not completed when the render returned. The oracle is built
+/// from them on the first CPU query, after that selection completes.
+pub(in crate::terrain::renderer) struct PendingCpuVisibilityOracle {
+    pub(in crate::terrain::renderer) params: crate::terrain::render_params::TerrainRenderParams,
+    pub(in crate::terrain::renderer) heightmap: Vec<f32>,
+    pub(in crate::terrain::renderer) height_dims: (u32, u32),
+    pub(in crate::terrain::renderer) provenance:
+        crate::terrain::clipmap::gpu_lod::LodSelectionProvenance,
+}
+
 pub(in crate::terrain::renderer) struct CpuVisibilityOracle {
     mesh: crate::accel::cpu_bvh::MeshCPU,
     bvh: crate::accel::cpu_bvh::BvhCPU,
     identities: Vec<(u32, u32)>,
+    lod_comparison: serde_json::Value,
 }
 
 impl CpuVisibilityOracle {
@@ -80,6 +92,7 @@ impl CpuVisibilityOracle {
             .collect::<std::collections::HashMap<_, _>>();
         let mut indices = Vec::new();
         let mut identities = Vec::new();
+        let mut lod_comparison = serde_json::Value::Null;
         if params.culling == "none" {
             // The renderer's pixel-correctness path submits the complete
             // clipmap once with the fallback instance (tile=0, lod=0).
@@ -94,19 +107,37 @@ impl CpuVisibilityOracle {
                 identities.push((0, primitive as u32 & 0xffff));
             }
         } else {
+            let cpu_tiles = cpu_lod_select(
+                tiles,
+                proj * view,
+                eye,
+                lod_config,
+                (
+                    (h_min - h_center - skirt) * params.z_scale,
+                    (h_max - h_center) * params.z_scale,
+                ),
+            )
+            .visible_tiles;
+            if let Some(submitted) = submitted_tiles {
+                let mut gpu_set = submitted
+                    .iter()
+                    .map(|tile| (tile.tile_id, tile.selected_lod))
+                    .collect::<Vec<_>>();
+                let mut cpu_set = cpu_tiles
+                    .iter()
+                    .map(|tile| (tile.tile_id, tile.selected_lod))
+                    .collect::<Vec<_>>();
+                gpu_set.sort_unstable();
+                cpu_set.sort_unstable();
+                lod_comparison = serde_json::json!({
+                    "submitted_equals_cpu": gpu_set == cpu_set,
+                    "submitted_tiles": gpu_set,
+                    "cpu_tiles": cpu_set,
+                });
+            }
             let selected_tiles =
                 crate::terrain::clipmap::gpu_lod::prefer_submitted_tiles(submitted_tiles, || {
-                    cpu_lod_select(
-                        tiles,
-                        proj * view,
-                        eye,
-                        lod_config,
-                        (
-                            (h_min - h_center - skirt) * params.z_scale,
-                            (h_max - h_center) * params.z_scale,
-                        ),
-                    )
-                    .visible_tiles
+                    cpu_tiles
                 });
             for visible in selected_tiles {
                 let Some(&tile_index) = tile_indices.get(&visible.tile_id) else {
@@ -150,6 +181,7 @@ impl CpuVisibilityOracle {
             mesh,
             bvh,
             identities,
+            lod_comparison,
         })
     }
 
@@ -167,13 +199,16 @@ impl CpuVisibilityOracle {
     }
 
     fn intersect_raster(&self, ray: &crate::picking::Ray, pixel: (u32, u32)) -> Option<(u32, u32)> {
-        let mut closest = f32::INFINITY;
+        let mut closest = f64::INFINITY;
         let mut identity = None;
         let root = self.bvh.nodes.len().checked_sub(1)? as u32;
         let mut stack = vec![root];
         while let Some(node_index) = stack.pop() {
             let node = self.bvh.nodes.get(node_index as usize)?;
-            if !ray_aabb(ray, node.aabb_min, node.aabb_max, closest.min(2.0)) {
+            // The clipped mesh is entirely within synthetic distances [1, 2].
+            // Keep BVH pruning conservative instead of rounding the precise
+            // depth comparison back to f32 at the far plane.
+            if !ray_aabb(ray, node.aabb_min, node.aabb_max, 2.0) {
                 continue;
             }
             if node.is_leaf() {
@@ -542,22 +577,30 @@ fn raster_distance_at_pixel(
     v1: [f32; 3],
     v2: [f32; 3],
     pixel: (u32, u32),
-) -> Option<f32> {
+) -> Option<f64> {
     if !raster_top_left_covers(v0, v1, v2, pixel) {
         return None;
     }
-    let point = glam::vec2(pixel.0 as f32 + 0.5, pixel.1 as f32 + 0.5);
-    let a = glam::Vec2::from_array([v0[0], v0[1]]);
-    let b = glam::Vec2::from_array([v1[0], v1[1]]);
-    let c = glam::Vec2::from_array([v2[0], v2[1]]);
+    let point = glam::dvec2(f64::from(pixel.0) + 0.5, f64::from(pixel.1) + 0.5);
+    let a = glam::dvec2(f64::from(v0[0]), f64::from(v0[1]));
+    let b = glam::dvec2(f64::from(v1[0]), f64::from(v1[1]));
+    let c = glam::dvec2(f64::from(v2[0]), f64::from(v2[1]));
     let area = (b - a).perp_dot(c - a);
     if area == 0.0 {
         return None;
     }
     let w0 = (b - point).perp_dot(c - point) / area;
     let w1 = (c - point).perp_dot(a - point) / area;
-    let depth = w0 * v0[2] + w1 * v1[2] + (1.0 - w0 - w1) * v2[2];
-    (0.0..=1.0).contains(&depth).then_some(1.0 + depth)
+    // Interpolate a depth plane relative to one vertex. Constant depth must
+    // remain exact: summing rounded barycentric weights can move 1 to 1-ulp.
+    // Retain the plane and synthetic distance in f64: an interior convex
+    // combination below the clear value must not round up to the far plane.
+    let depth = f64::from(v2[2])
+        + w0 * (f64::from(v0[2]) - f64::from(v2[2]))
+        + w1 * (f64::from(v1[2]) - f64::from(v2[2]));
+    // The visibility pass clears depth to 1 and uses CompareFunction::Less.
+    // A clipped triangle at exactly the far plane therefore writes no ID.
+    (0.0..1.0).contains(&depth).then_some(1.0 + depth)
 }
 
 #[cfg(test)]
@@ -586,6 +629,7 @@ mod tests {
             mesh,
             bvh,
             identities: (0..6).map(|triangle| (triangle, 0)).collect(),
+            lod_comparison: serde_json::Value::Null,
         };
 
         assert_eq!(
@@ -612,6 +656,7 @@ mod tests {
             mesh,
             bvh,
             identities: vec![(7, 9)],
+            lod_comparison: serde_json::Value::Null,
         };
         let ray = crate::picking::Ray::new([0.25, 0.25, 0.0], [0.0, 0.0, -1.0]);
 
@@ -641,6 +686,39 @@ mod tests {
             Some(1.5),
             "a GPU-owned edge pixel must retain a depth for CPU picking"
         );
+    }
+
+    #[test]
+    fn raster_depth_matches_less_test_against_far_plane_clear() {
+        let triangle = [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]];
+        assert_eq!(
+            raster_distance_at_pixel(triangle[0], triangle[1], triangle[2], (0, 0)),
+            Some(1.0),
+        );
+        let far_triangle = [[0.0, 0.0, 1.0], [7.0, 1.0, 1.0], [4.0, 9.0, 1.0]];
+        for y in 0..9 {
+            for x in 0..7 {
+                assert_eq!(
+                    raster_distance_at_pixel(
+                        far_triangle[0],
+                        far_triangle[1],
+                        far_triangle[2],
+                        (x, y)
+                    ),
+                    None,
+                    "constant far depth must fail the GPU's Less test at ({x}, {y})",
+                );
+            }
+        }
+        let inside_far = [
+            [0.0, 0.0, 1.0],
+            [8.0, 0.0, 1.0],
+            [0.0, 8.0, 1.0 - f32::EPSILON],
+        ];
+        let distance =
+            raster_distance_at_pixel(inside_far[0], inside_far[1], inside_far[2], (0, 0))
+                .expect("an interior depth below the clear value remains visible");
+        assert!(distance < 2.0 && distance > 1.0);
     }
 
     #[test]
@@ -1106,6 +1184,7 @@ impl super::TerrainScene {
         &self,
         pixels: &[(u32, u32)],
     ) -> anyhow::Result<Vec<Option<(u32, u32)>>> {
+        self.resolve_pending_cpu_visibility_oracle()?;
         let oracle = self
             .cpu_visibility_oracle
             .lock()
@@ -1114,5 +1193,24 @@ impl super::TerrainScene {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no CPU BVH visibility oracle is available"))?;
         Ok(oracle.pick(pixels))
+    }
+
+    /// Read-only CPU geometry for exact raster-edge and same-frame LOD checks.
+    /// No visibility attachment, depth image, or GPU vertex output is read.
+    pub(super) fn visibility_cpu_frame(&self) -> anyhow::Result<String> {
+        self.resolve_pending_cpu_visibility_oracle()?;
+        let oracle = self
+            .cpu_visibility_oracle
+            .lock()
+            .map_err(|_| anyhow::anyhow!("terrain CPU visibility oracle mutex poisoned"))?;
+        let oracle = oracle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no CPU BVH visibility oracle is available"))?;
+        Ok(serde_json::to_string(&serde_json::json!({
+            "vertices": oracle.mesh.vertices,
+            "indices": oracle.mesh.indices,
+            "identities": oracle.identities,
+            "lod_comparison": oracle.lod_comparison,
+        }))?)
     }
 }

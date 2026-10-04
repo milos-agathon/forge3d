@@ -22,6 +22,13 @@
 //! Run with: `FORGE3D_DET_REWRITE=1 cargo test det_instrument_rewrite --lib`
 //! (a dry run prints every planned edit; without the env var the test only
 //! reports which files would change).
+//!
+//! Applying edits to any file in `shader_sources::terrain_parts()` changes
+//! the assembled terrain source, so `PINNED_TERRAIN_SOURCE_HASH` in
+//! `verify/ir/engine.rs` must be refreshed (owner approval required) or the
+//! terrain proof summaries switch off. Rerun `shader_sources::tests` too:
+//! their source-text checks can reject the rewriter's spelling. If one does,
+//! barrier the operand inside the callee instead of at the call site.
 
 #[cfg(test)]
 mod instrument {

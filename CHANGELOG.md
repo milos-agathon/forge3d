@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+### Fixed
+- The PROMETHEUS terrain reference no longer fails its runtime contract check when exposure, sun intensity, sun color or environment intensity is extreme. The renderer clamps these to the binary16 range so they cannot blacken the image; the contract check now compares against those clamped, uploaded values instead of the raw request.
+- ORBIS globe LOD: the GPU and the CPU fallback now select the same planetary tiles and LODs on every adapter. In globe mode the CPU decides each tile's horizon visibility, camera distance and LOD once, and the shader reads those values instead of evaluating `acos`/`cos`/`tan`, whose precision varies by adapter (on WARP `acos` differed from Rust by 136 ULP, so hosted Windows kept a tile the CPU culled). The globe frustum test uses only `det_*`-pinned adds, multiplies and compares, mirrored exactly by the CPU. Flat mode is unchanged. Owner decision, 2026-10-02.
+- CI: the ORBIS wasm lane now reaches and runs its test. It sets `FORGE3D_NO_BOOTSTRAP=1`, so the test `conftest.py` no longer imports `forge3d` (and numpy) before the test starts, and the wasm32 build compiles again (the browser `RenderError` stub lacked `Budget` and `Display`).
+
+### Changed
+- AETHER's spectral closure (DeltaE2000 < 2 at all 189 sky samples, terrain saturation falloff within 10%, and the GPU sunset golden) now runs on the physical NVIDIA Vulkan CI runner and is required for full acceptance. Hosted CI has no physical Metal adapter, so the Metal-only gate never ran there. Thresholds are unchanged; Metal remains supported. Adds `tests/golden/atmosphere/aether_gpu_sunset_sweep.nvidia-vulkan.png`. Owner decision, 2026-10-01.
+- CI: AETHER's offline-bake tests now run even when the preceding workspace `cargo test` step fails.
 
 ### Planned for 1.41.0
 - NEPHELE (#172) is unreleased. Its typed spatial media, weighted RGB reference, terrain-coupled froxels, AOVs and diagnostics require Gate 3 and Gate 4 physical acceptance before delivery.

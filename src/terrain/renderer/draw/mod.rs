@@ -73,7 +73,7 @@ impl TerrainScene {
         let cache = if media_enabled { None } else { cache };
 
         self.prepare_frame_lighting(decoded)?;
-        let height_inputs =
+        let mut height_inputs =
             self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
         self.prepare_geometry(
             params,
@@ -730,7 +730,7 @@ impl TerrainScene {
         // never replaced by a CPU selection and never blocks this frame.
         self.refresh_cpu_visibility_oracle_from_gpu_selection(
             params,
-            &height_inputs.heightmap_data,
+            std::mem::take(&mut height_inputs.heightmap_data),
             (height_inputs.width, height_inputs.height),
             submitted_lod_provenance,
         )?;

@@ -184,14 +184,7 @@ impl Frame {
                     })?;
 
                     if save_png {
-                        let mut rgba8 = Vec::with_capacity(data.len());
-                        for px in data.chunks_exact(4) {
-                            for channel in &px[..3] {
-                                let code = (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
-                                rgba8.push(if code == 0 { 0 } else { (code - 1) | 1 });
-                            }
-                            rgba8.push(255);
-                        }
+                        let rgba8 = deterministic_rgba8(&data);
                         image_write::write_png_rgba8(path_obj, &rgba8, self.width, self.height)
                             .map_err(|err| {
                                 PyRuntimeError::new_err(format!("failed to write PNG: {err:#}"))
@@ -225,28 +218,40 @@ impl Frame {
     }
 
     fn to_numpy<'py>(&self, py: Python<'py>) -> PyResult<&'py PyArray3<u8>> {
-        match self.format {
-            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
-                let data = self
-                    .read_tight_bytes()
-                    .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
-                let arr = ndarray::Array3::from_shape_vec(
-                    (self.height as usize, self.width as usize, 4),
-                    data,
+        let data = match self.format {
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => self
+                .read_tight_bytes()
+                .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?,
+            wgpu::TextureFormat::Rgba16Float if crate::core::gpu::deterministic_mode() => {
+                let hdr = crate::core::hdr::read_hdr_texture(
+                    &self.device,
+                    &self.queue,
+                    &self.texture,
+                    self.width,
+                    self.height,
+                    self.format,
                 )
+                .map_err(|err| PyRuntimeError::new_err(format!("HDR readback failed: {err}")))?;
+                deterministic_rgba8(&hdr)
+            }
+            wgpu::TextureFormat::Rgba16Float => {
+                return Err(PyRuntimeError::new_err(
+                    "to_numpy for RGBA16F frames is not implemented yet",
+                ))
+            }
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unsupported texture format for numpy conversion: {:?}",
+                    other
+                )))
+            }
+        };
+        let arr =
+            ndarray::Array3::from_shape_vec((self.height as usize, self.width as usize, 4), data)
                 .map_err(|_| {
                     PyRuntimeError::new_err("failed to reshape RGBA buffer into numpy array")
                 })?;
-                Ok(arr.into_pyarray_bound(py).into_gil_ref())
-            }
-            wgpu::TextureFormat::Rgba16Float => Err(PyRuntimeError::new_err(
-                "to_numpy for RGBA16F frames is not implemented yet",
-            )),
-            other => Err(PyValueError::new_err(format!(
-                "unsupported texture format for numpy conversion: {:?}",
-                other
-            ))),
-        }
+        Ok(arr.into_pyarray_bound(py).into_gil_ref())
     }
 
     fn __repr__(&self) -> String {
@@ -255,4 +260,18 @@ impl Frame {
             self.width, self.height, self.format
         )
     }
+}
+
+/// Deterministic-mode RGBA16F -> RGBA8 quantization shared by `Frame.save`
+/// (`.png`) and `Frame.to_numpy`, so both expose the same canonical bytes.
+fn deterministic_rgba8(hdr: &[f32]) -> Vec<u8> {
+    let mut rgba8 = Vec::with_capacity(hdr.len());
+    for px in hdr.chunks_exact(4) {
+        for channel in &px[..3] {
+            let code = (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+            rgba8.push(if code == 0 { 0 } else { (code - 1) | 1 });
+        }
+        rgba8.push(255);
+    }
+    rgba8
 }

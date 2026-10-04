@@ -389,6 +389,9 @@ def _warm_streaming_to_full_residency(renderer, center: tuple[float, float]) -> 
             max_uploads=STREAM_TOTAL_TILES,
         )
         steps += 1
+        # The reader and GPU completion run asynchronously. Yield the polling
+        # thread while keeping the existing step and residency requirements.
+        time.sleep(0)
     assert stream["total_tiles"] == STREAM_TOTAL_TILES, stream
     assert stream["resident_fine_tiles"] == stream["total_tiles"], stream
     assert stream["loader_pending"] == 0, stream
@@ -1211,8 +1214,9 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
 
     The fully resident renderer produces both camera positions, independently
     validating the exact registration direction. A second renderer keeps
-    nearly every height tile at its real coarse-prefill fallback and renders
-    the displaced camera; registration must retain that production change.
+    nearly every height tile at its real asynchronous root fallback and
+    renders the displaced camera; registration must retain that production
+    change.
     """
     dem = fractal_dem(DEM_SIZE, DEM_OCTAVES, DEM_GAIN, DEM_SEED)
     center = _center_at(0)
@@ -1256,14 +1260,18 @@ def test_pop_gate_discriminates_at_this_resolution_and_dem():
 
         fallback_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         _enable_streaming(fallback_renderer, dem)
-        fallback_stats = fallback_renderer.stream_height_tiles(
-            (center[0], STREAM_ALTITUDE_M, center[1]), max_uploads=0
-        )
-        assert fallback_stats["coarse_prefilled"] == STREAM_TOTAL_TILES, fallback_stats
-        # `drain_completed(max_uploads)` deliberately clamps its budget to one,
-        # so a fast local reader may upload a single tile even when callers pass
-        # zero.  The control is still a real coarse-prefill fallback whenever it
-        # has not converged: most of the 64 physical mosaic slots remain coarse.
+        # ORBIS prefill requests one root asynchronously. Before that root
+        # arrives the renderer uses the caller's fine DEM overview, which
+        # cannot exercise this coarse-fallback control. Admit one completed
+        # tile per step until the root is resident, within the existing limit.
+        for _ in range(MAX_WARMUP_STEPS):
+            fallback_stats = fallback_renderer.stream_height_tiles(
+                (center[0], STREAM_ALTITUDE_M, center[1]), max_uploads=1
+            )
+            if fallback_stats["coarse_prefilled"] == 1:
+                break
+            time.sleep(0)
+        assert fallback_stats["coarse_prefilled"] == 1, fallback_stats
         assert fallback_stats["resident_fine_tiles"] < STREAM_TOTAL_TILES, fallback_stats
         assert fallback_stats["converged"] is False, fallback_stats
         fallback, fallback_depth = render_rgba_depth(
@@ -1341,8 +1349,6 @@ def test_visibility_shading_is_identical_and_hole_free_at_flythrough_settings():
 
         forward_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         _enable_streaming(forward_renderer, dem)
-        # Both renderers must reach identical mosaics or the bitwise comparison
-        # would be measuring streaming luck rather than shading equivalence.
         _warm_streaming_to_full_residency(forward_renderer, center)
         forward = render_rgba(
             forward_renderer,
@@ -1355,6 +1361,13 @@ def test_visibility_shading_is_identical_and_hole_free_at_flythrough_settings():
         visibility_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
         _enable_streaming(visibility_renderer, dem)
         _warm_streaming_to_full_residency(visibility_renderer, center)
+        independent_forward = render_rgba(
+            visibility_renderer,
+            _params(z_scale=Z_SCALE, overlay=overlay),
+            dem,
+            ibl,
+            material_set,
+        )
         visibility = render_rgba(
             visibility_renderer,
             _params(z_scale=Z_SCALE, overlay=overlay, shading="visibility"),
@@ -1364,6 +1377,21 @@ def test_visibility_shading_is_identical_and_hole_free_at_flythrough_settings():
         )
         stats = visibility_stats()
 
+    record_tessella_result(
+        "flythrough_renderer_equivalence_control",
+        {
+            "forward_vs_forward_mismatched_elements": int(
+                np.count_nonzero(independent_forward != forward)
+            ),
+            "forward_vs_visibility_mismatched_elements": int(
+                np.count_nonzero(visibility != forward)
+            ),
+            "same_renderer_shading_mismatched_elements": int(
+                np.count_nonzero(visibility != independent_forward)
+            ),
+        },
+    )
+    np.testing.assert_array_equal(independent_forward, forward)
     np.testing.assert_array_equal(visibility, forward)
     covered = stats["visible_pixels"] + stats["background_pixels"]
     assert covered == SIZE[0] * SIZE[1], stats

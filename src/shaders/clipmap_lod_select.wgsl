@@ -111,27 +111,25 @@ fn tile_center_relative(tile: TileInfo) -> vec3<f32> {
     );
 }
 
-fn horizon_visible(tile: TileInfo) -> bool {
-    if params.planet_params.z < 0.5 {
-        return true;
+fn globe_frustum_visible(tile: TileInfo, height_min: f32, height_max: f32) -> bool {
+    let center = det_barrier3(tile_center_relative(tile));
+    let extent_xy = det_barrier2(abs(det_barrier2(tile.bounds_max) - det_barrier2(tile.bounds_min)));
+    let half_xy = det_barrier2(extent_xy * vec2<f32>(0.5));
+    let extent_z = det_barrier(abs(det_barrier(height_max) - det_barrier(height_min)));
+    let half_z = det_barrier(extent_z * 0.5);
+    let lo = vec3<f32>(det_barrier2(center.xy - half_xy), det_barrier(center.z - half_z));
+    let hi = vec3<f32>(det_barrier2(center.xy + half_xy), det_barrier(center.z + half_z));
+    for (var i = 0u; i < 6u; i++) {
+        let plane = params.frustum_planes[i];
+        var p_vertex = lo;
+        if plane.x >= 0.0 { p_vertex.x = hi.x; }
+        if plane.y >= 0.0 { p_vertex.y = hi.y; }
+        if plane.z >= 0.0 { p_vertex.z = hi.z; }
+        if det_barrier(det_dot3(plane.xyz, p_vertex)) + det_barrier(plane.w) < 0.0 {
+            return false;
+        }
     }
-    let radius = params.planet_params.x;
-    let altitude = max(params.planet_params.y, 0.0);
-    let camera_up = normalize(params.camera_up.xyz);
-    let center_from_planet =
-        tile_center_relative(tile) + camera_up * (radius + altitude);
-    if radius <= 0.0 || dot(center_from_planet, center_from_planet) == 0.0 {
-        return true;
-    }
-
-    let tangent_cos = clamp(radius / (radius + altitude), 0.0, 1.0);
-    let angular_radius = clamp(tile.angular_radius, 0.0, 3.141592653589793);
-    let expanded_horizon = min(
-        acos(tangent_cos) + angular_radius,
-        3.141592653589793,
-    );
-    let conservative_threshold = cos(expanded_horizon);
-    return dot(camera_up, normalize(center_from_planet)) >= conservative_threshold;
+    return true;
 }
 
 // Calculate projected geometric error for a candidate LOD.
@@ -165,51 +163,48 @@ fn select_lod(distance: f32, tile_size: f32) -> u32 {
 
 @compute @workgroup_size(1, 1, 1)
 fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    det_seed(f32(global_id.x));
     if global_id.x != 0u {
         return;
     }
     let num_tiles = u32(params.terrain_params.y);
+    let globe = params.planet_params.z > 0.5;
     for (var tile_index = 0u; tile_index < num_tiles; tile_index++) {
         var tile = input_tiles[tile_index];
     
     // Calculate tile center and distance to camera
     let tile_center = tile_center_relative(tile);
     let camera_pos_2d = params.camera_pos.xy;
-    let distance = select(
-        length(tile_center.xy - camera_pos_2d),
-        length(tile_center),
-        params.planet_params.z > 0.5,
-    );
+    var distance = tile.distance;
+    if !globe {
+        distance = length(tile_center.xy - camera_pos_2d);
+    }
     tile.distance = distance;
     
     let has_local_heights = tile.height_min <= tile.height_max;
     let height_min = select(params.height_params.x, tile.height_min, has_local_heights);
     let height_max = select(params.height_params.y, tile.height_max, has_local_heights);
-    var frustum_min = tile.bounds_min;
-    var frustum_max = tile.bounds_max;
-    var frustum_height_min = height_min;
-    var frustum_height_max = height_max;
-    if params.planet_params.z > 0.5 {
-        let half_xy = abs(tile.bounds_max - tile.bounds_min) * 0.5;
-        let half_z = abs(height_max - height_min) * 0.5;
-        frustum_min = tile_center.xy - half_xy;
-        frustum_max = tile_center.xy + half_xy;
-        frustum_height_min = tile_center.z - half_z;
-        frustum_height_max = tile_center.z + half_z;
-    }
-    let frustum_visible = params.height_params.z < 0.5 || frustum_cull_aabb(
-            frustum_min,
-            frustum_max,
-            frustum_height_min,
-            frustum_height_max,
+    var visible = tile.visible != 0u;
+    if globe {
+        visible = visible
+            && (params.height_params.z < 0.5 || globe_frustum_visible(tile, height_min, height_max));
+    } else {
+        visible = params.height_params.z < 0.5 || frustum_cull_aabb(
+            tile.bounds_min,
+            tile.bounds_max,
+            height_min,
+            height_max,
         );
-    let visible = frustum_visible && horizon_visible(tile);
+    }
     tile.visible = select(0u, 1u, visible);
     
         if visible {
         // Select optimal LOD
         let tile_size = params.terrain_params.x;
-        let selected_lod = select_lod(distance, tile_size);
+        var selected_lod = min(tile.selected_lod, u32(params.lod_params.w));
+        if !globe {
+            selected_lod = select_lod(distance, tile_size);
+        }
         tile.selected_lod = selected_lod;
         
         // Append to output using atomic counter

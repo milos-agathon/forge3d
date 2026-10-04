@@ -9,6 +9,8 @@ Covers the moonshot definition-of-done:
 - ``test_all_families_page_within_budget`` — albedo, normal, and mask all page
   with per-family resident bytes > 0 whose sum stays within the VT residency
   budget and the 512 MiB host-visible ceiling.
+- Every completed render in the rendering gates records its certificate
+  host-visible peak (asserted <= 512 MiB) and total tracked bytes.
 - ``test_missing_family_is_fatal`` — a requested family with no registered
   source raises a fatal diagnostic instead of degrading silently.
 - ``test_partial_normal_residency_degrades_gracefully`` — non-resident normal
@@ -35,10 +37,12 @@ import pytest
 
 import forge3d as f3d
 from _substratia_evidence import (
+    captured_render_memory,
     image_sha256,
     load_golden,
     record_substratia_image,
     record_substratia_result,
+    summarize_render_memory,
 )
 from _terrain_runtime import _build_heightmap, _build_overlay, terrain_rendering_available
 from forge3d.diagnostics import visibility_stats
@@ -66,6 +70,13 @@ if GOLDEN_VARIANT not in {"metal", "nvidia-vulkan"}:
     )
 BASELINE_GOLDEN = GOLDEN_DIR / f"substratia_grazing_baseline.{GOLDEN_VARIANT}.png"
 NORMAL_GOLDEN = GOLDEN_DIR / f"substratia_grazing_normal.{GOLDEN_VARIANT}.png"
+# Per-render certificate allocation peaks for the running test; reset per test.
+RENDER_MEMORY_SAMPLES: list[dict[str, int]] = []
+
+
+def _render_memory_evidence() -> dict:
+    return summarize_render_memory(RENDER_MEMORY_SAMPLES, MEMORY_BUDGET_LIMIT_BYTES)
+
 
 # Labeled grazing-light detail region (fractions of image height/width) used
 # by the SSIM gate: central band where the low-sun normal shading dominates.
@@ -338,13 +349,14 @@ def _render_beauty(env, params) -> np.ndarray:
     # while keeping the golden gate independent of the optional ANAMNESIS
     # one-shot graph (whose validation is outside SUBSTRATIA's non-goals).
     renderer, material_set, ibl, heightmap = env
-    frame, _ = renderer.render_with_aov(
-        material_set=material_set,
-        env_maps=ibl,
-        params=params,
-        heightmap=heightmap,
-    )
-    image = np.asarray(frame.to_numpy())
+    with captured_render_memory(RENDER_MEMORY_SAMPLES):
+        frame, _ = renderer.render_with_aov(
+            material_set=material_set,
+            env_maps=ibl,
+            params=params,
+            heightmap=heightmap,
+        )
+        image = np.asarray(frame.to_numpy())
     assert _is_meaningful_render(image), "terrain beauty render returned a magenta/empty marker"
     return image
 
@@ -352,23 +364,22 @@ def _render_beauty(env, params) -> np.ndarray:
 def _render_beauty_and_normal_aov(env, params) -> tuple[np.ndarray, np.ndarray]:
     renderer, material_set, ibl, heightmap = env
     beauty = None
-    aov_frame = None
+    normal = None
     for _ in range(4):
-        frame, aov_frame = renderer.render_with_aov(
-            material_set=material_set,
-            env_maps=ibl,
-            params=params,
-            heightmap=heightmap,
-        )
-        beauty = np.asarray(frame.to_numpy())
+        with captured_render_memory(RENDER_MEMORY_SAMPLES):
+            frame, aov_frame = renderer.render_with_aov(
+                material_set=material_set,
+                env_maps=ibl,
+                params=params,
+                heightmap=heightmap,
+            )
+            beauty = np.asarray(frame.to_numpy())
+            normal = np.asarray(aov_frame.normal(), dtype=np.float32)
         if _is_meaningful_render(beauty):
             break
-    assert beauty is not None and aov_frame is not None
+    assert beauty is not None and normal is not None
     assert _is_meaningful_render(beauty), "AOV terrain render returned a magenta/empty marker"
-    return (
-        beauty,
-        np.asarray(aov_frame.normal(), dtype=np.float32),
-    )
+    return beauty, normal
 
 
 def _as_rgba8(image: np.ndarray) -> np.ndarray:
@@ -708,6 +719,7 @@ class TestTerrainVTPbrFamilies:
     def _reset_vt_sources(self, vt_render_env):
         renderer = vt_render_env[0]
         renderer.clear_material_vt_sources()
+        RENDER_MEMORY_SAMPLES.clear()
         yield
         renderer.clear_material_vt_sources()
 
@@ -812,6 +824,7 @@ class TestTerrainVTPbrFamilies:
                 "golden_mean_error_normal": golden_error_normal,
                 "actual_baseline_rgba_sha256": image_sha256(actual_baseline),
                 "actual_normal_rgba_sha256": image_sha256(actual_normal),
+                "render_memory": _render_memory_evidence(),
             },
         )
 
@@ -965,6 +978,8 @@ class TestTerrainVTPbrFamilies:
             assert registry_metrics[f"resident_bytes_{family}"] >= stats[
                 f"resident_bytes_{family}"
             ]
+        render_memory = _render_memory_evidence()
+        assert render_memory["total_tracked_bytes"] >= resident_sum
         record_substratia_result(
             "family_residency_budget",
             {
@@ -996,6 +1011,7 @@ class TestTerrainVTPbrFamilies:
                     for frame_stats in demand_frame_stats
                 ],
                 "tiles_streamed_upload_frame": int(stats["tiles_streamed"]),
+                "render_memory": render_memory,
             },
         )
 
@@ -1176,6 +1192,7 @@ class TestTerrainVTPbrFamilies:
                 "fallback_coverage": float(fallback_region.mean()),
                 "mean_luminance_error": float(region_diff.mean()),
                 "error_threshold": 0.02,
+                "render_memory": _render_memory_evidence(),
             },
         )
 
