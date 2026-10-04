@@ -1,6 +1,6 @@
 [package]
 name = "forge3d"
-version = "1.40.1"
+version = "1.41.0"
 edition = "2021"
 autoexamples = false
 description = "GPU-accelerated offline 3D map rendering with Rust-first GIS vector, rasterization, mask, thematic, CRS, affine, windowing, and reprojection support"
@@ -59,6 +59,9 @@ gis-remote = ["dep:reqwest", "dep:tokio"]
 proj = ["dep:proj"]
 # G-002c C4: robust topology backend gate for polygonal overlay operations.
 geos-topology = ["dep:geo"]
+# SPLAT-FUSED: path-traced Gaussian splat + LiDAR/COPC + terrain fusion under
+# the hybrid ReSTIR integrator (out-of-core paged residency).
+splat-fusion = []
 # A2-END:cargo-features
 
 [dependencies]

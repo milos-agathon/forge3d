@@ -32,8 +32,8 @@ SANCTIONED_DD_SPLITS = {
 
 # The db06b15f freeze below is the reviewed baseline the TERMINUS reader,
 # ANAMNESIS, and HELIOS records describe. LATER_REVIEWED_TRANSITIONS records
-# the subsequent source deltas; the release ledger bridges its historical
-# entries to the post-CHRONOS TESSELLA transition and current freeze.
+# subsequent source deltas; the release ledger bridges its historical entries
+# to the common post-CHRONOS base of TESSELLA and SPLAT-FUSED.
 REVIEWED_BASELINE_COUNT = 1545
 # The previous 1438-site freeze already covered the reviewed ANAMNESIS,
 # TESSELLA, and first SIDERA transitions described below. The d8313007 base
@@ -74,11 +74,16 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # params6 initializer change without introducing world-position narrowing.
 # Release 1.40 CHRONOS rewrites the two R2 jitter casts one-for-one and adds
 # the three unit-direction casts of SunPosition::to_scene_direction.
-# TESSELLA adds six bounded casts in its separate GPU LOD test module and
-# removes two pixel-centre casts from the CPU oracle. Milos approved exactly
-# these eight sites; the scanner and world-position boundary are unchanged.
-EXPECTED_CONVERSION_COUNT = 1825
-EXPECTED_CONVERSION_SHA256 = "0a99a0b7f915ca8c2650d33bf52f5ff7b6144748cb5ab778a54399b563077264"
+# SPLAT-FUSED adds seven non-world sites (raster/count helpers, 3DGS PLY
+# attribute narrowing, sky-bake normalisation, variance telemetry, and the
+# signature of the Anchor-routed PointCloudFrame::to_scene); see the
+# `splat_fused` ledger record, which is pending owner review.
+# Milos approved the combined freeze: the existing SPLAT-FUSED record plus
+# exactly six TESSELLA test casts added and two oracle casts removed. Both
+# historical records retain their own endpoints; the combined gate bridges
+# their shared 1,821-site base to this current freeze. Scanner unchanged.
+EXPECTED_CONVERSION_COUNT = 1832
+EXPECTED_CONVERSION_SHA256 = "92a2b5e256294968b4a5340b1235973633e175d71c9de640b32421322f3f3245"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -779,8 +784,21 @@ def test_release_1_39_terrain_inventory_transition_is_exact():
     assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
     assert not set(added) & set(removed)
     assert transition["base_count"] + len(added) - len(removed) == transition["result_count"]
-    # Reconstruct the #194 result inventory by undoing the 1.40 CHRONOS record.
+    # Reconstruct the #194 result inventory by undoing TESSELLA, SPLAT-FUSED
+    # and 1.40 CHRONOS without changing any historical record.
     current = collections.Counter(conversion_inventory())
+    tessella = REVIEWED_TESSELLA_INVENTORY_TRANSITION
+    for site in tessella["added_sites"]:
+        assert current[site] == 1
+        current[site] -= 1
+    for site in tessella["removed_sites"]:
+        assert current[site] == 0
+        current[site] += 1
+    splat = _ledger_data()["splat_fused"]
+    assert not splat["removed"]
+    for site in map(tuple, splat["added"]):
+        assert current[site] > 0
+        current[site] -= 1
     for site in map(tuple, chronos["added"]):
         assert current[site] > 0
         current[site] -= 1
@@ -795,10 +813,11 @@ def test_release_1_39_terrain_inventory_transition_is_exact():
 
 def test_release_1_40_chronos_inventory_transition_is_exact():
     transition = _ledger_data()["release_1_40_chronos"]
+    splat = _ledger_data()["splat_fused"]
+    tessella = REVIEWED_TESSELLA_INVENTORY_TRANSITION
     assert (transition["result_count"], transition["result_digest"]) == (
-        REVIEWED_TESSELLA_INVENTORY_TRANSITION["base_count"],
-        REVIEWED_TESSELLA_INVENTORY_TRANSITION["base_digest"],
-    )
+        splat["base_count"], splat["base_digest"]
+    ) == (tessella["base_count"], tessella["base_digest"])
     assert transition["review"]
     added = list(map(tuple, transition["added"]))
     removed = list(map(tuple, transition["removed"]))
@@ -836,7 +855,7 @@ def test_tessella_inventory_transition_is_exact():
         chronos["result_count"], chronos["result_digest"]
     )
     assert (transition["result_count"], transition["result_digest"]) == (
-        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+        1825, "0a99a0b7f915ca8c2650d33bf52f5ff7b6144748cb5ab778a54399b563077264"
     )
     added = transition["added_sites"]
     removed = transition["removed_sites"]
@@ -850,6 +869,60 @@ def test_tessella_inventory_transition_is_exact():
     for site in added:
         assert current[site] == 1, f"recorded addition missing or duplicated: {site}"
     for site in removed:
+        assert current[site] == 0, f"recorded removal still present: {site}"
+
+def test_splat_fused_inventory_transition_is_exact():
+    transition = _ledger_data()["splat_fused"]
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1828, "ac609dda139040202a137f8cfb108e515247e9c8e5de2c92c921655208991adc"
+    )
+    assert transition["review"]
+    added = list(map(tuple, transition["added"]))
+    assert transition["removed"] == []
+    assert len(set(added)) == len(added)
+    assert transition["base_count"] + len(added) == transition["result_count"]
+
+    assert [site[:4] for site in added] == [
+        ("src/path_tracing/hybrid_compute/render_fused.rs", "<module>", "as_f32", 1),
+        ("src/path_tracing/hybrid_compute/render_fused.rs", "render_fused_view", "as_f32", 1),
+        ("src/splat/load.rs", "f32_from_f64_attribute", "as_f32", 1),
+        ("src/splat/load.rs", "f32_from_f64_attribute", "f64_helper", 1),
+        ("src/splat/mod.rs", "f32_from_u32", "as_f32", 1),
+        ("src/splat/mod.rs", "f32_from_usize", "as_f32", 1),
+        ("src/splat/stream.rs", "<module>", "f64_helper", 1),
+    ]
+    # Splat and LiDAR positions leave f64 through the typed Anchor exit only.
+    assert "to_render_f32" in _read("src/splat/stream.rs")
+    load = _read("src/splat/load.rs")
+    assert "to_render_f32" in load
+    for line in load.splitlines():
+        if "f32_from_f64_attribute(" in line and "fn f32_from_f64_attribute" not in line:
+            assert "position" not in line.lower(), line
+
+    current = collections.Counter(conversion_inventory())
+    for site in added:
+        assert current[site] > 0, f"recorded addition missing: {site}"
+
+
+def test_tessella_and_splat_combined_freeze_is_exact():
+    tessella = REVIEWED_TESSELLA_INVENTORY_TRANSITION
+    splat = _ledger_data()["splat_fused"]
+    assert (tessella["base_count"], tessella["base_digest"]) == (
+        splat["base_count"], splat["base_digest"]
+    )
+    tessella_added = set(tessella["added_sites"])
+    tessella_removed = set(tessella["removed_sites"])
+    splat_added = set(map(tuple, splat["added"]))
+    assert len(splat_added) == 7 and not splat["removed"]
+    assert not (tessella_added | tessella_removed) & splat_added
+    assert EXPECTED_CONVERSION_COUNT == (
+        tessella["base_count"] + len(tessella_added) - len(tessella_removed)
+        + len(splat_added)
+    )
+    current = collections.Counter(conversion_inventory())
+    for site in tessella_added | splat_added:
+        assert current[site] == 1, f"recorded addition missing or duplicated: {site}"
+    for site in tessella_removed:
         assert current[site] == 0, f"recorded removal still present: {site}"
 
 

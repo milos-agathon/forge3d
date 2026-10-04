@@ -1,0 +1,43 @@
+{
+  "dem_file": "dem_65x65.f32",
+  "dem_width": 65,
+  "dem_height": 65,
+  "dem_spacing": [
+    1.0,
+    1.0
+  ],
+  "terrain_albedo": [
+    0.55,
+    0.52,
+    0.47
+  ],
+  "splat_file": "cloud.ply",
+  "splat_count": 3500,
+  "copc_file": "swath.copc.laz",
+  "copc_point_count": 5500,
+  "copc_origin": [
+    500000.0,
+    4000000.0,
+    1200.0
+  ],
+  "lidar_radius": 0.22,
+  "cam_origin": [
+    6.0,
+    52.0,
+    46.0
+  ],
+  "cam_look_at": [
+    0.0,
+    1.0,
+    1.0
+  ],
+  "cam_up": [
+    0.0,
+    1.0,
+    0.0
+  ],
+  "fov_y_deg": 52.0,
+  "sun_azimuth_deg": 172.0,
+  "sun_elevation_deg": 36.0,
+  "roi_half_extent": 27.0
+}

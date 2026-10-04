@@ -331,6 +331,11 @@ jobs:
               - 'tests/test_hybrid_terrain_pt.py'
               - 'tests/test_prometheus_dem_reference.py'
               - 'tests/test_inverse_pt.py'
+              - 'tests/test_splat_fusion_occlusion.py'
+              - 'tests/test_splat_fusion_occlusion.rs'
+              - 'tests/test_splat_api.py'
+              - 'tests/fixtures/splat_fusion/**'
+              - 'tests/golden/splat_fusion/**'
               - 'tests/data/prometheus/**'
               - 'tools/prometheus_reference.py'
               - 'tests/_deltae.py'
@@ -656,7 +661,7 @@ jobs:
           sudo apt-get install -y libvulkan-dev libproj-dev libsqlite3-dev sqlite3 pkg-config
 
       - name: Run cargo check
-        run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe
+        run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion
 
       - name: Run cargo check (system PROJ feature)
         if: matrix.os == 'ubuntu-latest'
@@ -666,7 +671,7 @@ jobs:
         # These direct-GPU checks are run on the physical NVIDIA Vulkan lane
         # below.  The generic matrix must not silently substitute WARP, Mesa,
         # or Metal for their hardware assertions.
-        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip gpu_timing_double_buffered_measures_copy --skip raster_capture_executes_production_shader --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip pbr_pipeline_initializes_real_ibl_and_shader --skip draw_batch_params_renders_pixels --skip live_shared_msm_sampler_treats_front_of_mean_as_lit --skip live_shared_msm_sampler_consumes_third_and_fourth_moments --skip generation_and_blur_cover_a_1024_moment_atlas --skip execute_rejects_unbound_and_mismatched_allocations --skip legacy_view_prepare_and_execute_sequence_remains_compatible --skip separable_blur_filters_both_axes --skip execute_rejects_invalid_or_mismatched_atlas_dimensions --skip execute_rejects_invalid_texture_contracts_before_view_creation --skip execute_rejects_invalid_evsm_exponents --skip bind_groups_follow_atlas_resource_identity --skip shared_evsm_visibility_helpers_execute_lit_front_of_mean --skip shared_evsm_minimum_variance_scales_each_warp_derivative --skip shared_evsm_moment_leak_control_preserves_a_soft_penumbra --skip shared_evsm_uniform_distribution_does_not_widen --skip shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver --skip shared_evsm_chebyshev_is_conservative_for_uniform_half_moments --skip shared_evsm_uniform_half_uncertainty_has_a_bounded_transition --skip shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows --skip shared_evsm_helpers_fail_open_for_non_finite_inputs --skip shared_pcss_penumbra_grows_with_light_size_and_receiver_separation --skip shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs
+        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip gpu_timing_double_buffered_measures_copy --skip raster_capture_executes_production_shader --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip pbr_pipeline_initializes_real_ibl_and_shader --skip draw_batch_params_renders_pixels --skip live_shared_msm_sampler_treats_front_of_mean_as_lit --skip live_shared_msm_sampler_consumes_third_and_fourth_moments --skip generation_and_blur_cover_a_1024_moment_atlas --skip execute_rejects_unbound_and_mismatched_allocations --skip legacy_view_prepare_and_execute_sequence_remains_compatible --skip separable_blur_filters_both_axes --skip execute_rejects_invalid_or_mismatched_atlas_dimensions --skip execute_rejects_invalid_texture_contracts_before_view_creation --skip execute_rejects_invalid_evsm_exponents --skip bind_groups_follow_atlas_resource_identity --skip shared_evsm_visibility_helpers_execute_lit_front_of_mean --skip shared_evsm_minimum_variance_scales_each_warp_derivative --skip shared_evsm_moment_leak_control_preserves_a_soft_penumbra --skip shared_evsm_uniform_distribution_does_not_widen --skip shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver --skip shared_evsm_chebyshev_is_conservative_for_uniform_half_moments --skip shared_evsm_uniform_half_uncertainty_has_a_bounded_transition --skip shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows --skip shared_evsm_helpers_fail_open_for_non_finite_inputs --skip shared_pcss_penumbra_grows_with_light_size_and_receiver_separation --skip shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs
         env:
           RUST_TEST_THREADS: 1
 
@@ -682,7 +687,7 @@ jobs:
         # Executes rustdoc examples, including the five `compile_fail` proofs in
         # src/geo/units.rs that make unit/height/CRS/epoch mismatches and the raw
         # f64->f32 world-coordinate narrowing genuinely fail to compile.
-        run: cargo test --doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe
+        run: cargo test --doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion
 
       - name: Run cargo clippy
         run: cargo forge3d-clippy-acceptance
@@ -1477,6 +1482,28 @@ jobs:
           python -m pytest tests/test_inverse_scoring.py tests/test_inverse_pt.py -v --tb=short --junitxml="$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$env:FORGE3D_INVERSE_ARTIFACT_DIR/junit.xml"
+          exit $LASTEXITCODE
+
+      - name: Run SPLAT-FUSED cross-representation occlusion gate
+        # Shadow IoU of the fused splat + LiDAR + terrain ReSTIR render against
+        # the AEQUITAS path-traced reference (> 0.9), at billion-primitive
+        # scale inside the 512 MiB budget. The hosted Rust/pytest matrices
+        # self-skip these GPU assertions; this physical lane forbids the skip.
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_SPLAT_FUSION_REQUIRED_GPU: '1'
+        run: |
+          $fusionDir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR 'splat-fusion'
+          New-Item -ItemType Directory -Force -Path $fusionDir | Out-Null
+          $env:FORGE3D_SPLAT_FUSION_ARTIFACT_DIR = $fusionDir
+          $fusionFeatures = 'default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion'
+          cargo test --release --features $fusionFeatures --test test_splat_fusion_occlusion -- --test-threads=1 --nocapture *>&1 | Tee-Object -FilePath (Join-Path $fusionDir 'rust-occlusion.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $junit = Join-Path $fusionDir 'junit.xml'
+          python -m pytest tests/test_splat_fusion_occlusion.py tests/test_splat_api.py -v --tb=short --capture=tee-sys --junitxml="$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE
 
       - name: Run GPU-only Rust checks on physical NVIDIA Vulkan
@@ -2769,7 +2796,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust docs
-        run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe --no-deps
+        run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion --no-deps
 
   # ============================================================================
   # Stable hosted gate for every existing and future PR. Configure branch

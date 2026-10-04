@@ -78,6 +78,253 @@ pub(crate) fn hybrid_kernel() -> String {
     .join("\n")
 }
 
+/// Replace exactly one occurrence of `from`; a missing or duplicated anchor is
+/// an assembly error (the base shader drifted), never a silent no-op.
+#[cfg(feature = "splat-fusion")]
+fn replace_once(
+    text: &str,
+    from: &str,
+    to: &str,
+    what: &str,
+) -> Result<String, crate::core::error::RenderError> {
+    match text.matches(from).count() {
+        1 => Ok(text.replacen(from, to, 1)),
+        found => Err(crate::core::error::RenderError::Render(format!(
+            "fused kernel assembly: anchor `{what}` matched {found} times in the hybrid \
+             kernel sources (expected exactly 1)"
+        ))),
+    }
+}
+
+/// Text between `start` (inclusive) and the first `end` after it (inclusive).
+#[cfg(feature = "splat-fusion")]
+fn extract_block(
+    text: &str,
+    start: &str,
+    end: &str,
+    what: &str,
+) -> Result<String, crate::core::error::RenderError> {
+    let missing = || {
+        crate::core::error::RenderError::Render(format!(
+            "fused kernel assembly: block `{what}` not found in its source shader"
+        ))
+    };
+    let begin = text.find(start).ok_or_else(missing)?;
+    let stop = text[begin..].find(end).ok_or_else(missing)? + begin + end.len();
+    Ok(text[begin..stop].to_string())
+}
+
+/// Anchored edits that route `main_terrain` / `main_terrain_gbuffer` through
+/// the fused occlusion model: (what, from, to). Each must match exactly once.
+#[cfg(feature = "splat-fusion")]
+const FUSED_TERRAIN_EDITS: &[(&str, &str, &str)] = &[
+    // Every fused render is seamless (camera_flags = 1): spatial reuse is
+    // self-only (pt_restir_spatial.wgsl) and temporal reuse is per pixel, so
+    // the reservoir's sun-disc sample is tile-safe. Without this edit tiles
+    // would shade from the disc centre only (hard shadows).
+    (
+        "seamless reservoir sun direction",
+        concat!(
+            "        if (uniforms.camera_flags == 0u && prev_valid) {\n",
+            "            sun_dir = normalize(prev_r.sample.direction);",
+        ),
+        concat!(
+            "        if (prev_valid) {\n",
+            "            sun_dir = normalize(prev_r.sample.direction);",
+        ),
+    ),
+    (
+        "terrain shading normal seam",
+        "fn terrain_normal_at(p: vec3<f32>, cx: u32, cz: u32) -> vec3<f32> {",
+        "fn terrain_normal_at_base(p: vec3<f32>, cx: u32, cz: u32) -> vec3<f32> {",
+    ),
+    (
+        "ReSTIR candidate target function",
+        concat!(
+            "            let ndotl = max(dot(n, wi), 0.0);\n",
+            "            let target_pdf = select(0.0, 1.0, terrain_luminance(albedo * lighting.light_color * ndotl) > 0.0);\n",
+            "            if (target_pdf > 0.0) {\n",
+            "                cand.sample.position = hit.point;\n",
+            "                cand.sample.light_index = 0u;\n",
+            "                cand.sample.direction = wi;\n",
+            "                cand.sample.intensity = terrain_luminance(lighting.light_color);\n",
+            "                cand.sample.light_type = 1u;\n",
+            "                cand.w_sum = cand.w_sum + target_pdf;\n",
+            "                cand.m = cand.m + 1u;\n",
+            "                cand.target_pdf = target_pdf;\n",
+            "            }\n",
+        ),
+        "            fusion_restir_candidate(&cand, hit.point, n, albedo, wi, &st);\n",
+    ),
+    (
+        "candidate reservoir publish",
+        "    terrain_reservoirs_curr[pix] = cand;",
+        "    fusion_restir_publish(&cand);\n    terrain_reservoirs_curr[pix] = cand;",
+    ),
+    (
+        "sun shading visibility",
+        concat!(
+            "            var vis = 1.0;\n",
+            "            if (lighting.shadows_enabled != 0u && intersect_shadow_ray(sray, 1e30)) {\n",
+            "                vis = 0.0;\n",
+            "            }\n",
+        ),
+        concat!(
+            "            var vis = 1.0;\n",
+            "            if (lighting.shadows_enabled != 0u) {\n",
+            "                vis = fusion_shading_visibility(sray, prev_valid, prev_r.sample.intensity);\n",
+            "            }\n",
+        ),
+    ),
+    (
+        "sun surface response",
+        "            sun = albedo * sampled_spectrum * nd * vis;",
+        "            sun = fusion_surface_response(n, -rd, sun_dir, albedo) * sampled_spectrum * nd * vis;",
+    ),
+    (
+        "AOV centre ray",
+        "        let chit = intersect_hybrid(cray);",
+        concat!(
+            "        fusion_deterministic = true;\n",
+            "        let chit = intersect_hybrid(cray);\n",
+            "        fusion_deterministic = false;",
+        ),
+    ),
+    (
+        "fused AOVs",
+        concat!(
+            "            textureStore(aov_visibility, coord, vec4<f32>(select(0.0, 1.0, is_hit), 0.0, 0.0, 1.0));\n",
+            "        }\n",
+        ),
+        concat!(
+            "            textureStore(aov_visibility, coord, vec4<f32>(select(0.0, 1.0, is_hit), 0.0, 0.0, 1.0));\n",
+            "        }\n",
+            "        fusion_write_aovs(coord, chit, calbedo, is_hit);\n",
+        ),
+    ),
+    (
+        "G-buffer centre ray",
+        concat!(
+            "    let ray = Ray(center_camera.origin, 1e-3, center_camera.direction, 1e30);\n",
+            "\n",
+            "    let hit = intersect_hybrid(ray);",
+        ),
+        concat!(
+            "    let ray = Ray(center_camera.origin, 1e-3, center_camera.direction, 1e30);\n",
+            "\n",
+            "    fusion_deterministic = true;\n",
+            "    let hit = intersect_hybrid(ray);",
+        ),
+    ),
+];
+
+/// The four traversal seams the fused wrappers replace (renamed `*_base`).
+#[cfg(feature = "splat-fusion")]
+const FUSED_TRAVERSAL_SEAMS: &[(&str, &str)] = &[
+    (
+        "fn intersect_hybrid(ray: Ray) -> HybridHitResult {",
+        "fn intersect_hybrid_base(ray: Ray) -> HybridHitResult {",
+    ),
+    (
+        "fn get_surface_properties(hit: HybridHitResult) -> vec3f {",
+        "fn get_surface_properties_base(hit: HybridHitResult) -> vec3f {",
+    ),
+    (
+        "fn intersect_shadow_ray(ray: Ray, max_distance: f32) -> bool {",
+        "fn intersect_shadow_ray_base(ray: Ray, max_distance: f32) -> bool {",
+    ),
+    (
+        "fn intersect_ibl_occlusion_ray(ray: Ray, max_distance: f32) -> bool {",
+        "fn intersect_ibl_occlusion_ray_base(ray: Ray, max_distance: f32) -> bool {",
+    ),
+];
+
+/// SPLAT-FUSED kernel: the hybrid ReSTIR kernel specialized for the fused
+/// splat + LiDAR + terrain scene. It is the SAME integrator — every source
+/// file of [`hybrid_kernel`] is reused verbatim — with:
+///
+/// * the four traversal seams (`intersect_hybrid`, `get_surface_properties`,
+///   `intersect_shadow_ray`, `intersect_ibl_occlusion_ray`) renamed `*_base`
+///   so the fused wrappers in `fusion/unified_occlusion.wgsl` take their
+///   place for every existing caller;
+/// * the reservoir candidate's target function, the sun shading visibility
+///   and the surface response in `main_terrain` routed through
+///   `shadow_transmittance` / `eval_brdf`;
+/// * the analytic Gaussian kernel, the unified occlusion module and the
+///   shared BRDF library appended.
+///
+/// The default [`hybrid_kernel`] text is untouched (its shader proofs and
+/// runtime contracts keep applying); a base-shader edit that moves an anchor
+/// fails here loudly instead of silently dropping the fused path.
+#[cfg(feature = "splat-fusion")]
+pub(crate) fn fused_kernel() -> Result<String, crate::core::error::RenderError> {
+    // Checkouts may carry CRLF; anchors are written with LF.
+    let lf = |text: &str| text.replace("\r\n", "\n");
+
+    let mut traversal = strip_includes(&lf(include_str!("shaders/hybrid_traversal.wgsl")));
+    for (from, to) in FUSED_TRAVERSAL_SEAMS {
+        traversal = replace_once(&traversal, from, to, from)?;
+    }
+    let mut terrain = strip_includes(&lf(include_str!("shaders/hybrid_terrain_traversal.wgsl")));
+    for (what, from, to) in FUSED_TERRAIN_EDITS {
+        terrain = replace_once(&terrain, from, to, what)?;
+    }
+
+    // Shared BRDF library: the dispatcher constants + ShadingParamsGPU come
+    // from lighting.wgsl and VolumetricParams from volumetric.wgsl, extracted
+    // verbatim so the fused kernel reuses those layouts without pulling in
+    // the raster pipelines' bind groups.
+    let brdf_prelude = extract_block(
+        &lf(include_str!("shaders/lighting.wgsl")),
+        "const BRDF_LAMBERT: u32 = 0u;",
+        "};",
+        "BRDF constants + ShadingParamsGPU",
+    )?;
+    if !brdf_prelude.contains("struct ShadingParamsGPU") {
+        return Err(crate::core::error::RenderError::Render(
+            "fused kernel assembly: ShadingParamsGPU is no longer adjacent to the BRDF \
+             constants in lighting.wgsl"
+                .into(),
+        ));
+    }
+    let volumetric_params = extract_block(
+        &lf(include_str!("shaders/volumetric.wgsl")),
+        "struct VolumetricParams {",
+        "\n}",
+        "VolumetricParams",
+    )?;
+
+    Ok([
+        lf(include_str!("shaders/includes/determinism.wgsl")),
+        // Same literal as lights.wgsl, which the BRDF library expects in scope.
+        "const PI: f32 = 3.14159265359;".to_string(),
+        brdf_prelude,
+        volumetric_params,
+        lf(include_str!("shaders/brdf/common.wgsl")),
+        lf(include_str!("shaders/brdf/lambert.wgsl")),
+        lf(include_str!("shaders/brdf/phong.wgsl")),
+        lf(include_str!("shaders/brdf/oren_nayar.wgsl")),
+        lf(include_str!("shaders/brdf/cook_torrance.wgsl")),
+        lf(include_str!("shaders/brdf/disney_principled.wgsl")),
+        lf(include_str!("shaders/brdf/ashikhmin_shirley.wgsl")),
+        lf(include_str!("shaders/brdf/ward.wgsl")),
+        lf(include_str!("shaders/brdf/toon.wgsl")),
+        lf(include_str!("shaders/brdf/minnaert.wgsl")),
+        strip_includes(&lf(include_str!("shaders/brdf/dispatch.wgsl"))),
+        lf(include_str!("shaders/sdf_primitives.wgsl")),
+        strip_includes(&lf(include_str!("shaders/sdf_operations.wgsl"))),
+        traversal,
+        terrain,
+        lf(include_str!(
+            "shaders/atmosphere/prometheus_spectral_reference.wgsl"
+        )),
+        strip_includes(&lf(include_str!("shaders/hybrid_kernel.wgsl"))),
+        lf(include_str!("shaders/splat/gaussian_intersect.wgsl")),
+        lf(include_str!("shaders/fusion/unified_occlusion.wgsl")),
+    ]
+    .join("\n"))
+}
+
 /// AETHER sky module: the established camera/sky ABI plus the spectral LUT
 /// evaluator in its dedicated bind group. The legacy sky module remains a
 /// separate source and cannot accidentally claim AETHER shader provenance.
@@ -1093,5 +1340,132 @@ mod tests {
         )
         .validate(&module)
         .unwrap();
+    }
+}
+
+#[cfg(all(test, feature = "splat-fusion"))]
+mod fused_kernel_tests {
+    use super::*;
+
+    #[test]
+    fn fused_kernel_assembles_and_validates() {
+        let source = fused_kernel().expect("fused kernel assembly");
+        assert_valid_wgsl(&source);
+        // Every entry point of the base integrator survives the assembly.
+        for entry in [
+            "fn main(",
+            "fn main_terrain(",
+            "fn main_terrain_gbuffer(",
+            "fn main_terrain_publish(",
+        ] {
+            assert_eq!(source.matches(entry).count(), 1, "{entry}");
+        }
+    }
+
+    #[test]
+    fn default_hybrid_kernel_is_untouched_by_the_fused_specialization() {
+        let base = hybrid_kernel();
+        assert!(!base.contains("fusion_"));
+        assert!(!base.contains("shadow_transmittance"));
+        assert!(base.contains("fn intersect_hybrid(ray: Ray) -> HybridHitResult {"));
+    }
+
+    /// Text of `fn name(` up to the next top-level `fn` / `@compute`.
+    fn body<'a>(source: &'a str, name: &str) -> &'a str {
+        let start = source
+            .find(&format!("fn {name}("))
+            .unwrap_or_else(|| panic!("missing fn {name}"));
+        let rest = &source[start + 3..];
+        let end = rest
+            .find("\nfn ")
+            .into_iter()
+            .chain(rest.find("\n@compute"))
+            .min()
+            .unwrap_or(rest.len());
+        &rest[..end]
+    }
+
+    #[test]
+    fn reservoir_target_function_calls_shadow_transmittance() {
+        let source = fused_kernel().unwrap();
+        // main_terrain generates its candidate through the fused target...
+        let main_terrain = body(&source, "main_terrain");
+        assert!(main_terrain
+            .contains("fusion_restir_candidate(&cand, hit.point, n, albedo, wi, &st);"));
+        assert!(!main_terrain.contains("let target_pdf = select(0.0, 1.0"));
+        // ...whose light-visibility term is the unified occlusion query...
+        let candidate = body(&source, "fusion_restir_candidate");
+        assert!(candidate.contains("visibility = shadow_transmittance(sray)"));
+        assert!(candidate
+            .contains("let target_pdf = floor_pdf + (1.0 - floor_pdf) * visibility;"));
+        // ...and that query is the product of the three sub-occluders.
+        let query = body(&source, "shadow_transmittance");
+        assert!(query.contains("fusion_shadow_parts(ray, ray.tmax, true)"));
+        assert!(query.contains("parts.x * parts.y * parts.z"));
+        // Shading visibility and the surface response go through the same
+        // query and the shared BRDF dispatcher.
+        assert!(main_terrain.contains(
+            "vis = fusion_shading_visibility(sray, prev_valid, prev_r.sample.intensity);"
+        ));
+        assert!(main_terrain.contains("fusion_surface_response(n, -rd, sun_dir, albedo)"));
+        assert!(body(&source, "fusion_surface_response").contains("eval_brdf("));
+        assert!(body(&source, "fusion_shading_visibility").contains("shadow_transmittance(sray)"));
+    }
+
+    #[test]
+    fn traversal_uses_the_analytic_gaussian_kernel_not_a_rasterized_splat() {
+        let source = fused_kernel().unwrap();
+        assert!(body(&source, "fusion_splat_page_closest").contains("gaussian_closest_hit("));
+        assert!(body(&source, "fusion_splat_page_shadow").contains("gaussian_any_hit("));
+        let kernel = body(&source, "gaussian_response");
+        assert!(kernel.contains("out.t_star = -dot(delta, sd) / out.a;"));
+        assert!(kernel.contains("exp(-0.5 * out.g_star)"));
+        // One structure, three leaf kinds, dispatched in a single traversal.
+        let closest = body(&source, "fusion_closest_hit");
+        for needle in [
+            "kind == FUSION_KIND_TERRAIN",
+            "terrain_trace(",
+            "fusion_splat_page_closest(",
+            "fusion_point_page_closest(",
+        ] {
+            assert!(closest.contains(needle), "{needle}");
+        }
+        let gaussian = include_str!("shaders/splat/gaussian_intersect.wgsl");
+        for projected in ["textureSample", "@vertex", "@fragment", "@group"] {
+            assert!(!gaussian.contains(projected), "{projected}");
+        }
+    }
+
+    #[test]
+    fn fused_kernel_uses_the_reservoir_sun_sample_in_seamless_mode() {
+        let source = fused_kernel().unwrap();
+        let main_terrain = body(&source, "main_terrain");
+        assert!(main_terrain
+            .contains("if (prev_valid) {\n            sun_dir = normalize(prev_r.sample.direction);"));
+        assert!(!main_terrain.contains("camera_flags == 0u && prev_valid"));
+        assert!(hybrid_kernel().contains("camera_flags == 0u && prev_valid"));
+    }
+
+    #[test]
+    fn fused_kernel_overrides_the_terrain_shading_normal() {
+        let source = fused_kernel().unwrap();
+        assert_eq!(source.matches("fn terrain_normal_at_base(").count(), 1);
+        assert_eq!(source.matches("fn terrain_normal_at(").count(), 1);
+        let fused = body(&source, "terrain_normal_at");
+        assert!(fused.contains("terrain_normal_at_base(p, cx, cz)"));
+        assert!(fused.contains("FUSION_FLAG_SMOOTH_TERRAIN"));
+        let base = hybrid_kernel();
+        assert!(base.contains("fn terrain_normal_at("));
+        assert!(!base.contains("terrain_normal_at_base"));
+    }
+
+    #[test]
+    fn a_moved_anchor_is_a_loud_assembly_error() {
+        let error = replace_once("abc", "x", "y", "probe").unwrap_err();
+        assert!(format!("{error}").contains("matched 0 times"));
+        let error = replace_once("xx", "x", "y", "probe").unwrap_err();
+        assert!(format!("{error}").contains("matched 2 times"));
+        assert!(extract_block("abc", "x", "c", "probe").is_err());
+        assert_eq!(extract_block("abc", "b", "c", "probe").unwrap(), "bc");
     }
 }
