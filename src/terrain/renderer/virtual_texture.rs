@@ -772,6 +772,11 @@ impl TerrainMaterialVT {
             return Err("material VT runtime has no source".to_string());
         }
         slots.sort_unstable();
+        // This test-only fault injector owns the probe's initial request set.
+        // The first render may already have ingested shader feedback, depending
+        // on asynchronous map completion. Do not mix those timing-dependent
+        // requests with the deliberately unsatisfied keys seeded below.
+        runtime.pending_feedback = Default::default();
         let mip_level = 0;
         let (pages_x, pages_y) = runtime.pages_at_mip(mip_level);
         for (index, (family_slot, material_index)) in slots.into_iter().enumerate() {

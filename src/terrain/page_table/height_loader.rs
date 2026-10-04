@@ -1,4 +1,6 @@
 use glam::Vec2;
+#[cfg(not(target_arch = "wasm32"))]
+use std::cell::RefCell;
 use std::collections::HashMap;
 #[cfg(target_arch = "wasm32")]
 use std::collections::VecDeque;
@@ -389,6 +391,8 @@ pub struct AsyncTileLoader {
     #[cfg(not(target_arch = "wasm32"))]
     terminal_rx: Receiver<TerminalEvent>,
     #[cfg(not(target_arch = "wasm32"))]
+    test_ready_terminal: RefCell<Option<TerminalEvent>>,
+    #[cfg(not(target_arch = "wasm32"))]
     _workers: Vec<thread::JoinHandle<()>>,
     pool_size: usize,
     max_in_flight: usize,
@@ -484,6 +488,7 @@ impl AsyncTileLoader {
                 lifecycle,
                 request_tx,
                 terminal_rx,
+                test_ready_terminal: RefCell::new(None),
                 _workers: workers,
                 pool_size,
                 max_in_flight,
@@ -520,12 +525,31 @@ impl AsyncTileLoader {
     fn next_terminal(&self) -> Option<TerminalEvent> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.terminal_rx.try_recv().ok()
+            self.test_ready_terminal
+                .borrow_mut()
+                .take()
+                .or_else(|| self.terminal_rx.try_recv().ok())
         }
         #[cfg(target_arch = "wasm32")]
         {
             self.lifecycle.next_wasm_terminal()
         }
+    }
+
+    /// Native test warm-up barrier. Keep the received terminal unacknowledged
+    /// so the ordinary nonblocking drain still owns capacity release, errors,
+    /// cancellation, and tile publication. The held ticket remains inside the
+    /// existing max-in-flight bound.
+    #[cfg(all(not(target_arch = "wasm32"), any(feature = "extension-module", test)))]
+    pub(crate) fn wait_for_terminal_for_test(&mut self) -> Result<(), String> {
+        if self.lifecycle.pending_len() > 0 && self.test_ready_terminal.get_mut().is_none() {
+            let event = self
+                .terminal_rx
+                .recv()
+                .map_err(|error| format!("height worker terminal channel disconnected: {error}"))?;
+            *self.test_ready_terminal.get_mut() = Some(event);
+        }
+        Ok(())
     }
 
     pub fn drain_completed(&self, limit: usize) -> Vec<TileData> {
@@ -760,6 +784,36 @@ mod tests {
                 Ok(vec![9.0; (width * height) as usize])
             }
         }
+    }
+
+    #[test]
+    fn test_barrier_preserves_terminal_errors_and_bounded_capacity_until_drain() {
+        let mut loader = AsyncTileLoader::new_with_reader(
+            TileBounds::new(Vec2::ZERO, Vec2::ONE),
+            Vec2::ONE,
+            2,
+            1,
+            1,
+            Arc::new(TransientReader(AtomicUsize::new(0))),
+            CoalescePolicy::PreferFine,
+        );
+        let root = TileId::new(0, 0, 0);
+        assert!(loader.request(root));
+        loader.wait_for_terminal_for_test().unwrap();
+        assert_eq!(loader.stats().0, 1);
+        assert!(!loader.request(TileId::new(1, 0, 0)));
+        assert!(matches!(loader.drain_terminals(1).pop(),
+            Some(TileLoadTerminal::Error(ticket)) if ticket.tile_id == root));
+        assert_eq!(loader.stats().0, 0);
+
+        assert!(loader.request(root));
+        loader.wait_for_terminal_for_test().unwrap();
+        loader.wait_for_terminal_for_test().unwrap();
+        assert_eq!(loader.stats().0, 1);
+        let tile = loader.drain_completed(1).pop().unwrap();
+        assert_eq!(tile.tile_id, root);
+        assert_eq!(tile.height_data, vec![9.0; 4]);
+        assert_eq!(loader.stats().0, 0);
     }
 
     #[test]

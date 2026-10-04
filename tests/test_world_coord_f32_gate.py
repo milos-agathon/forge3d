@@ -31,8 +31,9 @@ SANCTIONED_DD_SPLITS = {
 }
 
 # The db06b15f freeze below is the reviewed baseline the TERMINUS reader,
-# ANAMNESIS, and HELIOS records describe; LATER_REVIEWED_TRANSITIONS chains it
-# to the current EXPECTED_CONVERSION_COUNT/SHA256.
+# ANAMNESIS, and HELIOS records describe. LATER_REVIEWED_TRANSITIONS records
+# the subsequent source deltas; the release ledger bridges its historical
+# entries to the post-CHRONOS TESSELLA transition and current freeze.
 REVIEWED_BASELINE_COUNT = 1545
 # The previous 1438-site freeze already covered the reviewed ANAMNESIS,
 # TESSELLA, and first SIDERA transitions described below. The d8313007 base
@@ -73,8 +74,11 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # params6 initializer change without introducing world-position narrowing.
 # Release 1.40 CHRONOS rewrites the two R2 jitter casts one-for-one and adds
 # the three unit-direction casts of SunPosition::to_scene_direction.
-EXPECTED_CONVERSION_COUNT = 1821
-EXPECTED_CONVERSION_SHA256 = "1b17f3f2ac765a98e747d2bc7ef067aa8fb746a5d2bcf693189586f9b5c1d0c8"
+# TESSELLA adds six bounded casts in its separate GPU LOD test module and
+# removes two pixel-centre casts from the CPU oracle. Milos approved exactly
+# these eight sites; the scanner and world-position boundary are unchanged.
+EXPECTED_CONVERSION_COUNT = 1825
+EXPECTED_CONVERSION_SHA256 = "0a99a0b7f915ca8c2650d33bf52f5ff7b6144748cb5ab778a54399b563077264"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -430,12 +434,33 @@ REVIEWED_DIFFERENTIA_INVENTORY_TRANSITION = {
     ),
 }
 
+REVIEWED_TESSELLA_INVENTORY_TRANSITION = {
+    "base_count": 1821,
+    "base_digest": "1b17f3f2ac765a98e747d2bc7ef067aa8fb746a5d2bcf693189586f9b5c1d0c8",
+    "result_count": 1825,
+    "result_digest": "0a99a0b7f915ca8c2650d33bf52f5ff7b6144748cb5ab778a54399b563077264",
+    "added_sites": (
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 1, "let min = Vec2::new(-1024.0 + x as f32 * 256.0, -1024.0 + y as f32 * 256.0)"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 2, "let min = Vec2::new(-1024.0 + x as f32 * 256.0, -1024.0 + y as f32 * 256.0)"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 3, "let angle = (state as f32 / u32::MAX as f32) * std::f32::consts::TAU"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 4, "let angle = (state as f32 / u32::MAX as f32) * std::f32::consts::TAU"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 5, "let radius = 900.0 + (state as f32 / u32::MAX as f32) * 900.0"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 6, "let radius = 900.0 + (state as f32 / u32::MAX as f32) * 900.0"),
+    ),
+    "removed_sites": (
+        ("src/terrain/renderer/visibility_buffer.rs", "<module>", "as_f32", 7, "} let point = glam::vec2(pixel.0 as f32 + 0.5, pixel.1 as f32 + 0.5)"),
+        ("src/terrain/renderer/visibility_buffer.rs", "<module>", "as_f32", 8, "} let point = glam::vec2(pixel.0 as f32 + 0.5, pixel.1 as f32 + 0.5)"),
+    ),
+}
+
 # Transitions reviewed after the db06b15f freeze, in merge order. Earlier
 # records (TERMINUS reader, ANAMNESIS, HELIOS) describe that frozen tree; a
-# site they recorded may only disappear or reappear through one of these.
+# site they recorded may only disappear or reappear through one of these or
+# the intervening release ledger, which remains an immutable historical record.
 LATER_REVIEWED_TRANSITIONS = (
     REVIEWED_PROMETHEUS_INVENTORY_TRANSITION,
     REVIEWED_DIFFERENTIA_INVENTORY_TRANSITION,
+    REVIEWED_TESSELLA_INVENTORY_TRANSITION,
 )
 
 
@@ -635,7 +660,10 @@ def test_reviewed_helios_inventory_transition_is_exact():
 def test_historical_transition_ledger_and_current_freeze_are_consistent():
     previous_count = REVIEWED_BASELINE_COUNT
     previous_digest = REVIEWED_BASELINE_SHA256
-    for transition in LATER_REVIEWED_TRANSITIONS:
+    assert LATER_REVIEWED_TRANSITIONS[-1] is REVIEWED_TESSELLA_INVENTORY_TRANSITION
+    # The release ledger bridges the historical 1643-site endpoint to CHRONOS;
+    # the final post-CHRONOS transition is checked separately below.
+    for transition in LATER_REVIEWED_TRANSITIONS[:-1]:
         added = transition["added_sites"]
         removed = transition["removed_sites"]
         assert transition["base_count"] == previous_count
@@ -768,14 +796,15 @@ def test_release_1_39_terrain_inventory_transition_is_exact():
 def test_release_1_40_chronos_inventory_transition_is_exact():
     transition = _ledger_data()["release_1_40_chronos"]
     assert (transition["result_count"], transition["result_digest"]) == (
-        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+        REVIEWED_TESSELLA_INVENTORY_TRANSITION["base_count"],
+        REVIEWED_TESSELLA_INVENTORY_TRANSITION["base_digest"],
     )
     assert transition["review"]
     added = list(map(tuple, transition["added"]))
     removed = list(map(tuple, transition["removed"]))
     assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
     assert not set(added) & set(removed)
-    assert transition["base_count"] + len(added) - len(removed) == EXPECTED_CONVERSION_COUNT
+    assert transition["base_count"] + len(added) - len(removed) == transition["result_count"]
 
     r2 = ("src/terrain/accumulation.rs", "generate_r2_sequence", "as_f32")
     assert removed == [
@@ -795,6 +824,31 @@ def test_release_1_40_chronos_inventory_transition_is_exact():
     current = collections.Counter(conversion_inventory())
     for site in added:
         assert current[site] > 0, f"recorded addition missing: {site}"
+    for site in removed:
+        assert current[site] == 0, f"recorded removal still present: {site}"
+
+
+def test_tessella_inventory_transition_is_exact():
+    transition = LATER_REVIEWED_TRANSITIONS[-1]
+    assert transition is REVIEWED_TESSELLA_INVENTORY_TRANSITION
+    chronos = _ledger_data()["release_1_40_chronos"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        chronos["result_count"], chronos["result_digest"]
+    )
+    assert (transition["result_count"], transition["result_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+    )
+    added = transition["added_sites"]
+    removed = transition["removed_sites"]
+    assert len(added) == len(set(added)) == 6
+    assert len(removed) == len(set(removed)) == 2
+    assert not set(added) & set(removed)
+    assert transition["base_count"] + len(added) - len(removed) == transition["result_count"]
+    assert {site[0] for site in added} == {"src/terrain/clipmap/gpu_lod/tests.rs"}
+    assert {site[0] for site in removed} == {"src/terrain/renderer/visibility_buffer.rs"}
+    current = collections.Counter(conversion_inventory())
+    for site in added:
+        assert current[site] == 1, f"recorded addition missing or duplicated: {site}"
     for site in removed:
         assert current[site] == 0, f"recorded removal still present: {site}"
 
