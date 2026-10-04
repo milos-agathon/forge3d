@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import json
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,44 @@ requires_terrain = pytest.mark.skipif(
     not terrain_rendering_available(),
     reason="requires the TESSELLA physical-GPU lane",
 )
+
+
+def _exact_cpu_raster_ties(frame, pixels, gpu, cpu):
+    """D6 exclusions: exact edge zeros on the oracle's existing 1/256 grid.
+
+    GPU answers identify the triangle involved in a comparison; they never
+    supply geometry, coverage, depth or a tolerance to the CPU oracle.
+    """
+    snapped = np.rint(
+        np.asarray(frame["vertices"], dtype=np.float32)[:, :2] * np.float32(256)
+    ).astype(np.int64)
+    points = np.asarray(pixels, dtype=np.int64) * 256 + 128
+    ties = [[] for _ in pixels]
+    for index, source in enumerate(frame["indices"]):
+        triangle = snapped[source].copy()
+        a, b, c = triangle
+        area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        if area == 0:
+            continue
+        if area < 0:
+            triangle[[1, 2]] = triangle[[2, 1]]
+        candidates = np.flatnonzero(
+            np.all((points >= triangle.min(axis=0)) & (points <= triangle.max(axis=0)), axis=1)
+        )
+        delta = np.roll(triangle, -1, axis=0) - triangle
+        relative = points[candidates, None, :] - triangle
+        edges = delta[:, 0] * relative[:, :, 1] - delta[:, 1] * relative[:, :, 0]
+        on_edge = np.any(edges == 0, axis=1) & np.all(edges >= 0, axis=1)
+        identity = tuple(frame["identities"][index])
+        for sample, values in zip(candidates[on_edge], edges[on_edge], strict=True):
+            involved = {value for value in (gpu[sample], cpu[sample]) if value is not None}
+            if not involved or identity in involved:
+                ties[sample].append({
+                    "identity": identity,
+                    "raster_triangle_index": index,
+                    "edge_functions": [int(value) for value in values],
+                })
+    return ties
 
 
 def test_visibility_parameter_contract():
@@ -235,58 +274,94 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
     second = renderer.pick_visibility_pixels(pixels)
     assert second == first
 
-    # CPU ray intersections and raster coverage make different decisions at
-    # silhouette and primitive edges. Compare only visible centers whose
-    # complete 3x3 GPU neighborhood has one identity. A uniformly background
-    # raster neighborhood can still intersect a subpixel analytic CPU
-    # triangle, so background is covered by repeated GPU stability instead.
-    interior_indices = [
-        index
-        for index, (x, y) in enumerate(pixels)
-        if 0 < x < size[0] - 1 and 0 < y < size[1] - 1
-    ]
-    neighborhood_pixels = [
-        (x + dx, y + dy)
-        for index in interior_indices
-        for x, y in [pixels[index]]
-        for dy in (-1, 0, 1)
-        for dx in (-1, 0, 1)
-    ]
-    neighborhood_gpu = renderer.pick_visibility_pixels(neighborhood_pixels)
+    # Preserve the existing primitive-interior criterion, but actually compare
+    # 10,000 distinct CPU/GPU picks instead of discarding most random samples.
+    # Eligibility uses only raster identity; CPU answers do not select samples.
+    all_pixels = [(x, y) for y in range(size[1]) for x in range(size[0])]
+    all_gpu = renderer.pick_visibility_pixels(all_pixels)
+    identities = np.asarray(
+        [0 if value is None else 1 + (value[0] << 32) + value[1] for value in all_gpu],
+        dtype=np.uint64,
+    ).reshape(size[1], size[0])
+    centers = identities[1:-1, 1:-1]
+    stable = centers != 0
+    for dy in range(3):
+        for dx in range(3):
+            stable &= centers == identities[dy : dy + size[1] - 2, dx : dx + size[0] - 2]
+    # Keep the gated keys on their original seed-19 random-pool accounting.
     compared_indices = [
-        index
-        for offset, index in enumerate(interior_indices)
-        if len(set(neighborhood_gpu[offset * 9 : (offset + 1) * 9])) == 1
-        and neighborhood_gpu[offset * 9 + 4] is not None
+        index for index, (x, y) in enumerate(pixels)
+        if 0 < x < size[0] - 1 and 0 < y < size[1] - 1 and stable[y - 1, x - 1]
     ]
     assert compared_indices, "no unambiguous 3x3 picking neighborhoods"
-    compared_pixels = [pixels[index] for index in compared_indices]
+    random_cpu = renderer.pick_visibility_pixels_cpu(pixels)
+    frame = json.loads(renderer._visibility_cpu_frame())
+    lod_comparison = frame["lod_comparison"]
+    assert lod_comparison["submitted_equals_cpu"], lod_comparison
+    assert lod_comparison["submitted_tiles"] == lod_comparison["cpu_tiles"]
+    ties = _exact_cpu_raster_ties(frame, pixels, first, random_cpu)
+    non_tie_disagreements = [
+        {"sample_index": index, "pixel": pixel, "gpu": gpu, "cpu": cpu, "tie": False}
+        for index, (pixel, gpu, cpu, tie) in enumerate(zip(pixels, first, random_cpu, ties, strict=True))
+        if not tie and gpu != cpu
+    ]
+    record_tessella_result("visibility_unfiltered_picking", {
+        "seed": 19,
+        "samples": len(pixels),
+        "distinct_pixels": len(set(pixels)),
+        "gpu_cpu_matches": sum(a == b for a, b in zip(first, random_cpu, strict=True)),
+        "tie_exclusions": sum(bool(value) for value in ties),
+        "non_tie_compared": sum(not value for value in ties),
+        "non_tie_matches": sum(not tie and a == b for tie, a, b in zip(ties, first, random_cpu, strict=True)),
+        "non_tie_disagreements": len(non_tie_disagreements),
+        "disagreements": non_tie_disagreements,
+        "tie_pixels": [
+            {"sample_index": index, "pixel": pixels[index], "triangles": value}
+            for index, value in enumerate(ties) if value
+        ],
+        "tie_classification": "exact zero edge function on the existing 1/256 snap grid",
+        "lod_comparison": lod_comparison,
+    })
+    assert not non_tie_disagreements, non_tie_disagreements
     compared_gpu = [first[index] for index in compared_indices]
-    compared_cpu = renderer.pick_visibility_pixels_cpu(compared_pixels)
-    if compared_gpu != compared_cpu:
+    compared_cpu = [random_cpu[index] for index in compared_indices]
+    assert compared_gpu == compared_cpu
+
+    eligible_y, eligible_x = np.nonzero(stable)
+    assert len(eligible_x) >= 10_000, "fewer than 10,000 unambiguous visible pixels"
+    selected = rng.choice(len(eligible_x), size=10_000, replace=False)
+    eligible_pixels = [
+        (int(eligible_x[index]) + 1, int(eligible_y[index]) + 1) for index in selected
+    ]
+    assert len(set(eligible_pixels)) == 10_000
+    eligible_gpu = [all_gpu[y * size[0] + x] for x, y in eligible_pixels]
+    eligible_repeat = renderer.pick_visibility_pixels(eligible_pixels)
+    assert eligible_repeat == eligible_gpu
+    eligible_cpu = renderer.pick_visibility_pixels_cpu(eligible_pixels)
+    eligible_compared = sum(bool(stable[y - 1, x - 1]) for x, y in eligible_pixels)
+    if eligible_gpu != eligible_cpu:
         mismatch = next(
             index
             for index, (gpu_value, cpu_value) in enumerate(
-                zip(compared_gpu, compared_cpu, strict=True)
+                zip(eligible_gpu, eligible_cpu, strict=True)
             )
             if gpu_value != cpu_value
         )
         mismatch_count = sum(
             gpu_value != cpu_value
             for gpu_value, cpu_value in zip(
-                compared_gpu, compared_cpu, strict=True
+                eligible_gpu, eligible_cpu, strict=True
             )
         )
-        sample_index = compared_indices[mismatch]
         pytest.fail(
             repr({
                 "mismatch_count": mismatch_count,
-                "compared_count": len(compared_indices),
-                "excluded_count": len(first) - len(compared_indices),
-                "first_index": sample_index,
-                "pixel": pixels[sample_index],
-                "gpu": compared_gpu[mismatch],
-                "cpu": compared_cpu[mismatch],
+                "compared_count": eligible_compared,
+                "excluded_count": len(eligible_pixels) - eligible_compared,
+                "first_index": mismatch,
+                "pixel": eligible_pixels[mismatch],
+                "gpu": eligible_gpu[mismatch],
+                "cpu": eligible_cpu[mismatch],
             })
         )
     assert len(first) == 10_000
@@ -318,6 +393,17 @@ def test_visibility_resolve_pays_once_and_picking_is_stable_for_10000_pixels():
             ),
             "gpu_cpu_picking_compared": len(compared_indices),
             "gpu_cpu_picking_excluded": len(first) - len(compared_indices),
+            "picking_sample_selection": "original random pool; visible centers with one 3x3 raster identity",
+            "eligible_picking_samples": len(eligible_pixels),
+            "eligible_gpu_cpu_picking_compared": eligible_compared,
+            "eligible_gpu_cpu_picking_excluded": len(eligible_pixels) - eligible_compared,
+            "eligible_gpu_cpu_picking_matches": sum(
+                a == b for a, b in zip(eligible_gpu, eligible_cpu, strict=True)
+            ),
+            "eligible_gpu_picking_repeat_matches": sum(
+                a == b for a, b in zip(eligible_gpu, eligible_repeat, strict=True)
+            ),
+            "lod_comparison": lod_comparison,
             "gpu_cpu_picking_matches": sum(
                 gpu_value == cpu_value
                 for gpu_value, cpu_value in zip(

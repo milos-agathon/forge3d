@@ -51,9 +51,11 @@ def test_public_surface_is_exported():
         "splat",
         "load_gaussian_splats",
         "render_fused",
+        "render_fused_sequence",
         "GaussianSplatCloud",
         "FusedCamera",
         "FusedTerrain",
+        "FusedView",
         "FusedPointCloud",
         "FusedRenderResult",
         "SplatFusionUnavailable",
@@ -62,6 +64,9 @@ def test_public_surface_is_exported():
         assert hasattr(f3d, name), name
     assert f3d.render_fused is splat.render_fused
     assert f3d.load_gaussian_splats is splat.load_gaussian_splats
+    assert f3d.FusedView is splat.FusedView
+    assert f3d.render_fused_sequence is splat.render_fused_sequence
+    assert {"FusedView", "render_fused_sequence"} <= set(splat.__all__)
     assert set(splat.__all__) <= set(dir(splat))
 
 

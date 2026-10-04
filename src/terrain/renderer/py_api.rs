@@ -1033,6 +1033,14 @@ impl TerrainRenderer {
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     }
 
+    /// Read-only snapped CPU geometry and independently computed LOD evidence.
+    #[pyo3(text_signature = "(self)")]
+    fn _visibility_cpu_frame(&self) -> PyResult<String> {
+        self.scene
+            .visibility_cpu_frame()
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    }
+
     /// VERITAS: resident-tile provenance for unresolved shader demand in the
     /// last rendered frame.
     ///
@@ -1133,7 +1141,15 @@ impl TerrainRenderer {
     /// ancestor chain. The option never performs synchronous I/O. Flat
     /// streaming accepts `lod` in `0..=6`, bounding complete-root expansion
     /// to at most 64 x 64 live mosaic tiles.
-    #[pyo3(signature = (terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, dem=None, coarse_prefill=true, max_resident_bytes=None))]
+    ///
+    /// Two independent limits apply. `max_resident_bytes` bounds the
+    /// height-tile working set: resident tile slots times per-tile texel
+    /// bytes (R32 height + R8 coverage); it must hold at least one tile.
+    /// `max_gpu_visible_bytes` is the hard ceiling on every tracked height
+    /// allocation (atlas, page table, upload ring, overview double residency)
+    /// and is always clamped to the ORBIS 512 MiB envelope; `None` selects
+    /// that envelope. Construction fails if either limit cannot be met.
+    #[pyo3(signature = (terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, dem=None, coarse_prefill=true, max_resident_bytes=None, max_gpu_visible_bytes=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn enable_height_streaming(
         &mut self,
@@ -1147,6 +1163,7 @@ impl TerrainRenderer {
         dem: Option<PyReadonlyArray2<f32>>,
         coarse_prefill: bool,
         max_resident_bytes: Option<u64>,
+        max_gpu_visible_bytes: Option<u64>,
     ) -> PyResult<()> {
         use std::sync::Arc;
 
@@ -1193,6 +1210,7 @@ impl TerrainRenderer {
             reader,
             coarse_prefill,
             max_resident_bytes,
+            max_gpu_visible_bytes,
             false,
             crate::terrain::page_table::OverviewUvTransform::identity(),
         )
@@ -1207,8 +1225,10 @@ impl TerrainRenderer {
     /// compile time does not alter this method's coordinate or mesh semantics;
     /// planetary callers must use `enable_height_streaming_cog_globe`. Flat
     /// streaming accepts `lod` in `0..=6` so root expansion remains bounded.
+    /// `max_resident_bytes` and `max_gpu_visible_bytes` follow
+    /// `enable_height_streaming`.
     #[cfg(feature = "cog_streaming")]
-    #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None, overview_lonlat_bounds=None))]
+    #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None, overview_lonlat_bounds=None, max_gpu_visible_bytes=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn enable_height_streaming_cog(
         &mut self,
@@ -1223,6 +1243,7 @@ impl TerrainRenderer {
         coarse_prefill: bool,
         max_resident_bytes: Option<u64>,
         overview_lonlat_bounds: Option<(f64, f64, f64, f64)>,
+        max_gpu_visible_bytes: Option<u64>,
     ) -> PyResult<()> {
         if !(terrain_extent_m.is_finite() && terrain_extent_m > 0.0) {
             return Err(PyRuntimeError::new_err(
@@ -1253,6 +1274,7 @@ impl TerrainRenderer {
             reader,
             coarse_prefill,
             max_resident_bytes,
+            max_gpu_visible_bytes,
             false,
             overview,
         )
@@ -1266,8 +1288,10 @@ impl TerrainRenderer {
 
     /// Enable camera-relative planetary COG height streaming with f64 ECEF
     /// camera updates and bounded target-LOD footprints.
+    /// `max_resident_bytes` and `max_gpu_visible_bytes` follow
+    /// `enable_height_streaming`.
     #[cfg(all(feature = "cog_streaming", feature = "enable-globe"))]
-    #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None, overview_lonlat_bounds=None))]
+    #[pyo3(signature = (dataset, terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, coarse_prefill=true, max_resident_bytes=None, overview_lonlat_bounds=None, max_gpu_visible_bytes=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn enable_height_streaming_cog_globe(
         &mut self,
@@ -1282,6 +1306,7 @@ impl TerrainRenderer {
         coarse_prefill: bool,
         max_resident_bytes: Option<u64>,
         overview_lonlat_bounds: Option<(f64, f64, f64, f64)>,
+        max_gpu_visible_bytes: Option<u64>,
     ) -> PyResult<()> {
         if !(terrain_extent_m.is_finite() && terrain_extent_m > 0.0) {
             return Err(PyRuntimeError::new_err(
@@ -1310,6 +1335,7 @@ impl TerrainRenderer {
             reader,
             coarse_prefill,
             max_resident_bytes,
+            max_gpu_visible_bytes,
             true,
             overview,
         )

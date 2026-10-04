@@ -394,15 +394,16 @@ fn height_page_sample_covered(entry: HeightPageTableEntry, uv: vec2<f32>) -> vec
         vec2<f32>(0.0),
         vec2<f32>(1.0),
     );
-    let atlas_texel_x = det_barrier(f32(atlas_min_x) + det_barrier(local_uv.x * f32(atlas_max_x - atlas_min_x)));
-    let atlas_texel_y = det_barrier(f32(atlas_min_y) + det_barrier(local_uv.y * f32(atlas_max_y - atlas_min_y)));
-    let atlas_0 = vec2<i32>(i32(floor(atlas_texel_x)), i32(floor(atlas_texel_y)));
+    let local_texel_x = det_barrier(local_uv.x * f32(atlas_max_x - atlas_min_x));
+    let local_texel_y = det_barrier(local_uv.y * f32(atlas_max_y - atlas_min_y));
+    let local_0 = vec2<i32>(i32(floor(local_texel_x)), i32(floor(local_texel_y)));
+    let atlas_0 = local_0 + vec2<i32>(i32(atlas_min_x), i32(atlas_min_y));
     let atlas_1 = vec2<i32>(
         min(atlas_0.x + 1, i32(atlas_max_x)),
         min(atlas_0.y + 1, i32(atlas_max_y)),
     );
     let atlas_blend = clamp(
-        vec2<f32>(atlas_texel_x - f32(atlas_0.x), atlas_texel_y - f32(atlas_0.y)),
+        vec2<f32>(local_texel_x - f32(local_0.x), local_texel_y - f32(local_0.y)),
         vec2<f32>(0.0),
         vec2<f32>(1.0),
     );

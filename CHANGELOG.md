@@ -5,10 +5,12 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+
+## [1.41.0] - 2026-10-04
 ### Added
 - SPLAT-FUSED: `forge3d.render_fused` path-traces 3D Gaussian splats, a COPC LiDAR point cloud and DEM terrain in one ReSTIR pass, so each representation shadows the others: a splat-captured tree shadows the terrain, a ridge shadows the splats and the LiDAR. `forge3d.load_gaussian_splats` reads 3DGS `.ply` files into a `GaussianSplatCloud`. Behind the new `splat-fusion` Cargo feature, which the wheel enables. See `docs/splat-fused.md`.
-- SPLAT-FUSED: splats and points are paged from disk into a fixed GPU pool on demand, so scene size is not limited by GPU memory. The acceptance scene holds 1.0 billion primitives and renders with a tracked peak of about 131 MiB against the 512 MiB budget. `forge3d.build_splat_page_store` converts a `.ply` of any size to a page store.
-- SPLAT-FUSED: on the NVIDIA Vulkan lane the fused shadows are compared with an AEQUITAS path-traced reference (`forge3d.render_fused_reference`); shadow IoU must exceed 0.9 for splat-on-terrain, LiDAR-on-terrain, terrain-on-splat and terrain-on-LiDAR. Adds `tests/golden/splat_fusion/fused_fixture.png`.
+- SPLAT-FUSED: splats and points are paged from disk into a fixed GPU pool on demand, so scene size is not limited by GPU memory. The acceptance scene holds 1.0 billion primitives and renders with a tracked peak of about 131 MiB against the 512 MiB budget. `forge3d.splat.build_splat_page_store` converts a `.ply` of any size to a page store.
+- SPLAT-FUSED: on the NVIDIA Vulkan lane the fused shadows are compared with an AEQUITAS path-traced reference (`forge3d.splat.render_fused_reference`); shadow IoU must exceed 0.9 for splat-on-terrain, LiDAR-on-terrain, terrain-on-splat and terrain-on-LiDAR. Adds `tests/golden/splat_fusion/fused_fixture.png`.
 - SPLAT-FUSED: `render_fused` renders in seamless tiles (`tile=(w, h)`; default up to one megapixel per tile), so per-pixel GPU memory no longer grows with the output size: a 1920x1080 frame renders in 471 MiB, and 1080p or 4K at 960x540 tiles peaks exactly where a single 960x540 render does. A tiled render equals the single-tile render bit for bit. Without `return_aovs` the AOV targets are not allocated. Fused renders now always use self-only spatial ReSTIR reuse, so soft shadow edges are slightly grainier at low sample counts.
 - SPLAT-FUSED: terrain can be coloured with an 8-bit sRGB map (`FusedTerrain(albedo_map=..., albedo_sampling=...)`, 4 bytes per cell).
 - SPLAT-FUSED: terrain is shaded with interpolated vertex normals that are continuous across DEM cells (`terrain_smooth_normals=True`), removing the cell-edge streaks on steep cliffs; `False` restores the per-cell normal.
@@ -26,6 +28,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - CI: the ORBIS wasm lane now reaches and runs its test. It sets `FORGE3D_NO_BOOTSTRAP=1`, so the test `conftest.py` no longer imports `forge3d` (and numpy) before the test starts, and the wasm32 build compiles again (the browser `RenderError` stub lacked `Budget` and `Display`).
 
 ### Changed
+- Bumped the package and PyPI version to `1.41.0`.
 - AETHER's spectral closure (DeltaE2000 < 2 at all 189 sky samples, terrain saturation falloff within 10%, and the GPU sunset golden) now runs on the physical NVIDIA Vulkan CI runner and is required for full acceptance. Hosted CI has no physical Metal adapter, so the Metal-only gate never ran there. Thresholds are unchanged; Metal remains supported. Adds `tests/golden/atmosphere/aether_gpu_sunset_sweep.nvidia-vulkan.png`. Owner decision, 2026-10-01.
 - CI: AETHER's offline-bake tests now run even when the preceding workspace `cargo test` step fails.
 

@@ -173,6 +173,8 @@ pub struct TerrainScene {
     pub(super) material_vt: Mutex<super::virtual_texture::TerrainMaterialVT>,
     pub(super) visibility_buffer: Mutex<Option<super::visibility_buffer::TerrainVisibilityBuffer>>,
     pub(super) cpu_visibility_oracle: Mutex<Option<super::visibility_buffer::CpuVisibilityOracle>>,
+    pub(super) pending_cpu_visibility_oracle:
+        Mutex<Option<super::visibility_buffer::PendingCpuVisibilityOracle>>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
     pub(super) geometry_provider: Option<TerrainGeometryProvider>,
     pub(super) two_phase_culler: Option<crate::terrain::culling::two_phase::TwoPhaseTerrainCuller>,
