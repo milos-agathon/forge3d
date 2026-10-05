@@ -1,0 +1,271 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
+     Running unittests src\lib.rs (target\debug\deps\forge3d-2666d59f0fff9e0c.exe)
+
+running 109 tests
+test verify::contract::tests::parses_typed_contract ... ok
+test verify::contract::tests::gi_output_range_covers_all_additive_sources ... ok
+test verify::contract::tests::contract_requires_explicit_inputs_and_outputs ... ok
+test verify::contract::tests::ledger_is_structural_and_fail_closed ... ok
+test verify::contract::tests::contract_rejects_unknown_missing_duplicate_and_bad_ranges ... ok
+test verify::contract::tests::hybrid_contract_bounds_index_and_target_arrays_directionally ... ok
+test verify::domain::tests::add_and_sub_round_large_exponent_gaps_to_the_large_operand ... ok
+test verify::domain::tests::branch_refinement_join_and_widen_are_conservative ... ok
+test verify::domain::tests::division_fails_closed_outside_its_accuracy_range ... ok
+test verify::determinism_lint::tests::verify_raw_float_divide_is_rejected ... ok
+test verify::domain::tests::dot_and_normalize_are_component_wise ... ok
+test verify::domain::tests::exceptional_boundaries_remain_contained_and_unproven ... ok
+test verify::contract::tests::entry_contract_contains_only_reachable_argument_members ... ok
+test verify::contract::tests::indices_relation_does_not_bound_the_indices_buffer_length ... ok
+test verify::determinism_lint::tests::verify_identity_callee_is_transparent ... ok
+test verify::determinism_lint::tests::verify_barriered_argument_passes ... ok
+test verify::determinism_lint::tests::verify_struct_field_store_edge_is_rejected ... ok
+test verify::determinism_lint::tests::verify_barrier_reaching_entry_requires_seed ... ok
+test verify::determinism_lint::tests::verify_product_in_another_lane_is_not_blamed ... ok
+test verify::domain::tests::fma_joins_fused_and_decomposed_results ... ok
+test verify::determinism_lint::tests::verify_product_argument_fused_by_callee_is_rejected ... ok
+test verify::contract::tests::dimensions_cover_requires_an_image_with_width_and_height ... ok
+test verify::domain::tests::invalid_results_retain_indeterminate_finite_values_after_guards ... ok
+test verify::domain::tests::native_ops_include_the_vulkan_accuracy_envelope ... ok
+test verify::determinism_lint::tests::verify_deep_call_tail_cannot_escape_lint ... ok
+test verify::domain::tests::ordered_refinement_preserves_feasible_infinite_branches ... ok
+test verify::domain::tests::refinement_keeps_subnormal_ftz_comparison_alternatives ... ok
+test verify::domain::tests::refinement_restores_subnormals_only_when_the_branch_can_use_them ... ok
+test verify::domain::tests::scalar_transfers_cover_the_required_operations ... ok
+test verify::domain::tests::sqrt_contains_the_inherited_reciprocal_root_envelope ... ok
+test verify::domain::tests::subnormal_inputs_and_results_include_ftz_zeros ... ok
+test verify::domain::tests::subnormal_min_max_and_clamp_keep_permitted_operands ... ok
+test verify::domain::tests::tracks_exceptional_values_and_negative_zero ... ok
+test verify::domain::tests::unsafe_operations_remain_unproven ... ok
+test verify::domain::tests::widening_preserves_exceptional_only_states ... ok
+test verify::domain::tests::zero_and_ftz_preserve_both_zero_signs ... ok
+test verify::contract::tests::determinism_contract_covers_every_det_lemma ... ok
+test verify::ir::tests::determinism_source_hash_is_pinned ... ok
+test verify::ir::tests::bounded_loop_reaches_a_fixed_point ... ok
+test verify::ir::tests::cast_coordinates_preserve_guard_relations ... ok
+test verify::ir::tests::count_within_invariant_bounds_dynamic_prefix_indices ... ok
+test verify::ir::tests::inspect_deterministic_kernel_ir_shape ... ignored
+test verify::ir::tests::entry_point_output_ranges_are_checked ... ok
+test verify::ir::tests::exceptional_math_results_are_rejected ... ok
+test verify::ir::tests::false_equality_edge_excludes_zero_for_division ... ok
+test verify::ir::tests::distance_and_nonzero_branch_prove_normalize ... ok
+test verify::ir::tests::entry_structs_and_uniform_members_are_seeded_by_name ... ok
+test verify::ir::tests::det_body_mutation_invalidates_summary ... ok
+test verify::contract::tests::real_sidecar_rejects_omitted_renamed_and_bogus_members ... ok
+test verify::ir::tests::explicitly_allowed_nan_output_still_rejects_infinity ... ok
+test verify::ir::tests::dynamic_buffer_access_uses_the_declared_length ... ok
+test verify::ir::tests::calls_locals_and_branches_are_interpreted ... ok
+test verify::contract::tests::every_committed_contract_uses_the_strict_schema ... ok
+test verify::ir::tests::length_guard_proves_normalize ... ok
+test verify::ir::tests::image_store_checks_coordinates_and_written_range ... ok
+test verify::contract::tests::real_sidecar_rejects_omitted_and_renamed_resources ... ok
+test verify::ir::tests::integer_shift_ranges_keep_bit_trick_seeds_finite ... ok
+test verify::ir::tests::source_hash_ignores_platform_line_endings ... ok
+test verify::ir::tests::hybrid_renderer_source_hash_is_pinned ... ok
+test verify::ir::tests::independently_clamped_neighbor_axes_compose_to_an_in_bounds_coordinate ... ok
+test verify::ir::tests::non_convergent_loop_emits_widening_alarm ... ok
+test verify::ir::tests::negative_signed_buffer_index_is_oob ... ok
+test verify::ir::tests::negative_signed_texture_coordinate_is_oob ... ok
+test verify::ir::tests::normalize_uses_any_definitely_nonzero_component ... ok
+test verify::ir::tests::positive_fraction_does_not_bypass_subnormal_ftz ... ok
+test verify::ir::tests::positive_fraction_preserves_native_division_ulp_margin_near_one ... ok
+test verify::ir::tests::runtime_array_length_guard_proves_dynamic_access ... ok
+test verify::ir::tests::rounded_unit_coordinate_is_bounded_by_texture_dimensions ... ok
+test verify::ir::tests::sqrt_of_nonnegative_interval_is_finite ... ok
+test verify::ir::tests::strict_positive_branch_excludes_zero_denominator ... ok
+test verify::ir::tests::private_global_initializer_seeds_entry_output ... ok
+test verify::ir::tests::switch_and_array_length_are_interpreted ... ok
+test verify::ir::tests::texture_level_queries_are_bounded_integers ... ok
+test verify::ir::tests::uninitialized_function_locals_start_at_wgsl_zero ... ok
+test verify::ir::tests::vector_arithmetic_is_proved_from_component_ranges ... ok
+test verify::ir::tests::vector_components_are_seeded_by_name ... ok
+test verify::ir::tests::validated_ir_rejects_a_contract_that_allows_zero_denominator ... ok
+test verify::ir::tests::pointer_argument_helpers_are_interpreted_and_copied_back ... ok
+test verify::ir::tests::portable_height_bilinear_load_is_bounded_and_range_preserving ... ok
+test verify::ir::tests::vector_math_broadcasts_scalar_bounds ... ok
+test verify::tests::ledger_coverage_rejects_overlap_unknown_and_missing_rows ... ok
+test verify::ir::tests::texture_load_uses_declared_dimensions_and_sample_range ... ok
+test verify::contract::tests::semantic_references_reject_bogus_suffixes ... ok
+test verify::ir::tests::array_texture_load_uses_runtime_layer_count_guard ... ok
+test verify::ir::tests::xorshift_body_mutation_invalidates_callers ... ok
+test verify::ir::tests::nested_array_field_writes_preserve_types_and_reject_unsafe_values ... ok
+test verify::ir::tests::terrain_renderer_source_hash_is_pinned ... ok
+test verify::ir::tests::deterministic_division_accepts_a_positive_max_guard ... ok
+test verify::tests::gi_budget_checkpoint_is_proven ... ok
+test verify::tests::pt_shade_baseline_proven_then_guard_ablation_rejected ... ok
+test verify::tests::terrain_publish_proves_unit_and_zero_targets_and_rejects_missing_m_guard ... ok
+test verify::contract::tests::every_invariant_operator_rejects_wrong_naga_operand_types ... ok
+test verify::tests::brdf_checkpoint_is_proven ... ok
+test verify::tests::renderer_semantic_checkpoints_are_proven ... ok
+test verify::tests::brdf_half_vector_guard_ablation_is_rejected ... ok
+determinism rewrite: 0 edits (dry run)
+  skip: aether_blit:fs_main:1028: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:hard_shadow:2306: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:pcf_shadow:2347: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:eval_ibl:2516: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:eval_ibl:2527: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:eval_ibl:2531: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_reflection_probe_array:2956: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:nephele_same_medium_direct_transmittance:3959: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:nephele_same_medium_sky_transmittance:3965: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_water_reflection:4505: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_shadow_vsm_terrain:4571: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_shadow_evsm_terrain:4602: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_shadow_msm_terrain:4649: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_shadow_pcf_terrain:4788: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_shadow_pcf_terrain:4807: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_shadow_pcf_terrain:4873: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_shadow_pcf_terrain:4909: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:terrain_vt_resolve_family_uv:6126: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_material_layer_uv:6334: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:material_map_mask:6380: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:apply_material_normal_map:6387: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:apply_material_roughness_map:6395: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:sample_dem_detail_normal:6533: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:eval_ibl_split:6948: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:eval_ibl_split:6955: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:eval_ibl_split:6959: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:7456: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:7786: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8133: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8513: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8519: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8525: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8536: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8541: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8546: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8724: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8798: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8932: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8950: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: terrain:shade_main:8960: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:hard_shadow:2306: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:pcf_shadow:2347: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:eval_ibl:2516: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:eval_ibl:2527: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:eval_ibl:2531: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_reflection_probe_array:2956: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:nephele_same_medium_direct_transmittance:3959: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:nephele_same_medium_sky_transmittance:3965: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_water_reflection:4505: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_shadow_vsm_terrain:4571: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_shadow_evsm_terrain:4602: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_shadow_msm_terrain:4649: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_shadow_pcf_terrain:4788: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_shadow_pcf_terrain:4807: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_shadow_pcf_terrain:4873: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_shadow_pcf_terrain:4909: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:terrain_vt_resolve_family_uv:6126: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_material_layer_uv:6334: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:material_map_mask:6380: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:apply_material_normal_map:6387: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:apply_material_roughness_map:6395: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:sample_dem_detail_normal:6533: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:eval_ibl_split:6948: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:eval_ibl_split:6955: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:eval_ibl_split:6959: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:7456: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:7786: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8133: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8513: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8519: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8525: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8536: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8541: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8546: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8724: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8798: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8932: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8950: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_write:shade_main:8960: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:hard_shadow:2306: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:pcf_shadow:2347: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:eval_ibl:2516: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:eval_ibl:2527: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:eval_ibl:2531: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_reflection_probe_array:2956: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:nephele_same_medium_direct_transmittance:3959: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:nephele_same_medium_sky_transmittance:3965: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_water_reflection:4505: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_shadow_vsm_terrain:4571: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_shadow_evsm_terrain:4602: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_shadow_msm_terrain:4649: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_shadow_pcf_terrain:4788: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_shadow_pcf_terrain:4807: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_shadow_pcf_terrain:4873: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_shadow_pcf_terrain:4909: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:terrain_vt_resolve_family_uv:6126: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_material_layer_uv:6334: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:material_map_mask:6380: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:apply_material_normal_map:6387: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:apply_material_roughness_map:6395: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:sample_dem_detail_normal:6533: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:eval_ibl_split:6948: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:eval_ibl_split:6955: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:eval_ibl_split:6959: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:7456: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:7786: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8133: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8513: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8519: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8525: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8536: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8541: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8546: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8724: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8798: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8932: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8950: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: visbuffer_resolve:shade_main:8960: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: ibl_equirect:cs_equirect_to_cubemap:910: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: ibl_prefilter:sample_environment:886: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: ibl_prefilter:cs_specular_prefilter:1024: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: hdr_tonemap:sample_lut:1083: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: hdr_tonemap:fs_main:1092: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: csm:sample_shadow_basic:1163: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: csm:sample_shadow_pcf:1218: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: csm:sample_shadow_poisson_pcf:1293: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: csm:sample_shadow_pcss:1483: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:sample_shadow_basic:1163: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:sample_shadow_pcf:1218: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:sample_shadow_poisson_pcf:1293: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:sample_shadow_pcss:1483: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:hard_shadow:2801: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:pcf_shadow:2842: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:eval_ibl:3011: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:eval_ibl:3022: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:eval_ibl:3026: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:sample_normal_map:3385: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:shade_pbr:3427: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:shade_pbr:3433: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:shade_pbr:3443: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:shade_pbr:3448: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:shade_pbr:3522: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:shade_pbr:3587: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:fs_pbr_simple:3638: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:fs_pbr_simple:3645: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:fs_pbr_simple:3652: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:fs_debug_metallic_roughness:3730: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+  skip: pbr:fs_debug_base_color:3743: hardware_sample: filtered/compared texture sampling is hardware texel selection; use textureLoad + pinned bilinear
+test verify::det_rewrite::instrument::det_instrument_rewrite ... ok
+test verify::ir::tests::current_determinism_lemmas_are_proved_through_ir ... ok
+test verify::tests::small_semantic_checkpoints_are_proven ... ok
+test verify::tests::aether_terrain_segment_is_proven_and_zero_division_is_rejected ... ok
+test verify::domain::tests::one_million_deterministic_samples_are_contained ... ok
+test verify::tests::hybrid_body_mutation_invalidates_summaries ... ok
+test verify::tests::aether_atmospheric_apply_is_proven_and_ablation_rejected ... ok
+test verify::tests::aether_atmospheric_apply_rejects_raw_zero_normalization ... ok
+test verify::tests::ablations_are_rejected has been running for over 60 seconds
+test verify::tests::proven_list_is_large_enough has been running for over 60 seconds
+test verify::tests::runtime_assert_report_fails_closed_without_observations has been running for over 60 seconds
+test verify::tests::terrain_helper_body_mutation_invalidates_summaries has been running for over 60 seconds
+test verify::tests::terrain_pbr_baseline_proven_then_ablation_rejected has been running for over 60 seconds
+test verify::tests::unsafe_fixture_is_rejected has been running for over 60 seconds
+test verify::tests::terrain_pbr_baseline_proven_then_ablation_rejected ... ok
+test verify::tests::terrain_helper_body_mutation_invalidates_summaries ... ok
+test verify::tests::unsafe_fixture_is_rejected ... ok
+test verify::tests::proven_list_is_large_enough ... ok
+test verify::tests::ablations_are_rejected ... ok
+test verify::tests::runtime_assert_report_fails_closed_without_observations ... ok
+
+test result: ok. 108 passed; 0 failed; 1 ignored; 0 measured; 1568 filtered out; finished in 135.03s
+

@@ -1106,13 +1106,13 @@ impl RendererGraphExecution {
         );
         self.queue.submit(Some(encoder.finish()));
         self.submitted_command_buffers += 1;
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
         let slice = staging.slice(..);
         let (sender, receiver) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
         receiver
             .recv()
             .map_err(|error| RenderError::render(format!("readback callback failed: {error}")))?

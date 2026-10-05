@@ -170,7 +170,7 @@ impl TerrainSpike {
 
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
         let data = slice.get_mapped_range();
 
         let mut pixels = Vec::with_capacity((unpadded_bpr * self.height) as usize);

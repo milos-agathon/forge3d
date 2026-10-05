@@ -1,0 +1,6 @@
+🍹 Building a mixed python/rust project
+🔗 Found pyo3 bindings with abi3-py3.10 support
+📡 Using build options features, bindings from pyproject.toml
+   Compiling forge3d v1.41.0 (D:\forge3d\.worktrees\nephele-172-completion)
+    Finished `release` profile [optimized] target(s) in 5m 57s
+📦 Built wheel for abi3 Python ≥ 3.10 to wheels-nephele-round1-final\forge3d-1.41.0-cp310-abi3-win_amd64.whl

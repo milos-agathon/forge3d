@@ -1,0 +1,13 @@
+{
+  "files": {
+    "b1-report.json": "fd392ff7a29e68c99c06f31519dc33bfe9054b00cfe3c4b10f04fe78d84e3d96",
+    "camera-contract.json": "b57b44158d5382cd545a8403fc9fd5619de4228fc19970ea7aed9957e168c611",
+    "candidate-diagnostics.json": "645c0dcb2696f9fe58528e31371c8bc474f423b76d098a335495b76b0f75901d",
+    "cloud-shadow-aov.npy": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60",
+    "in-scatter.npy": "bb4fe1048220408db98f59e0a7e4fd3c69b34c7a8ef4d1e953c47a2f609a587c",
+    "medium-disabled-rgb.npy": "f833a79cc03506c8a9342eb2fd114f0b8baf727fe0d11298589135833bc8eb50",
+    "optical-depth.npy": "ee626fcab328f64326dacf2bc4b2da229ded37a7b1b37c655166ac466134720b",
+    "realtime-rgb.npy": "0daeaed52ba10b76df0284884897819b81d910765db858c7f2257691dfbb89ab",
+    "transmittance.npy": "63e9e1a8990b3236552c6c822ced995eedb588b3fea24f3530a6514f9b2580b8"
+  }
+}

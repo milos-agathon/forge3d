@@ -1,0 +1,162 @@
+CI Preflight	Materialize manual-dispatch candidate tree	﻿2026-09-30T23:03:52.4603337Z ##[group]Run set -euo pipefail
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4603616Z [36;1mset -euo pipefail[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4603781Z [36;1mtest "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4603991Z [36;1mgit fetch --no-tags origin "$CANDIDATE_HEAD_SHA"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4604210Z [36;1mtest "$(git rev-parse FETCH_HEAD)" = "$CANDIDATE_HEAD_SHA"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4604434Z [36;1mgit config --local user.name "github-actions[bot]"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4604703Z [36;1mgit config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4604976Z [36;1mgit merge --no-commit --no-ff "$CANDIDATE_HEAD_SHA"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4605183Z [36;1mtest "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4605394Z [36;1mtest "$(git rev-parse MERGE_HEAD)" = "$CANDIDATE_HEAD_SHA"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4605632Z [36;1mprintf 'policy_base_sha=%s\ncandidate_head_sha=%s\n' \[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4605874Z [36;1m  "$POLICY_BASE_SHA" "$CANDIDATE_HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"[0m
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4658918Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4659113Z env:
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4659229Z   CARGO_TERM_COLOR: always
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4659359Z   RUST_BACKTRACE: 1
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4659516Z   POLICY_BASE_SHA: 2c5fb1614d3719fc7eaab9efb903f02a9f24e60c
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4659732Z   CANDIDATE_HEAD_SHA: 26f4b2af5583a18d24ca495a308a3618a764f2b5
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4659909Z ##[endgroup]
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4796917Z From https://github.com/milos-agathon/forge3d
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.4797319Z  * branch              26f4b2af5583a18d24ca495a308a3618a764f2b5 -> FETCH_HEAD
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5749438Z Auto-merging .github/workflows/ci.yml
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5749744Z Auto-merging CHANGELOG.md
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5749927Z Auto-merging python/forge3d/__init__.py
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5750129Z Auto-merging python/forge3d/__init__.pyi
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5750308Z Auto-merging src/terrain/mod.rs
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5750485Z Auto-merging src/terrain/render_params/core.rs
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5750681Z Auto-merging src/terrain/render_params/decode_core.rs
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5750884Z Auto-merging src/terrain/render_params/private_impl.rs
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5751066Z Auto-merging src/terrain/renderer/py_api.rs
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5751245Z Auto-merging tests/data/world_coord_f32_ledger.json
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5751472Z CONFLICT (content): Merge conflict in tests/data/world_coord_f32_ledger.json
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5751711Z Auto-merging tests/test_api_contracts.py
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5751889Z Auto-merging tests/test_no_silent_degradation.py
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5752112Z Auto-merging tests/test_render_certificate_contract.py
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5752319Z Auto-merging tests/test_world_coord_f32_gate.py
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5752942Z CONFLICT (content): Merge conflict in tests/test_world_coord_f32_gate.py
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5760729Z Automatic merge failed; fix conflicts and then commit the result.
+CI Preflight	Materialize manual-dispatch candidate tree	2026-09-30T23:03:52.5782785Z ##[error]Process completed with exit code 1.
+PR Core Success	Enforce the hosted core contract	﻿2026-09-30T23:03:58.6591127Z ##[group]Run test 'failure' = success
+PR Core Success	Enforce the hosted core contract	2026-09-30T23:03:58.6592019Z [36;1mtest 'failure' = success[0m
+PR Core Success	Enforce the hosted core contract	2026-09-30T23:03:58.6592750Z [36;1mtest 'skipped' = success[0m
+PR Core Success	Enforce the hosted core contract	2026-09-30T23:03:58.7613047Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+PR Core Success	Enforce the hosted core contract	2026-09-30T23:03:58.7614266Z env:
+PR Core Success	Enforce the hosted core contract	2026-09-30T23:03:58.7614862Z   CARGO_TERM_COLOR: always
+PR Core Success	Enforce the hosted core contract	2026-09-30T23:03:58.7615520Z   RUST_BACKTRACE: 1
+PR Core Success	Enforce the hosted core contract	2026-09-30T23:03:58.7616190Z ##[endgroup]
+PR Core Success	Enforce the hosted core contract	2026-09-30T23:03:58.7858844Z ##[error]Process completed with exit code 1.
+Full Acceptance Summary	Enforce every selected acceptance family	﻿2026-09-30T23:04:04.8780285Z ##[group]Run failed=0
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8781412Z [36;1mfailed=0[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8782211Z [36;1mcheck_selected() {[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8783419Z [36;1m  selected="$1"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8784205Z [36;1m  result="$2"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8784959Z [36;1m  label="$3"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8786050Z [36;1m  if [ "$selected" = "true" ] && [ "$result" != "success" ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8787402Z [36;1m    echo "::error::$label was selected but finished as $result"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8788505Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8789470Z [36;1m  elif [ "$selected" != "true" ] && [ "$result" != "skipped" ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8790848Z [36;1m    echo "::error::$label was not selected but finished as $result"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8791979Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8792923Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8793669Z [36;1m}[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8794460Z [36;1mif [ 'failure' != 'success' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8795567Z [36;1m  echo "::error::PR Core Success finished as failure"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8796737Z [36;1m  failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8797444Z [36;1mfi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8798114Z [36;1mfull_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8799006Z [36;1mm06_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8799840Z [36;1mf3dz_physical_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8800892Z [36;1manamnesis_physical_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8801881Z [36;1mtessella_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8803017Z [36;1mhelios_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8803986Z [36;1mnephele_selected="true"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8804866Z [36;1mrender_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8805753Z [36;1mf3dz_hosted_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8806729Z [36;1manamnesis_hosted_selected="false"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8807613Z [36;1m[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8808509Z [36;1mcheck_selected "$full_selected" 'skipped' rust-full[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8809784Z [36;1mcheck_selected "$full_selected" 'skipped' orbis-wasm[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8811111Z [36;1mcheck_selected "$full_selected" 'skipped' python-full-linux[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8812809Z [36;1mcheck_selected "$full_selected" 'skipped' python-full-windows[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8814208Z [36;1mcheck_selected "$full_selected" 'skipped' python-full-macos[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8816019Z [36;1mcheck_selected "$full_selected" 'skipped' python-slow[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8817266Z [36;1mcheck_selected "$full_selected" 'skipped' terminus-fuzz[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8818617Z [36;1mcheck_selected "$full_selected" 'skipped' python-linux-arm[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8819983Z [36;1mcheck_selected "$full_selected" 'skipped' visual-goldens-nvidia[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8821370Z [36;1mcheck_selected "$full_selected" 'skipped' substratia-physical-nvidia[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8822864Z [36;1mif [ "$full_selected" = "true" ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8823784Z [36;1m  if [ '' != 'ran' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8824911Z [36;1m    echo "::error::visual NVIDIA Vulkan lane did not record RAN"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8826025Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8826741Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8827465Z [36;1m  if [ '' != 'ran' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8828517Z [36;1m    echo "::error::SUBSTRATIA physical lane did not record RAN"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8829708Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8830475Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8831227Z [36;1m  if [ '' != 'pass' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8832402Z [36;1m    echo "::error::SUBSTRATIA evidence verifier did not record PASS"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8833579Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8834368Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8835076Z [36;1m  if [ '' != 'ran' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8836212Z [36;1m    echo "::error::ORBIS physical NVIDIA Vulkan lane did not record RAN"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8837351Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8838128Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8838864Z [36;1mfi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8839894Z [36;1mcheck_selected "$full_selected" 'skipped' docs[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8840961Z [36;1mif [ "$full_selected" = "true" ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8841915Z [36;1m  sidera_lane=''[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8843043Z [36;1m  echo "SIDERA physical NVIDIA Vulkan lane: $sidera_lane"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8844210Z [36;1m  if [ "$sidera_lane" != "ran" ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8845593Z [36;1m    echo "::error::SIDERA physical NVIDIA Vulkan lane was selected but reported $sidera_lane"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8846970Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8847705Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8848398Z [36;1mfi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8849135Z [36;1m[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8850187Z [36;1mcheck_selected "$render_selected" 'skipped' determinism-render[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8851632Z [36;1mcheck_selected "$f3dz_hosted_selected" 'skipped' determinism-f3dz[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8853362Z [36;1mcheck_selected "$anamnesis_hosted_selected" 'skipped' determinism-anamnesis[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8854850Z [36;1mcheck_selected "$m06_selected" 'skipped' m06-physical[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8856170Z [36;1mcheck_selected "$f3dz_physical_selected" 'skipped' f3dz-physical[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8857683Z [36;1mcheck_selected "$anamnesis_physical_selected" 'skipped' anamnesis-seed[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8859232Z [36;1mcheck_selected "$anamnesis_physical_selected" 'skipped' anamnesis-portability[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8861071Z [36;1mcheck_selected "$anamnesis_physical_selected" 'skipped' anamnesis-production[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8862815Z [36;1mcheck_selected "$tessella_selected" 'skipped' tessella-physical[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8864313Z [36;1mcheck_selected "$helios_selected" 'skipped' helios-rust-conservative[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8865731Z [36;1mcheck_selected "$helios_selected" 'skipped' helios-physical[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8867098Z [36;1mcheck_selected "$nephele_selected" 'skipped' nephele-physical[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8868262Z [36;1mif [ "$helios_selected" = "true" ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8869340Z [36;1m  if [ '' != 'pass' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8870470Z [36;1m    echo "::error::HELIOS conservative-descent proof did not record PASS"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8871767Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8872574Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8873601Z [36;1m  if [ '' != 'ran' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8874658Z [36;1m    echo "::error::HELIOS physical lane did not record RAN"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8875689Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8876457Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8877194Z [36;1m  if [ '' != 'pass' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8878247Z [36;1m    echo "::error::HELIOS evidence verifier did not record PASS"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8879456Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8880168Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8880866Z [36;1mfi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8881653Z [36;1mif [ "$nephele_selected" = "true" ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8882781Z [36;1m  if [ '' != 'ran' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8883826Z [36;1m    echo "::error::NEPHELE physical lane did not record RAN"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8884889Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8885648Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8886360Z [36;1m  if [ '' != 'pass' ]; then[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8888056Z [36;1m    echo "::error::NEPHELE evidence verifier did not record PASS"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8889172Z [36;1m    failed=1[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8889882Z [36;1m  fi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8890593Z [36;1mfi[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:04.8891285Z [36;1mexit "$failed"[0m
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0113341Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0114625Z env:
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0115146Z   CARGO_TERM_COLOR: always
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0115754Z   RUST_BACKTRACE: 1
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0116276Z ##[endgroup]
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0348553Z ##[error]PR Core Success finished as failure
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0359851Z ##[error]nephele-physical was selected but finished as skipped
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0363204Z ##[error]NEPHELE physical lane did not record RAN
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0365845Z ##[error]NEPHELE evidence verifier did not record PASS
+Full Acceptance Summary	Enforce every selected acceptance family	2026-09-30T23:04:05.0376048Z ##[error]Process completed with exit code 1.

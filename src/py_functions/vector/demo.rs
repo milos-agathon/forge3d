@@ -141,7 +141,7 @@ pub(crate) fn vector_oit_and_pick_demo(
 
         scene.flush_uploads();
         scene.queue.submit(Some(post_encoder.finish()));
-        scene.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&scene.device);
 
         let rgba = read_rgba_texture_to_py(
             py,

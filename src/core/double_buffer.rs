@@ -249,7 +249,7 @@ impl DoubleBuffer {
     /// Force synchronization point (for debugging/validation)
     pub fn sync(&self, device: &Device) {
         // Poll to ensure all pending operations complete
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
     }
 
     /// Get buffer by index (for advanced usage)

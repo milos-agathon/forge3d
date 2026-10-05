@@ -1,0 +1,34 @@
+{
+  "schema": "forge3d.nephele.final_ci_outcome/1",
+  "physical_acceptance": false,
+  "checked_revision": "41979211d3db364a85386cfeeafc67ae86f7e2de",
+  "rendering_source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+  "required_pr_core": {
+    "run_id": 36822973299,
+    "conclusion": "success"
+  },
+  "broader_core": {
+    "run_id": 36822968213,
+    "conclusion": "failure",
+    "full_linux": {
+      "failed": 1,
+      "passed": 3804,
+      "skipped": 316,
+      "deselected": 55,
+      "duration_seconds": 1263.39
+    }
+  },
+  "failure": "tests/test_nephele_environment_defects.py::test_camera_visible_uniform_environment_readback: native dual-frame SIGSEGV",
+  "crashed_capture_adapter_identity": "UNVERIFIED",
+  "background_extra_component_request": false,
+  "root_cause": "NOT_ESTABLISHED",
+  "h1_dispatched_this_round": false,
+  "h2_run_this_round": false,
+  "stop_decision": "OD-10 NOT_PROVEN / NEPHELE 1.41 unreleased",
+  "failure_artifact": {
+    "path": "final-linux-failure.txt",
+    "bytes": 4576,
+    "sha256": "501adbf1ea606923de8b6e97898dfdae45e510d74641df8d2ea2bc24eb2bc148",
+    "format": "failure excerpt with trailing display whitespace removed; full raw log retained locally"
+  }
+}

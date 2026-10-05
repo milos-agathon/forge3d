@@ -19,6 +19,32 @@ pub struct PostProcessUniforms {
 }
 
 /// Full-screen post-process pass manager
+/// Linear-HDR value that the canonical-media resolve
+/// (`pow(aces_tonemap(x), 1/2.2)`) maps to `display`.
+///
+/// The legacy viewer clears to `background_color` as a display value that
+/// bypasses the in-shader tonemap. On the media path the clear goes through
+/// the resolve, so clearing with the raw colour lifts a near-black background
+/// to grey. Clearing with this inverse keeps the background identical while
+/// media in front of it still adds in-scatter.
+pub(crate) fn linear_hdr_for_display(display: [f32; 3]) -> [f32; 3] {
+    const A: f32 = 2.51;
+    const B: f32 = 0.03;
+    const C: f32 = 2.43;
+    const D: f32 = 0.59;
+    const E: f32 = 0.14;
+    // The ACES fit saturates at 1.0; stay just below so the root is finite.
+    const MAX_TONEMAPPED: f32 = 1.0 - f32::EPSILON;
+    display.map(|value| {
+        let y = value.clamp(0.0, 1.0).powf(2.2).min(MAX_TONEMAPPED);
+        // y = x(Ax + B) / (x(Cx + D) + E)  =>  (A - yC)x^2 + (B - yD)x - yE = 0
+        let qa = A - y * C;
+        let qb = B - y * D;
+        let qc = -y * E;
+        (-qb + (qb * qb - 4.0 * qa * qc).sqrt()) / (2.0 * qa)
+    })
+}
+
 pub struct PostProcessPass {
     device: Arc<wgpu::Device>,
     pipeline: wgpu::RenderPipeline,
@@ -29,6 +55,7 @@ pub struct PostProcessPass {
     intermediate_texture: Option<TrackedTexture>,
     pub intermediate_view: Option<wgpu::TextureView>,
     current_size: (u32, u32),
+    current_format: Option<wgpu::TextureFormat>,
 }
 
 impl PostProcessPass {
@@ -156,6 +183,7 @@ impl PostProcessPass {
             intermediate_texture: None,
             intermediate_view: None,
             current_size: (0, 0),
+            current_format: None,
         })
     }
 
@@ -166,7 +194,10 @@ impl PostProcessPass {
         height: u32,
         format: wgpu::TextureFormat,
     ) -> anyhow::Result<()> {
-        if self.current_size != (width, height) || self.intermediate_texture.is_none() {
+        if self.current_size != (width, height)
+            || self.current_format != Some(format)
+            || self.intermediate_texture.is_none()
+        {
             let texture = tracked_create_texture(
                 &self.device,
                 &wgpu::TextureDescriptor {
@@ -189,6 +220,7 @@ impl PostProcessPass {
                 Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
             self.intermediate_texture = Some(texture);
             self.current_size = (width, height);
+            self.current_format = Some(format);
         }
         Ok(())
     }
@@ -218,6 +250,71 @@ impl PostProcessPass {
         vignette_radius: f32,
         vignette_softness: f32,
     ) {
+        self.apply_from_input_internal(
+            encoder,
+            queue,
+            input_view,
+            output_view,
+            width,
+            height,
+            distortion,
+            chromatic_aberration,
+            vignette_strength,
+            vignette_radius,
+            vignette_softness,
+            false,
+        );
+    }
+
+    /// Resolve a linear-HDR input into the display/output format. This is the
+    /// single authoritative tonemap on the canonical-media viewer path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_from_linear_hdr(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        input_view: &wgpu::TextureView,
+        output_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        distortion: f32,
+        chromatic_aberration: f32,
+        vignette_strength: f32,
+        vignette_radius: f32,
+        vignette_softness: f32,
+    ) {
+        self.apply_from_input_internal(
+            encoder,
+            queue,
+            input_view,
+            output_view,
+            width,
+            height,
+            distortion,
+            chromatic_aberration,
+            vignette_strength,
+            vignette_radius,
+            vignette_softness,
+            true,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_from_input_internal(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        input_view: &wgpu::TextureView,
+        output_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        distortion: f32,
+        chromatic_aberration: f32,
+        vignette_strength: f32,
+        vignette_radius: f32,
+        vignette_softness: f32,
+        tonemap_linear_hdr: bool,
+    ) {
         let uniforms = PostProcessUniforms {
             screen_dims: [
                 width as f32,
@@ -231,7 +328,12 @@ impl PostProcessPass {
                 vignette_strength,
                 vignette_radius,
             ],
-            lens_params2: [vignette_softness, 0.0, 0.0, 0.0],
+            lens_params2: [
+                vignette_softness,
+                if tonemap_linear_hdr { 1.0 } else { 0.0 },
+                0.0,
+                0.0,
+            ],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
 
@@ -363,7 +465,7 @@ const POST_PROCESS_SHADER: &str = r#"
 struct Uniforms {
     screen_dims: vec4<f32>,    // width, height, 1/width, 1/height
     lens_params: vec4<f32>,    // distortion, chromatic_aberration, vignette_strength, vignette_radius
-    lens_params2: vec4<f32>,   // vignette_softness, _, _, _
+    lens_params2: vec4<f32>,   // vignette_softness, tonemap_linear_hdr, _, _
 };
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
@@ -401,6 +503,15 @@ fn apply_distortion(uv: vec2<f32>, k: f32) -> vec2<f32> {
 // Clamp UV to valid texture range
 fn clamp_uv(uv: vec2<f32>) -> vec2<f32> {
     return clamp(uv, vec2<f32>(0.001), vec2<f32>(0.999));
+}
+
+fn aces_tonemap(color: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp((color * (a * color + b)) / (color * (c * color + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 @fragment
@@ -446,7 +557,52 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         );
         color = color * mix(1.0, vignette, vignette_strength);
     }
+
+
+    if u.lens_params2.y > 0.5 {
+        color = pow(aces_tonemap(max(color, vec3<f32>(0.0))), vec3<f32>(1.0 / 2.2));
+    }
     
     return vec4<f32>(color, 1.0);
 }
 "#;
+
+#[cfg(test)]
+mod linear_hdr_for_display_tests {
+    use super::linear_hdr_for_display;
+
+    fn resolve(x: f32) -> f32 {
+        let aces = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+        aces.clamp(0.0, 1.0).powf(1.0 / 2.2)
+    }
+
+    #[test]
+    fn resolve_returns_the_display_background() {
+        for display in [0.0_f32, 0.004, 0.009, 0.05, 0.5, 0.9] {
+            let linear = linear_hdr_for_display([display; 3])[0];
+            assert!(linear.is_finite() && linear >= 0.0, "{display} -> {linear}");
+            assert!((resolve(linear) - display).abs() < 1e-4, "{display} -> {}", resolve(linear));
+        }
+    }
+
+    #[test]
+    fn white_background_stays_finite() {
+        assert!(linear_hdr_for_display([1.0; 3])[0].is_finite());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::POST_PROCESS_SHADER;
+
+    #[test]
+    fn canonical_media_resolve_contains_one_authoritative_tonemap_call() {
+        assert!(POST_PROCESS_SHADER.contains("u.lens_params2.y > 0.5"));
+        assert_eq!(
+            POST_PROCESS_SHADER
+                .matches("color = pow(aces_tonemap")
+                .count(),
+            1
+        );
+    }
+}

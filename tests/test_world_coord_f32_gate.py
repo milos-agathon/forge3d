@@ -71,14 +71,19 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # Anchor, and Anchor remains the sole production world-position narrowing
 # owner. Release 1.39 adds six screen-label conversions and records the
 # params6 initializer change without introducing world-position narrowing.
+# NEPHELE and CHRONOS preserve independent reviewed transitions from 1.39.
 # Release 1.40 CHRONOS rewrites the two R2 jitter casts one-for-one and adds
 # the three unit-direction casts of SunPosition::to_scene_direction.
 # SPLAT-FUSED adds seven non-world sites (raster/count helpers, 3DGS PLY
 # attribute narrowing, sky-bake normalisation, variance telemetry, and the
 # signature of the Anchor-routed PointCloudFrame::to_scene); see the
 # `splat_fused` ledger record, which is pending owner review.
-EXPECTED_CONVERSION_COUNT = 1828
-EXPECTED_CONVERSION_SHA256 = "ac609dda139040202a137f8cfb108e515247e9c8e5de2c92c921655208991adc"
+# The merged tree carries CHRONOS, NEPHELE, and SPLAT-FUSED; each ledger record
+# below stays exact against its own base. `nephele_main_integration` (pending
+# owner review) records the sites no earlier record covers, and this freeze is
+# its result.
+EXPECTED_CONVERSION_COUNT = 1905
+EXPECTED_CONVERSION_SHA256 = "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdbe1f76cd94"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -803,7 +808,7 @@ def test_release_1_40_chronos_inventory_transition_is_exact():
     ]
     assert "fn to_scene_direction" in _read("src/lighting/ephemeris.rs")
 
-    current = collections.Counter(conversion_inventory())
+    current = _undo_reviewed_transition(_reviewed_inventory(), _ledger_data()["nephele"])
     for site in added:
         assert current[site] > 0, f"recorded addition missing: {site}"
     for site in removed:
@@ -813,13 +818,13 @@ def test_release_1_40_chronos_inventory_transition_is_exact():
 def test_splat_fused_inventory_transition_is_exact():
     transition = _ledger_data()["splat_fused"]
     assert (transition["result_count"], transition["result_digest"]) == (
-        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+        1828, "ac609dda139040202a137f8cfb108e515247e9c8e5de2c92c921655208991adc"
     )
     assert transition["review"]
     added = list(map(tuple, transition["added"]))
     assert transition["removed"] == []
     assert len(set(added)) == len(added)
-    assert transition["base_count"] + len(added) == EXPECTED_CONVERSION_COUNT
+    assert transition["base_count"] + len(added) == transition["result_count"]
 
     assert [site[:4] for site in added] == [
         ("src/path_tracing/hybrid_compute/render_fused.rs", "<module>", "as_f32", 1),
@@ -934,3 +939,68 @@ def test_public_camera_helper_preserves_earth_scale_offset():
         )
     )
     np.testing.assert_allclose(earth, local, rtol=0.0, atol=1e-6)
+
+
+def _undo_reviewed_transition(current, transition):
+    added = collections.Counter(map(tuple, transition["added"]))
+    removed = collections.Counter(map(tuple, transition["removed"]))
+    assert not (added & removed)
+    for site, count in added.items():
+        assert current[site] >= count, f"reviewed addition missing: {site}"
+        current[site] -= count
+    for site, count in removed.items():
+        assert current[site] == 0, f"reviewed removal still present: {site}"
+        current[site] += count
+    return current
+
+
+def _reviewed_inventory():
+    """Current inventory with the pending integration record undone."""
+    return _undo_reviewed_transition(
+        collections.Counter(conversion_inventory()), _ledger_data()["nephele_main_integration"]
+    )
+
+
+def test_nephele_main_integration_record_reaches_the_current_freeze():
+    transition = _ledger_data()["nephele_main_integration"]
+    assert (transition["result_count"], transition["result_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+    )
+    assert transition["review"].startswith("PENDING OWNER REVIEW")
+    added = collections.Counter(map(tuple, transition["added"]))
+    removed = collections.Counter(map(tuple, transition["removed"]))
+    assert sum(added.values()) - sum(removed.values()) == (
+        transition["result_count"] - transition["base_count"]
+    )
+    # No recorded change narrows an absolute world coordinate.
+    for site in added:
+        assert site[0] != SANCTIONED, site
+    reviewed = _reviewed_inventory()
+    assert sum(reviewed.values()) == transition["base_count"]
+    # The reviewed base is main 3a6ec9f8 plus the SPLAT-FUSED and NEPHELE records.
+    splat = _ledger_data()["splat_fused"]
+    nephele = _ledger_data()["nephele"]
+    assert transition["base_count"] == (
+        splat["result_count"] + nephele["result_count"] - nephele["base_count"]
+    )
+
+
+def test_nephele_reviewed_inventory_transition_is_exact():
+    transition = _ledger_data()["nephele"]
+    preceding = _ledger_data()["release_1_39_terrain"]
+    assert (transition["base_count"], transition["base_digest"]) == (preceding["result_count"], preceding["result_digest"])
+    assert (transition["result_count"], transition["result_digest"]) == (1878, "beeb7833b23e4ef857acdc0c56955c07ce8ba5e20a8f10b067bad23ad9ba5f1c")
+    assert transition["review"]
+    current = _undo_reviewed_transition(
+        _undo_reviewed_transition(_reviewed_inventory(), _ledger_data()["splat_fused"]),
+        _ledger_data()["release_1_40_chronos"],
+    )
+    added, removed = collections.Counter(map(tuple, transition["added"])), collections.Counter(map(tuple, transition["removed"]))
+    assert not (added & removed)
+    for site, count in added.items():
+        assert current[site] >= count, f"NEPHELE addition missing: {site}"
+        current[site] -= count
+    for site, count in removed.items():
+        assert current[site] == 0, f"NEPHELE removal still present: {site}"
+        current[site] += count
+    assert sum(current.values()) == transition["base_count"]

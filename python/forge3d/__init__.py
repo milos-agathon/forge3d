@@ -497,6 +497,7 @@ def dem_stats(heightmap: np.ndarray) -> dict:
 # -----------------------------------------------------------------------------
 from . import geometry
 from . import io
+from . import media
 
 # -----------------------------------------------------------------------------
 # P4: Map Plate / Creator Workflow
@@ -926,6 +927,7 @@ __all__ = [
     "widgets",
     "astro",
     "sky",
+    "media",
     # Interactive viewer
     "open_viewer",
     "open_viewer_async",

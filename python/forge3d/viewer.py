@@ -16,9 +16,12 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .media import Medium
 
 from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
 from .diagnostics import (
@@ -258,6 +261,64 @@ class ViewerHandle:
     def send_ipc(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
         """Send a raw IPC command to the viewer and return the decoded response."""
         return self._send_command(cmd)
+
+    def set_media(
+        self,
+        media: Optional["Medium"],
+        *,
+        homogeneous_reach: Optional[float] = None,
+        ambient_radiance: Optional[Sequence[float]] = None,
+        froxel_depth_slices: Optional[int] = None,
+    ) -> None:
+        """Attach a canonical NEPHELE medium, or remove it with ``None``.
+
+        ``homogeneous_reach`` bounds a homogeneous medium to that distance along
+        every camera and sun ray, like ``render_volumetric_reference``'s
+        ``homogeneous_medium_reach``. Without it a homogeneous medium is
+        unbounded and blocks all direct sunlight. It is rejected for bounded
+        (grid or noise) media.
+
+        ``ambient_radiance`` is a uniform RGB sky radiance lighting the medium
+        from every direction (default black: media in shadow get no light).
+
+        ``froxel_depth_slices`` sets the logarithmic froxel depth resolution
+        (default 64). More slices sharpen thin layers such as fog tops; froxel
+        memory and per-frame CPU cost scale linearly, and allocation fails with
+        a reported ``media_render_error`` if it exceeds the memory budget.
+        """
+        if media is None:
+            for value, name in (
+                (homogeneous_reach, "homogeneous_reach"),
+                (ambient_radiance, "ambient_radiance"),
+                (froxel_depth_slices, "froxel_depth_slices"),
+            ):
+                if value is not None:
+                    raise ValueError(f"{name} requires a medium")
+            self._send_command({"cmd": "set_media", "media": None})
+            return
+        from .media import Medium
+
+        if not isinstance(media, Medium):
+            raise TypeError("media must be forge3d.media.Medium or None")
+        command: Dict[str, Any] = {"cmd": "set_media", "media": media.to_dict()}
+        if homogeneous_reach is not None:
+            reach = float(homogeneous_reach)
+            if not math.isfinite(reach) or reach <= 0.0:
+                raise ValueError("homogeneous_reach must be finite and positive")
+            command["homogeneous_reach"] = reach
+        if ambient_radiance is not None:
+            ambient = [float(value) for value in ambient_radiance]
+            if len(ambient) != 3 or any(not math.isfinite(v) or v < 0.0 for v in ambient):
+                raise ValueError("ambient_radiance must be three finite non-negative values")
+            command["ambient_radiance"] = ambient
+        if froxel_depth_slices is not None:
+            if isinstance(froxel_depth_slices, bool) or int(froxel_depth_slices) != froxel_depth_slices:
+                raise ValueError("froxel_depth_slices must be a positive integer")
+            slices = int(froxel_depth_slices)
+            if slices < 1:
+                raise ValueError("froxel_depth_slices must be a positive integer")
+            command["froxel_depth_slices"] = slices
+        self._send_command(command)
 
     def _allocate_label_id(self) -> int:
         return int(getattr(self, "_next_public_label_id", 1))

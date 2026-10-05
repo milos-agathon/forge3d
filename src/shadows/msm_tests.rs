@@ -208,7 +208,7 @@ fn test_msm_fragment() -> @location(0) vec4<f32> {{
         pass.draw(0..3, 0..1);
     }
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     if let Some(error) = pollster::block_on(device.pop_error_scope()) {
         panic!("MSM visibility draw failed: {error}");
     }

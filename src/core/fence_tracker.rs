@@ -90,7 +90,7 @@ impl FenceTracker {
 
     /// Wait for all pending fences to complete
     pub fn wait_for_all(&self) {
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
     }
 
     /// Clean up completed fences (remove from tracking)

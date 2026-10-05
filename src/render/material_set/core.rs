@@ -16,6 +16,8 @@ pub struct MaterialSet {
     pub(crate) _texture_paths: Vec<Option<String>>,
     #[cfg(feature = "extension-module")]
     pub(crate) gpu_cache: OnceCell<Arc<super::GpuMaterialSet>>,
+    #[cfg(feature = "extension-module")]
+    pub(crate) physical_gpu_cache: OnceCell<Arc<super::GpuMaterialSet>>,
 }
 
 impl Clone for MaterialSet {
@@ -28,6 +30,8 @@ impl Clone for MaterialSet {
             _texture_paths: self._texture_paths.clone(),
             #[cfg(feature = "extension-module")]
             gpu_cache: OnceCell::new(),
+            #[cfg(feature = "extension-module")]
+            physical_gpu_cache: OnceCell::new(),
         }
     }
 }
@@ -48,6 +52,8 @@ impl MaterialSet {
             _texture_paths: texture_paths,
             #[cfg(feature = "extension-module")]
             gpu_cache: OnceCell::new(),
+            #[cfg(feature = "extension-module")]
+            physical_gpu_cache: OnceCell::new(),
         }
     }
 
@@ -59,6 +65,21 @@ impl MaterialSet {
     /// Get material at index
     pub fn get_material(&self, index: usize) -> Option<&crate::core::material::PbrMaterial> {
         self.materials.get(index)
+    }
+
+    /// Return the authored linear base color when this set is exactly one
+    /// constant material. Physical terrain can then use the original f32
+    /// reflectance without an sRGB8 texture round trip.
+    pub(crate) fn single_untextured_base_color(&self) -> Option<[f32; 3]> {
+        if self.materials.len() != 1
+            || self._texture_paths.len() != 1
+            || self._texture_paths[0].is_some()
+        {
+            return None;
+        }
+
+        let base_color = self.materials[0].base_color;
+        Some([base_color[0], base_color[1], base_color[2]])
     }
 
     /// Exact source bytes that can affect the uploaded terrain material set.

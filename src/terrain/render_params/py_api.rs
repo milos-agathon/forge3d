@@ -159,6 +159,11 @@ impl TerrainRenderParams {
     }
 
     #[getter]
+    pub fn terrain_shading_model(&self) -> &str {
+        &self.terrain_shading_model
+    }
+
+    #[getter]
     pub fn vt_store(&self) -> Option<String> {
         self.vt_store_path.clone()
     }
@@ -251,6 +256,20 @@ impl TerrainRenderParams {
     #[getter]
     pub fn python_object<'py>(&self, py: Python<'py>) -> Py<PyAny> {
         self.python_object.clone_ref(py)
+    }
+
+    #[getter]
+    pub fn media<'py>(&self, py: Python<'py>) -> PyResult<Option<Py<PyAny>>> {
+        self.media
+            .as_ref()
+            .map(|medium| {
+                let wrapper = py
+                    .import_bound("forge3d.media")?
+                    .getattr("Medium")?
+                    .call_method1("_from_native", (medium.clone_ref(py),))?;
+                Ok(wrapper.unbind())
+            })
+            .transpose()
     }
 
     #[getter]

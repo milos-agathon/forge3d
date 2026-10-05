@@ -88,6 +88,53 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
             target: *target,
         })),
         IpcRequest::GetTerrainParams => Ok(Some(ViewerCmd::GetTerrainParams)),
+        IpcRequest::SetMedia {
+            media,
+            homogeneous_reach,
+            ambient_radiance,
+            froxel_depth_slices,
+        } => {
+            let Some(value) = media else {
+                for (given, name) in [
+                    (homogeneous_reach.is_some(), "homogeneous_reach"),
+                    (ambient_radiance.is_some(), "ambient_radiance"),
+                    (froxel_depth_slices.is_some(), "froxel_depth_slices"),
+                ] {
+                    if given {
+                        return Err(format!("{name} requires a medium"));
+                    }
+                }
+                return Ok(Some(ViewerCmd::SetMedia {
+                    medium: None,
+                    version: 0,
+                    options: crate::terrain::realtime_media::ViewerMediaOptions::default(),
+                }));
+            };
+            let mut value = value.clone();
+            let version = match value
+                .as_object_mut()
+                .and_then(|object| object.remove("version"))
+            {
+                None => 0,
+                Some(value) => value.as_u64().ok_or_else(|| {
+                    "invalid participating medium: version must be a non-negative integer"
+                        .to_string()
+                })?,
+            };
+            let medium = serde_json::from_value::<crate::media::Medium>(value)
+                .map_err(|error| format!("invalid participating medium: {error}"))?;
+            let defaults = crate::terrain::realtime_media::ViewerMediaOptions::default();
+            Ok(Some(ViewerCmd::SetMedia {
+                medium: Some(medium),
+                version,
+                options: crate::terrain::realtime_media::ViewerMediaOptions {
+                    homogeneous_reach: *homogeneous_reach,
+                    ambient_radiance: ambient_radiance.unwrap_or(defaults.ambient_radiance),
+                    froxel_depth_slices: froxel_depth_slices
+                        .unwrap_or(defaults.froxel_depth_slices),
+                },
+            }))
+        }
         IpcRequest::SetTerrainScatter { batches } => Ok(Some(ViewerCmd::SetTerrainScatter {
             batches: batches
                 .iter()

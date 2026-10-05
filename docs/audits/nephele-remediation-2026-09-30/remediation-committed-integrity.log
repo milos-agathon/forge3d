@@ -1,0 +1,6 @@
+scripts/nephele_b1_diagnostic.py committed_equal=True sha256=8bd38fa36bba950dc84b652e31be03d6758622ece363d21b151e143096a0613b
+scripts/nephele_b6_environment_diagnostic.py committed_equal=True sha256=15f0ca70f8b7660368aa579403ed65ec67f48e9ccb14439bee165b970be459bd
+scripts/nephele_b8_occlusion_diagnostic.py committed_equal=True sha256=728be385a5c46b41c540fb4416b274b5c57ff62251dac7025d208e6743cc35b9
+docs/audits/nephele-vacuum-control-plan-published-spp320-2026-09-30.json committed_equal=True sha256=fdaed43c61ad5c06c327682909462ffb90ce8567b31a3ff79deecadf9047bb1b
+nephele-b1-deterministic-2026-09-30 committed artifact hashes verified
+nephele-vacuum-control-published-spp320-2026-09-30 committed artifact hashes verified

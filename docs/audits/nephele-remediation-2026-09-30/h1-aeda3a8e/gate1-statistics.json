@@ -1,0 +1,98 @@
+{
+  "heterogeneous": {
+    "comparator_sha256": "07a1c1e3f677cbbc24718d58828e443fa1c7b6c61cfcce6f9e1827a9f049cbd1",
+    "raw_output": {
+      "encoding": "little-endian-f64",
+      "path": "heterogeneous-ratio-samples.bin",
+      "samples": 1000000,
+      "sha256": "0fc37c4567961a530e59b57d62aaa5eaacff99107dbf68f332c58e43fdc90704"
+    },
+    "sample_mapping": {
+      "algorithm": "canonical-grid3d-z-ray-v1",
+      "parameters": {
+        "coordinate_frame_u64": 86059606610177,
+        "fields": [
+          "sample",
+          "dimension"
+        ],
+        "tracking_frame_u64": 86059606610178
+      },
+      "sha256": "8bf4e10b2543112f9e07f56c0f844a6db5d40a62009639b444788ea60bd4f99e"
+    },
+    "samples": {
+      "count": 1000000,
+      "sum": 432331.6609017278,
+      "sum_squares": 268899.4580960553
+    },
+    "transport_representation": {
+      "density_f16_sha256": "b67c3b52d1385022cb2b7e788c1dfd3a9220758a8dc7f793d3b0b4294aeeb1fe",
+      "density_sampling": "normalized-clamp-to-edge-linear-texel-center-uN-minus-0.5",
+      "density_scale": 1.0,
+      "grid_shape": [
+        3,
+        3,
+        3
+      ],
+      "majorant_grid_shape": [
+        3,
+        3,
+        3
+      ],
+      "majorant_query": "floor(clamp(unit,0,1)*N)-clamped-to-N-minus-1",
+      "sigma_t_max": 0.065
+    }
+  },
+  "homogeneous": {
+    "density": 1.0,
+    "distance": 10.0,
+    "raw_output": {
+      "encoding": "little-endian-f64",
+      "path": "homogeneous-ratio-samples.bin",
+      "samples": 1000000,
+      "sha256": "bf925fadbc2395475bfe486be3ffd6ed295593828fdec2b6a230511fbc288566"
+    },
+    "sample_mapping": {
+      "algorithm": "canonical-sample-identity-v1",
+      "parameters": {
+        "fields": [
+          "frame",
+          "pixel",
+          "sample",
+          "bounce",
+          "dimension"
+        ],
+        "frame_u64": 86059606609921
+      },
+      "sha256": "6dec62447ea5142c31f4e4fd13e8dad4ee97032f4cfa20a96108b404e10ad6b0"
+    },
+    "samples": {
+      "count": 1000000,
+      "sum": 605711.0,
+      "sum_squares": 605711.0
+    },
+    "sigma_t": 0.05
+  },
+  "homogeneous_slab": {
+    "path": "tests/nephele/homogeneous-slab.json",
+    "sha256": "cf1ff1ad3f68706fad3b1df00113bffc47918c5c4a0abb86082fd17ecce6c6a4"
+  },
+  "majorant": {
+    "evidence_sha256": "212fe02d39d8dff258003bf504930d42afdb0ee4f5df174ef26f63abe3cff168"
+  },
+  "producer": {
+    "implementation": "canonical-ratio-delta-roulette-and-analog-sphere-v2",
+    "native_source": {
+      "path": "src/media_py.rs",
+      "sha256": "1cc2373940262b3b6abe43aca0878b2710145fb8e90f05e2dc67ddaef66e16c3"
+    },
+    "producer_tool": {
+      "path": "scripts/run_media_physical_capture.py",
+      "sha256": "9aaeb71b8c6f41d1e505534560970f1682d6eb9900ad45f48f1db7cdf6994344"
+    },
+    "source_revision": "aeda3a8e4d7ba927d23cc978ad3c4678e6e79039"
+  },
+  "russian_roulette": {
+    "evidence_sha256": "5f38979787bc6000101a1a337af76e675d7e656ac81adaa74e8a7346e7d3d5d8"
+  },
+  "schema": "forge3d.nephele.gate1_raw/1"
+}

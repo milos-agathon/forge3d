@@ -1549,6 +1549,36 @@ mod tests {
     }
 
     #[test]
+    fn capture_peak_changes_with_larger_transient_host_allocation() {
+        let ledger = AllocationLedger::new();
+        ledger.begin_capture(&[]);
+        let small = ledger.insert(
+            "acceptance-readback-small".to_string(),
+            1024,
+            true,
+            LedgerCategory::Buffer,
+            "test:small".to_string(),
+        );
+        ledger.remove(small);
+        let small_report = ledger.finish_capture();
+
+        ledger.begin_capture(&[]);
+        let large = ledger.insert(
+            "acceptance-readback-large".to_string(),
+            4096,
+            true,
+            LedgerCategory::Buffer,
+            "test:large".to_string(),
+        );
+        ledger.remove(large);
+        let large_report = ledger.finish_capture();
+
+        assert_eq!(small_report.peak_host_visible_bytes, 1024);
+        assert_eq!(large_report.peak_host_visible_bytes, 4096);
+        assert!(large_report.peak_host_visible_bytes > small_report.peak_host_visible_bytes);
+    }
+
+    #[test]
     fn owner_captures_are_independent_under_root_capture() {
         let ledger = AllocationLedger::new();
         let owner_a = AllocationOwner::new();

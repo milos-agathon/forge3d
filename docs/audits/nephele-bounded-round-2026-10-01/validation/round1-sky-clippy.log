@@ -1,0 +1,8 @@
+   Compiling pyo3-build-config v0.21.2
+   Compiling forge3d v1.41.0 (D:\forge3d\.worktrees\nephele-172-completion)
+   Compiling pyo3-macros-backend v0.21.2
+   Compiling pyo3-ffi v0.21.2
+   Compiling pyo3 v0.21.2
+   Compiling pyo3-macros v0.21.2
+    Checking numpy v0.21.0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 29.34s

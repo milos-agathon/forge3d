@@ -1,0 +1,189 @@
+{
+  "schema": "forge3d.nephele.blocked_worktree_evidence/1",
+  "classification": "dirty-worktree diagnostic; NOT physical acceptance",
+  "candidate_head": "96e0b30381f65517b4f4813cd1faf228b94d4c95",
+  "h1": "NOT_PROVEN",
+  "h2": "NOT_PROVEN",
+  "reference_tag": "nephele-reference-6a4ae50a",
+  "reference_tag_commit": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+  "wheel": {
+    "path": "wheels-nephele-completion\\forge3d-1.40.0-cp310-abi3-win_amd64.whl",
+    "sha256": "1e36c2ea406d6dfc4a6b36f15a1e8c7231c44bf533bfd74d152a209d9daf0b24"
+  },
+  "native": {
+    "path": ".tmp\\nephele-completion\\units-env\\Lib\\site-packages\\forge3d\\_forge3d.pyd",
+    "sha256": "06383485a386fd50123a9122b1d2dec7873e01f637c56ce4f98a79ea15aad999"
+  },
+  "artifacts": {
+    "b1-report.json": {
+      "sha256": "7d37d25cd71942e1e6e3e8bf335bccae82fa3e85efcc96f3aa0dfd375bd86c46",
+      "bytes": 5366
+    },
+    "camera-contract.json": {
+      "sha256": "b57b44158d5382cd545a8403fc9fd5619de4228fc19970ea7aed9957e168c611",
+      "bytes": 395
+    },
+    "candidate-diagnostics.json": {
+      "sha256": "5df918011e5bba1333d893b629ead9b72cf5e8f2818a2f000fdbc4e19c27ed84",
+      "bytes": 1200
+    },
+    "cloud-shadow-aov.npy": {
+      "sha256": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60",
+      "bytes": 49280
+    },
+    "git-status-short.txt": {
+      "sha256": "d055100a8d218b2ea9b10e045275aebc7bb6f2c360637ca63919569da92990f4",
+      "bytes": 1462
+    },
+    "in-scatter.npy": {
+      "sha256": "bb4fe1048220408db98f59e0a7e4fd3c69b34c7a8ef4d1e953c47a2f609a587c",
+      "bytes": 49280
+    },
+    "medium-disabled-rgb.npy": {
+      "sha256": "f833a79cc03506c8a9342eb2fd114f0b8baf727fe0d11298589135833bc8eb50",
+      "bytes": 12416
+    },
+    "optical-depth.npy": {
+      "sha256": "ee626fcab328f64326dacf2bc4b2da229ded37a7b1b37c655166ac466134720b",
+      "bytes": 49280
+    },
+    "pr-state.json": {
+      "sha256": "b1b447b96abb2d16402b49539ff0bbee5e9ea1675245e021cfe70eba177bb82b",
+      "bytes": 7255
+    },
+    "realtime-rgb.npy": {
+      "sha256": "0daeaed52ba10b76df0284884897819b81d910765db858c7f2257691dfbb89ab",
+      "bytes": 12416
+    },
+    "residual-analysis.json": {
+      "sha256": "58dbcb99f796d0f307c44c3b12a93f6f3a217284256709fa7b3d6fa566f69a44",
+      "bytes": 8827
+    },
+    "spatial-table.csv": {
+      "sha256": "de22cd756712f75409911d1bdbcacb7a89c7e3c6eab804d65dcb67956d20ba44",
+      "bytes": 791
+    },
+    "transmittance.npy": {
+      "sha256": "63e9e1a8990b3236552c6c822ced995eedb588b3fea24f3530a6514f9b2580b8",
+      "bytes": 49280
+    },
+    "diagnostic-capture.py": {
+      "sha256": "f9a9a396cc8cdd81a54b08d5fb1bbdec026cbed834ee890d053ae93c31ecc12d",
+      "bytes": 12578
+    },
+    "vacuum-noise-analysis.json": {
+      "sha256": "2da64e4ba475fa36a6dc3c183cf29ade4b33573ff3e6fc011a160c50eec2b314",
+      "bytes": 1553
+    }
+  },
+  "b2": {
+    "path": "docs/audits/nephele-b2-2026-09-30.json",
+    "sha256": "b91ac0d00e921988bb4ccf783c2e187045c3792ba65f2771c06be8b928bc54c0"
+  },
+  "immutable_input_diff": "",
+  "new_terrain_pin": "0xd5571951dd2806f0; conditional approval unmet: four proof/ablation tests failed",
+  "retained_terrain_pin": "0x8563_9719_6938_555f",
+  "g1": "NOT_PROVEN",
+  "g2": "NOT_PROVEN",
+  "g3": "NOT_PROVEN",
+  "g4": "NOT_PROVEN; B1 failed",
+  "g5": "NOT_PROVEN; static analyzer passed, physical ridgeline unrun",
+  "g6": "NOT_PROVEN",
+  "merge_commit": "NOT_PROVEN",
+  "release_tag": "NOT_PROVEN",
+  "pypi_version": "NOT_PROVEN",
+  "lanes": {
+    "earlier_implementation_and_review": "gpt-5.6-sol / xhigh requested; last review interrupted; no completed independent final review",
+    "current_work": "parent only after owner stopped the gpt-5.6-sol / xhigh generator lane; parent completed integration and verification"
+  },
+  "source_pin_checks": {
+    "passed": 46,
+    "ignored": [
+      "inspect_deterministic_kernel_ir_shape"
+    ],
+    "log": ".tmp/nephele-completion/approved-pin-source-tests.log"
+  },
+  "proof_ablation_checks": {
+    "passed": 14,
+    "failed": [
+      "terrain_pbr_baseline_proven_then_ablation_rejected",
+      "terrain_helper_body_mutation_invalidates_summaries",
+      "ablations_are_rejected",
+      "proven_list_is_large_enough"
+    ],
+    "log": ".tmp/nephele-completion/approved-pin-proof-tests.log"
+  },
+  "control_plan": {
+    "path": "docs/audits/nephele-vacuum-control-plan-spp320-2026-09-30.json",
+    "sha256": "c7804827ede99edd5d19de693892580aee680d5adbc866e27fa40657dc38fcbc",
+    "temporal_anchor": "published in persistent task commentary before generator invocation; not a Git commit"
+  },
+  "registered_control": {
+    "registration": {
+      "path": "docs/audits/nephele-vacuum-control-spp320-2026-09-30/vacuum-control-spp320.json",
+      "sha256": "209be381259fecf0d9df8c31837307fe9f9ce8b01399d2873d68cea2376d7f9a"
+    },
+    "reference": {
+      "artifact": "vacuum-reference-spp320.npy",
+      "path": "docs/audits/nephele-vacuum-control-spp320-2026-09-30/vacuum-reference-spp320.npy",
+      "sha256": "7e9912a7370597b2395b22edca0b0dfff16a407314bff0962e7a78c474aed0d6"
+    },
+    "samples_per_pixel": 320,
+    "native_sha256": "7661b8f81f6a5253d035b8d2e6241ccf73e8b1c001c4db6981b5c65a3012607f",
+    "sample_count": 1310720,
+    "render_wall_seconds": 771.5368901999973,
+    "physical_acceptance": false
+  },
+  "b1_spp320": {
+    "path": "docs/audits/nephele-b1-spp320-2026-09-30/b1-report.json",
+    "sha256": "301eb48b4d31345de69fbdf9dac20a2794f206c5bf0110e9769851df1943d211",
+    "artifact_inventory": {
+      "path": "docs/audits/nephele-b1-spp320-2026-09-30/artifact-hashes.json",
+      "sha256": "132cf974857928b6b70ba94f957090125e0e6901c2130ffaadd05697b9b676db"
+    },
+    "terrain_comparison": {
+      "fraction_delta_e_below_2": 0.9922978177150192,
+      "maximum_delta_e": 6.539428108757824,
+      "mean_delta_e": 0.33803307521373716,
+      "p95_delta_e": 0.8661229687669402,
+      "pass": true,
+      "pixels": 1558
+    },
+    "passing_pixels": 1546,
+    "status": "PRECHECK_PASS",
+    "physical_acceptance": false
+  },
+  "candidate_pin_wheel": {
+    "path": "wheels-nephele-approved/forge3d-1.40.0-cp310-abi3-win_amd64.whl",
+    "sha256": "0d04373dcc6a921b2a8cd055388b8f68a800aaf3450e9365d9d55bd7abff8823",
+    "native_sha256": "5aeb952884fa64f4d35dcbfb63d809d3696bb29672b0dbbdb90fa6d0eaaba551",
+    "terrain_pin": "0xd5571951dd2806f0",
+    "classification": "diagnostic proposed-pin wheel; old source pin retained after proof condition failed"
+  },
+  "python_shader_proofs": {
+    "passed": 6,
+    "failed": [
+      "test_proven_list_clean_and_large_enough",
+      "test_seeded_ablations_are_caught"
+    ],
+    "skipped": 0,
+    "log": ".tmp/nephele-completion/approved-shader-goldens.log"
+  },
+  "default_terrain_goldens": {
+    "passed": 9,
+    "failed": 0,
+    "skipped": 0,
+    "variant": "nvidia-vulkan",
+    "selector": "FORGE3D_TERRAIN_GOLDEN_VARIANT",
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "driver": "NVIDIA 610.60",
+    "log": ".tmp/nephele-completion/approved-nvidia-goldens.log"
+  },
+  "unrun_current_lanes": [
+    "eventual final-source NEPHELE suite",
+    "B3-B9",
+    "exact-head G1-G6 and H1/H2",
+    "CI, non-Vulkan portability, merge/release/publication"
+  ]
+}

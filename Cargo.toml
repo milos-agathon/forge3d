@@ -68,7 +68,7 @@ splat-fusion = []
 # Do NOT enable pyo3's extension-module by default; gate it via the Cargo feature above.
 # Enable `macros` so procedural attributes like #[pyclass], #[pymethods], and #[pyo3(signature=..)] work when the extension is built.
 ndarray = "0.15"
-wgpu = "0.19"
+wgpu = "=0.19.4"
 naga = { version = "=0.19.2", features = ["wgsl-in"] }
 winit = "0.29"
 pollster = "0.3"

@@ -65,7 +65,7 @@ pub(crate) fn vector_render_pick_map_py(
 
     scene.flush_uploads();
     scene.queue.submit(Some(encoder.finish()));
-    scene.device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&scene.device);
     let result = read_u32_texture_to_py(
         py,
         &scene.device,
@@ -224,7 +224,7 @@ pub(crate) fn vector_render_oit_and_pick_py(
 
         scene.flush_uploads();
         scene.queue.submit(Some(post_encoder.finish()));
-        scene.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&scene.device);
 
         let rgba = read_rgba_texture_to_py(
             py,

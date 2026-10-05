@@ -1,0 +1,48 @@
+{
+  "criterion": {
+    "pass": false,
+    "strict_maximum": 0.8
+  },
+  "diagnostics": {
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "density_device_local_bytes": 51200,
+    "driver": "NVIDIA 610.60",
+    "energy_accounting_residual": 2.980232238769531e-07,
+    "executed_multi_scatter": true,
+    "froxel_device_local_bytes": 913248,
+    "host_visible_bytes": 0,
+    "majorant_device_local_bytes": 0,
+    "majorant_proof": "TrilinearConvexHull",
+    "majorant_valid": true,
+    "multiple_scatter_dispatches": 1,
+    "multiple_scatter_luminance": 0.04361156141385436,
+    "sample_count": 4096,
+    "single_scatter_dispatches": 1,
+    "single_scatter_luminance": 0.16493901974978087,
+    "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+    "staging_readback_bytes": 153600,
+    "step_count": 341665,
+    "sun_transmittance_bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+    "sun_transmittance_executed_steps": 36723,
+    "sun_transmittance_max_abs_error": 0.008301794528961182,
+    "sun_transmittance_max_segment_length": 68.22770690917969,
+    "sun_transmittance_method": "bounded_nested_midpoint",
+    "temporal_history_decision": "rejected",
+    "temporal_history_reason": "no prior media history exists",
+    "terrain_shading_model": "lambert_physical",
+    "terrain_trace_queries": 1244
+  },
+  "disabled_frame_sha256": "6b33ebfd6ae41df57dd125c5544f7d70a6b2d2ed4cfdd9f798731c0cd2a29bec",
+  "godray_roi_mask": {
+    "artifact": "godray-roi-mask.npy",
+    "path": "tests/nephele/fixture/godray-roi-mask.npy",
+    "sha256": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20"
+  },
+  "physical_acceptance": false,
+  "primary_frame_sha256": "70e8cb1636d570028eb187fd409e11f0bee40889dbbf9b0774ea1a167c5cf673",
+  "producer_sha256": "728be385a5c46b41c540fb4416b274b5c57ff62251dac7025d208e6743cc35b9",
+  "schema": "forge3d.nephele.b8_diagnostic/1",
+  "terrain_occlusion_ablation_ssim": 0.9566974834371695,
+  "terrain_occlusion_in_media": false
+}

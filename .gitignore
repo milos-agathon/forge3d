@@ -101,6 +101,7 @@ docs/**/*prompt*.md
 
 # Generated agent docs and review packs
 docs/audits/*
+!docs/audits/nephele-*
 !docs/audits/fable5-moonshots/
 docs/audits/fable5-moonshots/*
 !docs/audits/fable5-moonshots/14-censor-implementation-audit.md
@@ -344,6 +345,7 @@ Cargo.lock  # Keep for applications, ignore for libraries - this is an app so ke
 
 # maturin build artifacts
 *.whl
+!tests/nephele/acceptance-runtime/reference-wheel/*.whl
 *.tar.gz
 .maturin/
 
@@ -419,6 +421,9 @@ scripts/*
 !scripts/substratia_evidence_report.py
 !scripts/write_orbis_evidence.py
 !scripts/helios_evidence_report.py
+!scripts/nephele_b1_diagnostic.py
+!scripts/nephele_b6_environment_diagnostic.py
+!scripts/nephele_b8_occlusion_diagnostic.py
 !scripts/run_nvidia_visual_acceptance.py
 !scripts/run_nvidia_determinism_acceptance.py
 !scripts/run_browser_probe.py

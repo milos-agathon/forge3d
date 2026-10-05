@@ -1,0 +1,7 @@
+{
+  "physical_acceptance": false,
+  "sky_cloud_delta_e_pass_fraction": 0.3955870764381403,
+  "godray_roi_ssim": 0.813460239551305,
+  "cloud_shadow_terrain_pass_fraction": 0.46563904945407836,
+  "medium_ablation_changed_fraction": 0.34146341463414637
+}

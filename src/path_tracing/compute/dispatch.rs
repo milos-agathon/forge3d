@@ -27,6 +27,6 @@ pub(super) fn dispatch(
     }
 
     g.queue.submit([enc.finish()]);
-    g.device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&g.device);
     Ok(())
 }

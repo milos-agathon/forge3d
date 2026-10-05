@@ -1,0 +1,143 @@
+{
+  "color_pipeline": {
+    "crop": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04",
+    "exposure": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31",
+    "linear_input": "linear-sRGB",
+    "output_encoding": "IEC 61966-2-1 sRGB",
+    "quantization": "round-to-nearest uint8",
+    "tonemap": "aces-fitted",
+    "tonemap_contract": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034"
+  },
+  "files": {
+    "cloud_shadow_mask": {
+      "artifact": "cloud-shadow-mask.npy",
+      "path": "tests/nephele/fixture/cloud-shadow-mask.npy",
+      "sha256": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e"
+    },
+    "godray_roi_mask": {
+      "artifact": "godray-roi-mask.npy",
+      "path": "tests/nephele/fixture/godray-roi-mask.npy",
+      "sha256": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20"
+    },
+    "reference_cloud_shadow_aov": {
+      "artifact": "reference-cloud-shadow-aov.npy",
+      "path": "tests/nephele/fixture/reference-cloud-shadow-aov.npy",
+      "sha256": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667"
+    },
+    "reference_in_scatter": {
+      "artifact": "reference-in-scatter.npy",
+      "path": "tests/nephele/fixture/reference-in-scatter.npy",
+      "sha256": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e"
+    },
+    "reference_media_lighting_visibility": {
+      "artifact": "reference-media-lighting-visibility.npy",
+      "path": "tests/nephele/fixture/reference-media-lighting-visibility.npy",
+      "sha256": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159"
+    },
+    "reference_optical_depth": {
+      "artifact": "reference-optical-depth.npy",
+      "path": "tests/nephele/fixture/reference-optical-depth.npy",
+      "sha256": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6"
+    },
+    "reference_rgb": {
+      "artifact": "reference-rgb.npy",
+      "path": "tests/nephele/fixture/reference-rgb.npy",
+      "sha256": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd"
+    },
+    "reference_terrain_hit": {
+      "artifact": "reference-terrain-hit.npy",
+      "path": "tests/nephele/fixture/reference-terrain-hit.npy",
+      "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+    },
+    "reference_terrain_slice": {
+      "artifact": "reference-terrain-slice.npy",
+      "path": "tests/nephele/fixture/reference-terrain-slice.npy",
+      "sha256": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5"
+    },
+    "reference_transmittance": {
+      "artifact": "reference-transmittance.npy",
+      "path": "tests/nephele/fixture/reference-transmittance.npy",
+      "sha256": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20"
+    },
+    "shaft_mask": {
+      "artifact": "shaft-mask.npy",
+      "path": "tests/nephele/fixture/shaft-mask.npy",
+      "sha256": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177"
+    },
+    "sky_cloud_mask": {
+      "artifact": "sky-cloud-mask.npy",
+      "path": "tests/nephele/fixture/sky-cloud-mask.npy",
+      "sha256": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2"
+    },
+    "terrain_mask": {
+      "artifact": "terrain-mask.npy",
+      "path": "tests/nephele/fixture/terrain-mask.npy",
+      "sha256": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+    }
+  },
+  "fixture_id": "nephele-cloud-over-terrain-v2",
+  "mask_generator": {
+    "path": "scripts/nephele_fixture_masks.py",
+    "sha256": "e290a957405bc1fbbece98f6998a2a31adc2d3c914347f1481561150bc0ce2c7"
+  },
+  "mask_rules": {
+    "path": "tests/nephele/fixture/mask-rules.json",
+    "sha256": "48a16b48747151e06b01669e91d7ed9e21c612aa87baddf1071f56f484681008"
+  },
+  "revision": 2,
+  "scene_inputs": {
+    "atmosphere": {
+      "artifact": "atmosphere.json",
+      "path": "tests/nephele/fixture/atmosphere.json",
+      "sha256": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47"
+    },
+    "camera": {
+      "artifact": "camera.json",
+      "path": "tests/nephele/fixture/camera.json",
+      "sha256": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1"
+    },
+    "crop": {
+      "artifact": "crop.json",
+      "path": "tests/nephele/fixture/crop.json",
+      "sha256": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04"
+    },
+    "exposure": {
+      "artifact": "exposure.json",
+      "path": "tests/nephele/fixture/exposure.json",
+      "sha256": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31"
+    },
+    "material": {
+      "artifact": "material.json",
+      "path": "tests/nephele/fixture/material.json",
+      "sha256": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789"
+    },
+    "medium": {
+      "artifact": "medium.json",
+      "path": "tests/nephele/fixture/medium.json",
+      "sha256": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9"
+    },
+    "sun": {
+      "artifact": "sun.json",
+      "path": "tests/nephele/fixture/sun.json",
+      "sha256": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02"
+    },
+    "terrain": {
+      "artifact": "terrain.json",
+      "path": "tests/nephele/fixture/terrain.json",
+      "sha256": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315"
+    },
+    "terrain_dem": {
+      "artifact": "terrain-dem.npy",
+      "path": "tests/nephele/fixture/terrain-dem.npy",
+      "sha256": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf"
+    },
+    "tonemap": {
+      "artifact": "tonemap.json",
+      "path": "tests/nephele/fixture/tonemap.json",
+      "sha256": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034"
+    }
+  },
+  "schema": "forge3d.nephele.fixture_manifest/3",
+  "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+  "status": "APPROVED"
+}

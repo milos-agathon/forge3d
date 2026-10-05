@@ -1,0 +1,68 @@
+{
+  "algorithm": "independent-f16-texel-center-column-bernoulli-v3",
+  "cache_key": "0ab5cf8dea69b95f4e5a45514983ede194f2742735ad345b532a16f1eebcb579",
+  "cache_provenance": {
+    "cache_key_scope": "inputs-only",
+    "status": "freshly_executed"
+  },
+  "command": "python scripts/nephele_heterogeneous_comparator.py medium.json OUTPUT --source-revision aeda3a8e4d7ba927d23cc978ad3c4678e6e79039",
+  "extinction_channel": 0,
+  "generated_at_utc": "2026-09-30T23:56:25.400029+00:00",
+  "medium": {
+    "path": "tests/nephele/fixture/medium.json",
+    "sha256": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9"
+  },
+  "producer_tool": {
+    "path": "scripts/nephele_heterogeneous_comparator.py",
+    "sha256": "496f2a69b86937581767fcaeef52cedd0a6f047df966c7034113099d031cc1a4"
+  },
+  "raw_output": {
+    "encoding": "bit-packed-lsb0-bernoulli",
+    "path": "heterogeneous-comparator.samples.bin",
+    "samples": 100000000,
+    "sha256": "31889c6ae015d144ac39070c0cd72aa0758c21f3d26aaf28379c4354edd2fc4b"
+  },
+  "sample_mapping": {
+    "algorithm": "indexed-ray-bernoulli-v1",
+    "parameters": {
+      "bit_order": "lsb0",
+      "dimensions": [
+        "u",
+        "v",
+        "survival"
+      ]
+    },
+    "sha256": "1cc127d48ebaa69bfff8d26d9716e47790c1f79312e0e81939eccc62b4bf7e67"
+  },
+  "samples": {
+    "count": 100000000,
+    "sum": 43241938,
+    "sum_squares": 43241938
+  },
+  "schema": "forge3d.nephele.heterogeneous_comparator/4",
+  "seed_identity": {
+    "algorithm": "splitmix64",
+    "parameters": {
+      "seed_u64": 5640002379681907969
+    },
+    "sha256": "db6ddd9994a08c5d2c8e1fa0095106c5b8981752c5b81f948069b083fb7c8299"
+  },
+  "sigma_t": 0.065,
+  "source_revision": "aeda3a8e4d7ba927d23cc978ad3c4678e6e79039",
+  "statistics": {
+    "mean": 0.43241938,
+    "sample_variance": 0.24543286225474423,
+    "standard_error": 4.9541181077437406e-05
+  },
+  "transport_representation": {
+    "density_f16_sha256": "b67c3b52d1385022cb2b7e788c1dfd3a9220758a8dc7f793d3b0b4294aeeb1fe",
+    "density_scale": 1.0,
+    "grid_shape": [
+      3,
+      3,
+      3
+    ],
+    "sampling": "normalized-clamp-to-edge-linear-texel-center-uN-minus-0.5",
+    "slab_integration": "exact-piecewise-linear-texel-center-column-mean"
+  }
+}

@@ -42,6 +42,45 @@ pub fn ctx_if_initialized() -> Option<&'static GpuContext> {
     CTX.get()
 }
 
+/// Block until every submission on `device` has actually completed.
+///
+/// Use this instead of `device.poll(wgpu::Maintain::Wait)`. wgpu-core 0.19
+/// waits at most `CLEANUP_WAIT_MS` (5 s) for `Maintain::Wait`, ignores the
+/// timeout, and then retires every active submission: it resets command pools
+/// and destroys buffers that the device may still be executing. Software
+/// Vulkan (lavapipe) can take longer than 5 s for one submission and then runs
+/// freed command buffers (`VUID-vkResetCommandPool-commandPool-00040`). A
+/// `Maintain::Poll` reads the real fence value, so polling until the queue is
+/// empty never retires unfinished work. On WebGPU, `poll` reports an empty
+/// queue immediately because the browser polls the device.
+///
+/// The GL backend keeps `Maintain::Wait`. wgpu-hal 0.19 GLES creates the
+/// submission fence without flushing and `Maintain::Poll` only reads its
+/// status, so an unflushed fence may never signal and a poll loop could spin
+/// forever. Only the `Wait` path flushes (`SYNC_FLUSH_COMMANDS_BIT`). GL hands
+/// commands to the driver at submit time and defers deletion of objects still
+/// in use, so the 5 s early retirement does not free memory the GPU is reading.
+pub fn wait_for_device_idle(device: &wgpu::Device) {
+    if device_is_gl(device) {
+        device.poll(wgpu::Maintain::Wait);
+        return;
+    }
+    while !device.poll(wgpu::Maintain::Poll).is_queue_empty() {
+        std::thread::yield_now();
+    }
+}
+
+/// wgpu-core 0.19.4 stores the backend in the top 3 bits of every id
+/// (`id.rs` `BACKEND_SHIFT`, value 4 = GL), and native `Device::global_id` is
+/// that raw id. `Device::as_hal::<Gles>` is not usable here: it looks the id up
+/// in the GL registry by slot without checking the backend, so a live GL device
+/// in the same slot misclassifies a Vulkan device or panics on the epoch check.
+/// `Id::inner` is a hidden testing API, so the unit test below pins this
+/// against every local adapter with all devices alive at once.
+fn device_is_gl(device: &wgpu::Device) -> bool {
+    device.global_id().inner() >> 61 == 4
+}
+
 /// Backend name of the already-initialized GPU context, if one exists.
 ///
 /// Returns `None` when no context has been created yet (peeks `CTX` without
@@ -667,7 +706,10 @@ pub fn create_device_and_queue_for_test() -> Option<(wgpu::Device, wgpu::Queue)>
 
 #[cfg(test)]
 mod backend_request_tests {
-    use super::{is_physical_proof_adapter, is_virtualized_adapter_name, parse_backend_request};
+    use super::{
+        device_is_gl, is_physical_proof_adapter, is_virtualized_adapter_name,
+        parse_backend_request, wait_for_device_idle,
+    };
 
     fn adapter(name: &str, device_type: wgpu::DeviceType) -> wgpu::AdapterInfo {
         wgpu::AdapterInfo {
@@ -736,5 +778,56 @@ mod backend_request_tests {
             &adapter("Apple Paravirtual device", wgpu::DeviceType::DiscreteGpu),
             false
         ));
+    }
+
+    /// Every device stays alive at once, so a GL device and a Vulkan/DX12
+    /// device share a registry slot number; a lookup in the GL registry by
+    /// slot would misclassify the non-GL device or panic on the epoch check.
+    #[test]
+    fn wait_for_device_idle_classifies_gl_and_returns_after_real_work() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let devices: Vec<_> = instance
+            .enumerate_adapters(wgpu::Backends::all())
+            .into_iter()
+            .filter_map(|adapter| {
+                let info = adapter.get_info();
+                pollster::block_on(adapter.request_device(&Default::default(), None))
+                    .ok()
+                    .map(|(device, queue)| (info, device, queue))
+            })
+            .collect();
+        for (info, device, queue) in &devices {
+            assert_eq!(
+                device_is_gl(device),
+                info.backend == wgpu::Backend::Gl,
+                "{info:?}"
+            );
+            let usage = wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+            let make = |label| {
+                crate::core::resource_tracker::tracked_create_buffer(
+                    device,
+                    &wgpu::BufferDescriptor {
+                        label: Some(label),
+                        size: 1 << 20,
+                        usage,
+                        mapped_at_creation: false,
+                    },
+                )
+                .unwrap()
+            };
+            let (src, dst) = (make("wait-src"), make("wait-dst"));
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&src, 0, &dst, 0, 1 << 20);
+            queue.submit([encoder.finish()]);
+            wait_for_device_idle(device);
+            assert!(
+                device.poll(wgpu::Maintain::Poll).is_queue_empty(),
+                "{info:?}"
+            );
+            eprintln!(
+                "wait_for_device_idle ok on {:?} ({})",
+                info.backend, info.name
+            );
+        }
     }
 }

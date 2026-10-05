@@ -6,6 +6,7 @@ use crate::viewer::terrain::ViewerTerrainScene;
 
 impl ViewerTerrainScene {
     pub(super) fn prepare_snapshot_overlays(&mut self) -> bool {
+        let scene_format = self.scene_color_format();
         let has_vector_overlays = if let Some(ref stack) = self.vector_overlay_stack {
             let enabled = stack.is_enabled();
             let count = stack.visible_layer_count();
@@ -65,7 +66,7 @@ impl ViewerTerrainScene {
 
             if let Some(ref mut stack) = self.vector_overlay_stack {
                 if !stack.pipelines_ready() || (self.oit_enabled && !stack.oit_pipelines_ready()) {
-                    if let Err(e) = stack.init_pipelines(self.surface_format) {
+                    if let Err(e) = stack.init_pipelines(scene_format) {
                         eprintln!("[terrain] overlay pipeline init failed: {e}");
                     }
                 }
@@ -91,7 +92,13 @@ impl ViewerTerrainScene {
 
         {
             let terrain = self.terrain.as_ref().unwrap();
-            let bg = terrain.background_color;
+            let bg = if self.canonical_media.is_some() {
+                crate::viewer::terrain::post_process::linear_hdr_for_display(
+                    terrain.background_color,
+                )
+            } else {
+                terrain.background_color
+            };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain_viewer.snapshot_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

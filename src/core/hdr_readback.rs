@@ -69,7 +69,7 @@ pub fn read_hdr_texture(
     );
 
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     // Map and read the buffer
     let buffer_slice = staging_buffer.slice(..);
@@ -77,7 +77,7 @@ pub fn read_hdr_texture(
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).unwrap();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     receiver
         .recv()
         .unwrap()
@@ -149,7 +149,7 @@ pub fn read_ldr_texture(
     );
 
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     // Map and read the buffer
     let buffer_slice = staging_buffer.slice(..);
@@ -157,7 +157,7 @@ pub fn read_ldr_texture(
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).unwrap();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     receiver
         .recv()
         .unwrap()
@@ -234,14 +234,14 @@ pub fn read_r32_texture(
     );
 
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     let buffer_slice = staging_buffer.slice(..);
     let (sender, receiver) = std::sync::mpsc::channel();
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).unwrap();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     receiver
         .recv()
         .unwrap()
@@ -331,14 +331,14 @@ pub fn read_r32uint_texture(
     );
 
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     let buffer_slice = staging_buffer.slice(..);
     let (sender, receiver) = std::sync::mpsc::channel();
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     let map_result = receiver
         .recv()
         .map_err(|e| format!("Buffer mapping callback lost: {e}"));

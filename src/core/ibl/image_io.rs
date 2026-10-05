@@ -213,7 +213,7 @@ impl IBLRenderer {
         for (buffer, _, _) in buffer_slices.iter() {
             buffer.slice(..).map_async(wgpu::MapMode::Read, |_| ());
         }
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         for (buffer, padded_row, mip_size) in buffer_slices.iter() {
             let data = buffer.slice(..).get_mapped_range();
@@ -282,7 +282,7 @@ impl IBLRenderer {
 
         queue.submit(Some(encoder.finish()));
         buffer.slice(..).map_async(wgpu::MapMode::Read, |_| ());
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let data = buffer.slice(..).get_mapped_range();
         let tight = strip_image_padding(&data, width, height, bytes_per_pixel);

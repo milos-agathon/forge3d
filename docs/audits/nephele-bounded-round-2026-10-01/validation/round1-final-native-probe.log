@@ -1,0 +1,2 @@
+($self, material_set, env_maps, params, heightmap, *, terrain_occlusion_in_media=True, include_no_medium=False, capture_radiance_provider=False, capture_scatter_components=False)
+D:\forge3d\.worktrees\nephele-172-completion\.tmp\nephele-completion\approved-env\Lib\site-packages\forge3d\_forge3d.pyd

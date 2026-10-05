@@ -470,6 +470,9 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
     fast_lane = set(ci_pytest_lane.fast_lane_files())
     expected_fast = {
         "tests/test_aether_acceptance_evidence.py",
+        "tests/test_nephele_evidence_report.py",
+        "tests/test_nephele_fixture_contracts.py",
+        "tests/test_nephele_public_api.py",
         "tests/test_install_smoke.py",
         "tests/test_license.py",
         "tests/test_api_contracts.py",
@@ -888,3 +891,50 @@ def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
     assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
     assert "continue-on-error: true" in metal_diagnostic
     assert "test-substratia-gpu," not in acceptance.split("\n    runs-on:", 1)[0]
+
+
+def test_nephele_provenance_lanes_fetch_complete_reference_history():
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    wheel_workflow = (ROOT / ".github/workflows/test-python-wheel.yml").read_text(encoding="utf-8")
+    for job in (
+        _workflow_job(workflow, "test-fast-contract"),
+        _workflow_job(workflow, "test-python-slow"),
+        _workflow_job(wheel_workflow, "test"),
+    ):
+        checkout = job.split("uses: actions/checkout@v4", 1)[1].split("\n      - ", 1)[0]
+        assert re.search(r"^\s+fetch-depth:\s+0\s*$", checkout, re.MULTILINE)
+
+
+def test_nephele_physical_exclusion_is_one_hosted_site_and_six_required_gates():
+    import ast
+
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    slow_job = _workflow_job(workflow, "test-python-slow")
+    exclusion = "--deselect=tests/test_nephele_physical.py"
+    assert workflow.count(exclusion) == 1
+    assert slow_job.count(exclusion) == 1
+    assert re.findall(r"--(?:deselect|ignore(?:-glob)?)(?:=|\s+)(\S+)", workflow) == [
+        "tests/test_nephele_physical.py"
+    ]
+    assert re.findall(r"--deselect(?:=|\s+)(\S+)", slow_job) == ["tests/test_nephele_physical.py"]
+    assert "--ignore" not in slow_job
+    args = ci_pytest_lane.build_pytest_args("full", [], slow=True)
+    assert args[args.index("-o") + 1] == "python_functions=test* gate*"
+    assert "tests/test_nephele_physical.py" in args
+    assert not any(arg.startswith(("--ignore", "--deselect")) for arg in args)
+    physical = ast.parse((ROOT / "tests/test_nephele_physical.py").read_text(encoding="utf-8"))
+    names = {node.name for node in physical.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    gates = {
+        "gate1_estimator_majorant_rr", "gate2_energy", "gate3_realtime_reference",
+        "gate4_terrain_coupling", "gate5_compute_shadow_ridgeline", "gate6_determinism_memory",
+    }
+    assert names == gates | {"physical"}
+    assert not any(isinstance(node, ast.ClassDef) for node in physical.body)
+    gpu = _workflow_job(workflow, "test-nephele-gpu")
+    assert "gpu-nvidia" in gpu and "Windows" in gpu and "X64" in gpu
+    assert "tests/test_nephele_physical.py" in gpu
+    assert "assert_junit_zero_skips.py" in gpu
+    assert "continue-on-error: true" not in gpu
+    summary = _workflow_job(workflow, "full-acceptance-summary")
+    assert "test-nephele-gpu" in summary.split("runs-on:", 1)[0]
+    assert "needs.test-nephele-gpu.result" in summary

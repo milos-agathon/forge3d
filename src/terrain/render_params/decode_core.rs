@@ -32,6 +32,7 @@ pub(super) struct CoreTerrainParams {
     pub camera_mode: String,
     pub culling: String,
     pub shading: String,
+    pub terrain_shading_model: String,
     pub vt_store_path: Option<String>,
     pub prefetch_horizon_ms: f32,
     pub vt_upload_budget_bytes: u64,
@@ -224,6 +225,23 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
             "shading must be one of 'forward' or 'visibility'",
         ));
     }
+    let terrain_shading_model = match params.getattr("terrain_shading_model") {
+        Ok(value) => value
+            .extract::<String>()
+            .map_err(|_| PyValueError::new_err("terrain_shading_model must be a string"))?,
+        Err(error) if error.is_instance_of::<pyo3::exceptions::PyAttributeError>(params.py()) => {
+            "stylized".to_string()
+        }
+        Err(error) => return Err(error),
+    };
+    if !matches!(
+        terrain_shading_model.as_str(),
+        "stylized" | "lambert_physical"
+    ) {
+        return Err(PyValueError::new_err(
+            "terrain_shading_model must be one of 'stylized' or 'lambert_physical'",
+        ));
+    }
     let vt_store_path = match params.getattr("vt_store").ok() {
         None => None,
         Some(value) if value.is_none() => None,
@@ -341,6 +359,7 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         camera_mode,
         culling,
         shading,
+        terrain_shading_model,
         vt_store_path,
         prefetch_horizon_ms,
         vt_upload_budget_bytes,

@@ -1,0 +1,10 @@
+{
+  "installed_native_path": "D:\\forge3d\\.worktrees\\nephele-172-completion\\.tmp\\nephele-completion\\approved-env\\Lib\\site-packages\\forge3d\\_forge3d.pyd",
+  "native_sha256": "b3ceff207d1eb3f001d7156a237fe2b61bc56ee7f39bff7b5eceda4286b53f84",
+  "package_version": "1.41.0",
+  "schema": "forge3d.nephele.installed_runtime/1",
+  "source_revision": "48d6a052d3b05ef2db16ab3d33fe8028e07d3819",
+  "wheel_filename": "forge3d-1.41.0-cp310-abi3-win_amd64.whl",
+  "wheel_native_member": "forge3d/_forge3d.pyd",
+  "wheel_sha256": "3870d78f55ea11da2ac05e702d657cb27fb1cbb8e53e74e3e7056929f0e49e1b"
+}

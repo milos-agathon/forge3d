@@ -11,6 +11,7 @@ pub(super) fn prepare_layer_mips(
     width: u32,
     height: u32,
     mip_level_count: u32,
+    encode_untextured_linear: bool,
 ) -> Vec<Vec<u8>> {
     let mut mips = Vec::with_capacity(mip_level_count as usize);
     let mut current_width = width.max(1);
@@ -39,12 +40,14 @@ pub(super) fn prepare_layer_mips(
         }
         None => {
             let color = material.base_color;
-            let rgba = [
-                (color[0].clamp(0.0, 1.0) * 255.0).round() as u8,
-                (color[1].clamp(0.0, 1.0) * 255.0).round() as u8,
-                (color[2].clamp(0.0, 1.0) * 255.0).round() as u8,
-                255u8,
-            ];
+            let encode = |value: f32| {
+                if encode_untextured_linear {
+                    linear_to_srgb_u8(value)
+                } else {
+                    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+                }
+            };
+            let rgba = [encode(color[0]), encode(color[1]), encode(color[2]), 255u8];
 
             for level in 0..mip_level_count {
                 let mut data = vec![0u8; (current_width as usize) * (current_height as usize) * 4];
@@ -61,6 +64,17 @@ pub(super) fn prepare_layer_mips(
     }
 
     mips
+}
+
+#[cfg(feature = "extension-module")]
+fn linear_to_srgb_u8(value: f32) -> u8 {
+    let linear = value.clamp(0.0, 1.0);
+    let srgb = if linear <= 0.003_130_8 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
+    (srgb.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[cfg(feature = "extension-module")]

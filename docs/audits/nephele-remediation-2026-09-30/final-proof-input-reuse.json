@@ -1,0 +1,13 @@
+{
+  "original_proof_source_commit": "1c6500154efff602c1be0b691492adf67a947bae",
+  "final_native_source_commit": "aeda3a8e4d7ba927d23cc978ad3c4678e6e79039",
+  "unchanged_proof_and_golden_input_blobs": {
+    "src/shaders/terrain_pbr_pom.wgsl": "5a3343824381182616e26790ca1f7a59d362d713a6b06f6c1353660139309c5f",
+    "src/verify/ir/engine.rs": "4cd70242e89952cb6f412942f0791b36d148d0254c2b5ef5605c5985e46b793d",
+    "tests/test_shader_proofs.py": "f620af6dae03a0fcf59d9afb6c166d888e18ded5cb1e291d35dce17240343aa5",
+    "tests/test_terrain_visual_goldens.py": "ad46d440fa070bf16d0704d0fbbfe37cca4da88ac53cde1f93cba6a0e40696cc",
+    "tests/test_terrain_tv10_goldens.py": "fedc29d0a386f1e8338b1049630200a36a57ff52f200380a9a50454a49912ce6"
+  },
+  "terrain_source_pin": "0xe3539a322a87b8cc",
+  "final_python_shader_goldens": "18 passed, 0 failed/skipped"
+}
