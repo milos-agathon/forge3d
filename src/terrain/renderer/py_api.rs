@@ -1417,6 +1417,21 @@ impl TerrainRenderer {
         self.stream_height_tiles_globe_focus(py, camera, focus, max_uploads)
     }
 
+    /// Test-only completion barrier for submitted uploads and pending reads.
+    /// Streaming and rendering retain their nonblocking production paths.
+    fn _wait_height_streaming(&mut self, py: Python<'_>) -> PyResult<()> {
+        let device = self.scene.device.clone();
+        let runtime = self.scene.height_streaming.as_mut();
+        py.allow_threads(move || {
+            device.poll(wgpu::Maintain::Wait);
+            if let Some(runtime) = runtime {
+                runtime.wait_for_loader_for_test()?;
+            }
+            Ok::<(), String>(())
+        })
+        .map_err(PyRuntimeError::new_err)
+    }
+
     /// BOP-P2-02: current streaming stats without advancing the stream.
     pub fn height_streaming_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
         let state = self.scene.height_streaming.as_ref().ok_or_else(|| {

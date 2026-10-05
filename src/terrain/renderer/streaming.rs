@@ -1139,6 +1139,11 @@ impl HeightVtFamilyRuntime {
         self.page_table_updates = self.page_table_updates.saturating_add(1);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn wait_for_loader_for_test(&mut self) -> Result<(), String> {
+        self.loader.wait_for_terminal_for_test()
+    }
+
     /// Map a tile at an arbitrary LOD onto the mosaic's fixed LOD.
     fn tiles_at_fixed_lod(&self, tile: TileId, out: &mut HashSet<TileId>) {
         map_tile_to_fixed_lod(tile, self.lod, self.tiles_axis, out);
