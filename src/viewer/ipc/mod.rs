@@ -79,7 +79,7 @@ mod tests {
             crate::viewer::viewer_enums::ViewerCmd::SetMedia {
                 medium: Some(medium),
                 version,
-                homogeneous_reach: None,
+                options: _,
             } => {
                 assert_eq!(version, 9);
                 assert!(medium
@@ -98,7 +98,7 @@ mod tests {
             Some(crate::viewer::viewer_enums::ViewerCmd::SetMedia {
                 medium: None,
                 version: 0,
-                homogeneous_reach: None,
+                options: _,
             })
         ));
     }
@@ -112,9 +112,13 @@ mod tests {
         assert!(matches!(
             ipc_request_to_viewer_cmd(&attach).unwrap(),
             Some(crate::viewer::viewer_enums::ViewerCmd::SetMedia {
-                homogeneous_reach: Some(reach),
+                options,
                 ..
-            }) if reach == 2500.0
+            }) if options.homogeneous_reach == Some(2500.0)
+                && options == crate::terrain::realtime_media::ViewerMediaOptions {
+                    homogeneous_reach: Some(2500.0),
+                    ..crate::terrain::realtime_media::ViewerMediaOptions::default()
+                }
         ));
         let orphan =
             parse_ipc_request(r#"{"cmd":"set_media","media":null,"homogeneous_reach":10.0}"#)
@@ -122,6 +126,31 @@ mod tests {
         assert!(ipc_request_to_viewer_cmd(&orphan)
             .unwrap_err()
             .contains("homogeneous_reach requires a medium"));
+    }
+
+    #[test]
+    fn canonical_media_ambient_and_slices_translate_and_require_a_medium() {
+        let attach = parse_ipc_request(
+            r#"{"cmd":"set_media","media":{"sigma_a":[0.1,0.1,0.1],"sigma_s":[0.2,0.2,0.2],"phase":"Isotropic","density":{"Homogeneous":{"authored_density":1.0,"mapping":{"physical_density_per_authored_unit":1.0}}}},"ambient_radiance":[0.16,0.19,0.27],"froxel_depth_slices":128}"#,
+        )
+        .unwrap();
+        match ipc_request_to_viewer_cmd(&attach).unwrap().unwrap() {
+            crate::viewer::viewer_enums::ViewerCmd::SetMedia { options, .. } => {
+                assert_eq!(options.ambient_radiance, [0.16, 0.19, 0.27]);
+                assert_eq!(options.froxel_depth_slices, 128);
+                assert_eq!(options.homogeneous_reach, None);
+            }
+            _ => panic!("expected canonical media attachment"),
+        }
+        for orphan in [
+            r#"{"cmd":"set_media","media":null,"ambient_radiance":[0.1,0.1,0.1]}"#,
+            r#"{"cmd":"set_media","media":null,"froxel_depth_slices":128}"#,
+        ] {
+            let request = parse_ipc_request(orphan).unwrap();
+            assert!(ipc_request_to_viewer_cmd(&request)
+                .unwrap_err()
+                .contains("requires a medium"));
+        }
     }
 
     #[test]

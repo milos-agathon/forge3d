@@ -267,6 +267,8 @@ class ViewerHandle:
         media: Optional["Medium"],
         *,
         homogeneous_reach: Optional[float] = None,
+        ambient_radiance: Optional[Sequence[float]] = None,
+        froxel_depth_slices: Optional[int] = None,
     ) -> None:
         """Attach a canonical NEPHELE medium, or remove it with ``None``.
 
@@ -275,10 +277,23 @@ class ViewerHandle:
         ``homogeneous_medium_reach``. Without it a homogeneous medium is
         unbounded and blocks all direct sunlight. It is rejected for bounded
         (grid or noise) media.
+
+        ``ambient_radiance`` is a uniform RGB sky radiance lighting the medium
+        from every direction (default black: media in shadow get no light).
+
+        ``froxel_depth_slices`` sets the logarithmic froxel depth resolution
+        (default 64). More slices sharpen thin layers such as fog tops; froxel
+        memory and per-frame CPU cost scale linearly, and allocation fails with
+        a reported ``media_render_error`` if it exceeds the memory budget.
         """
         if media is None:
-            if homogeneous_reach is not None:
-                raise ValueError("homogeneous_reach requires a medium")
+            for value, name in (
+                (homogeneous_reach, "homogeneous_reach"),
+                (ambient_radiance, "ambient_radiance"),
+                (froxel_depth_slices, "froxel_depth_slices"),
+            ):
+                if value is not None:
+                    raise ValueError(f"{name} requires a medium")
             self._send_command({"cmd": "set_media", "media": None})
             return
         from .media import Medium
@@ -291,6 +306,18 @@ class ViewerHandle:
             if not math.isfinite(reach) or reach <= 0.0:
                 raise ValueError("homogeneous_reach must be finite and positive")
             command["homogeneous_reach"] = reach
+        if ambient_radiance is not None:
+            ambient = [float(value) for value in ambient_radiance]
+            if len(ambient) != 3 or any(not math.isfinite(v) or v < 0.0 for v in ambient):
+                raise ValueError("ambient_radiance must be three finite non-negative values")
+            command["ambient_radiance"] = ambient
+        if froxel_depth_slices is not None:
+            if isinstance(froxel_depth_slices, bool) or int(froxel_depth_slices) != froxel_depth_slices:
+                raise ValueError("froxel_depth_slices must be a positive integer")
+            slices = int(froxel_depth_slices)
+            if slices < 1:
+                raise ValueError("froxel_depth_slices must be a positive integer")
+            command["froxel_depth_slices"] = slices
         self._send_command(command)
 
     def _allocate_label_id(self) -> int:

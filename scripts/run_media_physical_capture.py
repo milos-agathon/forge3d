@@ -53,6 +53,7 @@ DIAGNOSTIC_KEYS = {
     "sun_transmittance_max_segment_length", "sun_transmittance_executed_steps",
     "sun_transmittance_max_abs_error",
     "f16_flushed_sample_count", "f16_flushed_max_value",
+    "froxel_depth_slices", "uniform_ambient_radiance",
 }
 
 
@@ -110,6 +111,22 @@ def _validate_candidate_diagnostics(
         or not 0.0 <= diagnostics["f16_flushed_max_value"] < 2.0 ** -24
         or (diagnostics["f16_flushed_sample_count"] == 0)
         != (diagnostics["f16_flushed_max_value"] == 0.0)
+        or type(diagnostics["froxel_depth_slices"]) is not int
+        or diagnostics["froxel_depth_slices"] < 1
+        or not (
+            diagnostics["uniform_ambient_radiance"] is None
+            or (
+                isinstance(diagnostics["uniform_ambient_radiance"], list)
+                and len(diagnostics["uniform_ambient_radiance"]) == 3
+                and all(
+                    not isinstance(v, bool)
+                    and isinstance(v, (int, float))
+                    and math.isfinite(v)
+                    and v >= 0
+                    for v in diagnostics["uniform_ambient_radiance"]
+                )
+            )
+        )
     ):
         raise ValueError(
             "live media diagnostics differ from exact source, Vulkan adapter, "

@@ -33,7 +33,7 @@ impl ViewerTerrainScene {
                         (width, height),
                         medium,
                         self.canonical_media_version,
-                        self.canonical_media_homogeneous_reach,
+                        self.canonical_media_options,
                     )
                 },
                 Ok,

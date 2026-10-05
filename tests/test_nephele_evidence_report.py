@@ -625,6 +625,8 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
         "sun_transmittance_max_abs_error": 0.0005,
         "f16_flushed_sample_count": 0,
         "f16_flushed_max_value": 0.0,
+        "froxel_depth_slices": 64,
+        "uniform_ambient_radiance": None,
     }
     _validate_candidate_diagnostics(candidate_diagnostics, head, probe)
     _validate_realtime_diagnostics(
@@ -731,6 +733,10 @@ def test_capture_shaped_sun_diagnostics_interoperate_and_fail_closed(
         ("flush-max-type", "f16_flushed_max_value", 0),
         ("flush-max-not-subnormal", "f16_flushed_max_value", 1e-3),
         ("flush-max-without-count", "f16_flushed_max_value", 3e-8),
+        ("slices-zero", "froxel_depth_slices", 0),
+        ("slices-type", "froxel_depth_slices", 64.0),
+        ("ambient-short", "uniform_ambient_radiance", [0.1, 0.1]),
+        ("ambient-negative", "uniform_ambient_radiance", [0.1, -0.1, 0.1]),
     )
     for mutation, field, value in mutations:
         diagnostics = dict(base)

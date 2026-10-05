@@ -86,7 +86,7 @@ pub enum ViewerCmd {
     SetMedia {
         medium: Option<crate::media::Medium>,
         version: u64,
-        homogeneous_reach: Option<f32>,
+        options: crate::terrain::realtime_media::ViewerMediaOptions,
     },
     SetTerrainPbr {
         enabled: Option<bool>, hdr_path: Option<String>, ibl_intensity: Option<f32>,

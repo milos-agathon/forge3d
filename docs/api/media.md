@@ -143,6 +143,19 @@ distance along every camera and sun ray, matching
 ``render_volumetric_reference(..., homogeneous_medium_reach=distance)``.
 Grid and noise media are bounded by their own ``bounds`` and reject a reach.
 
+Two more viewer options shape how an attached medium renders:
+
+- ``ambient_radiance=(r, g, b)``: uniform sky radiance lighting the medium (and
+  the terrain it sees) from every direction. The default is black, so media in
+  terrain or night shadow receive no light and only absorb.
+- ``froxel_depth_slices=n``: logarithmic froxel depth resolution (default 64).
+  More slices sharpen thin layers such as fog tops. Froxel memory and the
+  per-frame CPU upload scale linearly; a grid that exceeds the memory budget
+  fails with a reported ``media_render_error`` rather than rendering.
+
+Real-time diagnostics report both as ``uniform_ambient_radiance`` and
+``froxel_depth_slices``.
+
 Each froxel's single-scatter estimate uses one stochastic continuation
 direction. Before multiple scattering and integration, the real-time path
 averages it over a 3x3 tent of neighbouring froxel columns in the same depth

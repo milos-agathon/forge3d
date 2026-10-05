@@ -144,7 +144,7 @@ impl ViewerTerrainScene {
             pbr_config: crate::viewer::terrain::pbr_renderer::ViewerTerrainPbrConfig::default(),
             canonical_media: None,
             canonical_media_version: 0,
-            canonical_media_homogeneous_reach: None,
+            canonical_media_options: crate::terrain::realtime_media::ViewerMediaOptions::default(),
             canonical_media_pass: None,
             canonical_media_diagnostics: None,
             canonical_media_render_error: None,
@@ -229,7 +229,7 @@ impl ViewerTerrainScene {
         &mut self,
         medium: Option<crate::media::Medium>,
         version: u64,
-        homogeneous_reach: Option<f32>,
+        options: crate::terrain::realtime_media::ViewerMediaOptions,
     ) -> Result<()> {
         let format_changes = self.canonical_media.is_some() != medium.is_some();
         if let Some(value) = &medium {
@@ -238,20 +238,18 @@ impl ViewerTerrainScene {
             crate::media::TrackingContext::new(value.clone(), majorant)
                 .map_err(|error| anyhow::anyhow!("media tracking validation failed: {error}"))?;
         }
-        if let Some(reach) = homogeneous_reach {
-            let medium = medium
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("homogeneous_reach requires a medium"))?;
-            if !matches!(medium.density(), crate::media::DensityField::Homogeneous(_)) {
-                anyhow::bail!("homogeneous_reach applies only to homogeneous media");
+        match &medium {
+            Some(value) => options
+                .validate(value, self.device.limits().max_texture_dimension_3d)
+                .map_err(|error| anyhow::anyhow!(error))?,
+            None if options != crate::terrain::realtime_media::ViewerMediaOptions::default() => {
+                anyhow::bail!("viewer media options require a medium")
             }
-            if !reach.is_finite() || reach <= 0.0 {
-                anyhow::bail!("homogeneous_reach must be finite and positive, got {reach}");
-            }
+            None => {}
         }
         self.canonical_media = medium;
         self.canonical_media_version = version;
-        self.canonical_media_homogeneous_reach = homogeneous_reach;
+        self.canonical_media_options = options;
         self.canonical_media_pass = None;
         self.canonical_media_diagnostics = None;
         self.canonical_media_render_error = None;

@@ -91,15 +91,23 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
         IpcRequest::SetMedia {
             media,
             homogeneous_reach,
+            ambient_radiance,
+            froxel_depth_slices,
         } => {
             let Some(value) = media else {
-                if homogeneous_reach.is_some() {
-                    return Err("homogeneous_reach requires a medium".to_string());
+                for (given, name) in [
+                    (homogeneous_reach.is_some(), "homogeneous_reach"),
+                    (ambient_radiance.is_some(), "ambient_radiance"),
+                    (froxel_depth_slices.is_some(), "froxel_depth_slices"),
+                ] {
+                    if given {
+                        return Err(format!("{name} requires a medium"));
+                    }
                 }
                 return Ok(Some(ViewerCmd::SetMedia {
                     medium: None,
                     version: 0,
-                    homogeneous_reach: None,
+                    options: crate::terrain::realtime_media::ViewerMediaOptions::default(),
                 }));
             };
             let mut value = value.clone();
@@ -115,10 +123,16 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
             };
             let medium = serde_json::from_value::<crate::media::Medium>(value)
                 .map_err(|error| format!("invalid participating medium: {error}"))?;
+            let defaults = crate::terrain::realtime_media::ViewerMediaOptions::default();
             Ok(Some(ViewerCmd::SetMedia {
                 medium: Some(medium),
                 version,
-                homogeneous_reach: *homogeneous_reach,
+                options: crate::terrain::realtime_media::ViewerMediaOptions {
+                    homogeneous_reach: *homogeneous_reach,
+                    ambient_radiance: ambient_radiance.unwrap_or(defaults.ambient_radiance),
+                    froxel_depth_slices: froxel_depth_slices
+                        .unwrap_or(defaults.froxel_depth_slices),
+                },
             }))
         }
         IpcRequest::SetTerrainScatter { batches } => Ok(Some(ViewerCmd::SetTerrainScatter {

@@ -120,6 +120,7 @@ REALTIME_DIAGNOSTIC_KEYS = {
     "sun_transmittance_bias", "sun_transmittance_max_segment_length",
     "sun_transmittance_executed_steps", "sun_transmittance_max_abs_error",
     "f16_flushed_sample_count", "f16_flushed_max_value",
+    "froxel_depth_slices", "uniform_ambient_radiance",
 }
 RAW_FILES = {
     *FIXTURE_FILES.values(),
@@ -2007,6 +2008,14 @@ def _validate_realtime_diagnostics(
         or (flushed_count == 0) != (flushed_max == 0.0)
     ):
         _fail("schema_error", f"{label}: f16 flush diagnostics are invalid")
+    _integer(diagnostics["froxel_depth_slices"], f"{label}.froxel_depth_slices", minimum=1)
+    ambient = diagnostics["uniform_ambient_radiance"]
+    if ambient is not None and (
+        not isinstance(ambient, list)
+        or len(ambient) != 3
+        or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 for v in ambient)
+    ):
+        _fail("schema_error", f"{label}: uniform_ambient_radiance diagnostics are invalid")
     return _sun_transmittance_diagnostics(diagnostics, label)
 
 

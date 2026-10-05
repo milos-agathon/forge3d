@@ -48,6 +48,8 @@ REALTIME_DIAGNOSTIC_FIELDS = REFERENCE_DIAGNOSTIC_FIELDS + (
     "sun_transmittance_max_abs_error",
     "f16_flushed_sample_count",
     "f16_flushed_max_value",
+    "froxel_depth_slices",
+    "uniform_ambient_radiance",
 )
 
 
@@ -188,6 +190,32 @@ def test_viewer_media_homogeneous_reach_is_sent_only_when_given(monkeypatch: pyt
     assert len(sent) == 1
 
 
+def test_viewer_media_ambient_and_slices_are_validated_and_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(media_module, "_native_module", lambda: _fake_native())
+    medium = Medium((0.1, 0.2, 0.3), (0.4, 0.5, 0.6), 0.75, version=9)
+    handle = object.__new__(ViewerHandle)
+    sent: list[dict[str, Any]] = []
+    handle._send_command = lambda command: sent.append(command) or {"ok": True}  # type: ignore[method-assign]
+
+    handle.set_media(medium, ambient_radiance=(0.16, 0.19, 0.27), froxel_depth_slices=128)
+    assert sent == [{
+        "cmd": "set_media",
+        "media": medium.to_dict(),
+        "ambient_radiance": [0.16, 0.19, 0.27],
+        "froxel_depth_slices": 128,
+    }]
+    for bad in ((0.1, 0.1), (-0.1, 0.0, 0.0), (float("nan"), 0.0, 0.0)):
+        with pytest.raises(ValueError, match="ambient_radiance"):
+            handle.set_media(medium, ambient_radiance=bad)
+    for bad in (0, -4, 2.5, True):
+        with pytest.raises(ValueError, match="froxel_depth_slices"):
+            handle.set_media(medium, froxel_depth_slices=bad)
+    for kwargs in ({"ambient_radiance": (0.1, 0.1, 0.1)}, {"froxel_depth_slices": 128}):
+        with pytest.raises(ValueError, match="requires a medium"):
+            handle.set_media(None, **kwargs)
+    assert len(sent) == 1
+
+
 def test_viewer_media_attach_remove_and_type_error_execute(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(media_module, "_native_module", lambda: _fake_native())
     medium = Medium((0.1, 0.2, 0.3), (0.4, 0.5, 0.6), 0.75, version=9)
@@ -309,7 +337,7 @@ def test_media_public_inventory_stubs_and_aov_methods_are_complete() -> None:
     viewer_stubs = (ROOT / "python/forge3d/viewer.pyi").read_text(encoding="utf-8")
     media_stubs = (ROOT / "python/forge3d/media.pyi").read_text(encoding="utf-8")
     assert (
-        "def set_media(self, media: Medium | None, *, homogeneous_reach: float | None = ...)"
+        "def set_media(self, media: Medium | None, *, homogeneous_reach: float | None = ..., ambient_radiance: Sequence[float] | None = ..., froxel_depth_slices: int | None = ...)"
         in viewer_stubs
     )
     media_stub_module = ast.parse(media_stubs)
@@ -366,6 +394,8 @@ def test_media_public_inventory_stubs_and_aov_methods_are_complete() -> None:
         "sun_transmittance_max_abs_error": "float",
         "f16_flushed_sample_count": "int",
         "f16_flushed_max_value": "float",
+        "froxel_depth_slices": "int",
+        "uniform_ambient_radiance": "list[float] | None",
     }
     reference_result_stub = next(
         node

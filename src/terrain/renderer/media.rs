@@ -57,10 +57,13 @@ pub(super) struct FroxelGrid {
 
 impl FroxelGrid {
     pub(super) fn for_viewport(width: u32, height: u32) -> Self {
+        Self::for_viewport_with_depth(width, height, FROXEL_DEPTH_SLICES)
+    }
+    pub(super) fn for_viewport_with_depth(width: u32, height: u32, depth: u32) -> Self {
         Self {
             width: width.max(1).div_ceil(FROXEL_TILE_SIZE_PX) + 2 * FROXEL_OFF_AXIS_BORDER,
             height: height.max(1).div_ceil(FROXEL_TILE_SIZE_PX) + 2 * FROXEL_OFF_AXIS_BORDER,
-            depth: FROXEL_DEPTH_SLICES,
+            depth: depth.max(1),
         }
     }
     pub(super) fn visible_width(self) -> u32 {
@@ -192,6 +195,11 @@ pub(crate) struct MediaExecutionDiagnostics {
     /// subnormal that were stored as zero, and the largest such sample.
     pub f16_flushed_sample_count: u64,
     pub f16_flushed_max_value: f64,
+    /// Logarithmic froxel depth slices executed.
+    pub froxel_depth_slices: u32,
+    /// Viewer uniform sky radiance on the medium; `None` on the offscreen
+    /// renderer, which lights media from its environment maps.
+    pub uniform_ambient_radiance: Option<[f64; 3]>,
     pub single_scatter_luminance: f64,
     pub multiple_scatter_luminance: f64,
     /// Maximum dimensionless difference between the executed product of
@@ -374,6 +382,9 @@ pub(super) struct TerrainMediaResources {
     pub(super) depth_transform: FroxelDepthTransform,
     pub(super) previous_view_projection: glam::Mat4,
     pub(super) sun_transmittance_diagnostic: SunTransmittanceDiagnostic,
+    /// Viewer-only uniform sky radiance; `None` on the offscreen renderer,
+    /// whose environment comes from its IBL maps.
+    pub(super) uniform_ambient_radiance: Option<[f32; 3]>,
     pub(super) radiance_provider: Arc<TrackedTexture>,
     pub(super) radiance_provider_identity: u64,
     pub(super) blue_noise_identity: u64,
@@ -418,10 +429,7 @@ pub(crate) struct ViewerMediaPass {
     resources: TerrainMediaResources,
     medium: crate::media::Medium,
     version: u64,
-    /// Distance a homogeneous medium fills along every ray (camera and sun),
-    /// matching the reference renderer's `homogeneous_medium_reach`. `None`
-    /// keeps the medium unbounded, which blocks all direct sunlight.
-    homogeneous_reach: Option<f32>,
+    options: ViewerMediaOptions,
     viewer_terrain_key: Option<u64>,
     viewer_terrain_albedo: [f32; 3],
     prepared_medium_identity: Option<crate::media::MediumIdentity>,
@@ -471,18 +479,27 @@ impl ViewerMediaPass {
         viewport: (u32, u32),
         medium: crate::media::Medium,
         version: u64,
-        homogeneous_reach: Option<f32>,
+        options: ViewerMediaOptions,
     ) -> crate::core::error::RenderResult<Self> {
         medium
             .validate()
             .map_err(crate::core::error::RenderError::render)?;
-        validate_homogeneous_reach(&medium, homogeneous_reach)
+        options
+            .validate(&medium, device.limits().max_texture_dimension_3d)
             .map_err(crate::core::error::RenderError::render)?;
+        let mut resources = TerrainMediaResources::new_with_depth(
+            device,
+            queue,
+            viewport,
+            version,
+            options.froxel_depth_slices,
+        )?;
+        resources.uniform_ambient_radiance = Some(options.ambient_radiance);
         Ok(Self {
-            resources: TerrainMediaResources::new(device, queue, viewport, version)?,
+            resources,
             medium,
             version,
-            homogeneous_reach,
+            options,
             viewer_terrain_key: None,
             viewer_terrain_albedo: [0.0; 3],
             prepared_medium_identity: None,
@@ -519,7 +536,7 @@ impl ViewerMediaPass {
             queue,
             &self.medium,
             self.version,
-            self.homogeneous_reach,
+            self.options.homogeneous_reach,
             preparation.camera_position,
             preparation.inverse_view_projection,
             preparation.depth,
@@ -541,7 +558,14 @@ impl ViewerMediaPass {
         let frame_was_prepared = self.prepared_medium_identity.is_some();
         let preparation = self.prepared_frame.take();
         self.prepared_medium_identity = None;
-        self.resources = TerrainMediaResources::new(device, queue, viewport, self.version)?;
+        self.resources = TerrainMediaResources::new_with_depth(
+            device,
+            queue,
+            viewport,
+            self.version,
+            self.options.froxel_depth_slices,
+        )?;
+        self.resources.uniform_ambient_radiance = Some(self.options.ambient_radiance);
         let Some(preparation) = preparation.filter(|_| frame_was_prepared) else {
             return Ok(());
         };
@@ -549,7 +573,7 @@ impl ViewerMediaPass {
             queue,
             &self.medium,
             self.version,
-            self.homogeneous_reach,
+            self.options.homogeneous_reach,
             preparation.camera_position,
             preparation.inverse_view_projection,
             preparation.depth,
@@ -655,12 +679,14 @@ impl ViewerMediaPass {
                 "viewer media frame was not prepared before terrain direct lighting",
             )
         })?;
+        let ambient = self.options.ambient_radiance;
         fill_radiance_provider(
             queue,
             &self.resources.radiance_provider,
             self.resources.viewport,
-            [0.0; 3],
+            ambient,
         )?;
+        self.resources.diffuse_ibl = diffuse_ibl_irradiance(ambient);
         let phase = match self.resources.phase {
             crate::media::Phase::Isotropic => (0.0, 0.0),
             crate::media::Phase::HenyeyGreenstein { g } => (g, 1.0),
@@ -669,7 +695,11 @@ impl ViewerMediaPass {
             view_projection,
             terrain_revision,
             medium_identity,
-            media_lighting_identity(sun_direction, sun_radiance, 1.0, true),
+            // Ambient sky light is lighting: changing it must reject history.
+            stable_words_hash(
+                std::iter::once(media_lighting_identity(sun_direction, sun_radiance, 1.0, true))
+                    .chain(ambient.map(|value| u64::from(value.to_bits()))),
+            ),
             &adapter.get_info(),
         );
         let mut depth_params = depth.wgsl_params();
@@ -842,8 +872,18 @@ impl TerrainMediaResources {
         viewport: (u32, u32),
         resource_version: u64,
     ) -> crate::core::error::RenderResult<Self> {
+        Self::new_with_depth(device, queue, viewport, resource_version, FROXEL_DEPTH_SLICES)
+    }
+
+    pub(super) fn new_with_depth(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        viewport: (u32, u32),
+        resource_version: u64,
+        froxel_depth_slices: u32,
+    ) -> crate::core::error::RenderResult<Self> {
         let viewport = (viewport.0.max(1), viewport.1.max(1));
-        let grid = FroxelGrid::for_viewport(viewport.0, viewport.1);
+        let grid = FroxelGrid::for_viewport_with_depth(viewport.0, viewport.1, froxel_depth_slices);
         let froxel_usage = wgpu::TextureUsages::STORAGE_BINDING
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_DST
@@ -1062,6 +1102,7 @@ impl TerrainMediaResources {
                 .map_err(crate::core::error::RenderError::render)?,
             previous_view_projection: glam::Mat4::IDENTITY,
             sun_transmittance_diagnostic: SunTransmittanceDiagnostic::default(),
+            uniform_ambient_radiance: None,
             radiance_provider: Arc::new(radiance_provider),
             radiance_provider_identity: 0,
             blue_noise_identity,
@@ -2016,6 +2057,8 @@ impl TerrainMediaResources {
             ),
             f16_flushed_sample_count: self.f16_flush.count,
             f16_flushed_max_value: f64::from(self.f16_flush.max_value),
+            froxel_depth_slices: self.grid.depth,
+            uniform_ambient_radiance: self.uniform_ambient_radiance.map(|value| value.map(f64::from)),
             single_scatter_luminance: 0.0,
             multiple_scatter_luminance: 0.0,
             energy_accounting_residual: None,
@@ -3015,6 +3058,62 @@ fn froxel_footprint_for_uv(grid: FroxelGrid, uv: glam::Vec2) -> ([u32; 2], glam:
 
 /// Rejects a reach that is not finite and positive, or one given for a
 /// bounded medium (whose own bounds already limit every ray).
+/// Viewer-only controls for an attached canonical medium.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewerMediaOptions {
+    /// Distance a homogeneous medium fills along every camera and sun ray,
+    /// matching the reference renderer's `homogeneous_medium_reach`. `None`
+    /// keeps the medium unbounded, which blocks all direct sunlight.
+    pub homogeneous_reach: Option<f32>,
+    /// Uniform sky radiance lighting the medium from every direction (and the
+    /// terrain the medium sees). Zero keeps the viewer's previous behaviour:
+    /// media in shadow then receive no light at all.
+    pub ambient_radiance: [f32; 3],
+    /// Logarithmic froxel depth slices. More slices sharpen thin layers and fog
+    /// tops; froxel memory and CPU upload cost scale linearly with it.
+    pub froxel_depth_slices: u32,
+}
+
+impl Default for ViewerMediaOptions {
+    fn default() -> Self {
+        Self {
+            homogeneous_reach: None,
+            ambient_radiance: [0.0; 3],
+            froxel_depth_slices: FROXEL_DEPTH_SLICES,
+        }
+    }
+}
+
+impl ViewerMediaOptions {
+    /// Validates the options for `medium`. `max_texture_dimension_3d` is the
+    /// device limit the froxel volumes must fit; froxel memory is checked by
+    /// the resource tracker when the grid is allocated for a viewport.
+    pub(crate) fn validate(
+        &self,
+        medium: &crate::media::Medium,
+        max_texture_dimension_3d: u32,
+    ) -> Result<(), String> {
+        validate_homogeneous_reach(medium, self.homogeneous_reach)?;
+        if self
+            .ambient_radiance
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(format!(
+                "ambient_radiance must be finite and non-negative, got {:?}",
+                self.ambient_radiance
+            ));
+        }
+        if self.froxel_depth_slices == 0 || self.froxel_depth_slices > max_texture_dimension_3d {
+            return Err(format!(
+                "froxel_depth_slices must be between 1 and the device 3D texture limit {max_texture_dimension_3d}, got {}",
+                self.froxel_depth_slices
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn validate_homogeneous_reach(
     medium: &crate::media::Medium,
     homogeneous_reach: Option<f32>,
@@ -3781,6 +3880,46 @@ mod tests {
         assert!(validate_homogeneous_reach(&medium, None).is_ok());
     }
     #[test]
+    fn viewer_media_options_validate_ambient_slices_and_reach() {
+        let homogeneous = crate::media::Medium::new(
+            [0.0; 3],
+            [0.01; 3],
+            crate::media::Phase::Isotropic,
+            crate::media::DensityField::Homogeneous(crate::media::Homogeneous {
+                authored_density: 1.0,
+                mapping: crate::media::DensityMapping {
+                    physical_density_per_authored_unit: 1.0,
+                },
+            }),
+        )
+        .unwrap();
+        let defaults = ViewerMediaOptions::default();
+        assert_eq!(defaults.froxel_depth_slices, FROXEL_DEPTH_SLICES);
+        assert_eq!(defaults.ambient_radiance, [0.0; 3]);
+        assert!(defaults.validate(&homogeneous, 2048).is_ok());
+        let valid = ViewerMediaOptions {
+            homogeneous_reach: Some(100.0),
+            ambient_radiance: [0.16, 0.19, 0.27],
+            froxel_depth_slices: 128,
+        };
+        assert!(valid.validate(&homogeneous, 2048).is_ok());
+        for bad in [
+            ViewerMediaOptions { ambient_radiance: [-0.1, 0.0, 0.0], ..valid },
+            ViewerMediaOptions { ambient_radiance: [f32::NAN, 0.0, 0.0], ..valid },
+            ViewerMediaOptions { froxel_depth_slices: 0, ..valid },
+            ViewerMediaOptions { froxel_depth_slices: 4096, ..valid },
+            ViewerMediaOptions { homogeneous_reach: Some(0.0), ..valid },
+        ] {
+            assert!(bad.validate(&homogeneous, 2048).is_err(), "{bad:?}");
+        }
+    }
+    #[test]
+    fn froxel_grid_depth_follows_requested_slices() {
+        assert_eq!(FroxelGrid::for_viewport(640, 480).depth, FROXEL_DEPTH_SLICES);
+        let deep = FroxelGrid::for_viewport_with_depth(640, 480, 128);
+        assert_eq!((deep.width, deep.height, deep.depth), (82, 62, 128));
+    }
+    #[test]
     fn edge_footprint_consumes_both_off_axis_border_tiles() {
         let grid = FroxelGrid::for_viewport(640, 480);
         let (low, low_weight) = froxel_footprint_for_uv(grid, glam::Vec2::ZERO);
@@ -4017,6 +4156,8 @@ mod tests")
             sun_transmittance_max_abs_error: 1e-6,
             f16_flushed_sample_count: 2,
             f16_flushed_max_value: 3e-8,
+            froxel_depth_slices: 128,
+            uniform_ambient_radiance: Some([0.16, 0.19, 0.27]),
             single_scatter_luminance: 0.25,
             multiple_scatter_luminance: 0.125,
             energy_accounting_residual: Some(5.960_464_477_539_063e-8),
@@ -4063,6 +4204,8 @@ mod tests")
                 "sun_transmittance_max_abs_error",
                 "f16_flushed_sample_count",
                 "f16_flushed_max_value",
+                "froxel_depth_slices",
+                "uniform_ambient_radiance",
                 "multiple_scatter_dispatches",
                 "multiple_scatter_luminance",
                 "energy_accounting_residual",
@@ -4083,6 +4226,8 @@ mod tests")
         assert_eq!(value["sun_transmittance_max_abs_error"], 1e-6);
         assert_eq!(value["f16_flushed_sample_count"], 2);
         assert_eq!(value["f16_flushed_max_value"], 3e-8);
+        assert_eq!(value["froxel_depth_slices"], 128);
+        assert_eq!(value["uniform_ambient_radiance"][2], 0.27);
     }
     #[test]
     fn multiple_scatter_is_accounted() {

@@ -30,6 +30,8 @@ class RealtimeMediaDiagnostics(ReferenceMediaDiagnostics):
     sun_transmittance_max_abs_error: float
     f16_flushed_sample_count: int
     f16_flushed_max_value: float
+    froxel_depth_slices: int
+    uniform_ambient_radiance: list[float] | None
 
 class VolumetricReferenceResult(TypedDict):
     beauty: Any

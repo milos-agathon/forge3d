@@ -81,7 +81,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         ViewerCmd::SetMedia {
             medium,
             version,
-            homogeneous_reach,
+            options,
         } => {
             let outcome = viewer
                 .terrain_viewer
@@ -89,7 +89,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 .ok_or_else(|| "set_media requires a loaded terrain scene".to_string())
                 .and_then(|terrain| {
                     terrain
-                        .set_media(medium.clone(), *version, *homogeneous_reach)
+                        .set_media(medium.clone(), *version, *options)
                         .map_err(|error| error.to_string())
                 });
             if let Err(error) = outcome {

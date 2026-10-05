@@ -57,6 +57,10 @@ pub enum IpcRequest {
         media: Option<serde_json::Value>,
         #[serde(default)]
         homogeneous_reach: Option<f32>,
+        #[serde(default)]
+        ambient_radiance: Option<[f32; 3]>,
+        #[serde(default)]
+        froxel_depth_slices: Option<u32>,
     },
     SetTerrainPbr {
         #[serde(default)] enabled: Option<bool>, #[serde(default)] hdr_path: Option<String>, #[serde(default)] ibl_intensity: Option<f32>,
