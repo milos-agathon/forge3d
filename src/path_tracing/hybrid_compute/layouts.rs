@@ -23,6 +23,31 @@ impl HybridPathTracer {
         })
     }
 
+    /// Group 1 of the fused (SPLAT-FUSED) kernel: the base scene bindings
+    /// plus the fused uniforms, the top-level/per-page BVH, the page table
+    /// (read-write: traversal feedback), splat SoA records, packed inverse
+    /// covariance, COPC point pages and the VolumetricParams block.
+    #[cfg(feature = "splat-fusion")]
+    pub(super) fn create_fused_scene_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("hybrid-pt-bgl1-scene-fused"),
+            entries: &[
+                storage_entry(0, true),
+                uniform_entry(1),
+                storage_entry(2, true),
+                storage_entry(3, true),
+                storage_entry(4, true),
+                uniform_entry(5),
+                storage_entry(6, true),
+                storage_entry(7, false),
+                storage_entry(8, true),
+                storage_entry(9, true),
+                storage_entry(10, true),
+                uniform_entry(11),
+            ],
+        })
+    }
+
     pub(super) fn create_accum_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("hybrid-pt-bgl2-accum"),

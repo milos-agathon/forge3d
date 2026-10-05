@@ -45,10 +45,21 @@ SHA_RE = re.compile(r"[0-9a-f]{40}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 # Milos's reviewed exceptions, not transport changes: CHRONOS re-exports and
 # the SUTURA `camera_mode` module declaration (terrain/mod.rs), and the
-# manual-bilinear tap-count test (shader_sources.rs).
+# manual-bilinear tap-count test (shader_sources.rs), and main e0f4961e in
+# render_terrain.rs, which moves the existing AETHER radiometry clamp into
+# uploaded_radiometry() and checks the runtime contract against the uploaded
+# (clamped) values; the uploaded values are computed identically.
+# main ec003e90 (SPLAT-FUSED limits) adds an opt-in F16 min-max pyramid and
+# new albedo formats to terrain_heightfield.rs; TerrainPtScene::new and
+# new_with_albedo, which the reference uses, keep the F32 pyramid and
+# Rgba32F albedo (owner-approved by code inspection, not re-measured).
+# shader_sources.rs: main ec003e90/c93b653e add only cfg(splat-fusion) fused
+# kernel assembly and drop one alternative from the tap-count test above.
 REFERENCE_SOURCE_ALLOWLIST = {
     "src/terrain/mod.rs": "4562b11c06b55edc88265f4b31a5a088261b574b18ec55619b9394a56e8e3377",
-    "src/shader_sources.rs": "28b090ef71315c6edd9b21fd346f3494ae4ec96656c476910f89b1ac0082a1e2",
+    "src/shader_sources.rs": "156f2b121f286f8bf5f32fe333edbacac0bce0a1f731e11853458705b4fab1db",
+    "src/path_tracing/hybrid_compute/render_terrain.rs": "90a271018cbb579b621a7a8f2d013031f62ef484b4944ae98098f05945100dc3",
+    "src/path_tracing/hybrid_compute/terrain_heightfield.rs": "da6e5c5027b98f3845ea5d7e02819ef1528d6fa0a3c2b48dc3badd12aeefeeed",
 }
 
 

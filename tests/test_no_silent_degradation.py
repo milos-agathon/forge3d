@@ -110,6 +110,10 @@ PORTABLE_CI_CARGO_FEATURES = {
     "enable-inverse-pt",
     "shader-contract-asserts",
     "enable-globe",
+    # SPLAT-FUSED: the fused splat/LiDAR/terrain integrator, its paging and
+    # its CPU kernels are compiled and unit-tested on every portable lane
+    # (the GPU acceptance self-skips off the hardware lane).
+    "splat-fusion",
 }
 DEDICATED_SYSTEM_FEATURES = {"proj"}
 DEDICATED_ACCEPTANCE_FEATURES = {"atmosphere-bake"}
@@ -289,6 +293,8 @@ WHEEL_REQUIRED_FEATURES = {
     "atmosphere-bake",
     # DIFFERENTIA: `inverse_solve`/`inverse_render_primal` are public API.
     "enable-inverse-pt",
+    # SPLAT-FUSED: `load_gaussian_splats`/`render_fused` are public API.
+    "splat-fusion",
 }
 
 

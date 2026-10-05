@@ -128,6 +128,8 @@ class TestNativeModuleSymbols:
         "TransformFailed",
         # LITTERA: immutable native shaping result
         "ShapedText",
+        # SPLAT-FUSED: structure-of-arrays Gaussian splat cloud
+        "GaussianSplatCloud",
         "CompiledFrame",
     ]
 
@@ -196,6 +198,14 @@ class TestNativeModuleSymbols:
         # DIFFERENTIA: differentiable inverse solver + primal
         "inverse_solve",
         "inverse_render_primal",
+        # SPLAT-FUSED: Gaussian splats + fused splat/LiDAR/terrain ReSTIR render
+        "load_gaussian_splats",
+        "render_fused",
+        "render_fused_reference",
+        "render_fused_sequence",
+        "build_splat_page_store",
+        "write_synthetic_point_field",
+        "splat_ray_gaussian",
         # VERITAS: per-pixel cryptographic provenance
         "seal_provenance",
         "verify_provenance",

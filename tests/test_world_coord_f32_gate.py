@@ -74,8 +74,16 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # NEPHELE and CHRONOS preserve independent reviewed transitions from 1.39.
 # Release 1.40 CHRONOS rewrites the two R2 jitter casts one-for-one and adds
 # the three unit-direction casts of SunPosition::to_scene_direction.
-EXPECTED_CONVERSION_COUNT = 1881
-EXPECTED_CONVERSION_SHA256 = "45ca418834228c2e25d26dfded6e8d86f1cda1ba67b1eb0079cf32f6df33b192"
+# SPLAT-FUSED adds seven non-world sites (raster/count helpers, 3DGS PLY
+# attribute narrowing, sky-bake normalisation, variance telemetry, and the
+# signature of the Anchor-routed PointCloudFrame::to_scene); see the
+# `splat_fused` ledger record, which is pending owner review.
+# The merged tree carries CHRONOS, NEPHELE, and SPLAT-FUSED; each ledger record
+# below stays exact against its own base. `nephele_main_integration` (pending
+# owner review) records the sites no earlier record covers, and this freeze is
+# its result.
+EXPECTED_CONVERSION_COUNT = 1905
+EXPECTED_CONVERSION_SHA256 = "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdbe1f76cd94"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -752,8 +760,14 @@ def test_release_1_39_terrain_inventory_transition_is_exact():
     assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
     assert not set(added) & set(removed)
     assert transition["base_count"] + len(added) - len(removed) == transition["result_count"]
-    # Reconstruct the #194 result inventory by undoing the 1.40 CHRONOS record.
+    # Reconstruct the #194 result inventory by undoing the SPLAT-FUSED and
+    # 1.40 CHRONOS records.
     current = collections.Counter(conversion_inventory())
+    splat = _ledger_data()["splat_fused"]
+    assert not splat["removed"]
+    for site in map(tuple, splat["added"]):
+        assert current[site] > 0
+        current[site] -= 1
     for site in map(tuple, chronos["added"]):
         assert current[site] > 0
         current[site] -= 1
@@ -768,8 +782,9 @@ def test_release_1_39_terrain_inventory_transition_is_exact():
 
 def test_release_1_40_chronos_inventory_transition_is_exact():
     transition = _ledger_data()["release_1_40_chronos"]
+    splat = _ledger_data()["splat_fused"]
     assert (transition["result_count"], transition["result_digest"]) == (
-        1821, "1b17f3f2ac765a98e747d2bc7ef067aa8fb746a5d2bcf693189586f9b5c1d0c8"
+        splat["base_count"], splat["base_digest"]
     )
     assert transition["review"]
     added = list(map(tuple, transition["added"]))
@@ -793,11 +808,44 @@ def test_release_1_40_chronos_inventory_transition_is_exact():
     ]
     assert "fn to_scene_direction" in _read("src/lighting/ephemeris.rs")
 
-    current = _undo_reviewed_transition(collections.Counter(conversion_inventory()), _ledger_data()["nephele"])
+    current = _undo_reviewed_transition(_reviewed_inventory(), _ledger_data()["nephele"])
     for site in added:
         assert current[site] > 0, f"recorded addition missing: {site}"
     for site in removed:
         assert current[site] == 0, f"recorded removal still present: {site}"
+
+
+def test_splat_fused_inventory_transition_is_exact():
+    transition = _ledger_data()["splat_fused"]
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1828, "ac609dda139040202a137f8cfb108e515247e9c8e5de2c92c921655208991adc"
+    )
+    assert transition["review"]
+    added = list(map(tuple, transition["added"]))
+    assert transition["removed"] == []
+    assert len(set(added)) == len(added)
+    assert transition["base_count"] + len(added) == transition["result_count"]
+
+    assert [site[:4] for site in added] == [
+        ("src/path_tracing/hybrid_compute/render_fused.rs", "<module>", "as_f32", 1),
+        ("src/path_tracing/hybrid_compute/render_fused.rs", "render_fused_view", "as_f32", 1),
+        ("src/splat/load.rs", "f32_from_f64_attribute", "as_f32", 1),
+        ("src/splat/load.rs", "f32_from_f64_attribute", "f64_helper", 1),
+        ("src/splat/mod.rs", "f32_from_u32", "as_f32", 1),
+        ("src/splat/mod.rs", "f32_from_usize", "as_f32", 1),
+        ("src/splat/stream.rs", "<module>", "f64_helper", 1),
+    ]
+    # Splat and LiDAR positions leave f64 through the typed Anchor exit only.
+    assert "to_render_f32" in _read("src/splat/stream.rs")
+    load = _read("src/splat/load.rs")
+    assert "to_render_f32" in load
+    for line in load.splitlines():
+        if "f32_from_f64_attribute(" in line and "fn f32_from_f64_attribute" not in line:
+            assert "position" not in line.lower(), line
+
+    current = collections.Counter(conversion_inventory())
+    for site in added:
+        assert current[site] > 0, f"recorded addition missing: {site}"
 
 
 def test_mensura_transition_leaves_one_world_cast_in_the_typed_anchor_exit():
@@ -906,13 +954,47 @@ def _undo_reviewed_transition(current, transition):
     return current
 
 
+def _reviewed_inventory():
+    """Current inventory with the pending integration record undone."""
+    return _undo_reviewed_transition(
+        collections.Counter(conversion_inventory()), _ledger_data()["nephele_main_integration"]
+    )
+
+
+def test_nephele_main_integration_record_reaches_the_current_freeze():
+    transition = _ledger_data()["nephele_main_integration"]
+    assert (transition["result_count"], transition["result_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+    )
+    assert transition["review"].startswith("PENDING OWNER REVIEW")
+    added = collections.Counter(map(tuple, transition["added"]))
+    removed = collections.Counter(map(tuple, transition["removed"]))
+    assert sum(added.values()) - sum(removed.values()) == (
+        transition["result_count"] - transition["base_count"]
+    )
+    # No recorded change narrows an absolute world coordinate.
+    for site in added:
+        assert site[0] != SANCTIONED, site
+    reviewed = _reviewed_inventory()
+    assert sum(reviewed.values()) == transition["base_count"]
+    # The reviewed base is main 3a6ec9f8 plus the SPLAT-FUSED and NEPHELE records.
+    splat = _ledger_data()["splat_fused"]
+    nephele = _ledger_data()["nephele"]
+    assert transition["base_count"] == (
+        splat["result_count"] + nephele["result_count"] - nephele["base_count"]
+    )
+
+
 def test_nephele_reviewed_inventory_transition_is_exact():
     transition = _ledger_data()["nephele"]
     preceding = _ledger_data()["release_1_39_terrain"]
     assert (transition["base_count"], transition["base_digest"]) == (preceding["result_count"], preceding["result_digest"])
     assert (transition["result_count"], transition["result_digest"]) == (1878, "beeb7833b23e4ef857acdc0c56955c07ce8ba5e20a8f10b067bad23ad9ba5f1c")
     assert transition["review"]
-    current = _undo_reviewed_transition(collections.Counter(conversion_inventory()), _ledger_data()["release_1_40_chronos"])
+    current = _undo_reviewed_transition(
+        _undo_reviewed_transition(_reviewed_inventory(), _ledger_data()["splat_fused"]),
+        _ledger_data()["release_1_40_chronos"],
+    )
     added, removed = collections.Counter(map(tuple, transition["added"])), collections.Counter(map(tuple, transition["removed"]))
     assert not (added & removed)
     for site, count in added.items():

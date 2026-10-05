@@ -1937,5 +1937,405 @@
     "let y = ((n * alpha2) % 1.0) as f32"
    ]
   ]
+ },
+ "splat_fused": {
+  "base_commit": "53acd545",
+  "base_count": 1821,
+  "base_digest": "1b17f3f2ac765a98e747d2bc7ef067aa8fb746a5d2bcf693189586f9b5c1d0c8",
+  "result_count": 1828,
+  "result_digest": "ac609dda139040202a137f8cfb108e515247e9c8e5de2c92c921655208991adc",
+  "review": "PENDING OWNER REVIEW (recorded by the SPLAT-FUSED implementation, not yet approved by Milos). Seven additions, none narrowing an absolute world coordinate: the two crate::splat::num helpers convert u32/usize raster dimensions, grid indices and counts (+2); f32_from_f64_attribute narrows per-splat 3DGS PLY attributes stored as doubles (scale, rotation, opacity, SH; positions do not use it) and is matched once as a cast and once as an f64->f32 helper (+2); PointCloudFrame::to_scene is matched as an f64 helper only because of its DVec3 -> [f32; 3] signature, and its body narrows through Anchor::to_render_f32 (+1); render_fused.rs normalises the baked Hosek sky radiance to half-float range (+1) and reads the accumulated luminance variance telemetry (+1). Splat PLY and COPC positions cross f64 -> f32 only through Anchor::to_render_f32, which stays the sole world-position narrowing owner.",
+  "added": [
+   [
+    "src/path_tracing/hybrid_compute/render_fused.rs",
+    "<module>",
+    "as_f32",
+    1,
+    "*value = (f64::from(*value) * scale).min(65_504.0) as f32"
+   ],
+   [
+    "src/path_tracing/hybrid_compute/render_fused.rs",
+    "render_fused_view",
+    "as_f32",
+    1,
+    "variance = variance.max((f64::from(s.y) / (n * (n - 1.0))) as f32)"
+   ],
+   [
+    "src/splat/load.rs",
+    "f32_from_f64_attribute",
+    "as_f32",
+    1,
+    "value as f32"
+   ],
+   [
+    "src/splat/load.rs",
+    "f32_from_f64_attribute",
+    "f64_helper",
+    1,
+    "} Ok(chunk) } } fn f32_from_f64_attribute(value: f64) -> f32 { value as f32"
+   ],
+   [
+    "src/splat/mod.rs",
+    "f32_from_u32",
+    "as_f32",
+    1,
+    "value as f32"
+   ],
+   [
+    "src/splat/mod.rs",
+    "f32_from_usize",
+    "as_f32",
+    1,
+    "value as f32"
+   ],
+   [
+    "src/splat/stream.rs",
+    "<module>",
+    "f64_helper",
+    1,
+    "anchor } pub fn to_scene(&self, anchor: &crate::camera::Anchor, p: DVec3) -> [f32"
+   ]
+  ],
+  "removed": []
+ },
+ "nephele_main_integration": {
+  "base_count": 1888,
+  "base_digest": "ec8a15bb2dc79d3f65ea8b1c3ba4f53f39ec48ca496727ea5dc9a748c646bdf0",
+  "result_count": 1905,
+  "result_digest": "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdbe1f76cd94",
+  "review": "PENDING OWNER REVIEW (recorded while merging main into PR #172, not yet approved by Milos). The reviewed base is main 3a6ec9f8 plus the recorded SPLAT-FUSED and NEPHELE transitions. None of the changes narrows an absolute world coordinate. NEPHELE real-time media (media.rs): froxel grid, viewport and step-count integer->f32 conversions from the bilinear froxel footprint, depth-slice options, parallel canonical upload and viewer terrain placement; most removals are the same statements re-keyed by those refactors. TESSELLA (#207): six integer->f32 conversions in the gpu_lod test camera generator. main also removed two visibility_buffer.rs pixel-centre casts.",
+  "added": [
+   [
+    "src/terrain/clipmap/gpu_lod/tests.rs",
+    "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras",
+    "as_f32",
+    1,
+    "let min = Vec2::new(-1024.0 + x as f32 * 256.0, -1024.0 + y as f32 * 256.0)"
+   ],
+   [
+    "src/terrain/clipmap/gpu_lod/tests.rs",
+    "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras",
+    "as_f32",
+    2,
+    "let min = Vec2::new(-1024.0 + x as f32 * 256.0, -1024.0 + y as f32 * 256.0)"
+   ],
+   [
+    "src/terrain/clipmap/gpu_lod/tests.rs",
+    "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras",
+    "as_f32",
+    3,
+    "let angle = (state as f32 / u32::MAX as f32) * std::f32::consts::TAU"
+   ],
+   [
+    "src/terrain/clipmap/gpu_lod/tests.rs",
+    "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras",
+    "as_f32",
+    4,
+    "let angle = (state as f32 / u32::MAX as f32) * std::f32::consts::TAU"
+   ],
+   [
+    "src/terrain/clipmap/gpu_lod/tests.rs",
+    "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras",
+    "as_f32",
+    5,
+    "let radius = 900.0 + (state as f32 / u32::MAX as f32) * 900.0"
+   ],
+   [
+    "src/terrain/clipmap/gpu_lod/tests.rs",
+    "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras",
+    "as_f32",
+    6,
+    "let radius = 900.0 + (state as f32 / u32::MAX as f32) * 900.0"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    1,
+    "origin_xz: render_origin_xz, spacing_xz: [ render_span_xz[0] / dimensions.0.saturating_sub(1).max(1) as f32, render_span_xz[1] / dimensions.1.saturating_sub(1).max(1) as f32, ], height_offset: height_min, height_scale: z_scale,"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    2,
+    "origin_xz: render_origin_xz, spacing_xz: [ render_span_xz[0] / dimensions.0.saturating_sub(1).max(1) as f32, render_span_xz[1] / dimensions.1.saturating_sub(1).max(1) as f32, ], height_offset: height_min, height_scale: z_scale,"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    3,
+    "sum.map(|value| (value / count) as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    4,
+    "let spacing_xz = [ terrain_span / dimensions.0.saturating_sub(1).max(1) as f32, terrain_span / dimensions.1.saturating_sub(1).max(1) as f32, ]"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    5,
+    "let spacing_xz = [ terrain_span / dimensions.0.saturating_sub(1).max(1) as f32, terrain_span / dimensions.1.saturating_sub(1).max(1) as f32, ]"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    6,
+    "let origin_xz = [ -0.5 * dimensions.0.saturating_sub(1) as f32 * spacing_xz[0], -0.5 * dimensions.1.saturating_sub(1) as f32 * spacing_xz[1], ]"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    7,
+    "let origin_xz = [ -0.5 * dimensions.0.saturating_sub(1) as f32 * spacing_xz[0], -0.5 * dimensions.1.saturating_sub(1) as f32 * spacing_xz[1], ]"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "termination_integration_steps",
+    "as_f32",
+    1,
+    "} let max_slice = (froxel_depth - 1) as f32"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    8,
+    "} } mean.map(|value| (value / count as f64) as f32 * env_maps.intensity.max(0.0))"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "prepare_realtime_media_for_terrain",
+    "as_f32",
+    1,
+    "let width = ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "prepare_realtime_media_for_terrain",
+    "as_f32",
+    2,
+    "let height = ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "encode_attached_realtime_media_inject_with_matrices",
+    "as_f32",
+    1,
+    "let expected_viewport = ( ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "encode_attached_realtime_media_inject_with_matrices",
+    "as_f32",
+    2,
+    "let expected_viewport = ( ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    11,
+    "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    12,
+    "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    13,
+    "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    14,
+    "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    15,
+    "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    16,
+    "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    17,
+    "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    18,
+    "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    19,
+    "let centre = uv * visible + glam::Vec2::splat(FROXEL_OFF_AXIS_BORDER as f32 - 0.5)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    20,
+    "let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    21,
+    "let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    22,
+    "let step = segment_length / steps as f32"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    23,
+    "let point = origin + direction * (start + (i as f32 + 0.5) * step)"
+   ]
+  ],
+  "removed": [
+   [
+    "src/terrain/renderer/visibility_buffer.rs",
+    "<module>",
+    "as_f32",
+    7,
+    "} let point = glam::vec2(pixel.0 as f32 + 0.5, pixel.1 as f32 + 0.5)"
+   ],
+   [
+    "src/terrain/renderer/visibility_buffer.rs",
+    "<module>",
+    "as_f32",
+    8,
+    "} let point = glam::vec2(pixel.0 as f32 + 0.5, pixel.1 as f32 + 0.5)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    1,
+    "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    2,
+    "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    3,
+    "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    4,
+    "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    5,
+    "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    6,
+    "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    7,
+    "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    8,
+    "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    11,
+    "let position = uv * visible + jitter + glam::Vec2::splat(FROXEL_OFF_AXIS_BORDER as f32)"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    12,
+    "[ position.x.floor().clamp(0.0, (grid.width - 1) as f32) as u32, position.y.floor().clamp(0.0, (grid.height - 1) as f32) as u32, ]"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    13,
+    "[ position.x.floor().clamp(0.0, (grid.width - 1) as f32) as u32, position.y.floor().clamp(0.0, (grid.height - 1) as f32) as u32, ]"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    14,
+    "let step = segment_length / steps as f32"
+   ],
+   [
+    "src/terrain/renderer/media.rs",
+    "<module>",
+    "as_f32",
+    15,
+    "let point = origin + direction * (start + (i as f32 + 0.5) * step)"
+   ]
+  ]
  }
 }

@@ -26,7 +26,7 @@ mod viewer_image_utils;
 mod viewer_render_helpers;
 mod viewer_ssr_scene;
 pub mod viewer_struct;
-mod viewer_types;
+pub(crate) mod viewer_types;
 
 // Re-export public items
 pub use ipc::IpcServerConfig;

@@ -52,6 +52,64 @@ pub enum AlbedoSampling {
     Bilinear = 1,
 }
 
+/// Storage precision of the min-max pyramid. `F16Conservative` stores each
+/// node's minimum rounded down and maximum rounded up to the next half-float,
+/// so every node still bounds its cells: traversal visits a superset of the
+/// F32 nodes and the exact leaf test (R32Float heights) decides every hit.
+/// It halves the pyramid, which dominates terrain memory (pow2 padding).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MinMaxPrecision {
+    F32,
+    F16Conservative,
+}
+
+// The albedo-map enum lives in `terrain_albedo.rs`: its lifetime parameter
+// would read as a character literal to the world-coordinate f32 gate's
+// comment/string stripper and unbalance this file's test-module braces.
+pub use super::terrain_albedo::TerrainAlbedoMap;
+
+/// Largest half-float `<= v` (NaN passes through).
+pub(crate) fn f16_floor(v: f32) -> half::f16 {
+    let h = half::f16::from_f32(v);
+    if h.is_nan() || h.to_f32() <= v {
+        h
+    } else {
+        f16_step_down(h)
+    }
+}
+
+/// Smallest half-float `>= v` (NaN passes through).
+pub(crate) fn f16_ceil(v: f32) -> half::f16 {
+    let h = half::f16::from_f32(v);
+    if h.is_nan() || h.to_f32() >= v {
+        h
+    } else {
+        f16_step_up(h)
+    }
+}
+
+fn f16_step_up(h: half::f16) -> half::f16 {
+    let b = h.to_bits();
+    if h == half::f16::INFINITY {
+        return h;
+    }
+    if b == 0x8000 {
+        return half::f16::from_bits(0x0001);
+    }
+    half::f16::from_bits(if b & 0x8000 == 0 { b + 1 } else { b - 1 })
+}
+
+fn f16_step_down(h: half::f16) -> half::f16 {
+    let b = h.to_bits();
+    if h == half::f16::NEG_INFINITY {
+        return h;
+    }
+    if b == 0x0000 {
+        return half::f16::from_bits(0x8001);
+    }
+    half::f16::from_bits(if b & 0x8000 == 0 { b - 1 } else { b + 1 })
+}
+
 /// Curvature parameters consumed by the shared terrain traversal. The two
 /// explicit pads match WGSL uniform layout (vec2 alignment = 8 bytes).
 #[repr(C)]
@@ -229,6 +287,8 @@ pub struct TerrainMinMaxPyramid {
     width: u32,
     height: u32,
     cpu_mips: MinMaxMips,
+    minmax_bytes: u64,
+    minmax_f16: bool,
 }
 
 impl TerrainMinMaxPyramid {
@@ -242,6 +302,21 @@ impl TerrainMinMaxPyramid {
         heights: &[f32],
         w: u32,
         h: u32,
+    ) -> Result<Self, RenderError> {
+        Self::from_heightfield_with_precision(device, queue, heights, w, h, MinMaxPrecision::F32)
+    }
+
+    /// `from_heightfield` with a chosen min-max storage precision.
+    /// `F16Conservative` is honoured only when every height satisfies
+    /// `|h| <= 65504`; otherwise the pyramid is F32 and `minmax_is_f16()`
+    /// reports it.
+    pub fn from_heightfield_with_precision(
+        device: &Device,
+        queue: &Queue,
+        heights: &[f32],
+        w: u32,
+        h: u32,
+        precision: MinMaxPrecision,
     ) -> Result<Self, RenderError> {
         let mips = build_minmax_mips(heights, w, h)?;
         let (pot_w, pot_h) = mips.dims[0];
@@ -287,6 +362,9 @@ impl TerrainMinMaxPyramid {
             },
         );
 
+        let minmax_f16 = precision == MinMaxPrecision::F16Conservative
+            && heights.iter().all(|v| v.abs() <= 65504.0);
+        let texel_bytes: u32 = if minmax_f16 { 4 } else { 8 };
         let minmax_texture = tracked_create_texture(
             device,
             &wgpu::TextureDescriptor {
@@ -299,13 +377,26 @@ impl TerrainMinMaxPyramid {
                 mip_level_count: mip_count,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: TextureFormat::Rg32Float,
+                format: if minmax_f16 {
+                    TextureFormat::Rg16Float
+                } else {
+                    TextureFormat::Rg32Float
+                },
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
         )?;
-        let mut byte_size = (w as u64) * (h as u64) * 4;
+        let height_bytes = (w as u64) * (h as u64) * 4;
+        let mut minmax_bytes = 0u64;
         for (level, ((lw, lh), data)) in mips.dims.iter().zip(mips.levels.iter()).enumerate() {
+            // Conservative half-float bounds: min rounds down, max rounds up.
+            let packed: Vec<[u16; 2]> = if minmax_f16 {
+                data.iter()
+                    .map(|[lo, hi]| [f16_floor(*lo).to_bits(), f16_ceil(*hi).to_bits()])
+                    .collect()
+            } else {
+                Vec::new()
+            };
             queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &minmax_texture,
@@ -313,10 +404,14 @@ impl TerrainMinMaxPyramid {
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                bytemuck::cast_slice(data),
+                if minmax_f16 {
+                    bytemuck::cast_slice(&packed)
+                } else {
+                    bytemuck::cast_slice(data)
+                },
                 wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(lw * 8),
+                    bytes_per_row: Some(lw * texel_bytes),
                     rows_per_image: Some(*lh),
                 },
                 wgpu::Extent3d {
@@ -325,8 +420,9 @@ impl TerrainMinMaxPyramid {
                     depth_or_array_layers: 1,
                 },
             );
-            byte_size += (*lw as u64) * (*lh as u64) * 8;
+            minmax_bytes += (*lw as u64) * (*lh as u64) * u64::from(texel_bytes);
         }
+        let byte_size = height_bytes + minmax_bytes;
         log::info!(
             "hybrid-pt-terrain-minmax: {}x{} DEM -> {} mips, {:.2} MiB total",
             w,
@@ -347,7 +443,19 @@ impl TerrainMinMaxPyramid {
             width: w,
             height: h,
             cpu_mips: mips,
+            minmax_bytes,
+            minmax_f16,
         })
+    }
+
+    /// Tracked bytes of the min-max texture alone (all mips).
+    pub fn minmax_bytes(&self) -> u64 {
+        self.minmax_bytes
+    }
+
+    /// Whether the min-max pyramid is stored as conservative half floats.
+    pub fn minmax_is_f16(&self) -> bool {
+        self.minmax_f16
     }
 
     /// CPU mirror used to derive conservative tile AABBs for raster HZB
@@ -442,7 +550,8 @@ pub struct TerrainPtScene {
     pub env_texture: TrackedTexture,
     /// (0, 0) selects the constant-white env fallback in the kernel.
     pub env_dims: (u32, u32),
-    /// Per-texel albedo map at DEM texel resolution (RGBA32F). A 1x1 white
+    /// Per-texel albedo map at DEM texel resolution (RGBA32F, or RGBA8 sRGB
+    /// for `TerrainAlbedoMap::Rgba8Srgb`). A 1x1 white
     /// placeholder when no map was given; consumers still bind it at group 2
     /// binding 16 so the layout stays fixed. Texels with alpha < 1 fall back to
     /// the constant `albedo`.
@@ -535,6 +644,46 @@ impl TerrainPtScene {
         albedo_sampling: AlbedoSampling,
         turbidity: f32,
     ) -> Result<Self, RenderError> {
+        Self::new_with_options(
+            device,
+            queue,
+            heights,
+            dem_width,
+            dem_height,
+            spacing,
+            exaggeration,
+            albedo,
+            env_map,
+            env_intensity,
+            match albedo_rgba {
+                Some(data) => TerrainAlbedoMap::Rgba32F(data),
+                None => TerrainAlbedoMap::None,
+            },
+            albedo_sampling,
+            turbidity,
+            MinMaxPrecision::F32,
+        )
+    }
+
+    /// `new_with_albedo` with an explicit albedo-map encoding and min-max
+    /// pyramid precision.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_options(
+        device: &Device,
+        queue: &Queue,
+        heights: &[f32],
+        dem_width: u32,
+        dem_height: u32,
+        spacing: (f32, f32),
+        exaggeration: f32,
+        albedo: [f32; 3],
+        env_map: Option<(&[f32], u32, u32)>,
+        env_intensity: f32,
+        albedo_map: TerrainAlbedoMap,
+        albedo_sampling: AlbedoSampling,
+        turbidity: f32,
+        minmax: MinMaxPrecision,
+    ) -> Result<Self, RenderError> {
         if !(spacing.0.is_finite() && spacing.0 > 0.0 && spacing.1.is_finite() && spacing.1 > 0.0) {
             return Err(RenderError::Upload(format!(
                 "terrain spacing must be finite and > 0, got {spacing:?}"
@@ -560,12 +709,37 @@ impl TerrainPtScene {
                 "terrain turbidity must be finite and >= 1, got {turbidity}"
             )));
         }
-        let pyramid =
-            TerrainMinMaxPyramid::from_heightfield(device, queue, heights, dem_width, dem_height)?;
+        let pyramid = TerrainMinMaxPyramid::from_heightfield_with_precision(
+            device, queue, heights, dem_width, dem_height, minmax,
+        )?;
 
-        let (alb_w, alb_h, alb_rgba): (u32, u32, Vec<f32>) = match albedo_rgba {
-            Some(data) => {
-                if data.len() != (dem_width as usize) * (dem_height as usize) * 4 {
+        let has_albedo_map = !matches!(albedo_map, TerrainAlbedoMap::None);
+        let cells = (dem_width as usize) * (dem_height as usize);
+        // (width, height, format, bytes per texel, texel bytes)
+        let (alb_w, alb_h, alb_format, alb_texel, alb_bytes): (
+            u32,
+            u32,
+            TextureFormat,
+            u32,
+            Vec<u8>,
+        ) = match albedo_map {
+            TerrainAlbedoMap::Rgba8Srgb(data) => {
+                if data.len() != cells * 4 {
+                    return Err(RenderError::Upload(format!(
+                        "terrain sRGB albedo map must hold {dem_width}x{dem_height}x4 bytes, got {}",
+                        data.len()
+                    )));
+                }
+                (
+                    dem_width,
+                    dem_height,
+                    TextureFormat::Rgba8UnormSrgb,
+                    4,
+                    data.to_vec(),
+                )
+            }
+            TerrainAlbedoMap::Rgba32F(data) => {
+                if data.len() != cells * 4 {
                     return Err(RenderError::Upload(format!(
                         "terrain albedo map must match the DEM grid {dem_width}x{dem_height} \
                          with four channels"
@@ -581,9 +755,21 @@ impl TerrainPtScene {
                             .into(),
                     ));
                 }
-                (dem_width, dem_height, data.to_vec())
+                (
+                    dem_width,
+                    dem_height,
+                    TextureFormat::Rgba32Float,
+                    16,
+                    bytemuck::cast_slice(data).to_vec(),
+                )
             }
-            None => (1, 1, vec![1.0, 1.0, 1.0, 1.0]),
+            TerrainAlbedoMap::None => (
+                1,
+                1,
+                TextureFormat::Rgba32Float,
+                16,
+                bytemuck::cast_slice(&[1.0f32; 4]).to_vec(),
+            ),
         };
         let albedo_texture = tracked_create_texture(
             device,
@@ -597,7 +783,7 @@ impl TerrainPtScene {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: TextureFormat::Rgba32Float,
+                format: alb_format,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -609,10 +795,10 @@ impl TerrainPtScene {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            bytemuck::cast_slice(&alb_rgba),
+            &alb_bytes,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(alb_w * 16),
+                bytes_per_row: Some(alb_w * alb_texel),
                 rows_per_image: Some(alb_h),
             },
             wgpu::Extent3d {
@@ -622,80 +808,46 @@ impl TerrainPtScene {
             },
         );
 
-        let (env_data, env_w, env_h, env_dims): (Vec<f32>, u32, u32, (u32, u32)) = match env_map {
-            Some((data, w, h)) => {
-                if w == 0 || h == 0 || data.len() != (w as usize) * (h as usize) * 3 {
-                    return Err(RenderError::Upload(
-                        "env map dims do not match data length".into(),
-                    ));
-                }
-                if data.iter().any(|v| !v.is_finite()) {
-                    return Err(RenderError::Upload(
-                        "env map contains non-finite samples".into(),
-                    ));
-                }
-                (data.to_vec(), w, h, (w, h))
-            }
-            // 1x1 white placeholder; env_dims (0,0) routes the kernel through
-            // the constant fallback so both configurations share one code path.
-            None => (vec![1.0, 1.0, 1.0], 1, 1, (0, 0)),
-        };
-        let env_rgba: Vec<f32> = env_data
-            .chunks_exact(3)
-            .flat_map(|c| [c[0], c[1], c[2], 1.0])
-            .collect();
-        let env_texture = tracked_create_texture(
-            device,
-            &wgpu::TextureDescriptor {
-                label: Some("hybrid-pt-terrain-env"),
-                size: wgpu::Extent3d {
-                    width: env_w,
-                    height: env_h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: TextureFormat::Rgba32Float,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            },
-        )?;
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &env_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            bytemuck::cast_slice(&env_rgba),
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(env_w * 16),
-                rows_per_image: Some(env_h),
-            },
-            wgpu::Extent3d {
-                width: env_w,
-                height: env_h,
-                depth_or_array_layers: 1,
-            },
-        );
+        let (env_texture, env_dims, env_tracked) = upload_environment(device, queue, env_map)?;
 
         Ok(Self {
             pyramid,
             env_texture,
             env_dims,
             albedo_texture,
-            has_albedo_map: albedo_rgba.is_some(),
-            albedo_bytes: (alb_w as u64) * (alb_h as u64) * 16,
+            has_albedo_map,
+            albedo_bytes: (alb_w as u64) * (alb_h as u64) * u64::from(alb_texel),
             albedo_sampling,
             spacing,
             exaggeration,
             albedo,
             env_intensity,
-            env_tracked: (env_w, env_h),
+            env_tracked,
             turbidity,
         })
+    }
+
+    /// Replace the environment map (and its intensity) while keeping the
+    /// heightfield, min-max pyramid and albedo map. A fused sequence uploads
+    /// the terrain once and swaps only the per-view sky.
+    pub fn set_environment(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        env_map: Option<(&[f32], u32, u32)>,
+        env_intensity: f32,
+    ) -> Result<(), RenderError> {
+        if !(env_intensity.is_finite() && env_intensity >= 0.0) {
+            return Err(RenderError::Upload(
+                "env intensity must be finite and >= 0".into(),
+            ));
+        }
+        let (env_texture, env_dims, env_tracked) = upload_environment(device, queue, env_map)?;
+        self.env_texture = env_texture;
+        self.env_dims = env_dims;
+        self.env_tracked = env_tracked;
+        self.env_intensity = env_intensity;
+        Ok(())
     }
 
     /// Total tracked GPU bytes (pyramid mips + DEM texture + env map +
@@ -703,6 +855,22 @@ impl TerrainPtScene {
     pub fn byte_size(&self) -> u64 {
         let (ew, eh) = self.env_tracked;
         self.pyramid.byte_size + (ew as u64) * (eh as u64) * 16 + self.albedo_bytes
+    }
+
+    /// Tracked bytes of the min-max pyramid texture (all mips).
+    pub fn minmax_bytes(&self) -> u64 {
+        self.pyramid.minmax_bytes()
+    }
+
+    /// Tracked bytes of the albedo map texture (the 1x1 placeholder when no
+    /// map was given).
+    pub fn albedo_bytes(&self) -> u64 {
+        self.albedo_bytes
+    }
+
+    /// Whether the min-max pyramid is stored as conservative half floats.
+    pub fn minmax_is_f16(&self) -> bool {
+        self.pyramid.minmax_is_f16()
     }
 
     pub fn uniforms(&self, spp: u32, stats_readback_cadence: u32) -> TerrainPtUniforms {
@@ -722,10 +890,168 @@ impl TerrainPtScene {
     }
 }
 
+/// Upload an RGB environment map (`w * h * 3` floats) as RGBA32F. Returns
+/// the texture, the dims the kernel samples ((0, 0) = constant fallback) and
+/// the tracked dims.
+#[allow(clippy::type_complexity)]
+fn upload_environment(
+    device: &Device,
+    queue: &Queue,
+    env_map: Option<(&[f32], u32, u32)>,
+) -> Result<(TrackedTexture, (u32, u32), (u32, u32)), RenderError> {
+    let (env_data, env_w, env_h, env_dims): (Vec<f32>, u32, u32, (u32, u32)) = match env_map {
+        Some((data, w, h)) => {
+            if w == 0 || h == 0 || data.len() != (w as usize) * (h as usize) * 3 {
+                return Err(RenderError::Upload(
+                    "env map dims do not match data length".into(),
+                ));
+            }
+            if data.iter().any(|v| !v.is_finite()) {
+                return Err(RenderError::Upload(
+                    "env map contains non-finite samples".into(),
+                ));
+            }
+            (data.to_vec(), w, h, (w, h))
+        }
+        // 1x1 white placeholder; env_dims (0,0) routes the kernel through
+        // the constant fallback so both configurations share one code path.
+        None => (vec![1.0, 1.0, 1.0], 1, 1, (0, 0)),
+    };
+    let env_rgba: Vec<f32> = env_data
+        .chunks_exact(3)
+        .flat_map(|c| [c[0], c[1], c[2], 1.0])
+        .collect();
+    let env_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("hybrid-pt-terrain-env"),
+            size: wgpu::Extent3d {
+                width: env_w,
+                height: env_h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        },
+    )?;
+    queue.write_texture(
+        wgpu::ImageCopyTexture {
+            texture: &env_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytemuck::cast_slice(&env_rgba),
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(env_w * 16),
+            rows_per_image: Some(env_h),
+        },
+        wgpu::Extent3d {
+            width: env_w,
+            height: env_h,
+            depth_or_array_layers: 1,
+        },
+    );
+    Ok((env_texture, env_dims, (env_w, env_h)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::gpu::try_ctx;
+
+    #[test]
+    fn srgb8_albedo_map_costs_four_bytes_per_cell() {
+        let Ok(ctx) = try_ctx() else {
+            eprintln!("srgb8 albedo map test skipped: no GPU adapter");
+            return;
+        };
+        let (w, h) = (37u32, 23u32);
+        let heights = ramp(w, h);
+        let map = vec![200u8; (w * h * 4) as usize];
+        let scene = TerrainPtScene::new_with_options(
+            &ctx.device,
+            &ctx.queue,
+            &heights,
+            w,
+            h,
+            (1.0, 1.0),
+            1.0,
+            [0.5; 3],
+            None,
+            1.0,
+            TerrainAlbedoMap::Rgba8Srgb(&map),
+            AlbedoSampling::Bilinear,
+            1.0,
+            MinMaxPrecision::F32,
+        )
+        .unwrap();
+        assert!(scene.has_albedo_map);
+        assert_eq!(scene.albedo_bytes(), 4 * u64::from(w) * u64::from(h));
+        let short = vec![200u8; (w * h * 4 - 1) as usize];
+        assert!(TerrainPtScene::new_with_options(
+            &ctx.device,
+            &ctx.queue,
+            &heights,
+            w,
+            h,
+            (1.0, 1.0),
+            1.0,
+            [0.5; 3],
+            None,
+            1.0,
+            TerrainAlbedoMap::Rgba8Srgb(&short),
+            AlbedoSampling::Bilinear,
+            1.0,
+            MinMaxPrecision::F32,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn f16_rounding_is_conservative_and_tight() {
+        let mut state = 0x1234_5678u32;
+        for _ in 0..100_000 {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let v = (f32::from_bits(0x3f80_0000 | (state >> 9)) - 1.5) * 2.0e4; // [-1e4, 1e4)
+            let (lo, hi) = (f16_floor(v), f16_ceil(v));
+            assert!(
+                lo.to_f32() <= v && v <= hi.to_f32(),
+                "{v}: {} {}",
+                lo.to_f32(),
+                hi.to_f32()
+            );
+            // f16 bits are sign-magnitude: map them onto a signed total order
+            // so a negative value's floor (larger magnitude) sorts below its
+            // ceiling; adjacent half floats then differ by exactly one.
+            let order = |x: half::f16| {
+                let b = i32::from(x.to_bits());
+                if b & 0x8000 != 0 {
+                    -(b & 0x7fff)
+                } else {
+                    b
+                }
+            };
+            let steps = order(hi) - order(lo);
+            assert!(
+                steps <= 1 || (lo.to_f32() <= 0.0 && hi.to_f32() >= 0.0),
+                "{v}: not adjacent"
+            );
+        }
+        for exact in [0.0f32, 1.0, -2.5, 2048.0, 65504.0, -65504.0] {
+            assert_eq!(f16_floor(exact).to_f32(), exact);
+            assert_eq!(f16_ceil(exact).to_f32(), exact);
+        }
+        assert_eq!(f16_floor(f32::INFINITY).to_f32(), f32::INFINITY);
+        assert_eq!(f16_ceil(f32::NEG_INFINITY).to_f32(), f32::NEG_INFINITY);
+    }
     use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 
     fn ramp(w: u32, h: u32) -> Vec<f32> {

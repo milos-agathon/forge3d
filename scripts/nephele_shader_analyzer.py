@@ -379,7 +379,9 @@ def analyze_shaders(repo_root:Path)->dict[str,Any]:
                 if resolved is None: unresolved.append(f"{label}:{' '.join(expression.split())[:160]}")
                 else: assemblies[label]=resolved
     wrapper_sites=set(wrapper_specs)
-    for wrapper_label,spec in wrapper_specs.items():
+    pending_wrappers=list(wrapper_specs.items())
+    while pending_wrappers:
+        wrapper_label,spec=pending_wrappers.pop(0)
         candidate_paths=rust_paths if spec["function"]=="create_labeled_shader_module" else [spec["path"]]
         for caller_path in candidate_paths:
             caller_text=rust[caller_path]; caller_relative=caller_path.relative_to(repo_root).as_posix()
@@ -415,14 +417,30 @@ def analyze_shaders(repo_root:Path)->dict[str,Any]:
                         continue
                 if call_label in wrapper_sites:
                     wrapper_delegations.append((wrapper_label,call_label)); continue
+                if re.fullmatch(r"[A-Za-z_]\w*",bare):
+                    caller_functions=[function for function in _function_spans(caller_text) if function["body_start"]<call.start()<function["body_end"]]
+                    caller_enclosing=min(caller_functions,key=lambda function:function["body_end"]-function["body_start"]) if caller_functions else None
+                    forwarded=_source_parameter(caller_enclosing,bare) if caller_enclosing else None
+                    if forwarded is not None:
+                        caller_parents=[function for function in caller_functions if function is not caller_enclosing and function["body_start"]<caller_enclosing["start"]<function["body_end"]]
+                        caller_parent=min(caller_parents,key=lambda function:function["body_end"]-function["body_start"]) if caller_parents else None
+                        wrapper_specs[call_label]={"path":caller_path,"relative":caller_relative,"function":caller_enclosing["name"],"source_parameter_index":forwarded,"scope":(caller_parent["body_start"],caller_parent["body_end"]) if caller_parent else None}
+                        wrapper_sites.add(call_label); pending_wrappers.append((call_label,wrapper_specs[call_label]))
+                        wrapper_delegations.append((wrapper_label,call_label)); continue
                 unresolved.append(f"{call_label}:unresolved wrapper source argument {' '.join(expression.split())[:160]}")
+    resolved_delegations=set(); changed=True
+    while changed:
+        changed=False
+        for wrapper_label,delegated_wrapper in wrapper_delegations:
+            expanded=[(label,source) for label,source in list(assemblies.items()) if label.startswith(delegated_wrapper+"<-")]
+            if not expanded: continue
+            resolved_delegations.add((wrapper_label,delegated_wrapper)); wrapper_calls.add(f"{wrapper_label}<-{delegated_wrapper}")
+            for label,source in expanded:
+                key=f"{wrapper_label}<-{label}"
+                if key not in assemblies: assemblies[key]=source; changed=True
     for wrapper_label,delegated_wrapper in wrapper_delegations:
-        expanded=[(label,source) for label,source in assemblies.items() if label.startswith(delegated_wrapper+"<-")]
-        if not expanded:
+        if (wrapper_label,delegated_wrapper) not in resolved_delegations:
             unresolved.append(f"{wrapper_label}<-{delegated_wrapper}:wrapper delegation has no resolved live caller")
-            continue
-        wrapper_calls.add(f"{wrapper_label}<-{delegated_wrapper}")
-        for label,source in expanded: assemblies[f"{wrapper_label}<-{label}"]=source
     if unresolved: raise ValueError("unresolved production shader source expressions: "+"; ".join(sorted(unresolved)))
     naga_count,naga_labels=_naga_analyze(assemblies) if (repo_root/"Cargo.toml").is_file() else (0,[])
     sources={path.relative_to(repo_root).as_posix():path.read_text(encoding="utf-8") for path in wgsl_paths}; sources.update(assemblies); sources.update(embedded_sources); violations=[]; stale=0
