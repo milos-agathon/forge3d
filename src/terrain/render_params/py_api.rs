@@ -10,8 +10,9 @@ impl TerrainRenderParams {
 
     /// Project terrain UV, raw height and an elevation offset through the exact
     /// camera and height transform used by the mesh/flat-clipmap terrain pass.
-    pub fn project_terrain_points(&self, points: Vec<[f32; 4]>) -> PyResult<Vec<Option<[f32; 3]>>> {
+    pub fn project_terrain_points(&self, points: Vec<[f64; 4]>) -> PyResult<Vec<Option<[f64; 3]>>> {
         let (_, view, proj) = crate::terrain::renderer::TerrainScene::build_camera_matrices(self);
+        let (view, proj) = (view.as_dmat4(), proj.as_dmat4());
         points
             .into_iter()
             .map(|point| {
@@ -20,7 +21,13 @@ impl TerrainRenderParams {
                         "terrain projection requires finite UV/height/offset",
                     ));
                 }
-                Ok(self.project_point(point, view, proj))
+                Ok(self.project_point(point, view, proj).map(|mut projected| {
+                    // Compare final device depth in the same f32 representation
+                    // as the GPU/proxy depth buffer. World/camera math and screen
+                    // positions above retain f64 precision.
+                    projected[2] = f64::from(projected[2] as f32);
+                    projected
+                }))
             })
             .collect()
     }
@@ -46,6 +53,7 @@ impl TerrainRenderParams {
             .checked_mul(height)
             .ok_or_else(|| PyValueError::new_err("depth viewport overflow"))?;
         let (_, view, proj) = crate::terrain::renderer::TerrainScene::build_camera_matrices(self);
+        let (view, proj) = (view.as_dmat4(), proj.as_dmat4());
         // Only two projected rows are live, independent of DEM size.
         let mut previous = Vec::with_capacity(cols);
         let mut current = Vec::with_capacity(cols);
@@ -55,9 +63,9 @@ impl TerrainRenderParams {
             for col in 0..cols {
                 let value = self.project_point(
                     [
-                        col as f32 / (cols - 1) as f32,
-                        row as f32 / (rows - 1) as f32,
-                        dem[[row, col]],
+                        col as f64 / (cols - 1) as f64,
+                        row as f64 / (rows - 1) as f64,
+                        f64::from(dem[[row, col]]),
                         0.0,
                     ],
                     view,
@@ -65,9 +73,9 @@ impl TerrainRenderParams {
                 );
                 current.push(value.map(|p| {
                     [
-                        f64::from(p[0]) * width as f64 / f64::from(self.size_px.0),
-                        f64::from(p[1]) * height as f64 / f64::from(self.size_px.1),
-                        f64::from(p[2]),
+                        p[0] * width as f64 / f64::from(self.size_px.0),
+                        p[1] * height as f64 / f64::from(self.size_px.1),
+                        p[2],
                     ]
                 }));
             }
@@ -139,6 +147,8 @@ impl TerrainRenderParams {
                         1.0,
                     );
                 if world.is_finite() && world.w != 0.0 {
+                    // These are final normalized texture UVs for screen pixels,
+                    // not absolute or terrain-local world-coordinate storage.
                     uv[[row, col, 0]] =
                         (world.x / world.w / f64::from(self.terrain_span) + 0.5) as f32;
                     uv[[row, col, 1]] =

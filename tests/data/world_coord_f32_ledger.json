@@ -1396,5 +1396,44 @@
    ]
   ],
   "removed": []
+ },
+ "sutura": {
+   "base_count": 1832,
+   "base_digest": "92a2b5e256294968b4a5340b1235973633e175d71c9de640b32421322f3f3245",
+   "result_count": 1836,
+   "result_digest": "ccb80f7e3e4ab82a4cc6e2bb83c0acfd0681a078ea16017db46d70341f5e1fb4",
+   "added": [
+     [
+       "src/terrain/render_params/projection.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "*target = target.min(z as f32)"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "projected[2] = f64::from(projected[2] as f32)"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "unproject_terrain_depth",
+       "as_f32",
+       1,
+       "uv[[row, col, 0]] = (world.x / world.w / f64::from(self.terrain_span) + 0.5) as f32"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "unproject_terrain_depth",
+       "as_f32",
+       2,
+       "uv[[row, col, 1]] = (world.y / world.w / f64::from(self.terrain_span) + 0.5) as f32"
+     ]
+   ],
+   "removed": [],
+   "base_commit": "9f14e648cbf9e7e2f071d5c47b2eecad18f3180c",
+   "review": "Parent source review removed six early f32 casts. The remaining four conversions store final normalized device depth for f32 GPU/proxy comparisons and normalized texture UVs for screen pixels. Source world coordinates are made terrain-relative in Python f64; local coordinates and camera projection remain f64. No absolute world coordinate is narrowed. Existing historical records are unchanged."
  }
 }

@@ -471,6 +471,18 @@ def test_screen_drape_keeps_north_up_uv_footprint(tmp_path, record_property):
     record_property("footprint_centroid", [float(xx.mean()), float(yy.mean())])
 
 
+def test_projection_preserves_distinct_f64_positions_until_screen_space():
+    scene = _scene(np.zeros((N, N), dtype=np.float32))
+    params = map_scene._build_mapscene_terrain_params(scene.recipe, scene.recipe.terrain.data, (N, N))
+    left = float(np.float32(0.5))
+    adjacent = float(np.nextafter(np.float32(0.5), np.float32(1.0)))
+    right = (left + adjacent) / 2.0
+    assert np.float32(left) == np.float32(right)
+    projected = params.project_terrain_points([[left, 0.5, 0.0, 0.0], [right, 0.5, 0.0, 0.0]])
+    assert projected[0] is not None and projected[1] is not None
+    assert projected[0][:2] != projected[1][:2]
+
+
 def test_projection_surface_registration_and_finite_contract():
     scene = _scene(np.zeros((N, N), dtype=np.float32))
     params = map_scene._build_mapscene_terrain_params(scene.recipe, scene.recipe.terrain.data, (N, N))

@@ -4578,7 +4578,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // leaving the existing material/height samples in [0,0.5]. Keep
             // those pixels unchanged; raster imagery covers the complete tile
             // and retains the screen compositor's top-to-bottom row convention.
-            drape_uv = vec2<f32>(uv.x * 2.0, 1.0 - uv.y * 2.0);
+            drape_uv = vec2<f32>(uv.x * 2.0, 1.0 - det_barrier(uv.y * 2.0));
         }
         let drape = textureSample(material_drape_tex, material_map_samp, drape_uv);
         final_albedo = det_mix3(final_albedo, drape.rgb, drape.a);

@@ -4,17 +4,36 @@ use super::*;
 impl TerrainRenderParams {
     pub(super) fn project_point(
         &self,
-        point: [f32; 4],
-        view: glam::Mat4,
-        proj: glam::Mat4,
-    ) -> Option<[f32; 3]> {
+        point: [f64; 4],
+        view: glam::DMat4,
+        proj: glam::DMat4,
+    ) -> Option<[f64; 3]> {
         let range = self.decoded.clamp.height_range;
-        let height =
-            crate::terrain::renderer::visibility_buffer::apply_height_curve(point[2], range, self);
-        let world = glam::Vec4::new(
-            (point[0] - 0.5) * self.terrain_span,
-            (point[1] - 0.5) * self.terrain_span,
-            (height + point[3] - (range.0 + range.1) * 0.5) * self.z_scale,
+        let height_min = f64::from(range.0);
+        let height_max = f64::from(range.1);
+        let height_range = (height_max - height_min).max(f64::from(1e-6_f32));
+        let t = ((point[2] - height_min) / height_range).clamp(0.0, 1.0);
+        let curved = match self.height_curve_mode.as_str() {
+            "pow" => t.powf(f64::from(self.height_curve_power.max(0.01))),
+            "smoothstep" => t * t * (3.0 - 2.0 * t),
+            "lut" => self
+                .height_curve_lut
+                .as_deref()
+                .and_then(|lut| {
+                    let index = (t * lut.len().saturating_sub(1) as f64).round() as usize;
+                    lut.get(index).copied().map(f64::from)
+                })
+                .unwrap_or(t),
+            _ => t,
+        };
+        let strength = f64::from(self.height_curve_strength.clamp(0.0, 1.0));
+        let height = height_min + (t + (curved - t) * strength) * height_range;
+        // Absolute source coordinates are made terrain-relative in Python as
+        // f64. Retain that precision through local coordinates and camera math.
+        let world = glam::DVec4::new(
+            (point[0] - 0.5) * f64::from(self.terrain_span),
+            (point[1] - 0.5) * f64::from(self.terrain_span),
+            (height + point[3] - (height_min + height_max) * 0.5) * f64::from(self.z_scale),
             1.0,
         );
         let clip = proj * (view * world);
@@ -23,8 +42,8 @@ impl TerrainRenderParams {
         }
         let ndc = clip.truncate() / clip.w;
         Some([
-            (ndc.x + 1.0) * self.size_px.0 as f32 * 0.5,
-            (1.0 - ndc.y) * self.size_px.1 as f32 * 0.5,
+            (ndc.x + 1.0) * f64::from(self.size_px.0) * 0.5,
+            (1.0 - ndc.y) * f64::from(self.size_px.1) * 0.5,
             ndc.z,
         ])
     }
@@ -56,6 +75,8 @@ pub(super) fn raster_triangle(depth: &mut [f32], width: usize, height: usize, tr
             let z = wa * a[2] + wb * b[2] + wc * c[2];
             if wa >= 0.0 && wb >= 0.0 && wc >= 0.0 && (0.0..=1.0).contains(&z) {
                 let target = &mut depth[y * width + x];
+                // This is normalized device depth stored for a screen pixel,
+                // after all world and projection arithmetic has finished.
                 *target = target.min(z as f32);
             }
         }

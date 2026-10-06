@@ -3975,11 +3975,13 @@ def _render_native_offscreen_result(
     from ._map_scene_rasters import raster_content_hashes
     from ._map_scene_projection import project_vector_recipe
 
-    raster_content_hashes(recipe)
-    vector_recipe = project_vector_recipe(recipe)
     heightmap = _load_native_heightmap(recipe.terrain)
     if heightmap is None or recipe.output is None:
         return None
+    # Terrain is the prerequisite for every draped layer. Preserve the native
+    # terrain diagnostic when the DEM is unavailable before inspecting overlays.
+    raster_content_hashes(recipe)
+    vector_recipe = project_vector_recipe(recipe)
     heightmap, nodata_height_below = _mapscene_nodata_heightmap(heightmap)
 
     import numpy as np

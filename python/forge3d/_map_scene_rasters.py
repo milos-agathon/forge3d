@@ -58,11 +58,17 @@ def _overlay_in_terrain_uv(layer, recipe, shape):
             # Preserve both nodata and source footprint even for opaque RGB input.
             rgba[..., 3] = np.minimum(rgba[..., 3], source.dataset_mask())
             output = np.zeros((*shape, 4), dtype=np.uint8)
+            # GDAL can move a valid zero byte to 1 when it coincides with the
+            # destination nodata value. Warp into a floating-point band so its
+            # nodata adjustment stays below one byte, then quantize explicitly.
+            band_output = np.zeros(shape, dtype=np.float32)
             for band in range(4):
-                reproject(rgba[..., band], output[..., band], src_transform=source.transform,
+                band_output.fill(0)
+                reproject(rgba[..., band], band_output, src_transform=source.transform,
                           src_crs=source.crs, dst_transform=_affine_from_metadata(grid['transform']),
                           dst_crs=grid['crs'], src_nodata=None, dst_nodata=0,
                           resampling=_resampling_method(str(metadata.get('alignment_resampling') or metadata.get('resampling') or 'nearest')))
+                output[..., band] = np.clip(np.rint(band_output), 0, 255).astype(np.uint8)
             return output
     if not _same_crs(layer.crs, recipe.target_crs or recipe.terrain.crs):
         raise ValueError('PNG draping requires the terrain CRS; use a georeferenced GeoTIFF for reprojection')
@@ -122,6 +128,7 @@ def terrain_raster_drape(recipe, heightmap):
     # budget, and derives bytes from array shapes/dtypes rather than a new cap.
     grid_bytes = int(np.prod(shape)) * (
         6 * 4 * np.dtype(np.float32).itemsize +  # source-over/rounding temporaries
+        np.dtype(np.float32).itemsize +        # GeoTIFF reprojection band
         8 * np.dtype(np.float64).itemsize +    # XY, UV, indices, affine temporaries
         2 * 4 * np.dtype(np.uint8).itemsize + np.dtype(np.bool_).itemsize)
     reservation = reserve(grid_bytes, 'mapscene.terrain_uv_raster')
