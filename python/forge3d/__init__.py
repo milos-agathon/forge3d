@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.41.0"
+__version__ = "1.42.0"
 version = __version__
 
 import numpy as np
@@ -503,6 +503,7 @@ from . import io
 # -----------------------------------------------------------------------------
 from .map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
 from .legend import Legend, LegendConfig
+from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .north_arrow import NorthArrow, NorthArrowConfig
 from .graticule import GraticuleSpec, generate_graticule
@@ -721,6 +722,10 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
+    "RasterHeightSurfaceStyle",
+    "CategoricalRasterStyle",
+    "BivariateRasterStyle",
+    "RasterStyleResult",
     "terrain",
     "VTStore",
     "open_vt_store",

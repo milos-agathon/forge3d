@@ -20,6 +20,7 @@ from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
+from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle, RasterStyleResult as RasterStyleResult
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .north_arrow import NorthArrow, NorthArrowConfig
 from .scale_bar import ScaleBar, ScaleBarConfig
@@ -578,6 +579,8 @@ class OverlayLayer:
     offset: float
     blend_mode: str
     domain: Tuple[float, float]
+    @staticmethod
+    def from_raster_rgba(rgba: np.ndarray, strength: float = ...) -> OverlayLayer: ...
     @staticmethod
     def from_colormap1d(
         colormap: Colormap1D,

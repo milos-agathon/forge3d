@@ -133,6 +133,13 @@ impl TerrainScene {
         pyo3::Python::with_gil(|py| {
             for overlay_py in overlays {
                 let overlay_ref = overlay_py.borrow(py);
+                if let Some(lut) = overlay_ref.raster_lut() {
+                    binding.uniform.params0 = [0.0, 1.0, overlay_ref.strength_value(), 0.0];
+                    binding.uniform.params1[0] = 1.0;
+                    binding.uniform.params6[3] = 1.0;
+                    binding.lut = Some(lut);
+                    break;
+                }
                 if let Some(colormap) = overlay_ref.colormap_clone() {
                     let domain = overlay_ref.domain_tuple();
                     let range = domain.1 - domain.0;

@@ -28,6 +28,25 @@ N = 256
 _ZUP = {"camera_mode": "mesh:zup"}
 
 
+@pytest.mark.parametrize("mixed", (True, False))
+def test_unsupported_styled_raster_stack_blocks_before_draw(tmp_path, monkeypatch, mixed):
+    styled = f3d.RasterOverlay("styled", data=np.zeros((N, N), np.float32),
+                              style=f3d.CategoricalRasterStyle({0: (255, 0, 0, 255)}))
+    other = f3d.RasterOverlay("ortho", path=_write_raster_overlay(tmp_path), crs="EPSG:32633") if mixed else (
+        f3d.RasterOverlay("other-styled", data=np.zeros((N, N), np.float32), style=styled.style))
+    scene = _scene(np.zeros((N, N), np.float32), layers=[styled, other])
+    def unexpected_draw(*args, **kwargs):
+        pytest.fail("unsupported raster combinations must block before native drawing")
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result_impl", unexpected_draw)
+    report = scene.validate()
+    assert report.render_blocked(scene.render_policy)
+    assert any(d.layer_id == "styled" and d.code == "invalid_raster_style" for d in report.diagnostics)
+    path = tmp_path / "blocked.png"
+    with pytest.raises(RuntimeError, match="blocking diagnostics"):
+        scene.render(str(path))
+    assert not path.exists()
+
+
 def _gaussian(cx: float, cy: float, sigma: float, height: float) -> np.ndarray:
     yy, xx = np.mgrid[0:N, 0:N].astype(np.float32)
     return (height * np.exp(-(((xx - cx) / sigma) ** 2 + ((yy - cy) / sigma) ** 2))).astype(np.float32)
@@ -720,3 +739,36 @@ def test_globe_option_follows_actual_native_mapscene_camera(tmp_path, option):
     assert not report.render_blocked()
     scene.render(str(tmp_path/"globe-vector.png"))
     assert scene.last_render_metadata["vector_backend"] in {"native_oit", "python_precise_raster"}
+
+
+@requires_gpu
+def test_unstyled_drape_uses_original_uv_with_d02_height_style(tmp_path, monkeypatch):
+    from test_raster_styles import PALETTE
+    from test_raster_styles_gpu import _scene as thematic_scene
+    from forge3d.helpers.offscreen import save_png_deterministic
+
+    colors = np.asarray(PALETTE, dtype=np.uint8)
+    pixels = np.repeat(np.repeat(colors, 32, axis=0), 32, axis=1)
+    source = tmp_path / "drape.png"
+    save_png_deterministic(source, pixels)
+    layer = f3d.RasterOverlay("drape", path=source, crs="EPSG:3857")
+    scene = thematic_scene(np.zeros((96, 96), np.float32), layers=[layer])
+    original = map_scene._render_terrain_renderer_result
+    observed = []
+    def observe(*args, **kwargs):
+        result = original(*args, **kwargs)
+        observed.append(result)
+        return result
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", observe)
+    scene.render(str(tmp_path / "combined.png"))
+    assert scene.last_render_backend == "gpu_terrain"
+    assert scene.last_render_metadata["thematic_backend"] == "native_terrain_rgba_cells"
+    assert scene.last_render_metadata["raster_overlay_backend"] == "native_terrain_uv"
+    albedo = np.asarray(observed[-1].aov_frame.albedo())
+    centers = [32, 96, 160]
+    actual = albedo[np.ix_(centers, centers)][..., :3]
+    srgb = colors[..., :3] / 255
+    expected = np.where(srgb <= .04045, srgb / 12.92, ((srgb + .055) / 1.055) ** 2.4)
+    # Native albedo is RGBA16Float; use its storage precision, as in D02's gate.
+    half_ulp = np.max(np.spacing(expected.astype(np.float16)).astype(np.float32))
+    assert np.max(np.abs(actual - expected)) <= half_ulp, (actual, expected)

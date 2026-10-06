@@ -68,6 +68,25 @@ def test_output_destination_change_hits_and_writes_requested_target(
     assert first_path.read_bytes() == second_path.read_bytes()
 
 
+def test_secondary_file_byte_change_misses_styled_raster_cache(fake_renderer, tmp_path):
+    from test_raster_styles import bivariate
+    scene = _scene(tmp_path / "frame.png")
+    primary, secondary = tmp_path / "primary.npy", tmp_path / "secondary.npy"
+    np.save(primary, np.zeros((4, 4), np.float32))
+    np.save(secondary, np.zeros((4, 4), np.float32))
+    scene.recipe.layers = [f3d.RasterOverlay("thematic", path=primary, secondary_path=secondary,
+        style=bivariate())]
+    cache = tmp_path / "cache"
+    scene.render(cache=cache)
+    assert scene.last_render_metadata["cache_hit"] is False
+    scene.render(cache=cache)
+    assert scene.last_render_metadata["cache_hit"] is True
+    np.save(secondary, np.full((4, 4), 30, np.float32))
+    scene.render(cache=cache)
+    assert scene.last_render_metadata["cache_hit"] is False
+    assert fake_renderer == [35.0, 35.0]
+
+
 def test_different_scenes_share_cache_root_without_thrashing(fake_renderer, tmp_path):
     output = tmp_path / "shared.png"
     first = _scene(output, azimuth_deg=35.0)

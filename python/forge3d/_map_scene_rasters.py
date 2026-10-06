@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import io
+import json
 import struct
 import tempfile
 from contextlib import contextmanager
@@ -12,25 +13,55 @@ def raster_content_hashes(recipe):
     """Identify source bytes before cache lookup, including in-place edits."""
     from .map_scene import MapSceneNativeUnavailable, RasterOverlay
     from ._map_scene_validation import diagnostic_block
+    from .raster_style import BivariateRasterStyle, raster_values_to_dict
     identities = []
     for layer in recipe.layers:
         if not isinstance(layer, RasterOverlay):
             continue
-        try:
-            path = Path(layer.path or "")
-            if path.suffix.lower() not in {".png", ".tif", ".tiff"}:
-                raise ValueError("supported raster sources are PNG and GeoTIFF")
-            digest = hashlib.sha256()
-            with path.open("rb") as source:
-                while chunk := source.read(io.DEFAULT_BUFFER_SIZE):
-                    digest.update(chunk)
-            identities.append({"layer_id": layer.layer_id, "sha256": digest.hexdigest()})
-        except (OSError, ValueError) as exc:
-            raise MapSceneNativeUnavailable([diagnostic_block(
-                layer=str(layer.layer_id), reason=f"RasterOverlay source is unavailable: {exc}",
-                required_native="readable RasterOverlay source",
-            )]) from exc
+        sources = [("primary", layer.path, layer.data)]
+        if isinstance(layer.style, BivariateRasterStyle):
+            sources.append(("secondary", layer.secondary_path, layer.secondary_data))
+        for role, source_path, data in sources:
+            try:
+                digest = hashlib.sha256()
+                if data is not None:
+                    payload = raster_values_to_dict(data)
+                    digest.update(json.dumps(payload, sort_keys=True, allow_nan=False,
+                                             separators=(",", ":")).encode("utf-8"))
+                else:
+                    path = Path(source_path or "")
+                    if layer.style is None and path.suffix.lower() not in {".png", ".tif", ".tiff"}:
+                        raise ValueError("supported unstyled raster sources are PNG and GeoTIFF")
+                    with path.open("rb") as source:
+                        while chunk := source.read(io.DEFAULT_BUFFER_SIZE):
+                            digest.update(chunk)
+                identity = {"layer_id": layer.layer_id, "sha256": digest.hexdigest()}
+                if layer.style is not None:
+                    identity["source"] = role
+                identities.append(identity)
+            except (OSError, ValueError, TypeError) as exc:
+                source_name = f" {role}" if layer.style is not None else ""
+                raise MapSceneNativeUnavailable([diagnostic_block(
+                    layer=str(layer.layer_id), reason=f"RasterOverlay{source_name} source is unavailable: {exc}",
+                    required_native="readable RasterOverlay source",
+                )]) from exc
     return identities
+
+
+def raster_route_blocks(recipe):
+    """Reject raster stacks whose order the single thematic pass cannot preserve."""
+    from .map_scene import RasterOverlay
+    from ._map_scene_validation import diagnostic_block
+    layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)]
+    styled = [layer for layer in layers if layer.style is not None]
+    if len(styled) > 1 or (styled and len(styled) != len(layers)):
+        return [diagnostic_block(
+            layer=str(layer.layer_id),
+            reason="native terrain supports one styled RasterOverlay or an ordered unstyled raster stack; "
+                   "mixed styled/unstyled overlays cannot preserve recipe order",
+            required_native="separate thematic and terrain-UV raster passes",
+        ) for layer in layers]
+    return []
 
 
 def _overlay_in_terrain_uv(layer, recipe, shape):
@@ -111,7 +142,10 @@ def terrain_raster_drape(recipe, heightmap):
     from ._map_scene_validation import diagnostic_block
     from ._native import get_native_module
     from .helpers.offscreen import save_png_deterministic
-    layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)]
+    blocks = raster_route_blocks(recipe)
+    if blocks:
+        raise MapSceneNativeUnavailable(blocks)
+    layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is None]
     if not layers:
         yield None, 0
         return

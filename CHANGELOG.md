@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.42.0] - 2026-10-06
+### Added
+- Population and thematic rasters through public `MapScene` styles: `RasterHeightSurfaceStyle` turns population values into a continuous native height/shade surface, `CategoricalRasterStyle` maps class IDs to colours and class legends, and `BivariateRasterStyle` classifies two aligned rasters into a 3×3 palette with labelled axes. A thematic overlay can colour a population height surface. Units, nodata masks and bin-boundary semantics remain explicit; styled scenes retain canonical bundle round trips. Existing unstyled defaults and serialization are preserved. See `docs/guides/thematic_raster_styles.md` and `examples/mapscene_thematic_rasters.py`. (#210)
+
+### Changed
+- Bumped the package and PyPI version to `1.42.0`.
+
+### Fixed
+- Corrected the release version for population and thematic styles, which were initially published under the existing `1.41.0` entry. Restored that entry's original date and contents; the published `1.41.0` tag and package files are unchanged.
+
 ## [1.41.0] - 2026-10-04
 ### Added
 - SPLAT-FUSED: `forge3d.render_fused` path-traces 3D Gaussian splats, a COPC LiDAR point cloud and DEM terrain in one ReSTIR pass, so each representation shadows the others: a splat-captured tree shadows the terrain, a ridge shadows the splats and the LiDAR. `forge3d.load_gaussian_splats` reads 3DGS `.ply` files into a `GaussianSplatCloud`. Behind the new `splat-fusion` Cargo feature, which the wheel enables. See `docs/splat-fused.md`.
