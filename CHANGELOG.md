@@ -6,8 +6,9 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
-## [1.41.0] - 2026-10-04
+## [1.41.0] - 2026-10-06
 ### Added
+- Population and thematic rasters through public `MapScene` styles: `RasterHeightSurfaceStyle` turns population values into a continuous native height/shade surface, `CategoricalRasterStyle` maps class IDs to colours and class legends, and `BivariateRasterStyle` classifies two aligned rasters into a 3×3 palette with labelled axes. A thematic overlay can colour a population height surface. Units, nodata masks and bin-boundary semantics remain explicit; styled scenes retain canonical bundle round trips. Existing unstyled defaults and serialization are preserved. See `docs/guides/thematic_raster_styles.md` and `examples/mapscene_thematic_rasters.py`. (#210)
 - SPLAT-FUSED: `forge3d.render_fused` path-traces 3D Gaussian splats, a COPC LiDAR point cloud and DEM terrain in one ReSTIR pass, so each representation shadows the others: a splat-captured tree shadows the terrain, a ridge shadows the splats and the LiDAR. `forge3d.load_gaussian_splats` reads 3DGS `.ply` files into a `GaussianSplatCloud`. Behind the new `splat-fusion` Cargo feature, which the wheel enables. See `docs/splat-fused.md`.
 - SPLAT-FUSED: splats and points are paged from disk into a fixed GPU pool on demand, so scene size is not limited by GPU memory. The acceptance scene holds 1.0 billion primitives and renders with a tracked peak of about 131 MiB against the 512 MiB budget. `forge3d.splat.build_splat_page_store` converts a `.ply` of any size to a page store.
 - SPLAT-FUSED: on the NVIDIA Vulkan lane the fused shadows are compared with an AEQUITAS path-traced reference (`forge3d.splat.render_fused_reference`); shadow IoU must exceed 0.9 for splat-on-terrain, LiDAR-on-terrain, terrain-on-splat and terrain-on-LiDAR. Adds `tests/golden/splat_fusion/fused_fixture.png`.
