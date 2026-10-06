@@ -767,8 +767,8 @@ def test_unstyled_drape_uses_original_uv_with_d02_height_style(tmp_path, monkeyp
     albedo = np.asarray(observed[-1].aov_frame.albedo())
     centers = [32, 96, 160]
     actual = albedo[np.ix_(centers, centers)][..., :3]
-    srgb = colors[..., :3] / 255
-    expected = np.where(srgb <= .04045, srgb / 12.92, ((srgb + .055) / 1.055) ** 2.4)
+    # Unstyled drapes use Rgba8Unorm, rather than D02's sRGB colormap texture.
+    expected = colors[..., :3] / 255
     # Native albedo is RGBA16Float; use its storage precision, as in D02's gate.
     half_ulp = np.max(np.spacing(expected.astype(np.float16)).astype(np.float32))
     assert np.max(np.abs(actual - expected)) <= half_ulp, (actual, expected)

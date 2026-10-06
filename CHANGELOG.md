@@ -14,7 +14,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Opt-in world labels through `LabelLayer(metadata={"coordinate_space": "world"})`. Their anchors and geometry follow the terrain camera; existing screen-coordinate labels keep their behavior.
 
 ### Fixed
-- Curved labels now emit screen-space glyph rotations in radians, keeping text such as “Silver River” upright along its path.
+- Curved labels now emit screen-space glyph rotations in radians and reserve their rotated screen bounds, keeping text such as “Silver River” upright along its path.
 
 ## [1.42.0] - 2026-10-06
 ### Added
