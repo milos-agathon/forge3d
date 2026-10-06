@@ -25,6 +25,13 @@ from forge3d._native import NATIVE_AVAILABLE, get_native_module
 from _toml_compat import load_toml
 
 
+def test_d02_native_raster_overlay_constructor_registered():
+    native = get_native_module()
+    assert callable(native.OverlayLayer.from_raster_rgba)
+    for name in ("RasterHeightSurfaceStyle", "CategoricalRasterStyle", "BivariateRasterStyle", "RasterStyleResult"):
+        assert name in f3d.__all__ and hasattr(f3d, name)
+
+
 # ---------------------------------------------------------------------------
 # Skip entire module when native extension is absent (e.g., pure-Python CI)
 # ---------------------------------------------------------------------------

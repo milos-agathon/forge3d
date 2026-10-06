@@ -12,6 +12,73 @@ pub struct ColormapLUT {
 }
 
 impl ColormapLUT {
+    /// Display-sRGB raster cells; textureLoad in the terrain shader avoids
+    /// interpolating categorical classes or nodata across cell boundaries.
+    pub fn new_raster_rgba(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let limits = device.limits();
+        if width == 0
+            || height == 0
+            || width > limits.max_texture_dimension_2d
+            || height > limits.max_texture_dimension_2d
+            || u64::from(width) * u64::from(height) * 4 != data.len() as u64
+        {
+            return Err("raster RGBA dimensions/bytes exceed the device texture contract".into());
+        }
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.thematic_rgba"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )?;
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            size,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.thematic_nearest"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        Ok(Self {
+            texture,
+            view,
+            sampler,
+            format,
+        })
+    }
+
     pub fn new_single_palette(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

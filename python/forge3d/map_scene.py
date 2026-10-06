@@ -214,6 +214,16 @@ def _as_native_heightmap(data: Any, *, dtype: Any, source_label: str) -> Any:
 
 
 def _load_native_heightmap(terrain: "TerrainSource") -> Any | None:
+    raw = _load_raw_heightmap(terrain)
+    if raw is not None and terrain.style is not None:
+        return terrain.style.apply(raw).heights
+    return raw
+
+
+def _load_raw_heightmap(terrain: "TerrainSource") -> Any | None:
+    if terrain.style is not None:
+        from .raster_style import _single
+        return _single(_thematic_source(terrain.data, terrain.path))
     dtype = _terrain_dtype(terrain)
     if terrain.data is not None:
         return _as_native_heightmap(terrain.data, dtype=dtype, source_label="array")
@@ -354,6 +364,8 @@ def _load_native_raster_overlay(
     *,
     target_grid: Mapping[str, Any] | None = None,
 ) -> Any | None:
+    if layer.style is not None:
+        return _styled_raster_result(layer).rgba
     if not layer.path:
         return None
     path = Path(str(layer.path))
@@ -398,6 +410,43 @@ def _load_native_raster_overlay(
     return _resize_nearest_rgba(overlay, target_shape)
 
 
+def _thematic_source(data: Any, path: Any) -> Any:
+    import numpy as np
+    if data is not None:
+        return data
+    if path is None or not Path(path).is_file():
+        raise ValueError("missing_external_asset: thematic raster source is unavailable")
+    if Path(path).suffix.lower() == ".npy":
+        return np.load(path, allow_pickle=False)
+    from . import gis
+    return gis.read_raster(path, masked=True)
+
+
+def _styled_raster_result(layer: "RasterOverlay") -> Any:
+    from .raster_style import BivariateRasterStyle
+    source = _thematic_source(layer.data, layer.path)
+    if isinstance(layer.style, BivariateRasterStyle):
+        return layer.style.apply(source, _thematic_source(layer.secondary_data, layer.secondary_path))
+    return layer.style.apply(source)
+
+
+def _mapscene_thematic_surface(recipe: "SceneRecipe", shape: Sequence[int]) -> Any | None:
+    styled = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is not None]
+    # This native pass has one colour source, just as its existing colormap
+    # path does. Do not silently ignore or screen-composite another source.
+    if len(styled) > 1:
+        raise ValueError("unsupported_option: native terrain pass has one thematic color source")
+    if styled:
+        result = _styled_raster_result(styled[0])
+    elif recipe.terrain.style is not None:
+        result = recipe.terrain.style.apply(_load_raw_heightmap(recipe.terrain))
+    else:
+        return None
+    if tuple(result.valid_mask.shape) != tuple(shape):
+        raise ValueError("shape_mismatch: thematic raster must match the terrain grid; align sources before styling")
+    return result
+
+
 def _load_python_raster_overlays(
     recipe: "SceneRecipe",
     *,
@@ -410,7 +459,7 @@ def _load_python_raster_overlays(
     honest CPU implementation for loaded pixels, never a placeholder source.
     """
 
-    raster_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)]
+    raster_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is None]
     if not raster_layers:
         return [], []
     overlays: list[tuple["RasterOverlay", Any]] = []
@@ -1447,6 +1496,12 @@ def _build_mapscene_terrain_params(
         blend_mode="Alpha",
         domain=domain,
     )
+    thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
+    if thematic is not None:
+        if not callable(getattr(f3d.OverlayLayer, "from_raster_rgba", None)):
+            raise MapSceneNativeUnavailable(diagnostic_block(layer="thematic", reason="native thematic terrain color source is unavailable; rebuild the bindings", required_native="OverlayLayer.from_raster_rgba"))
+        styled_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is not None]
+        overlay = f3d.OverlayLayer.from_raster_rgba(thematic.rgba, strength=styled_layers[0].opacity if styled_layers else 1.0)
     azimuth, elevation = _sun_angles_from_direction(recipe.lighting.sun_direction)
     # sun_direction carries a compass azimuth (0 = north, 90 = east). The
     # renderer reads a math angle from +X (east) toward +Y in the terrain
@@ -1474,14 +1529,14 @@ def _build_mapscene_terrain_params(
         z_scale=float(settings.get("exaggeration") or 1.0),
         exposure=float(renderer_config.lighting.exposure),
         domain=domain,
-        albedo_mode=str(settings.get("albedo_mode") or preset_albedo),
+        albedo_mode=str(settings.get("albedo_mode") or ("mix" if thematic is not None else preset_albedo)),
         colormap_strength=float(
-            preset_colormap_strength
+            (1.0 if thematic is not None else preset_colormap_strength)
             if configured_colormap_strength is None
             else configured_colormap_strength
         ),
         hue_variation_strength=float(
-            0.08
+            (0.0 if thematic is not None else 0.08)
             if configured_hue_variation_strength is None
             else configured_hue_variation_strength
         ),
@@ -1785,6 +1840,10 @@ def _render_terrain_renderer_result(
             "denoiser_used": "none",
             "adaptive": False,
         }
+        thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
+        if thematic is not None:
+            metadata["thematic_backend"] = "native_terrain_rgba_cells"
+            metadata["thematic_legend"] = thematic.legend
         metadata.update(_mapscene_clipmap_metadata(recipe, heightmap))
         if building_scatter is not None:
             scatter_batches, scatter_metadata = building_scatter
@@ -3807,7 +3866,7 @@ def _screen_space_layer_blocks_for_3d(recipe: "SceneRecipe") -> list[dict[str, A
         return []
     blocks: list[dict[str, Any]] = []
     for layer in recipe.layers:
-        if isinstance(layer, RasterOverlay):
+        if isinstance(layer, RasterOverlay) and layer.style is None:
             kind, required = "RasterOverlay", "terrain-UV raster drape (SUTURA stage 2)"
         elif isinstance(layer, VectorOverlay):
             kind, required = "VectorOverlay", "vector projection through the terrain camera (SUTURA stage 3)"
@@ -4013,6 +4072,7 @@ class TerrainSource:
     elevation_sampling_available: bool = False
     dtype: str = "float32"
     nodata_policy: str = "fill"
+    style: Any | None = None
 
     def __post_init__(self) -> None:
         import numpy as np
@@ -4020,6 +4080,12 @@ class TerrainSource:
         np.dtype(self.dtype)
         if str(self.nodata_policy).lower() not in {"fill", "preserve"}:
             raise ValueError("TerrainSource nodata_policy must be 'fill' or 'preserve'")
+        if self.style is not None:
+            from .raster_style import RasterHeightSurfaceStyle, _single
+            if not isinstance(self.style, RasterHeightSurfaceStyle):
+                raise TypeError("TerrainSource.style must be RasterHeightSurfaceStyle")
+            if self.data is not None:
+                self.data = _single(self.data)
 
     def to_dict(self) -> dict[str, Any]:
         data_summary = None
@@ -4028,7 +4094,7 @@ class TerrainSource:
 
             arr = np.asarray(self.data)
             data_summary = {"shape": list(arr.shape), "dtype": str(arr.dtype)}
-        return {
+        result = {
             "kind": "terrain_source",
             "path": _path_to_str(self.path),
             "data": data_summary,
@@ -4038,6 +4104,11 @@ class TerrainSource:
             "dtype": str(self.dtype),
             "nodata_policy": str(self.nodata_policy),
         }
+        if self.style is not None:
+            from .raster_style import raster_values_to_dict
+            result["style"] = self.style.to_dict()
+            result["values"] = raster_values_to_dict(self.data)
+        return result
 
 
 @dataclass
@@ -4047,9 +4118,24 @@ class RasterOverlay:
     crs: str | None = None
     opacity: float = 1.0
     metadata: Mapping[str, Any] | None = None
+    style: Any | None = None
+    data: Any | None = None
+    secondary_path: str | Path | None = None
+    secondary_data: Any | None = None
+
+    def __post_init__(self) -> None:
+        from .raster_style import CategoricalRasterStyle, BivariateRasterStyle
+        if self.style is not None and not isinstance(self.style, (CategoricalRasterStyle, BivariateRasterStyle)):
+            raise TypeError("RasterOverlay.style must be CategoricalRasterStyle or BivariateRasterStyle")
+        if self.style is not None and (not math.isfinite(self.opacity) or not 0 <= self.opacity <= 1):
+            raise ValueError("invalid_argument: thematic opacity must be finite and in [0, 1]")
+        if self.style is None and any(v is not None for v in (self.data, self.secondary_path, self.secondary_data)):
+            raise ValueError("invalid_argument: inline/secondary raster sources require a thematic style")
+        if isinstance(self.style, CategoricalRasterStyle) and any(v is not None for v in (self.secondary_path, self.secondary_data)):
+            raise ValueError("invalid_argument: a categorical style has no secondary raster axis")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "kind": "raster_overlay",
             "layer_id": str(self.layer_id),
             "path": _path_to_str(self.path),
@@ -4057,6 +4143,11 @@ class RasterOverlay:
             "opacity": float(self.opacity),
             "metadata": _metadata(self.metadata),
         }
+        if self.style is not None:
+            from .raster_style import raster_values_to_dict
+            result.update(style=self.style.to_dict(), values=raster_values_to_dict(self.data),
+                          secondary_path=_path_to_str(self.secondary_path), secondary_values=raster_values_to_dict(self.secondary_data))
+        return result
 
 
 @dataclass
@@ -5221,6 +5312,7 @@ def _align_terrain_to_target(terrain: TerrainSource, target_crs: str) -> tuple[T
             elevation_sampling_available=terrain.elevation_sampling_available,
             dtype=str(result["array"].dtype),
             nodata_policy=terrain.nodata_policy,
+            style=terrain.style,
         ),
         True,
     )
@@ -5391,6 +5483,7 @@ class MapScene:
 
     @staticmethod
     def _layer_from_dict(data: Mapping[str, Any]) -> Any:
+        from .raster_style import raster_style_from_dict, raster_values_from_dict
         kind = str(data.get("kind", ""))
         if kind == "raster_overlay":
             return RasterOverlay(
@@ -5399,6 +5492,10 @@ class MapScene:
                 crs=data.get("crs"),
                 opacity=float(data.get("opacity", 1.0)),
                 metadata=data.get("metadata") or {},
+                style=raster_style_from_dict(data.get("style")),
+                data=raster_values_from_dict(data.get("values")),
+                secondary_path=data.get("secondary_path"),
+                secondary_data=raster_values_from_dict(data.get("secondary_values")),
             )
         if kind == "vector_overlay":
             return VectorOverlay(
@@ -5463,6 +5560,7 @@ class MapScene:
 
     @classmethod
     def _recipe_from_dict(cls, data: Mapping[str, Any]) -> SceneRecipe:
+        from .raster_style import raster_style_from_dict, raster_values_from_dict
         terrain_data = data.get("terrain") or {}
         camera_data = data.get("camera") or {}
         lighting_data = data.get("lighting") or {}
@@ -5477,6 +5575,8 @@ class MapScene:
                 elevation_sampling_available=bool(terrain_data.get("elevation_sampling_available", False)),
                 dtype=str(terrain_data.get("dtype", "float32")),
                 nodata_policy=str(terrain_data.get("nodata_policy", "fill")),
+                style=raster_style_from_dict(terrain_data.get("style")),
+                data=raster_values_from_dict(terrain_data.get("values")),
             ),
             camera=OrbitCamera(
                 target=camera_data.get("target") or (0.0, 0.0, 0.0),
@@ -5652,6 +5752,16 @@ class MapScene:
             "elevation_sampling_available": bool(terrain.elevation_sampling_available),
             "path": _path_to_str(terrain.path),
         }
+        if terrain.style is not None:
+            try:
+                styled = terrain.style.apply(_load_raw_heightmap(terrain))
+                terrain_details["style"] = terrain.style.to_dict()
+                terrain_details["legend"] = styled.legend
+                supported_features["terrain.population_height_shade"] = "supported"
+            except (ValueError, TypeError, RuntimeError) as exc:
+                diagnostics.append(Diagnostic(code="invalid_raster_style", severity="error", message=str(exc),
+                    remediation="Correct the population values, nodata or scale.", layer_id="terrain", support_level="unsupported"))
+                terrain_support_level = "unsupported"
         terrain_resource_diagnostics, terrain_resource_details, terrain_resource_support = (
             _p2_resource_availability_diagnostics(
                 terrain.metadata,
@@ -5757,7 +5867,21 @@ class MapScene:
                 )
                 support_level = "unsupported"
 
-            if isinstance(layer, RasterOverlay):
+            if isinstance(layer, RasterOverlay) and layer.style is not None:
+                layer_type = "raster_overlay"
+                layer_memory = _dimension_memory_bytes(layer.metadata)
+                details = {"style": layer.style.to_dict(), "opacity": layer.opacity}
+                try:
+                    styled = _styled_raster_result(layer)
+                    terrain_shape = _load_native_heightmap(terrain).shape
+                    _mapscene_thematic_surface(self.recipe, terrain_shape)
+                    details["legend"] = styled.legend
+                    supported_features["raster.thematic_style"] = "supported"
+                except (ValueError, TypeError, RuntimeError, AttributeError) as exc:
+                    layer_diagnostics.append(Diagnostic(code="invalid_raster_style", severity="error", message=str(exc),
+                        remediation="Correct thematic inputs and align both raster axes to the terrain grid.", layer_id=layer_id, support_level="unsupported"))
+                    support_level = "unsupported"
+            elif isinstance(layer, RasterOverlay):
                 layer_type = "raster_overlay"
                 layer_memory = _dimension_memory_bytes(layer.metadata)
                 details = {"path": _path_to_str(layer.path), "crs": layer.crs, "opacity": float(layer.opacity)}
@@ -6609,6 +6733,8 @@ class MapScene:
             "material_vt_stats",
             "raster_overlay_backend",
             "raster_overlay_layer_count",
+            "thematic_backend",
+            "thematic_legend",
             "vector_backend",
             "point_cloud_backend",
             "point_cloud_edl_backend",

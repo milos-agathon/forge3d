@@ -190,7 +190,7 @@ struct OverlayUniforms {
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
-    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, reserved
+    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, raster_rgba
 };
 
 struct IblUniforms {
@@ -4060,7 +4060,15 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         }
     }
 
-    let uv = input.tex_coord;
+    var uv = input.tex_coord;
+    // Legacy screen UVs clamp the oversized triangle's vertices. For the
+    // new raster source reconstruct its full, row-zero-north grid from the
+    // interpolated XY plane; keep the historical colormap path unchanged.
+    if (u_overlay.params6.w > 0.5 && u_terrain.camera_mode_params.x < 0.5) {
+        let inv_span = det_div(1.0, u_terrain.spacing_h_exag.x);
+        uv = det_barrier2(vec2<f32>(det_barrier(input.world_position.x * inv_span) + 0.5,
+                                  0.5 - det_barrier(input.world_position.y * inv_span)));
+    }
     // No-data cells (params6.z enables, params6.y is the raw-height
     // threshold): the caller stores them just below the lowest valid height,
     // so a fragment whose unclamped height falls under the threshold lies on
@@ -4523,11 +4531,18 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         lut_u = clamp(height_clamped, 0.0, 1.0);
     }
     let lut_uv = vec2<f32>(clamp(lut_u, 0.0, 1.0), 0.5);
-    let overlay_rgb = textureSample(colormap_tex, colormap_samp, lut_uv).rgb;
+    var overlay_rgba = textureSample(colormap_tex, colormap_samp, lut_uv);
+    if (u_overlay.params6.w > 0.5) {
+        let dims = textureDimensions(colormap_tex);
+        let cell = clamp(vec2<u32>(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * vec2<f32>(dims)), vec2<u32>(0u), dims - vec2<u32>(1u));
+        overlay_rgba = textureLoad(colormap_tex, vec2<i32>(cell), 0);
+        if (overlay_rgba.a == 0.0) { discard; }
+    }
+    let overlay_rgb = overlay_rgba.rgb;
 
     // Apply overlay blend to material albedo (if overlay is active)
     var material_albedo = albedo; // Store original triplanar albedo
-    if (overlay_strength_raw > 1e-5) {
+    if (overlay_strength_raw > 1e-5 && u_overlay.params6.w < 0.5) {
         let strength = clamp(overlay_strength_raw, 0.0, 1.0);
 
         // Blend modes:
@@ -4567,6 +4582,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         final_albedo = det_mix3(material_albedo, overlay_rgb, colormap_strength);
     }
 
+    if (u_overlay.params6.w > 0.5 && !is_water) {
+        final_albedo = det_mix3(material_albedo, overlay_rgb, clamp(overlay_strength_raw * overlay_rgba.a, 0.0, 1.0));
+    }
     albedo = clamp(final_albedo, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));
 
     // P6: Apply procedural albedo brightness noise (terrain only)

@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from .diagnostics import Diagnostic, ValidationReport
 from .graticule import GraticuleSpec
+from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -18,11 +19,16 @@ class TerrainSource:
     elevation_sampling_available: bool
     dtype: str
     nodata_policy: str
-    def __init__(self, path: PathLikeStr | None = ..., data: Any | None = ..., crs: str | None = ..., metadata: Mapping[str, Any] | None = ..., elevation_sampling_available: bool = ..., dtype: str = ..., nodata_policy: str = ...) -> None: ...
+    style: RasterHeightSurfaceStyle | None
+    def __init__(self, path: PathLikeStr | None = ..., data: Any | None = ..., crs: str | None = ..., metadata: Mapping[str, Any] | None = ..., elevation_sampling_available: bool = ..., dtype: str = ..., nodata_policy: str = ..., style: RasterHeightSurfaceStyle | None = ...) -> None: ...
     def to_dict(self) -> dict[str, Any]: ...
 
 class RasterOverlay:
-    def __init__(self, layer_id: str, path: PathLikeStr | None = ..., crs: str | None = ..., opacity: float = ..., metadata: Mapping[str, Any] | None = ...) -> None: ...
+    style: CategoricalRasterStyle | BivariateRasterStyle | None
+    data: Any | None
+    secondary_path: PathLikeStr | None
+    secondary_data: Any | None
+    def __init__(self, layer_id: str, path: PathLikeStr | None = ..., crs: str | None = ..., opacity: float = ..., metadata: Mapping[str, Any] | None = ..., style: CategoricalRasterStyle | BivariateRasterStyle | None = ..., data: Any | None = ..., secondary_path: PathLikeStr | None = ..., secondary_data: Any | None = ...) -> None: ...
     def to_dict(self) -> dict[str, Any]: ...
 
 class VectorOverlay:
