@@ -111,7 +111,7 @@ impl Scene {
     }
 
     #[pyo3(
-        text_signature = "($self, x, y, w, h, u0, v0, u1, v1, r, g, b, a, halo_r, halo_g, halo_b, halo_a, halo_width)"
+        signature = (x, y, w, h, u0, v0, u1, v1, r, g, b, a, halo_r, halo_g, halo_b, halo_a, halo_width, rotation=0.0)
     )]
     #[allow(clippy::too_many_arguments)]
     pub fn add_native_text_rect_uv_halo(
@@ -133,9 +133,23 @@ impl Scene {
         halo_b: f32,
         halo_a: f32,
         halo_width: f32,
+        rotation: f32,
     ) -> PyResult<()> {
-        let rect_min = [x.max(0.0), y.max(0.0)];
-        let rect_max = [(x + w).max(0.0), (y + h).max(0.0)];
+        if !rotation.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "text rotation must be finite",
+            ));
+        }
+        // A rotated quad can be entirely visible even when its unrotated
+        // rectangle crosses an edge. Let the GPU clip after rotation.
+        let (rect_min, rect_max) = if rotation == 0.0 {
+            (
+                [x.max(0.0), y.max(0.0)],
+                [(x + w).max(0.0), (y + h).max(0.0)],
+            )
+        } else {
+            ([x, y], [x + w, y + h])
+        };
         let uv_min = [u0, v0];
         let uv_max = [u1, v1];
         let color = [
@@ -150,10 +164,11 @@ impl Scene {
             halo_b.clamp(0.0, 1.0),
             halo_a.clamp(0.0, 1.0),
         ];
-        self.text_instances.push(
+        let mut instance =
             crate::core::text_overlay::TextInstance::new(rect_min, rect_max, uv_min, uv_max, color)
-                .with_halo(halo_color, halo_width),
-        );
+                .with_halo(halo_color, halo_width);
+        instance.rotation = rotation;
+        self.text_instances.push(instance);
         Ok(())
     }
 

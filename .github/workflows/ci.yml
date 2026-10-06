@@ -326,6 +326,7 @@ jobs:
               - 'tests/test_mapscene_sutura_integrity.py'
               - 'tests/test_mapscene_render_cache.py'
               - 'tests/test_mapscene_geometric_integrity.py'
+              - 'tests/test_mapscene_overlay_visibility.py'
               - 'tests/test_chronos_flythrough.py'
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
@@ -1324,7 +1325,7 @@ jobs:
           $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "sutura"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           $junit = Join-Path $dir "junit.xml"
-          python -m pytest tests/test_mapscene_sutura_integrity.py tests/test_mapscene_render_cache.py tests/test_mapscene_geometric_integrity.py -v --tb=short --junitxml="$junit"
+          python -m pytest tests/test_mapscene_sutura_integrity.py tests/test_mapscene_render_cache.py tests/test_mapscene_geometric_integrity.py tests/test_mapscene_overlay_visibility.py -v --tb=short --junitxml="$junit"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE

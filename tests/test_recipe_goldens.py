@@ -324,6 +324,9 @@ def _label_halo_depth(tmp_path: Path) -> f3d.MapScene:
                         "id": "front",
                         "text": "Front",
                         "geometry": {"type": "Point", "coordinates": (28.0, 26.0, 0.25)},
+                        "projected_anchor": [28.0, 26.0, 0.25],
+                        "projected_depth_convention": "normalized_device_depth",
+                        "projected_depth_domain": [0.0, 1.0],
                         "typography": {
                             "color": [1.0, 1.0, 1.0, 1.0],
                             "halo_color": [0.02, 0.02, 0.02, 0.92],
@@ -334,6 +337,9 @@ def _label_halo_depth(tmp_path: Path) -> f3d.MapScene:
                         "id": "summit",
                         "text": "Summit",
                         "geometry": {"type": "Point", "coordinates": (72.0, 50.0, 0.20)},
+                        "projected_anchor": [72.0, 50.0, 0.20],
+                        "projected_depth_convention": "normalized_device_depth",
+                        "projected_depth_domain": [0.0, 1.0],
                         "typography": {
                             "color": [0.12, 0.16, 0.18, 1.0],
                             "halo_color": [1.0, 1.0, 1.0, 0.88],
@@ -344,6 +350,9 @@ def _label_halo_depth(tmp_path: Path) -> f3d.MapScene:
                         "id": "behind",
                         "text": "Behind",
                         "geometry": {"type": "Point", "coordinates": (28.0, 26.0, 0.85)},
+                        "projected_anchor": [28.0, 26.0, 0.85],
+                        "projected_depth_convention": "normalized_device_depth",
+                        "projected_depth_domain": [0.0, 1.0],
                     },
                 ],
                 glyph_atlas={"glyphs": sorted(set("FrontSummitBehind"))},
@@ -353,6 +362,8 @@ def _label_halo_depth(tmp_path: Path) -> f3d.MapScene:
                         "image": np.full((8, 8), 0.5, dtype=np.float32).tolist(),
                         "source": "recipe_depth_aov",
                         "bias": 0.0,
+                        "depth_convention": "normalized_device_depth",
+                        "depth_domain": [0.0, 1.0],
                     }
                 },
             )
@@ -424,6 +435,9 @@ def _label_occlusion_ridge(tmp_path: Path) -> f3d.MapScene:
                         "id": "front",
                         "text": "Front",
                         "geometry": {"type": "Point", "coordinates": (34.0, 26.0, 0.0)},
+                        "projected_anchor": [34.0, 26.0, 0.0],
+                        "projected_depth_convention": "normalized_device_depth",
+                        "projected_depth_domain": [0.0, 1.0],
                         "typography": {
                             "color": [1.0, 1.0, 1.0, 1.0],
                             "halo_color": [0.02, 0.02, 0.02, 0.92],
@@ -434,6 +448,9 @@ def _label_occlusion_ridge(tmp_path: Path) -> f3d.MapScene:
                         "id": "behind-ridge",
                         "text": "Hidden",
                         "geometry": {"type": "Point", "coordinates": (34.0, 26.0, 0.95)},
+                        "projected_anchor": [34.0, 26.0, 0.95],
+                        "projected_depth_convention": "normalized_device_depth",
+                        "projected_depth_domain": [0.0, 1.0],
                     },
                 ],
                 glyph_atlas={"glyphs": sorted(set("FrontHidden"))},
@@ -447,6 +464,8 @@ def _label_occlusion_ridge(tmp_path: Path) -> f3d.MapScene:
                         "image": np.full((16, 16), 0.5, dtype=np.float32).tolist(),
                         "source": "serialized_depth_proxy",
                         "bias": 0.0,
+                        "depth_convention": "normalized_device_depth",
+                        "depth_domain": [0.0, 1.0],
                     }
                 },
             )
@@ -1206,6 +1225,18 @@ def test_recipe_golden_gate_rejects_pixel_regression(
     assert spec.golden_path.read_bytes() == golden_bytes_before, (
         "negative control must never write over the committed golden"
     )
+
+
+@pytest.mark.parametrize("scene_id", ("mapscene_label_halo_depth", "mapscene_label_occlusion_ridge"))
+def test_depth_recipe_fixtures_have_authoritative_visibility(tmp_path: Path, scene_id: str) -> None:
+    spec=next(item for item in RECIPE_GOLDENS if item.scene_id==scene_id)
+    scene=spec.build(tmp_path)
+    compiled=scene.compile_plan()
+    assert not compiled.validation_report.render_blocked()
+    plan=compiled.label_plans["labels"]
+    assert "front" in {label.label_id for label in plan.accepted}
+    hidden="behind" if scene_id=="mapscene_label_halo_depth" else "behind-ridge"
+    assert any(label.label_id==hidden and label.reason=="terrain_occluded" for label in plan.rejected)
 
 
 def _render_recipe_golden_pixels(tmp_path: Path, spec: RecipeGolden) -> None:

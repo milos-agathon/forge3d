@@ -913,6 +913,10 @@ var material_mask_tex: texture_2d<f32>;
 @group(6) @binding(15)
 var material_map_samp: sampler;
 
+// SUTURA: straight-alpha raster drape in the heightmap UV frame.
+@group(6) @binding(17)
+var material_drape_tex: texture_2d<f32>;
+
 struct TerrainFrameCounters {
     material_invocations: atomic<u32>,
     feedback_records: atomic<u32>,
@@ -4565,6 +4569,19 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         // Mix mode: blend between material albedo and colormap directly
         // colormap_strength=1.0 means full colormap, 0.0 means full material
         final_albedo = det_mix3(material_albedo, overlay_rgb, colormap_strength);
+    }
+
+    if (material_layer_uniforms.map_flags.w > 0.5) {
+        var drape_uv = uv;
+        if (u_terrain.camera_mode_params.x < 0.5) {
+            // Legacy fullscreen vertices clamp (0,2) UVs before interpolation,
+            // leaving the existing material/height samples in [0,0.5]. Keep
+            // those pixels unchanged; raster imagery covers the complete tile
+            // and retains the screen compositor's top-to-bottom row convention.
+            drape_uv = vec2<f32>(uv.x * 2.0, 1.0 - uv.y * 2.0);
+        }
+        let drape = textureSample(material_drape_tex, material_map_samp, drape_uv);
+        final_albedo = det_mix3(final_albedo, drape.rgb, drape.a);
     }
 
     albedo = clamp(final_albedo, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));

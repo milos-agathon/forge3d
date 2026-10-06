@@ -1403,6 +1403,7 @@ def _build_mapscene_terrain_params(
     emit_source_id: bool = False,
     nodata_height_below: float | None = None,
     chronos_frame_json: str | None = None,
+    albedo_path: str | None = None,
 ) -> Any | None:
     try:
         import forge3d as f3d
@@ -1520,6 +1521,8 @@ def _build_mapscene_terrain_params(
         pom=_mapscene_pom_settings(settings),
         vt=_mapscene_vt_settings(recipe),
     )
+    if albedo_path is not None:
+        config.materials.albedo_path = albedo_path
     if emit_source_id:
         # VERITAS: capture the per-pixel VT source-id map alongside the
         # beauty pass (requires the msaa_samples=1 path used above).
@@ -1527,7 +1530,13 @@ def _build_mapscene_terrain_params(
         config.aov.source_id = True
     if chronos_frame_json is not None:
         config.chronos_frame_json = chronos_frame_json
-    return f3d.TerrainRenderParams(config)
+    native_params = f3d.TerrainRenderParams(config)
+    if albedo_path is not None and native_params.material_map_paths.get("albedo") != albedo_path:
+        raise MapSceneNativeUnavailable([diagnostic_block(
+            layer=_layer_id(layer, "layer"), reason="native bindings do not support the terrain-UV albedo input; rebuild bindings",
+            required_native="TerrainRenderParams.material_map_paths[albedo]",
+        ) for layer in recipe.layers if isinstance(layer, RasterOverlay)])
+    return native_params
 
 
 def _mapscene_camera_target(recipe: "SceneRecipe") -> tuple[float, float, float]:
@@ -1696,12 +1705,34 @@ def _shared_terrain_render_context() -> Any:
 
 
 def _render_terrain_renderer_result(
+    recipe: "SceneRecipe", heightmap: Any, *, emit_provenance: bool = False,
+    nodata_height_below: float | None = None, chronos_frame_json: str | None = None,
+) -> _MapSceneNativeRenderResult | None:
+    from ._map_scene_rasters import terrain_raster_drape
+
+    with terrain_raster_drape(recipe, heightmap) as (albedo_path, layer_count):
+        result = _render_terrain_renderer_result_impl(
+            recipe, heightmap, emit_provenance=emit_provenance,
+            nodata_height_below=nodata_height_below,
+            chronos_frame_json=chronos_frame_json, albedo_path=albedo_path,
+        )
+        if result is not None:
+            if layer_count:
+                result.metadata["raster_overlay_backend"] = "native_terrain_uv"
+                result.metadata["raster_overlay_layer_count"] = layer_count
+            if _is_3d_camera_mode(_mapscene_effective_camera_mode(recipe)):
+                result.metadata["terrain_camera_projection"] = "native_terrain_camera"
+        return result
+
+
+def _render_terrain_renderer_result_impl(
     recipe: "SceneRecipe",
     heightmap: Any,
     *,
     emit_provenance: bool = False,
     nodata_height_below: float | None = None,
     chronos_frame_json: str | None = None,
+    albedo_path: str | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     try:
         import forge3d as f3d
@@ -1730,6 +1761,7 @@ def _render_terrain_renderer_result(
         emit_source_id=emit_provenance,
         nodata_height_below=nodata_height_below,
         chronos_frame_json=chronos_frame_json,
+        albedo_path=albedo_path,
     )
     if params is None:
         return None
@@ -1891,6 +1923,10 @@ def _rgba01(color: tuple[int, int, int, int]) -> tuple[float, float, float, floa
 
 
 def _pixel_to_ndc(point: tuple[int, int], width: int, height: int) -> tuple[float, float]:
+    if getattr(point, "terrain_projected", False):
+        # Native terrain pixels use the viewport extent, not width/height - 1.
+        return (float(point[0]) * 2.0 / width - 1.0,
+                1.0 - float(point[1]) * 2.0 / height)
     x = -1.0 if width <= 1 else (float(point[0]) / float(width - 1)) * 2.0 - 1.0
     y = 1.0 if height <= 1 else 1.0 - (float(point[1]) / float(height - 1)) * 2.0
     return (max(-1.0, min(1.0, x)), max(-1.0, min(1.0, y)))
@@ -1914,6 +1950,11 @@ def _vector_layer_requires_precise_raster(layer: "VectorOverlay") -> bool:
         if not isinstance(geometry, Mapping):
             continue
         geometry_type = str(geometry.get("type", "")).lower()
+        if "polygon" in geometry_type and line_join != "round":
+            if any(getattr(point, "terrain_projected", False)
+                   for polygon in _render_geometry_polygon_rings(geometry)
+                   for ring in polygon for point in ring):
+                return True
         if "polygon" not in geometry_type and (line_join != "round" or "line-miter-limit" in line_layout):
             if len(_render_geometry_points(geometry)) > 2:
                 return True
@@ -1976,6 +2017,17 @@ def _native_vector_payload_for_layer(layer: "VectorOverlay", width: int, height:
     polyline_rgba: list[tuple[float, float, float, float]] = []
     stroke_width: list[float] = []
 
+    def append_line(points, rgba, stroke):
+        # The native OIT bridge counts polylines as draw instances. A projected
+        # path is densified along the DEM, so give each segment its own instance
+        # to ensure the complete path is drawn. Legacy screen payloads stay intact.
+        paths = (zip(points, points[1:]) if any(
+            getattr(point, "terrain_projected", False) for point in points) else (points,))
+        for path in paths:
+            polylines.append([_pixel_to_ndc(point, width, height) for point in path])
+            polyline_rgba.append(rgba)
+            stroke_width.append(stroke)
+
     for feature in layer.features or ():
         geometry = feature.get("geometry") if isinstance(feature, Mapping) else None
         if not isinstance(geometry, Mapping):
@@ -1995,13 +2047,15 @@ def _native_vector_payload_for_layer(layer: "VectorOverlay", width: int, height:
                     feature_rgba[2],
                     max(0.0, min(1.0, feature_rgba[3] * float(opacity))),
                 )
-        feature_width = line_width
-        if getattr(layer, "width_px", None) is None and "line-width" in line_paint:
+        feature_width = feature.get("_projected_width_px", line_width)
+        if "_projected_width_px" not in feature and getattr(layer, "width_px", None) is None and "line-width" in line_paint:
             evaluated_width = evaluate_number_expr(line_paint.get("line-width"), dict(properties))
             if evaluated_width is not None:
                 feature_width = max(1.0, float(evaluated_width))
         geometry_type = str(geometry.get("type", "")).lower()
         if "polygon" in geometry_type:
+            if feature.get("_terrain_fill_only"):
+                continue
             for polygon_rings in _render_geometry_polygon_rings(geometry):
                 for ring in polygon_rings:
                     points = [_render_point_to_pixel(point, width, height) for point in ring]
@@ -2009,9 +2063,7 @@ def _native_vector_payload_for_layer(layer: "VectorOverlay", width: int, height:
                         continue
                     if points[0] != points[-1]:
                         points.append(points[0])
-                    polylines.append([_pixel_to_ndc(point, width, height) for point in points])
-                    polyline_rgba.append(feature_rgba)
-                    stroke_width.append(feature_width)
+                    append_line(points, feature_rgba, feature_width)
             continue
         points = [_render_point_to_pixel(point, width, height) for point in _render_geometry_points(geometry)]
         if geometry_type == "point" and points:
@@ -2025,9 +2077,7 @@ def _native_vector_payload_for_layer(layer: "VectorOverlay", width: int, height:
         for segment in segments:
             if len(segment) < 2:
                 continue
-            polylines.append([_pixel_to_ndc(point, width, height) for point in segment])
-            polyline_rgba.append(feature_rgba)
-            stroke_width.append(feature_width)
+            append_line(segment, feature_rgba, feature_width)
 
     return points_xy, point_rgba_values, point_sizes, polylines, polyline_rgba, stroke_width
 
@@ -2172,8 +2222,8 @@ def _composite_python_precise_vector_layers(
                 feature_line_color[2],
                 max(0, min(255, int(round(feature_line_opacity * 255.0)))),
             )
-            feature_line_width = line_width
-            if getattr(layer, "width_px", None) is None and _render_is_style_expression(
+            feature_line_width = feature.get("_projected_width_px", line_width)
+            if "_projected_width_px" not in feature and getattr(layer, "width_px", None) is None and _render_is_style_expression(
                 line_paint.get("line-width")
             ):
                 feature_line_width = max(
@@ -2205,7 +2255,7 @@ def _composite_python_precise_vector_layers(
                     if not pixel_rings:
                         continue
                     _render_draw_polygon_fill(out, pixel_rings, feature_fill_color)
-                    for ring_points in pixel_rings:
+                    for ring_points in (() if feature.get("_terrain_fill_only") else pixel_rings):
                         if ring_points and ring_points[0] != ring_points[-1]:
                             ring_points = [*ring_points, ring_points[0]]
                         if len(ring_points) >= 2:
@@ -3114,6 +3164,18 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                     y = float(anchor_y) + float(origin[1]) * render_size + float(glyph["oy"]) * atlas_scale
                     w = glyph_w * atlas_scale
                     h = glyph_h * atlas_scale
+                    rotation = float(positioned_glyph.get("rotation",0.0))
+                    if rotation:
+                        # The shader rotates around the rectangle centre. Move
+                        # that centre so the glyph instead follows its baseline.
+                        c,s = math.cos(rotation),math.sin(rotation)
+                        ox = float(glyph["ox"])*atlas_scale+w*0.5
+                        oy = float(glyph["oy"])*atlas_scale+h*0.5
+                        pen_x = float(anchor_x)+float(origin[0])*render_size
+                        pen_y = float(anchor_y)+float(origin[1])*render_size
+                        x = pen_x+ox*c-oy*s-w*0.5
+                        y = pen_y+ox*s+oy*c-h*0.5
+
                     u0 = glyph_x / float(atlas_w)
                     v0 = glyph_y / float(atlas_h)
                     u1 = (glyph_x + glyph_w) / float(atlas_w)
@@ -3132,6 +3194,8 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                         *halo_color,
                         halo_width_px,
                     )
+                    if rotation:
+                        rect = (*rect, rotation)
                     invalid_rect = (
                         not all(math.isfinite(value) for value in rect)
                         or w <= 0.0
@@ -3908,6 +3972,11 @@ def _render_native_offscreen_result(
     frame = getattr(compiled, "frame", None)
     plans = _chronos_label_plans(frame) if frame is not None else compiled.label_plans
     chronos_frame_json = frame.to_json() if frame is not None else None
+    from ._map_scene_rasters import raster_content_hashes
+    from ._map_scene_projection import project_vector_recipe
+
+    raster_content_hashes(recipe)
+    vector_recipe = project_vector_recipe(recipe)
     heightmap = _load_native_heightmap(recipe.terrain)
     if heightmap is None or recipe.output is None:
         return None
@@ -3932,6 +4001,17 @@ def _render_native_offscreen_result(
         raise
     if result is None:
         return None
+    raster_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)]
+    unsupported = []
+    if result.metadata.get("terrain_camera_projection") != "native_terrain_camera":
+        unsupported.extend(_screen_space_layer_blocks_for_3d(recipe))
+    if raster_layers and result.metadata.get("raster_overlay_backend") != "native_terrain_uv":
+        unsupported.extend(diagnostic_block(
+            layer=_layer_id(layer, "layer"), reason="native terrain renderer did not consume the raster drape",
+            required_native="terrain-UV raster drape (SUTURA stage 2)",
+        ) for layer in raster_layers)
+    if unsupported:
+        raise MapSceneNativeUnavailable(unsupported)
     rgba = result.rgba
     if rgba.ndim != 3 or rgba.shape[2] != 4:
         raise RuntimeError("MapScene terrain renderer returned an invalid RGBA image")
@@ -3946,16 +4026,12 @@ def _render_native_offscreen_result(
     base, textured_landmarks, textured_metadata = _composite_textured_landmark_layers(base, recipe)
     base, screen_space_metadata = _apply_mapscene_screen_space(base, recipe, heightmap)
     base, native_labels = _composite_native_label_layers(base, recipe, plans)
-    base, native_vectors = _composite_native_vector_layers(base, recipe)
+    if vector_recipe is recipe:
+        base, native_vectors = _composite_native_vector_layers(base, vector_recipe)
+    else:
+        from ._map_scene_projection import composite_projected_vectors
+        base, native_vectors = composite_projected_vectors(base, vector_recipe, recipe)
     base, native_point_clouds, point_tile_metadata = _composite_native_point_cloud_layers(base, recipe)
-    target_grid = _terrain_alignment_grid(
-        recipe.terrain,
-        target_crs=recipe.target_crs or recipe.terrain.crs,
-        fallback_shape=heightmap.shape,
-    )
-    raster_overlays, raster_blocks = _load_python_raster_overlays(
-        recipe, target_grid=target_grid
-    )
     blocks = _native_composite_blocks(
         recipe,
         native_labels=native_labels,
@@ -3964,14 +4040,10 @@ def _render_native_offscreen_result(
         native_point_clouds=native_point_clouds,
         plans=plans,
     )
-    blocks.extend(raster_blocks)
-    blocks.extend(_screen_space_layer_blocks_for_3d(recipe))
     if blocks:
         raise MapSceneNativeUnavailable(blocks)
 
-    # Loaded raster overlays are an explicit deterministic Python compositor
-    # exception. Missing sources were blocked above; no placeholder is drawn.
-    composited = _composite_python_raster_overlays(base, raster_overlays)
+    composited = base
     # Map furniture (graticule, scale bar, north arrow, title) draws over
     # everything, matching the old compositor's final step.
     _compose_furniture(composited, recipe)
@@ -3984,10 +4056,7 @@ def _render_native_offscreen_result(
         metadata.update(textured_metadata)
     if native_point_clouds:
         metadata.update(point_tile_metadata)
-    if raster_overlays:
-        metadata["raster_overlay_backend"] = "python_resample_composite"
-        metadata["raster_overlay_layer_count"] = len(raster_overlays)
-    vector_layers = [layer for layer in recipe.layers if isinstance(layer, VectorOverlay)]
+    vector_layers = [layer for layer in vector_recipe.layers if isinstance(layer, VectorOverlay)]
     if vector_layers and any(
         _vector_layer_requires_precise_raster(layer) for layer in vector_layers
     ):
@@ -5575,6 +5644,17 @@ class MapScene:
         return scene
 
     def validate(self) -> ValidationReport:
+        projection_context: dict[str, Any] = {}
+        try:
+            return self._validate_with_projection(projection_context)
+        finally:
+            # Drop the shared depth input before releasing its host reservation.
+            projection_context.pop("depth", None)
+            reservation = projection_context.pop("depth_reservation", None)
+            if reservation is not None:
+                reservation.close()
+
+    def _validate_with_projection(self, projection_context: dict[str, Any]) -> ValidationReport:
         self.compiled_label_plans = {}
         diagnostics: list[Diagnostic] = []
         layer_summaries: list[LayerSummary] = []
@@ -5823,6 +5903,19 @@ class MapScene:
                     layer_diagnostics.append(placeholder_fallback_diagnostic("vector path loader", layer_id=layer_id))
                     unsupported_features["vector.path_loader"] = "placeholder/fallback"
                     support_level = "placeholder/fallback"
+                if layer.features and _is_3d_camera_mode(_mapscene_effective_camera_mode(self.recipe)):
+                    from ._map_scene_projection import project_vector_recipe
+                    try:
+                        projection_recipe = copy.copy(self.recipe)
+                        projection_recipe.layers = (layer,)
+                        project_vector_recipe(projection_recipe)
+                    except (MapSceneNativeUnavailable, ValueError, TypeError, RuntimeError) as exc:
+                        layer_diagnostics.append(Diagnostic(
+                            code="world_overlay_projection_unavailable", severity="error", message=str(exc),
+                            remediation="Provide finite world coordinates inside the terrain footprint.",
+                            support_level="unsupported", layer_id=layer_id))
+                        unsupported_features["vector.world_projection"] = "unsupported"
+                        support_level = "unsupported"
                 if layer.style:
                     for style_layer in (layer.style.get("layers", ()) if isinstance(layer.style, Mapping) else ()):
                         if not isinstance(style_layer, Mapping) or str(style_layer.get("type", "")).lower() != "line":
@@ -5891,7 +5984,22 @@ class MapScene:
                     unsupported_features=unsupported_features,
                 )
                 if _has_labels_or_plan(layer):
-                    plan = _label_plan_from_layer(layer, recipe=self.recipe, terrain=terrain)
+                    frozen_plans = getattr(self, "_frozen_validation_label_plans", None)
+                    if frozen_plans is not None and layer_id in frozen_plans:
+                        plan = frozen_plans[layer_id]
+                    else:
+                        try:
+                            plan = _label_plan_from_layer(layer, recipe=self.recipe, terrain=terrain,
+                                projection_context=projection_context)
+                        except (MapSceneNativeUnavailable, ValueError, TypeError, RuntimeError) as exc:
+                            from .label_plan import LabelPlan
+                            world_projection = _is_3d_camera_mode(_mapscene_effective_camera_mode(self.recipe))
+                            plan = LabelPlan(accepted=(), rejected=(), diagnostics=[Diagnostic(
+                                code="world_overlay_projection_unavailable" if world_projection else "label_plan_compile_unavailable",
+                                severity="error", message=str(exc),
+                                remediation="Provide valid label geometry, projection and depth metadata.",
+                                support_level="unsupported", layer_id=layer_id,
+                            )])
                     self.compiled_label_plans[layer_id] = plan
                     plan_diagnostics = [_diagnostic_for_layer(diagnostic, layer_id) for diagnostic in plan.diagnostics]
                     existing_diagnostic_keys = {
@@ -6314,11 +6422,17 @@ class MapScene:
 
         from .label_plan import LabelPlan
 
-        report = self.validate()
         label_plans = {
             str(layer_id): LabelPlan.from_dict(payload)
             for layer_id, payload in dict(manifest.compiled_label_plans or {}).items()
         }
+        # Validate the recipe and frozen plan diagnostics without making new
+        # label/depth decisions while loading a v3 manifest.
+        self._frozen_validation_label_plans = label_plans
+        try:
+            report = self.validate()
+        finally:
+            del self._frozen_validation_label_plans
         self.compiled_label_plans = dict(label_plans)
         depth_cull = dict(manifest.depth_cull or {})
         compiled = CompiledScenePlan(
@@ -6383,7 +6497,12 @@ class MapScene:
             from ._canonical_json import canonical_json_bytes
 
             rendered: dict[str, ValidationReport] = {}
+            from ._map_scene_rasters import raster_content_hashes
+
             key_scene = copy.deepcopy(self.to_dict())
+            raster_content = raster_content_hashes(self.recipe)
+            if raster_content:
+                key_scene["raster_content"] = raster_content
             # Match ANAMNESIS's destination-only output fields while the
             # MapScene output is nested under recipe.
             for name in ("path", "directory", "filename"):
@@ -6646,7 +6765,7 @@ class MapScene:
             report = self._report_with_feature(report, "mapscene.render_png_16bit", "supported")
         if any(isinstance(layer, VectorOverlay) for layer in self.recipe.layers):
             report = self._report_with_feature(report, "mapscene.vector_composite", "supported")
-        if metadata.get("raster_overlay_backend") == "python_resample_composite":
+        if metadata.get("raster_overlay_backend") == "native_terrain_uv":
             report = self._report_with_feature(report, "mapscene.raster_overlay_composite", "supported")
         if metadata.get("vector_backend") == "python_precise_raster":
             report = self._report_with_feature(report, "mapscene.vector_precise_raster_composite", "supported")

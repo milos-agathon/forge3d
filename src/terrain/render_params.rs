@@ -28,6 +28,7 @@ mod native_vt;
 mod parse;
 mod private_impl;
 mod py_api;
+mod projection;
 
 use native_effects::{
     BloomSettingsNative, FogSettingsNative, HeightAoSettingsNative, ReflectionSettingsNative,

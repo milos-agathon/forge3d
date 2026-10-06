@@ -1136,3 +1136,36 @@ class TestFlythroughPhysical:
         # instead of rendering from a partial residency.
         with pytest.raises(Exception, match="chronos residency"):
             render_compiled(vt_scene(128, 0.25), 2)
+
+
+def test_reused_compiled_frames_include_current_raster_bytes(monkeypatch, tmp_path):
+    import forge3d.anamnesis as anamnesis
+    from forge3d.chronos import _render_frames
+    from forge3d.helpers.offscreen import save_png_deterministic
+
+    scene = _synthetic_scene()
+    path = tmp_path / "source.png"
+    pixels = np.full((4, 4, 4), 255, dtype=np.uint8)
+    save_png_deterministic(path, pixels)
+    scene.recipe.layers = [f3d.RasterOverlay(layer_id="raster", path=str(path), crs="EPSG:32610")]
+    frame = SimpleNamespace(to_json=lambda: '{"frame":0}')
+    contexts = []
+    def capture(*args, **kwargs):
+        contexts.append(kwargs["render_frame_context"])
+        return SimpleNamespace(frame_blobs=[])
+    monkeypatch.setattr(anamnesis, "render_sequence", capture)
+    def context():
+        _render_frames({0: scene}, {0: frame}, {0: tmp_path / "frame.png"},
+                       certificate_paths=None, cache=tmp_path / "cache")
+    context()
+    pixels[..., 0] = 0
+    save_png_deterministic(path, pixels)
+    context()
+    assert contexts[0] != contexts[1]
+    for value in contexts:
+        decoded = json.loads(value)
+        assert decoded["0"] == frame.to_json()
+        assert decoded["raster_content"]["0"][0]["layer_id"] == "raster"
+    scene.recipe.layers = []
+    context()
+    assert json.loads(contexts[-1]) == {"0": frame.to_json()}

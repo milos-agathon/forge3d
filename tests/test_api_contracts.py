@@ -1443,6 +1443,23 @@ class TestSsgiSsrSettingsWiring:
         assert hasattr(_native.TerrainRenderParams, "screen_space_settings")
         assert callable(getattr(_native.TerrainRenderParams, "screen_space_settings"))
 
+    def test_terrain_camera_projection_registered_and_stubbed(self):
+        import ast
+        from pathlib import Path
+        import forge3d
+
+        assert forge3d.TerrainRenderParams is _native.TerrainRenderParams
+        assert callable(_native.TerrainRenderParams.project_terrain_points)
+        assert callable(_native.TerrainRenderParams.project_terrain_depth)
+        assert callable(_native.TerrainRenderParams.unproject_terrain_depth)
+        stub = Path(forge3d.__file__).with_name("__init__.pyi")
+        module = ast.parse(stub.read_text(encoding="utf-8"))
+        params = next(node for node in module.body
+                      if isinstance(node, ast.ClassDef) and node.name == "TerrainRenderParams")
+        methods={node.name for node in params.body if isinstance(node,ast.FunctionDef)}
+        assert {"project_terrain_points","project_terrain_depth","unproject_terrain_depth"}<=methods
+
+
 
 # ===========================================================================
 # Section 15: P1.2 Bloom settings wiring behavior tests

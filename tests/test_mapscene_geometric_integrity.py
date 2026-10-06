@@ -4,8 +4,8 @@ SUTURA guarantees that every layer is drawn for real or blocks. These checks
 add the missing half: in the 3D (``mesh:zup``) camera modes the map is
 north-up and not mirrored, the sun lights the flank that faces it,
 ``camera.target`` moves the view, declared lighting settings are validated,
-and layers that are only placed in 2D screen space block instead of being
-drawn in the wrong place.
+and terrain-UV rasters, vectors and world Point labels follow that camera.
+Unsupported world inputs block before pixels.
 """
 
 from __future__ import annotations
@@ -248,3 +248,463 @@ def test_declared_lighting_settings_change_the_image(tmp_path, key, value):
     plain = _render_luma(_scene(dem, sun=sun), tmp_path / "plain.png")
     with_setting = _render_luma(_scene(dem, sun=sun, settings={key: value}), tmp_path / f"{key}.png")
     assert np.abs(with_setting - plain).mean() > 0.5, f"settings[{key!r}] had no effect on the render"
+
+# Stages 2-3: physical terrain-UV footprint and shared terrain-camera alignment.
+_CAMERA_MODES = ("mesh:zup", "clipmap:2:32:32:10:0.3:zup")
+
+
+def _drape_fixture(tmp_path, *, mode, pose):
+    from forge3d.helpers.offscreen import save_png_deterministic
+    dem = _gaussian(200, 56, 20, 100.0) + _gaussian(80, 180, 30, 35.0)
+    camera = _top_down_north_up() if pose == "overhead" else f3d.OrbitCamera(
+        target=(24.0, -16.0, 0.0), distance=420.0, azimuth_deg=-65.0, elevation_deg=30.0, fov_deg=40.0,
+    )
+    scene = _scene(dem, camera=camera, camera_mode=mode)
+    # Bundles persist file-backed terrain assets; inline array fingerprints do
+    # not serialize the DEM samples in the existing recipe format.
+    dem_path = tmp_path / "asymmetric.npy"
+    np.save(dem_path, dem)
+    scene.recipe.terrain.path = str(dem_path)
+    scene.recipe.terrain.data = None
+    span = map_scene._terrain_scene_diagonal(scene.recipe.terrain)
+    world = (span * 0.125, span * 0.125)
+    pixels = np.zeros((32, 32, 4), dtype=np.uint8)
+    pixels[..., 0] = 255
+    pixels[..., 3] = 255
+    path = tmp_path / "footprint.png"
+    save_png_deterministic(path, pixels)
+    raster = f3d.RasterOverlay(layer_id="ortho", path=str(path), crs="EPSG:32633",
+        metadata={"source_id": "footprint", "width": 32, "height": 32,
+                  "bounds": [world[0] - 16, world[1] - 16, world[0] + 16, world[1] + 16]})
+    return scene, raster, world
+
+
+@requires_gpu
+@pytest.mark.parametrize("mode", _CAMERA_MODES)
+@pytest.mark.parametrize("pose", ("overhead", "oblique-target"))
+def test_native_drape_vectors_and_world_labels_follow_camera(tmp_path, mode, pose, monkeypatch, record_property, line_join="miter"):
+    from forge3d._map_scene_projection import TerrainProjector
+    from forge3d import recipe_manifest as rm
+    scene, raster, world = _drape_fixture(tmp_path, mode=mode, pose=pose)
+    vector = f3d.VectorOverlay(layer_id="marker", crs="EPSG:32633", width_px=3, line_join=line_join,
+        features=[
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": world}, "properties": {}},
+            {"type": "Feature", "geometry": {"type": "LineString", "coordinates":
+                [[world[0] - 8, world[1]], [world[0] + 8, world[1]]]}, "properties": {}},
+        ],
+        style={"layers": [{"type": "line", "paint": {"line-color": "#ffffff"}}]})
+    labels = f3d.LabelLayer(layer_id="labels", occlusion="none",
+        labels=[{"id": "peak", "kind": "point", "text": "P", "geometry": {"type": "Point", "coordinates": world}}],
+        glyph_atlas={"glyphs": ["P"]}, metadata={"source_id": "peak-label", "seed": 7, "coordinate_space": "world"})
+    with map_scene._shared_terrain_render_context():
+        bare_path = tmp_path / "bare.png"
+        scene.render(str(bare_path))
+        bare = np.asarray(Image.open(bare_path).convert("RGBA"))
+        scene.recipe.layers = [raster]
+        drape_path = tmp_path / "drape.png"
+        scene.render(str(drape_path))
+        draped = np.asarray(Image.open(drape_path).convert("RGBA"))
+        assert scene.last_render_metadata["raster_overlay_backend"] == "native_terrain_uv"
+        assert scene.last_render_metadata["raster_overlay_layer_count"] == 1
+        expected = TerrainProjector(scene.recipe).project(world)
+        red = (draped[..., 0] > draped[..., 1] + draped[..., 2].astype(np.int32))
+        assert red.any(), "the physical terrain pass must sample the red footprint"
+        row, col = int(expected[1]), int(expected[0])
+        assert red[row, col], (mode, pose, expected)
+        changed = np.any(bare != draped, axis=2)
+        assert changed.any() and not changed[0, 0], "a UV footprint must not paint the frame background"
+        if pose == "overhead":
+            assert row < N // 2 and col > N // 2, "north-east raster footprint must remain north-east"
+        scene.recipe.layers = [raster, vector]
+        vector_path = tmp_path / "vector.png"
+        vector_report = scene.render(str(vector_path))
+        vector_pixels = np.asarray(Image.open(vector_path).convert("RGBA"))
+        expected_backend = "native_oit" if line_join == "round" else "python_precise_raster"
+        assert scene.last_render_metadata["vector_backend"] == expected_backend
+        if line_join != "round":
+            assert vector_report.supported_features["mapscene.vector_precise_raster_composite"] == "supported"
+        vector_mask = np.any(vector_pixels != draped, axis=2)
+        assert vector_mask.any()
+        assert np.all(red[vector_mask]), "projected vector marker must sit inside its world raster footprint"
+        drawn_y, drawn_x = np.nonzero(vector_mask)
+        projected_path = TerrainProjector(scene.recipe).path(vector.features[1]["geometry"]["coordinates"])
+        for sample in projected_path:
+            distance = np.hypot(drawn_x + 0.5 - sample[0], drawn_y + 0.5 - sample[1])
+            assert float(distance.min()) <= vector.width_px, "every draped line segment must produce pixels"
+        record_property("drawn_line_samples", len(projected_path))
+        scene.recipe.layers = [raster, vector, labels]
+        compiled = scene.compile_plan()
+        assert compiled.label_plans["labels"].accepted
+        label = compiled.label_plans["labels"].accepted[0]
+        center = next(candidate for candidate in label.candidates if candidate.candidate_type == "center")
+        np.testing.assert_allclose(center.anchor, expected, rtol=0, atol=np.finfo(np.float32).eps * N)
+        frozen = rm.manifest_to_json(compiled.manifest)
+        def fail_recompile(*args, **kwargs):
+            raise AssertionError("render must consume the compiled label plan")
+        monkeypatch.setattr(map_scene, "_label_plan_from_layer", fail_recompile)
+        final_path = tmp_path / "labels.png"
+        scene.render(str(final_path))
+        final = np.asarray(Image.open(final_path).convert("RGBA"))
+        assert np.any(final != vector_pixels), "native label pixels must be drawn"
+        glyph_y, glyph_x = np.nonzero(np.any(final != vector_pixels,axis=2))
+        bounds = label.screen_bounds
+        halo = float(label.typography.get("halo_width_px",0))
+        # One pixel covers integer rasterization at the glyph/halo edge.
+        assert glyph_x.min() >= math.floor(bounds[0]-halo)-1
+        assert glyph_x.max() <= math.ceil(bounds[2]+halo)+1
+        assert glyph_y.min() >= math.floor(bounds[1]-halo)-1
+        assert glyph_y.max() <= math.ceil(bounds[3]+halo)+1
+
+        assert rm.manifest_to_json(compiled.manifest) == frozen
+        record_property("raster_footprint_pixels", int(red.sum()))
+        record_property("vector_pixels", int(vector_mask.sum()))
+        record_property("projected_anchor", list(expected))
+
+
+@requires_gpu
+@pytest.mark.parametrize("mode", ("screen",) + _CAMERA_MODES)
+def test_transparent_drape_preserves_identical_pixels(tmp_path, mode):
+    from forge3d.helpers.offscreen import save_png_deterministic
+    scene, raster, _ = _drape_fixture(tmp_path, mode=mode, pose="overhead")
+    save_png_deterministic(raster.path, np.zeros((32, 32, 4), dtype=np.uint8))
+    with map_scene._shared_terrain_render_context():
+        plain_path, transparent_path = tmp_path / "plain.png", tmp_path / "transparent.png"
+        scene.render(str(plain_path))
+        scene.recipe.layers = [raster]
+        scene.render(str(transparent_path))
+    np.testing.assert_array_equal(np.asarray(Image.open(plain_path)), np.asarray(Image.open(transparent_path)))
+
+
+@requires_gpu
+def test_raster_content_invalidates_chronos_and_pixel_cache(tmp_path, record_property):
+    from forge3d.chronos import _camera_json, _scene_json
+    from forge3d.helpers.offscreen import save_png_deterministic
+    scene, raster, _ = _drape_fixture(tmp_path, mode="mesh:zup", pose="overhead")
+    scene.recipe.layers = [raster]
+    def scene_hash():
+        return json.loads(f3d.compile_frame(0, 1, 1, _camera_json(scene), _scene_json(scene, [])).to_json())["scene_hash"]
+    first_hash = scene_hash()
+    cache = tmp_path / "cache"
+    with map_scene._shared_terrain_render_context():
+        scene.render(str(tmp_path / "first.png"), cache=cache)
+        assert not scene.last_render_metadata["cache_hit"]
+        scene.render(str(tmp_path / "replayed.png"), cache=cache)
+        assert scene.last_render_metadata["cache_hit"]
+        pixels = np.zeros((32, 32, 4), dtype=np.uint8)
+        pixels[..., 1] = 255
+        pixels[..., 3] = 255
+        save_png_deterministic(raster.path, pixels)
+        second_hash = scene_hash()
+        assert first_hash != second_hash
+        scene.render(str(tmp_path / "changed.png"), cache=cache)
+        assert not scene.last_render_metadata["cache_hit"]
+    assert (tmp_path / "first.png").read_bytes() != (tmp_path / "changed.png").read_bytes()
+    record_property("original_scene_hash", first_hash)
+    record_property("changed_scene_hash", second_hash)
+
+
+@pytest.mark.parametrize("bad_source", ("unreadable", "invalid-png", "invalid-bounds"))
+def test_unsupported_drape_blocks_before_terrain_pixels(tmp_path, monkeypatch, bad_source):
+    scene, raster, _ = _drape_fixture(tmp_path, mode="mesh:zup", pose="overhead")
+    if bad_source == "unreadable":
+        raster.path = str(tmp_path / "missing.png")
+    elif bad_source == "invalid-png":
+        Path(raster.path).write_bytes(b"invalid image bytes")
+    else:
+        raster.metadata = dict(raster.metadata, bounds=[0, 0, 0, 1])
+    scene.recipe.layers = [raster]
+    def no_pixels(*args, **kwargs):
+        raise AssertionError("unsupported raster must block before the native terrain draw")
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result_impl", no_pixels)
+    output = tmp_path / "blocked.png"
+    if bad_source == "unreadable":
+        report = scene.validate()
+        assert any(item.layer_id == "ortho" and item.severity == "error" for item in report.diagnostics)
+        with pytest.raises(RuntimeError, match="blocked by blocking diagnostics"):
+            scene.render(str(output))
+    else:
+        with pytest.raises(f3d.MapSceneNativeUnavailable) as excinfo:
+            scene.render(str(output))
+        assert excinfo.value.diagnostics[0]["layer"] == "ortho"
+    assert not output.exists()
+
+
+@requires_gpu
+@pytest.mark.parametrize("mode", _CAMERA_MODES)
+def test_world_overlay_bundle_freezes_manifest_and_report(tmp_path, mode, monkeypatch, record_property):
+    from forge3d import recipe_manifest as rm
+    from test_mapscene_sutura_integrity import _ssim, _report_bytes
+    scene, raster, world = _drape_fixture(tmp_path, mode=mode, pose="oblique-target")
+    scene.recipe.layers = [raster, f3d.LabelLayer(layer_id="labels", occlusion="none",
+        labels=[{"id": "peak", "text": "P", "geometry": {"type": "Point", "coordinates": world}}],
+        glyph_atlas={"glyphs": ["P"]}, metadata={"source_id": "world-label", "coordinate_space": "world"})]
+    with map_scene._shared_terrain_render_context():
+        first_path, second_path = tmp_path / "first.png", tmp_path / "second.png"
+        first_report = scene.render(str(first_path))
+        first_manifest = rm.manifest_to_json(scene.compiled_plan.manifest)
+        scene.save_bundle(tmp_path / "bundle")
+        with monkeypatch.context() as patch:
+            def no_recompile(*args, **kwargs):
+                raise AssertionError("v3 bundle load must consume frozen label/depth decisions")
+            patch.setattr(map_scene, "_label_plan_from_layer", no_recompile)
+            loaded = f3d.MapScene.load_bundle(scene.last_bundle_path)
+        assert rm.manifest_to_json(loaded.compiled_plan.manifest) == first_manifest
+        second_report = loaded.render(str(second_path))
+    score = _ssim(np.asarray(Image.open(first_path)), np.asarray(Image.open(second_path)))
+    assert score >= 0.99
+    assert _report_bytes(first_report) == _report_bytes(second_report)
+    assert rm.manifest_to_json(loaded.compiled_plan.manifest) == first_manifest
+    record_property("roundtrip_ssim", score)
+
+@requires_gpu
+def test_screen_drape_keeps_north_up_uv_footprint(tmp_path, record_property):
+    scene, raster, _ = _drape_fixture(tmp_path, mode="screen", pose="overhead")
+    scene.recipe.layers = [raster]
+    path = tmp_path / "screen.png"
+    scene.render(str(path))
+    pixels = np.asarray(Image.open(path).convert("RGBA"))
+    red = pixels[..., 0].astype(np.int32) > pixels[..., 1].astype(np.int32) + pixels[..., 2].astype(np.int32)
+    yy, xx = np.nonzero(red)
+    assert len(xx)
+    assert float(xx.mean()) > N / 2 and float(yy.mean()) < N / 2
+    assert not red[0, 0] and not red[-1, -1]
+    record_property("footprint_centroid", [float(xx.mean()), float(yy.mean())])
+
+
+def test_projection_surface_registration_and_finite_contract():
+    scene = _scene(np.zeros((N, N), dtype=np.float32))
+    params = map_scene._build_mapscene_terrain_params(scene.recipe, scene.recipe.terrain.data, (N, N))
+    assert callable(params.project_terrain_points)
+    assert callable(params.project_terrain_depth)
+    assert callable(params.unproject_terrain_depth)
+    assert params.project_terrain_points([[0.5, 0.5, 0.0, 0.0]])[0] is not None
+    with pytest.raises(ValueError, match="finite"):
+        params.project_terrain_points([[float("nan"), 0.5, 0.0, 0.0]])
+    depth=params.project_terrain_depth(scene.recipe.terrain.data,(N,N))
+    assert depth.shape==(N,N) and depth.dtype==np.float32
+    uv=params.unproject_terrain_depth(depth)
+    assert uv.shape==(N,N,2)
+    assert np.isfinite(uv[depth<1]).all()
+    with pytest.raises(ValueError,match="finite"):
+        params.project_terrain_depth(np.full((2,2),np.nan,np.float32),(N,N))
+
+
+@requires_gpu
+def test_world_label_depth_is_decided_in_compile_plan(tmp_path, monkeypatch, record_property):
+    from forge3d._map_scene_projection import TerrainProjector
+    scene, _, world = _drape_fixture(tmp_path, mode="mesh:zup", pose="overhead")
+    projector = TerrainProjector(scene.recipe)
+    ground = projector.height(projector.uv(world))
+    labels = f3d.LabelLayer(layer_id="depth-labels", occlusion="terrain",
+        glyph_atlas={"glyphs": ["P"]}, metadata={"source_id": "depth-labels", "seed": 7, "coordinate_space": "world"})
+    plans = []
+    with map_scene._shared_terrain_render_context():
+        scene.render(str(tmp_path / "bare.png"))
+        bare = np.asarray(Image.open(tmp_path / "bare.png"))
+        for name, elevation in (("below", ground - 30), ("ground", ground), ("above", ground + 30)):
+            labels.labels = [{"id": name, "text": "P", "kind": "point", "geometry":
+                {"type": "Point", "coordinates": [*world, elevation]}}]
+            scene.recipe.layers = [labels]
+            compiled = scene.compile_plan()
+            plan = compiled.label_plans["depth-labels"]
+            plans.append(plan)
+            with monkeypatch.context() as patch:
+                def no_decision(*args, **kwargs):
+                    raise AssertionError("depth decisions must be frozen by compile_plan")
+                patch.setattr(map_scene, "_label_plan_from_layer", no_decision)
+                scene.render(str(tmp_path / (name + ".png")))
+        assert not plans[0].accepted and plans[1].accepted and plans[2].accepted
+        np.testing.assert_array_equal(bare, np.asarray(Image.open(tmp_path / "below.png")))
+        assert np.any(bare != np.asarray(Image.open(tmp_path / "above.png")))
+    record_property("below_terrain_accepted", len(plans[0].accepted))
+    record_property("on_terrain_accepted", len(plans[1].accepted))
+    record_property("above_terrain_accepted", len(plans[2].accepted))
+
+
+@requires_gpu
+@pytest.mark.parametrize("mode", ("screen", *_CAMERA_MODES))
+def test_geotiff_mask_and_world_grid_drape_on_physical_terrain(tmp_path, mode):
+    import rasterio
+    from rasterio.transform import from_origin
+    from forge3d._map_scene_projection import TerrainProjector
+    scene, png, world = _drape_fixture(tmp_path, mode=mode, pose="overhead")
+    transform = from_origin(500000.0, 5800000.0, 1.0, 1.0)
+    scene.recipe.terrain.metadata = dict(scene.recipe.terrain.metadata,
+        geotransform=list(transform.to_gdal()))
+    # The same NE patch expressed in a real UTM raster grid; transparent
+    # surroundings and an asymmetric alpha notch remain transparent.
+    pixels = np.zeros((N, N, 4), dtype=np.uint8)
+    pixels[40:72, 184:216] = [255, 0, 0, 255]
+    pixels[40:48, 184:192] = 0
+    path = tmp_path / "ortho.tif"
+    with rasterio.open(path, "w", driver="GTiff", height=N, width=N, count=4,
+        dtype="uint8", crs="EPSG:32633", transform=transform) as dst:
+        dst.write(np.moveaxis(pixels, -1, 0))
+    raster = f3d.RasterOverlay(layer_id="ortho", path=str(path), crs="EPSG:32633")
+    with map_scene._shared_terrain_render_context():
+        scene.render(str(tmp_path / "bare-geotiff.png"))
+        bare = np.asarray(Image.open(tmp_path / "bare-geotiff.png"))
+        scene.recipe.layers = [raster]
+        scene.render(str(tmp_path / "draped-geotiff.png"))
+        rgba = np.asarray(Image.open(tmp_path / "draped-geotiff.png"))
+        red = rgba[..., 0].astype(np.int32) > rgba[..., 1].astype(np.int32) + rgba[..., 2].astype(np.int32)
+        assert red.any()
+        if mode == "screen":
+            row, col = 56, 200
+        else:
+            east, north = transform * (200.5, 56.5)
+            anchor = TerrainProjector(scene.recipe).project((east, north))
+            row, col = int(anchor[1]), int(anchor[0])
+        assert red[row, col]
+        assert row < N // 2 and col > N // 2
+        assert not np.any(bare[0, 0] != rgba[0, 0])
+        projector = None if mode == "screen" else TerrainProjector(scene.recipe)
+        def pixel_at(col, row):
+            if projector is None:
+                return int(row), int(col)
+            east, north = transform * (col + 0.5, row + 0.5)
+            anchor = projector.project((east, north))
+            return int(anchor[1]), int(anchor[0])
+        # All four footprint edges and both notch axes, beyond the filter edge.
+        for col, row in ((200,42),(214,56),(200,70),(186,56),(194,44),(188,50)):
+            y,x = pixel_at(col,row)
+            assert red[y,x], (mode,col,row,x,y)
+        for col, row in ((200,36),(220,56),(200,76),(180,56),(188,44)):
+            y,x = pixel_at(col,row)
+            assert not red[y,x], (mode,col,row,x,y)
+            np.testing.assert_array_equal(rgba[y,x],bare[y,x])
+
+
+
+@pytest.mark.parametrize("input_kind", ("outside-world-width", "outside-terrain", "world-line-label"))
+def test_unsupported_world_overlays_block_before_pixels(tmp_path, monkeypatch, input_kind):
+    scene, _, world = _drape_fixture(tmp_path, mode="mesh:zup", pose="overhead")
+    if input_kind == "world-line-label":
+        layer = f3d.LabelLayer(layer_id="unsupported", occlusion="none", metadata={"coordinate_space": "world"}, labels=[
+            {"id": "line", "kind": "line", "text": "P", "geometry":
+             {"type": "LineString", "coordinates": [list(world), [world[0]+1, world[1]+1]]}}])
+    else:
+        coords = (world[0]*8, world[1]*8)
+        layer = f3d.VectorOverlay(layer_id="unsupported", crs="EPSG:32633",
+            width_world=1.0 if input_kind == "outside-world-width" else None,
+            features=[{"type": "Feature", "geometry": {"type": "Point", "coordinates": coords}}])
+    scene.recipe.layers = [layer]
+    def no_pixels(*args, **kwargs):
+        raise AssertionError("unsupported world inputs must block before the terrain draw")
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result_impl", no_pixels)
+    output = tmp_path / "unsupported.png"
+    report = scene.validate()
+    assert report.render_blocked()
+    assert scene.compile_plan().validation_report.render_blocked()
+    with pytest.raises(RuntimeError, match="blocking diagnostics"):
+        scene.render(str(output))
+    assert any(diagnostic.layer_id == "unsupported" for diagnostic in report.diagnostics)
+    assert not output.exists()
+
+
+@requires_gpu
+@pytest.mark.parametrize("mode", _CAMERA_MODES)
+def test_camera_alignment_on_raised_asymmetric_peak(tmp_path, mode, monkeypatch, record_property):
+    fixture = _drape_fixture
+    def peak_fixture(*args, **kwargs):
+        scene, raster, _ = fixture(*args, **kwargs)
+        span = map_scene._terrain_scene_diagonal(scene.recipe.terrain)
+        world = (span * (200 / (N - 1) - 0.5), span * (0.5 - 56 / (N - 1)))
+        raster.metadata = dict(raster.metadata,
+            bounds=[world[0]-16, world[1]-16, world[0]+16, world[1]+16])
+        # The original offset view puts this summit on the terrain silhouette,
+        # where a finite-width stroke legitimately reaches the background.
+        # Aim at the raised peak, retaining the strict full-footprint assertion
+        # and the native camera's oblique polar angle (measured from vertical).
+        heightmap = map_scene._load_native_heightmap(scene.recipe.terrain)
+        center = sum(map_scene._heightmap_domain(heightmap)) * 0.5
+        cell_spacing = span / (N - 1)
+        dy, dx = np.gradient(heightmap, cell_spacing)
+        max_slope = float(np.hypot(dx, dy).max())
+        # Half the measured steepest-slope grazing angle keeps this fixture
+        # away from folds without changing the production camera or mesh.
+        polar_angle = math.degrees(math.atan(1.0 / max_slope)) * 0.5
+        scene.recipe.camera = f3d.OrbitCamera(
+            target=(world[0], world[1], float(heightmap[56, 200]) - center),
+            distance=420.0, azimuth_deg=-65.0, elevation_deg=polar_angle, fov_deg=40.0)
+        record_property("camera_polar_angle_deg", polar_angle)
+        from forge3d._map_scene_projection import TerrainProjector
+        projector = TerrainProjector(scene.recipe)
+        anchor = projector.project(world)
+        flat = projector.project((*world, 0.0))
+        assert np.linalg.norm(np.asarray(anchor[:2]) - np.asarray(flat[:2])) > 3.0
+        record_property("height_projection_pixel_displacement", float(
+            np.linalg.norm(np.asarray(anchor[:2]) - np.asarray(flat[:2]))))
+        ground = projector.height(projector.uv(world))
+        assert ground == pytest.approx(float(map_scene._load_native_heightmap(scene.recipe.terrain)[56, 200]))
+        record_property("terrain_height_at_anchor", ground)
+        return scene, raster, world
+    monkeypatch.setitem(globals(), "_drape_fixture", peak_fixture)
+    test_native_drape_vectors_and_world_labels_follow_camera(
+        tmp_path, mode, "oblique-target", monkeypatch, record_property, line_join="round")
+
+
+def test_path_only_world_vector_blocks_before_pixels(tmp_path, monkeypatch):
+    scene, _, _ = _drape_fixture(tmp_path, mode="mesh:zup", pose="overhead")
+    source = tmp_path / "points.geojson"
+    source.write_text(json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0, 0]}}]}), encoding="utf-8")
+    scene.recipe.layers = [f3d.VectorOverlay(layer_id="path-vector", path=str(source), crs="EPSG:32633")]
+    def no_pixels(*args, **kwargs):
+        raise AssertionError("path-only world vectors must block before the terrain draw")
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result_impl", no_pixels)
+    output = tmp_path / "blocked-vector.png"
+    # Preserve the existing path-loader validation diagnostic and exception.
+    with pytest.raises(RuntimeError, match="blocking diagnostics"):
+        scene.render(str(output))
+    assert scene.last_validation_report.render_blocked()
+    assert any(diagnostic.layer_id == "path-vector"
+               for diagnostic in scene.last_validation_report.diagnostics)
+    assert not output.exists()
+
+
+@requires_gpu
+@pytest.mark.parametrize("line_join", ("miter", "round"))
+def test_projected_polygon_preserves_world_footprint_and_hole(tmp_path, line_join):
+    from forge3d._map_scene_projection import TerrainProjector
+    scene, raster, world = _drape_fixture(tmp_path, mode="mesh:zup", pose="oblique-target")
+    def ring(radius):
+        x, y = world
+        return [[x-radius,y-radius],[x+radius,y-radius],[x+radius,y+radius],
+                [x-radius,y+radius],[x-radius,y-radius]]
+    polygon = f3d.VectorOverlay(layer_id="polygon", crs="EPSG:32633", line_join=line_join,
+        width_px=1, features=[{"type":"Feature", "geometry":{"type":"Polygon",
+            "coordinates":[ring(12), ring(4)]}, "properties":{}}],
+        style={"layers":[{"type":"fill", "paint":{"fill-color":"#ffffff", "fill-opacity":1}},
+                         {"type":"line", "paint":{"line-color":"#ffffff"}}]})
+    with map_scene._shared_terrain_render_context():
+        scene.recipe.layers=[raster]
+        scene.render(str(tmp_path/"drape.png"))
+        draped=np.asarray(Image.open(tmp_path/"drape.png"))
+        scene.recipe.layers=[raster,polygon]
+        polygon_report = scene.render(str(tmp_path/"polygon.png"))
+        expected_backend = "native_oit" if line_join == "round" else "python_precise_raster"
+        assert scene.last_render_metadata["vector_backend"] == expected_backend
+        if line_join != "round":
+            assert polygon_report.supported_features["mapscene.vector_precise_raster_composite"] == "supported"
+        painted=np.asarray(Image.open(tmp_path/"polygon.png"))
+        changed=np.any(painted!=draped,axis=2)
+        red=draped[...,0].astype(np.int32)>draped[...,1].astype(np.int32)+draped[...,2].astype(np.int32)
+        assert changed.any() and np.all(red[changed])
+        projector=TerrainProjector(scene.recipe)
+        hole=projector.project(world)
+        fill=projector.project((world[0]+8,world[1]))
+        np.testing.assert_array_equal(painted[int(hole[1]),int(hole[0])], draped[int(hole[1]),int(hole[0])])
+        np.testing.assert_array_equal(painted[int(fill[1]),int(fill[0]),:3], [255,255,255])
+
+
+@requires_gpu
+@pytest.mark.parametrize("option", ("globe", "GLOBE"))
+def test_globe_option_follows_actual_native_mapscene_camera(tmp_path, option):
+    scene, _, world = _drape_fixture(tmp_path, mode=f"clipmap:2:32:32:10:0.3:zup:{option}", pose="overhead")
+    scene.recipe.layers=[f3d.VectorOverlay(layer_id="planetary", crs="EPSG:32633", width_px=3,
+        features=[{"type":"Feature", "geometry":{"type":"Point", "coordinates":world}}])]
+    report = scene.validate()
+    assert not report.render_blocked()
+    scene.render(str(tmp_path/"globe-vector.png"))
+    assert scene.last_render_metadata["vector_backend"] in {"native_oit", "python_precise_raster"}

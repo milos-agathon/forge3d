@@ -186,3 +186,15 @@ def test_material_normal_map_changes_native_normal_aov(tmp_path: Path) -> None:
     baseline = np.asarray(baseline_aov.normal(), dtype=np.float32)
     mapped = np.asarray(mapped_aov.normal(), dtype=np.float32)
     assert float(np.mean(np.abs(mapped - baseline))) > 0.02
+
+
+def test_material_albedo_input_is_optional_and_native(tmp_path):
+    settings = MaterialLayerSettings()
+    assert settings.albedo_path is None
+    settings = MaterialLayerSettings(albedo_path="albedo.png")
+    assert settings.albedo_path == "albedo.png"
+    with pytest.raises(ValueError, match="albedo_path"):
+        MaterialLayerSettings(albedo_path="")
+    config = make_terrain_params_config(size_px=(64, 64), render_scale=1.0,
+        terrain_span=1.0, msaa_samples=1, z_scale=1.0, exposure=1.0, domain=(0.0, 1.0), materials=settings)
+    assert f3d.TerrainRenderParams(config).material_map_paths["albedo"] == "albedo.png"
