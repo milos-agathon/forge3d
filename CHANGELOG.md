@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Compatibility
+- SUTURA raster imagery now contributes terrain albedo before lighting, rather than being pasted over the finished frame. Terrain-raster scenes therefore have a new shaded look; their committed references have been refreshed.
+
+### Added
+- SUTURA 3D overlays: terrain-UV raster draping and vectors projected through the terrain camera, with terrain occlusion and perspective-aware world widths.
+- Opt-in world labels through `LabelLayer(metadata={"coordinate_space": "world"})`. Their anchors and geometry follow the terrain camera; existing screen-coordinate labels keep their behavior.
+
+### Fixed
+- Curved labels now emit screen-space glyph rotations in radians, keeping text such as “Silver River” upright along its path.
+
 ## [1.42.0] - 2026-10-06
 ### Added
 - Population and thematic rasters through public `MapScene` styles: `RasterHeightSurfaceStyle` turns population values into a continuous native height/shade surface, `CategoricalRasterStyle` maps class IDs to colours and class legends, and `BivariateRasterStyle` classifies two aligned rasters into a 3×3 palette with labelled axes. A thematic overlay can colour a population height surface. Units, nodata masks and bin-boundary semantics remain explicit; styled scenes retain canonical bundle round trips. Existing unstyled defaults and serialization are preserved. See `docs/guides/thematic_raster_styles.md` and `examples/mapscene_thematic_rasters.py`. (#210)

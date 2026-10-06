@@ -286,7 +286,7 @@ pub(crate) fn layout_label_candidates_py(
 
     // Curved authority works in the horizontal world plane; the screen
     // polyline maps x -> x and screen y -> z so the authority's
-    // `atan2(tangent.x, tangent.z)` convention is preserved verbatim.
+    // `atan2(tangent.x, tangent.z)` convention stays inside that authority.
     let curved_path = if kind == "curved" {
         let vertices: Vec<glam::Vec3> = screen_path
             .iter()
@@ -364,7 +364,16 @@ pub(crate) fn layout_label_candidates_py(
             layout
                 .glyphs
                 .iter()
-                .map(|glyph| (glyph.world_pos.x, glyph.world_pos.z, glyph.rotation))
+                .map(|glyph| {
+                    // Here (world x, z) is screen (x, y down). The authority
+                    // stores r = atan2(tx, tz); the compositor needs
+                    // atan2(tz, tx) = PI/2 - r (modulo a full turn).
+                    (
+                        glyph.world_pos.x,
+                        glyph.world_pos.z,
+                        std::f32::consts::FRAC_PI_2 - glyph.rotation,
+                    )
+                })
                 .collect()
         };
         if placed.len() != glyph_count {
