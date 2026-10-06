@@ -13,6 +13,9 @@ pub(crate) enum OverlaySource {
     Colormap {
         colormap: crate::colormap::colormap1d::Colormap1D,
     },
+    Raster {
+        lut: std::sync::Arc<crate::terrain::ColormapLUT>,
+    },
 }
 
 #[cfg(feature = "extension-module")]
@@ -62,6 +65,47 @@ pub struct OverlayLayer {
 #[cfg(feature = "extension-module")]
 #[pymethods]
 impl OverlayLayer {
+    /// Nearest-cell, display-sRGB RGBA colours in terrain UV space.
+    #[staticmethod]
+    #[pyo3(signature = (rgba, strength=1.0))]
+    pub fn from_raster_rgba(rgba: numpy::PyReadonlyArray3<u8>, strength: f32) -> PyResult<Self> {
+        if !strength.is_finite() || !(0.0..=1.0).contains(&strength) {
+            return Err(PyValueError::new_err(
+                "strength must be finite and in [0, 1]",
+            ));
+        }
+        let array = rgba.as_array();
+        let shape = array.shape();
+        if shape[0] == 0 || shape[1] == 0 || shape[2] != 4 {
+            return Err(PyValueError::new_err(
+                "rgba must have nonempty shape (height, width, 4)",
+            ));
+        }
+        let ctx = crate::core::gpu::try_ctx()?;
+        let width =
+            u32::try_from(shape[1]).map_err(|_| PyValueError::new_err("rgba width exceeds u32"))?;
+        let height = u32::try_from(shape[0])
+            .map_err(|_| PyValueError::new_err("rgba height exceeds u32"))?;
+        let data: Vec<u8> = array.iter().copied().collect();
+        let lut = crate::terrain::ColormapLUT::new_raster_rgba(
+            &ctx.device,
+            &ctx.queue,
+            width,
+            height,
+            &data,
+        )
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(Self {
+            source: OverlaySource::Raster {
+                lut: std::sync::Arc::new(lut),
+            },
+            strength,
+            offset: 0.0,
+            domain: (0.0, 1.0),
+            blend_mode: OverlayBlendMode::Alpha,
+        })
+    }
+
     /// Create an overlay sourced from a 1D colormap.
     #[staticmethod]
     #[pyo3(signature = (colormap, strength=1.0, offset=0.0, blend_mode="Alpha", domain=(0.0, 1.0)))]
@@ -122,11 +166,12 @@ impl OverlayLayer {
         self.domain
     }
 
-    /// Kind of overlay source (currently only `Colormap1D`).
+    /// Kind of overlay source (`Colormap1D` or `RasterRGBA`).
     #[getter]
     pub fn kind(&self) -> &'static str {
         match self.source {
             OverlaySource::Colormap { .. } => "Colormap1D",
+            OverlaySource::Raster { .. } => "RasterRGBA",
         }
     }
 
@@ -135,6 +180,7 @@ impl OverlayLayer {
     pub fn colormap(&self) -> Option<crate::colormap::colormap1d::Colormap1D> {
         match &self.source {
             OverlaySource::Colormap { colormap } => Some(colormap.clone()),
+            OverlaySource::Raster { .. } => None,
         }
     }
 
@@ -162,6 +208,14 @@ impl OverlayLayer {
     pub fn colormap_clone(&self) -> Option<crate::colormap::colormap1d::Colormap1D> {
         match &self.source {
             OverlaySource::Colormap { colormap } => Some(colormap.clone()),
+            OverlaySource::Raster { .. } => None,
+        }
+    }
+
+    pub(crate) fn raster_lut(&self) -> Option<std::sync::Arc<crate::terrain::ColormapLUT>> {
+        match &self.source {
+            OverlaySource::Raster { lut } => Some(lut.clone()),
+            _ => None,
         }
     }
 }

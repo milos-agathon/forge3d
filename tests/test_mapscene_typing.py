@@ -25,6 +25,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import forge3d as f3d
+import numpy as np
+from forge3d.style import RasterHeightSurfaceStyle
 
 
 def build_scene(output: Path) -> f3d.MapScene:
@@ -43,6 +45,26 @@ def build_scene(output: Path) -> f3d.MapScene:
     manifest: dict[str, object] = f3d.recipe_manifest(scene)
     assert manifest["kind"] == "mapscene_recipe_manifest"
     return scene
+
+
+def build_thematic_scene() -> f3d.MapScene:
+    population = RasterHeightSurfaceStyle(2, "people/km²")
+    assert population.high_color[3] == 255
+    categorical = f3d.CategoricalRasterStyle({0: (255, 0, 0, 255)})
+    bivariate = f3d.BivariateRasterStyle(
+        [1, 2], [10, 20], [[(255, 0, 0, 255)] * 3] * 3,
+        "Population", "Temperature", x_units="people/km²", y_units="°C",
+    )
+    assert bivariate.x_units == "people/km²"
+    legend: dict[str, object] = bivariate.legend()
+    assert legend["kind"] == "bivariate"
+    result: f3d.RasterStyleResult = categorical.apply(np.zeros((2, 2)))
+    assert result.valid_mask.any()
+    return f3d.MapScene(
+        terrain=f3d.TerrainSource(data=np.zeros((2, 2)), style=population),
+        layers=[f3d.RasterOverlay("theme", data=np.zeros((2, 2)),
+                                  secondary_data=np.zeros((2, 2)), style=bivariate)],
+    )
 """.strip()
         + "\n",
         encoding="utf-8",

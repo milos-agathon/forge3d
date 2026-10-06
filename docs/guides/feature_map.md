@@ -10,6 +10,7 @@ organized by workflow rather than by Rust module layout.
 | Interactive terrain viewing | `open_viewer_async`, `ViewerHandle`, `ViewerWidget` | `terrain_viewer_interactive.py`, `terrain_camera_rigs_demo.py` |
 | Terrain inputs and datasets | `mini_dem`, `fetch_dem`, `datasets`, `cog.open_cog` | `terrain_single_tile.py`, `cog_streaming_demo.py` |
 | Raster overlays | `ViewerHandle.load_overlay` | `swiss_terrain_landcover_viewer.py`, `bosnia_terrain_landcover_viewer.py`, `belgium_bivariate_climate_map.py` |
+| Population and thematic rasters | `RasterHeightSurfaceStyle`, `CategoricalRasterStyle`, `BivariateRasterStyle` through `MapScene` | [Style contracts](thematic_raster_styles.md), `mapscene_thematic_rasters.py` |
 | Vector overlays and labels | `ViewerHandle.add_vector_overlay`, `ViewerHandle.add_label`, `ViewerHandle.add_labels`, `ViewerHandle.add_line_label`, `ViewerHandle.add_callout` | `luxembourg_rail_overlay.py`, `fuji_labels_demo.py` |
 | Picking and selection | `viewer_ipc` picking helpers | `picking_demo.py`, `picking_test_interactive.py` |
 | Point clouds | `ViewerHandle.load_point_cloud`, `forge3d.pointcloud` | `pointcloud_viewer_interactive.py` |
