@@ -966,7 +966,7 @@ def test_nephele_main_integration_record_reaches_the_current_freeze():
     assert (transition["result_count"], transition["result_digest"]) == (
         EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
     )
-    assert transition["review"].startswith("PENDING OWNER REVIEW")
+    assert transition["review"].startswith("APPROVED by Milos")
     added = collections.Counter(map(tuple, transition["added"]))
     removed = collections.Counter(map(tuple, transition["removed"]))
     assert sum(added.values()) - sum(removed.values()) == (
