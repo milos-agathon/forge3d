@@ -33,8 +33,15 @@ These invariants remain part of normal implementation work:
 | --- | --- | --- | --- |
 | PR core | Every pull request and protected-branch push; reported by `PR Core Success` | Formatting, curated lint/build, focused capability/degradation/allocation/certificate tests, affected package smoke, and workflow-policy contracts | The affected change |
 | Affected integration | Explicitly selected when a change touches a renderer, shader, resource/certificate core, packaging boundary, or validation workflow | Focused subsystem tests and the smallest representative render or golden | The affected change |
-| Acceptance | Manual `scope=full` dispatch for a named candidate SHA, plus explicitly selected or scheduled evidence lanes | Complete Python lane, curated cross-platform Rust/feature matrix, full wheel matrix, the golden and physical-GPU probes named by that candidate's acceptance plan, and acceptance artifacts summarized by `Full Acceptance Summary` | Declaring the named moonshot or candidate accepted |
-| Release | Explicit release promotion | Production signing, complete certificate verification, release artifacts, and any separately requested acceptance evidence | Release promotion only |
+| Acceptance | Manual `scope=full` dispatch for a named candidate SHA, plus explicitly selected or scheduled evidence lanes | Complete Python lane, curated cross-platform Rust/feature matrix, full wheel matrix, the golden and physical-GPU probes named by that candidate's acceptance plan, and acceptance artifacts summarized by `Full Acceptance Summary`; optional Metal diagnostics record `ABSENT` and are excluded from this verdict | Declaring the named moonshot or candidate accepted |
+| Release | Explicit release promotion; `v*` tag pushes and production publish dispatches require exact-SHA full acceptance first | A completed `ci.yml` run on the release SHA, from `schedule` or `workflow_dispatch` with recorded `scope=full`, whose `Full Acceptance Summary` succeeded; then production signing, complete certificate verification and release artifacts | Every release job; explicit `dry_run=true` dispatches bypass evidence lookup and only build/test artifacts |
+
+D02 raster-style proofs require physical native frames. Linux/Windows software-adapter Python matrices
+record their three-case deselection and physical-adapter reason in a notice and
+job summary; macOS retains these tests. Full acceptance runs the file on the probed NVIDIA Vulkan runner,
+requires zero skips, retains adapter/pixel assertions, and saves adapter
+measurements and JUnit evidence. Missing D02 execution fails
+`Full Acceptance Summary`.
 
 `PR Core Success` must not require a production signing secret, a scarce physical
 runner, an all-golden render, a repository-wide test matrix, or deliberate
@@ -69,5 +76,15 @@ Full-suite, exhaustive-golden, physical-GPU, and red-proof results are
 attributable to the candidate SHA on which they ran. They are not transitive
 proof for later commits and their absence does not block unrelated feature
 development. The repository does not automatically run acceptance after every
-merge or before every artifact publication; promotion owners request it when a
-candidate needs that claim.
+merge. Release promotion requires green full acceptance on the exact release
+SHA; promotion owners request it before attempting publication. A missing run
+refuses all release work and prints `gh workflow run ci.yml -f scope=full --ref
+<tag>`. A dispatch summary records its selected scope in an executed job step,
+so narrower acceptance dispatches cannot authorize a release. An explicit dry
+run bypasses this check and publishes neither PyPI packages nor release assets.
+
+Optional Metal SUBSTRATIA diagnostics do not block acceptance. Probe exit 2
+with matching `absent` evidence records an explicit summary/annotation and
+omits the hardware controls; it is not GPU success. Probe crashes and
+inconsistent or missing evidence remain failures. The required physical
+NVIDIA lane and its zero-skip evidence requirements are unchanged.

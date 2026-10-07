@@ -349,3 +349,45 @@ def test_m06_acceptance_keeps_only_unique_physical_coverage() -> None:
     assert "required M-06 NVIDIA/Vulkan viewer lane only" in picking
     assert "pytest.mark.interactive_viewer" in shadow
     assert 'os.environ.get("RUN_M06_VIEWER_CI") != "1"' in shadow
+
+
+def test_full_python_timing_artifact_does_not_upload_fixtures() -> None:
+    workflow = yaml.load((ROOT / ".github/workflows/test-python-wheel.yml").read_text(), Loader=yaml.BaseLoader)
+    steps = workflow["jobs"]["test"]["steps"]
+    upload = next(step for step in steps if step.get("name") == "Upload full Python timing and skip evidence")
+    assert "always()" in upload["if"]
+    assert upload["with"]["path"] == "python-full-junit.xml"
+    assert "matrix.python-version" in upload["with"]["name"]
+
+
+def test_optional_metal_upload_retains_absent_probe_evidence() -> None:
+    job = yaml.load(_workflow(), Loader=yaml.BaseLoader)["jobs"]["test-substratia-gpu"]
+    upload = next(step for step in job["steps"] if step.get("name") == "Upload optional Metal SUBSTRATIA evidence")
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == "tests/artifacts/substratia-metal-diagnostic/"
+    assert job["env"]["FORGE3D_EXPECTED_ADAPTER_PROBE"].startswith(upload["with"]["path"])
+
+
+def test_release_gate_fetches_no_lfs_or_build_artifacts() -> None:
+    jobs = yaml.load((ROOT / '.github/workflows/publish.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)['jobs']
+    gate = jobs['release-full-ci']
+    for step in gate['steps']:
+        assert step.get('with', {}).get('lfs', 'false') == 'false'
+        assert 'download-artifact' not in step.get('uses', '')
+        assert 'maturin' not in step.get('run', '')
+    assert 'actions: read' in (ROOT / '.github/workflows/publish.yml').read_text(encoding='utf-8')
+
+
+def test_d02_synthetic_fixtures_reuse_bound_visual_evidence() -> None:
+    jobs = yaml.load(_workflow(), Loader=yaml.BaseLoader)["jobs"]
+    steps = jobs["test-golden-images-nvidia"]["steps"]
+    d02 = next(step for step in steps
+               if step.get("name") == "Run D02 thematic raster physical GPU gate")
+    assert 'Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "d02"' in d02["run"]
+    assert "$env:FORGE3D_D02_ARTIFACT_DIR = $dir" in d02["run"]
+    assert "--junitxml=" in d02["run"]
+    assert "git lfs" not in d02["run"] and "curl" not in d02["run"]
+    evidence = next(step for step in steps
+                    if step.get("with", {}).get("name") == "visual-gpu-evidence")
+    assert evidence["if"] == "always()"
+    assert evidence["with"]["path"] == "${{ runner.temp }}/forge3d-visual-${{ github.run_id }}-${{ github.run_attempt }}/"

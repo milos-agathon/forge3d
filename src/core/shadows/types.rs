@@ -55,10 +55,13 @@ impl Default for CsmConfig {
     }
 }
 
-/// Shadow cascade data
+/// Fog shadow cascade: matches `volumetric.wgsl`'s `FogShadowCascade` (80 bytes).
+///
+/// Distinct from `shadows::ShadowCascade`, the terrain/mesh cascade (144 bytes),
+/// which also carries a combined `light_view_proj`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct ShadowCascade {
+pub struct FogShadowCascade {
     /// Light-space projection matrix for this cascade
     pub light_projection: [[f32; 4]; 4],
     /// Far plane distance for this cascade
@@ -71,17 +74,22 @@ pub struct ShadowCascade {
     pub _padding: f32,
 }
 
-/// CSM uniform buffer data sent to GPU
-/// P0.2/M3: Must match shader std140 layout (816 bytes)
+/// Fog CSM uniform data sent to the GPU.
+///
+/// Covers the whole of `volumetric.wgsl`'s `FogCsmUniforms`; the trailing
+/// fields and padding here are unused by the fog shader. Distinct from
+/// `shadows::CsmUniforms`, the terrain/mesh contract: 608 bytes with 80-byte
+/// cascades against 864 with 144-byte cascades. `fog_layout_lock_tests` is what
+/// keeps the two apart.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CsmUniforms {
+pub struct FogCsmUniforms {
     /// Light direction in world space
     pub light_direction: [f32; 4],
     /// Light view matrix (world to light space)
     pub light_view: [[f32; 4]; 4],
     /// Shadow cascades data
-    pub cascades: [ShadowCascade; 4],
+    pub cascades: [FogShadowCascade; 4],
     /// Number of active cascades
     pub cascade_count: u32,
     /// PCF kernel size
@@ -115,8 +123,93 @@ pub struct CsmUniforms {
     pub technique_reserved: [f32; 4],
     /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
     pub cascade_blend_range: f32,
-    /// Padding for std430 alignment (storage buffer) - 27 floats to reach 864 total bytes
+    /// Trailing padding; the fog shader (`FogCsmUniforms`) reads only the leading fields.
     pub _padding2: [f32; 27],
+}
+
+// Compile-time size checks: the cascade must match `volumetric.wgsl` exactly,
+// and the uniform buffer must stay large enough to cover the shader's 432-byte
+// struct. Neither was asserted anywhere before.
+const _: () = assert!(std::mem::size_of::<FogShadowCascade>() == 80);
+const _: () = assert!(std::mem::size_of::<FogCsmUniforms>() == 608);
+
+/// The fog contract had no layout verification at all, so `volumetric.wgsl` could
+/// drift from it silently. Derive the expectations from the shader instead, the
+/// same way `core::shadow_mapping::layout_lock_tests` does for the terrain one.
+#[cfg(test)]
+mod fog_layout_lock_tests {
+    use super::*;
+    use crate::shader_sources::csm_wgsl_layout::layout;
+
+    const FOG_WGSL: &str = include_str!("../../shaders/volumetric.wgsl");
+
+    /// Compiler-reported offsets in WGSL field order. An unknown name panics, so
+    /// a new WGSL field cannot slip past uncompared.
+    fn rust_offsets(
+        wgsl: &[(String, usize)],
+        offset_of_field: fn(&str) -> usize,
+    ) -> Vec<(String, usize)> {
+        wgsl.iter()
+            .map(|(name, _)| (name.clone(), offset_of_field(name)))
+            .collect()
+    }
+
+    /// The shader stops at `debug_mode`, so it declares a strict prefix of the
+    /// Rust struct; the total may only grow on the Rust side.
+    #[test]
+    fn fog_rust_layout_covers_volumetric_wgsl() {
+        const CASCADE_BYTES: usize = std::mem::size_of::<FogShadowCascade>();
+
+        fn cascade_offset(name: &str) -> usize {
+            match name {
+                "light_projection" => std::mem::offset_of!(FogShadowCascade, light_projection),
+                "far_distance" => std::mem::offset_of!(FogShadowCascade, far_distance),
+                "near_distance" => std::mem::offset_of!(FogShadowCascade, near_distance),
+                "texel_size" => std::mem::offset_of!(FogShadowCascade, texel_size),
+                other => {
+                    panic!("WGSL FogShadowCascade field `{other}` has no Rust counterpart")
+                }
+            }
+        }
+
+        fn uniform_offset(name: &str) -> usize {
+            match name {
+                "light_direction" => std::mem::offset_of!(FogCsmUniforms, light_direction),
+                "light_view" => std::mem::offset_of!(FogCsmUniforms, light_view),
+                "cascades" => std::mem::offset_of!(FogCsmUniforms, cascades),
+                "cascade_count" => std::mem::offset_of!(FogCsmUniforms, cascade_count),
+                "pcf_kernel_size" => std::mem::offset_of!(FogCsmUniforms, pcf_kernel_size),
+                "depth_bias" => std::mem::offset_of!(FogCsmUniforms, depth_bias),
+                "slope_bias" => std::mem::offset_of!(FogCsmUniforms, slope_bias),
+                "shadow_map_size" => std::mem::offset_of!(FogCsmUniforms, shadow_map_size),
+                "debug_mode" => std::mem::offset_of!(FogCsmUniforms, debug_mode),
+                other => panic!("WGSL FogCsmUniforms field `{other}` has no Rust counterpart"),
+            }
+        }
+
+        let (wgsl_cascade, cascade_bytes) = layout(FOG_WGSL, "FogShadowCascade", CASCADE_BYTES);
+        assert_eq!(
+            cascade_bytes, CASCADE_BYTES,
+            "WGSL FogShadowCascade is {cascade_bytes} bytes, Rust is {CASCADE_BYTES}",
+        );
+        assert_eq!(
+            wgsl_cascade,
+            rust_offsets(&wgsl_cascade, cascade_offset),
+            "FogShadowCascade layout differs from the Rust struct",
+        );
+
+        let (wgsl_uniforms, uniform_bytes) = layout(FOG_WGSL, "FogCsmUniforms", CASCADE_BYTES);
+        assert!(
+            uniform_bytes <= std::mem::size_of::<FogCsmUniforms>(),
+            "WGSL FogCsmUniforms needs {uniform_bytes} bytes, Rust has {}",
+            std::mem::size_of::<FogCsmUniforms>(),
+        );
+        assert_eq!(
+            wgsl_uniforms,
+            rust_offsets(&wgsl_uniforms, uniform_offset),
+            "FogCsmUniforms layout differs from the Rust struct",
+        );
+    }
 }
 
 /// Directional light configuration for shadow casting

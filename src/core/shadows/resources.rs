@@ -3,7 +3,7 @@
 //! Provides helper functions for creating shadow map textures, views,
 //! samplers, and uniform buffers.
 
-use super::types::{CsmConfig, CsmUniforms};
+use super::types::{CsmConfig, FogCsmUniforms};
 use crate::core::error::RenderResult;
 use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 
@@ -66,7 +66,7 @@ pub fn create_uniform_buffer(device: &wgpu::Device) -> RenderResult<TrackedBuffe
         device,
         &wgpu::BufferDescriptor {
             label: Some("CSM Uniforms"),
-            size: std::mem::size_of::<CsmUniforms>() as u64,
+            size: std::mem::size_of::<FogCsmUniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         },

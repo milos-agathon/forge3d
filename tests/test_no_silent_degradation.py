@@ -888,3 +888,126 @@ def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
     assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
     assert "continue-on-error: true" in metal_diagnostic
     assert "test-substratia-gpu," not in acceptance.split("\n    runs-on:", 1)[0]
+
+
+def test_hosted_windows_globe_omission_is_explicit_and_scoped():
+    import ast
+
+    source = (ROOT / "tests/test_globe_floating_origin.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    condition = next(node for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "_HOSTED_WINDOWS_GLOBE_SKIP" for target in node.targets))
+    assert ast.unparse(condition.value.args[0]) == "_running_on_unsupported_hosted_windows_ci()"
+    reason = next(keyword.value.value for keyword in condition.value.keywords if keyword.arg == "reason")
+    assert "software-adapter" in reason and "NVIDIA Vulkan ORBIS acceptance" in reason
+    marked = {node.name for node in tree.body if isinstance(node, ast.FunctionDef) and any(isinstance(dec, ast.Name) and dec.id == "_HOSTED_WINDOWS_GLOBE_SKIP" for dec in node.decorator_list)}
+    assert marked == {
+        "test_snapshot_and_metrics_fail_closed_before_descent",
+        "test_constructor_accepts_declared_pathlike_source",
+        "test_failed_later_overview_seed_leaves_scene_state_unchanged",
+        "test_custom_waypoints_are_validated_before_render",
+        "test_entire_custom_path_is_validated_before_any_render",
+        "test_extreme_altitude_rejects_without_mutating_scene",
+        "test_oblique_camera_distance_is_bounded_before_render",
+    }
+
+
+@pytest.mark.parametrize("code, status, expected", [(0, "passed", 0), (2, "absent", 0), (3, "failed", 3)])
+def test_optional_metal_records_absent_without_hiding_crashes(monkeypatch, tmp_path, capsys, code, status, expected):
+    import json
+    from types import SimpleNamespace
+    from scripts import run_optional_terrain_probe as optional
+
+    path = tmp_path / "probe.json"
+    path.write_text(json.dumps({"status": status, "probe": {"name": "Apple Paravirtual device"}}))
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr(optional.subprocess, "run", lambda command: SimpleNamespace(returncode=code))
+    assert optional.run_probe(path) == expected
+    if code == 2:
+        assert output.read_text() == "probe=absent\n"
+        assert "ABSENT" in summary.read_text()
+        assert "controls were not run" in capsys.readouterr().out
+    elif code == 0:
+        assert output.read_text() == "probe=positive\n"
+    else:
+        assert not output.exists() and not summary.exists()
+
+
+def test_optional_metal_rejects_unproven_absence(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from scripts import run_optional_terrain_probe as optional
+
+    path = tmp_path / "probe.json"
+    path.write_text('{"status":"failed"}')
+    monkeypatch.setattr(optional.subprocess, "run", lambda command: SimpleNamespace(returncode=2))
+    with pytest.raises(ValueError, match="disagrees"):
+        optional.run_probe(path)
+
+
+def test_release_gate_cli_records_dry_run_and_api_absence():
+    import os
+
+    command = [sys.executable, str(ROOT / 'scripts/require_full_ci.py'),
+               '--repository', 'milos-agathon/forge3d', '--sha', 'a' * 40,
+               '--ref', 'v1.42.0', '--event', 'workflow_dispatch', '--dry-run']
+    # No gh executable: an explicit dry run must need no API access, while a
+    # production request must fail closed and supply the recovery command.
+    environment = {**os.environ, 'PATH': ''}
+    dry_run = subprocess.run(command + ['true'], env=environment, text=True, capture_output=True)
+    assert dry_run.returncode == 0
+    assert 'no full CI claim' in dry_run.stdout
+    production = subprocess.run(command + ['false'], env=environment, text=True, capture_output=True)
+    assert production.returncode == 1
+    assert 'Cannot verify' in production.stdout
+    assert 'gh workflow run ci.yml -f scope=full --ref v1.42.0' in production.stdout
+
+
+def test_d02_full_acceptance_requires_physical_zero_skip_execution():
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    job = _workflow_job(workflow, "test-golden-images-nvidia")
+    probe = job.index("- name: Require physical NVIDIA Vulkan terrain adapter")
+    d02 = job.index("- name: Run D02 thematic raster physical GPU gate")
+    visual = job.index("- name: Run visual golden tests")
+    assert probe < d02 < visual
+    step = job[d02:].split("\n      - name:", 1)[0]
+    assert "tests/test_raster_styles_gpu.py" in step
+    assert "--deselect" not in step
+    assert "assert_junit_zero_skips.py" in step
+    assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in step
+    commands = [line.strip() for line in step.splitlines() if line.startswith("          ")]
+    assert commands[-1] == "exit $LASTEXITCODE"
+    assert "continue-on-error" not in step and "if:" not in step
+    aggregate = _workflow_job(workflow, "full-acceptance-summary")
+    assert 'check_selected "$full_selected" \'${{ needs.test-golden-images-nvidia.result }}\' visual-goldens-nvidia' in aggregate
+
+
+def test_d02_hosted_deselection_records_a_physical_reason(tmp_path):
+    import os
+
+    workflow = (ROOT / ".github/workflows/test-python-wheel.yml").read_text(encoding="utf-8")
+    job = _workflow_job(workflow, "test")
+    record_name = "- name: Record D02 physical-test deselection"
+    execute_name = "- name: Run full default Python lane"
+    record = job.split(record_name, 1)[1].split("\n      - name:", 1)[0]
+    assert "if: inputs.test_mode == 'full' && runner.os != 'macOS'" in record
+    command = next(line.strip() for line in record.splitlines()
+                   if line.strip().startswith("python -c "))
+    args = shlex.split(command)
+    assert args[:2] == ["python", "-c"]
+    summary = tmp_path / "summary.md"
+    result = subprocess.run([sys.executable, *args[1:]],
+                            env={**os.environ, "GITHUB_STEP_SUMMARY": str(summary)},
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "::notice::D02:" in result.stdout
+    reason = summary.read_text()
+    assert "deselect tests/test_raster_styles_gpu.py (three physical cases)" in reason
+    assert "required NVIDIA Vulkan acceptance runs all three with zero skips" in reason
+    assert "unchanged physical/pixel assertions" in reason
+    assert job.index(record_name) < job.index(execute_name)
+    execute = job.split(execute_name, 1)[1].split("\n      - name:", 1)[0]
+    selector = "${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}"
+    assert execute.count(selector) == 1
+    assert execute.count("--deselect=") == 1
