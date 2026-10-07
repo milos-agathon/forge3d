@@ -33,7 +33,7 @@ These invariants remain part of normal implementation work:
 | --- | --- | --- | --- |
 | PR core | Every pull request and protected-branch push; reported by `PR Core Success` | Formatting, curated lint/build, focused capability/degradation/allocation/certificate tests, affected package smoke, and workflow-policy contracts | The affected change |
 | Affected integration | Explicitly selected when a change touches a renderer, shader, resource/certificate core, packaging boundary, or validation workflow | Focused subsystem tests and the smallest representative render or golden | The affected change |
-| Acceptance | Manual `scope=full` dispatch for a named candidate SHA, plus explicitly selected or scheduled evidence lanes | Complete Python lane, curated cross-platform Rust/feature matrix, full wheel matrix, the golden and physical-GPU probes named by that candidate's acceptance plan, and acceptance artifacts summarized by `Full Acceptance Summary` | Declaring the named moonshot or candidate accepted |
+| Acceptance | Manual `scope=full` dispatch for a named candidate SHA, plus explicitly selected or scheduled evidence lanes | Complete Python lane, curated cross-platform Rust/feature matrix, full wheel matrix, the golden and physical-GPU probes named by that candidate's acceptance plan, and acceptance artifacts summarized by `Full Acceptance Summary`; optional Metal diagnostics record `ABSENT` and are excluded from this verdict | Declaring the named moonshot or candidate accepted |
 | Release | Explicit release promotion | Production signing, complete certificate verification, release artifacts, and any separately requested acceptance evidence | Release promotion only |
 
 `PR Core Success` must not require a production signing secret, a scarce physical
@@ -71,3 +71,10 @@ proof for later commits and their absence does not block unrelated feature
 development. The repository does not automatically run acceptance after every
 merge or before every artifact publication; promotion owners request it when a
 candidate needs that claim.
+
+
+Optional Metal SUBSTRATIA diagnostics do not block acceptance. Probe exit 2
+with matching `absent` evidence records an explicit summary/annotation and
+omits the hardware controls; it is not GPU success. Probe crashes and
+inconsistent or missing evidence remain failures. The required physical
+NVIDIA lane and its zero-skip evidence requirements are unchanged.

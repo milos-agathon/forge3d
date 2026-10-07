@@ -358,3 +358,11 @@ def test_full_python_timing_artifact_does_not_upload_fixtures() -> None:
     assert "always()" in upload["if"]
     assert upload["with"]["path"] == "python-full-junit.xml"
     assert "matrix.python-version" in upload["with"]["name"]
+
+
+def test_optional_metal_upload_retains_absent_probe_evidence() -> None:
+    job = yaml.load(_workflow(), Loader=yaml.BaseLoader)["jobs"]["test-substratia-gpu"]
+    upload = next(step for step in job["steps"] if step.get("name") == "Upload optional Metal SUBSTRATIA evidence")
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == "tests/artifacts/substratia-metal-diagnostic/"
+    assert job["env"]["FORGE3D_EXPECTED_ADAPTER_PROBE"].startswith(upload["with"]["path"])

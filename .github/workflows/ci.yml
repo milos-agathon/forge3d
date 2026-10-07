@@ -1659,9 +1659,11 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=no)"
           mkdir -p "$FORGE3D_SUBSTRATIA_ARTIFACT_DIR"
       - name: Validate physical Metal adapter when diagnostic is enabled
+        id: metal-probe
         shell: bash
-        run: python scripts/terrain_ci_probe.py --mode terrain --json "$FORGE3D_EXPECTED_ADAPTER_PROBE"
+        run: python scripts/run_optional_terrain_probe.py "$FORGE3D_EXPECTED_ADAPTER_PROBE"
       - name: Run optional Metal SUBSTRATIA controls
+        if: steps.metal-probe.outputs.probe == 'positive'
         shell: bash
         run: |
           set -euo pipefail

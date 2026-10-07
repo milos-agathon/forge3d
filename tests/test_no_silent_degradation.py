@@ -909,3 +909,38 @@ def test_hosted_windows_globe_omission_is_explicit_and_scoped():
         "test_extreme_altitude_rejects_without_mutating_scene",
         "test_oblique_camera_distance_is_bounded_before_render",
     }
+
+
+@pytest.mark.parametrize("code, status, expected", [(0, "passed", 0), (2, "absent", 0), (3, "failed", 3)])
+def test_optional_metal_records_absent_without_hiding_crashes(monkeypatch, tmp_path, capsys, code, status, expected):
+    import json
+    from types import SimpleNamespace
+    from scripts import run_optional_terrain_probe as optional
+
+    path = tmp_path / "probe.json"
+    path.write_text(json.dumps({"status": status, "probe": {"name": "Apple Paravirtual device"}}))
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr(optional.subprocess, "run", lambda command: SimpleNamespace(returncode=code))
+    assert optional.run_probe(path) == expected
+    if code == 2:
+        assert output.read_text() == "probe=absent\n"
+        assert "ABSENT" in summary.read_text()
+        assert "controls were not run" in capsys.readouterr().out
+    elif code == 0:
+        assert output.read_text() == "probe=positive\n"
+    else:
+        assert not output.exists() and not summary.exists()
+
+
+def test_optional_metal_rejects_unproven_absence(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from scripts import run_optional_terrain_probe as optional
+
+    path = tmp_path / "probe.json"
+    path.write_text('{"status":"failed"}')
+    monkeypatch.setattr(optional.subprocess, "run", lambda command: SimpleNamespace(returncode=2))
+    with pytest.raises(ValueError, match="disagrees"):
+        optional.run_probe(path)

@@ -747,3 +747,15 @@ def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
     assert "explicit WARP omission" in text
     assert text.index("2.000s: cpu::error_contract") < text.index("0.010s: globe::constructor")
     assert "ABSENT" in summarize(tmp_path / "missing.xml")
+
+
+def test_optional_metal_absence_is_outside_full_verdict() -> None:
+    jobs = _workflow_data("ci.yml")["jobs"]
+    assert "test-substratia-gpu" not in jobs["full-acceptance-summary"]["needs"]
+    diagnostic = jobs["test-substratia-gpu"]
+    assert diagnostic["continue-on-error"] == "true"
+    probe = next(step for step in diagnostic["steps"] if step.get("id") == "metal-probe")
+    assert "run_optional_terrain_probe.py" in probe["run"]
+    controls = next(step for step in diagnostic["steps"] if step.get("name") == "Run optional Metal SUBSTRATIA controls")
+    assert controls["if"] == "steps.metal-probe.outputs.probe == 'positive'"
+    assert "assert_junit_zero_skips.py" in controls["run"]
