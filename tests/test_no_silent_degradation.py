@@ -944,3 +944,21 @@ def test_optional_metal_rejects_unproven_absence(monkeypatch, tmp_path):
     monkeypatch.setattr(optional.subprocess, "run", lambda command: SimpleNamespace(returncode=2))
     with pytest.raises(ValueError, match="disagrees"):
         optional.run_probe(path)
+
+
+def test_release_gate_cli_records_dry_run_and_api_absence():
+    import os
+
+    command = [sys.executable, str(ROOT / 'scripts/require_full_ci.py'),
+               '--repository', 'milos-agathon/forge3d', '--sha', 'a' * 40,
+               '--ref', 'v1.42.0', '--event', 'workflow_dispatch', '--dry-run']
+    # No gh executable: an explicit dry run must need no API access, while a
+    # production request must fail closed and supply the recovery command.
+    environment = {**os.environ, 'PATH': ''}
+    dry_run = subprocess.run(command + ['true'], env=environment, text=True, capture_output=True)
+    assert dry_run.returncode == 0
+    assert 'no full CI claim' in dry_run.stdout
+    production = subprocess.run(command + ['false'], env=environment, text=True, capture_output=True)
+    assert production.returncode == 1
+    assert 'Cannot verify' in production.stdout
+    assert 'gh workflow run ci.yml -f scope=full --ref v1.42.0' in production.stdout

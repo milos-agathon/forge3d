@@ -6,6 +6,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 ### Fixed
+- Require completed green full CI on the exact release SHA before every publish job; narrower manual acceptance scopes cannot qualify. Explicit dry runs only build/test artifacts, and same-HEAD full CI dispatches now pass candidate materialization.
 - Record missing optional Metal hardware as an explicit ABSENT diagnostic, without running GPU controls or failing the job; genuine probe errors remain failures and the diagnostic remains outside Full Acceptance.
 - Keep GPU-heavy globe constructor checks in physical ORBIS acceptance while the hosted Windows software-adapter lane records explicit omissions. Full Python jobs retain their 35-minute timeout and save per-test timings, skip reasons and JUnit evidence.
 - Refresh the ORBIS Rainier NVIDIA Vulkan golden after the stable render drift that appeared between `452fadd3` and `3a6ec9f8`, most likely from the deterministic ORBIS arithmetic barriers in `026dc54f`. The gated ORBIS test was not part of that commit's byte-identity check; this was not GPU-bisected and PR #201 is not excluded. Owner-approved pixels; SSIM 0.995 and mean-difference 2.0 gates are unchanged.

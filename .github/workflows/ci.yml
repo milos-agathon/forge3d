@@ -117,7 +117,13 @@ jobs:
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git merge --no-commit --no-ff "$CANDIDATE_HEAD_SHA"
           test "$(git rev-parse HEAD)" = "$POLICY_BASE_SHA"
-          test "$(git rev-parse MERGE_HEAD)" = "$CANDIDATE_HEAD_SHA"
+          if git merge-base --is-ancestor "$CANDIDATE_HEAD_SHA" "$POLICY_BASE_SHA"; then
+            # Same-HEAD and already-integrated candidates need no merge state.
+            test "$(git write-tree)" = "$(git rev-parse "${POLICY_BASE_SHA}^{tree}")"
+            test -z "$(git status --porcelain --untracked-files=no)"
+          else
+            test "$(git rev-parse MERGE_HEAD)" = "$CANDIDATE_HEAD_SHA"
+          fi
           printf 'policy_base_sha=%s\ncandidate_head_sha=%s\n' \
             "$POLICY_BASE_SHA" "$CANDIDATE_HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
 
@@ -2827,6 +2833,16 @@ jobs:
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.scope != 'core'))
     steps:
+      # Job metadata exposes this executed name to the release gate; the runs
+      # API does not expose workflow_dispatch inputs.
+      - name: "Record acceptance scope: ${{ github.event_name == 'schedule' && 'full' || inputs.scope }}"
+        shell: bash
+        env:
+          ACCEPTANCE_SCOPE: ${{ github.event_name == 'schedule' && 'full' || inputs.scope }}
+          CANDIDATE_HEAD_SHA: ${{ github.sha }}
+        run: |
+          printf 'scope=%s\ncandidate_head_sha=%s\n' \
+            "$ACCEPTANCE_SCOPE" "$CANDIDATE_HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
       - name: Enforce every selected acceptance family
         shell: bash
         run: |

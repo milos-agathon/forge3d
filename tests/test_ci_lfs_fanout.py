@@ -366,3 +366,13 @@ def test_optional_metal_upload_retains_absent_probe_evidence() -> None:
     assert upload["if"] == "always()"
     assert upload["with"]["path"] == "tests/artifacts/substratia-metal-diagnostic/"
     assert job["env"]["FORGE3D_EXPECTED_ADAPTER_PROBE"].startswith(upload["with"]["path"])
+
+
+def test_release_gate_fetches_no_lfs_or_build_artifacts() -> None:
+    jobs = yaml.load((ROOT / '.github/workflows/publish.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)['jobs']
+    gate = jobs['release-full-ci']
+    for step in gate['steps']:
+        assert step.get('with', {}).get('lfs', 'false') == 'false'
+        assert 'download-artifact' not in step.get('uses', '')
+        assert 'maturin' not in step.get('run', '')
+    assert 'actions: read' in (ROOT / '.github/workflows/publish.yml').read_text(encoding='utf-8')
