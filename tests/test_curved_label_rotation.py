@@ -6,26 +6,12 @@ import pytest
 import forge3d as f3d
 
 
-def _tangent_at_center(path, center):
-    """Sample the authority's interpolated vertex tangents in screen axes."""
-    vertices = np.asarray(path, dtype=np.float64)[:, :2]
-    segments = np.diff(vertices, axis=0)
-    unit = segments / np.linalg.norm(segments, axis=1)[:, None]
-    tangents = np.vstack((unit[0], unit[:-1] + unit[1:], unit[-1]))
-    tangents /= np.linalg.norm(tangents, axis=1)[:, None]
-    fractions = np.clip(np.sum((center - vertices[:-1]) * segments, axis=1)
-                        / np.sum(segments * segments, axis=1), 0, 1)
-    projected = vertices[:-1] + fractions[:, None] * segments
-    index = np.argmin(np.linalg.norm(projected - center, axis=1))
-    fraction = fractions[index]
-    tangent = tangents[index] * (1 - fraction) + tangents[index + 1] * fraction
-    return math.atan2(tangent[1], tangent[0])
-
-
 @pytest.mark.parametrize("angle", (0, 30, -45, 90, "arc"))
 def test_curved_glyph_rotation_matches_screen_tangent_at_center(angle):
     if angle == "arc":
-        theta = np.linspace(-math.pi / 3, math.pi / 3, 17)
+        # Dense circle samples keep the polyline approximation below the
+        # required 1e-4 radians. The oracle uses only the circle equation.
+        theta = np.linspace(-math.pi / 3, math.pi / 3, 257)
         path = [(float(200 + 180 * math.sin(t)), float(200 - 180 * math.cos(t)), 0)
                 for t in theta]
     else:
@@ -41,7 +27,8 @@ def test_curved_glyph_rotation_matches_screen_tangent_at_center(angle):
         assert len(emitted) == len(glyphs)
         for glyph in emitted:
             center = np.asarray(candidate["anchor"][:2]) + np.asarray(glyph["origin"]) * 24
-            expected = _tangent_at_center(path, center)
+            expected = (math.atan2(center[0] - 200, 200 - center[1])
+                        if angle == "arc" else math.radians(angle))
             error = math.atan2(math.sin(glyph["rotation"] - expected),
                                math.cos(glyph["rotation"] - expected))
             assert abs(error) <= 1e-4, (angle, center, glyph["rotation"], expected)

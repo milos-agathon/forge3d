@@ -40,7 +40,15 @@ def test_unsupported_styled_raster_stack_blocks_before_draw(tmp_path, monkeypatc
     monkeypatch.setattr(map_scene, "_render_terrain_renderer_result_impl", unexpected_draw)
     report = scene.validate()
     assert report.render_blocked(scene.render_policy)
-    assert any(d.layer_id == "styled" and d.code == "invalid_raster_style" for d in report.diagnostics)
+    route_diagnostics = [d for d in report.diagnostics if d.code == "unsupported_raster_route"]
+    assert {d.layer_id for d in route_diagnostics} == {styled.layer_id, other.layer_id}
+    for diagnostic in route_diagnostics:
+        assert diagnostic.severity == "fatal"
+        assert diagnostic.details["status"] == "diagnostic_block"
+        assert diagnostic.details["layer"] == diagnostic.layer_id
+        assert diagnostic.details["required_native"] == "separate thematic and terrain-UV raster passes"
+    restored = f3d.ValidationReport.from_dict(report.to_dict())
+    assert restored.to_dict() == report.to_dict()
     path = tmp_path / "blocked.png"
     with pytest.raises(RuntimeError, match="blocking diagnostics"):
         scene.render(str(path))

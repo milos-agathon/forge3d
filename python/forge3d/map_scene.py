@@ -5911,6 +5911,8 @@ class MapScene:
         if self.recipe.target_crs:
             supported_features["mapscene.alignment"] = "supported"
 
+        from ._map_scene_rasters import raster_route_blocks
+        raster_blocks = {block["layer"]: block for block in raster_route_blocks(self.recipe)}
         for index, layer in enumerate(self.recipe.layers):
             layer_id = _layer_id(layer, f"layer_{index}")
             layer_diagnostics: list[Diagnostic] = []
@@ -5956,7 +5958,19 @@ class MapScene:
                 )
                 support_level = "unsupported"
 
-            if isinstance(layer, RasterOverlay) and layer.style is not None:
+            if isinstance(layer, RasterOverlay) and str(layer_id) in raster_blocks:
+                block = raster_blocks[str(layer_id)]
+                layer_type = "raster_overlay"
+                layer_memory = _dimension_memory_bytes(layer.metadata)
+                layer_diagnostics.append(Diagnostic(
+                    code="unsupported_raster_route", severity="fatal",
+                    message=block["reason"],
+                    remediation="Use one styled overlay or an ordered stack of unstyled overlays.",
+                    layer_id=layer_id, support_level="unsupported", details=block,
+                ))
+                unsupported_features["raster.overlay_route"] = "unsupported"
+                support_level = "unsupported"
+            elif isinstance(layer, RasterOverlay) and layer.style is not None:
                 layer_type = "raster_overlay"
                 layer_memory = _dimension_memory_bytes(layer.metadata)
                 details = {"style": layer.style.to_dict(), "opacity": layer.opacity}

@@ -13,7 +13,11 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - SUTURA 3D overlays: terrain-UV raster draping and vectors projected through the terrain camera, with terrain occlusion and perspective-aware world widths.
 - Opt-in world labels through `LabelLayer(metadata={"coordinate_space": "world"})`. Their anchors and geometry follow the terrain camera; existing screen-coordinate labels keep their behavior.
 
+### Changed
+- Refreshed the terrain-raster reference images for terrain-albedo draping.
+
 ### Fixed
+- Unsupported styled raster combinations now report a structured route diagnostic for each affected layer during validation, before rendering.
 - Curved labels now emit screen-space glyph rotations in radians and reserve their rotated screen bounds, keeping text such as “Silver River” upright along its path.
 
 ## [1.42.0] - 2026-10-06

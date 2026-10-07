@@ -6,7 +6,7 @@ import forge3d as f3d
 from forge3d import map_scene
 
 
-def render_curved_label(angle_deg):
+def curved_label_scene(angle_deg):
     angle = math.radians(angle_deg)
     path = [[80.0, 96.0], [80.0 + 240.0 * math.cos(angle),
                           96.0 + 240.0 * math.sin(angle)]]
@@ -24,6 +24,11 @@ def render_curved_label(angle_deg):
         layers=[layer], lighting=f3d.LightingPreset(name="daylight"),
         output=f3d.OutputSpec(width=384, height=256),
     )
+    return scene
+
+
+def render_curved_label(angle_deg):
+    scene = curved_label_scene(angle_deg)
     plan = scene.compile_plan()
     assert not plan.validation_report.render_blocked(), plan.validation_report.to_dict()
     accepted = plan.label_plans["river"].accepted
