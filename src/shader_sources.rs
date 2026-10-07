@@ -1515,21 +1515,18 @@ pub(crate) mod csm_wgsl_layout {
             .collect()
     }
 
-    /// Byte size of a WGSL type in the CSM storage buffer.
+    /// Byte size of a WGSL type in a CSM storage/uniform buffer.
     ///
     /// Every member is a 4-byte scalar or a 16-byte-aligned vector/matrix, so
-    /// the storage layout is tightly packed and a running sum is exact. A struct
-    /// element declared by name (`array<ShadowCascade, 4>`) is resolved from the
-    /// same source rather than assumed to be the cascade stride.
-    fn type_size(source: &str, ty: &str, cascade_bytes: usize, depth: usize) -> usize {
-        assert!(
-            depth < 4,
-            "WGSL type nesting too deep, is `{ty}` self-referential?"
-        );
+    /// the layout is tightly packed and a running sum is exact.
+    fn type_size(ty: &str, cascade_bytes: usize) -> usize {
         match ty {
-            "f32" | "u32" | "i32" => 4,
+            "f32" | "u32" => 4,
+            "vec2<f32>" => 8,
             "vec4<f32>" => 16,
             "mat4x4<f32>" => 64,
+            // The only struct element either CSM contract declares.
+            "ShadowCascade" | "FogShadowCascade" => cascade_bytes,
             other if other.starts_with("array<") => {
                 let inner = other
                     .strip_prefix("array<")
@@ -1541,42 +1538,35 @@ pub(crate) mod csm_wgsl_layout {
                 let count: usize = count.trim().parse().unwrap_or_else(|_| {
                     panic!("malformed WGSL array element count in {other}")
                 });
-                type_size(source, element.trim(), cascade_bytes, depth + 1) * count
+                type_size(element.trim(), cascade_bytes) * count
             }
-            other => {
-                if !source.contains(&format!("struct {other}")) {
-                    panic!("unhandled WGSL type in CSM layout: {other}");
-                }
-                layout_at(source, other, cascade_bytes, depth + 1).1
-            }
+            other => panic!("unhandled WGSL type in CSM layout: {other}"),
         }
     }
 
-    /// Byte offset of every field of a WGSL struct, plus the struct's total size,
-    /// derived from the declared types.
+    /// `(name, byte offset)` for every non-padding field of a WGSL struct, plus
+    /// the struct's total size. Offsets come from the declared types.
     ///
-    /// `cascade_bytes` is threaded in explicitly because WGSL declares
+    /// WGSL spells padding as `_padN*` members and Rust as `_paddingN` arrays.
+    /// Padding is counted toward the size but left out of the compared names —
+    /// the size is what pins how much of it there is.
+    ///
+    /// `cascade_bytes` is threaded in because WGSL declares
     /// `array<ShadowCascade, 4>` by element name, not by byte size.
-    pub(crate) fn layout(source: &str, name: &str, cascade_bytes: usize) -> (Vec<usize>, usize) {
-        layout_at(source, name, cascade_bytes, 0)
-    }
-
-    fn layout_at(
+    pub(crate) fn layout(
         source: &str,
         name: &str,
         cascade_bytes: usize,
-        depth: usize,
-    ) -> (Vec<usize>, usize) {
+    ) -> (Vec<(String, usize)>, usize) {
         let mut size = 0usize;
-        let offsets = struct_fields(source, name)
-            .into_iter()
-            .map(|(_, ty)| {
-                let at = size;
-                size += type_size(source, &ty, cascade_bytes, depth);
-                at
-            })
-            .collect();
-        (offsets, size)
+        let mut fields = Vec::new();
+        for (field, ty) in struct_fields(source, name) {
+            if !field.starts_with("_pad") {
+                fields.push((field, size));
+            }
+            size += type_size(&ty, cascade_bytes);
+        }
+        (fields, size)
     }
 
     /// Drift gate for the four WGSL copies of `ShadowCascade` + `CsmUniforms`.
