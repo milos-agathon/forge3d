@@ -47,6 +47,9 @@ FAST_LANE_FILES = [
     "tests/test_no_silent_degradation.py",
     "tests/test_substratia_evidence_report.py",
     "tests/test_orbis_task6_contracts.py",
+    "tests/test_m06_single_rebase_contract.py",
+    "tests/test_world_coord_f32_gate.py",
+    "tests/test_m06_anchoring_boundary.py",
 ]
 
 
