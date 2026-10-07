@@ -376,3 +376,18 @@ def test_release_gate_fetches_no_lfs_or_build_artifacts() -> None:
         assert 'download-artifact' not in step.get('uses', '')
         assert 'maturin' not in step.get('run', '')
     assert 'actions: read' in (ROOT / '.github/workflows/publish.yml').read_text(encoding='utf-8')
+
+
+def test_d02_synthetic_fixtures_reuse_bound_visual_evidence() -> None:
+    jobs = yaml.load(_workflow(), Loader=yaml.BaseLoader)["jobs"]
+    steps = jobs["test-golden-images-nvidia"]["steps"]
+    d02 = next(step for step in steps
+               if step.get("name") == "Run D02 thematic raster physical GPU gate")
+    assert 'Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "d02"' in d02["run"]
+    assert "$env:FORGE3D_D02_ARTIFACT_DIR = $dir" in d02["run"]
+    assert "--junitxml=" in d02["run"]
+    assert "git lfs" not in d02["run"] and "curl" not in d02["run"]
+    evidence = next(step for step in steps
+                    if step.get("with", {}).get("name") == "visual-gpu-evidence")
+    assert evidence["if"] == "always()"
+    assert evidence["with"]["path"] == "${{ runner.temp }}/forge3d-visual-${{ github.run_id }}-${{ github.run_attempt }}/"

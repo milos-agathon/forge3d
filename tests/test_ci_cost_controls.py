@@ -845,3 +845,22 @@ def test_manual_dispatch_materializes_same_head_ancestor_and_divergent_candidate
             else:
                 assert git("write-tree") == git("rev-parse", f"{base}^{{tree}}")
                 assert not git("status", "--porcelain", "--untracked-files=no")
+
+
+def test_d02_reuses_the_full_nvidia_lane_without_build_fanout() -> None:
+    jobs = _workflow_data("ci.yml")["jobs"]
+    owners = [name for name, job in jobs.items()
+              if "tests/test_raster_styles_gpu.py" in str(job.get("steps", []))]
+    assert owners == ["test-golden-images-nvidia"]
+    job = jobs[owners[0]]
+    assert job["needs"] == ["build-wheel-windows", "terrain-golden-paths"]
+    assert "inputs.scope == 'full'" in job["if"]
+    assert job["env"]["WGPU_BACKEND"] == "vulkan"
+    assert sum(step.get("uses") == "actions/download-artifact@v4"
+               and step.get("with", {}).get("name") == "wheels-windows"
+               for step in job["steps"]) == 1
+    full = next(step for step in _workflow_data("test-python-wheel.yml")["jobs"]["test"]["steps"]
+                if step.get("name") == "Run full default Python lane")
+    for option in ("--durations=30", "-rs", "--junitxml=python-full-junit.xml"):
+        assert option in full["run"].split()
+    assert "${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}" in full["run"]

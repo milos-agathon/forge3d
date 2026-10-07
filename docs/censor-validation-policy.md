@@ -36,6 +36,13 @@ These invariants remain part of normal implementation work:
 | Acceptance | Manual `scope=full` dispatch for a named candidate SHA, plus explicitly selected or scheduled evidence lanes | Complete Python lane, curated cross-platform Rust/feature matrix, full wheel matrix, the golden and physical-GPU probes named by that candidate's acceptance plan, and acceptance artifacts summarized by `Full Acceptance Summary`; optional Metal diagnostics record `ABSENT` and are excluded from this verdict | Declaring the named moonshot or candidate accepted |
 | Release | Explicit release promotion; `v*` tag pushes and production publish dispatches require exact-SHA full acceptance first | A completed `ci.yml` run on the release SHA, from `schedule` or `workflow_dispatch` with recorded `scope=full`, whose `Full Acceptance Summary` succeeded; then production signing, complete certificate verification and release artifacts | Every release job; explicit `dry_run=true` dispatches bypass evidence lookup and only build/test artifacts |
 
+D02 raster-style proofs require physical native frames. Linux/Windows software-adapter Python matrices
+record their three-case deselection and physical-adapter reason in a notice and
+job summary; macOS retains these tests. Full acceptance runs the file on the probed NVIDIA Vulkan runner,
+requires zero skips, retains adapter/pixel assertions, and saves adapter
+measurements and JUnit evidence. Missing D02 execution fails
+`Full Acceptance Summary`.
+
 `PR Core Success` must not require a production signing secret, a scarce physical
 runner, an all-golden render, a repository-wide test matrix, or deliberate
 scratch-branch corruption.
