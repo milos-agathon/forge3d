@@ -604,6 +604,8 @@ from .buildings import (
     material_from_name,
 )
 
+from .vector_line import VectorLineLayer, VectorLineStyleError
+
 # -----------------------------------------------------------------------------
 # Mapbox Style Spec Import
 # -----------------------------------------------------------------------------
@@ -994,6 +996,8 @@ __all__ = [
     "parse_color",
     "validate_style_support",
     "vector_overlay_configs_from_style",
+    "VectorLineLayer",
+    "VectorLineStyleError",
     "label_layer_contracts_from_style",
     "paint_to_vector_style",
     "layout_to_label_style",
