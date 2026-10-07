@@ -728,3 +728,139 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
             selected("workflow_dispatch", scope="tessella", family="tessella") is True
         )
         assert selected("workflow_dispatch", scope="m06", family="tessella") is False
+
+
+def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
+    from scripts.summarize_python_lane import summarize
+
+    workflow = yaml.load(_workflow("test-python-wheel.yml"), Loader=yaml.BaseLoader)
+    job = workflow["jobs"]["test"]
+    assert job["timeout-minutes"] == "35"
+    run = next(step for step in job["steps"] if step.get("name") == "Run full default Python lane")
+    assert "--durations=30 -rs --junitxml=python-full-junit.xml" in run["run"]
+    record = next(step for step in job["steps"] if "summarize_python_lane.py" in step.get("run", ""))
+    assert "always()" in record["if"]
+    report = tmp_path / "junit.xml"
+    report.write_text('<testsuites><testsuite><testcase classname="globe" name="constructor" time="0.01"><skipped message="explicit WARP omission"/></testcase><testcase classname="cpu" name="error_contract" time="2"><failure/></testcase></testsuite></testsuites>')
+    text = summarize(report)
+    assert "2 cases, 1 failures, 0 errors, 1 explicit skips" in text
+    assert "explicit WARP omission" in text
+    assert text.index("2.000s: cpu::error_contract") < text.index("0.010s: globe::constructor")
+    assert "ABSENT" in summarize(tmp_path / "missing.xml")
+
+
+def test_optional_metal_absence_is_outside_full_verdict() -> None:
+    jobs = _workflow_data("ci.yml")["jobs"]
+    assert "test-substratia-gpu" not in jobs["full-acceptance-summary"]["needs"]
+    diagnostic = jobs["test-substratia-gpu"]
+    assert diagnostic["continue-on-error"] == "true"
+    probe = next(step for step in diagnostic["steps"] if step.get("id") == "metal-probe")
+    assert "run_optional_terrain_probe.py" in probe["run"]
+    controls = next(step for step in diagnostic["steps"] if step.get("name") == "Run optional Metal SUBSTRATIA controls")
+    assert controls["if"] == "steps.metal-probe.outputs.probe == 'positive'"
+    assert "assert_junit_zero_skips.py" in controls["run"]
+
+
+def test_publish_requires_full_ci_before_every_other_job() -> None:
+    jobs = _workflow_data("publish.yml")["jobs"]
+    assert next(iter(jobs)) == "release-full-ci"
+    gate = jobs["release-full-ci"]
+    assert gate["permissions"] == {"contents": "read", "actions": "read"}
+    assert "continue-on-error" not in gate and "if" not in gate
+    verify = next(step for step in gate["steps"] if "run" in step)
+    assert "scripts/require_full_ci.py" in verify["run"]
+    for variable in ("GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_REF_NAME", "GITHUB_EVENT_NAME", "RELEASE_DRY_RUN"):
+        assert f'"${variable}"' in verify["run"]
+    assert verify["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert verify["env"]["RELEASE_DRY_RUN"] == "${{ inputs.dry_run }}"
+    for name, job in jobs.items():
+        if name != "release-full-ci":
+            assert "release-full-ci" in job["needs"], name
+            assert "always()" not in job.get("if", ""), name
+    assert "!(github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true')" in jobs["release-assets"]["if"]
+
+
+def test_full_dispatch_scope_is_recorded_in_summary_metadata() -> None:
+    job = _workflow_data("ci.yml")["jobs"]["full-acceptance-summary"]
+    step = job["steps"][0]
+    scope = "${{ github.event_name == 'schedule' && 'full' || inputs.scope }}"
+    assert step["name"] == "Record acceptance scope: " + scope
+    assert step["env"]["ACCEPTANCE_SCOPE"] == scope
+    assert step["env"]["CANDIDATE_HEAD_SHA"] == "${{ github.sha }}"
+    assert "GITHUB_STEP_SUMMARY" in step["run"]
+    assert "continue-on-error" not in step and "if" not in step
+
+
+def test_manual_dispatch_materializes_same_head_ancestor_and_divergent_candidates(tmp_path) -> None:
+    import shutil
+    import subprocess
+
+    step = next(step for step in _workflow_data("ci.yml")["jobs"]["preflight"]["steps"]
+                if step.get("name") == "Materialize manual-dispatch candidate tree")
+    bash = str(Path("C:/Program Files/Git/bin/bash.exe")) if os.name == "nt" else shutil.which("bash")
+    assert bash, "bash is required to exercise the CI script"
+    for relation in ("same", "ancestor", "divergent", "conflict"):
+        repo = tmp_path / relation
+        repo.mkdir()
+
+        def git(*arguments):
+            return subprocess.run(["git", "-C", str(repo), *arguments], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+
+        git("init", "-b", "base")
+        git("config", "user.name", "CI contract fixture")
+        git("config", "user.email", "ci-contract@example.invalid")
+        common = repo / "common"
+        common.write_text("original\n")
+        git("add", "common")
+        git("commit", "-m", "initial")
+        ancestor = git("rev-parse", "HEAD")
+        common.write_text("base\n")
+        git("commit", "-am", "policy base")
+        base = git("rev-parse", "HEAD")
+        candidate = base if relation == "same" else ancestor
+        if relation in ("divergent", "conflict"):
+            git("checkout", "-b", "candidate", ancestor)
+            path = common if relation == "conflict" else repo / "candidate-file"
+            path.write_text("candidate\n")
+            git("add", str(path))
+            git("commit", "-m", "candidate")
+            candidate = git("rev-parse", "HEAD")
+            git("checkout", "base")
+        git("remote", "add", "origin", str(repo))
+        report = tmp_path / (relation + "-summary")
+        env = {**os.environ, "POLICY_BASE_SHA": base, "CANDIDATE_HEAD_SHA": candidate,
+               "GITHUB_STEP_SUMMARY": report.as_posix()}
+        result = subprocess.run([bash, "-c", step["run"]], cwd=repo, env=env,
+                                capture_output=True, text=True)
+        assert (result.returncode == 0) == (relation != "conflict"), result.stdout + result.stderr
+        assert git("rev-parse", "HEAD") == base
+        if relation == "conflict":
+            assert not report.exists()
+        else:
+            assert f"candidate_head_sha={candidate}" in report.read_text()
+            if relation == "divergent":
+                assert git("rev-parse", "MERGE_HEAD") == candidate
+                assert (repo / "candidate-file").read_text() == "candidate\n"
+            else:
+                assert git("write-tree") == git("rev-parse", f"{base}^{{tree}}")
+                assert not git("status", "--porcelain", "--untracked-files=no")
+
+
+def test_d02_reuses_the_full_nvidia_lane_without_build_fanout() -> None:
+    jobs = _workflow_data("ci.yml")["jobs"]
+    owners = [name for name, job in jobs.items()
+              if "tests/test_raster_styles_gpu.py" in str(job.get("steps", []))]
+    assert owners == ["test-golden-images-nvidia"]
+    job = jobs[owners[0]]
+    assert job["needs"] == ["build-wheel-windows", "terrain-golden-paths"]
+    assert "inputs.scope == 'full'" in job["if"]
+    assert job["env"]["WGPU_BACKEND"] == "vulkan"
+    assert sum(step.get("uses") == "actions/download-artifact@v4"
+               and step.get("with", {}).get("name") == "wheels-windows"
+               for step in job["steps"]) == 1
+    full = next(step for step in _workflow_data("test-python-wheel.yml")["jobs"]["test"]["steps"]
+                if step.get("name") == "Run full default Python lane")
+    for option in ("--durations=30", "-rs", "--junitxml=python-full-junit.xml"):
+        assert option in full["run"].split()
+    assert "${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}" in full["run"]
