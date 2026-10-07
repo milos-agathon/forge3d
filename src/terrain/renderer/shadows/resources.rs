@@ -9,15 +9,14 @@ impl TerrainScene {
     ) -> Result<NoopShadow> {
         use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
 
-        let identity_mat = [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ];
+        // `CsmUniforms` stores `light_projection`/`light_view` as flat
+        // column-major arrays and `light_view_proj` as a 2D array, so build each
+        // shape from one matrix the way `ShadowCascade::new` does instead of
+        // repeating the identity literals.
+        let identity = glam::Mat4::IDENTITY;
         let default_cascade = CsmCascadeData {
-            light_projection: identity_mat,
-            light_view_proj: identity_mat,
+            light_projection: identity.to_cols_array(),
+            light_view_proj: identity.to_cols_array_2d(),
             near_distance: 0.0,
             far_distance: 100000.0,
             texel_size: 1.0,
@@ -25,7 +24,7 @@ impl TerrainScene {
         };
         let csm_uniforms = CsmUniforms {
             light_direction: [0.0, -1.0, 0.0, 0.0],
-            light_view: identity_mat,
+            light_view: identity.to_cols_array(),
             cascades: [default_cascade; 4],
             cascade_count: 0,
             pcf_kernel_size: 1,

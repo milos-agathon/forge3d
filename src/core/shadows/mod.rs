@@ -21,7 +21,7 @@ pub use resources::{
     create_uniform_buffer,
 };
 pub use types::{
-    parse_shadow_debug_env, CsmConfig, CsmUniforms, DirectionalLight, ShadowCascade, ShadowStats,
+    parse_shadow_debug_env, CsmConfig, FogCsmUniforms, DirectionalLight, FogShadowCascade, ShadowStats,
 };
 
 /// Cascaded Shadow Map manager
@@ -41,7 +41,7 @@ pub struct CsmShadowMap {
     /// CSM uniform buffer
     uniform_buffer: TrackedBuffer,
     /// Current cascade data
-    cascades: Vec<ShadowCascade>,
+    cascades: Vec<FogShadowCascade>,
     /// Shadow debug mode
     debug_mode: u32,
 }
@@ -83,7 +83,7 @@ impl CsmShadowMap {
             shadow_array_view,
             shadow_sampler,
             uniform_buffer,
-            cascades: vec![ShadowCascade::zeroed(); cascade_count],
+            cascades: vec![FogShadowCascade::zeroed(); cascade_count],
             debug_mode: parse_shadow_debug_env(),
         })
     }
@@ -132,7 +132,7 @@ impl CsmShadowMap {
     }
 
     /// Get read-only access to the current shadow cascades
-    pub fn cascades(&self) -> &[ShadowCascade] {
+    pub fn cascades(&self) -> &[FogShadowCascade] {
         &self.cascades
     }
 
@@ -215,7 +215,7 @@ fn calculate_light_basis(light: &DirectionalLight) -> (Vec3, Vec3) {
 }
 
 fn update_single_cascade(
-    cascade: &mut ShadowCascade,
+    cascade: &mut FogShadowCascade,
     idx: usize,
     splits: &[f32],
     frustum: &CameraFrustum,
@@ -279,15 +279,15 @@ fn add_padding_and_snap(
 fn build_csm_uniforms(
     config: &CsmConfig,
     light: &DirectionalLight,
-    cascades: &[ShadowCascade],
+    cascades: &[FogShadowCascade],
     light_up: Vec3,
     debug_mode: u32,
-) -> CsmUniforms {
-    let mut cascade_array = [ShadowCascade::zeroed(); 4];
+) -> FogCsmUniforms {
+    let mut cascade_array = [FogShadowCascade::zeroed(); 4];
     for (i, c) in cascades.iter().enumerate().take(4) {
         cascade_array[i] = *c;
     }
-    CsmUniforms {
+    FogCsmUniforms {
         light_direction: [light.direction.x, light.direction.y, light.direction.z, 0.0],
         light_view: Mat4::look_at_rh(Vec3::ZERO, light.direction, light_up).to_cols_array_2d(),
         cascades: cascade_array,
