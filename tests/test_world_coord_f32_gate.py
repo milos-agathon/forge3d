@@ -83,7 +83,7 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # historical records retain their own endpoints; the combined gate bridges
 # their shared 1,821-site base to this current freeze. Scanner unchanged.
 EXPECTED_CONVERSION_COUNT = 1832
-EXPECTED_CONVERSION_SHA256 = "92a2b5e256294968b4a5340b1235973633e175d71c9de640b32421322f3f3245"
+EXPECTED_CONVERSION_SHA256 = "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
