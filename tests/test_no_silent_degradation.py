@@ -965,8 +965,6 @@ def test_release_gate_cli_records_dry_run_and_api_absence():
 
 
 def test_d02_full_acceptance_requires_physical_zero_skip_execution():
-    import yaml
-
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     job = _workflow_job(workflow, "test-golden-images-nvidia")
     probe = job.index("- name: Require physical NVIDIA Vulkan terrain adapter")
@@ -978,10 +976,8 @@ def test_d02_full_acceptance_requires_physical_zero_skip_execution():
     assert "--deselect" not in step
     assert "assert_junit_zero_skips.py" in step
     assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in step
-    parsed = yaml.load(workflow, Loader=yaml.BaseLoader)
-    command = next(item["run"] for item in parsed["jobs"]["test-golden-images-nvidia"]["steps"]
-                   if item.get("name") == "Run D02 thematic raster physical GPU gate")
-    assert command.rstrip().endswith("exit $LASTEXITCODE")
+    commands = [line.strip() for line in step.splitlines() if line.startswith("          ")]
+    assert commands[-1] == "exit $LASTEXITCODE"
     assert "continue-on-error" not in step and "if:" not in step
     aggregate = _workflow_job(workflow, "full-acceptance-summary")
     assert 'check_selected "$full_selected" \'${{ needs.test-golden-images-nvidia.result }}\' visual-goldens-nvidia' in aggregate
@@ -989,15 +985,16 @@ def test_d02_full_acceptance_requires_physical_zero_skip_execution():
 
 def test_d02_hosted_deselection_records_a_physical_reason(tmp_path):
     import os
-    import yaml
 
-    workflow = yaml.load((ROOT / ".github/workflows/test-python-wheel.yml").read_text(),
-                         Loader=yaml.BaseLoader)
-    steps = workflow["jobs"]["test"]["steps"]
-    record = next(step for step in steps
-                  if step.get("name") == "Record D02 physical-test deselection")
-    assert record["if"] == "inputs.test_mode == 'full' && runner.os != 'macOS'"
-    args = shlex.split(record["run"])
+    workflow = (ROOT / ".github/workflows/test-python-wheel.yml").read_text(encoding="utf-8")
+    job = _workflow_job(workflow, "test")
+    record_name = "- name: Record D02 physical-test deselection"
+    execute_name = "- name: Run full default Python lane"
+    record = job.split(record_name, 1)[1].split("\n      - name:", 1)[0]
+    assert "if: inputs.test_mode == 'full' && runner.os != 'macOS'" in record
+    command = next(line.strip() for line in record.splitlines()
+                   if line.strip().startswith("python -c "))
+    args = shlex.split(command)
     assert args[:2] == ["python", "-c"]
     summary = tmp_path / "summary.md"
     result = subprocess.run([sys.executable, *args[1:]],
@@ -1009,9 +1006,8 @@ def test_d02_hosted_deselection_records_a_physical_reason(tmp_path):
     assert "deselect tests/test_raster_styles_gpu.py (three physical cases)" in reason
     assert "required NVIDIA Vulkan acceptance runs all three with zero skips" in reason
     assert "unchanged physical/pixel assertions" in reason
-    execute = next(step for step in steps
-                   if step.get("name") == "Run full default Python lane")
-    assert steps.index(record) < steps.index(execute)
+    assert job.index(record_name) < job.index(execute_name)
+    execute = job.split(execute_name, 1)[1].split("\n      - name:", 1)[0]
     selector = "${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}"
-    assert execute["run"].count(selector) == 1
-    assert execute["run"].count("--deselect=") == 1
+    assert execute.count(selector) == 1
+    assert execute.count("--deselect=") == 1
