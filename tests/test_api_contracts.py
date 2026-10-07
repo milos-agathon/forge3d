@@ -840,6 +840,8 @@ class TestPackageLevelApiContracts:
         "native_import_error",
         "open_viewer",
         "open_viewer_async",
+        "VectorLineLayer",
+        "VectorLineStyleError",
         "render_offscreen_rgba",
         "numpy_to_png",
         "png_to_numpy",

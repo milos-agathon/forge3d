@@ -5,6 +5,7 @@ from typing import Any, Callable, Optional, Sequence, TypeAlias
 from .bundle import LoadedBundle
 from .diagnostics import Diagnostic
 from .geo import SolarTime
+from .vector_line import VectorLineLayer
 
 WorldPosition: TypeAlias = tuple[float, float, float]
 VectorOverlayVertex: TypeAlias = tuple[float, float, float, float, float, float, float, int]
@@ -100,6 +101,7 @@ class ViewerHandle:
         text_size: Optional[float] = ...,
         text_color: Optional[tuple[float, float, float, float]] = ...,
     ) -> int | LabelOperationResult: ...
+    def add_vector_line(self, line: VectorLineLayer) -> int: ...
     def add_vector_overlay(
         self,
         name: str,
