@@ -127,103 +127,121 @@ mod layout_lock_tests {
         assert_eq!(std::mem::size_of::<CsmCascadeData>(), 144);
     }
 
+    /// Every WGSL copy of `ShadowCascade` + `CsmUniforms` must match the Rust
+    /// ABI, field for field and byte for byte.
+    ///
+    /// The expected offsets are derived from the WGSL type declarations rather
+    /// than hand-written, because a hand-written table can agree with a stale
+    /// copy of itself and prove nothing. Deriving them closes the drift this
+    /// lock exists for: adding, removing or resizing a field in all four WGSL
+    /// copies leaves them "identical" to each other while silently moving the
+    /// GPU layout away from the Rust struct.
     #[test]
-    fn test_csm_uniforms_critical_field_offsets() {
-        // These offsets must match WGSL struct layout in terrain_pbr_pom.wgsl:
-        // light_direction: vec4<f32>        @ offset 0
-        // light_view: mat4x4<f32>           @ offset 16
-        // cascades: array<ShadowCascade, 4> @ offset 80 (16 + 64)
-        // cascade_count: u32                @ offset 656 (80 + 4*144)
-        // pcf_kernel_size: u32              @ offset 660
-        // depth_clip_factor: f32            @ offset 696
-        // technique: u32                    @ offset 700
-        // technique_flags: u32              @ offset 704
-        // _padding1: [f32; 3]               @ offset 708
-        // technique_params: vec4<f32>       @ offset 720
-        // technique_reserved: vec4<f32>     @ offset 736
-        // cascade_blend_range: f32          @ offset 752
+    fn rust_csm_layout_matches_every_wgsl_copy() {
+        use crate::shader_sources::csm_wgsl_layout::{layout, struct_fields, COPIES};
 
-        assert_eq!(
-            offset_of!(CsmUniforms, light_direction),
-            0,
-            "light_direction offset"
-        );
-        assert_eq!(offset_of!(CsmUniforms, light_view), 16, "light_view offset");
-        assert_eq!(offset_of!(CsmUniforms, cascades), 80, "cascades offset");
-        assert_eq!(
-            offset_of!(CsmUniforms, cascade_count),
-            656,
-            "cascade_count offset"
-        );
-        assert_eq!(
-            offset_of!(CsmUniforms, pcf_kernel_size),
-            660,
-            "pcf_kernel_size offset"
-        );
-        assert_eq!(
-            offset_of!(CsmUniforms, depth_clip_factor),
-            696,
-            "depth_clip_factor offset"
-        );
-        assert_eq!(offset_of!(CsmUniforms, technique), 700, "technique offset");
-        assert_eq!(
-            offset_of!(CsmUniforms, technique_flags),
-            704,
-            "technique_flags offset"
-        );
-        assert_eq!(offset_of!(CsmUniforms, _padding1), 708, "_padding1 offset");
-        assert_eq!(
-            offset_of!(CsmUniforms, technique_params),
-            720,
-            "technique_params offset"
-        );
-        assert_eq!(
-            offset_of!(CsmUniforms, technique_reserved),
-            736,
-            "technique_reserved offset"
-        );
-        assert_eq!(
-            offset_of!(CsmUniforms, cascade_blend_range),
-            752,
-            "cascade_blend_range offset"
-        );
-    }
+        const CASCADE_BYTES: usize = std::mem::size_of::<CsmCascadeData>();
 
-    #[test]
-    fn test_csm_cascade_data_field_offsets() {
-        // WGSL ShadowCascade layout:
-        // light_projection: mat4x4<f32>  @ offset 0
-        // light_view_proj: mat4x4<f32>   @ offset 64
-        // near_distance: f32             @ offset 128
-        // far_distance: f32              @ offset 132
-        // texel_size: f32                @ offset 136
-        // _padding: f32                  @ offset 140
+        /// WGSL spells a padding run as consecutive `_padN*` members while Rust
+        /// uses one array per run, so compare the run start — that is the offset
+        /// the layout actually pins. A lone `_padding` field (as in
+        /// `ShadowCascade`) is not a run and keeps its own name.
+        fn canonical(fields: Vec<(String, String)>, offsets: Vec<usize>) -> Vec<(String, usize)> {
+            let mut out: Vec<(String, usize)> = Vec::new();
+            let mut run = 0usize;
+            let mut prev_in_run = false;
+            for ((name, _), offset) in fields.into_iter().zip(offsets) {
+                let in_run = name.len() > 4
+                    && name.starts_with("_pad")
+                    && name.as_bytes()[4].is_ascii_digit();
+                if in_run {
+                    if !prev_in_run {
+                        run += 1;
+                        out.push((format!("_padding{run}"), offset));
+                    }
+                } else {
+                    out.push((name, offset));
+                }
+                prev_in_run = in_run;
+            }
+            out
+        }
 
-        assert_eq!(
-            offset_of!(CsmCascadeData, light_projection),
-            0,
-            "light_projection offset"
-        );
-        assert_eq!(
-            offset_of!(CsmCascadeData, light_view_proj),
-            64,
-            "light_view_proj offset"
-        );
-        assert_eq!(
-            offset_of!(CsmCascadeData, near_distance),
-            128,
-            "near_distance offset"
-        );
-        assert_eq!(
-            offset_of!(CsmCascadeData, far_distance),
-            132,
-            "far_distance offset"
-        );
-        assert_eq!(
-            offset_of!(CsmCascadeData, texel_size),
-            136,
-            "texel_size offset"
-        );
-        assert_eq!(offset_of!(CsmCascadeData, _padding), 140, "_padding offset");
+        /// Compiler-reported offset of a WGSL-named `CsmUniforms` field. An
+        /// unknown name panics, so a new WGSL field cannot slip past uncompared.
+        fn rust_uniform_offset(name: &str) -> usize {
+            match name {
+                "light_direction" => offset_of!(CsmUniforms, light_direction),
+                "light_view" => offset_of!(CsmUniforms, light_view),
+                "cascades" => offset_of!(CsmUniforms, cascades),
+                "cascade_count" => offset_of!(CsmUniforms, cascade_count),
+                "pcf_kernel_size" => offset_of!(CsmUniforms, pcf_kernel_size),
+                "depth_bias" => offset_of!(CsmUniforms, depth_bias),
+                "slope_bias" => offset_of!(CsmUniforms, slope_bias),
+                "shadow_map_size" => offset_of!(CsmUniforms, shadow_map_size),
+                "debug_mode" => offset_of!(CsmUniforms, debug_mode),
+                "evsm_positive_exp" => offset_of!(CsmUniforms, evsm_positive_exp),
+                "evsm_negative_exp" => offset_of!(CsmUniforms, evsm_negative_exp),
+                "peter_panning_offset" => offset_of!(CsmUniforms, peter_panning_offset),
+                "enable_unclipped_depth" => offset_of!(CsmUniforms, enable_unclipped_depth),
+                "depth_clip_factor" => offset_of!(CsmUniforms, depth_clip_factor),
+                "technique" => offset_of!(CsmUniforms, technique),
+                "technique_flags" => offset_of!(CsmUniforms, technique_flags),
+                "technique_params" => offset_of!(CsmUniforms, technique_params),
+                "technique_reserved" => offset_of!(CsmUniforms, technique_reserved),
+                "cascade_blend_range" => offset_of!(CsmUniforms, cascade_blend_range),
+                "_padding1" => offset_of!(CsmUniforms, _padding1),
+                "_padding2" => offset_of!(CsmUniforms, _padding2),
+                other => panic!("WGSL CsmUniforms field `{other}` has no Rust counterpart"),
+            }
+        }
+
+        /// Compiler-reported offset of a WGSL-named `ShadowCascade` field.
+        fn rust_cascade_offset(name: &str) -> usize {
+            match name {
+                "light_projection" => offset_of!(CsmCascadeData, light_projection),
+                "light_view_proj" => offset_of!(CsmCascadeData, light_view_proj),
+                "near_distance" => offset_of!(CsmCascadeData, near_distance),
+                "far_distance" => offset_of!(CsmCascadeData, far_distance),
+                "texel_size" => offset_of!(CsmCascadeData, texel_size),
+                "_padding" => offset_of!(CsmCascadeData, _padding),
+                other => panic!("WGSL ShadowCascade field `{other}` has no Rust counterpart"),
+            }
+        }
+
+        for (file, text) in COPIES {
+            let (cascade_offsets, cascade_size) = layout(text, "ShadowCascade", CASCADE_BYTES);
+            let wgsl_cascade = canonical(struct_fields(text, "ShadowCascade"), cascade_offsets);
+            assert_eq!(
+                cascade_size,
+                CASCADE_BYTES,
+                "{file}: WGSL ShadowCascade is {cascade_size} bytes, Rust is {CASCADE_BYTES}",
+            );
+            let rust_cascade: Vec<(String, usize)> = wgsl_cascade
+                .iter()
+                .map(|(name, _)| (name.clone(), rust_cascade_offset(name)))
+                .collect();
+            assert_eq!(
+                wgsl_cascade, rust_cascade,
+                "{file}: ShadowCascade layout differs from the Rust struct",
+            );
+
+            let (uniform_offsets, uniform_size) = layout(text, "CsmUniforms", CASCADE_BYTES);
+            let wgsl_uniforms = canonical(struct_fields(text, "CsmUniforms"), uniform_offsets);
+            assert_eq!(
+                uniform_size,
+                std::mem::size_of::<CsmUniforms>(),
+                "{file}: WGSL CsmUniforms is {uniform_size} bytes, Rust is {}",
+                std::mem::size_of::<CsmUniforms>(),
+            );
+            let rust_uniforms: Vec<(String, usize)> = wgsl_uniforms
+                .iter()
+                .map(|(name, _)| (name.clone(), rust_uniform_offset(name)))
+                .collect();
+            assert_eq!(
+                wgsl_uniforms, rust_uniforms,
+                "{file}: CsmUniforms layout differs from the Rust struct",
+            );
+        }
     }
 }

@@ -1469,16 +1469,15 @@ mod fused_kernel_tests {
     }
 }
 
-/// Drift gate for the four WGSL copies of `ShadowCascade` + `CsmUniforms`.
+/// WGSL parsing for the CSM layout gates.
 ///
-/// They cannot be collapsed into one definition yet: the assembled terrain
-/// source is hash-pinned (`PINNED_TERRAIN_SOURCE_HASH`), so injecting a shared
-/// prelude changes that hash and needs owner approval. Until then this test
-/// fails if any copy's fields (name, type, order) diverge, which is the
-/// back-and-forth this lock exists to stop.
+/// Test-only, but `pub(crate)`: `core::shadow_mapping::layout_lock_tests`
+/// imports these so the four WGSL copies are parsed in exactly one place (and
+/// their `include_str!` paths resolve relative to this module).
 #[cfg(test)]
-mod csm_single_source_tests {
-    const COPIES: &[(&str, &str)] = &[
+pub(crate) mod csm_wgsl_layout {
+    /// Every WGSL file carrying a copy of `ShadowCascade` + `CsmUniforms`.
+    pub(crate) const COPIES: &[(&str, &str)] = &[
         ("shadows.wgsl", include_str!("shaders/shadows.wgsl")),
         (
             "mesh_instanced.wgsl",
@@ -1494,7 +1493,8 @@ mod csm_single_source_tests {
         ),
     ];
 
-    fn struct_fields(source: &str, name: &str) -> Vec<String> {
+    /// Ordered `(name, type)` pairs of a WGSL struct body, comments stripped.
+    pub(crate) fn struct_fields(source: &str, name: &str) -> Vec<(String, String)> {
         let marker = format!("struct {name}");
         let start = source
             .find(&marker)
@@ -1503,12 +1503,89 @@ mod csm_single_source_tests {
         let close = source[open..].find('}').expect("close brace") + open;
         source[open + 1..close]
             .lines()
-            .map(|line| line.split("//").next().unwrap_or("").trim())
-            .filter(|line| !line.is_empty())
-            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter_map(|line| {
+                let line = line.split("//").next().unwrap_or("").trim();
+                let (field, ty) = line.split_once(':')?;
+                let ty = ty.trim().trim_end_matches(',').trim();
+                if field.is_empty() || ty.is_empty() {
+                    return None;
+                }
+                Some((field.trim().to_string(), ty.to_string()))
+            })
             .collect()
     }
 
+    /// Byte size of a WGSL type in the CSM storage buffer.
+    ///
+    /// Every member is a 4-byte scalar or a 16-byte-aligned vector/matrix, so
+    /// the storage layout is tightly packed and a running sum is exact. A struct
+    /// element declared by name (`array<ShadowCascade, 4>`) is resolved from the
+    /// same source rather than assumed to be the cascade stride.
+    fn type_size(source: &str, ty: &str, cascade_bytes: usize, depth: usize) -> usize {
+        assert!(
+            depth < 4,
+            "WGSL type nesting too deep, is `{ty}` self-referential?"
+        );
+        match ty {
+            "f32" | "u32" | "i32" => 4,
+            "vec4<f32>" => 16,
+            "mat4x4<f32>" => 64,
+            other if other.starts_with("array<") => {
+                let inner = other
+                    .strip_prefix("array<")
+                    .and_then(|rest| rest.strip_suffix('>'))
+                    .unwrap_or_else(|| panic!("malformed WGSL array type: {other}"));
+                let (element, count) = inner
+                    .rsplit_once(',')
+                    .unwrap_or_else(|| panic!("malformed WGSL array type: {other}"));
+                let count: usize = count.trim().parse().unwrap_or_else(|_| {
+                    panic!("malformed WGSL array element count in {other}")
+                });
+                type_size(source, element.trim(), cascade_bytes, depth + 1) * count
+            }
+            other => {
+                if !source.contains(&format!("struct {other}")) {
+                    panic!("unhandled WGSL type in CSM layout: {other}");
+                }
+                layout_at(source, other, cascade_bytes, depth + 1).1
+            }
+        }
+    }
+
+    /// Byte offset of every field of a WGSL struct, plus the struct's total size,
+    /// derived from the declared types.
+    ///
+    /// `cascade_bytes` is threaded in explicitly because WGSL declares
+    /// `array<ShadowCascade, 4>` by element name, not by byte size.
+    pub(crate) fn layout(source: &str, name: &str, cascade_bytes: usize) -> (Vec<usize>, usize) {
+        layout_at(source, name, cascade_bytes, 0)
+    }
+
+    fn layout_at(
+        source: &str,
+        name: &str,
+        cascade_bytes: usize,
+        depth: usize,
+    ) -> (Vec<usize>, usize) {
+        let mut size = 0usize;
+        let offsets = struct_fields(source, name)
+            .into_iter()
+            .map(|(_, ty)| {
+                let at = size;
+                size += type_size(source, &ty, cascade_bytes, depth);
+                at
+            })
+            .collect();
+        (offsets, size)
+    }
+
+    /// Drift gate for the four WGSL copies of `ShadowCascade` + `CsmUniforms`.
+    ///
+    /// They cannot be collapsed into one definition yet: the assembled terrain
+    /// source is hash-pinned (`PINNED_TERRAIN_SOURCE_HASH`), so injecting a shared
+    /// prelude changes that hash and needs owner approval. Until then this test
+    /// fails if any copy's fields (name, type, order) diverge, which is the
+    /// back-and-forth this lock exists to stop.
     #[test]
     fn csm_uniforms_wgsl_copies_are_identical() {
         for name in ["ShadowCascade", "CsmUniforms"] {
