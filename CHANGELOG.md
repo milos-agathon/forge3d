@@ -5,7 +5,6 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
-
 ### Compatibility
 - SUTURA raster imagery now contributes terrain albedo before lighting, rather than being pasted over the finished frame. Terrain-raster scenes therefore have a new shaded look; their committed references have been refreshed.
 
@@ -17,6 +16,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Refreshed the terrain-raster reference images for terrain-albedo draping.
 
 ### Fixed
+- `tests/test_m06_single_rebase_contract.py` re-freezes the viewer `Anchor` inventory with the three SPLAT-FUSED sites that landed in 1.41.0 without a ledger entry, so the fail-closed coordinate-safety gate was red on `main`: `src/splat/load.rs::read_chunk` (3DGS PLY reader, zero-origin scene frame) and `src/splat/stream.rs::PointCloudFrame::anchor` (COPC/LiDAR frame with a caller-supplied georeferenced origin). Both are stand-alone splat readers, not viewer anchor mutations.
 - Unsupported styled raster combinations now report a structured route diagnostic for each affected layer during validation, before rendering.
 - Curved labels now emit screen-space glyph rotations in radians and reserve their rotated screen bounds, keeping text such as “Silver River” upright along its path.
 

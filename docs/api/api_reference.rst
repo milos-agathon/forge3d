@@ -18,6 +18,31 @@ Viewer, Notebook, And IPC
    :members:
    :no-index:
 
+Local Vector Line Overlays
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Create a ``forge3d.VectorLineLayer`` from an open world-coordinate path and
+submit it with ``ViewerHandle.add_vector_line`` on a terrain-loaded viewer.
+The helper builds stroke and halo geometry and returns the overlay id, using
+the existing native ``add_vector_overlay`` submission. Width and halo use
+horizontal world units; caps support ``butt``/``square`` and joins support
+``bevel``/``miter``. Defaults are butt caps and miter joins, with miter length
+clamped at four times the stroke half-width or halo outer radius.
+
+Native drape adds ``(height - domain_min) * z_scale + z_offset`` to display Y
+at each generated vertex. Without drape, only ``z_offset`` is added. Tight
+corners with short segments or wide halos can produce folded ribbons and are
+rejected before submission. ``VectorLineLayer.from_style`` translates the
+documented local subset and raises ``VectorLineStyleError`` with structured
+diagnostics for unsupported fields. See :doc:`../guides/style_support_matrix`
+for units, defaults, geometry limits and the runnable
+``examples/vector_line_drape.py`` example. Streamed MVT, full Mapbox parity and
+SUTURA ``MapScene`` projection are outside this helper's scope.
+
+.. automodule:: forge3d.vector_line
+   :members:
+   :no-index:
+
 Label API Truth
 ~~~~~~~~~~~~~~~
 

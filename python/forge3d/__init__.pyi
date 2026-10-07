@@ -155,6 +155,7 @@ from .style import (
     validate_style_support,
     vector_overlay_configs_from_style,
 )
+from .vector_line import VectorLineLayer as VectorLineLayer, VectorLineStyleError as VectorLineStyleError
 from . import smoke
 from . import verify
 from .path_tracing import ExperimentalSyntheticOutput, render_terrain_poster

@@ -1978,6 +1978,7 @@ jobs:
             'tests/test_m06_full_geospatial_viewer.py',
             'tests/test_terrain_viewer_pbr.py',
             'tests/test_vector_overlay_rendering.py',
+            'tests/test_vector_line_viewer.py',
             'tests/test_vector_coverage.py'
           )
           $tests -join "`n" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/pytest-files.txt"

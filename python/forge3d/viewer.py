@@ -27,6 +27,7 @@ from .diagnostics import (
     missing_glyphs_diagnostic,
     placeholder_fallback_diagnostic,
 )
+from .vector_line import VectorLineLayer
 from .viewer_contract import (
     NormalizedExtent,
     VectorOverlayVertex,
@@ -743,6 +744,26 @@ class ViewerHandle:
         self._commit_label_id(created_id)
         self._ensure_label_api_state()["label_ids"].add(created_id)
         return created_id
+
+    def add_vector_line(
+        self,
+        line: VectorLineLayer,
+    ) -> int:
+        """Submit a local line's width/halo/cap/join geometry with native drape.
+
+        See :class:`forge3d.VectorLineLayer` for world units and supported values.
+        All geometry and styling validation completes before IPC submission.
+        """
+        if not isinstance(line, VectorLineLayer):
+            raise TypeError("line must be a VectorLineLayer")
+        config = line.to_overlay_config()
+        return self.add_vector_overlay(
+            config.name, [vertex.to_array() for vertex in config.vertices],
+            config.indices, primitive=config.primitive.value, drape=config.drape,
+            drape_offset=config.drape_offset, opacity=config.opacity,
+            depth_bias=config.depth_bias, line_width=config.line_width,
+            point_size=config.point_size, z_order=config.z_order,
+        )
 
     def add_vector_overlay(
         self,
