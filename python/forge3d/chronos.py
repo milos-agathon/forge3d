@@ -233,6 +233,8 @@ def _render_size(recipe: Any) -> tuple[int, int]:
 
 
 def _scene_json(frame_scene: MapScene, label_records: list[dict[str, Any]]) -> str:
+    from ._map_scene_rasters import raster_content_hashes
+
     recipe_dict = frame_scene.recipe.to_dict()
     output_dict = recipe_dict.get("output")
     if isinstance(output_dict, Mapping):
@@ -245,6 +247,9 @@ def _scene_json(frame_scene: MapScene, label_records: list[dict[str, Any]]) -> s
         "virtual_texture": _vt_descriptor(frame_scene.recipe, _render_size(frame_scene.recipe)),
         "scene": recipe_dict,
     }
+    raster_content = raster_content_hashes(frame_scene.recipe)
+    if raster_content:
+        scene_value["raster_content"] = raster_content
     return _canonical_json_text(scene_value, "chronos scene")
 
 
@@ -299,10 +304,17 @@ def _render_frames(
     # Destination paths are where bytes land, not what is rendered.
     cache_recipe = frame_scenes[indices[0]].to_dict()
     cache_recipe["recipe"]["output"]["path"] = None
-    context = canonical_json_bytes(
-        {str(index): compiled_frames[index].to_json() for index in indices},
-        error_context="CHRONOS cache context",
-    )
+    from ._map_scene_rasters import raster_content_hashes
+
+    frame_context = {str(index): compiled_frames[index].to_json() for index in indices}
+    raster_content = {
+        str(index): identities
+        for index in indices
+        if (identities := raster_content_hashes(frame_scenes[index].recipe))
+    }
+    if raster_content:
+        frame_context["raster_content"] = raster_content
+    context = canonical_json_bytes(frame_context, error_context="CHRONOS cache context")
     sequence = render_sequence(
         cache_recipe,
         frames=indices,

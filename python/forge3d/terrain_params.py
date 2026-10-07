@@ -568,7 +568,7 @@ class MaterialLayerSettings:
     under ``variation`` and default to zero amplitudes so the existing material
     layering output remains unchanged until explicitly enabled.
 
-    ``normal_path``, ``roughness_path``, and ``mask_path`` describe optional
+    ``albedo_path``, ``normal_path``, ``roughness_path``, and ``mask_path`` describe optional
     per-texel material maps for the terrain shader/VT path. They are inert when
     unset and serialize with the rest of the render parameters.
     """
@@ -606,6 +606,7 @@ class MaterialLayerSettings:
     wetness_subsurface_tint: Tuple[float, float, float] = (1.0, 1.0, 1.0)
     # TV4: Procedural variation controls shared across snow/rock/wetness.
     variation: MaterialNoiseSettings = field(default_factory=MaterialNoiseSettings)
+    albedo_path: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.snow_altitude_blend <= 0.0:
@@ -658,6 +659,7 @@ class MaterialLayerSettings:
         if not isinstance(self.variation, MaterialNoiseSettings):
             raise ValueError("variation must be a MaterialNoiseSettings instance")
         for name, value in [
+            ("albedo_path", self.albedo_path),
             ("normal_path", self.normal_path),
             ("roughness_path", self.roughness_path),
             ("mask_path", self.mask_path),

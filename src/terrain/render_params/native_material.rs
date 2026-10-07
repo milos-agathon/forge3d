@@ -36,6 +36,7 @@ pub struct MaterialLayerSettingsNative {
     pub normal_path: Option<String>,
     pub roughness_path: Option<String>,
     pub mask_path: Option<String>,
+    pub albedo_path: Option<String>,
     // Snow layer
     pub snow_enabled: bool,
     pub snow_altitude_min: f32,
@@ -72,6 +73,7 @@ impl Default for MaterialLayerSettingsNative {
             normal_path: None,
             roughness_path: None,
             mask_path: None,
+            albedo_path: None,
             snow_enabled: false,
             snow_altitude_min: 2000.0,
             snow_altitude_blend: 500.0,

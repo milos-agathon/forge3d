@@ -286,7 +286,7 @@ pub(crate) fn layout_label_candidates_py(
 
     // Curved authority works in the horizontal world plane; the screen
     // polyline maps x -> x and screen y -> z so the authority's
-    // `atan2(tangent.x, tangent.z)` convention is preserved verbatim.
+    // `atan2(tangent.x, tangent.z)` convention stays inside that authority.
     let curved_path = if kind == "curved" {
         let vertices: Vec<glam::Vec3> = screen_path
             .iter()
@@ -364,7 +364,16 @@ pub(crate) fn layout_label_candidates_py(
             layout
                 .glyphs
                 .iter()
-                .map(|glyph| (glyph.world_pos.x, glyph.world_pos.z, glyph.rotation))
+                .map(|glyph| {
+                    // Here (world x, z) is screen (x, y down). The authority
+                    // stores r = atan2(tx, tz); the compositor needs
+                    // atan2(tz, tx) = PI/2 - r (modulo a full turn).
+                    (
+                        glyph.world_pos.x,
+                        glyph.world_pos.z,
+                        std::f32::consts::FRAC_PI_2 - glyph.rotation,
+                    )
+                })
                 .collect()
         };
         if placed.len() != glyph_count {
@@ -429,7 +438,15 @@ pub(crate) fn layout_label_candidates_py(
             f32::NEG_INFINITY,
             f32::NEG_INFINITY,
         );
-        for (x, y, _rotation) in placed {
+        let mut candidate_pad = pad;
+        for (x, y, rotation) in placed {
+            if kind == "curved" {
+                // Rotating the reserved half-em square expands its screen
+                // half-extents by |cos(r)| + |sin(r)|. Use the largest glyph
+                // extent so the complete run retains its reserved font box.
+                candidate_pad =
+                    candidate_pad.max(pad * (rotation.cos().abs() + rotation.sin().abs()));
+            }
             min_x = min_x.min(*x);
             min_y = min_y.min(*y);
             max_x = max_x.max(*x);
@@ -441,7 +458,12 @@ pub(crate) fn layout_label_candidates_py(
         candidate.set_item("anchor", (anchor_x, anchor_y, anchor_z))?;
         candidate.set_item(
             "bounds",
-            (min_x - pad, min_y - pad, max_x + pad, max_y + pad),
+            (
+                min_x - candidate_pad,
+                min_y - candidate_pad,
+                max_x + candidate_pad,
+                max_y + candidate_pad,
+            ),
         )?;
         let details = PyDict::new_bound(py);
         details.set_item("arc_fraction", fraction)?;

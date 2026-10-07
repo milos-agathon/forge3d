@@ -81,9 +81,12 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # Milos approved the combined freeze: the existing SPLAT-FUSED record plus
 # exactly six TESSELLA test casts added and two oracle casts removed. Both
 # historical records retain their own endpoints; the combined gate bridges
-# their shared 1,821-site base to this current freeze. Scanner unchanged.
-EXPECTED_CONVERSION_COUNT = 1832
-EXPECTED_CONVERSION_SHA256 = "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9"
+# their shared 1,821-site base to the 1,832-site SUTURA base.
+# SUTURA adds four final screen depth/texture UV conversions and keeps
+# world/camera projection in f64; see its exact ledger transition.
+# Scanner unchanged.
+EXPECTED_CONVERSION_COUNT = 1836
+EXPECTED_CONVERSION_SHA256 = "3d58d0cb7decfff40b2c22299813cb565fc3ecdbed2afa1f0559a52855cfb489"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -581,6 +584,34 @@ def _function_body(rel: str, function: str) -> str:
     raise AssertionError(f"missing function {rel}::{function}")
 
 
+
+def test_reviewed_csm_layout_context_transition_is_exact():
+    transition = _ledger_data()["csm_layout_context"]
+    sutura = _ledger_data()["sutura"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        sutura["result_count"], sutura["result_digest"],
+    )
+    assert transition["review"]
+    assert len(transition["removed"]) == len(transition["added"]) == 1
+    old, = map(tuple, transition["removed"])
+    new, = map(tuple, transition["added"])
+    assert old[:4] == new[:4] == (
+        "src/core/shadow_mapping/system.rs", "update_uniforms", "as_f32", 1,
+    )
+    assert old[4].replace(
+        "light_view: self.light_view_matrix.to_cols_array_2d()",
+        "light_view: self.light_view_matrix.to_cols_array()",
+    ) == new[4]
+    sites = conversion_inventory()
+    assert sites.count(new) == 1 and old not in sites
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    restored = [old if site == new else site for site in sites]
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+
 def test_exact_production_conversion_inventory_is_frozen():
     sites = conversion_inventory()
     digest = _inventory_digest(sites)
@@ -915,7 +946,7 @@ def test_tessella_and_splat_combined_freeze_is_exact():
     splat_added = set(map(tuple, splat["added"]))
     assert len(splat_added) == 7 and not splat["removed"]
     assert not (tessella_added | tessella_removed) & splat_added
-    assert EXPECTED_CONVERSION_COUNT == (
+    assert _ledger_data()["sutura"]["base_count"] == (
         tessella["base_count"] + len(tessella_added) - len(tessella_removed)
         + len(splat_added)
     )
@@ -1017,3 +1048,44 @@ def test_public_camera_helper_preserves_earth_scale_offset():
         )
     )
     np.testing.assert_allclose(earth, local, rtol=0.0, atol=1e-6)
+
+
+def test_sutura_screen_output_inventory_transition_is_exact():
+    sutura = _ledger_data()["sutura"]
+    assert (sutura["base_count"], sutura["base_digest"]) == (
+        1832,
+        "92a2b5e256294968b4a5340b1235973633e175d71c9de640b32421322f3f3245",
+    )
+    expected_added = [
+        ("src/terrain/render_params/projection.rs", "<module>", "as_f32", 1,
+         "*target = target.min(z as f32)"),
+        ("src/terrain/render_params/py_api.rs", "<module>", "as_f32", 1,
+         "projected[2] = f64::from(projected[2] as f32)"),
+        ("src/terrain/render_params/py_api.rs", "unproject_terrain_depth", "as_f32", 1,
+         "uv[[row, col, 0]] = (world.x / world.w / f64::from(self.terrain_span) + 0.5) as f32"),
+        ("src/terrain/render_params/py_api.rs", "unproject_terrain_depth", "as_f32", 2,
+         "uv[[row, col, 1]] = (world.y / world.w / f64::from(self.terrain_span) + 0.5) as f32"),
+    ]
+    assert list(map(tuple, sutura["added"])) == expected_added
+    assert sutura["removed"] == []
+    assert sutura["result_count"] == sutura["base_count"] + len(expected_added)
+    csm = _ledger_data()["csm_layout_context"]
+    assert (sutura["result_count"], sutura["result_digest"]) == (
+        csm["base_count"], csm["base_digest"],
+    )
+    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+        csm["result_count"], csm["result_digest"],
+    )
+    sites = conversion_inventory()
+    counts = collections.Counter(sites)
+    for site in expected_added:
+        assert counts[site] == 1, f"screen output addition missing or duplicated: {site}"
+    # Reverse only the separately checked CSM context transition before
+    # reconstructing the historical SUTURA input inventory.
+    old_csm, = map(tuple, csm["removed"])
+    new_csm, = map(tuple, csm["added"])
+    sites = [old_csm if site == new_csm else site for site in sites]
+    baseline = [site for site in sites if site not in expected_added]
+    assert (len(baseline), _inventory_digest(baseline)) == (
+        sutura["base_count"], sutura["base_digest"],
+    )

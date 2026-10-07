@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+### Compatibility
+- SUTURA raster imagery now contributes terrain albedo before lighting, rather than being pasted over the finished frame. Terrain-raster scenes therefore have a new shaded look; their committed references have been refreshed.
+
+### Added
+- SUTURA 3D overlays: terrain-UV raster draping and vectors projected through the terrain camera, with terrain occlusion and perspective-aware world widths.
+- Opt-in world labels through `LabelLayer(metadata={"coordinate_space": "world"})`. Their anchors and geometry follow the terrain camera; existing screen-coordinate labels keep their behavior.
+
 ### Changed
+- Refreshed the terrain-raster reference images for terrain-albedo draping.
 - Added the single-rebase, world-coordinate f32, and anchoring-boundary gates to the fast PR contract lane.
 
 ### Fixed
@@ -15,6 +23,8 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Route D02 physical raster-style tests to required zero-skip NVIDIA acceptance with unchanged adapter and pixel assertions. Linux/Windows software-adapter Python matrices record their three-case deselection and reason in a notice and job summary; macOS retains the tests and Full Acceptance requires D02 hardware execution.
 - Refresh the ORBIS Rainier NVIDIA Vulkan golden after the stable render drift that appeared between `452fadd3` and `3a6ec9f8`, most likely from the deterministic ORBIS arithmetic barriers in `026dc54f`. The gated ORBIS test was not part of that commit's byte-identity check; this was not GPU-bisected and PR #201 is not excluded. Owner-approved pixels; SSIM 0.995 and mean-difference 2.0 gates are unchanged.
 - `tests/test_m06_single_rebase_contract.py` re-freezes the viewer `Anchor` inventory with the three SPLAT-FUSED sites that landed in 1.41.0 without a ledger entry, so the fail-closed coordinate-safety gate was red on `main`: `src/splat/load.rs::read_chunk` (3DGS PLY reader, zero-origin scene frame) and `src/splat/stream.rs::PointCloudFrame::anchor` (COPC/LiDAR frame with a caller-supplied georeferenced origin). Both are stand-alone splat readers, not viewer anchor mutations.
+- Unsupported styled raster combinations now report a structured route diagnostic for each affected layer during validation, before rendering.
+- Curved labels now emit screen-space glyph rotations in radians and reserve their rotated screen bounds, keeping text such as “Silver River” upright along its path.
 
 ## [1.42.0] - 2026-10-06
 ### Added

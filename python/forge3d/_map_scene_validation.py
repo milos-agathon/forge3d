@@ -25,20 +25,17 @@ from .diagnostics import (
 # ---------------------------------------------------------------------------
 #
 # Every MapScene layer either renders through a concrete native symbol or the
-# render is blocked with a structured fatal diagnostic, with two explicitly
-# named deterministic CPU compositor exceptions (not placeholders and not
-# native-only): loaded raster overlays use the Python resample compositor
-# (``raster_overlay_backend = "python_resample_composite"``), and precise
-# dashed/mitered vectors use the Python precise raster compositor
-# (``vector_backend = "python_precise_raster"``). Missing raster sources still
-# block, and both exceptions are surfaced in render metadata and support
-# features so the product never claims that all layers are native-only.
+# render is blocked with a structured fatal diagnostic. RasterOverlay albedo
+# is sampled natively in terrain UV in every camera mode. Precise dashed/mitered
+# vectors retain the explicit deterministic Python precise raster compositor
+# (vector_backend = "python_precise_raster"). World geometry is projected through
+# the native terrain camera before that compositor is called.
 # This mirrors the diagnose-before-render precedent documented in
 # docs/guides/competitive_positioning.md (textured PBR buildings, VT runtime).
 
 _NATIVE_CAPABILITY_SYMBOLS: dict[str, tuple[str, ...]] = {
     "terrain": ("TerrainRenderer", "Session"),
-    "raster": ("Scene",),
+    "raster": ("TerrainRenderer", "TerrainRenderParams", "Session"),
     "labels": ("Scene",),
     "vector": ("vector_render_oit_py", "vector_render_polygons_fill_py"),
     "buildings": ("Scene",),

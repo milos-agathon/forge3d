@@ -806,6 +806,7 @@ impl TerrainScene {
             materials.material_normal_view(),
             materials.material_roughness_view(),
             materials.material_mask_view(),
+            materials.material_albedo_view(),
             materials.material_map_sampler(),
             &materials.shading_buffer,
             materials.colormap_view(),

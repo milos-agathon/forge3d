@@ -171,6 +171,7 @@ impl TerrainScene {
         material_normal_view: &wgpu::TextureView,
         material_roughness_view: &wgpu::TextureView,
         material_mask_view: &wgpu::TextureView,
+        material_albedo_view: &wgpu::TextureView,
         material_map_sampler: &wgpu::Sampler,
         shading_buffer: &wgpu::Buffer,
         colormap_view: &wgpu::TextureView,
@@ -406,7 +407,7 @@ impl TerrainScene {
                 } else {
                     0.0
                 },
-                0.0,
+                if materials.albedo_path.is_some() { 1.0 } else { 0.0 },
             ],
         };
         self.queue.write_buffer(
@@ -502,6 +503,10 @@ impl TerrainScene {
                         wgpu::BindGroupEntry {
                             binding: 15,
                             resource: wgpu::BindingResource::Sampler(material_map_sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 17,
+                            resource: wgpu::BindingResource::TextureView(material_albedo_view),
                         },
                         wgpu::BindGroupEntry {
                             binding: 16,

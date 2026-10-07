@@ -19,14 +19,47 @@ let several defects through. This follow-up closes them.
 | F7 | 3D mesh geometry is a fixed 512x512 grid; ~24 s per 1080p frame for a 3800^2 DEM. | Bryce flyover prototype. |
 | F8 | **Terrain sun shading is in the wrong frame in every camera mode, including the default 2D mode.** The fragment shader builds its shading normal Y-up `(-dh/dx, s, -dh/dv)` = (east, up, south), but the sun direction (`decode_lighting.rs`) and view vectors arrive in the Z-up geometry frame (east, south, up) and are dotted unconverted. South-facing slopes are lit and north-facing slopes dark whatever the sun does; east/west response follows the sun's north-south component. Fixing it changes nearly every terrain golden and the shader hashes pinned by the signed recipe certificates. | Tilted-plane sweep, 2D mode, sun at 30 deg: faces_south 161 and faces_north 61 at every azimuth; a north sun lights east-facing slopes (181). |
 
-Stage 1 status: F1, F2, F5 (raster/vector blocks) and F6 are implemented with tests.
-F3's 3D azimuth conversion (compass - 90) is correct for the geometry frame but
-only half the fix: until F8 converts light and view vectors into the shading
-frame, `test_sun_lights_the_flank_facing_it[0.0-north-south]` fails (the other
-three azimuths pass because of F8's constant south bias). F8 needs an owner
-decision because of the golden and certificate churn.
+## Local implementation review (2026-10-05)
 
-## Stages (each its own reviewable commit set; this PR delivers stage 1)
+Published main was verified at `9f14e648cbf9e7e2f071d5c47b2eecad18f3180c`.
+Stage 1 (F1/F2/F3/F6/F8) is already on that base. The changes below are local,
+unmerged work in `D:/forge3d/.worktrees/sutura-overlays-main`.
+
+Stages 2-3 add native terrain-UV albedo draping, raster source-byte identity in
+CHRONOS and pixel caches, and terrain-camera projection of vectors and automatic
+world point, line and area labels. Lines/rings sample the DEM before projection.
+Both vector compositors retain projected depth and reject occluded pixels;
+polygon fills also use the visible terrain UV and original footprint/holes.
+World-unit widths resolve through the perspective camera. Generated line-label
+bounds include the atlas quads, and the text compositor consumes glyph rotations.
+Label projection, candidates and visibility remain compile-time decisions;
+bundle loading and rendering consume frozen plans. Serialized anchors bypass
+new projection, and gappy DEMs use the renderer's filled heightmap.
+
+The `globe` option follows the camera of MapScene's array-backed clipmap, which
+is flat without a globe streaming runtime. This proves the existing MapScene
+camera boundary, not geodetic COG globe-streaming support. Invalid world inputs
+produce structured validation/compile diagnostics before rendering.
+
+Native CPU depth compilation replaces Python per-cell triangle work. On the
+same flat DEM / 256x256 viewport workload, a 512x512 grid went from 36.3917 s to
+0.01948 s; a 3800x3800 grid took 1.5827 s. A separate asymmetric-grid comparison
+has byte-identical depth arrays for mesh, clipmap and globe-option cameras.
+These are CPU compilation measurements, not GPU timings. Label layers share
+the depth image during validation.
+
+Correction evidence is under `artifacts/sutura-corrections/` in the worktree.
+The earlier `artifacts/sutura-overlays/` captures remain relevant for absent
+overlay identity and the four original recipe round trips (SSIM 1.0 with
+identical reports/manifests); the correction run checks affected contracts.
+
+SUTURA remains **partial**. Stage 4/F7 mesh density and residency are excluded.
+Changed terrain-raster pixels and the shader fingerprints in signed recipe
+certificates require Milos approval. Protected references remain unchanged.
+The existing vector/label golden also failed before this work. Physical Metal
+is ABSENT; WASM and hosted CI are unrun. No narrower stage-3 scope is assumed.
+
+## Stages
 
 ### Stage 1: settings honoured, frame correct, wrong layers blocked
 1. Pass `camera.target` to the renderer; prove the CHRONOS camera hash covers it.
@@ -57,6 +90,16 @@ Re-approve `mapscene_terrain_raster{,.nvidia-vulkan,.metal}`.
 clipmap) and keeping DEM/imagery resident across CHRONOS frames.
 
 ## Compatibility
-Stage 1 changes output only for 3D camera modes (`mesh:zup`, clipmap): they
+The original stage-1 camera changes affect 3D camera modes (`mesh:zup`, clipmap): they
 become north-up with a correct sun, and 3D scenes with screen-stretched layers
 now raise instead of rendering wrong. The 2D `screen` mode is unchanged.
+
+Stages 2-3 preserve the absent-overlay pixels and the existing screen vector/label
+coordinate convention, including inline labels in 3D camera modes. Automatic
+terrain-camera label placement explicitly opts in through
+`LabelLayer.metadata={"coordinate_space": "world"}`; existing projected anchors
+and geometry authority retain their meaning. Raster imagery is now lit as terrain albedo in every
+camera mode, so raster-present pixels deliberately change and need golden
+approval. No bundle/report schema, signed certificate, committed golden or pinned
+hash is changed by this local implementation. The legacy screen height/material
+sampling stays intact; the new drape maps the complete logical screen tile.
