@@ -1231,9 +1231,8 @@ mod tests {
         // Both the ordinary geometry path and every clipmap morph lookup must
         // share the same reconstruction instead of drifting by callsite.
         assert!(source.contains("let h_raw = det_barrier(sample_height_bilinear(uv));"));
-        assert!(source.contains(
-            "let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"
-        ));
+        assert!(source
+            .contains("let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"));
         // The three offset taps barrier `level_base` before the add.
         assert_eq!(
             source.matches("sample_height_bilinear(level_base").count()
@@ -1250,9 +1249,8 @@ mod tests {
         assert!(!resolve.contains("textureSample(height_tex"));
         assert!(!resolve.contains("textureSampleLevel(height_tex"));
         assert_eq!(resolve.matches("textureLoad(height_tex").count(), 4);
-        assert!(resolve.contains(
-            "let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"
-        ));
+        assert!(resolve
+            .contains("let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"));
 
         // The CSM caster and visible surface must agree between texel centres.
         let shadow = terrain_shadow_depth();
@@ -1390,14 +1388,14 @@ mod fused_kernel_tests {
         let source = fused_kernel().unwrap();
         // main_terrain generates its candidate through the fused target...
         let main_terrain = body(&source, "main_terrain");
-        assert!(main_terrain
-            .contains("fusion_restir_candidate(&cand, hit.point, n, albedo, wi, &st);"));
+        assert!(
+            main_terrain.contains("fusion_restir_candidate(&cand, hit.point, n, albedo, wi, &st);")
+        );
         assert!(!main_terrain.contains("let target_pdf = select(0.0, 1.0"));
         // ...whose light-visibility term is the unified occlusion query...
         let candidate = body(&source, "fusion_restir_candidate");
         assert!(candidate.contains("visibility = shadow_transmittance(sray)"));
-        assert!(candidate
-            .contains("let target_pdf = floor_pdf + (1.0 - floor_pdf) * visibility;"));
+        assert!(candidate.contains("let target_pdf = floor_pdf + (1.0 - floor_pdf) * visibility;"));
         // ...and that query is the product of the three sub-occluders.
         let query = body(&source, "shadow_transmittance");
         assert!(query.contains("fusion_shadow_parts(ray, ray.tmax, true)"));
@@ -1440,8 +1438,9 @@ mod fused_kernel_tests {
     fn fused_kernel_uses_the_reservoir_sun_sample_in_seamless_mode() {
         let source = fused_kernel().unwrap();
         let main_terrain = body(&source, "main_terrain");
-        assert!(main_terrain
-            .contains("if (prev_valid) {\n            sun_dir = normalize(prev_r.sample.direction);"));
+        assert!(main_terrain.contains(
+            "if (prev_valid) {\n            sun_dir = normalize(prev_r.sample.direction);"
+        ));
         assert!(!main_terrain.contains("camera_flags == 0u && prev_valid"));
         assert!(hybrid_kernel().contains("camera_flags == 0u && prev_valid"));
     }
@@ -1467,5 +1466,61 @@ mod fused_kernel_tests {
         assert!(format!("{error}").contains("matched 2 times"));
         assert!(extract_block("abc", "x", "c", "probe").is_err());
         assert_eq!(extract_block("abc", "b", "c", "probe").unwrap(), "bc");
+    }
+}
+
+/// Drift gate for the four WGSL copies of `ShadowCascade` + `CsmUniforms`.
+///
+/// They cannot be collapsed into one definition yet: the assembled terrain
+/// source is hash-pinned (`PINNED_TERRAIN_SOURCE_HASH`), so injecting a shared
+/// prelude changes that hash and needs owner approval. Until then this test
+/// fails if any copy's fields (name, type, order) diverge, which is the
+/// back-and-forth this lock exists to stop.
+#[cfg(test)]
+mod csm_single_source_tests {
+    const COPIES: &[(&str, &str)] = &[
+        ("shadows.wgsl", include_str!("shaders/shadows.wgsl")),
+        (
+            "mesh_instanced.wgsl",
+            include_str!("shaders/mesh_instanced.wgsl"),
+        ),
+        (
+            "terrain_pbr_pom.wgsl",
+            include_str!("shaders/terrain_pbr_pom.wgsl"),
+        ),
+        (
+            "terrain_pbr.wgsl",
+            include_str!("viewer/terrain/shader_pbr/terrain_pbr.wgsl"),
+        ),
+    ];
+
+    fn struct_fields(source: &str, name: &str) -> Vec<String> {
+        let marker = format!("struct {name}");
+        let start = source
+            .find(&marker)
+            .unwrap_or_else(|| panic!("struct {name} not found"));
+        let open = source[start..].find('{').expect("open brace") + start;
+        let close = source[open..].find('}').expect("close brace") + open;
+        source[open + 1..close]
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or("").trim())
+            .filter(|line| !line.is_empty())
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect()
+    }
+
+    #[test]
+    fn csm_uniforms_wgsl_copies_are_identical() {
+        for name in ["ShadowCascade", "CsmUniforms"] {
+            let reference = struct_fields(COPIES[0].1, name);
+            assert!(!reference.is_empty(), "{name} has no fields");
+            for (file, text) in COPIES {
+                assert_eq!(
+                    struct_fields(text, name),
+                    reference,
+                    "{name} drifted in {file}; the WGSL copies must stay identical",
+                );
+            }
+        }
     }
 }

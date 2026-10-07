@@ -52,104 +52,16 @@ impl Default for ShadowMappingConfig {
     }
 }
 
-/// CSM uniform data for GPU
-/// Layout must match WGSL struct in terrain_pbr_pom.wgsl
-/// P0.2/M3: Expected size: 816 bytes (std140 alignment to 16-byte boundary)
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CsmUniforms {
-    /// Light direction in world space
-    pub light_direction: [f32; 4],
+// Contract A (terrain/mesh shadow uniforms: 864 bytes, 144-byte cascades) is
+// defined once in `crate::shadows::csm_types`. Re-export both names so every
+// module path shares a single layout instead of drifting copies.
+pub use crate::shadows::{CsmUniforms, ShadowCascade as CsmCascadeData};
 
-    /// Light view matrix  
-    pub light_view: [[f32; 4]; 4],
-
-    /// Shadow cascade data (up to 4 cascades)
-    pub cascades: [CsmCascadeData; 4],
-
-    /// Number of active cascades
-    pub cascade_count: u32,
-
-    /// PCF kernel size
-    pub pcf_kernel_size: u32,
-
-    /// Depth bias to prevent acne
-    pub depth_bias: f32,
-
-    /// Slope-scaled bias
-    pub slope_bias: f32,
-
-    /// Shadow map resolution
-    pub shadow_map_size: f32,
-
-    /// Debug visualization mode
-    pub debug_mode: u32,
-
-    /// P0.2/M3: EVSM exponents
-    pub evsm_positive_exp: f32,
-    pub evsm_negative_exp: f32,
-
-    /// Peter-panning prevention offset
-    pub peter_panning_offset: f32,
-
-    /// Enable unclipped depth
-    pub enable_unclipped_depth: u32,
-
-    /// Depth clip factor
-    pub depth_clip_factor: f32,
-
-    /// P0.2/M3: Active shadow technique (Hard=0, PCF=1, PCSS=2, VSM=3, EVSM=4, MSM=5)
-    pub technique: u32,
-
-    /// Technique feature flags
-    pub technique_flags: u32,
-
-    /// Padding to align technique_params to 16-byte boundary
-    pub _padding1: [f32; 3],
-
-    /// Technique parameters: [pcss_blocker_radius, pcss_filter_radius, moment_bias, light_size]
-    pub technique_params: [f32; 4],
-
-    /// Reserved for future technique parameters
-    pub technique_reserved: [f32; 4],
-
-    /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
-    pub cascade_blend_range: f32,
-
-    /// Padding for std430 alignment (storage buffer) - 27 floats to reach 864 total bytes
-    pub _padding2: [f32; 27],
-}
-
-// Compile-time size check - temporarily disabled to determine actual size
-// TODO: Re-enable after padding is correct
-// const _: () = assert!(
-//     std::mem::size_of::<CsmUniforms>() == 912,
-//     "CsmUniforms size mismatch with WGSL"
-// );
-
-/// GPU representation of a shadow cascade
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CsmCascadeData {
-    /// Light-space projection matrix
-    pub light_projection: [[f32; 4]; 4],
-
-    /// Combined light_view_proj matrix (projection * view)
-    /// Pre-computed for efficiency and to ensure consistency with shadow depth pass
-    pub light_view_proj: [[f32; 4]; 4],
-
-    /// Near plane distance
-    pub near_distance: f32,
-
-    /// Far plane distance
-    pub far_distance: f32,
-
-    /// Texel size in world space
-    pub texel_size: f32,
-
-    /// Padding for alignment
-    pub _padding: f32,
-}
+// Compile-time size check: the struct must match the WGSL storage layout.
+const _: () = assert!(
+    std::mem::size_of::<CsmUniforms>() == 864,
+    "CsmUniforms size mismatch with WGSL"
+);
 
 /// Shadow atlas information for debugging
 #[derive(Debug)]

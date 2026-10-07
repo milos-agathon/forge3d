@@ -9,6 +9,9 @@ impl TerrainScene {
     ) -> Result<NoopShadow> {
         use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
 
+        let identity_flat: [f32; 16] = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
         let identity_mat = [
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0, 0.0],
@@ -16,7 +19,7 @@ impl TerrainScene {
             [0.0, 0.0, 0.0, 1.0],
         ];
         let default_cascade = CsmCascadeData {
-            light_projection: identity_mat,
+            light_projection: identity_flat,
             light_view_proj: identity_mat,
             near_distance: 0.0,
             far_distance: 100000.0,
@@ -25,7 +28,7 @@ impl TerrainScene {
         };
         let csm_uniforms = CsmUniforms {
             light_direction: [0.0, -1.0, 0.0, 0.0],
-            light_view: identity_mat,
+            light_view: identity_flat,
             cascades: [default_cascade; 4],
             cascade_count: 0,
             pcf_kernel_size: 1,

@@ -72,7 +72,8 @@ pub struct ShadowCascade {
 }
 
 /// CSM uniform buffer data sent to GPU
-/// P0.2/M3: Must match shader std140 layout (816 bytes)
+/// Fog shadow contract: matches the `volumetric.wgsl` `FogCsmUniforms` prefix
+/// (80-byte cascades). Not the terrain/mesh `CsmUniforms` in `core::shadow_mapping`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CsmUniforms {
@@ -115,7 +116,7 @@ pub struct CsmUniforms {
     pub technique_reserved: [f32; 4],
     /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
     pub cascade_blend_range: f32,
-    /// Padding for std430 alignment (storage buffer) - 27 floats to reach 864 total bytes
+    /// Trailing padding; the fog shader (`FogCsmUniforms`) reads only the leading fields.
     pub _padding2: [f32; 27],
 }
 

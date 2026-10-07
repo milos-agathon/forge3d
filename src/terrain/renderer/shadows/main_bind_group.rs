@@ -3,81 +3,13 @@ use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl TerrainScene {
     pub(super) fn create_shadow_bind_group(&self) -> Result<wgpu::BindGroup> {
-        use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
+        use crate::core::shadow_mapping::CsmUniforms;
 
         let csm = &self.csm_renderer.uniforms;
         let terrain_csm_uniforms = CsmUniforms {
             light_direction: csm.light_direction,
-            light_view: [
-                [
-                    csm.light_view[0],
-                    csm.light_view[1],
-                    csm.light_view[2],
-                    csm.light_view[3],
-                ],
-                [
-                    csm.light_view[4],
-                    csm.light_view[5],
-                    csm.light_view[6],
-                    csm.light_view[7],
-                ],
-                [
-                    csm.light_view[8],
-                    csm.light_view[9],
-                    csm.light_view[10],
-                    csm.light_view[11],
-                ],
-                [
-                    csm.light_view[12],
-                    csm.light_view[13],
-                    csm.light_view[14],
-                    csm.light_view[15],
-                ],
-            ],
-            cascades: {
-                fn flat_to_2d(arr: &[f32; 16]) -> [[f32; 4]; 4] {
-                    [
-                        [arr[0], arr[1], arr[2], arr[3]],
-                        [arr[4], arr[5], arr[6], arr[7]],
-                        [arr[8], arr[9], arr[10], arr[11]],
-                        [arr[12], arr[13], arr[14], arr[15]],
-                    ]
-                }
-                [
-                    CsmCascadeData {
-                        light_projection: flat_to_2d(&csm.cascades[0].light_projection),
-                        light_view_proj: csm.cascades[0].light_view_proj,
-                        near_distance: csm.cascades[0].near_distance,
-                        far_distance: csm.cascades[0].far_distance,
-                        texel_size: csm.cascades[0].texel_size,
-                        _padding: 0.0,
-                    },
-                    CsmCascadeData {
-                        light_projection: flat_to_2d(&csm.cascades[1].light_projection),
-                        light_view_proj: csm.cascades[1].light_view_proj,
-                        near_distance: csm.cascades[1].near_distance,
-                        far_distance: csm.cascades[1].far_distance,
-                        texel_size: csm.cascades[1].texel_size,
-                        _padding: 0.0,
-                    },
-                    CsmCascadeData {
-                        light_projection: flat_to_2d(&csm.cascades[2].light_projection),
-                        light_view_proj: csm.cascades[2].light_view_proj,
-                        near_distance: csm.cascades[2].near_distance,
-                        far_distance: csm.cascades[2].far_distance,
-                        texel_size: csm.cascades[2].texel_size,
-                        _padding: 0.0,
-                    },
-                    CsmCascadeData {
-                        light_projection: flat_to_2d(&csm.cascades[3].light_projection),
-                        light_view_proj: csm.cascades[3].light_view_proj,
-                        near_distance: csm.cascades[3].near_distance,
-                        far_distance: csm.cascades[3].far_distance,
-                        texel_size: csm.cascades[3].texel_size,
-                        _padding: 0.0,
-                    },
-                ]
-            },
+            light_view: csm.light_view,
+            cascades: csm.cascades,
             cascade_count: csm.cascade_count,
             pcf_kernel_size: csm.pcf_kernel_size,
             depth_bias: csm.depth_bias,
