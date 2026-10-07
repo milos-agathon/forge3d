@@ -728,3 +728,22 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
             selected("workflow_dispatch", scope="tessella", family="tessella") is True
         )
         assert selected("workflow_dispatch", scope="m06", family="tessella") is False
+
+
+def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
+    from scripts.summarize_python_lane import summarize
+
+    workflow = yaml.load(_workflow("test-python-wheel.yml"), Loader=yaml.BaseLoader)
+    job = workflow["jobs"]["test"]
+    assert job["timeout-minutes"] == "35"
+    run = next(step for step in job["steps"] if step.get("name") == "Run full default Python lane")
+    assert "--durations=30 -rs --junitxml=python-full-junit.xml" in run["run"]
+    record = next(step for step in job["steps"] if "summarize_python_lane.py" in step.get("run", ""))
+    assert "always()" in record["if"]
+    report = tmp_path / "junit.xml"
+    report.write_text('<testsuites><testsuite><testcase classname="globe" name="constructor" time="0.01"><skipped message="explicit WARP omission"/></testcase><testcase classname="cpu" name="error_contract" time="2"><failure/></testcase></testsuite></testsuites>')
+    text = summarize(report)
+    assert "2 cases, 1 failures, 0 errors, 1 explicit skips" in text
+    assert "explicit WARP omission" in text
+    assert text.index("2.000s: cpu::error_contract") < text.index("0.010s: globe::constructor")
+    assert "ABSENT" in summarize(tmp_path / "missing.xml")

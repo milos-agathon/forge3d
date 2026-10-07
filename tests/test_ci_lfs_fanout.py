@@ -349,3 +349,12 @@ def test_m06_acceptance_keeps_only_unique_physical_coverage() -> None:
     assert "required M-06 NVIDIA/Vulkan viewer lane only" in picking
     assert "pytest.mark.interactive_viewer" in shadow
     assert 'os.environ.get("RUN_M06_VIEWER_CI") != "1"' in shadow
+
+
+def test_full_python_timing_artifact_does_not_upload_fixtures() -> None:
+    workflow = yaml.load((ROOT / ".github/workflows/test-python-wheel.yml").read_text(), Loader=yaml.BaseLoader)
+    steps = workflow["jobs"]["test"]["steps"]
+    upload = next(step for step in steps if step.get("name") == "Upload full Python timing and skip evidence")
+    assert "always()" in upload["if"]
+    assert upload["with"]["path"] == "python-full-junit.xml"
+    assert "matrix.python-version" in upload["with"]["name"]

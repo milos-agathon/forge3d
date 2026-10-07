@@ -390,7 +390,7 @@ Windows jobs were cancelled in both runs, and remain cancelled in the record:
 |---|---:|---:|---|
 | Visual Goldens NVIDIA / ORBIS SSIM — fixed locally; full CI pending | 111170313814 | 111293788855 | Historical SSIM 0.993359476432247 below unchanged 0.995 threshold. Fresh NVIDIA Vulkan render on 2026-10-07 reproduces it byte for byte using current-main sources; see the nightly-recovery follow-up below. Owner approved the replacement on 2026-10-07; all 40 ORBIS tests pass locally with no skips; fresh SSIM 1.0 / mean difference 0.0. Full CI pending. |
 | TESSELLA — fixed on main by PR #207 | 111170313895 | 111293788945 | Historical failures: five streaming-budget tests and one missing CPU BVH oracle. Merged PR #207 fixes them; run 37160548024, job 111315204953 passed |
-| Windows Python matrix — open | Four jobs listed above | Four jobs listed above | All four versions cancelled in both runs; not rechecked on current main |
+| Windows Python matrix — local correction prepared; hosted verification pending | Four jobs listed above | Four jobs listed above | Constructor-only tests stalled the hosted software lane. Nine GPU-heavy constructor cases now follow the explicit hosted-Windows terrain policy; the 35-minute timeout is unchanged. Fresh hosted matrix and WARP durations remain unrun. |
 | SUBSTRATIA optional Metal | 111170820518 | 111294523382 | `terrain-ci-probe: ABSENT — no CI-safe hardware adapter on this runner`, before tests |
 | Full Acceptance Summary | 111180391817 | 111308284181 | failure in both completed runs; no whole-run-green claim |
 
@@ -552,3 +552,37 @@ and **2.0**. Evidence is in `approved-golden-orbis.log` and
 `approved-golden/orbis/{junit.xml,orbis-metrics.json}` under the local evidence
 directory. This closes the snapshot mismatch locally; a full CI and next
 scheduled nightly are still required by the nightly-recovery task.
+
+
+### Hosted Windows constructor follow-up
+
+The 2026-10-06 Windows Python 3.12 job
+[112211794230](https://github.com/milos-agathon/forge3d/actions/runs/37444443735/job/112211794230)
+logged the last pre-GPU diagnostic at 10:05:12.2406302 UTC, then completed
+`test_snapshot_and_metrics_fail_closed_before_descent` at 10:15:41.4582329 UTC
+(**629.2176027 seconds**) and `test_constructor_accepts_declared_pathlike_source`
+at 10:26:27.3727706 UTC (**645.9145377 seconds**). These are measured log
+intervals, not `pytest --durations` output. Both tests only construct a
+`GlobeScene`; no frame is rendered. Its constructor eagerly constructs
+`TerrainRenderer` and its pipelines. Thus construction is the demonstrated
+bottleneck; pipeline compilation on WARP is the likely internal cost, not a
+separately measured stage.
+
+Seven functions (nine parameterized cases) that initialize a real globe now
+use `offscreen` and the existing hosted-Windows terrain guard. This omits the
+GPU-heavy cases only on GitHub-hosted Windows without the explicit hardware
+opt-in, with a recorded reason naming the software adapter cost and the
+physical NVIDIA Vulkan acceptance that retains their coverage. Pure pre-GPU
+validation tests still run. Linux, macOS, local runs and the opted-in physical
+NVIDIA lane retain the constructor checks.
+
+Local policy validation recorded all nine skips in 0.19 seconds, with no globe
+constructed; this simulated the hosted policy on this physical machine and
+is **not** WARP execution. The same nine cases pass on the explicit NVIDIA
+Vulkan lane. Workflow/policy tests passed (43 tests). Full Python jobs now run
+with `--durations=30 -rs --junitxml=python-full-junit.xml`, append measured
+completion/skip/duration information to their summary and upload the JUnit
+report even when pytest fails. A missing report is explicitly `ABSENT`.
+The timeout remains 35 minutes. Fresh hosted 3.10–3.13 full runs, their
+`--durations=30` results and completion within that timeout are still required;
+local-only authorization does not permit publishing these workflow changes.

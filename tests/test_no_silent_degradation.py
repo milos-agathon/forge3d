@@ -888,3 +888,24 @@ def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
     assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
     assert "continue-on-error: true" in metal_diagnostic
     assert "test-substratia-gpu," not in acceptance.split("\n    runs-on:", 1)[0]
+
+
+def test_hosted_windows_globe_omission_is_explicit_and_scoped():
+    import ast
+
+    source = (ROOT / "tests/test_globe_floating_origin.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    condition = next(node for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "_HOSTED_WINDOWS_GLOBE_SKIP" for target in node.targets))
+    assert ast.unparse(condition.value.args[0]) == "_running_on_unsupported_hosted_windows_ci()"
+    reason = next(keyword.value.value for keyword in condition.value.keywords if keyword.arg == "reason")
+    assert "software-adapter" in reason and "NVIDIA Vulkan ORBIS acceptance" in reason
+    marked = {node.name for node in tree.body if isinstance(node, ast.FunctionDef) and any(isinstance(dec, ast.Name) and dec.id == "_HOSTED_WINDOWS_GLOBE_SKIP" for dec in node.decorator_list)}
+    assert marked == {
+        "test_snapshot_and_metrics_fail_closed_before_descent",
+        "test_constructor_accepts_declared_pathlike_source",
+        "test_failed_later_overview_seed_leaves_scene_state_unchanged",
+        "test_custom_waypoints_are_validated_before_render",
+        "test_entire_custom_path_is_validated_before_any_render",
+        "test_extreme_altitude_rejects_without_mutating_scene",
+        "test_oblique_camera_distance_is_bounded_before_render",
+    }

@@ -109,4 +109,17 @@ jobs:
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: |
-          python scripts/ci_pytest_lane.py --profile full -v --tb=short
+          python scripts/ci_pytest_lane.py --profile full -v --tb=short --durations=30 -rs --junitxml=python-full-junit.xml
+
+      - name: Record full Python timings and explicit skips
+        if: always() && inputs.test_mode == 'full'
+        run: python scripts/summarize_python_lane.py python-full-junit.xml
+
+      - name: Upload full Python timing and skip evidence
+        if: always() && inputs.test_mode == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-full-${{ runner.os }}-${{ matrix.python-version }}
+          path: python-full-junit.xml
+          if-no-files-found: warn
+          retention-days: 1
