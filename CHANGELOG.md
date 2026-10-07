@@ -14,6 +14,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Changed
 - Refreshed the terrain-raster reference images for terrain-albedo draping.
+- Added the single-rebase, world-coordinate f32, and anchoring-boundary gates to the fast PR contract lane.
 
 ### Fixed
 - Require completed green full CI on the exact release SHA before every publish job; narrower manual acceptance scopes cannot qualify. Explicit dry runs only build/test artifacts, and same-HEAD full CI dispatches now pass candidate materialization.
