@@ -1333,6 +1333,19 @@ jobs:
           python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE
 
+      # D02 requires physical GPU proof; hosted full matrices deselect this file.
+      - name: Run D02 thematic raster physical GPU gate
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "d02"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $env:FORGE3D_D02_ARTIFACT_DIR = $dir
+          $junit = Join-Path $dir "junit.xml"
+          python -m pytest tests/test_raster_styles_gpu.py -v --tb=short --junitxml="$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
       # CHRONOS GPU cases (repeat-run cache, per-frame certificates, physical
       # pixel-hash replay, samples>1, popping) skip in the hosted default lane;
       # this is their only executing lane.

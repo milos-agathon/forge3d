@@ -109,4 +109,4 @@ jobs:
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: |
-          python scripts/ci_pytest_lane.py --profile full -v --tb=short
+          python scripts/ci_pytest_lane.py --profile full -v --tb=short --deselect=tests/test_raster_styles_gpu.py
