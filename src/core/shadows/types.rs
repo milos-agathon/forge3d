@@ -55,10 +55,13 @@ impl Default for CsmConfig {
     }
 }
 
-/// Shadow cascade data
+/// Fog shadow cascade: matches `volumetric.wgsl`'s `FogShadowCascade` (80 bytes).
+///
+/// Distinct from `shadows::ShadowCascade`, the terrain/mesh cascade (144 bytes),
+/// which also carries a combined `light_view_proj`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct ShadowCascade {
+pub struct FogShadowCascade {
     /// Light-space projection matrix for this cascade
     pub light_projection: [[f32; 4]; 4],
     /// Far plane distance for this cascade
@@ -71,18 +74,22 @@ pub struct ShadowCascade {
     pub _padding: f32,
 }
 
-/// CSM uniform buffer data sent to GPU
-/// Fog shadow contract: matches the `volumetric.wgsl` `FogCsmUniforms` prefix
-/// (80-byte cascades). Not the terrain/mesh `CsmUniforms` in `core::shadow_mapping`.
+/// Fog CSM uniform data sent to the GPU.
+///
+/// Covers the whole of `volumetric.wgsl`'s `FogCsmUniforms`; the trailing
+/// fields and padding here are unused by the fog shader. Distinct from
+/// `shadows::CsmUniforms`, the terrain/mesh contract: 608 bytes with 80-byte
+/// cascades against 864 with 144-byte cascades. `fog_layout_lock_tests` is what
+/// keeps the two apart.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CsmUniforms {
+pub struct FogCsmUniforms {
     /// Light direction in world space
     pub light_direction: [f32; 4],
     /// Light view matrix (world to light space)
     pub light_view: [[f32; 4]; 4],
     /// Shadow cascades data
-    pub cascades: [ShadowCascade; 4],
+    pub cascades: [FogShadowCascade; 4],
     /// Number of active cascades
     pub cascade_count: u32,
     /// PCF kernel size
@@ -119,6 +126,12 @@ pub struct CsmUniforms {
     /// Trailing padding; the fog shader (`FogCsmUniforms`) reads only the leading fields.
     pub _padding2: [f32; 27],
 }
+
+// Compile-time size checks: the cascade must match `volumetric.wgsl` exactly,
+// and the uniform buffer must stay large enough to cover the shader's 432-byte
+// struct. Neither was asserted anywhere before.
+const _: () = assert!(std::mem::size_of::<FogShadowCascade>() == 80);
+const _: () = assert!(std::mem::size_of::<FogCsmUniforms>() == 608);
 
 /// Directional light configuration for shadow casting
 #[derive(Debug, Clone)]
