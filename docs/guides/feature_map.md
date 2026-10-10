@@ -19,6 +19,7 @@ organized by workflow rather than by Rust module layout.
 | Native/offscreen rendering | `Scene`, `Session`, `TerrainRenderer`, `render_offline` | `terrain_atmosphere_path_demo.py`, `triangle_png.py` |
 | Match a compatible terrain reference | `recover_scene`, `RecoveredScene` | GPU acceptance scene; this estimates surface colour, sunlight, and haze without changing an existing map on its own |
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |
+| Ordered map composition | `RenderPassInput`, `RenderPassSpec`, `MapScene.render_passes` | [Composition contracts](ordered_map_composition.md), [physical render example](../examples/mapscene_render_passes.py) |
 | Geometry, mesh, vector, SDF, path tracing | `geometry`, `mesh`, `vector`, `sdf`, `path_tracing` | API-level usage; not every module has a dedicated showcase script |
 | Device and memory diagnostics | `has_gpu`, `device_probe`, `mem` | diagnostics and tooling flows rather than gallery scripts |
 

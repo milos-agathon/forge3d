@@ -59,6 +59,8 @@ def test_mapscene_public_api_is_documented_with_truthful_support_levels():
     assert "`unsupported`" in offline
     assert "`Pro-gated`" in offline
     assert "`placeholder/fallback`" in offline
+    assert "MapScene.render_passes" in offline and "MapScene.render_passes" in api
+    assert "python_ordered_rgba_composition" in api
 
 
 def test_feature_004_artifacts_do_not_keep_stale_tbd_or_later_owned_wording():
