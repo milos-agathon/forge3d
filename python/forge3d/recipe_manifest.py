@@ -213,6 +213,7 @@ class RecipeManifest:
     # camera+terrain hash) so a reloaded bundle reproduces the identical cull.
     compiled_label_plans: Mapping[str, Any] = field(default_factory=dict)
     depth_cull: Mapping[str, Any] = field(default_factory=dict)
+    compiled_render_passes: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.source_examples = [str(path) for path in self.source_examples]
@@ -236,6 +237,8 @@ class RecipeManifest:
         self.open_questions = [str(question) for question in self.open_questions]
         self.compiled_label_plans = _dict(self.compiled_label_plans)
         self.depth_cull = _dict(self.depth_cull)
+        self.compiled_render_passes = canonical_json_value(
+            _dict(self.compiled_render_passes), error_context="Compiled render passes")
 
 
 def manifest_from_dict(data: Mapping[str, Any]) -> RecipeManifest:
@@ -265,6 +268,7 @@ def manifest_from_dict(data: Mapping[str, Any]) -> RecipeManifest:
         open_questions=_list(data.get("open_questions")),
         compiled_label_plans=_dict(data.get("compiled_label_plans")),
         depth_cull=_dict(data.get("depth_cull")),
+        compiled_render_passes=_dict(data.get("compiled_render_passes")),
     )
 
 
@@ -300,6 +304,8 @@ def manifest_to_dict(manifest: RecipeManifest) -> dict[str, Any]:
     if manifest.compiled_label_plans or manifest.depth_cull:
         payload["compiled_label_plans"] = _json_value(manifest.compiled_label_plans)
         payload["depth_cull"] = _json_value(manifest.depth_cull)
+    if manifest.compiled_render_passes:
+        payload["compiled_render_passes"] = _json_value(manifest.compiled_render_passes)
     return payload
 
 
@@ -367,6 +373,9 @@ def recipe_manifest(value: Any, *, golden_fixture_intent: Mapping[str, Any] | No
         },
         "layers": layers,
     }
+    if recipe.get("render_passes"):
+        manifest["render_passes"] = canonical_json_value(
+            recipe["render_passes"], error_context="Render pass summary")
     golden_payload = _golden_fixture_payload(golden_fixture_intent)
     if golden_payload is not None:
         manifest["golden_fixture_intent"] = golden_payload
@@ -459,7 +468,15 @@ def _recipe_payload(value: Any) -> Mapping[str, Any]:
     if hasattr(value, "recipe"):
         value = value.recipe
     if hasattr(value, "to_dict") and callable(value.to_dict):
-        payload = value.to_dict()
+        from inspect import signature
+
+        # Detect the serializer's explicit capability without importing any
+        # scene/native backend into this offline manifest module.
+        try:
+            compact = "include_pass_data" in signature(value.to_dict).parameters
+        except (TypeError, ValueError):
+            compact = False  # Opaque serializers retain their existing call.
+        payload = value.to_dict(include_pass_data=False) if compact else value.to_dict()
     elif isinstance(value, Mapping):
         payload = dict(value)
     else:
@@ -467,6 +484,17 @@ def _recipe_payload(value: Any) -> Mapping[str, Any]:
     recipe = payload.get("recipe") if isinstance(payload.get("recipe"), Mapping) else payload
     if not isinstance(recipe, Mapping):
         raise TypeError("recipe_manifest could not find a recipe mapping")
+    # Self-contained mapping inputs necessarily carry pixels. Normalize each
+    # inline snapshot once so all public representations hash the same recipe.
+    passes = recipe.get("render_passes") or {}
+    images = passes.get("inputs") or {}
+    if any("rgba" in image for image in images.values()):
+        from .render_pass import RenderPassInput
+
+        recipe = dict(recipe)
+        recipe["render_passes"] = dict(passes, inputs={
+            name: RenderPassInput.from_dict(image)._asset_descriptor() if "rgba" in image else dict(image)
+            for name, image in images.items()})
     return recipe
 
 
