@@ -677,6 +677,8 @@ from .label_plan import (
 # Typed MapScene recipe contract
 # -----------------------------------------------------------------------------
 from .map_scene import (
+    RenderPassInput,
+    RenderPassSpec,
     CompiledScenePlan,
     FontAtlas,
     FontFallbackRange,
@@ -1044,6 +1046,8 @@ __all__ = [
     "PriorityClass",
     "RejectedLabel",
     # Typed MapScene recipe contract
+    "RenderPassInput",
+    "RenderPassSpec",
     "MapScene",
     "MapSceneNativeUnavailable",
     "MapSceneTextLayoutError",

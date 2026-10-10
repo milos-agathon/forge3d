@@ -343,7 +343,9 @@ def test_load_bundle_rejects_future_bundle_version(tmp_path):
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
-    with pytest.raises(ValueError, match=rf"999 > supported version {BUNDLE_VERSION}"):
+    from forge3d.bundle import COMPOSITION_BUNDLE_VERSION
+
+    with pytest.raises(ValueError, match=rf"999 > supported version {COMPOSITION_BUNDLE_VERSION}"):
         f3d.MapScene.load_bundle(bundle_path)
 
 

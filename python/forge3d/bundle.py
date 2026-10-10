@@ -27,6 +27,9 @@ from .diagnostics import ValidationReport
 # Version 3 adds the frozen compile-phase plan (scene/compiled_plan.json).
 # Version 2 bundles remain readable: MapScene.load_bundle recompiles once.
 BUNDLE_VERSION = 3
+# Composition bundles use binary snapshots and must be rejected by v3 readers.
+# Keep the ordinary bundle writer/default version unchanged.
+COMPOSITION_BUNDLE_VERSION = 4
 BUNDLE_EXTENSION = "forge3d"
 _LABEL_KINDS = {"point", "line", "curved", "callout"}
 
@@ -639,13 +642,15 @@ class BundleManifest:
             json.dump(self.to_dict(), handle, indent=2)
 
     @classmethod
-    def load(cls, path: Path) -> "BundleManifest":
+    def load(cls, path: Path, *, allow_composition: bool = False) -> "BundleManifest":
+        """Read manifest metadata; only MapScene opts into composition v4."""
         with path.open(encoding="utf-8") as handle:
             data = json.load(handle)
         manifest = cls.from_dict(data)
-        if manifest.version > BUNDLE_VERSION:
+        supported_version = COMPOSITION_BUNDLE_VERSION if allow_composition else BUNDLE_VERSION
+        if manifest.version > supported_version:
             raise ValueError(
-                f"Bundle version {manifest.version} > supported version {BUNDLE_VERSION}"
+                f"Bundle version {manifest.version} > supported version {supported_version}"
             )
         return manifest
 

@@ -25,6 +25,14 @@ from forge3d._native import NATIVE_AVAILABLE, get_native_module
 from _toml_compat import load_toml
 
 
+def test_d04_python_composition_public_surface():
+    from forge3d.map_scene import RenderPassInput, RenderPassSpec
+
+    for name, value in (("RenderPassInput", RenderPassInput), ("RenderPassSpec", RenderPassSpec)):
+        assert name in f3d.__all__ and getattr(f3d, name) is value
+    assert callable(f3d.MapScene.render_passes)
+
+
 def test_d02_native_raster_overlay_constructor_registered():
     native = get_native_module()
     assert callable(native.OverlayLayer.from_raster_rgba)

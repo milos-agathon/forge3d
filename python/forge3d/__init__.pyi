@@ -108,6 +108,8 @@ from .label_plan import (
     RejectedLabel,
 )
 from .map_scene import (
+    RenderPassInput as RenderPassInput,
+    RenderPassSpec as RenderPassSpec,
     CompiledScenePlan as CompiledScenePlan,
     FontAtlas as FontAtlas,
     FontFallbackRange as FontFallbackRange,

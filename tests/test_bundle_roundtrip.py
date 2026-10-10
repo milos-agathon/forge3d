@@ -185,6 +185,37 @@ def test_manifest_version_check():
             BundleManifest.load(manifest_path)
 
 
+def test_composition_version_is_opt_in_and_not_loaded_as_generic_bundle(tmp_path):
+    from forge3d.map_scene import MapScene, TerrainSource, LightingPreset, OutputSpec
+    from forge3d.render_pass import RenderPassInput, RenderPassSpec
+    from forge3d.viewer import ViewerHandle
+    import numpy as np
+
+    scene = MapScene(terrain=TerrainSource(crs='EPSG:3857'), lighting=LightingPreset(),
+                     output=OutputSpec(1, 1),
+                     pass_specs=[RenderPassSpec('out', 'color', ('a',))],
+                     pass_inputs={'a': RenderPassInput(np.ones((1, 1, 4)))})
+    scene.save_bundle(tmp_path / 'composition')
+    root = tmp_path / 'composition.forge3d'
+    manifest_path = root / 'manifest.json'
+    with pytest.raises(ValueError, match='Bundle version 4 > supported version 3'):
+        BundleManifest.load(manifest_path)
+    assert BundleManifest.load(manifest_path, allow_composition=True).version == 4
+    with pytest.raises(ValueError, match='Bundle version 4 > supported version 3'):
+        load_bundle(root)
+    # Reject before launching a viewer or sending IPC; this is a loader gate test.
+    with pytest.raises(ValueError, match='Bundle version 4 > supported version 3'):
+        ViewerHandle.load_bundle(None, root)
+    assert MapScene.load_bundle(root).recipe.pass_specs
+
+
+def test_default_manifest_reader_preserves_future_version_cap(tmp_path):
+    path = tmp_path / 'manifest.json'
+    BundleManifest(version=999, name='future', created_at='2026-10-09').save(path)
+    with pytest.raises(ValueError, match='Bundle version 999 > supported version 3'):
+        BundleManifest.load(path)
+
+
 def test_checksum_verification():
     """load_bundle verifies file checksums."""
     with tempfile.TemporaryDirectory() as tmpdir:

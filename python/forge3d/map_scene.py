@@ -118,6 +118,7 @@ from .diagnostics import (
     unsupported_tile_format_diagnostic,
     validate_label_support,
 )
+from .render_pass import RenderPassInput, RenderPassSpec, compile_passes, decode_passes, execute_passes
 
 if TYPE_CHECKING:
     from .graticule import GraticuleSpec
@@ -177,6 +178,8 @@ class CompiledScenePlan:
     manifest: Any
     validation_report: "ValidationReport"
     frame: Any | None = None
+    render_passes_json: str | None = None
+    render_pass_inputs: Mapping[str, RenderPassInput] = field(default_factory=dict, repr=False, compare=False)
 
 
 def _native_scene_class() -> Any | None:
@@ -5054,13 +5057,25 @@ class SceneRecipe:
     render_policy: str = RenderFailurePolicy.CONTINUE_ON_WARNING
     diagnostics_policy: Mapping[str, Any] | None = None
     reproducibility_profile: ReproducibilityProfile | None = None
+    pass_specs: Sequence[RenderPassSpec] = field(default_factory=tuple)
+    pass_inputs: Mapping[str, RenderPassInput] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.render_policy = RenderFailurePolicy.validate(self.render_policy)
         self.layers = tuple(self.layers or ())
+        self.pass_specs = tuple(self.pass_specs)
+        self.pass_inputs = dict(self.pass_inputs)
+        if self.pass_specs or self.pass_inputs:
+            self._pass_payload()
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def _pass_payload(self, *, include_data: bool = False) -> dict[str, Any]:
+        if self.output is None:
+            raise ValueError("render passes require OutputSpec dimensions")
+        return compile_passes(self.pass_specs, self.pass_inputs, (self.output.height, self.output.width),
+                              include_data=include_data)
+
+    def to_dict(self, *, include_pass_data: bool = True) -> dict[str, Any]:
+        payload = {
             "kind": "scene_recipe",
             "terrain": _json_safe(self.terrain),
             "camera": _json_safe(self.camera),
@@ -5077,6 +5092,9 @@ class SceneRecipe:
                 else None
             ),
         }
+        if self.pass_specs or self.pass_inputs:
+            payload["render_passes"] = self._pass_payload(include_data=include_pass_data)
+        return payload
 
 
 def _camera_from_preset(current: OrbitCamera, terrain: TerrainSource, camera_data: Mapping[str, Any]) -> OrbitCamera:
@@ -5182,6 +5200,8 @@ def _apply_mapscene_lighting_preset(recipe: SceneRecipe) -> SceneRecipe:
         render_policy=recipe.render_policy,
         diagnostics_policy=recipe.diagnostics_policy,
         reproducibility_profile=reproducibility_profile,
+        pass_specs=recipe.pass_specs,
+        pass_inputs=recipe.pass_inputs,
     )
 
 
@@ -5382,6 +5402,8 @@ def _apply_scene_alignment(recipe: SceneRecipe) -> SceneRecipe:
         render_policy=recipe.render_policy,
         diagnostics_policy=recipe.diagnostics_policy,
         reproducibility_profile=recipe.reproducibility_profile,
+        pass_specs=recipe.pass_specs,
+        pass_inputs=recipe.pass_inputs,
     )
 
 
@@ -5414,6 +5436,8 @@ class MapScene:
         render_policy: str = RenderFailurePolicy.CONTINUE_ON_WARNING,
         diagnostics_policy: Mapping[str, Any] | None = None,
         reproducibility_profile: ReproducibilityProfile | None = None,
+        pass_specs: Sequence[RenderPassSpec] | None = None,
+        pass_inputs: Mapping[str, RenderPassInput] | None = None,
     ) -> None:
         if recipe is not None and any(
             value is not None
@@ -5427,6 +5451,8 @@ class MapScene:
                 map_furniture,
                 diagnostics_policy,
                 reproducibility_profile,
+                pass_specs,
+                pass_inputs,
             )
         ):
             raise TypeError("Pass either recipe or recipe keyword components, not both")
@@ -5444,6 +5470,8 @@ class MapScene:
                 render_policy=render_policy,
                 diagnostics_policy=diagnostics_policy,
                 reproducibility_profile=reproducibility_profile,
+                pass_specs=pass_specs or (),
+                pass_inputs=pass_inputs or {},
             )
         recipe = _apply_mapscene_lighting_preset(recipe)
         recipe = _apply_scene_alignment(recipe)
@@ -5559,7 +5587,8 @@ class MapScene:
         return dict(data)
 
     @classmethod
-    def _recipe_from_dict(cls, data: Mapping[str, Any]) -> SceneRecipe:
+    def _recipe_from_dict(cls, data: Mapping[str, Any],
+                          pass_inputs: Mapping[str, RenderPassInput] | None = None) -> SceneRecipe:
         from .raster_style import raster_style_from_dict, raster_values_from_dict
         terrain_data = data.get("terrain") or {}
         camera_data = data.get("camera") or {}
@@ -5567,6 +5596,7 @@ class MapScene:
         output_data = data.get("output") or {}
         furniture_data = data.get("map_furniture")
         reproducibility_data = data.get("reproducibility_profile")
+        passes, inputs = decode_passes(data.get("render_passes") or {}, pass_inputs)
         return SceneRecipe(
             terrain=TerrainSource(
                 path=terrain_data.get("path"),
@@ -5595,6 +5625,8 @@ class MapScene:
                 overrides=lighting_data.get("overrides") or {},
             ),
             layers=tuple(cls._layer_from_dict(layer) for layer in data.get("layers") or ()),
+            pass_specs=passes,
+            pass_inputs=inputs,
             output=OutputSpec(
                 width=int(output_data.get("width", 1)),
                 height=int(output_data.get("height", 1)),
@@ -5643,18 +5675,31 @@ class MapScene:
     def load_bundle(cls, path: str | Path) -> "MapScene":
         bundle_path = Path(path)
         manifest_path = bundle_path / "manifest.json"
+        bundle_manifest = None
         if manifest_path.exists():
             from .bundle import BundleManifest
 
-            # Enforces the bundle version contract: version > BUNDLE_VERSION
-            # raises ValueError instead of silently loading a future schema.
-            BundleManifest.load(manifest_path)
+            # Reject unsupported future versions before reading scene payloads.
+            bundle_manifest = BundleManifest.load(manifest_path, allow_composition=True)
         recipe_path = bundle_path / "scene" / "mapscene_recipe.json"
         if not recipe_path.exists():
             raise FileNotFoundError(f"MapScene bundle recipe not found: {recipe_path}")
         with recipe_path.open("r", encoding="utf-8") as handle:
             recipe_payload = json.load(handle)
-        scene = cls(recipe=cls._recipe_from_dict(recipe_payload))
+        pass_inputs = None
+        pass_payload = recipe_payload.get("render_passes") or {}
+        from .bundle import COMPOSITION_BUNDLE_VERSION
+
+        if (bundle_manifest is not None and bundle_manifest.version == COMPOSITION_BUNDLE_VERSION
+                and not pass_payload.get("passes")):
+            raise ValueError("version 4 MapScene bundles require nonempty render passes")
+        if pass_payload:
+            from ._render_pass_bundle import load_snapshots
+
+            if bundle_manifest is None or bundle_manifest.version != COMPOSITION_BUNDLE_VERSION:
+                raise ValueError("render pass bundles require version 4")
+            pass_inputs = load_snapshots(bundle_path, pass_payload, bundle_manifest.checksums)
+        scene = cls(recipe=cls._recipe_from_dict(recipe_payload, pass_inputs))
         scene.last_bundle_path = str(bundle_path)
         compiled_path = bundle_path / "scene" / "compiled_plan.json"
         if compiled_path.exists():
@@ -5662,7 +5707,7 @@ class MapScene:
 
             scene._rehydrate_compiled_plan(load_manifest(compiled_path))
         else:
-            # v2 read path (BUNDLE_VERSION < 3): no frozen compiled plan on
+            # v2 read path: no frozen compiled plan on
             # disk — recompile once from the serialized recipe.
             scene.compile_plan()
         state_path = bundle_path / "scene" / "state.json"
@@ -5675,6 +5720,8 @@ class MapScene:
         return scene
 
     def validate(self) -> ValidationReport:
+        if self.recipe.pass_specs or self.recipe.pass_inputs:
+            self.recipe._pass_payload()
         self.compiled_label_plans = {}
         diagnostics: list[Diagnostic] = []
         layer_summaries: list[LayerSummary] = []
@@ -6333,7 +6380,7 @@ class MapScene:
         from .recipe_manifest import RecipeManifest
 
         report = self.validate()
-        recipe_payload = self.recipe.to_dict()
+        recipe_payload = self.recipe.to_dict(include_pass_data=False)
         recipe_hash = _stable_hash(recipe_payload)
         camera_terrain_key = _stable_hash(
             {
@@ -6410,6 +6457,7 @@ class MapScene:
                 self.recipe.output.to_dict() if self.recipe.output is not None else {}
             ),
             compiled_label_plans=compiled_label_plans,
+            compiled_render_passes=recipe_payload.get("render_passes") or {},
             depth_cull={
                 "source": "compile_phase",
                 "depth_inputs": depth_authorities,
@@ -6428,6 +6476,9 @@ class MapScene:
             label_plans=MappingProxyType(label_plans),
             manifest=manifest,
             validation_report=report,
+            render_passes_json=(json.dumps(manifest.compiled_render_passes, sort_keys=True, allow_nan=False)
+                                if manifest.compiled_render_passes else None),
+            render_pass_inputs=MappingProxyType(dict(self.recipe.pass_inputs)),
         )
         self.compiled_plan = compiled
         return compiled
@@ -6445,12 +6496,18 @@ class MapScene:
         }
         self.compiled_label_plans = dict(label_plans)
         depth_cull = dict(manifest.depth_cull or {})
+        pass_payload = self.recipe.to_dict(include_pass_data=False).get("render_passes") or {}
+        if manifest.compiled_render_passes != pass_payload:
+            raise ValueError("compiled render passes do not match the bundle recipe")
         compiled = CompiledScenePlan(
-            recipe_hash=_stable_hash(self.recipe.to_dict()),
+            recipe_hash=_stable_hash(self.recipe.to_dict(include_pass_data=False)),
             camera_terrain_key=str(depth_cull.get("camera_terrain_key") or ""),
             label_plans=MappingProxyType(label_plans),
             manifest=manifest,
             validation_report=report,
+            render_passes_json=(json.dumps(manifest.compiled_render_passes, sort_keys=True, allow_nan=False)
+                                if manifest.compiled_render_passes else None),
+            render_pass_inputs=MappingProxyType(dict(self.recipe.pass_inputs)),
         )
         self.compiled_plan = compiled
         return compiled
@@ -6463,7 +6520,7 @@ class MapScene:
         render/bundle would carry frozen state from a recipe that no longer
         exists.
         """
-        current_hash = _stable_hash(self.recipe.to_dict())
+        current_hash = _stable_hash(self.recipe.to_dict(include_pass_data=False))
         compiled = self.compiled_plan
         if compiled is None or compiled.recipe_hash != current_hash:
             return self.compile_plan()
@@ -6488,6 +6545,12 @@ class MapScene:
         cache: "str | os.PathLike[str] | None" = None,
     ) -> ValidationReport:
         """Render the scene; ``cache`` holds path-free per-scene subfolders."""
+        if self.recipe.pass_specs:
+            raise MapSceneNativeUnavailable(diagnostic_block(
+                layer="render_passes",
+                reason="Configured image passes require MapScene.render_passes, the explicit Python compositor",
+                required_native="native render-pass composition is unavailable",
+            ))
         output = self.recipe.output
         target = path or (output.path if output is not None else None)
         cache_eligible = bool(
@@ -6576,6 +6639,69 @@ class MapScene:
             if sha is not None:
                 self.last_render_metadata["certificate_payload_sha256"] = sha
         return report
+
+    def render_passes(
+        self,
+        passes: Sequence[RenderPassSpec] | None = None,
+        inputs: Mapping[str, RenderPassInput] | None = None,
+        path: str | None = None,
+        *,
+        certificate: "bool | str | os.PathLike[str]" = False,
+        cache: "str | os.PathLike[str] | None" = None,
+    ) -> ValidationReport:
+        """Compose named RGBA snapshots, or replay the compiled bundle passes.
+
+        Supply both ``passes`` and ``inputs`` to replace the recipe's pass
+        specification. With neither, replay the frozen plan directly. With
+        no configured passes, retain ordinary native ``render`` behavior,
+        including ``certificate`` and ``cache`` controls. Composition rejects
+        those native controls before changing the saved specification.
+        """
+        if (passes is None) != (inputs is None):
+            raise ValueError("supply both passes and inputs, or neither for replay")
+        output = self.recipe.output
+        if passes is not None and inputs is not None:
+            if not passes:
+                raise ValueError("explicit passes must be nonempty; omit passes and inputs for replay")
+            if output is None:
+                raise ValueError("render passes require OutputSpec dimensions")
+        if passes is None and not self.recipe.pass_specs:
+            if certificate or cache is not None:
+                return self.render(path, certificate=certificate, cache=cache)
+            return self.render(path)
+        if certificate or cache is not None:
+            raise ValueError("render pass composition does not support native certificates or render cache")
+        target = path or (output.path if output is not None else None)
+        if not target:
+            raise ValueError("MapScene.render_passes requires a render path or OutputSpec.path")
+        if (output is None or output.format.lower() != "png" or output.hdr or output.aovs
+                or output.bit_depth not in (8, 16)):
+            raise ValueError("render pass composition supports 8/16-bit PNG without HDR or AOV exports")
+        if passes is not None and inputs is not None:
+            compile_passes(passes, inputs, (output.height, output.width), include_data=False)
+            self.recipe.pass_specs = tuple(passes)
+            self.recipe.pass_inputs = dict(inputs)
+        compiled = self._compiled_plan_for_current_recipe()
+        report = compiled.validation_report
+        if report.render_blocked(self.render_policy):
+            raise RuntimeError("MapScene.render_passes blocked by diagnostics")
+        if compiled.render_passes_json is None:
+            raise RuntimeError("compiled scene has no render pass specification")
+        rgba = execute_passes(compiled.render_passes_json, (output.height, output.width), compiled.render_pass_inputs)
+        from .helpers.offscreen import save_png_deterministic
+
+        target_path = Path(target)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        save_png_deterministic(target_path, rgba, bit_depth=output.bit_depth)
+        self.last_render_path = str(target_path)
+        self.last_render_backend = "python_ordered_rgba_composition"
+        self.last_render_metadata = {
+            "composition_backend": self.last_render_backend,
+            "pass_order": [item["name"] for item in json.loads(compiled.render_passes_json)["passes"]],
+            "color_space": "srgb", "alpha_mode": "straight",
+            "format": "png", "bit_depth": output.bit_depth,
+        }
+        return self._report_with_feature(report, "mapscene.render_passes", "supported")
 
     def _render_impl(
         self,
@@ -6820,10 +6946,10 @@ class MapScene:
         return bundle_path
 
     def _bundle_manifest(self, checksums: Mapping[str, str]) -> Any:
-        from .bundle import BUNDLE_VERSION, BundleManifest
+        from .bundle import BUNDLE_VERSION, COMPOSITION_BUNDLE_VERSION, BundleManifest
 
         manifest = BundleManifest(
-            version=BUNDLE_VERSION,
+            version=COMPOSITION_BUNDLE_VERSION if self.recipe.pass_specs else BUNDLE_VERSION,
             name="mapscene_review",
             created_at="1970-01-01T00:00:00+00:00",
             description="Deterministic MapScene review bundle",
@@ -6888,7 +7014,11 @@ class MapScene:
         bundle_path.mkdir(parents=True, exist_ok=True)
         checksums: dict[str, str] = {}
 
-        recipe_payload = self.recipe.to_dict()
+        recipe_payload = self.recipe.to_dict(include_pass_data=False)
+        if self.recipe.pass_specs:
+            from ._render_pass_bundle import write_snapshots
+
+            write_snapshots(bundle_path, compiled.render_pass_inputs, checksums)
         self._write_bundle_json(bundle_path, "scene/mapscene_recipe.json", recipe_payload, checksums)
 
         from .recipe_manifest import manifest_to_json
@@ -6980,6 +7110,8 @@ class MapScene:
 
 
 __all__ = [
+    "RenderPassInput",
+    "RenderPassSpec",
     "MapScene",
     "MapSceneNativeUnavailable",
     "MapSceneTextLayoutError",

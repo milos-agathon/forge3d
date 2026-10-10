@@ -111,6 +111,18 @@ manifest for CI/review tooling. ``MapScene.save_bundle`` writes review metadata
 and diagnostics; blocked scenes are recorded as non-renderable instead of being
 represented as successful renders.
 
+``RenderPassInput`` and ``RenderPassSpec`` define named color, relief and overlay
+image passes. ``MapScene.render_passes`` composes supplied RGBA snapshots in
+explicit order with multiply, screen or alpha-over, retains alpha and declared
+color-space semantics, and replays the frozen specification from a bundle.
+Its backend is ``python_ordered_rgba_composition``; it is separate from native
+``MapScene.render``. See ``guides/ordered_map_composition`` for the equations,
+validation rules, serialization and executable physical-render example.
+Composition summaries include the compact pass specification and use the same
+recipe hash as the compiled plan. Version-4 composition bundles require nonempty
+passes and load through ``MapScene.load_bundle``; generic and viewer bundle
+loaders retain their version-3 gate.
+
 Feature ``005-map-assets-bundles-p1`` extends this product path without
 changing the legacy building module export. Use ``forge3d.map_scene.LabelLayer``
 constructors ``LabelLayer.from_features``, ``LabelLayer.from_geodataframe``,
