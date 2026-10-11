@@ -1013,4 +1013,10 @@ def test_d02_hosted_deselection_records_a_physical_reason(tmp_path):
     execute = job.split(execute_name, 1)[1].split("\n      - name:", 1)[0]
     selector = "${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}"
     assert execute.count(selector) == 1
-    assert execute.count("--deselect=") == 1
+    # AUTOCHIRON's explicit owner-approved physical routing keeps its complete
+    # suite in required NVIDIA/Vulkan acceptance alongside the D02 lane.
+    assert execute.count("--deselect=tests/test_cinema_solver.py") == 1
+    assert set(re.findall(r"--deselect=([\w./-]+)", execute)) == {
+        "tests/test_raster_styles_gpu.py", "tests/test_cinema_solver.py",
+    }
+    assert execute.count("--deselect=") == 2
