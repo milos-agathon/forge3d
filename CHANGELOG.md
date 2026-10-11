@@ -6,10 +6,12 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 ### Compatibility
+- CHRONOS labels now fade in and out over 8 frames instead of 256, so compiled frames, pixel hashes and cache keys for flythroughs with labels change. Pass `label_fade_frames=256` to `render_flythrough` to keep the old fade.
 - SUTURA raster imagery now contributes terrain albedo before lighting, rather than being pasted over the finished frame. Terrain-raster scenes therefore have a new shaded look; their committed references have been refreshed.
 
 ### Added
 - SUTURA 3D overlays: terrain-UV raster draping and vectors projected through the terrain camera, with terrain occlusion and perspective-aware world widths.
+- `forge3d.chronos.render_flythrough(label_fade_frames=...)` sets how many frames a label takes to fade in and out. The value is recorded in each compiled frame and covered by its hashes. With the old fixed 256-frame fade, labels that entered or left a short shot stayed faint for most of it.
 - Opt-in world labels through `LabelLayer(metadata={"coordinate_space": "world"})`. Their anchors and geometry follow the terrain camera; existing screen-coordinate labels keep their behavior.
 
 ### Changed
