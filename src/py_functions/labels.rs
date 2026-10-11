@@ -407,9 +407,15 @@ pub(crate) fn layout_label_candidates_py(
     // absolute screen positions, so rebase them on the candidate's anchor.
     // Both authorities sample each glyph at its advance centre, while the
     // compositor contract expects the pen origin (it adds the glyph bearing),
-    // so step back half an advance along the glyph's baseline.
-    let pen_origin = |(x, y, rotation): (f32, f32, f32), advance_px: f32| {
-        let half = advance_px * 0.5;
+    // so step back half the sampled advance along the glyph's baseline. The
+    // line authority includes tracking in every sampled advance except the last.
+    let pen_origin = |(x, y, rotation): (f32, f32, f32), advance_px: f32, glyph_index: usize| {
+        let sampled_advance = if kind == "line" && glyph_index < glyph_count.saturating_sub(1) {
+            advance_px + tracking_px
+        } else {
+            advance_px
+        };
+        let half = sampled_advance * 0.5;
         (x - half * rotation.cos(), y - half * rotation.sin())
     };
     let emit_glyphs = |placed: &[(f32, f32, f32)],
@@ -417,12 +423,13 @@ pub(crate) fn layout_label_candidates_py(
                        anchor_y: f32|
      -> PyResult<Py<pyo3::types::PyList>> {
         let list = pyo3::types::PyList::empty_bound(py);
-        for ((glyph, (x, y, rotation)), advance_px) in glyphs_in
+        for (glyph_index, ((glyph, (x, y, rotation)), advance_px)) in glyphs_in
             .iter()
             .zip(placed.iter())
             .zip(pixel_advances.iter())
+            .enumerate()
         {
-            let (pen_x, pen_y) = pen_origin((*x, *y, *rotation), *advance_px);
+            let (pen_x, pen_y) = pen_origin((*x, *y, *rotation), *advance_px, glyph_index);
             let item = PyDict::new_bound(py);
             item.set_item("glyph_id", glyph.glyph_id)?;
             item.set_item("font_index", glyph.font_index)?;
@@ -475,8 +482,10 @@ pub(crate) fn layout_label_candidates_py(
             // [-ascent, +descent] (screen y down) instead of the baseline
             // envelope, which cannot contain cap-height glyphs.
             candidate_pad = 0.0;
-            for (&(x, y, rotation), &advance_px) in placed.iter().zip(pixel_advances.iter()) {
-                let (pen_x, pen_y) = pen_origin((x, y, rotation), advance_px);
+            for (glyph_index, (&(x, y, rotation), &advance_px)) in
+                placed.iter().zip(pixel_advances.iter()).enumerate()
+            {
+                let (pen_x, pen_y) = pen_origin((x, y, rotation), advance_px, glyph_index);
                 let (c, s) = (rotation.cos(), rotation.sin());
                 for u in [0.0, advance_px] {
                     for v in [-ascent_px, descent_px] {

@@ -26,13 +26,49 @@ def test_curved_glyph_rotation_matches_screen_tangent_at_center(angle):
         emitted = candidate["positioned_glyphs"]
         assert len(emitted) == len(glyphs)
         for glyph in emitted:
-            # Origins are pen origins; the centre lies half an advance along
-            # the glyph's baseline.
-            baseline = np.array([math.cos(glyph["rotation"]), math.sin(glyph["rotation"])])
-            center = (np.asarray(candidate["anchor"][:2])
-                      + (np.asarray(glyph["origin"]) + 0.5 * 0.6 * baseline) * 24)
+            # `origin` is the pen (left end of the baseline); the glyph centre
+            # is half an advance further along its rotation.
+            pen = np.asarray(candidate["anchor"][:2]) + np.asarray(glyph["origin"]) * 24
+            direction = np.array([math.cos(glyph["rotation"]), math.sin(glyph["rotation"])])
+            center = pen + direction * glyph["advance"][0] * 24 * 0.5
             expected = (math.atan2(center[0] - 200, 200 - center[1])
                         if angle == "arc" else math.radians(angle))
             error = math.atan2(math.sin(glyph["rotation"] - expected),
                                math.cos(glyph["rotation"] - expected))
             assert abs(error) <= 1e-4, (angle, center, glyph["rotation"], expected)
+
+
+@pytest.mark.parametrize("kind", ("curved", "line"))
+@pytest.mark.parametrize("angle", (0, 30, -60))
+def test_glyph_pens_advance_by_each_glyphs_own_advance(kind, angle):
+    # Regression: the producer emitted glyph centres as pens, so each pen step
+    # was the mean of two neighbouring advances and a wide glyph after a narrow
+    # one ran into its neighbour ("Rim Trail" drew as "Ri mTrail").
+    advances = [0.6, 0.25, 0.9, 0.28, 0.6, 0.4, 0.55, 0.25, 0.25]
+    font_size, tracking = 20.0, 0.05
+    theta = math.radians(angle)
+    path = [(100, 300, 0), (100 + 600 * math.cos(theta), 300 + 600 * math.sin(theta), 0)]
+    glyphs = [{"glyph_id": index + 1, "font_index": 0, "advance": [advance, 0],
+               "has_outline": True} for index, advance in enumerate(advances)]
+    result = f3d.layout_label_candidates(kind=kind, label_id="rim", text="Rim Trail",
+        screen_path=path, positioned_glyphs=glyphs, font_size=font_size,
+        arc_fractions=[0.5], tracking=tracking)
+    assert result is not None
+    (candidate,) = result["candidates"]
+    emitted = candidate["positioned_glyphs"]
+    direction = np.array([math.cos(theta), math.sin(theta)])
+    pens = [np.asarray(glyph["origin"]) for glyph in emitted]
+    for index in range(len(pens) - 1):
+        step = float(np.dot(pens[index + 1] - pens[index], direction))
+        assert step == pytest.approx(advances[index] + tracking, abs=1e-4), index
+    # The text block is centred on the anchor (arc fraction 0.5).
+    start = float(np.dot(pens[0], direction))
+    end = float(np.dot(pens[-1], direction)) + advances[-1]
+    assert start == pytest.approx(-end, abs=1e-4)
+    # The reserved bounds cover every glyph from its pen to its far end.
+    x0, y0, x1, y1 = candidate["bounds"]
+    anchor = np.asarray(candidate["anchor"][:2])
+    for pen, advance in zip(pens, advances):
+        for point in (anchor + pen * font_size,
+                      anchor + (pen + direction * advance) * font_size):
+            assert x0 <= point[0] <= x1 and y0 <= point[1] <= y1
