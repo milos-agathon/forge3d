@@ -1071,3 +1071,35 @@ def test_e_former_mapscene_quarantine_has_required_physical_routing(tmp_path):
     assert "zero skips and unchanged assertions" in explanation
     execute = hosted.split(execute_name, 1)[1].split("\n      - name:", 1)[0]
     assert all(execute.count("--deselect=" + path) == 1 for path in targets)
+
+
+def test_autochiron_required_golden_enables_the_qualified_windows_lane(monkeypatch):
+    import _terrain_runtime
+
+    workflow = (ROOT / ".github/workflows/determinism-matrix.yml").read_text(encoding="utf-8")
+    job = _workflow_job(workflow, "render-nvidia")
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
+    probe = "- name: Require physical NVIDIA Vulkan adapter"
+    build = "- name: Build the AUTOCHIRON reference viewer"
+    required = "- name: Require AUTOCHIRON physical NVIDIA Vulkan golden"
+    assert job.index(probe) < job.index(build) < job.index(required)
+    assert "--require-nvidia-vulkan" in job.split(build, 1)[0]
+    gate = job.split(required, 1)[1].split("\n      - uses:", 1)[0]
+    assert "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'" in gate
+    assert "FORGE3D_NO_BOOTSTRAP: '1'" in gate
+    assert "FORGE3D_REQUIRE_AUTOCHIRON_GOLDEN: '1'" in gate
+    assert "FORGE3D_TEST_INSTALLED_WHEEL: '1'" in gate
+    assert "FORGE3D_DETERMINISM_TEST_BACKEND: vulkan" in gate
+    assert "WGPU_BACKEND: vulkan" in gate and "WGPU_BACKENDS: vulkan" in gate
+    assert "assert_junit_zero_skips.py" in gate
+    assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in gate
+    assert "continue-on-error" not in gate
+
+    # Reproduce the hosted-Windows classification that caused collection to
+    # skip even after the separate physical NVIDIA probe had passed.
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(_terrain_runtime.platform, "system", lambda: "Windows")
+    monkeypatch.delenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", raising=False)
+    assert _terrain_runtime._running_on_unsupported_hosted_windows_ci()
+    monkeypatch.setenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", "1")
+    assert not _terrain_runtime._running_on_unsupported_hosted_windows_ci()
