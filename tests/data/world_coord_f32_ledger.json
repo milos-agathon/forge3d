@@ -1396,5 +1396,141 @@
    ]
   ],
   "removed": []
+ },
+ "autochiron": {
+  "base_count": 1832,
+  "base_digest": "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9",
+  "result_count": 1850,
+  "result_digest": "9e7a23747ae95ed6d259bf6d387a3bfb7e7eefdbb38671fe1ad7f87d9e587087",
+  "added": [
+   [
+    "src/cinema/bindings.rs",
+    "cinema_validate",
+    "as_f32",
+    1,
+    "} if !time_offset.is_finite() || time_offset < 0.0 || solution.segments[0].t0 != 0.0 || solution.segments.last().unwrap().t1 != shot.duration_s || solution.segments.windows(2).any(|s| s[0].t1 != s[1].t0) || keys[0].time > time_offset || keys.last().unwrap().time < f64::from((time_offset + shot.duration_s) as f32) || keys .iter() .any(|k| k.radius <= 0.0 || k.fov <= 0.0 || k.fov >= 180.0) { return Err(py_error(binding( , , )))"
+   ],
+   [
+    "src/cinema/gpu_trace.rs",
+    "trace",
+    "as_f32",
+    1,
+    "origin_spacing: [ 0.0, 0.0, (terrain.width / (terrain.w - 1) as f64) as f32, (terrain.width / (terrain.h - 1) as f64) as f32, ], h_params: [pyramid.h_min, pyramid.h_max, 1.0, 0.0], albedo_pad: [0.0"
+   ],
+   [
+    "src/cinema/gpu_trace.rs",
+    "trace",
+    "as_f32",
+    2,
+    "origin_spacing: [ 0.0, 0.0, (terrain.width / (terrain.w - 1) as f64) as f32, (terrain.width / (terrain.h - 1) as f64) as f32, ], h_params: [pyramid.h_min, pyramid.h_max, 1.0, 0.0], albedo_pad: [0.0"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "native",
+    "as_f32",
+    1,
+    "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "native",
+    "as_f32",
+    2,
+    "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "native",
+    "as_f32",
+    3,
+    "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "native",
+    "as_f32",
+    4,
+    "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "consumer",
+    "as_f32",
+    1,
+    "let state = a .evaluate(t as f32) .ok_or_else(|| binding( , ))?"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "resample",
+    "as_f32",
+    1,
+    "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "resample",
+    "as_f32",
+    2,
+    "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "resample",
+    "as_f32",
+    3,
+    "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "resample",
+    "as_f32",
+    4,
+    "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "framing",
+    "as_f32",
+    1,
+    "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "framing",
+    "as_f32",
+    2,
+    "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "framing",
+    "as_f32",
+    3,
+    "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "times",
+    "as_f32",
+    1,
+    "(0..=n) .map(|i| f64::from((offset + shot.duration_s * i as f64 / n as f64) as f32) - offset) .collect()"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "add_ray",
+    "as_f32",
+    1,
+    "origin_tmin: [p.x, p.y, p.z, 0.0], direction_tmax: [d.x, d.y, d.z, length as f32],"
+   ],
+   [
+    "src/cinema/validate.rs",
+    "validate",
+    "as_f32",
+    1,
+    "let actual_fov = f64::from( a.evaluate((t + offset) as f32) .ok_or_else(|| binding( , ))? .fov_deg, )"
+   ]
+  ],
+  "removed": [],
+  "review": "Exact 18 sites in artifacts/autochiron-conversion-review.json; owner continuation authorized local implementation after proposal presentation, 2026-10-11. Motion remains f64; world positions use typed Anchor."
  }
 }

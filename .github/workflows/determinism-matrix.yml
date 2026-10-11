@@ -274,6 +274,30 @@ jobs:
         run: |
           python scripts/run_dupla_proof.py --output hash-out/dupla-proof-nvidia.json --absence-output hash-out/dupla-proof-nvidia.ABSENT --failure-output hash-out/dupla-proof-nvidia.FAILED
           exit $LASTEXITCODE
+      - name: Build the AUTOCHIRON reference viewer
+        shell: pwsh
+        run: |
+          $env:CARGO_TARGET_DIR = Join-Path $env:RUNNER_TEMP "forge3d-autochiron-viewer-${{ github.run_id }}-${{ github.run_attempt }}"
+          cargo build --release --bin interactive_viewer --features async_readback,enable-gpu-instancing *>&1 | Tee-Object hash-out/autochiron-viewer-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $viewer = Join-Path $env:CARGO_TARGET_DIR 'release/interactive_viewer.exe'
+          if (-not (Test-Path -LiteralPath $viewer -PathType Leaf)) { throw "AUTOCHIRON viewer build produced no executable" }
+          "FORGE3D_VIEWER_BINARY=$viewer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Require AUTOCHIRON physical NVIDIA Vulkan golden
+        shell: pwsh
+        env:
+          WGPU_BACKEND: vulkan
+          WGPU_BACKENDS: vulkan
+          FORGE3D_DETERMINISM_TEST_BACKEND: vulkan
+          FORGE3D_REQUIRE_AUTOCHIRON_GOLDEN: '1'
+          FORGE3D_TEST_INSTALLED_WHEEL: '1'
+        run: |
+          python -m pip install pytest rasterio
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest tests/test_determinism_hash.py -k autochiron -v --tb=short --basetemp=hash-out/autochiron --junitxml=hash-out/autochiron-junit.xml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py hash-out/autochiron-junit.xml
+          exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
         if: always()
         with:

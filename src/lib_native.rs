@@ -141,6 +141,7 @@ pub mod terrain;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
 pub mod animation; // Feature C: Camera animation and keyframe interpolation
+pub mod cinema;
 pub mod bundle; // Scene bundle (.forge3d) for portable scene packages
 pub mod export;
 pub mod labels; // Screen-space text labels with MSDF rendering

@@ -1,6 +1,8 @@
 use super::*;
 
 pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(crate::cinema::bindings::cinema_solve, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::cinema::bindings::cinema_validate, m)?)?;
     crate::terrain::clipmap::py_bindings::register_clipmap_bindings(m)?;
     #[cfg(feature = "cog_streaming")]
     crate::terrain::cog::py_bindings::register_cog_bindings(m)?;
