@@ -1,0 +1,321 @@
+{
+  "status": "frozen_before_acceptance",
+  "units": "world units/s^3",
+  "rule": "Three equal-duration rest-to-rest minimum-jerk spherical-coordinate phases: rise to declared terrain/subject top, sweep, settle. Constant look target at declared subject center. Use the largest conservative analytic Cartesian jerk bound. No solver data or calibration factor.",
+  "scope": "An independently chosen motion yardstick, not certification that the reference satisfies framing/clearance. Both solved and consumer-interval jerk must meet it; consumer playback is not globally C2.",
+  "fixtures": {
+    "canyon": {
+      "reference_top": 68.0,
+      "phases": [
+        {
+          "first_eye": [
+            10.0,
+            55.0,
+            50.0
+          ],
+          "last_eye": [
+            10.0,
+            68.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 6.787787671962253
+        },
+        {
+          "first_eye": [
+            10.0,
+            68.0,
+            50.0
+          ],
+          "last_eye": [
+            25.0,
+            68.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 6.919222705914815
+        },
+        {
+          "first_eye": [
+            25.0,
+            68.0,
+            50.0
+          ],
+          "last_eye": [
+            25.0,
+            55.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 8.032319345455331
+        }
+      ],
+      "proposed_max_jerk": 8.032319345455331,
+      "geometry_duration_sha256": "fc78b898fe84999228d59591f40d3c4d830c656d18197ad4880b7c9f7f74283c"
+    },
+    "infeasible": {
+      "reference_top": 58.0,
+      "phases": [
+        {
+          "first_eye": [
+            50.0,
+            1.0,
+            50.0
+          ],
+          "last_eye": [
+            50.0,
+            58.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 408.32632039418183
+        },
+        {
+          "first_eye": [
+            50.0,
+            58.0,
+            50.0
+          ],
+          "last_eye": [
+            90.0,
+            58.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 98.05800323719477
+        },
+        {
+          "first_eye": [
+            90.0,
+            58.0,
+            50.0
+          ],
+          "last_eye": [
+            90.0,
+            8.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 56.613634566979044
+        }
+      ],
+      "proposed_max_jerk": 408.32632039418183,
+      "geometry_duration_sha256": "8dbb5c1ff59349a4b6e082282e996a51afbeaccd250ce32420c0d1a037ae6c6b"
+    },
+    "knife_edge": {
+      "reference_top": 58.0,
+      "phases": [
+        {
+          "first_eye": [
+            10.0,
+            8.0,
+            50.0
+          ],
+          "last_eye": [
+            10.0,
+            58.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 56.613634566979044
+        },
+        {
+          "first_eye": [
+            10.0,
+            58.0,
+            50.0
+          ],
+          "last_eye": [
+            90.0,
+            58.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 188.63378265834356
+        },
+        {
+          "first_eye": [
+            90.0,
+            58.0,
+            50.0
+          ],
+          "last_eye": [
+            90.0,
+            16.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 42.22123318048744
+        }
+      ],
+      "proposed_max_jerk": 188.63378265834356,
+      "geometry_duration_sha256": "5a6316d1314376afad0d828c71845828eaed5051ec4ba6a031a79d66e2d719c8"
+    },
+    "summit_cliff": {
+      "reference_top": 58.0,
+      "phases": [
+        {
+          "first_eye": [
+            90.0,
+            8.0,
+            50.0
+          ],
+          "last_eye": [
+            90.0,
+            58.0,
+            50.0
+          ],
+          "duration_s": 10.0,
+          "analytic_jerk_bound": 8.588498043938745
+        },
+        {
+          "first_eye": [
+            90.0,
+            58.0,
+            50.0
+          ],
+          "last_eye": [
+            10.0,
+            58.0,
+            50.0
+          ],
+          "duration_s": 10.0,
+          "analytic_jerk_bound": 28.61644347291019
+        },
+        {
+          "first_eye": [
+            10.0,
+            58.0,
+            50.0
+          ],
+          "last_eye": [
+            10.0,
+            8.0,
+            50.0
+          ],
+          "duration_s": 10.0,
+          "analytic_jerk_bound": 8.588498043938745
+        }
+      ],
+      "proposed_max_jerk": 28.61644347291019,
+      "geometry_duration_sha256": "6c262c4a477670c1247467279ab6de34f6a6502b7e67b692df2373d521cbe9a4"
+    },
+    "terrain_attached_mountain": {
+      "reference_top": 43.0,
+      "phases": [
+        {
+          "first_eye": [
+            100.0,
+            45.0,
+            200.0
+          ],
+          "last_eye": [
+            100.0,
+            43.0,
+            200.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 0.847038922011292
+        },
+        {
+          "first_eye": [
+            100.0,
+            43.0,
+            200.0
+          ],
+          "last_eye": [
+            300.0,
+            43.0,
+            200.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 470.8511574047889
+        },
+        {
+          "first_eye": [
+            300.0,
+            43.0,
+            200.0
+          ],
+          "last_eye": [
+            300.0,
+            50.0,
+            200.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 3.1251864553205264
+        }
+      ],
+      "proposed_max_jerk": 470.8511574047889,
+      "geometry_duration_sha256": "0e56c4e803477bd57db5f9633a8dbc15001cbb22862d5437a96f7ddce7ff1c96"
+    },
+    "valley_col": {
+      "reference_top": 78.0,
+      "phases": [
+        {
+          "first_eye": [
+            10.0,
+            8.0,
+            50.0
+          ],
+          "last_eye": [
+            10.0,
+            78.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 98.30911849628082
+        },
+        {
+          "first_eye": [
+            10.0,
+            78.0,
+            50.0
+          ],
+          "last_eye": [
+            90.0,
+            78.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 188.63378265834356
+        },
+        {
+          "first_eye": [
+            90.0,
+            78.0,
+            50.0
+          ],
+          "last_eye": [
+            90.0,
+            8.0,
+            50.0
+          ],
+          "duration_s": 5.333333333333333,
+          "analytic_jerk_bound": 98.30911849628082
+        }
+      ],
+      "proposed_max_jerk": 188.63378265834356,
+      "geometry_duration_sha256": "3065441f2b5c658df7cc611085b9b7a1cc28bc27856c70f2473767709559858b"
+    }
+  },
+  "insufficient_budget_control": {
+    "kind": "straight radial dolly",
+    "start_eye": [
+      10.0,
+      55.0,
+      50.0
+    ],
+    "end_eye": [
+      25.0,
+      55.0,
+      50.0
+    ],
+    "duration_s": 16.0,
+    "max_jerk": 0.10986328125,
+    "analytic_required_minimum": 0.2197265625,
+    "expected_binding_constraint": "duration_speed_jerk"
+  },
+  "owner_authorization": "Milos explicitly ratified the exact six-fixture rule/values and independently declared insufficient-budget control on 2026-10-11 by replying \"Approved\" to the six-decision manifest and execution plan. Numeric budgets were already frozen and remain unchanged. No signing or merge authorized.",
+  "canyon_review_correction": "Terrain-only canyon entry, sidewall and floor-ridge correction. Walls at z=43.75/56.25 preserve the required GPU clearance cones. Reference top remains 68; analytic rule and all six budgets are unchanged. Geometry hash refrozen before acceptance."
+}

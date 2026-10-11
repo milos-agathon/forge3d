@@ -8,6 +8,11 @@ from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping,
 import os
 import numpy as np
 from . import gis
+from . import cinema as cinema
+from .cinema import Subject as Subject, FramingSpec as FramingSpec, Shot as Shot, ShotPlan as ShotPlan, CinemaInfeasible as CinemaInfeasible, CinemaNativeUnavailable as CinemaNativeUnavailable, plan as plan_shots
+
+def cinema_solve(spec_json: str, heights: list[float], width: int, height: int, terrain_width: float) -> str: ...
+def cinema_validate(spec_json: str, solution_json: str, keyframes_json: str, heights: list[float], width: int, height: int, terrain_width: float, time_offset: float) -> str: ...
 from . import geo as geo
 from . import terrain as terrain
 from . import codec as codec

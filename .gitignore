@@ -328,6 +328,7 @@ tests/goldens/*
 !tests/goldens/determinism/
 tests/goldens/determinism/*
 !tests/goldens/determinism/*.sha256
+!tests/goldens/determinism/autochiron_viewer_v1.png
 /out/
 /diag_out/
 /artifacts/
@@ -406,6 +407,8 @@ examples/**/*.py
 !examples/orbis_swiss_alps_descent.py
 !examples/mapscene_thematic_rasters.py
 !examples/vector_line_drape.py
+!examples/autochiron_reveal_orbit.py
+!examples/autochiron_render_golden.py
 tests/test_*example*.py
 tests/test_*examples*.py
 .superpowers/

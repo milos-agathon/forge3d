@@ -1013,4 +1013,93 @@ def test_d02_hosted_deselection_records_a_physical_reason(tmp_path):
     execute = job.split(execute_name, 1)[1].split("\n      - name:", 1)[0]
     selector = "${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}"
     assert execute.count(selector) == 1
-    assert execute.count("--deselect=") == 1
+    # AUTOCHIRON's explicit owner-approved physical routing keeps its complete
+    # suite in required NVIDIA/Vulkan acceptance alongside the D02 lane.
+    assert execute.count("--deselect=tests/test_cinema_solver.py") == 1
+    assert set(re.findall(r"--deselect=([\w./-]+)", execute)) == {
+        "tests/test_raster_styles_gpu.py", "tests/test_cinema_solver.py",
+        "tests/test_mapscene_buildings.py", "tests/test_mapscene_furniture.py",
+        "tests/test_mapscene_render_png.py", "tests/test_mapscene_screen_space_settings.py",
+    }
+    assert execute.count("--deselect=") == 6
+
+
+def test_e_former_mapscene_quarantine_has_required_physical_routing(tmp_path):
+    import os
+
+    targets = {
+        "tests/test_mapscene_buildings.py", "tests/test_mapscene_furniture.py",
+        "tests/test_mapscene_render_png.py", "tests/test_mapscene_screen_space_settings.py",
+    }
+    assert targets.isdisjoint(ci_pytest_lane.unrun_files())
+    assert targets <= set(ci_pytest_lane.full_lane_files())
+    ci_yml = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    physical_job = _workflow_job(ci_yml, "test-golden-images-nvidia")
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in physical_job
+    assert "inputs.scope == 'full'" in physical_job
+    gate_name = "- name: Run MapScene former-quarantine physical gate"
+    assert physical_job.index("- name: Require physical NVIDIA Vulkan terrain adapter") < physical_job.index(gate_name)
+    gate = physical_job.split(gate_name, 1)[1].split("\n      - name:", 1)[0]
+    assert "FORGE3D_NO_BOOTSTRAP: '1'" in gate
+    assert "WGPU_BACKEND: vulkan" in gate and "WGPU_BACKENDS: vulkan" in gate
+    assert set(re.findall(r"tests/test_[A-Za-z0-9_]+\.py", gate)) == targets
+    assert "--deselect" not in gate and " -k " not in gate
+    assert "continue-on-error" not in gate and "if:" not in gate
+    assert "assert_junit_zero_skips.py" in gate
+    assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in gate
+    commands = [line.strip() for line in gate.splitlines() if line.startswith("          ")]
+    assert commands[-1] == "exit $LASTEXITCODE"
+    assert '$env:FORGE3D_VISUAL_ARTIFACT_DIR "mapscene-former-quarantine"' in gate
+    aggregate = _workflow_job(ci_yml, "full-acceptance-summary")
+    assert "needs.test-golden-images-nvidia.result" in aggregate
+
+    hosted = _workflow_job((ROOT / ".github/workflows/test-python-wheel.yml").read_text(encoding="utf-8"), "test")
+    record_name = "- name: Record MapScene physical-test routing"
+    execute_name = "- name: Run full default Python lane"
+    assert hosted.index(record_name) < hosted.index(execute_name)
+    record = hosted.split(record_name, 1)[1].split("\n      - name:", 1)[0]
+    assert "if: inputs.test_mode == 'full'" in record
+    command = next(line.strip() for line in record.splitlines() if line.strip().startswith("python -c "))
+    args = shlex.split(command)
+    assert args[:2] == ["python", "-c"]
+    summary = tmp_path / "mapscene-summary.md"
+    result = subprocess.run([sys.executable, *args[1:]], env={**os.environ, "GITHUB_STEP_SUMMARY": str(summary)}, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "::notice::MapScene:" in result.stdout
+    explanation = summary.read_text()
+    assert all(path in explanation for path in targets)
+    assert "zero skips and unchanged assertions" in explanation
+    execute = hosted.split(execute_name, 1)[1].split("\n      - name:", 1)[0]
+    assert all(execute.count("--deselect=" + path) == 1 for path in targets)
+
+
+def test_autochiron_required_golden_enables_the_qualified_windows_lane(monkeypatch):
+    import _terrain_runtime
+
+    workflow = (ROOT / ".github/workflows/determinism-matrix.yml").read_text(encoding="utf-8")
+    job = _workflow_job(workflow, "render-nvidia")
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
+    probe = "- name: Require physical NVIDIA Vulkan adapter"
+    build = "- name: Build the AUTOCHIRON reference viewer"
+    required = "- name: Require AUTOCHIRON physical NVIDIA Vulkan golden"
+    assert job.index(probe) < job.index(build) < job.index(required)
+    assert "--require-nvidia-vulkan" in job.split(build, 1)[0]
+    gate = job.split(required, 1)[1].split("\n      - uses:", 1)[0]
+    assert "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'" in gate
+    assert "FORGE3D_NO_BOOTSTRAP: '1'" in gate
+    assert "FORGE3D_REQUIRE_AUTOCHIRON_GOLDEN: '1'" in gate
+    assert "FORGE3D_TEST_INSTALLED_WHEEL: '1'" in gate
+    assert "FORGE3D_DETERMINISM_TEST_BACKEND: vulkan" in gate
+    assert "WGPU_BACKEND: vulkan" in gate and "WGPU_BACKENDS: vulkan" in gate
+    assert "assert_junit_zero_skips.py" in gate
+    assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in gate
+    assert "continue-on-error" not in gate
+
+    # Reproduce the hosted-Windows classification that caused collection to
+    # skip even after the separate physical NVIDIA probe had passed.
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(_terrain_runtime.platform, "system", lambda: "Windows")
+    monkeypatch.delenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", raising=False)
+    assert _terrain_runtime._running_on_unsupported_hosted_windows_ci()
+    monkeypatch.setenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", "1")
+    assert not _terrain_runtime._running_on_unsupported_hosted_windows_ci()

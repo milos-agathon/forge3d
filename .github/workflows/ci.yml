@@ -1475,6 +1475,38 @@ jobs:
           python scripts/assert_junit_zero_skips.py "tests/artifacts/prometheus/junit.xml"
           exit $LASTEXITCODE
 
+      - name: Run MapScene former-quarantine physical gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          WGPU_BACKEND: vulkan
+          WGPU_BACKENDS: vulkan
+        run: |
+          $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "mapscene-former-quarantine"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $junit = Join-Path $dir "junit.xml"
+          $pytestTemp = Join-Path $dir "pytest"
+          python -m pytest tests/test_mapscene_buildings.py tests/test_mapscene_furniture.py tests/test_mapscene_render_png.py tests/test_mapscene_screen_space_settings.py -v -s --tb=short --basetemp="$pytestTemp" --junitxml="$junit" *>&1 | Tee-Object (Join-Path $dir "pytest.log")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
+      - name: Run AUTOCHIRON physical terrain cinematography gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          WGPU_BACKEND: vulkan
+          WGPU_BACKENDS: vulkan
+        run: |
+          $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "autochiron"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $junit = Join-Path $dir "junit.xml"
+          $pytestTemp = Join-Path $dir "pytest"
+          python -m pytest tests/test_cinema_solver.py -v -s --tb=short --basetemp="$pytestTemp" --junitxml="$junit" *>&1 | Tee-Object (Join-Path $dir "pytest.log")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
       - name: Run physical NVIDIA Vulkan Python GPU checks
         shell: pwsh
         env:

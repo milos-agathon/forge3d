@@ -59,6 +59,8 @@ _NATIVE_MODULE = _get_native_module()
 # Native exports (when available)
 # -----------------------------------------------------------------------------
 _NATIVE_ONLY_EXPORTS = (
+        "cinema_solve",
+        "cinema_validate",
         "Scene",
         "Session",
         "Colormap1D",
@@ -700,6 +702,8 @@ from .map_scene import (
 )
 from . import recipe_manifest
 from .chronos import FlythroughManifest, render_flythrough
+from . import cinema as cinema
+from .cinema import Subject, FramingSpec, Shot, ShotPlan, CinemaInfeasible, CinemaNativeUnavailable, plan as plan_shots
 from .alignment import (
     alignment_report,
     alignment_residual,
@@ -724,6 +728,7 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
+    "cinema", "Subject", "FramingSpec", "Shot", "ShotPlan", "CinemaInfeasible", "CinemaNativeUnavailable", "plan_shots",
     "RasterHeightSurfaceStyle",
     "CategoricalRasterStyle",
     "BivariateRasterStyle",
@@ -1113,3 +1118,4 @@ __all__ = [
     "material_from_name",
 ]
 __all__.extend(_AVAILABLE_BUNDLE_EXPORTS)
+__all__.extend(name for name in ("cinema_solve", "cinema_validate") if name in globals())

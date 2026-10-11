@@ -151,6 +151,8 @@ class TestNativeModuleSymbols:
     # ---- Registered free functions (wrap_pyfunction in lib.rs) ----
 
     EXPECTED_FUNCTIONS = [
+        "cinema_solve",
+        "cinema_validate",
         "open_viewer",
         "open_terrain_viewer",
         "enumerate_adapters",

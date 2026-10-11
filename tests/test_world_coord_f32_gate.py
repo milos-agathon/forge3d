@@ -82,8 +82,8 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # exactly six TESSELLA test casts added and two oracle casts removed. Both
 # historical records retain their own endpoints; the combined gate bridges
 # their shared 1,821-site base to this current freeze. Scanner unchanged.
-EXPECTED_CONVERSION_COUNT = 1832
-EXPECTED_CONVERSION_SHA256 = "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9"
+EXPECTED_CONVERSION_COUNT = 1850
+EXPECTED_CONVERSION_SHA256 = "9e7a23747ae95ed6d259bf6d387a3bfb7e7eefdbb38671fe1ad7f87d9e587087"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -917,7 +917,7 @@ def test_tessella_and_splat_combined_freeze_is_exact():
     assert not (tessella_added | tessella_removed) & splat_added
     assert EXPECTED_CONVERSION_COUNT == (
         tessella["base_count"] + len(tessella_added) - len(tessella_removed)
-        + len(splat_added)
+        + len(splat_added) + len(_ledger_data()["autochiron"]["added"])
     )
     current = collections.Counter(conversion_inventory())
     for site in tessella_added | splat_added:
@@ -1017,3 +1017,21 @@ def test_public_camera_helper_preserves_earth_scale_offset():
         )
     )
     np.testing.assert_allclose(earth, local, rtol=0.0, atol=1e-6)
+
+
+def test_autochiron_inventory_transition_is_exact():
+    transition = _ledger_data()["autochiron"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        1832, "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9")
+    assert (transition["result_count"], transition["result_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256)
+    added = list(map(tuple, transition["added"]))
+    assert len(added) == len(set(added)) == 18
+    assert transition["removed"] == [] and transition["review"]
+    current = collections.Counter(conversion_inventory())
+    for site in added:
+        assert current[site] == 1, f"addition missing or duplicated: {site}"
+        current[site] -= 1
+    preceding = list(current.elements())
+    assert len(preceding) == transition["base_count"]
+    assert _inventory_digest(preceding) == transition["base_digest"]
