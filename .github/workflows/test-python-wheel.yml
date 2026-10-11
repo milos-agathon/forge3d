@@ -114,12 +114,17 @@ jobs:
         run: >-
           python -c "import os; from pathlib import Path; reason = 'AUTOCHIRON: hosted Python matrices deselect tests/test_cinema_solver.py (44 cases); required physical NVIDIA Vulkan acceptance runs all 44 with zero skips and unchanged safety, framing, motion and replay assertions.'; print('::notice::' + reason); Path(os.environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8').write(reason + '\n')"
 
+      - name: Record MapScene physical-test routing
+        if: inputs.test_mode == 'full'
+        run: >-
+          python -c "import os; from pathlib import Path; reason = 'MapScene: hosted Python jobs route all cases in tests/test_mapscene_buildings.py, tests/test_mapscene_furniture.py, tests/test_mapscene_render_png.py, tests/test_mapscene_screen_space_settings.py to required physical NVIDIA/Vulkan acceptance with zero skips and unchanged assertions; the four expired UNRUN entries are removed.'; print('::notice::' + reason); Path(os.environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8').write(reason + '\n')"
+
       - name: Run full default Python lane
         if: inputs.test_mode == 'full'
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: |
-          python scripts/ci_pytest_lane.py --profile full -v --tb=short --durations=30 -rs --junitxml=python-full-junit.xml --deselect=tests/test_cinema_solver.py ${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}
+          python scripts/ci_pytest_lane.py --profile full -v --tb=short --durations=30 -rs --junitxml=python-full-junit.xml --deselect=tests/test_cinema_solver.py --deselect=tests/test_mapscene_buildings.py --deselect=tests/test_mapscene_furniture.py --deselect=tests/test_mapscene_render_png.py --deselect=tests/test_mapscene_screen_space_settings.py ${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}
 
       - name: Record full Python timings and explicit skips
         if: always() && inputs.test_mode == 'full'
