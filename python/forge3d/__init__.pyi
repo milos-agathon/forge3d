@@ -1688,6 +1688,8 @@ def layout_label_candidates(
     font_size: float,
     arc_fractions: Sequence[float] | None = ...,
     tracking: float = ...,
+    ascent: float | None = ...,
+    descent: float | None = ...,
 ) -> Dict[str, Any] | None: ...
 
 # AEQUITAS: PT-vs-raster perceptual adjudication pair

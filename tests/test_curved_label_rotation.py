@@ -26,7 +26,11 @@ def test_curved_glyph_rotation_matches_screen_tangent_at_center(angle):
         emitted = candidate["positioned_glyphs"]
         assert len(emitted) == len(glyphs)
         for glyph in emitted:
-            center = np.asarray(candidate["anchor"][:2]) + np.asarray(glyph["origin"]) * 24
+            # Origins are pen origins; the centre lies half an advance along
+            # the glyph's baseline.
+            baseline = np.array([math.cos(glyph["rotation"]), math.sin(glyph["rotation"])])
+            center = (np.asarray(candidate["anchor"][:2])
+                      + (np.asarray(glyph["origin"]) + 0.5 * 0.6 * baseline) * 24)
             expected = (math.atan2(center[0] - 200, 200 - center[1])
                         if angle == "arc" else math.radians(angle))
             error = math.atan2(math.sin(glyph["rotation"] - expected),

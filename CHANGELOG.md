@@ -17,6 +17,9 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Added the single-rebase, world-coordinate f32, and anchoring-boundary gates to the fast PR contract lane.
 
 ### Fixed
+- Line and curved labels now space glyphs by their advances. Produced glyph origins were glyph centres, so each glyph was drawn half its own advance late ("Si lver Ri ver"). Produced candidate bounds now reserve each glyph's rotated font line box, using the `font_metrics` (units per em, ascender, descender) that `ShapedText.to_dict()` now reports, and `layout_label_candidates` accepts optional `ascent`/`descent` in em.
+- MSDF text takes each atlas texel's median before bilinear filtering, so single-channel values in glyph padding no longer draw stray halo beside glyphs.
+- Renewed four expired hardware-adapter `tests/UNRUN.toml` exemptions to 2026-11-10 (owner-approved).
 - Require completed green full CI on the exact release SHA before every publish job; narrower manual acceptance scopes cannot qualify. Explicit dry runs only build/test artifacts, and same-HEAD full CI dispatches now pass candidate materialization.
 - Record missing optional Metal hardware as an explicit ABSENT diagnostic, without running GPU controls or failing the job; genuine probe errors remain failures and the diagnostic remains outside Full Acceptance.
 - Keep GPU-heavy globe constructor checks in physical ORBIS acceptance while the hosted Windows software-adapter lane records explicit omissions. Full Python jobs retain their 35-minute timeout and save per-test timings, skip reasons and JUnit evidence.

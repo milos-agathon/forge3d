@@ -317,6 +317,7 @@ def _native_shape_label_glyphs(
             _stable_font_source(path) for path in payload.get("font_sources", font_paths)
         ],
         "font_sha256": list(payload.get("font_sha256", ())),
+        "font_metrics": [dict(item) for item in payload.get("font_metrics", ())],
     }
     return glyphs, details
 
@@ -483,6 +484,29 @@ def _native_layout_label_candidates() -> Any | None:
     return getattr(native, "layout_label_candidates", None)
 
 
+def _font_line_box(font_metrics: Any) -> tuple[float, float] | None:
+    """Largest (ascent, descent) in em across the shaped font chain."""
+    if not isinstance(font_metrics, Sequence) or isinstance(font_metrics, (str, bytes)):
+        return None
+    ascent = descent = None
+    for item in font_metrics:
+        if not isinstance(item, Mapping):
+            return None
+        units = _number(item.get("units_per_em"), default=0.0)
+        if units <= 0.0:
+            return None
+        # Font units: ascender above the baseline, descender below (negative).
+        item_ascent = _number(item.get("ascender"), default=float("nan")) / units
+        item_descent = -_number(item.get("descender"), default=float("nan")) / units
+        if not (math.isfinite(item_ascent) and math.isfinite(item_descent)):
+            return None
+        ascent = item_ascent if ascent is None else max(ascent, item_ascent)
+        descent = item_descent if descent is None else max(descent, item_descent)
+    if ascent is None or descent is None or ascent + descent <= 0.0:
+        return None
+    return ascent, descent
+
+
 def _produce_geometry_authority(
     record: Mapping[str, Any],
     *,
@@ -494,6 +518,7 @@ def _produce_geometry_authority(
     camera: Any,
     viewport_size: tuple[float, float],
     glyph_atlas: Any = None,
+    font_line_box: tuple[float, float] | None = None,
 ) -> Mapping[str, Any] | None:
     """Produce a ``geometry_authority`` payload for a line/curved label.
 
@@ -576,6 +601,11 @@ def _produce_geometry_authority(
             positioned_glyphs=[dict(glyph) for glyph in positioned],
             font_size=font_size,
             tracking=tracking,
+            **(
+                {"ascent": font_line_box[0], "descent": font_line_box[1]}
+                if font_line_box
+                else {}
+            ),
         )
     except Exception:
         return None
@@ -1778,6 +1808,8 @@ class LabelPlan:
             glyph_sequence, shaping_details = _shape_label_glyphs(
                 text, glyph_atlas, record.get("line_ranges")
             )
+            # Font metrics size produced line boxes; they are not persisted.
+            font_line_box = _font_line_box(shaping_details.pop("font_metrics", None))
 
             if not text.strip():
                 rejected.append(
@@ -1873,6 +1905,7 @@ class LabelPlan:
                     camera=camera,
                     viewport_size=viewport_size,
                     glyph_atlas=glyph_atlas,
+                    font_line_box=font_line_box,
                 )
                 if produced is not None:
                     record["geometry_authority"] = produced

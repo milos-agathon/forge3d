@@ -20,15 +20,17 @@ def _nvidia(record_property):
     record_property("adapter", probe)
 
 
-def test_horizontal_curved_label_is_byte_identical_to_main_9f14e648(tmp_path, record_property):
+def test_horizontal_curved_label_matches_pinned_pen_origin_render(tmp_path, record_property):
     _nvidia(record_property)
     pixels, base, _ = render_curved_label(0)
     assert np.any(pixels != base)
     path = tmp_path / "horizontal-curved.png"
     save_png_deterministic(path, pixels)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    # Measured from the same fixture on main 9f14e648, RTX 3070 Vulkan.
-    assert digest == "9e0d2484a397744e5ecece348e4f18c6b0d6cf64ecca4a719f467edfd530fe54"
+    # Measured after glyph origins became pen origins (main 9f14e648 drew
+    # each glyph half an advance late) and MSDF medians became per texel,
+    # RTX 3070 Vulkan, driver 610.60.
+    assert digest == "6c8c66058650b9cf1390737ba0f0774431d3144f9288f33be2eb839634005437"
     record_property("png_sha256", digest)
 
 

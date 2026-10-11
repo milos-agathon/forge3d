@@ -134,6 +134,22 @@ impl PyShapedText {
                 })
                 .collect::<Vec<_>>(),
         )?;
+        // Vertical font metrics in font units, indexed like `font_sha256`, so
+        // consumers can reserve real glyph line boxes.
+        let font_metrics = PyList::empty_bound(py);
+        for font_index in 0..self.inner.face_descriptors.len() {
+            let metrics = self
+                .inner
+                .fonts
+                .metrics(font_index)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            let value = PyDict::new_bound(py);
+            value.set_item("units_per_em", metrics.units_per_em)?;
+            value.set_item("ascender", metrics.ascender)?;
+            value.set_item("descender", metrics.descender)?;
+            font_metrics.append(value)?;
+        }
+        output.set_item("font_metrics", font_metrics)?;
         let runs = PyList::empty_bound(py);
         for run in &self.inner.runs {
             let item = PyDict::new_bound(py);

@@ -143,7 +143,7 @@ fn screen_path_length(path: &[(f32, f32, f32)]) -> f64 {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 #[pyo3(name = "layout_label_candidates")]
-#[pyo3(signature = (kind, label_id, text, screen_path, positioned_glyphs, font_size, arc_fractions = None, tracking = 0.0))]
+#[pyo3(signature = (kind, label_id, text, screen_path, positioned_glyphs, font_size, arc_fractions = None, tracking = 0.0, ascent = None, descent = None))]
 pub(crate) fn layout_label_candidates_py(
     py: Python<'_>,
     kind: &str,
@@ -154,6 +154,8 @@ pub(crate) fn layout_label_candidates_py(
     font_size: f32,
     arc_fractions: Option<Vec<f32>>,
     tracking: f32,
+    ascent: Option<f32>,
+    descent: Option<f32>,
 ) -> PyResult<Option<Py<PyDict>>> {
     if kind != "line" && kind != "curved" {
         return Err(PyValueError::new_err(format!(
@@ -166,6 +168,20 @@ pub(crate) fn layout_label_candidates_py(
     if !tracking.is_finite() {
         return Err(PyValueError::new_err("tracking must be finite"));
     }
+    // Font line box in em units (ascent above, descent below the baseline).
+    let line_box = match (ascent, descent) {
+        (None, None) => None,
+        (Some(ascent), Some(descent))
+            if ascent.is_finite() && descent.is_finite() && ascent + descent > 0.0 =>
+        {
+            Some((ascent * font_size, descent * font_size))
+        }
+        _ => {
+            return Err(PyValueError::new_err(
+                "ascent and descent must be given together, finite, with a positive sum",
+            ))
+        }
+    };
     for (x, y, z) in &screen_path {
         if !x.is_finite() || !y.is_finite() || !z.is_finite() {
             return Err(PyValueError::new_err(
@@ -389,12 +405,24 @@ pub(crate) fn layout_label_candidates_py(
     // authorities: em units relative to the candidate anchor (the compositor
     // draws each glyph at `anchor + origin * font_size`). `placed` holds
     // absolute screen positions, so rebase them on the candidate's anchor.
+    // Both authorities sample each glyph at its advance centre, while the
+    // compositor contract expects the pen origin (it adds the glyph bearing),
+    // so step back half an advance along the glyph's baseline.
+    let pen_origin = |(x, y, rotation): (f32, f32, f32), advance_px: f32| {
+        let half = advance_px * 0.5;
+        (x - half * rotation.cos(), y - half * rotation.sin())
+    };
     let emit_glyphs = |placed: &[(f32, f32, f32)],
                        anchor_x: f32,
                        anchor_y: f32|
      -> PyResult<Py<pyo3::types::PyList>> {
         let list = pyo3::types::PyList::empty_bound(py);
-        for (glyph, (x, y, rotation)) in glyphs_in.iter().zip(placed.iter()) {
+        for ((glyph, (x, y, rotation)), advance_px) in glyphs_in
+            .iter()
+            .zip(placed.iter())
+            .zip(pixel_advances.iter())
+        {
+            let (pen_x, pen_y) = pen_origin((*x, *y, *rotation), *advance_px);
             let item = PyDict::new_bound(py);
             item.set_item("glyph_id", glyph.glyph_id)?;
             item.set_item("font_index", glyph.font_index)?;
@@ -406,7 +434,10 @@ pub(crate) fn layout_label_candidates_py(
             }
             item.set_item(
                 "origin",
-                ((*x - anchor_x) / font_size, (*y - anchor_y) / font_size),
+                (
+                    (pen_x - anchor_x) / font_size,
+                    (pen_y - anchor_y) / font_size,
+                ),
             )?;
             if let Some((ax, ay)) = glyph.advance {
                 item.set_item("advance", (ax, ay))?;
@@ -439,18 +470,38 @@ pub(crate) fn layout_label_candidates_py(
             f32::NEG_INFINITY,
         );
         let mut candidate_pad = pad;
-        for (x, y, rotation) in placed {
-            if kind == "curved" {
-                // Rotating the reserved half-em square expands its screen
-                // half-extents by |cos(r)| + |sin(r)|. Use the largest glyph
-                // extent so the complete run retains its reserved font box.
-                candidate_pad =
-                    candidate_pad.max(pad * (rotation.cos().abs() + rotation.sin().abs()));
+        if let Some((ascent_px, descent_px)) = line_box {
+            // Reserve each glyph's rotated line box [pen, pen + advance] x
+            // [-ascent, +descent] (screen y down) instead of the baseline
+            // envelope, which cannot contain cap-height glyphs.
+            candidate_pad = 0.0;
+            for (&(x, y, rotation), &advance_px) in placed.iter().zip(pixel_advances.iter()) {
+                let (pen_x, pen_y) = pen_origin((x, y, rotation), advance_px);
+                let (c, s) = (rotation.cos(), rotation.sin());
+                for u in [0.0, advance_px] {
+                    for v in [-ascent_px, descent_px] {
+                        let (cx, cy) = (pen_x + u * c - v * s, pen_y + u * s + v * c);
+                        min_x = min_x.min(cx);
+                        min_y = min_y.min(cy);
+                        max_x = max_x.max(cx);
+                        max_y = max_y.max(cy);
+                    }
+                }
             }
-            min_x = min_x.min(*x);
-            min_y = min_y.min(*y);
-            max_x = max_x.max(*x);
-            max_y = max_y.max(*y);
+        } else {
+            for (x, y, rotation) in placed {
+                if kind == "curved" {
+                    // Rotating the reserved half-em square expands its screen
+                    // half-extents by |cos(r)| + |sin(r)|. Use the largest glyph
+                    // extent so the complete run retains its reserved font box.
+                    candidate_pad =
+                        candidate_pad.max(pad * (rotation.cos().abs() + rotation.sin().abs()));
+                }
+                min_x = min_x.min(*x);
+                min_y = min_y.min(*y);
+                max_x = max_x.max(*x);
+                max_y = max_y.max(*y);
+            }
         }
         let candidate = PyDict::new_bound(py);
         candidate.set_item("candidate_id", format!("{label_id}:authority-{index}"))?;
