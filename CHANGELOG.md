@@ -5,13 +5,16 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+
+## [1.43.0] - 2026-10-12
 ### Compatibility
 - CHRONOS labels now fade in and out over 8 frames instead of 256, so compiled frames, pixel hashes and cache keys for flythroughs with labels change. Pass `label_fade_frames=256` to `render_flythrough` to keep the old fade.
 - SUTURA raster imagery now contributes terrain albedo before lighting, rather than being pasted over the finished frame. Terrain-raster scenes therefore have a new shaded look; their committed references have been refreshed.
 
 ### Added
-- SUTURA 3D overlays: terrain-UV raster draping and vectors projected through the terrain camera, with terrain occlusion and perspective-aware world widths.
-- `forge3d.chronos.render_flythrough(label_fade_frames=...)` sets how many frames a label takes to fade in and out. The value is recorded in each compiled frame and covered by its hashes. With the old fixed 256-frame fade, labels that entered or left a short shot stayed faint for most of it.
+- SUTURA 3D overlays: terrain-UV raster draping and vectors projected through the terrain camera, with terrain occlusion and perspective-aware world widths (#209).
+- Ordered multipass `MapScene` composition: `RenderPassSpec` / `RenderPassInput` passes with blend modes, opacity and sRGB-correct alpha, saved in version 4 composition bundles that `MapScene.load_bundle` reads. Scenes without passes still write and read version 3 bundles unchanged (#220).
+- `forge3d.chronos.render_flythrough(label_fade_frames=...)` sets how many frames a label takes to fade in and out. The value is recorded in each compiled frame and covered by its hashes. With the old fixed 256-frame fade, labels that entered or left a short shot stayed faint for most of it (#222).
 - Opt-in world labels through `LabelLayer(metadata={"coordinate_space": "world"})`. Their anchors and geometry follow the terrain camera; existing screen-coordinate labels keep their behavior.
 
 ### Changed
