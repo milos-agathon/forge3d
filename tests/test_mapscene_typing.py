@@ -44,6 +44,10 @@ def build_scene(output: Path) -> f3d.MapScene:
     )
     manifest: dict[str, object] = f3d.recipe_manifest(scene)
     assert manifest["kind"] == "mapscene_recipe_manifest"
+    image = f3d.RenderPassInput(np.zeros((1000, 1600, 4), dtype=np.uint8))
+    passes = [f3d.RenderPassSpec("color", "color", ("source",))]
+    report = scene.render_passes(passes, {"source": image}, str(output))
+    assert report.status is not None
     return scene
 
 
