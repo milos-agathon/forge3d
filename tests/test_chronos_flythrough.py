@@ -148,9 +148,9 @@ class TestCompileFrame:
             )["labels"]
         (record,) = labels_payload(4)
         assert record["visible"] is True
-        assert abs(record["alpha"] - 1.0 / 256.0) < 1e-9
+        assert abs(record["alpha"] - 1.0 / 8.0) < 1e-9
         (record,) = labels_payload(8)
-        assert abs(record["alpha"] - 4.0 / 256.0) < 1e-9
+        assert abs(record["alpha"] - 4.0 / 8.0) < 1e-9
         (record,) = labels_payload(3)
         assert record["alpha"] == 0.0
         (record,) = labels_payload(12)
@@ -167,6 +167,91 @@ class TestCompileFrame:
             f3d.compile_frame(6, 0, 1, CAMERA_JSON, _scene_json(labels=[hidden])).to_json()
         )["labels"]
         assert record["alpha"] == 0.0
+
+    def test_label_fade_frames_in_scene_sets_fade_and_hashes(self):
+        _require_chronos_native()
+        label = {
+            "layer_id": "cities",
+            "label_id": "summit",
+            "visible": True,
+            "appearance_frame": 4,
+            "disappearance_frame": 300,
+            "payload": {"text": "Summit"},
+        }
+
+        def payload(frame: int, **fade):
+            return json.loads(
+                f3d.compile_frame(
+                    frame, 0, 1, CAMERA_JSON, _scene_json(labels=[label], **fade)
+                ).to_json()
+            )
+
+        assert payload(8, label_fade_frames=256)["labels"][0]["alpha"] == pytest.approx(
+            5.0 / 256.0
+        )
+        assert payload(8, label_fade_frames=4)["labels"][0]["alpha"] == 1.0
+        short, long = payload(8, label_fade_frames=8), payload(8, label_fade_frames=256)
+        assert short["scene_hash"] != long["scene_hash"]
+        assert short["label_set_hash"] != long["label_set_hash"]
+        for bad in (0, -3, 2.5, "8", True):
+            with pytest.raises(Exception, match="label_fade_frames"):
+                f3d.compile_frame(
+                    0, 0, 1, CAMERA_JSON, _scene_json(labels=[label], label_fade_frames=bad)
+                )
+
+    def test_label_leaving_before_last_frame_is_opaque_until_its_fade(self):
+        # Regression: a 256-frame look-ahead fade drew a label leaving at frame
+        # N at 10/256 opacity on frame N-10.
+        _require_chronos_native()
+        from forge3d.chronos import (
+            _DEFAULT_LABEL_FADE_FRAMES,
+            _label_records,
+            _label_timeline_events,
+        )
+
+        frame_count = 360
+        leave = 300  # visible on frames 0..leave-1, hidden from `leave` on
+        key = ("labels", "peak")
+        sorted_indices = list(range(frame_count))
+        per_frame_keys = {i: ({key} if i < leave else set()) for i in sorted_indices}
+        events = _label_timeline_events(per_frame_keys, sorted_indices)
+
+        def alpha_at(frame: int) -> float:
+            accepted = {key: SimpleNamespace(to_dict=lambda: {"text": "Peak"})} if (
+                frame < leave
+            ) else {}
+
+            def events_for(layer_id, label_id, visible):
+                if not visible:
+                    return (None, None)
+                return events[(layer_id, label_id)][frame]
+
+            records = _label_records([key], accepted, events_for)
+            (record,) = json.loads(
+                f3d.compile_frame(
+                    frame,
+                    0,
+                    1,
+                    CAMERA_JSON,
+                    _scene_json(labels=records, label_fade_frames=_DEFAULT_LABEL_FADE_FRAMES),
+                ).to_json()
+            )["labels"]
+            return record["alpha"]
+
+        assert _DEFAULT_LABEL_FADE_FRAMES == 8
+        assert alpha_at(0) == 1.0  # present from the first frame: no fade-in
+        assert alpha_at(leave - 10) == 1.0
+        assert alpha_at(leave - _DEFAULT_LABEL_FADE_FRAMES) == 1.0
+        assert alpha_at(leave - 1) == pytest.approx(1.0 / _DEFAULT_LABEL_FADE_FRAMES)
+        assert alpha_at(leave) == 0.0
+
+    def test_render_flythrough_rejects_bad_label_fade_frames(self, tmp_path):
+        scene = SimpleNamespace()
+        for bad, error in ((0, ValueError), (-1, ValueError), (2.5, TypeError), (True, TypeError)):
+            with pytest.raises(error, match="label_fade_frames"):
+                render_flythrough(
+                    [scene], base_seed=0, samples=1, out_dir=tmp_path, label_fade_frames=bad
+                )
 
     def test_compile_rejects_zero_samples(self):
         _require_chronos_native()
@@ -934,7 +1019,10 @@ class TestFlythroughPhysical:
             )
         )
         appearance = 100
-        fade_end = appearance + 255  # alpha reaches 1.0 on this frame
+        # The sub-code-per-frame gate holds for fades of >= 256 frames; the
+        # short default fade trades it for labels that reach full opacity fast.
+        fade_frames = 256
+        fade_end = appearance + fade_frames - 1  # alpha reaches 1.0 on this frame
         windows = [
             range(appearance - 1, appearance + 5),
             range(appearance + 126, appearance + 131),
@@ -946,7 +1034,13 @@ class TestFlythroughPhysical:
         camera_path = {
             index: (base if index < appearance else labelled) for index in indices
         }
-        manifest = render_flythrough(camera_path, base_seed=5, samples=1, out_dir=tmp_path)
+        manifest = render_flythrough(
+            camera_path,
+            base_seed=5,
+            samples=1,
+            out_dir=tmp_path,
+            label_fade_frames=fade_frames,
+        )
 
         alphas = {}
         codes = {}
@@ -958,6 +1052,10 @@ class TestFlythroughPhysical:
         assert alphas[appearance - 1] == []
         assert alphas[appearance] == [pytest.approx(1.0 / 256.0)]
         assert alphas[fade_end] == [1.0]
+        replay = manifest.replay_frame(
+            labelled, appearance, tmp_path / "replay_custom_fade.png"
+        )
+        assert replay["pixel_hash"] == manifest.frame_record(appearance)["pixel_hash"]
 
         # Rec. 709 luminance in exact integer units of 1/10000 of an 8-bit code
         # (2126 + 7152 + 722 == 10000), so "one code" is compared without float

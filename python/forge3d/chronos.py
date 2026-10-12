@@ -33,6 +33,10 @@ _VT_FAMILY_SLOTS = {"albedo": 0, "normal": 1, "mask": 2}
 # The terrain clipmap rejects more rings than its checked LOD shift range
 # (src/terrain/clipmap/level.rs).
 _CLIPMAP_MAX_RINGS = 31
+# Frames a label takes to fade in after it is first placed and to fade out
+# before it leaves. Matches the native default; every compiled scene records
+# the value explicitly so it is covered by the scene and label-set hashes.
+_DEFAULT_LABEL_FADE_FRAMES = 8
 
 
 def _native():
@@ -232,7 +236,21 @@ def _render_size(recipe: Any) -> tuple[int, int]:
     return (max(64, int(output.width)), max(64, int(output.height)))
 
 
-def _scene_json(frame_scene: MapScene, label_records: list[dict[str, Any]]) -> str:
+def _validate_label_fade_frames(label_fade_frames: Any) -> int:
+    if isinstance(label_fade_frames, bool) or not isinstance(label_fade_frames, int):
+        raise TypeError("render_flythrough label_fade_frames= must be an int")
+    if label_fade_frames < 1:
+        raise ValueError(
+            f"render_flythrough label_fade_frames= must be >= 1, got {label_fade_frames}"
+        )
+    return int(label_fade_frames)
+
+
+def _scene_json(
+    frame_scene: MapScene,
+    label_records: list[dict[str, Any]],
+    label_fade_frames: int = _DEFAULT_LABEL_FADE_FRAMES,
+) -> str:
     from ._map_scene_rasters import raster_content_hashes
 
     recipe_dict = frame_scene.recipe.to_dict()
@@ -243,6 +261,7 @@ def _scene_json(frame_scene: MapScene, label_records: list[dict[str, Any]]) -> s
         }
     scene_value = {
         "labels": label_records,
+        "label_fade_frames": int(label_fade_frames),
         "clipmap": _clipmap_descriptor(frame_scene.recipe),
         "virtual_texture": _vt_descriptor(frame_scene.recipe, _render_size(frame_scene.recipe)),
         "scene": recipe_dict,
@@ -508,8 +527,11 @@ class FlythroughManifest:
         record = self.frame_record(frame_index)
         canonical = str(record["compiled_frame"])
         compiled = f3d.CompiledFrame.from_json(canonical)
-        stored_labels = (
-            (json.loads(canonical).get("scene") or {}).get("labels") or []
+        stored_scene = json.loads(canonical).get("scene") or {}
+        stored_labels = stored_scene.get("labels") or []
+        stored_fade = stored_scene.get("label_fade_frames")
+        label_fade_frames = (
+            _DEFAULT_LABEL_FADE_FRAMES if stored_fade is None else int(stored_fade)
         )
         stored_events = {
             (str(item["layer_id"]), str(item["label_id"])): (
@@ -530,7 +552,7 @@ class FlythroughManifest:
 
         label_records = _label_records(sorted(stored_events), accepted, events_for)
         camera_json = _camera_json(frame_scene)
-        scene_json = _scene_json(frame_scene, label_records)
+        scene_json = _scene_json(frame_scene, label_records, label_fade_frames)
         candidate = f3d.compile_frame(
             int(frame_index), self.base_seed, self.samples, camera_json, scene_json
         )
@@ -560,6 +582,7 @@ def render_flythrough(
     out_dir: str | Path,
     certificate: bool = False,
     cache: "str | os.PathLike[str] | None" = None,
+    label_fade_frames: int = _DEFAULT_LABEL_FADE_FRAMES,
 ) -> FlythroughManifest:
     """Render a deterministic CHRONOS flythrough to ``out_dir``.
 
@@ -579,9 +602,18 @@ def render_flythrough(
     ANAMNESIS cache directory; a hit replays the stored frame bytes for the
     identical compiled frame, and the pixel hash is still recomputed from the
     written PNG. ``certificate=True`` always renders fresh.
+
+    ``label_fade_frames`` is how many frames a label takes to fade in after it
+    is first placed and to fade out before the frame it leaves; outside those
+    frames it is drawn at full opacity. A label that moves to another layer
+    fades out and in again. The value is part of each compiled frame, so it
+    changes the frame hashes and cache keys. Each fade step changes alpha by
+    ``1 / label_fade_frames``; use 256 or more to keep every step below one
+    8-bit code.
     """
     if not isinstance(certificate, bool):
         raise TypeError("render_flythrough certificate= must be a bool")
+    label_fade_frames = _validate_label_fade_frames(label_fade_frames)
     f3d = _native()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -630,7 +662,7 @@ def render_flythrough(
             int(base_seed),
             int(samples),
             _camera_json(frame_scene),
-            _scene_json(frame_scene, label_records),
+            _scene_json(frame_scene, label_records, label_fade_frames),
         )
         plan = frame_scene.compiled_plan
         frame_scene.compiled_plan = replace(plan, frame=compiled)
