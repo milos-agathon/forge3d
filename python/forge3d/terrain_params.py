@@ -480,8 +480,17 @@ class DetailSettings:
     Gradient-match fields:
     ``detail_normal_path`` points to an optional DEM-derived detail-normal
     texture, ``detail_sigma_px`` records the Gaussian sigma used to generate it,
-    and ``detail_strength`` controls how strongly it blends with the procedural
-    detail path.
+    and ``detail_strength`` controls its contribution independently of
+    ``normal_strength``. Enable detail and supply both a path and a positive
+    strength to sample the map; zero strength leaves rendering unchanged.
+    RGB encodes tangent-space normals in linear [0, 1]: red is east (+U),
+    green is south (+V, increasing raster row), and blue is surface-up.
+    The map spans the same UV extent as the heightmap and fades with distance.
+    Contribution is full through ``fade_start`` and zero at/beyond
+    ``fade_end``, in camera-to-fragment world units. For distant map views,
+    set ``fade_end`` beyond the visible terrain distance (and ``fade_start``
+    beyond it to retain full strength).
+    ``detail_sigma_px`` is generation metadata; the renderer does not blur it.
     """
 
     enabled: bool = False  # Disabled by default (P5 compatibility)
@@ -506,10 +515,16 @@ class DetailSettings:
             raise ValueError("fade_start must be >= 0")
         if self.fade_end <= self.fade_start:
             raise ValueError("fade_end must be > fade_start")
-        if self.detail_sigma_px <= 0.0:
-            raise ValueError("detail_sigma_px must be > 0")
+        if self.detail_normal_path is not None and (
+            not isinstance(self.detail_normal_path, str) or not self.detail_normal_path.strip()
+        ):
+            raise ValueError("detail_normal_path must be a non-empty string or None")
+        if not math.isfinite(self.detail_sigma_px) or self.detail_sigma_px <= 0.0:
+            raise ValueError("detail_sigma_px must be finite and > 0")
         if not 0.0 <= self.detail_strength <= 1.0:
             raise ValueError("detail_strength must be in [0, 1]")
+        if self.enabled and self.detail_strength > 0.0 and self.detail_normal_path is None:
+            raise ValueError("detail_normal_path is required when detail is enabled and detail_strength > 0")
 
 
 @dataclass

@@ -191,6 +191,7 @@ struct OverlayUniforms {
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
     params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, raster_rgba
+    params7 : vec4<f32>, // DEM detail strength, reserved, reserved, reserved
 };
 
 struct IblUniforms {
@@ -3272,7 +3273,9 @@ fn apply_slope_hue_variation(albedo: vec3<f32>, slope_factor: f32, height_norm: 
 /// Returns tangent-space normal decoded from RGB [0,1] -> [-1,1]
 fn sample_dem_detail_normal(uv: vec2<f32>) -> vec3<f32> {
     // Sample the detail normal texture
-    let sample = textureSample(detail_normal_tex, detail_normal_samp, uv);
+    // The uploaded map has one mip. Explicit LOD also allows distance/water
+    // gating without relying on derivatives in non-uniform control flow.
+    let sample = textureSampleLevel(detail_normal_tex, detail_normal_samp, uv, 0.0);
     // Decode from [0,1] to [-1,1] per channel (tangent space: R=X, G=Y, B=Z)
     let decoded = det_barrier3(sample.rgb * 2.0) - 1.0;
     // Ensure valid normal (avoid NaN from zero-length vectors)
@@ -3337,6 +3340,7 @@ fn apply_detail_normal(
 /// UV: terrain UV (0-1 across terrain extent)
 fn apply_dem_detail_normal(
     base_normal: vec3<f32>,
+    surface_up: vec3<f32>,
     terrain_uv: vec2<f32>,
     view_distance: f32,
     detail_strength: f32,
@@ -3359,14 +3363,39 @@ fn apply_dem_detail_normal(
         return base_normal;
     }
 
-    // Build TBN from base normal
-    let tbn = build_tbn(base_normal);
+    // The map's red/green axes follow +U/+V, not an arbitrary normal frame.
+    let tbn = build_terrain_uv_tbn(base_normal, surface_up);
 
-    // Apply RNM blend with strength and fade
+    // Perturb the neutral tangent normal, then transform once. Passing the
+    // world-space base normal into tangent-space RNM would rotate it twice.
     let effective_strength = detail_strength * fade;
-    let blended = blend_rnm(base_normal, det_mix3(vec3<f32>(0.0, 0.0, 1.0), detail_tangent, effective_strength));
+    let blended = det_mix3(vec3<f32>(0.0, 0.0, 1.0), detail_tangent, effective_strength);
 
     return det_normalize3(det_mat3_mul_vec3(tbn, blended));
+}
+
+/// DEM normals use +U east, +V south (increasing raster row), +Z surface-up.
+/// Follow the U derivative of a Z-up heightfield; Gram-Schmidt completes V.
+fn build_terrain_uv_tbn(normal: vec3<f32>, surface_up: vec3<f32>) -> mat3x3<f32> {
+    var east = vec3<f32>(1.0, 0.0, 0.0);
+    var south = vec3<f32>(0.0, 1.0, 0.0);
+    var handedness = 1.0;
+    if (orbis_globe_active()) {
+        east = det_barrier3(det_cross3(orbis_render_pole(), surface_up));
+        if (det_dot3(east, east) == 0.0) {
+            east = det_barrier3(det_cross3(vec3<f32>(1.0, 0.0, 0.0), surface_up));
+        }
+        east = det_normalize3(east);
+        south = -det_cross3(surface_up, east);
+        handedness = -1.0;
+    }
+    var tangent = det_cross3(south, normal) * handedness;
+    if (det_dot3(tangent, tangent) == 0.0) {
+        tangent = east - det_barrier3(normal * det_dot3(east, normal));
+    }
+    tangent = det_normalize3(tangent);
+    let bitangent = det_cross3(normal, tangent) * handedness;
+    return mat3x3<f32>(tangent, bitangent, normal);
 }
 
 /// Terrain geometry frame (+X east, +Y south, +Z up) to the Y-up environment
@@ -4518,6 +4547,17 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             detail_fade_start,
             detail_fade_end
         );
+        if (u_overlay.params7.x > 0.0) {
+            shading_normal = apply_dem_detail_normal(
+                shading_normal,
+                base_normal,
+                input.tex_coord,
+                view_distance,
+                u_overlay.params7.x,
+                detail_fade_start,
+                detail_fade_end
+            );
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────

@@ -38,6 +38,8 @@ pub(in crate::terrain::renderer) struct PreparedMaterials {
     pub(in crate::terrain::renderer) overlay_binding: OverlayBinding,
     pub(in crate::terrain::renderer) fallback_colormap_view: Option<wgpu::TextureView>,
     pub(in crate::terrain::renderer) material_maps: MaterialMapResources,
+    _detail_normal_texture: Option<TrackedTexture>,
+    pub(in crate::terrain::renderer) detail_normal_view: Option<wgpu::TextureView>,
 }
 
 impl PreparedMaterials {
@@ -201,6 +203,22 @@ impl TerrainScene {
                 PyRuntimeError::new_err(format!("Failed to prepare material textures: {err:#}"))
             })?;
         let material_maps = self.prepare_material_map_resources(&decoded.materials)?;
+        let detail_map = if decoded.detail.enabled && decoded.detail.detail_strength > 0.0 {
+            Some(
+                self.upload_material_map_texture(
+                    decoded.detail.detail_normal_path.as_deref(),
+                    [128, 128, 255, 255],
+                    "terrain.detail_normal",
+                )
+                .map_err(|err| anyhow!("detail_normal_path: {err:#}"))?,
+            )
+        } else {
+            None
+        };
+        let (detail_normal_texture, detail_normal_view) = match detail_map {
+            Some((texture, view)) => (Some(texture), Some(view)),
+            None => (None, None),
+        };
 
         let shading_uniforms =
             self.build_shading_uniforms(material_set, gpu_materials.as_ref(), params, decoded)?;
@@ -252,6 +270,8 @@ impl TerrainScene {
             overlay_binding,
             fallback_colormap_view,
             material_maps,
+            _detail_normal_texture: detail_normal_texture,
+            detail_normal_view,
         })
     }
 
