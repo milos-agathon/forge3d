@@ -453,7 +453,7 @@ impl TerrainScene {
         offline_params.msaa_samples = 1;
 
         let height_inputs =
-            self.upload_height_inputs(heightmap, water_mask, offline_params.terrain_data_revision)?;
+            self.upload_height_inputs(heightmap, water_mask, &offline_params)?;
         self.prepare_geometry(
             &offline_params,
             &height_inputs.heightmap_data,

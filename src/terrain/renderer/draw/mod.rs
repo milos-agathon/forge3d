@@ -69,7 +69,7 @@ impl TerrainScene {
 
         self.prepare_frame_lighting(decoded)?;
         let mut height_inputs =
-            self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
+            self.upload_height_inputs(heightmap, water_mask, params)?;
         self.prepare_geometry(
             params,
             &height_inputs.heightmap_data,

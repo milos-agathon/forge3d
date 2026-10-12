@@ -583,7 +583,7 @@ impl TerrainScene {
         let height_inputs = graph.execute_with_barriers("terrain.prepare", |_barriers| {
             self.prepare_frame_lighting(decoded)?;
             let inputs =
-                self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
+                self.upload_height_inputs(heightmap, water_mask, params)?;
             self.prepare_geometry(
                 params,
                 &inputs.heightmap_data,
