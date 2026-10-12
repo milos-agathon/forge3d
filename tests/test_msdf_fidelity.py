@@ -269,7 +269,9 @@ def test_true_rgb_msdf_representative_scripts_match_pillow_freetype_oracle():
 def test_text_overlay_shader_keeps_msdf_decode_and_derivative_smoothing():
     shader = (ROOT / "src/shaders/text_overlay.wgsl").read_text(encoding="utf-8")
 
-    assert "sdf = median3(sample.rgb) - 0.5;" in shader
+    # MSDF medians are taken per texel, then bilinearly filtered.
+    assert "median3(textureLoad(atlas_tex," in shader
+    assert "sdf = mix(mix(m00, m10, t.x), mix(m01, m11, t.x), t.y) - 0.5;" in shader
     assert "sdf = sample.r - 0.5;" in shader
     assert "fwidth(sdf) * max(U.smoothing, 0.1)" in shader
     assert "smoothstep(-edge_width, edge_width, sdf)" in shader

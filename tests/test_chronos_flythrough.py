@@ -1136,3 +1136,83 @@ class TestFlythroughPhysical:
         # instead of rendering from a partial residency.
         with pytest.raises(Exception, match="chronos residency"):
             render_compiled(vt_scene(128, 0.25), 2)
+
+
+def test_reused_compiled_frames_include_current_raster_bytes(monkeypatch, tmp_path):
+    import forge3d.anamnesis as anamnesis
+    from forge3d.chronos import _render_frames
+    from forge3d.helpers.offscreen import save_png_deterministic
+
+    scene = _synthetic_scene()
+    path = tmp_path / "source.png"
+    pixels = np.full((4, 4, 4), 255, dtype=np.uint8)
+    save_png_deterministic(path, pixels)
+    scene.recipe.layers = [f3d.RasterOverlay(layer_id="raster", path=str(path), crs="EPSG:32610")]
+    frame = SimpleNamespace(to_json=lambda: '{"frame":0}')
+    contexts = []
+    def capture(*args, **kwargs):
+        contexts.append(kwargs["render_frame_context"])
+        return SimpleNamespace(frame_blobs=[])
+    monkeypatch.setattr(anamnesis, "render_sequence", capture)
+    def context():
+        _render_frames({0: scene}, {0: frame}, {0: tmp_path / "frame.png"},
+                       certificate_paths=None, cache=tmp_path / "cache")
+    context()
+    pixels[..., 0] = 0
+    save_png_deterministic(path, pixels)
+    context()
+    assert contexts[0] != contexts[1]
+    for value in contexts:
+        decoded = json.loads(value)
+        assert decoded["0"] == frame.to_json()
+        assert decoded["raster_content"]["0"][0]["layer_id"] == "raster"
+    scene.recipe.layers = []
+    context()
+    assert json.loads(contexts[-1]) == {"0": frame.to_json()}
+
+
+@pytest.mark.parametrize("axis", ("primary", "secondary"))
+@pytest.mark.parametrize("storage", ("file", "inline"))
+def test_styled_source_edits_invalidate_reused_chronos_cache(monkeypatch, tmp_path, axis, storage):
+    import forge3d.anamnesis as anamnesis
+    from forge3d.chronos import _render_frames, _scene_json
+    from test_raster_styles import bivariate
+
+    scene = _synthetic_scene()
+    primary, secondary = np.zeros((4, 4), np.float32), np.zeros((4, 4), np.float32)
+    paths = [tmp_path / "primary.npy", tmp_path / "secondary.npy"]
+    for path, values in zip(paths, (primary, secondary)):
+        np.save(path, values)
+    style = bivariate()
+    layer = f3d.RasterOverlay("thematic", style=style,
+        path=paths[0] if storage == "file" else None,
+        secondary_path=paths[1] if storage == "file" else None,
+        data=primary if storage == "inline" else None,
+        secondary_data=secondary if storage == "inline" else None)
+    scene.recipe.layers = [layer]
+    frame = SimpleNamespace(to_json=lambda: '{"frame":0}')
+    contexts = []
+    def capture(*args, **kwargs):
+        contexts.append(kwargs["render_frame_context"])
+        return SimpleNamespace(frame_blobs=[])
+    monkeypatch.setattr(anamnesis, "render_sequence", capture)
+    def context():
+        _render_frames({0: scene}, {0: frame}, {0: tmp_path / "frame.png"},
+                       certificate_paths=None, cache=tmp_path / "cache")
+    original_scene = _scene_json(scene, [])
+    context()
+    context()
+    assert contexts[0] == contexts[1], "unchanged sources must retain the cache identity"
+    changed_index = 0 if axis == "primary" else 1
+    values = (primary, secondary)[changed_index]
+    values.fill(30)
+    if storage == "file":
+        np.save(paths[changed_index], values)
+    context()
+    assert contexts[2] != contexts[0]
+    assert _scene_json(scene, []) != original_scene
+    before = json.loads(contexts[0])["raster_content"]["0"]
+    after = json.loads(contexts[2])["raster_content"]["0"]
+    assert before[changed_index]["source"] == axis
+    assert before[changed_index]["sha256"] != after[changed_index]["sha256"]
+    assert before[1 - changed_index] == after[1 - changed_index]

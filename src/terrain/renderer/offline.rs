@@ -758,6 +758,7 @@ impl TerrainScene {
                 state.materials.material_normal_view(),
                 state.materials.material_roughness_view(),
                 state.materials.material_mask_view(),
+                state.materials.material_albedo_view(),
                 state.materials.material_map_sampler(),
                 &state.materials.shading_buffer,
                 state.materials.colormap_view(),

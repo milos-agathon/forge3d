@@ -17,6 +17,7 @@ pub(super) fn parse_material_layer_settings(
         let normal_path = optional_path(&materials, "normal_path");
         let roughness_path = optional_path(&materials, "roughness_path");
         let mask_path = optional_path(&materials, "mask_path");
+        let albedo_path = optional_path(&materials, "albedo_path");
 
         let snow_enabled: bool = materials
             .getattr("snow_enabled")
@@ -185,6 +186,7 @@ pub(super) fn parse_material_layer_settings(
             normal_path,
             roughness_path,
             mask_path,
+            albedo_path,
             snow_enabled,
             snow_altitude_min,
             snow_altitude_blend,

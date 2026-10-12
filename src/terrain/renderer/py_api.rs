@@ -146,6 +146,7 @@ fn terrain_cache_options<'py>(
         params.decoded().materials.normal_path.as_ref(),
         params.decoded().materials.roughness_path.as_ref(),
         params.decoded().materials.mask_path.as_ref(),
+        params.decoded().materials.albedo_path.as_ref(),
     ] {
         match path {
             Some(path) => {

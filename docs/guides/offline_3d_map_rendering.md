@@ -80,3 +80,65 @@ Use the linked guides as the support contract for MVP review:
 - `guides/virtual_texturing_support_matrix`
 - `guides/large_scene_support`
 - `guides/competitive_positioning`
+
+## Terrain-aligned overlays
+
+`RasterOverlay` is sampled by the native terrain shader in terrain UV in screen,
+mesh and clipmap views. It changes terrain albedo, so lighting applies to the
+imagery and the footprint follows camera target and pose changes. Render metadata
+reports `raster_overlay_backend = "native_terrain_uv"`. An absent input preserves
+the existing terrain pixels. Source file bytes participate in CHRONOS and
+MapScene cache identity, including edits made at the same path.
+
+PNG imagery without bounds covers the terrain tile. To give it a smaller
+footprint, supply `metadata={"bounds": [west, south, east, north]}` in the terrain
+CRS. For an ungeoreferenced terrain array these bounds use local metres, east
+and north from the tile centre. GeoTIFF imagery uses its own CRS, transform and
+nodata mask and requires a georeferenced terrain grid. Missing, corrupt or
+unalignable imagery blocks with diagnostics before output pixels.
+
+In 3D views, inline vectors and labels with
+`LabelLayer.metadata={"coordinate_space": "world"}` use the same terrain camera.
+This opt-in supports automatic point, line and area placement. Existing label
+coordinates remain screen coordinates in every camera mode; an omitted setting
+or `"coordinate_space": "screen"` preserves that convention. Serialized projected
+anchors and geometry authority remain authoritative with either setting.
+World coordinates use the terrain CRS when its grid/bounds are
+specified, or tile-centred east/north metres otherwise. An omitted elevation
+places an anchor on the terrain; an explicit third coordinate is an absolute
+terrain elevation. Line/ring edges sample the DEM cell spacing before projection.
+Screen views retain their existing normalized/pixel coordinate behavior.
+
+World labels are projected during `compile_plan()`. Line labels use the native
+positioned-glyph geometry authority along their draped path; area labels project
+the centroid and visual-centre candidates through the terrain camera. The native
+text compositor follows each glyph's rotation, and generated line-label bounds
+include the atlas quads before candidate selection. The native CPU DEM depth
+proxy, candidate selection and visibility decisions are frozen in
+the compiled manifest; rendering consumes them. Explicit projected anchors and
+frozen plans retain their authority, including on terrain with nodata gaps.
+World-unit strokes resolve transverse screen width along the path through the
+perspective camera. Both vector compositors test depth; polygon fills also check
+the visible terrain UV against the original footprint and holes. Precise vector
+styles retain their declared Python compositor. Invalid/out-of-footprint world
+geometry produces blocking validation diagnostics before drawing.
+
+The `globe` camera-mode option uses the actual MapScene terrain camera rather
+than rejecting projected overlays by option name. MapScene currently supplies
+an array-backed terrain surface: without a globe streaming runtime the native
+clipmap is flat. This does not certify geodetic COG globe-streaming overlays.
+
+The low-level `MaterialLayerSettings.albedo_path` accepts a straight-alpha RGBA
+map alongside the existing normal, roughness and mask paths.
+`TerrainRenderParams.project_terrain_points(points)` projects records of
+`[u, v, terrain_height, elevation_offset]` to `[pixel_x, pixel_y, normalized_depth]`
+using the native mesh/flat-clipmap camera and height transform. Points behind the
+camera return `None`; non-finite inputs are rejected. The result is a list of
+three-element lists or `None`.
+
+`project_terrain_depth(heightmap, size_px, nodata_height_below=None)` compiles a
+float32 device-depth image from finite DEM triangles on the CPU, keeping only two
+projected grid rows in memory. Fully nodata triangles leave depth at 1.
+`unproject_terrain_depth(depth)` recovers the visible terrain UV for each pixel;
+background pixels have NaN UV. These methods use the same native camera as point
+projection and do not render a GPU frame.

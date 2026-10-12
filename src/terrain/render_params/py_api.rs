@@ -8,6 +8,158 @@ impl TerrainRenderParams {
         Self::from_python_params(py, params)
     }
 
+    /// Project terrain UV, raw height and an elevation offset through the exact
+    /// camera and height transform used by the mesh/flat-clipmap terrain pass.
+    pub fn project_terrain_points(&self, points: Vec<[f64; 4]>) -> PyResult<Vec<Option<[f64; 3]>>> {
+        let (_, view, proj) = crate::terrain::renderer::TerrainScene::build_camera_matrices(self);
+        let (view, proj) = (view.as_dmat4(), proj.as_dmat4());
+        points
+            .into_iter()
+            .map(|point| {
+                if !point.iter().all(|value| value.is_finite()) {
+                    return Err(PyValueError::new_err(
+                        "terrain projection requires finite UV/height/offset",
+                    ));
+                }
+                Ok(self.project_point(point, view, proj).map(|mut projected| {
+                    // Compare final device depth in the same f32 representation
+                    // as the GPU/proxy depth buffer. World/camera math and screen
+                    // positions above retain f64 precision.
+                    projected[2] = f64::from(projected[2] as f32);
+                    projected
+                }))
+            })
+            .collect()
+    }
+
+    /// Rasterize the DEM triangles once without crossing Python for every cell.
+    #[pyo3(signature = (heightmap, size_px, nodata_height_below=None))]
+    pub fn project_terrain_depth<'py>(
+        &self,
+        py: Python<'py>,
+        heightmap: numpy::PyReadonlyArray2<'py, f32>,
+        size_px: (usize, usize),
+        nodata_height_below: Option<f32>,
+    ) -> PyResult<Bound<'py, numpy::PyArray2<f32>>> {
+        let dem = heightmap.as_array();
+        let (rows, cols) = dem.dim();
+        let (width, height) = size_px;
+        if rows < 2 || cols < 2 || width == 0 || height == 0 || !dem.iter().all(|v| v.is_finite()) {
+            return Err(PyValueError::new_err(
+                "depth projection requires a finite 2D terrain and positive viewport",
+            ));
+        }
+        let count = width
+            .checked_mul(height)
+            .ok_or_else(|| PyValueError::new_err("depth viewport overflow"))?;
+        let (_, view, proj) = crate::terrain::renderer::TerrainScene::build_camera_matrices(self);
+        let (view, proj) = (view.as_dmat4(), proj.as_dmat4());
+        // Only two projected rows are live, independent of DEM size.
+        let mut previous = Vec::with_capacity(cols);
+        let mut current = Vec::with_capacity(cols);
+        let mut depth = vec![1.0f32; count];
+        for row in 0..rows {
+            current.clear();
+            for col in 0..cols {
+                let value = self.project_point(
+                    [
+                        col as f64 / (cols - 1) as f64,
+                        row as f64 / (rows - 1) as f64,
+                        f64::from(dem[[row, col]]),
+                        0.0,
+                    ],
+                    view,
+                    proj,
+                );
+                current.push(value.map(|p| {
+                    [
+                        p[0] * width as f64 / f64::from(self.size_px.0),
+                        p[1] * height as f64 / f64::from(self.size_px.1),
+                        p[2],
+                    ]
+                }));
+            }
+            if row > 0 {
+                for col in 0..cols - 1 {
+                    for indices in [
+                        [(row - 1, col), (row - 1, col + 1), (row, col)],
+                        [(row - 1, col + 1), (row, col + 1), (row, col)],
+                    ] {
+                        // Fully nodata triangles leave the renderer's holes empty.
+                        if nodata_height_below
+                            .is_some_and(|limit| indices.iter().all(|&(y, x)| dem[[y, x]] < limit))
+                        {
+                            continue;
+                        }
+                        let triangle =
+                            indices.map(|(y, x)| if y == row { current[x] } else { previous[x] });
+                        if let [Some(a), Some(b), Some(c)] = triangle {
+                            super::projection::raster_triangle(
+                                &mut depth,
+                                width,
+                                height,
+                                [a, b, c],
+                            );
+                        }
+                    }
+                }
+            }
+            std::mem::swap(&mut previous, &mut current);
+        }
+        use numpy::IntoPyArray;
+        let array = ndarray::Array2::from_shape_vec((height, width), depth)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(array.into_pyarray_bound(py))
+    }
+
+    /// Recover the visible terrain UV at each depth pixel using the same camera.
+    pub fn unproject_terrain_depth<'py>(
+        &self,
+        py: Python<'py>,
+        depth: numpy::PyReadonlyArray2<'py, f32>,
+    ) -> PyResult<Bound<'py, numpy::PyArray3<f32>>> {
+        let depth = depth.as_array();
+        let (height, width) = depth.dim();
+        if width == 0
+            || height == 0
+            || !depth
+                .iter()
+                .all(|z| z.is_finite() && (0.0..=1.0).contains(z))
+        {
+            return Err(PyValueError::new_err(
+                "unprojection requires finite normalized device depth",
+            ));
+        }
+        let (_, view, proj) = crate::terrain::renderer::TerrainScene::build_camera_matrices(self);
+        let inverse = (proj.as_dmat4() * view.as_dmat4()).inverse();
+        let mut uv = ndarray::Array3::from_elem((height, width, 2), f32::NAN);
+        for row in 0..height {
+            for col in 0..width {
+                let z = depth[[row, col]];
+                if z == 1.0 {
+                    continue;
+                }
+                let world = inverse
+                    * glam::DVec4::new(
+                        (col as f64 + 0.5) * 2.0 / width as f64 - 1.0,
+                        1.0 - (row as f64 + 0.5) * 2.0 / height as f64,
+                        f64::from(z),
+                        1.0,
+                    );
+                if world.is_finite() && world.w != 0.0 {
+                    // These are final normalized texture UVs for screen pixels,
+                    // not absolute or terrain-local world-coordinate storage.
+                    uv[[row, col, 0]] =
+                        (world.x / world.w / f64::from(self.terrain_span) + 0.5) as f32;
+                    uv[[row, col, 1]] =
+                        (world.y / world.w / f64::from(self.terrain_span) + 0.5) as f32;
+                }
+            }
+        }
+        use numpy::IntoPyArray;
+        Ok(uv.into_pyarray_bound(py))
+    }
+
     #[getter]
     pub fn size_px(&self) -> (u32, u32) {
         self.size_px
@@ -256,6 +408,9 @@ impl TerrainRenderParams {
     #[getter]
     pub fn material_map_paths(&self) -> std::collections::BTreeMap<String, String> {
         let mut paths = std::collections::BTreeMap::new();
+        if let Some(path) = self.decoded.materials.albedo_path.as_ref() {
+            paths.insert("albedo".to_string(), path.clone());
+        }
         if let Some(path) = self.decoded.materials.normal_path.as_ref() {
             paths.insert("normal".to_string(), path.clone());
         }

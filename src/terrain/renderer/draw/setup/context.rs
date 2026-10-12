@@ -22,6 +22,8 @@ pub(in crate::terrain::renderer) struct MaterialMapResources {
     normal_view: wgpu::TextureView,
     _roughness_texture: TrackedTexture,
     roughness_view: wgpu::TextureView,
+    _albedo_texture: TrackedTexture,
+    albedo_view: wgpu::TextureView,
     _mask_texture: TrackedTexture,
     mask_view: wgpu::TextureView,
     sampler: wgpu::Sampler,
@@ -69,6 +71,10 @@ impl PreparedMaterials {
 
     pub(in crate::terrain::renderer) fn material_roughness_view(&self) -> &wgpu::TextureView {
         &self.material_maps.roughness_view
+    }
+
+    pub(in crate::terrain::renderer) fn material_albedo_view(&self) -> &wgpu::TextureView {
+        &self.material_maps.albedo_view
     }
 
     pub(in crate::terrain::renderer) fn material_mask_view(&self) -> &wgpu::TextureView {
@@ -253,6 +259,11 @@ impl TerrainScene {
         &self,
         materials: &crate::terrain::render_params::MaterialLayerSettingsNative,
     ) -> Result<MaterialMapResources> {
+        let (albedo_texture, albedo_view) = self.upload_material_map_texture(
+            materials.albedo_path.as_deref(),
+            [0, 0, 0, 0],
+            "terrain.material_maps.albedo",
+        )?;
         let (normal_texture, normal_view) = self.upload_material_map_texture(
             materials.normal_path.as_deref(),
             [128, 128, 255, 255],
@@ -279,6 +290,8 @@ impl TerrainScene {
             ..Default::default()
         });
         Ok(MaterialMapResources {
+            _albedo_texture: albedo_texture,
+            albedo_view,
             _normal_texture: normal_texture,
             normal_view,
             _roughness_texture: roughness_texture,

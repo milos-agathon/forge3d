@@ -264,8 +264,8 @@ def test_render_recompiles_stale_plan_after_recipe_mutation(tmp_path, monkeypatc
     assert compiled.recipe_hash != stale_hash
 
 
-def test_raster_overlay_reports_python_compositor_or_blocks(tmp_path, monkeypatch):
-    """Loaded rasters name the CPU compositor; missing data blocks."""
+def test_raster_overlay_requires_native_drape_or_blocks(tmp_path, monkeypatch):
+    """Missing sources and renderers that omit the drape must block before pixels."""
     def fake_terrain(_recipe, _heightmap, **_kwargs):
         rgba = np.zeros((64, 96, 4), dtype=np.uint8)
         rgba[..., 3] = 255
@@ -322,11 +322,12 @@ def test_raster_overlay_reports_python_compositor_or_blocks(tmp_path, monkeypatc
             )
         ],
     )
-    report = scene.render(str(tmp_path / "raster.png"))
-
-    assert scene.last_render_metadata["raster_overlay_backend"] == "python_resample_composite"
-    assert scene.last_render_metadata["raster_overlay_layer_count"] == 1
-    assert report.supported_features["mapscene.raster_overlay_composite"] == "supported"
+    output = tmp_path / "raster.png"
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as excinfo:
+        scene.render(str(output))
+    _assert_structured_block(excinfo.value)
+    assert "terrain-UV raster drape" in str(excinfo.value)
+    assert not output.exists()
 
 
 def test_load_bundle_rejects_future_bundle_version(tmp_path):

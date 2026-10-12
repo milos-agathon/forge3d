@@ -1396,5 +1396,70 @@
    ]
   ],
   "removed": []
- }
+ },
+ "sutura": {
+   "base_count": 1832,
+   "base_digest": "92a2b5e256294968b4a5340b1235973633e175d71c9de640b32421322f3f3245",
+   "result_count": 1836,
+   "result_digest": "ccb80f7e3e4ab82a4cc6e2bb83c0acfd0681a078ea16017db46d70341f5e1fb4",
+   "added": [
+     [
+       "src/terrain/render_params/projection.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "*target = target.min(z as f32)"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "projected[2] = f64::from(projected[2] as f32)"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "unproject_terrain_depth",
+       "as_f32",
+       1,
+       "uv[[row, col, 0]] = (world.x / world.w / f64::from(self.terrain_span) + 0.5) as f32"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "unproject_terrain_depth",
+       "as_f32",
+       2,
+       "uv[[row, col, 1]] = (world.y / world.w / f64::from(self.terrain_span) + 0.5) as f32"
+     ]
+   ],
+   "removed": [],
+   "base_commit": "9f14e648cbf9e7e2f071d5c47b2eecad18f3180c",
+   "review": "Parent source review removed six early f32 casts. The remaining four conversions store final normalized device depth for f32 GPU/proxy comparisons and normalized texture UVs for screen pixels. Source world coordinates are made terrain-relative in Python f64; local coordinates and camera projection remain f64. No absolute world coordinate is narrowed. Existing historical records are unchanged."
+ },
+ "csm_layout_context": {
+  "base_count": 1836,
+  "base_digest": "ccb80f7e3e4ab82a4cc6e2bb83c0acfd0681a078ea16017db46d70341f5e1fb4",
+  "result_count": 1836,
+  "result_digest": "3d58d0cb7decfff40b2c22299813cb565fc3ecdbed2afa1f0559a52855cfb489",
+  "added": [
+    [
+      "src/core/shadow_mapping/system.rs",
+      "update_uniforms",
+      "as_f32",
+      1,
+      "light_direction: Vec4::new( self.light_direction.x, self.light_direction.y, self.light_direction.z, 0.0, ) .to_array(), light_view: self.light_view_matrix.to_cols_array(), cascades: cascade_data, cascade_count: self.cascades.len().min(4) as u32, pcf_kernel_size: self.config.pcf_quality as u32, depth_bias: self.config.depth_bias, slope_bias: self.config.slope_bias, shadow_map_size: self.config.shadow_map_size as f32, debug_mode: self.config.debug_mode, evsm_positive_exp: 40.0, evsm_negative_exp: 5.0, peter_panning_offset: 0.001, enable_unclipped_depth: 0, depth_clip_factor: 1.0, technique: 1, technique_flags: 0, _padding1: [0.0"
+    ]
+  ],
+  "removed": [
+    [
+      "src/core/shadow_mapping/system.rs",
+      "update_uniforms",
+      "as_f32",
+      1,
+      "light_direction: Vec4::new( self.light_direction.x, self.light_direction.y, self.light_direction.z, 0.0, ) .to_array(), light_view: self.light_view_matrix.to_cols_array_2d(), cascades: cascade_data, cascade_count: self.cascades.len().min(4) as u32, pcf_kernel_size: self.config.pcf_quality as u32, depth_bias: self.config.depth_bias, slope_bias: self.config.slope_bias, shadow_map_size: self.config.shadow_map_size as f32, debug_mode: self.config.debug_mode, evsm_positive_exp: 40.0, evsm_negative_exp: 5.0, peter_panning_offset: 0.001, enable_unclipped_depth: 0, depth_clip_factor: 1.0, technique: 1, technique_flags: 0, _padding1: [0.0"
+    ]
+  ],
+  "source_commit": "f7581b9c08a351d3db2f7d28cf2b3285d7d80fd2",
+  "review": "Main PR #216 changes the adjacent light_view matrix packing from to_cols_array_2d() to to_cols_array(). All 1836 narrowing operations and operands are unchanged. Reversing this exact single statement-context replacement restores the prior frozen digest; every historical ledger record is preserved."
+}
 }
