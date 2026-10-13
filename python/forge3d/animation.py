@@ -24,6 +24,7 @@ from typing import Iterable, Optional, Tuple
 
 from ._native import get_native_module
 
+# Import-time class bindings stay fixed to preserve type and instance identity.
 _NATIVE = get_native_module()
 
 

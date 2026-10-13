@@ -8,7 +8,7 @@ from __future__ import annotations
 import importlib
 import sys
 from types import ModuleType
-from typing import Optional
+from typing import Any, Optional
 
 
 # Root cause of the most recent failed native import, preserved so downstream
@@ -21,10 +21,11 @@ def _load_native() -> Optional[ModuleType]:
     global NATIVE_IMPORT_ERROR
     try:
         module = importlib.import_module("forge3d._forge3d")
-        sys.modules.setdefault("python.forge3d._forge3d", module)
+        sys.modules["python.forge3d._forge3d"] = module
         NATIVE_IMPORT_ERROR = None
         return module
     except Exception as exc:
+        sys.modules.pop("python.forge3d._forge3d", None)
         NATIVE_IMPORT_ERROR = exc
         return None
 
@@ -34,8 +35,28 @@ NATIVE_AVAILABLE: bool = NATIVE_MODULE is not None
 
 
 def get_native_module() -> Optional[ModuleType]:
-    """Expose the cached PyO3 extension module (if available)."""
+    """Return the current extension snapshot without importing or probing a GPU.
+
+    Runtime callers must resolve this at the point of use, rather than retain
+    the result or a copied ``NATIVE_AVAILABLE`` flag across an explicit refresh.
+    Import-time class exports intentionally retain their original identities.
+    """
     return NATIVE_MODULE
+
+
+def get_native_symbol(name: str, default: Any = None) -> Any:
+    """Resolve an optional symbol against the current extension snapshot."""
+    return getattr(get_native_module(), name, default)
+
+
+def require_native_module(
+    message: str = "forge3d native module is not available; build the extension first",
+) -> ModuleType:
+    """Resolve the current extension or raise with the preserved import cause."""
+    module = get_native_module()
+    if module is None:
+        raise RuntimeError(message) from native_import_error()
+    return module
 
 
 def native_import_error() -> Optional[BaseException]:
@@ -49,8 +70,16 @@ def native_import_error() -> Optional[BaseException]:
 
 
 def refresh_native_module() -> Optional[ModuleType]:
-    """Reload the PyO3 extension and update global availability flags."""
+    """Retry the extension import and replace the shared capability snapshot.
+
+    This does not reload an already imported binary or rebind exported classes
+    and existing native objects. Ordinary lookups never retry an import. Python's
+    import caches are invalidated so a newly installed extension can be found.
+    ``NATIVE_MODULE``, ``NATIVE_AVAILABLE`` and the import error remain available
+    for compatibility; values imported by value are intentional snapshots.
+    """
     global NATIVE_MODULE, NATIVE_AVAILABLE
+    importlib.invalidate_caches()
     NATIVE_MODULE = _load_native()
     NATIVE_AVAILABLE = NATIVE_MODULE is not None
     return NATIVE_MODULE

@@ -737,7 +737,8 @@ def test_sun_color_valid_input_does_not_suppress_unrelated_failures(monkeypatch)
         def hybrid_render_terrain_reference(*args, **kwargs):
             raise RuntimeError("invalid device adapter state should propagate")
 
-    monkeypatch.setattr(pt, "_NATIVE", BrokenNative())
+    from forge3d import _native
+    monkeypatch.setattr(_native, "NATIVE_MODULE", BrokenNative())
     dem = np.zeros((2, 2), dtype=np.float32)
     with pytest.raises(RuntimeError, match="adapter state"):
         pt.hybrid_render_terrain_reference(

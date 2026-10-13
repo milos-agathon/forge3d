@@ -33,7 +33,7 @@ def test_fallback_enforce_policy_raises_when_budget_exceeded(monkeypatch):
     memory = importlib.import_module("forge3d._memory")
     mem = importlib.import_module("forge3d.mem")
 
-    monkeypatch.setattr(memory, "NATIVE_AVAILABLE", False)
+    monkeypatch.setattr(importlib.import_module("forge3d._native"), "NATIVE_MODULE", None)
     memory._GLOBAL_MEMORY.update(
         {"buffer_count": 0, "texture_count": 0, "buffer_bytes": 0, "texture_bytes": 0}
     )
@@ -48,7 +48,7 @@ def test_fallback_warn_policy_reports_over_budget_without_raising(monkeypatch):
     memory = importlib.import_module("forge3d._memory")
     mem = importlib.import_module("forge3d.mem")
 
-    monkeypatch.setattr(memory, "NATIVE_AVAILABLE", False)
+    monkeypatch.setattr(importlib.import_module("forge3d._native"), "NATIVE_MODULE", None)
     memory._GLOBAL_MEMORY.update(
         {"buffer_count": 0, "texture_count": 0, "buffer_bytes": 0, "texture_bytes": 0}
     )

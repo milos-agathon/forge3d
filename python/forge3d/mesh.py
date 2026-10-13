@@ -11,13 +11,13 @@ from typing import Dict, List, Tuple, Any
 import numpy as np
 import warnings
 
-try:
-    from . import _forge3d
-    # Check if TBN functions are available (gated by feature flag)
-    _HAS_TBN = hasattr(_forge3d, 'mesh_generate_cube_tbn')
-except ImportError:
-    _forge3d = None
-    _HAS_TBN = False
+from ._native import get_native_symbol
+
+
+def __getattr__(name):
+    if name == "_HAS_TBN":
+        return has_tbn_support()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def generate_cube_tbn() -> Tuple[List[Dict[str, Any]], List[int], List[Dict[str, Any]]]:
@@ -52,8 +52,9 @@ def generate_cube_tbn() -> Tuple[List[Dict[str, Any]], List[int], List[Dict[str,
     RuntimeError
         If TBN generation feature is not enabled
     """
-    if _HAS_TBN:
-        result = _forge3d.mesh_generate_cube_tbn()
+    native_fn = get_native_symbol("mesh_generate_cube_tbn")
+    if native_fn is not None:
+        result = native_fn()
         return result['vertices'], result['indices'], result['tbn_data']
     # Pure-Python fallback: 6 faces, 4 vertices per face (no sharing)
     vertices: List[Dict[str, Any]] = []
@@ -132,8 +133,9 @@ def generate_plane_tbn(width: int, height: int) -> Tuple[List[Dict[str, Any]], L
     RuntimeError
         If TBN generation feature is not enabled
     """
-    if _HAS_TBN:
-        result = _forge3d.mesh_generate_plane_tbn(width, height)
+    native_fn = get_native_symbol("mesh_generate_plane_tbn")
+    if native_fn is not None:
+        result = native_fn(width, height)
         return result['vertices'], result['indices'], result['tbn_data']
     if width < 2 or height < 2:
         raise ValueError("width and height must be >= 2")
@@ -288,7 +290,7 @@ def has_tbn_support() -> bool:
     bool
         True if TBN generation functions are available
     """
-    return _HAS_TBN
+    return get_native_symbol("mesh_generate_cube_tbn") is not None
 
 
 # ============================================================================

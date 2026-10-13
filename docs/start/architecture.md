@@ -57,6 +57,24 @@ node width divided by span. Decoding capabilities remain format-specific; sharin
 hierarchy traversal does not give EPT a point decoder. The existing selection,
 depth and point-budget policies remain in `PointCloudRenderer`.
 
+Native capability dispatch belongs to `forge3d._native`. Runtime callers resolve
+the current module with `get_native_module()` or an optional symbol with
+`get_native_symbol()`; required-module guards use `require_native_module()`.
+These lookups do not retry imports or create a GPU context. An explicit
+`refresh_native_module()` invalidates Python's import caches and retries the
+extension import, updating the module, availability flag, import-error cause,
+and legacy `python.forge3d._forge3d` alias together. It does not reload an already
+imported binary; replacing a loaded extension binary requires a new process.
+
+Imports of availability flags by value are snapshots. Exported classes and
+exception types in the package facade, animation, GIS, text, and smoke modules
+retain their import-time identities. Smoke's backend selection stays coupled to
+its exported classes and Python-version safety guard. Existing native objects
+retain their owning module; newly created wrappers resolve current capabilities.
+Missing native-only facade exports resolve against the current module without
+rebinding exports that are already present. Extension absence and missing
+symbols continue to use each caller's existing fallback or error behavior.
+
 ### Examples, tutorials, and gallery
 
 The `examples/` directory shows the supported workflows in executable form.

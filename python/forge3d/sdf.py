@@ -8,12 +8,26 @@ from enum import Enum
 import warnings
 import os
 
-try:
-    # Use the actual native extension module name
-    from . import _forge3d as forge3d_native  # Rust extension module
-    NATIVE_AVAILABLE = True
-except Exception:
-    NATIVE_AVAILABLE = False
+from ._native import get_native_module as _get_native_module
+from ._native import get_native_symbol as _get_native_symbol
+from ._native import require_native_module as _require_native_module
+
+
+def __getattr__(name):
+    """Keep legacy native attributes importable while resolving them live."""
+    if name == "__all__":
+        native_exports = ["forge3d_native"] if _get_native_module() is not None else []
+        return _SDF_EXPORTS + native_exports
+    if name == "NATIVE_AVAILABLE":
+        return _get_native_module() is not None
+    if name == "forge3d_native":
+        native = _get_native_module()
+        if native is not None:
+            return native
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+if _get_native_module() is None:
     warnings.warn("Native SDF module not available, using fallback implementation")
     try:
         from . import _degradation as _degradation_sink
@@ -469,7 +483,7 @@ class HybridRenderer:
         from . import _degradation
         from . import certificate as _certificate
 
-        if USE_NATIVE_SDF and NATIVE_AVAILABLE and hasattr(forge3d_native, 'hybrid_render'):
+        if USE_NATIVE_SDF and _get_native_symbol("hybrid_render") is not None:
             try:
                 with _certificate._render_capture(
                     "python.sdf.render", "sdf.native_cpu", draw_calls=1
@@ -501,6 +515,7 @@ class HybridRenderer:
     def _render_native(self, scene: SdfScene, spheres: List) -> np.ndarray:
         """Render using native Rust implementation"""
         del spheres
+        forge3d_native = _require_native_module()
         builder = forge3d_native.SdfSceneBuilder()
         node_handles: Dict[int, int] = {}
 
@@ -701,6 +716,11 @@ def render_simple_scene(
     scene = create_simple_scene()
     renderer = HybridRenderer(width, height)
     return renderer.render_sdf_scene(scene, certificate=certificate, cache=cache)
+
+
+# Preserve wildcard imports of the legacy availability flag. Native helpers
+# remain private; __getattr__ selects the native alias at the time of import.
+_SDF_EXPORTS = [name for name in globals() if not name.startswith("_")] + ["NATIVE_AVAILABLE"]
 
 
 # Example usage

@@ -19,10 +19,7 @@ from enum import Enum
 import math
 import warnings
 
-try:
-    from . import _forge3d  # Rust bindings
-except ImportError:
-    _forge3d = None
+from ._native import get_native_module
 
 
 def _record_native_setter_unavailable(fn_name: str) -> None:
@@ -72,6 +69,7 @@ def sun_direction_from_angles(azimuth_deg: float, elevation_deg: float) -> Tuple
 
 def set_exposure_stops(stops: float) -> float:
     """Set exposure in stops and return the linear scale (2**stops)."""
+    _forge3d = get_native_module()
     global _EXPOSURE_STOPS, _EXPOSURE_SCALE
     stops_f = float(stops)
     _EXPOSURE_STOPS = stops_f
@@ -241,10 +239,12 @@ class RestirDI:
         self.config = config or RestirConfig()
         self._lights: List[LightSample] = []
         self._light_weights: Optional[np.ndarray] = None
+        # Bind native operations to the module that owns this native handle.
+        self._native_module = get_native_module()
         self._native_restir = None
 
-        if _forge3d is not None and hasattr(_forge3d, "create_restir_di"):
-            self._native_restir = _forge3d.create_restir_di(
+        if self._native_module is not None and hasattr(self._native_module, "create_restir_di"):
+            self._native_restir = self._native_module.create_restir_di(
                 initial_candidates=self.config.initial_candidates,
                 temporal_neighbors=self.config.temporal_neighbors,
                 spatial_neighbors=self.config.spatial_neighbors,
@@ -320,17 +320,17 @@ class RestirDI:
             self._light_weights = weights_array
 
         # Update native implementation if available
-        if self._native_restir is not None and hasattr(_forge3d, "restir_set_lights"):
+        if self._native_restir is not None and hasattr(self._native_module, "restir_set_lights"):
             lights_array = np.array([light.to_array() for light in lights], dtype=np.float32)
-            _forge3d.restir_set_lights(self._native_restir, lights_array, self._light_weights)
+            self._native_module.restir_set_lights(self._native_restir, lights_array, self._light_weights)
 
     def clear_lights(self):
         """Remove all lights from the scene."""
         self._lights.clear()
         self._light_weights = None
 
-        if self._native_restir is not None and hasattr(_forge3d, "restir_clear_lights"):
-            _forge3d.restir_clear_lights(self._native_restir)
+        if self._native_restir is not None and hasattr(self._native_module, "restir_clear_lights"):
+            self._native_module.restir_clear_lights(self._native_restir)
 
     def sample_light(self, u1: float, u2: float) -> Optional[Tuple[int, float]]:
         """Sample a light using the alias table.
@@ -344,8 +344,8 @@ class RestirDI:
         if not self._lights:
             return None
 
-        if self._native_restir is not None and hasattr(_forge3d, "restir_sample_light"):
-            return _forge3d.restir_sample_light(self._native_restir, u1, u2)
+        if self._native_restir is not None and hasattr(self._native_module, "restir_sample_light"):
+            return self._native_module.restir_sample_light(self._native_restir, u1, u2)
 
         # Fallback CPU implementation
         if self._light_weights is None:
@@ -385,7 +385,7 @@ class RestirDI:
             Rendered image as numpy array
         """
         _ = cache
-        if self._native_restir is None or not hasattr(_forge3d, "restir_render_frame"):
+        if self._native_restir is None or not hasattr(self._native_module, "restir_render_frame"):
             raise RuntimeError("Native ReSTIR implementation not available")
 
         # Validate G-buffer
@@ -407,7 +407,7 @@ class RestirDI:
         with _certificate._render_capture(
             "python.lighting.restir_render_frame", "lighting.restir", draw_calls=1
         ):
-            result = _forge3d.restir_render_frame(
+            result = self._native_module.restir_render_frame(
                 self._native_restir,
                 width, height,
                 camera_params,
@@ -462,8 +462,8 @@ class RestirDI:
             }
         }
 
-        if self._native_restir is not None and hasattr(_forge3d, "restir_get_statistics"):
-            native_stats = _forge3d.restir_get_statistics(self._native_restir)
+        if self._native_restir is not None and hasattr(self._native_module, "restir_get_statistics"):
+            native_stats = self._native_module.restir_get_statistics(self._native_restir)
             stats.update(native_stats)
 
         return stats
@@ -796,6 +796,7 @@ class CsmController:
 
     def _sync_native_state(self) -> None:
         """Push the current configuration to the native module when available."""
+        _forge3d = get_native_module()
         if _forge3d is None:
             _record_native_setter_unavailable("configure_csm")
             return
@@ -826,6 +827,7 @@ class CsmController:
 
     def enable_shadows(self, enabled: bool = True) -> None:
         """Enable or disable shadow rendering."""
+        _forge3d = get_native_module()
         self._enabled = enabled
         if _forge3d is not None:
             setter = getattr(_forge3d, "set_csm_enabled", None)
@@ -843,6 +845,7 @@ class CsmController:
 
     def set_light_direction(self, direction: Tuple[float, float, float]) -> None:
         """Set directional light direction for shadow casting."""
+        _forge3d = get_native_module()
         self._light_direction = np.array(direction, dtype=np.float32)
         self._light_direction /= np.linalg.norm(self._light_direction)
 
@@ -861,6 +864,7 @@ class CsmController:
 
     def configure_pcf(self, kernel_size: int) -> None:
         """Configure PCF filtering quality."""
+        _forge3d = get_native_module()
         if kernel_size not in [1, 3, 5, 7]:
             raise ValueError(f"PCF kernel size must be 1, 3, 5, or 7, got {kernel_size}")
         self.config.pcf_kernel_size = kernel_size
@@ -881,6 +885,7 @@ class CsmController:
 
     def set_bias_parameters(self, depth_bias: float, slope_bias: float, peter_panning_offset: float) -> None:
         """Configure shadow bias parameters to prevent artifacts."""
+        _forge3d = get_native_module()
         self.config.depth_bias = depth_bias
         self.config.slope_bias = slope_bias
         self.config.peter_panning_offset = peter_panning_offset
@@ -905,6 +910,7 @@ class CsmController:
         Args:
             mode: Debug mode (0=off, 1=cascade colors, 2=overdraw)
         """
+        _forge3d = get_native_module()
         if not (0 <= mode <= 2):
             raise ValueError(f"Debug mode must be 0-2, got {mode}")
         self.config.debug_mode = mode
@@ -929,6 +935,7 @@ class CsmController:
         Returns:
             List of (near_dist, far_dist, texel_size) for each cascade
         """
+        _forge3d = get_native_module()
         if _forge3d is not None:
             getter = getattr(_forge3d, "get_csm_cascade_info", None)
             if getter is not None:
@@ -944,6 +951,7 @@ class CsmController:
 
     def validate_peter_panning_prevention(self) -> bool:
         """Validate that peter-panning artifacts are prevented."""
+        _forge3d = get_native_module()
         if _forge3d is not None:
             validator = getattr(_forge3d, "validate_csm_peter_panning", None)
             if validator is not None:

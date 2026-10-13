@@ -415,11 +415,11 @@ class CopcDataset:
 
     def read_points(self, key: OctreeKey | None = None, budget: int | None = None) -> PointData:
         """Read decoded points for a COPC node through the native decoder."""
-        from ._native import NATIVE_AVAILABLE, get_native_module
+        from ._native import get_native_module
 
-        if not NATIVE_AVAILABLE:
-            raise RuntimeError("CopcDataset.read_points requires the compiled native extension")
         native = get_native_module()
+        if native is None:
+            raise RuntimeError("CopcDataset.read_points requires the compiled native extension")
         fn = getattr(native, "copc_read_node_points", None)
         if fn is None:
             raise RuntimeError("native copc_read_node_points is unavailable")
@@ -533,11 +533,11 @@ def open_laz(path: str | Path) -> LazDataset:
 
 def read_laz_point_attributes(path: str | Path, sample_count: int = 3) -> Dict[str, Any]:
     """Read native LAS/LAZ sample attributes including intensity and classification."""
-    from ._native import NATIVE_AVAILABLE, get_native_module
+    from ._native import get_native_module
 
-    if not NATIVE_AVAILABLE:
-        raise RuntimeError("read_laz_point_attributes requires the compiled native extension")
     native = get_native_module()
+    if native is None:
+        raise RuntimeError("read_laz_point_attributes requires the compiled native extension")
     fn = getattr(native, "read_laz_point_attributes", None)
     if fn is None:
         raise RuntimeError("native read_laz_point_attributes is unavailable")
