@@ -44,6 +44,9 @@ def send_command(
         return {"ok": False, "error": f"Send failed: {exc}"}
 
     data = _receive_buffers.setdefault(sock, bytearray())
+    # Discard inter-reply ASCII whitespace kept over from an earlier call.
+    # Freshly received blank lines retain each caller's existing behavior.
+    del data[:len(data) - len(data.lstrip())]
     while b"\n" not in data:
         try:
             chunk = sock.recv(4096)
