@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import re
@@ -21,6 +20,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 import numpy as np
 
 from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
+from ._viewer_transport import forget_connection as _forget_connection
+from ._viewer_transport import send_command as _transport_command
 from .diagnostics import (
     Diagnostic,
     experimental_feature_diagnostic,
@@ -220,23 +221,7 @@ class ViewerHandle:
         if self._socket is None:
             raise ViewerError("Not connected to viewer")
         
-        # Send NDJSON request
-        request = json.dumps(cmd) + "\n"
-        self._socket.sendall(request.encode("utf-8"))
-        
-        # Read response line
-        response_data = b""
-        while b"\n" not in response_data:
-            chunk = self._socket.recv(4096)
-            if not chunk:
-                raise ViewerError("Connection closed by viewer")
-            response_data += chunk
-        
-        line = response_data.split(b"\n")[0].decode("utf-8")
-        try:
-            response = json.loads(line)
-        except json.JSONDecodeError as e:
-            raise ViewerError(f"Invalid JSON response: {e}")
+        response = _transport_command(self._socket, cmd, error_type=ViewerError)
         
         if not response.get("ok", False):
             error_msg = response.get("error", "Unknown error")
@@ -1367,6 +1352,7 @@ class ViewerHandle:
                     self._socket.close()
                 except Exception:
                     pass
+                _forget_connection(self._socket)
                 self._socket = None
             if self._process is not None:
                 try:
