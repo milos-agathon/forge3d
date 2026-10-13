@@ -84,9 +84,12 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # their shared 1,821-site base to the 1,832-site SUTURA base.
 # SUTURA adds four final screen depth/texture UV conversions and keeps
 # world/camera projection in f64; see its exact ledger transition.
+# WATER-OPTICS adds six normalized normal components and four lossless boolean
+# flags. Its exact transition preserves the preceding CSM and SUTURA endpoints;
+# no world-coordinate conversion is added or existing site removed.
 # Scanner unchanged.
-EXPECTED_CONVERSION_COUNT = 1836
-EXPECTED_CONVERSION_SHA256 = "3d58d0cb7decfff40b2c22299813cb565fc3ecdbed2afa1f0559a52855cfb489"
+EXPECTED_CONVERSION_COUNT = 1846
+EXPECTED_CONVERSION_SHA256 = "5e8cbf17b01a79dfc3eb437b2b7a9506ed8069043a11d8af4faf989c1e7a2e08"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -585,6 +588,113 @@ def _function_body(rel: str, function: str) -> str:
 
 
 
+def _inventory_before_water_optics():
+    transition = _ledger_data()["water_optics"]
+    sites = conversion_inventory()
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    added = list(map(tuple, transition["added"]))
+    assert transition["removed"] == []
+    counts = collections.Counter(sites)
+    for site in added:
+        assert counts[site] == 1, f"water addition missing or duplicated: {site}"
+    added_set = set(added)
+    baseline = [site for site in sites if site not in added_set]
+    assert (len(baseline), _inventory_digest(baseline)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+    return baseline
+
+
+def test_water_optics_inventory_transition_is_exact():
+    transition = _ledger_data()["water_optics"]
+    csm = _ledger_data()["csm_layout_context"]
+    assert transition["review"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        csm["result_count"], csm["result_digest"],
+    )
+    assert (transition["result_count"], transition["result_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
+    )
+    expected_added = [
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            1,
+            'n.map(|v| (f64::from(v) / length) as f32)',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            2,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            3,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            4,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            5,
+            'let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            6,
+            'let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            1,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            2,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            3,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            4,
+            'self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]',
+        ],
+    ]
+    assert transition["added"] == expected_added
+    assert transition["removed"] == []
+    assert transition["result_count"] == transition["base_count"] + len(expected_added)
+    _inventory_before_water_optics()
+
+
 def test_reviewed_csm_layout_context_transition_is_exact():
     transition = _ledger_data()["csm_layout_context"]
     sutura = _ledger_data()["sutura"]
@@ -602,7 +712,7 @@ def test_reviewed_csm_layout_context_transition_is_exact():
         "light_view: self.light_view_matrix.to_cols_array_2d()",
         "light_view: self.light_view_matrix.to_cols_array()",
     ) == new[4]
-    sites = conversion_inventory()
+    sites = _inventory_before_water_optics()
     assert sites.count(new) == 1 and old not in sites
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
@@ -1073,14 +1183,15 @@ def test_sutura_screen_output_inventory_transition_is_exact():
     assert (sutura["result_count"], sutura["result_digest"]) == (
         csm["base_count"], csm["base_digest"],
     )
-    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+    water = _ledger_data()["water_optics"]
+    assert (water["base_count"], water["base_digest"]) == (
         csm["result_count"], csm["result_digest"],
     )
-    sites = conversion_inventory()
+    sites = _inventory_before_water_optics()
     counts = collections.Counter(sites)
     for site in expected_added:
         assert counts[site] == 1, f"screen output addition missing or duplicated: {site}"
-    # Reverse only the separately checked CSM context transition before
+    # Water additions are already reversed; reverse the checked CSM transition before
     # reconstructing the historical SUTURA input inventory.
     old_csm, = map(tuple, csm["removed"])
     new_csm, = map(tuple, csm["added"])

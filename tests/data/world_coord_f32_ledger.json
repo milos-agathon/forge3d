@@ -1461,5 +1461,85 @@
   ],
   "source_commit": "f7581b9c08a351d3db2f7d28cf2b3285d7d80fd2",
   "review": "Main PR #216 changes the adjacent light_view matrix packing from to_cols_array_2d() to to_cols_array(). All 1836 narrowing operations and operands are unchanged. Reversing this exact single statement-context replacement restores the prior frozen digest; every historical ledger record is preserved."
-}
+},
+ "water_optics": {
+  "base_count": 1836,
+  "base_digest": "3d58d0cb7decfff40b2c22299813cb565fc3ecdbed2afa1f0559a52855cfb489",
+  "result_count": 1846,
+  "result_digest": "5e8cbf17b01a79dfc3eb437b2b7a9506ed8069043a11d8af4faf989c1e7a2e08",
+  "added": [
+   [
+    "src/terrain/renderer/water_reflection/surface.rs",
+    "upload_water_surface",
+    "as_f32",
+    1,
+    "n.map(|v| (f64::from(v) / length) as f32)"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/surface.rs",
+    "upload_water_surface",
+    "as_f32",
+    2,
+    "[n.x as f32, n.y as f32, n.z as f32]"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/surface.rs",
+    "upload_water_surface",
+    "as_f32",
+    3,
+    "[n.x as f32, n.y as f32, n.z as f32]"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/surface.rs",
+    "upload_water_surface",
+    "as_f32",
+    4,
+    "[n.x as f32, n.y as f32, n.z as f32]"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/surface.rs",
+    "upload_water_surface",
+    "as_f32",
+    5,
+    "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/surface.rs",
+    "upload_water_surface",
+    "as_f32",
+    6,
+    "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/uniforms.rs",
+    "with_optics",
+    "as_f32",
+    1,
+    "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/uniforms.rs",
+    "with_optics",
+    "as_f32",
+    2,
+    "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/uniforms.rs",
+    "with_optics",
+    "as_f32",
+    3,
+    "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+   ],
+   [
+    "src/terrain/renderer/water_reflection/uniforms.rs",
+    "with_optics",
+    "as_f32",
+    4,
+    "self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]"
+   ]
+  ],
+  "removed": [],
+  "review": "2026-10-13: Milos instructed completing a green and mergeable PR after this exact ten-site inventory transition was presented. Six conversions encode normalized normal components; four convert boolean flags losslessly to 0 or 1. No world-coordinate cast is added, no site is removed, and every preceding ledger record and rejecting probe is retained."
+ }
 }
