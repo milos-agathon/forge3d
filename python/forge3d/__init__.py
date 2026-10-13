@@ -53,6 +53,8 @@ from .mem import (
     override_memory_limit,
 )
 
+# Class/function re-exports and exception identities are import-time bindings.
+# Runtime capability dispatch resolves through _native at the point of use.
 _NATIVE_MODULE = _get_native_module()
 
 # -----------------------------------------------------------------------------
@@ -219,7 +221,10 @@ def __getattr__(name: str):
         globals()[name] = module
         return module
     if name in _NATIVE_ONLY_EXPORTS:
-        if _NATIVE_MODULE is None:
+        native = _get_native_module()
+        if native is not None and hasattr(native, name):
+            return getattr(native, name)
+        if native is None:
             cause = native_import_error()
             detail = (
                 f"the compiled extension forge3d._forge3d failed to import: {cause!r}"

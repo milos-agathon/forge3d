@@ -63,7 +63,7 @@ def test_load_native_records_root_cause(monkeypatch):
 
 def test_missing_native_symbol_message_includes_root_cause(monkeypatch):
     boom = ImportError("DLL load failed: The specified module could not be found")
-    monkeypatch.setattr(f3d, "_NATIVE_MODULE", None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     monkeypatch.setattr(native_mod, "NATIVE_IMPORT_ERROR", boom)
 
     with pytest.raises(AttributeError) as excinfo:
@@ -76,7 +76,7 @@ def test_missing_native_symbol_message_includes_root_cause(monkeypatch):
 
 
 def test_missing_native_symbol_without_cause_mentions_not_built(monkeypatch):
-    monkeypatch.setattr(f3d, "_NATIVE_MODULE", None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     monkeypatch.setattr(native_mod, "NATIVE_IMPORT_ERROR", None)
 
     with pytest.raises(AttributeError, match="is not built"):
@@ -87,7 +87,7 @@ def test_feature_gated_symbol_message_mentions_cargo_feature(monkeypatch):
     class _FakeNative:
         pass  # deliberately lacks every symbol
 
-    monkeypatch.setattr(f3d, "_NATIVE_MODULE", _FakeNative())
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", _FakeNative())
 
     with pytest.raises(AttributeError) as excinfo:
         f3d.__getattr__("copc_read_node_points")
@@ -104,7 +104,7 @@ def test_unknown_attribute_still_plain_attribute_error():
 
 def test_hasattr_probe_stays_false_not_raising(monkeypatch):
     """hasattr() probes across the repo must keep returning False, not raise."""
-    monkeypatch.setattr(f3d, "_NATIVE_MODULE", None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     monkeypatch.setattr(native_mod, "NATIVE_IMPORT_ERROR", None)
     monkeypatch.delitem(f3d.__dict__, "Scene", raising=False)
     assert hasattr(f3d, "Scene") is False
@@ -122,7 +122,7 @@ def _assert_diagnostic_fields(probe: dict, expected_status: str) -> None:
 
 
 def test_device_probe_native_missing(monkeypatch):
-    monkeypatch.setattr(gpu_mod, "get_native_module", lambda: None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     probe = gpu_mod.device_probe()
     _assert_diagnostic_fields(probe, "native_missing")
     assert "maturin develop" in probe["remediation"]
@@ -130,7 +130,7 @@ def test_device_probe_native_missing(monkeypatch):
 
 def test_device_probe_native_missing_preserves_import_error(monkeypatch):
     boom = ImportError("simulated missing DLL")
-    monkeypatch.setattr(gpu_mod, "get_native_module", lambda: None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     monkeypatch.setattr(native_mod, "NATIVE_IMPORT_ERROR", boom)
     probe = gpu_mod.device_probe()
     _assert_diagnostic_fields(probe, "native_missing")
@@ -146,7 +146,7 @@ def test_device_probe_probe_error(monkeypatch):
         enumerate_adapters = None
         get_device = None
 
-    monkeypatch.setattr(gpu_mod, "get_native_module", lambda: _BrokenNative())
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", _BrokenNative())
     probe = gpu_mod.device_probe()
     _assert_diagnostic_fields(probe, "probe_error")
     assert "simulated driver crash" in probe["reason"]

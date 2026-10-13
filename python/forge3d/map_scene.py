@@ -517,20 +517,9 @@ def _composite_python_raster_overlays(
 
 
 def _numpy_to_exr_writer() -> Any | None:
-    try:
-        from ._native import get_native_module
+    from ._native import get_native_symbol
 
-        writer = getattr(get_native_module(), "numpy_to_exr", None)
-        if writer is not None:
-            return writer
-    except Exception:
-        pass
-    try:
-        import forge3d._forge3d as native  # type: ignore[import-not-found]
-
-        return getattr(native, "numpy_to_exr", None)
-    except Exception:
-        return None
+    return get_native_symbol("numpy_to_exr")
 
 
 def _write_exr_array(path: Path, array: Any, *, channel_prefix: str) -> None:

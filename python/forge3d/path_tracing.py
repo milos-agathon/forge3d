@@ -24,11 +24,7 @@ import time as _time
 from .certificate import _render_capture, emit_render_certificate
 from .denoise import atrous_denoise
 
-try:
-    from ._native import get_native_module as _get_native_module
-    _NATIVE = _get_native_module()
-except Exception:
-    _NATIVE = None
+from ._native import get_native_symbol
 
 
 class ExperimentalSyntheticOutput(RuntimeError):
@@ -664,9 +660,7 @@ def save_aovs(
     except Exception:
         numpy_to_png = None  # type: ignore
 
-    native_exr = None
-    if _NATIVE is not None:
-        native_exr = getattr(_NATIVE, "numpy_to_exr", None)
+    native_exr = get_native_symbol("numpy_to_exr")
 
     for key, arr in aovs_map.items():
         k = str(key).lower()
@@ -1011,7 +1005,8 @@ def hybrid_render_terrain_reference(
     an exception; they never fall back to flat or vacuum rendering.
     """
     _ = cache
-    if _NATIVE is None or not hasattr(_NATIVE, "hybrid_render_terrain_reference"):
+    native_render = get_native_symbol("hybrid_render_terrain_reference")
+    if native_render is None:
         raise RuntimeError(
             "hybrid_render_terrain_reference requires the native forge3d "
             "module with GPU support"
@@ -1158,7 +1153,7 @@ def hybrid_render_terrain_reference(
             raise ValueError(f"mesh_vertices must be (N, 3), got {mv.shape}")
         if mi.ndim != 2 or mi.shape[1] != 3:
             raise ValueError(f"mesh_indices must be (M, 3), got {mi.shape}")
-    result = _NATIVE.hybrid_render_terrain_reference(
+    result = native_render(
         dem,
         int(width),
         int(height),
@@ -1410,14 +1405,13 @@ def render_terrain_poster(
                 )
                 tiles.append(stats)
 
-        if _NATIVE is None or not hasattr(
-            _NATIVE, "_record_terrain_poster_certificate_inputs"
-        ):
+        record_inputs = get_native_symbol("_record_terrain_poster_certificate_inputs")
+        if record_inputs is None:
             raise RuntimeError(
                 "render_terrain_poster requires a native build with the terrain "
                 "poster certificate helper"
             )
-        _NATIVE._record_terrain_poster_certificate_inputs(
+        record_inputs(
             model,
             albedo_map_sha256,
             albedo_sampling,

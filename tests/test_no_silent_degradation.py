@@ -473,6 +473,7 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
         "tests/test_install_smoke.py",
         "tests/test_license.py",
         "tests/test_api_contracts.py",
+        "tests/test_native_capabilities.py",
         "tests/test_solar_spa.py",
         "tests/test_capability_negotiation.py",
         "tests/test_budget_enforce.py",

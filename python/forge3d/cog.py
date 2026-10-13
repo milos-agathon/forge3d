@@ -22,17 +22,7 @@ import numpy as np
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Try to import native COG support
-_COG_AVAILABLE = False
-_CogDatasetNative = None
-
-try:
-    from . import _forge3d
-    if hasattr(_forge3d, 'CogDataset'):
-        _CogDatasetNative = _forge3d.CogDataset
-        _COG_AVAILABLE = True
-except ImportError:
-    pass
+from ._native import get_native_symbol
 
 
 def is_cog_available() -> bool:
@@ -41,7 +31,7 @@ def is_cog_available() -> bool:
     Returns:
         True if the forge3d extension was built with cog_streaming feature.
     """
-    return _COG_AVAILABLE
+    return get_native_symbol("CogDataset") is not None
 
 
 def _rasterio_available() -> bool:
@@ -167,7 +157,8 @@ class CogDataset:
         cache_dir: str | PathLike[str] | None = None,
         cache_budget_mb: int | None = None,
     ):
-        if not _COG_AVAILABLE:
+        native_cls = get_native_symbol("CogDataset")
+        if native_cls is None:
             raise RuntimeError(
                 "COG streaming is not available. "
                 "Rebuild forge3d with: maturin develop --release --features cog_streaming"
@@ -175,7 +166,7 @@ class CogDataset:
         
         cache_dir_str = None if cache_dir is None else str(cache_dir)
         range_cache_budget_mb = cache_size_mb if cache_budget_mb is None else cache_budget_mb
-        self._native = _CogDatasetNative(url, cache_size_mb, cache_dir_str, range_cache_budget_mb)
+        self._native = native_cls(url, cache_size_mb, cache_dir_str, range_cache_budget_mb)
         self._url = url
         self._cache_size_mb = cache_size_mb
         self._cache_dir = cache_dir_str
@@ -415,7 +406,7 @@ def open_cog(
         >>> ds = open_cog("https://example.com/dem.tif")
         >>> tile = ds.read_tile(0, 0)
     """
-    if prefer_native and _COG_AVAILABLE:
+    if prefer_native and is_cog_available():
         ds = CogDataset(
             url,
             cache_size_mb=cache_size_mb,
@@ -439,7 +430,7 @@ def open_cog(
             cache_budget_mb=cache_budget_mb,
         )
     except RuntimeError:
-        if _COG_AVAILABLE:
+        if is_cog_available():
             return CogDataset(
                 url,
                 cache_size_mb=cache_size_mb,
