@@ -84,9 +84,11 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # their shared 1,821-site base to the 1,832-site SUTURA base.
 # SUTURA adds four final screen depth/texture UV conversions and keeps
 # world/camera projection in f64; see its exact ledger transition.
+# Texture layout changes one existing integer-size statistics operand; the
+# exact ledger transition restores the prior freeze without adding casts.
 # Scanner unchanged.
 EXPECTED_CONVERSION_COUNT = 1836
-EXPECTED_CONVERSION_SHA256 = "3d58d0cb7decfff40b2c22299813cb565fc3ecdbed2afa1f0559a52855cfb489"
+EXPECTED_CONVERSION_SHA256 = "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -585,6 +587,49 @@ def _function_body(rel: str, function: str) -> str:
 
 
 
+def _undo_texture_layout_stats_transition(sites):
+    transition = _ledger_data()["texture_layout_stats"]
+    old, = map(tuple, transition["removed"])
+    new, = map(tuple, transition["added"])
+    assert sites.count(new) == 1 and old not in sites
+    return [old if site == new else site for site in sites]
+
+
+def test_reviewed_texture_layout_stats_transition_is_exact():
+    transition = _ledger_data()["texture_layout_stats"]
+    previous = _ledger_data()["csm_layout_context"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        previous["result_count"], previous["result_digest"],
+    )
+    assert transition["review"]
+    assert len(transition["removed"]) == len(transition["added"]) == 1
+    old, = map(tuple, transition["removed"])
+    new, = map(tuple, transition["added"])
+    prefix = ("src/core/texture_format.rs", "calculate_compression_ratio", "as_f32", 1)
+    assert old == (*prefix, "let rgba8_size = (w * h * 4) as f32")
+    assert new == (*prefix,
+        "let rgba8_size = crate::core::texture_layout::resident_2d_size(w, h, TextureFormat::Rgba8Unorm) as f32",
+    )
+    # The changed operand remains unsigned texture-size telemetry, not world data.
+    assert re.search(
+        r"^pub\(crate\) fn resident_2d_size\(width: u32, height: u32, "
+        r"format: TextureFormat\) -> u64 \{",
+        _read("src/core/texture_layout.rs"),
+        re.M,
+    )
+    sites = conversion_inventory()
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    restored = _undo_texture_layout_stats_transition(sites)
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+
+
 def test_reviewed_csm_layout_context_transition_is_exact():
     transition = _ledger_data()["csm_layout_context"]
     sutura = _ledger_data()["sutura"]
@@ -602,7 +647,7 @@ def test_reviewed_csm_layout_context_transition_is_exact():
         "light_view: self.light_view_matrix.to_cols_array_2d()",
         "light_view: self.light_view_matrix.to_cols_array()",
     ) == new[4]
-    sites = conversion_inventory()
+    sites = _undo_texture_layout_stats_transition(conversion_inventory())
     assert sites.count(new) == 1 and old not in sites
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
@@ -1073,10 +1118,14 @@ def test_sutura_screen_output_inventory_transition_is_exact():
     assert (sutura["result_count"], sutura["result_digest"]) == (
         csm["base_count"], csm["base_digest"],
     )
-    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
-        csm["result_count"], csm["result_digest"],
+    texture = _ledger_data()["texture_layout_stats"]
+    assert (csm["result_count"], csm["result_digest"]) == (
+        texture["base_count"], texture["base_digest"],
     )
-    sites = conversion_inventory()
+    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+        texture["result_count"], texture["result_digest"],
+    )
+    sites = _undo_texture_layout_stats_transition(conversion_inventory())
     counts = collections.Counter(sites)
     for site in expected_added:
         assert counts[site] == 1, f"screen output addition missing or duplicated: {site}"
