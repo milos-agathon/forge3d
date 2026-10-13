@@ -137,6 +137,7 @@ impl TerrainScene {
                     },
                     0.0,
                 ],
+                params7: [detail.detail_strength, 0.0, 0.0, 0.0],
             },
             lut: None,
         };

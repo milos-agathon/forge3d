@@ -33,7 +33,7 @@ impl TerrainRenderParams {
             shadow: parse_shadow_settings(&shadows)?,
             fog: parse_fog_settings(&params),
             reflection: parse_reflection_settings(&params),
-            detail: parse_detail_settings(&params),
+            detail: parse_detail_settings(&params)?,
             height_ao: parse_height_ao_settings(&params),
             sun_visibility: parse_sun_visibility_settings(&params),
             bloom: parse_bloom_settings(&params),
