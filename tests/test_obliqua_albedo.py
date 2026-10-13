@@ -20,7 +20,7 @@ def _dem():
 
 
 def test_albedo_map_is_grid_aligned_and_forwarded(monkeypatch):
-    monkeypatch.setattr(pt, "_NATIVE", _Native())
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(_Native(), name, None))
     albedo_map = np.ones((4, 5, 4), dtype=np.float64)
     result = pt.hybrid_render_terrain_reference(
         _dem(), 8, 8, albedo_map=albedo_map, albedo_sampling="bilinear"
@@ -34,7 +34,7 @@ def test_rgb_albedo_map_is_accepted_with_form_default_sampling(monkeypatch):
     # (H, W, 3) linear RGB is the alpha-one form of the RGBA map; sampling is
     # left to the native seam, which defaults RGB maps to bilinear and RGBA
     # maps to nearest.
-    monkeypatch.setattr(pt, "_NATIVE", _Native())
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(_Native(), name, None))
     result = pt.hybrid_render_terrain_reference(
         _dem(), 8, 8, albedo_map=np.ones((4, 5, 3), dtype=np.float64)
     )
@@ -52,13 +52,13 @@ def test_rgb_albedo_map_is_accepted_with_form_default_sampling(monkeypatch):
     ],
 )
 def test_albedo_map_shape_mismatch_is_an_error(monkeypatch, value):
-    monkeypatch.setattr(pt, "_NATIVE", _Native())
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(_Native(), name, None))
     with pytest.raises(ValueError, match=r"albedo_map must have shape \(4, 5, 4\)"):
         pt.hybrid_render_terrain_reference(_dem(), 8, 8, albedo_map=value)
 
 
 def test_albedo_map_rejects_nonfinite_and_bad_sampling(monkeypatch):
-    monkeypatch.setattr(pt, "_NATIVE", _Native())
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(_Native(), name, None))
     albedo_map = np.ones((4, 5, 4), dtype=np.float32)
     albedo_map[0, 0, 0] = np.nan
     with pytest.raises(ValueError, match="non-finite"):

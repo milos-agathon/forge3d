@@ -1175,7 +1175,7 @@ def test_public_wrapper_resolves_solar_time_and_reports_source(monkeypatch):
             captured.update(kwargs)
             return {}
 
-    monkeypatch.setattr(pt, "_NATIVE", Native())
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(Native(), name, None))
     assert f3d.hybrid_render_terrain_reference is pt.hybrid_render_terrain_reference
     when = SolarTime(
         utc=(2003, 10, 17, 12, 30, 30),

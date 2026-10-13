@@ -249,7 +249,12 @@ def test_other_runtime_dispatch_follows_refresh(native_runtime, monkeypatch):
     refresh(module)
     lighting.set_exposure_stops(1)
     assert setter_calls == [2.0]
-    assert path_tracing.hybrid_render_terrain_reference(np.zeros((2, 2)), 8, 8, {}) == {"native": True}
+    assert path_tracing.hybrid_render_terrain_reference(np.zeros((2, 2)), 8, 8, {}) == {
+        "native": True,
+        "sun_source": "manual_angles",
+        "solar_azimuth_deg": 315.0,
+        "solar_elevation_deg": 45.0,
+    }
     assert pointcloud.read_laz_point_attributes("unused")["coords"].shape == (0, 3)
     dataset = tiles3d.Tiles3dDataset(Path("unused"), None)
     assert dataset.traverse((0, 0, 0)) == [{"native": True}]
