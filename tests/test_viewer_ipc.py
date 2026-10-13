@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -876,3 +877,293 @@ class TestNDJSONProtocol:
         for i, line in enumerate(lines):
             parsed = json.loads(line)
             assert parsed["cmd"] == cmds[i]["cmd"]
+
+
+class _ScriptedSocket:
+    """Socket seam with deterministic byte fragments and connection failures."""
+
+    def __init__(self, incoming, *, send_error=None):
+        self.incoming = list(incoming)
+        self.sent = []
+        self.recv_count = 0
+        self.send_error = send_error
+        self.timeout = 10.0
+        self.closed = False
+
+    def sendall(self, data):
+        if self.send_error is not None:
+            raise self.send_error
+        self.sent.append(data)
+
+    def recv(self, size):
+        self.recv_count += 1
+        assert self.incoming, "Transport read beyond the scripted reply"
+        item = self.incoming.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        if len(item) > size:
+            self.incoming.insert(0, item[size:])
+        return item[:size]
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+    def connect(self, address):
+        self.address = address
+
+    def close(self):
+        self.closed = True
+
+
+def _handle_for_socket(sock):
+    handle = ViewerHandle.__new__(ViewerHandle)
+    handle._socket = sock
+    return handle
+
+
+@pytest.fixture(params=["handle", "raw"])
+def command_client(request):
+    if request.param == "handle":
+        return request.param, lambda sock, cmd: _handle_for_socket(sock).send_ipc(cmd)
+    return request.param, viewer_ipc_module.send_ipc
+
+
+class TestViewerCommandTransport:
+    """Both public callers exercise the same transport through its socket seam."""
+
+    def test_fragmented_utf8_reply_and_ndjson_request(self, command_client):
+        _, send = command_client
+        sock = _ScriptedSocket([b'{"ok":', b'true,"text":"caf\xc3', b'\xa9"}', b'\n'])
+        cmd = {"cmd": "add_label", "text": "café\nsecond line"}
+
+        assert send(sock, cmd) == {"ok": True, "text": "café"}
+        assert sock.sent == [(json.dumps(cmd) + "\n").encode("utf-8")]
+        assert sock.timeout == 10.0
+
+    def test_extra_lines_and_partial_tail_survive_later_calls(self, command_client):
+        _, send = command_client
+        sock = _ScriptedSocket([
+            b'{"ok":true,"id":1}\n{"ok":true,"id":2}\n{"ok":',
+            b'true,"id":3}\n',
+        ])
+
+        assert send(sock, {"cmd": "first"}) == {"ok": True, "id": 1}
+        assert send(sock, {"cmd": "second"}) == {"ok": True, "id": 2}
+        assert sock.recv_count == 1
+        assert send(sock, {"cmd": "third"}) == {"ok": True, "id": 3}
+        assert sock.recv_count == 2
+        assert [json.loads(data) for data in sock.sent] == [
+            {"cmd": "first"}, {"cmd": "second"}, {"cmd": "third"},
+        ]
+
+    def test_buffer_is_shared_when_switching_entry_points(self, command_client):
+        name, send = command_client
+        sock = _ScriptedSocket([b'{"ok":true,"id":1}\n{"ok":true,"id":2}\n'])
+        other_send = (
+            viewer_ipc_module.send_ipc if name == "handle"
+            else lambda sock, cmd: _handle_for_socket(sock).send_ipc(cmd)
+        )
+
+        assert send(sock, {"cmd": "first"})["id"] == 1
+        assert other_send(sock, {"cmd": "second"})["id"] == 2
+        assert sock.recv_count == 1
+        assert len(sock.sent) == 2
+
+    def test_buffers_are_isolated_by_socket(self, command_client):
+        _, send = command_client
+        first = _ScriptedSocket([b'{"ok":true,"id":1}\n{"ok":true,"id":2}\n'])
+        second = _ScriptedSocket([b'{"ok":true,"id":10}\n'])
+
+        assert send(first, {"cmd": "first"})["id"] == 1
+        assert send(second, {"cmd": "second"})["id"] == 10
+        assert send(first, {"cmd": "third"})["id"] == 2
+
+    @pytest.mark.parametrize(
+        "incoming,exception_type,handle_error,raw_error",
+        [
+            ([b""], ViewerError, "Connection closed by viewer", "Empty response from viewer"),
+            ([b'{"ok":', b""], ViewerError, "Connection closed by viewer", "Invalid JSON response:"),
+            ([b'{"ok": nope}\n'], ViewerError, "Invalid JSON response:", "Invalid JSON response:"),
+            ([b"\n"], ViewerError, "Invalid JSON response:", "Empty response from viewer"),
+            ([socket.timeout("timed out")], socket.timeout, "timed out", "Timeout waiting for response"),
+            ([b'{"ok":', socket.timeout("timed out")], socket.timeout, "timed out", "Invalid JSON response:"),
+            ([ConnectionResetError("reset")], ConnectionResetError, "reset", "Receive failed: reset"),
+            ([b'{"ok":', OSError("reset")], OSError, "reset", "Receive failed: reset"),
+            ([b'{"ok":false,"error":"denied"}\n'], ViewerError, "Viewer command failed: denied", "denied"),
+        ],
+        ids=["eof", "partial-eof", "malformed-json", "empty-line", "timeout",
+             "partial-timeout", "receive-failure", "receive-failure-after-fragment", "rejected-command"],
+    )
+    def test_failure_conventions(
+        self, command_client, incoming, exception_type, handle_error, raw_error,
+    ):
+        name, send = command_client
+        sock = _ScriptedSocket(incoming)
+        if name == "handle":
+            with pytest.raises(exception_type, match=handle_error):
+                send(sock, {"cmd": "get_stats"})
+        else:
+            response = send(sock, {"cmd": "get_stats"})
+            assert response["ok"] is False
+            assert response["error"].startswith(raw_error)
+        assert sock.sent == [b'{"cmd": "get_stats"}\n']
+        assert sock.timeout == 10.0
+
+    @pytest.mark.parametrize("failure", [BrokenPipeError("broken pipe"), socket.timeout("timed out")])
+    def test_send_failure_conventions(self, command_client, failure):
+        name, send = command_client
+        sock = _ScriptedSocket([], send_error=failure)
+        if name == "handle":
+            with pytest.raises(type(failure)) as raised:
+                send(sock, {"cmd": "close"})
+            assert raised.value is failure
+        else:
+            assert send(sock, {"cmd": "close"}) == {"ok": False, "error": f"Send failed: {failure}"}
+        assert sock.recv_count == 0
+
+    @pytest.mark.parametrize("boundary", [b"", socket.timeout("timed out")], ids=["eof", "timeout"])
+    def test_unterminated_json_preserves_legacy_behavior(self, command_client, boundary):
+        name, send = command_client
+        sock = _ScriptedSocket([b'{"ok":true}', boundary])
+        if name == "handle":
+            error_type = socket.timeout if isinstance(boundary, Exception) else ViewerError
+            with pytest.raises(error_type):
+                send(sock, {"cmd": "get_stats"})
+        else:
+            assert send(sock, {"cmd": "get_stats"}) == {"ok": True}
+
+    @pytest.mark.parametrize("failure", [socket.timeout("timed out"), OSError("reset")], ids=["timeout", "receive-error"])
+    def test_failed_partial_reply_is_discarded(self, command_client, failure):
+        name, send = command_client
+        sock = _ScriptedSocket([b'{"ok":', failure, b'{"ok":true}\n'])
+        if name == "handle":
+            with pytest.raises(type(failure)) as raised:
+                send(sock, {"cmd": "first"})
+            assert raised.value is failure
+        else:
+            assert send(sock, {"cmd": "first"})["ok"] is False
+        assert send(sock, {"cmd": "second"}) == {"ok": True}
+
+    @pytest.mark.parametrize("prefix", [b"\n", b" \t\r\n\n", "\u00a0\n".encode("utf-8")])
+    def test_leading_buffered_blank_lines_keep_caller_convention(self, command_client, prefix):
+        name, send = command_client
+        sock = _ScriptedSocket([prefix + b'{"ok":true,"id":1}\n{"ok":true,"id":2}\n'])
+        if name == "handle":
+            with pytest.raises(ViewerError, match="Invalid JSON response:"):
+                send(sock, {"cmd": "first"})
+        else:
+            assert send(sock, {"cmd": "first"}) == {"ok": True, "id": 1}
+            assert send(sock, {"cmd": "second"}) == {"ok": True, "id": 2}
+        assert sock.recv_count == 1
+
+    @pytest.mark.parametrize(
+        "trailing_whitespace", [b"\n", b" \r\n", b"\t\n\f\v\r\n"],
+        ids=["newline", "spaces-crlf", "ascii-whitespace"],
+    )
+    def test_kept_over_blank_lines_do_not_replace_next_reply(self, command_client, trailing_whitespace):
+        _, send = command_client
+        sock = _ScriptedSocket([
+            b'{"ok":true,"id":1}\n' + trailing_whitespace,
+            b'{"ok":true,"id":2}\n',
+        ])
+
+        assert send(sock, {"cmd": "first"}) == {"ok": True, "id": 1}
+        assert send(sock, {"cmd": "second"}) == {"ok": True, "id": 2}
+        assert sock.recv_count == 2
+        assert sock.sent == [b'{"cmd": "first"}\n', b'{"cmd": "second"}\n']
+
+    def test_malformed_line_leaves_next_reply_buffered(self, command_client):
+        name, send = command_client
+        sock = _ScriptedSocket([b'not json\n{"ok":true}\n'])
+        if name == "handle":
+            with pytest.raises(ViewerError, match="Invalid JSON response:"):
+                send(sock, {"cmd": "first"})
+        else:
+            assert send(sock, {"cmd": "first"})["ok"] is False
+        assert send(sock, {"cmd": "second"}) == {"ok": True}
+        assert sock.recv_count == 1
+
+    def test_large_payload_logging_keeps_caller_convention(self, command_client, capsys):
+        name, send = command_client
+        sock = _ScriptedSocket([b'{"ok":true}\n'])
+        cmd = {"cmd": "add_mesh", "payload": "x" * 100000}
+        assert send(sock, cmd) == {"ok": True}
+        assert json.loads(sock.sent[0]) == cmd
+        assert ("Sending large IPC message:" in capsys.readouterr().out) == (name == "raw")
+
+    def test_socket_and_buffer_can_be_collected(self, command_client):
+        import gc
+        import weakref
+        from forge3d import _viewer_transport
+
+        _, send = command_client
+        sock = _ScriptedSocket([b'{"ok":true}\nunused bytes'])
+        assert send(sock, {"cmd": "get_stats"}) == {"ok": True}
+        assert sock in _viewer_transport._receive_buffers
+        reference = weakref.ref(sock)
+        del sock
+        gc.collect()
+        assert reference() is None
+
+    def test_close_releases_buffer(self, command_client):
+        from types import SimpleNamespace
+        from forge3d import _viewer_transport
+
+        name, send = command_client
+        sock = _ScriptedSocket([b'{"ok":true}\n{"ok":true}\nunread tail'])
+        assert send(sock, {"cmd": "get_stats"}) == {"ok": True}
+        process = SimpleNamespace(terminate=lambda: None, wait=lambda timeout: None)
+        if name == "handle":
+            handle = _handle_for_socket(sock)
+            handle._process = process
+            handle._cleanup_paths = []
+            handle.close()
+            assert handle._socket is None
+        else:
+            viewer_ipc_module.close_viewer(sock, process)
+        assert sock.closed
+        assert sock not in _viewer_transport._receive_buffers
+
+    def test_live_socket_exchange(self, command_client):
+        from concurrent.futures import ThreadPoolExecutor
+
+        _, send = command_client
+        client, server = socket.socketpair()
+        # Use ViewerHandle's existing default timeout for the test sockets.
+        client.settimeout(10.0)
+        server.settimeout(10.0)
+        commands = [{"cmd": "first"}, {"cmd": "second"}]
+
+        def serve():
+            received = []
+            for index in range(len(commands)):
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = server.recv(4096)
+                    assert chunk, "Client closed before completing its request"
+                    data += chunk
+                received.append(json.loads(data))
+                server.sendall(b'{"ok":true,"text":"caf\xc3')
+                server.sendall(b'\xa9","id":' + str(index).encode() + b'}\n')
+            return received
+
+        with client, server, ThreadPoolExecutor(max_workers=1) as executor:
+            result = executor.submit(serve)
+            for index, cmd in enumerate(commands):
+                assert send(client, cmd) == {"ok": True, "text": "café", "id": index}
+            assert result.result() == commands
+            assert client.gettimeout() == 10.0
+
+    def test_handle_connection_keeps_configured_timeout(self, monkeypatch):
+        sock = _ScriptedSocket([b'{"ok":true}\n'])
+        monkeypatch.setattr(viewer_module.socket, "socket", lambda *args: sock)
+        handle = ViewerHandle(None, "127.0.0.1", 12345, timeout=30.0)
+        assert sock.address == ("127.0.0.1", 12345)
+        assert sock.timeout == 30.0
+        assert handle.send_ipc({"cmd": "get_stats"}) == {"ok": True}
+        assert sock.timeout == 30.0
+
+    def test_handle_disconnected_exception_is_unchanged(self):
+        handle = _handle_for_socket(None)
+        with pytest.raises(ViewerError, match="Not connected to viewer"):
+            handle.send_ipc({"cmd": "get_stats"})
