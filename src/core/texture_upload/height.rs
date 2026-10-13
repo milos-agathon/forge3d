@@ -1,6 +1,7 @@
-use super::hdr::align_copy_bytes_per_row;
 use crate::core::error::{RenderError, RenderResult};
+use crate::core::memory_tracker::MEMORY_BUDGET_LIMIT;
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
+use crate::core::texture_layout::{resident_2d_size, TransferLayout};
 
 pub fn create_r32f_height_texture(
     device: &wgpu::Device,
@@ -18,8 +19,8 @@ pub fn create_r32f_height_texture(
         )));
     }
 
-    let texture_bytes = (width as u64) * (height as u64) * 4;
-    let limit_bytes = 512 * 1024 * 1024;
+    let texture_bytes = resident_2d_size(width, height, wgpu::TextureFormat::R32Float);
+    let limit_bytes = MEMORY_BUDGET_LIMIT;
     if texture_bytes > limit_bytes {
         return Err(RenderError::upload(format!(
             "Height texture {}x{} ({} bytes) exceeds 512 MiB limit",
@@ -60,8 +61,18 @@ fn upload_r32f_data(
     width: u32,
     height: u32,
 ) -> RenderResult<()> {
-    let row_bytes = width * 4;
-    let padded_bpr = align_copy_bytes_per_row(row_bytes);
+    let layout = TransferLayout::buffer_copy(
+        wgpu::TextureFormat::R32Float,
+        wgpu::TextureAspect::All,
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    )
+    .map_err(RenderError::upload)?;
+    let row_bytes = layout.row_bytes;
+    let padded_bpr = layout.bytes_per_row;
 
     if padded_bpr == row_bytes {
         let bytes: &[u8] = bytemuck::cast_slice(data);
@@ -73,11 +84,7 @@ fn upload_r32f_data(
                 aspect: wgpu::TextureAspect::All,
             },
             bytes,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(std::num::NonZeroU32::new(row_bytes).unwrap().into()),
-                rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap().into()),
-            },
+            layout.image_data_layout(),
             wgpu::Extent3d {
                 width,
                 height,
@@ -85,12 +92,12 @@ fn upload_r32f_data(
             },
         );
     } else {
-        let mut padded_data = vec![0u8; (padded_bpr * height) as usize];
+        let mut padded_data = vec![0u8; layout.transfer_bytes as usize];
         let input_data = bytemuck::cast_slice::<f32, u8>(data);
 
         for y in 0..height {
-            let src_offset = (y * row_bytes) as usize;
-            let dst_offset = (y * padded_bpr) as usize;
+            let src_offset = y as usize * row_bytes as usize;
+            let dst_offset = y as usize * padded_bpr as usize;
             let src_end = src_offset + row_bytes as usize;
             let dst_end = dst_offset + row_bytes as usize;
             padded_data[dst_offset..dst_end].copy_from_slice(&input_data[src_offset..src_end]);
@@ -104,11 +111,7 @@ fn upload_r32f_data(
                 aspect: wgpu::TextureAspect::All,
             },
             &padded_data,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr).unwrap().into()),
-                rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap().into()),
-            },
+            layout.image_data_layout(),
             wgpu::Extent3d {
                 width,
                 height,
@@ -136,9 +139,19 @@ pub fn create_r32f_height_texture_padded(
         )));
     }
 
-    let bytes_per_row = (width * 4) as usize;
-    let padded_bpr = ((bytes_per_row + 255) / 256) * 256;
-    let mut staged = vec![0u8; padded_bpr * (height as usize)];
+    let layout = TransferLayout::buffer_copy(
+        wgpu::TextureFormat::R32Float,
+        wgpu::TextureAspect::All,
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    )
+    .map_err(RenderError::upload)?;
+    let bytes_per_row = layout.row_bytes as usize;
+    let padded_bpr = layout.bytes_per_row as usize;
+    let mut staged = vec![0u8; layout.transfer_bytes as usize];
     let src = bytemuck::cast_slice::<f32, u8>(data);
 
     for row in 0..height as usize {
@@ -176,11 +189,7 @@ pub fn create_r32f_height_texture_padded(
             aspect: wgpu::TextureAspect::All,
         },
         &staged,
-        wgpu::ImageDataLayout {
-            offset: 0,
-            bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr as u32).unwrap().into()),
-            rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap().into()),
-        },
+        layout.image_data_layout(),
         wgpu::Extent3d {
             width,
             height,

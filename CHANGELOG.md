@@ -6,6 +6,11 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Fixed
+- Texture accounting and transfers share one internal layout module. Public format-based size estimates now use format block geometry: R16Unorm/Snorm use 2 bytes per texel (previously 4), Rgba16Unorm/Snorm use 8 (previously 4), Stencil8 uses 1 (previously 4), and ASTC uses each format's actual block dimensions (previously always 4×4). For example, a 13×11 ASTC B12x12 level now counts 32 bytes instead of 192. Descriptor-based accounting and ledger budget enforcement are unchanged; resident sizes remain estimates of allocation bytes, without driver overhead.
+- `CompressedImage::calculate_gpu_size` uses format geometry for formats absent from the registry instead of an RGBA8 fallback. A 13×11 ASTC B8x5 image with three mips now counts 128 bytes instead of 716. Caller-constructed `TextureFormatInfo` records retain sizing from their own layout fields.
+- HDR uploads accept tight rows of any valid width; queue writes do not require encoder-copy row padding. Their existing budget check now rejects already-over-budget usage without subtraction underflow. Height textures retain their existing allocation ceiling, using the registry's shared budget constant.
+
 ## [1.43.0] - 2026-10-12
 ### Compatibility
 - CHRONOS labels now fade in and out over 8 frames instead of 256, so compiled frames, pixel hashes and cache keys for flythroughs with labels change. Pass `label_fade_frames=256` to `render_flythrough` to keep the old fade.

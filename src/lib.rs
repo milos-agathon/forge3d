@@ -52,6 +52,8 @@ pub mod core {
 
     #[path = "memory_tracker.rs"]
     pub mod memory_tracker;
+    #[path = "texture_layout.rs"]
+    pub(crate) mod texture_layout;
 
     // Browser atlas/page-table resources use the exact native RAII ledger and
     // budget wrappers; wasm is not allowed a parallel no-op allocation path.
