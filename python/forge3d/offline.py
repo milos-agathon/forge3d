@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import TracebackType
 import time
 import warnings
 from typing import Any, Callable, Optional
@@ -129,38 +130,70 @@ def render_offline(
     return result
 
 
-def _render_offline_impl(
-    renderer: Any,
-    material_set: Any,
-    env_maps: Any,
-    params: Any,
-    heightmap: np.ndarray,
-    *,
-    settings: OfflineQualitySettings,
-    progress_callback: Optional[Callable[[OfflineProgress], None]] = None,
-    water_mask: Optional[np.ndarray] = None,
-) -> OfflineResult:
-    if not settings.enabled:
-        raise ValueError("render_offline requires OfflineQualitySettings(enabled=True)")
+class _OfflineRenderSession:
+    """Own one successful native begin through completion or failure cleanup.
 
-    target_samples = int(settings.max_samples if settings.adaptive else params.aa_samples)
-    target_samples = max(target_samples, 1)
-    renderer.begin_offline_accumulation(
-        material_set=material_set,
-        env_maps=env_maps,
-        params=params,
-        heightmap=heightmap,
-        water_mask=water_mask,
-        jitter_sequence_samples=target_samples,
-    )
+    Native tonemapping still ends a successful low-level session. Explicit end
+    is idempotent, so this scope also closes renderers that leave it active and
+    covers every failure, including callback cancellation.
+    """
 
-    rendered = 0
-    metrics: dict[str, float] | None = None
-    metric_history: list[dict[str, float]] = []
-    denoiser_used = "none"
-    started = time.perf_counter()
+    def __init__(
+        self,
+        renderer: Any,
+        material_set: Any,
+        env_maps: Any,
+        params: Any,
+        heightmap: np.ndarray,
+        settings: OfflineQualitySettings,
+        water_mask: Optional[np.ndarray],
+    ) -> None:
+        self.renderer = renderer
+        self.params = params
+        self.settings = settings
+        self.target_samples = max(
+            int(settings.max_samples if settings.adaptive else params.aa_samples), 1
+        )
+        self._begin_kwargs = {
+            "material_set": material_set,
+            "env_maps": env_maps,
+            "params": params,
+            "heightmap": heightmap,
+            "water_mask": water_mask,
+            "jitter_sequence_samples": self.target_samples,
+        }
 
-    try:
+    def __enter__(self) -> _OfflineRenderSession:
+        # A rejected begin must not close a session owned by another caller.
+        self.renderer.begin_offline_accumulation(**self._begin_kwargs)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
+        try:
+            self.renderer.end_offline_accumulation()
+        except Exception as cleanup_error:
+            if exc_value is None:
+                raise
+            # Keep the render failure primary while exposing a cleanup failure.
+            raise exc_value.with_traceback(traceback) from cleanup_error
+
+    def run(
+        self,
+        progress_callback: Optional[Callable[[OfflineProgress], None]],
+    ) -> OfflineResult:
+        renderer = self.renderer
+        settings = self.settings
+        target_samples = self.target_samples
+        rendered = 0
+        metrics: dict[str, float] | None = None
+        metric_history: list[dict[str, float]] = []
+        started = time.perf_counter()
+
         while rendered < target_samples:
             batch = min(int(settings.batch_size), target_samples - rendered)
             batch_result = renderer.accumulate_batch(batch)
@@ -205,6 +238,18 @@ def _render_offline_impl(
             ):
                 break
 
+        return self._finish(rendered, metrics)
+
+    def _finish(
+        self,
+        rendered: int,
+        metrics: Optional[dict[str, float]],
+    ) -> OfflineResult:
+        renderer = self.renderer
+        params = self.params
+        settings = self.settings
+        target_samples = self.target_samples
+        denoiser_used = "none"
         hdr_frame, aov_frame = renderer.resolve_offline_hdr()
 
         params_python = _params_python_object(params)
@@ -256,24 +301,41 @@ def _render_offline_impl(
                     hdr_frame = renderer.upload_hdr_frame(beauty_hdr, hdr_frame.size)
 
         frame = renderer.tonemap_offline_hdr(hdr_frame)
-    except Exception:
-        renderer.end_offline_accumulation()
-        raise
 
-    metadata: dict[str, Any] = {
-        "samples_used": rendered,
-        "denoiser_used": denoiser_used,
-        "final_p95_delta": None if metrics is None else metrics["p95_delta"],
-        "converged_ratio": None if metrics is None else metrics["converged_tile_ratio"],
-        "target_samples": target_samples,
-        "adaptive": bool(settings.adaptive),
-    }
-    return OfflineResult(
-        frame=frame,
-        hdr_frame=hdr_frame,
-        aov_frame=aov_frame,
-        metadata=metadata,
-    )
+        metadata: dict[str, Any] = {
+            "samples_used": rendered,
+            "denoiser_used": denoiser_used,
+            "final_p95_delta": None if metrics is None else metrics["p95_delta"],
+            "converged_ratio": None if metrics is None else metrics["converged_tile_ratio"],
+            "target_samples": target_samples,
+            "adaptive": bool(settings.adaptive),
+        }
+        return OfflineResult(
+            frame=frame,
+            hdr_frame=hdr_frame,
+            aov_frame=aov_frame,
+            metadata=metadata,
+        )
+
+
+def _render_offline_impl(
+    renderer: Any,
+    material_set: Any,
+    env_maps: Any,
+    params: Any,
+    heightmap: np.ndarray,
+    *,
+    settings: OfflineQualitySettings,
+    progress_callback: Optional[Callable[[OfflineProgress], None]] = None,
+    water_mask: Optional[np.ndarray] = None,
+) -> OfflineResult:
+    if not settings.enabled:
+        raise ValueError("render_offline requires OfflineQualitySettings(enabled=True)")
+
+    with _OfflineRenderSession(
+        renderer, material_set, env_maps, params, heightmap, settings, water_mask
+    ) as session:
+        return session.run(progress_callback)
 
 
 __all__ = ["OfflineProgress", "OfflineResult", "render_offline"]
