@@ -48,6 +48,15 @@ The Python layer is the user-facing control surface. The main modules are:
 - `forge3d.pointcloud`, `forge3d.buildings`, `forge3d.tiles3d`, and `forge3d.style` for non-raster scene assets
 - `forge3d.map_plate`, `forge3d.export`, and `forge3d.bundle` for packaged outputs
 
+Point-cloud LOD traversal consumes only `root_node()` and `children(key)` spatial
+facts. COPC and EPT adapters share key-to-bounds subdivision and child enumeration
+in the private `_pointcloud_octree` module, with children ordered by octant. Each
+adapter retains its own format parsing, hierarchy loading, point counts and
+spacing rules: COPC uses its declared spacing divided by `2 ** depth`, while EPT uses
+node width divided by span. Decoding capabilities remain format-specific; sharing
+hierarchy traversal does not give EPT a point decoder. The existing selection,
+depth and point-budget policies remain in `PointCloudRenderer`.
+
 ### Examples, tutorials, and gallery
 
 The `examples/` directory shows the supported workflows in executable form.
