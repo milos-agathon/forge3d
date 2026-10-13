@@ -958,31 +958,10 @@ pub fn tracked_create_texture(
     })
 }
 
-/// Exact byte size of every subresource described by a texture descriptor.
+/// Resident accounting estimate for every mip, layer/depth slice and sample.
+/// Excludes transfer-row padding and implementation-specific driver overhead.
 pub fn calculate_texture_descriptor_size(desc: &TextureDescriptor<'_>) -> u64 {
-    let (block_width, block_height) = desc.format.block_dimensions();
-    let bytes_per_block = desc
-        .format
-        .block_copy_size(None)
-        .map(u64::from)
-        .unwrap_or_else(|| calculate_texture_size(block_width, block_height, desc.format));
-    let mut total = 0u64;
-    for mip in 0..desc.mip_level_count {
-        let width = (desc.size.width >> mip).max(1);
-        let height = match desc.dimension {
-            wgpu::TextureDimension::D1 => 1,
-            _ => (desc.size.height >> mip).max(1),
-        };
-        let layers_or_depth = match desc.dimension {
-            wgpu::TextureDimension::D3 => (desc.size.depth_or_array_layers >> mip).max(1),
-            _ => desc.size.depth_or_array_layers,
-        };
-        let blocks = u64::from(width.div_ceil(block_width))
-            .saturating_mul(u64::from(height.div_ceil(block_height)))
-            .saturating_mul(u64::from(layers_or_depth));
-        total = total.saturating_add(blocks.saturating_mul(bytes_per_block));
-    }
-    total.saturating_mul(u64::from(desc.sample_count))
+    crate::core::texture_layout::resident_descriptor_size(desc)
 }
 
 #[cfg(test)]

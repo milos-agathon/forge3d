@@ -1,4 +1,4 @@
-use super::hdr::{align_copy_bytes_per_row, validate_config};
+use super::hdr::{align_copy_bytes_per_row, check_hdr_budget, validate_config};
 use super::*;
 
 #[test]
@@ -12,6 +12,18 @@ fn test_align_copy_bytes_per_row() {
     assert_eq!(align_copy_bytes_per_row(100), 256);
     assert_eq!(align_copy_bytes_per_row(256), 256);
     assert_eq!(align_copy_bytes_per_row(300), 512);
+}
+
+#[test]
+fn test_hdr_budget_boundaries_and_existing_overuse() {
+    let mut metrics = crate::core::memory_tracker::ResourceRegistry::new().get_metrics();
+    metrics.total_bytes = metrics.limit_bytes - 4;
+    assert!(check_hdr_budget(4, &metrics).is_ok());
+    assert!(check_hdr_budget(5, &metrics).is_err());
+    metrics.total_bytes = metrics.limit_bytes + 1;
+    assert!(check_hdr_budget(1, &metrics).is_err());
+    metrics.total_bytes = u64::MAX;
+    assert!(check_hdr_budget(1, &metrics).is_err());
 }
 
 #[test]

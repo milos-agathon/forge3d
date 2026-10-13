@@ -562,10 +562,10 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
 }
 
 /// Align to WebGPU's required bytes-per-row for copies.
+/// Panics if the aligned row cannot fit in the API's u32 field.
 #[inline]
 pub fn align_copy_bpr(unpadded: u32) -> u32 {
-    let a = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    ((unpadded + a - 1) / a) * a
+    crate::core::texture_layout::align_copy_row(unpadded).expect("Padded texture row exceeds u32")
 }
 
 /// Create a small wgpu device for unit tests.

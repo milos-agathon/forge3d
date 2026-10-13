@@ -3,9 +3,10 @@
 // RELEVANT FILES: shaders/postprocess_tonemap.wgsl
 
 use crate::core::resource_tracker::tracked_create_buffer;
+use crate::core::texture_layout::TransferLayout;
 use wgpu::{
-    BufferDescriptor, BufferUsages, Device, Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d,
-    Queue, Texture, TextureAspect, TextureFormat,
+    BufferDescriptor, BufferUsages, Device, Extent3d, ImageCopyTexture, Origin3d, Queue, Texture,
+    TextureAspect, TextureFormat,
 };
 
 /// Read HDR data from a floating-point texture
@@ -17,25 +18,29 @@ pub fn read_hdr_texture(
     height: u32,
     format: TextureFormat,
 ) -> Result<Vec<f32>, String> {
-    let bpp = match format {
-        TextureFormat::Rgba16Float => 8,  // 4 channels * 2 bytes
-        TextureFormat::Rgba32Float => 16, // 4 channels * 4 bytes
-        _ => return Err("Unsupported HDR format for readback".to_string()),
-    };
-
-    let unpadded_bytes_per_row = width * bpp;
-    let padded_bytes_per_row = {
-        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        ((unpadded_bytes_per_row + alignment - 1) / alignment) * alignment
-    };
-
-    let buffer_size = padded_bytes_per_row * height;
+    if !matches!(
+        format,
+        TextureFormat::Rgba16Float | TextureFormat::Rgba32Float
+    ) {
+        return Err("Unsupported HDR format for readback".to_string());
+    }
+    let layout = TransferLayout::buffer_copy(
+        format,
+        TextureAspect::All,
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    )
+    .map_err(str::to_string)?;
+    let padded_bytes_per_row = layout.bytes_per_row;
 
     let staging_buffer = tracked_create_buffer(
         device,
         &BufferDescriptor {
             label: Some("hdr_readback.hdr_staging"),
-            size: buffer_size as u64,
+            size: layout.transfer_bytes,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         },
@@ -55,11 +60,7 @@ pub fn read_hdr_texture(
         },
         wgpu::ImageCopyBuffer {
             buffer: &staging_buffer,
-            layout: ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
-                rows_per_image: Some(height),
-            },
+            layout: layout.image_data_layout(),
         },
         Extent3d {
             width,
@@ -102,20 +103,24 @@ pub fn read_ldr_texture(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, String> {
-    let bpp = 4; // RGBA8
-    let unpadded_bytes_per_row = width * bpp;
-    let padded_bytes_per_row = {
-        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        ((unpadded_bytes_per_row + alignment - 1) / alignment) * alignment
-    };
-
-    let buffer_size = padded_bytes_per_row * height;
+    let layout = TransferLayout::buffer_copy(
+        TextureFormat::Rgba8Unorm,
+        TextureAspect::All,
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    )
+    .map_err(str::to_string)?;
+    let unpadded_bytes_per_row = layout.row_bytes;
+    let padded_bytes_per_row = layout.bytes_per_row;
 
     let staging_buffer = tracked_create_buffer(
         device,
         &BufferDescriptor {
             label: Some("hdr_readback.ldr_staging"),
-            size: buffer_size as u64,
+            size: layout.transfer_bytes,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         },
@@ -135,11 +140,7 @@ pub fn read_ldr_texture(
         },
         wgpu::ImageCopyBuffer {
             buffer: &staging_buffer,
-            layout: ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
-                rows_per_image: Some(height),
-            },
+            layout: layout.image_data_layout(),
         },
         Extent3d {
             width,
@@ -166,10 +167,10 @@ pub fn read_ldr_texture(
     let data = buffer_slice.get_mapped_range();
 
     // Copy LDR data (remove padding)
-    let mut ldr_data = Vec::with_capacity((width * height * 4) as usize);
+    let mut ldr_data = Vec::with_capacity(layout.payload_bytes as usize);
 
     for y in 0..height {
-        let row_offset = (y * padded_bytes_per_row) as usize;
+        let row_offset = y as usize * padded_bytes_per_row as usize;
         let row_data = &data[row_offset..row_offset + unpadded_bytes_per_row as usize];
         ldr_data.extend_from_slice(row_data);
     }
@@ -188,19 +189,23 @@ pub fn read_r32_texture(
     width: u32,
     height: u32,
 ) -> Result<Vec<f32>, String> {
-    let bpp = 4u32;
-    let unpadded_bytes_per_row = width * bpp;
-    let padded_bytes_per_row = {
-        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        ((unpadded_bytes_per_row + alignment - 1) / alignment) * alignment
-    };
+    let layout = TransferLayout::buffer_copy(
+        TextureFormat::R32Float,
+        TextureAspect::All,
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    )
+    .map_err(str::to_string)?;
+    let padded_bytes_per_row = layout.bytes_per_row;
 
-    let buffer_size = padded_bytes_per_row * height;
     let staging_buffer = tracked_create_buffer(
         device,
         &BufferDescriptor {
             label: Some("hdr_readback.r32_staging"),
-            size: buffer_size as u64,
+            size: layout.transfer_bytes,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         },
@@ -220,11 +225,7 @@ pub fn read_r32_texture(
         },
         wgpu::ImageCopyBuffer {
             buffer: &staging_buffer,
-            layout: ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
-                rows_per_image: Some(height),
-            },
+            layout: layout.image_data_layout(),
         },
         Extent3d {
             width,
@@ -248,12 +249,12 @@ pub fn read_r32_texture(
         .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
 
     let data = buffer_slice.get_mapped_range();
-    let mut values = Vec::with_capacity((width * height) as usize);
+    let mut values = Vec::with_capacity(width as usize * height as usize);
 
     for y in 0..height {
-        let row_offset = (y * padded_bytes_per_row) as usize;
+        let row_offset = y as usize * padded_bytes_per_row as usize;
         for x in 0..width {
-            let pixel_offset = row_offset + (x * bpp) as usize;
+            let pixel_offset = row_offset + x as usize * std::mem::size_of::<u32>();
             let bytes = [
                 data[pixel_offset],
                 data[pixel_offset + 1],
@@ -279,14 +280,17 @@ pub fn read_r32uint_texture(
     width: u32,
     height: u32,
 ) -> Result<Vec<u32>, String> {
-    let bpp = 4u32;
-    let unpadded_bytes_per_row = width * bpp;
-    let padded_bytes_per_row = {
-        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        ((unpadded_bytes_per_row + alignment - 1) / alignment) * alignment
-    };
-
-    let buffer_size = (padded_bytes_per_row * height) as u64;
+    let layout = TransferLayout::buffer_copy(
+        TextureFormat::R32Uint,
+        TextureAspect::All,
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    )
+    .map_err(str::to_string)?;
+    let padded_bytes_per_row = layout.bytes_per_row;
     // Host-visible staging buffer; the tracked wrapper records it in the
     // registry + ledger and frees on drop (superseding the prior manual
     // track/free accounting).
@@ -294,7 +298,7 @@ pub fn read_r32uint_texture(
         device,
         &BufferDescriptor {
             label: Some("hdr_readback.r32uint_staging"),
-            size: buffer_size,
+            size: layout.transfer_bytes,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         },
@@ -317,11 +321,7 @@ pub fn read_r32uint_texture(
         },
         wgpu::ImageCopyBuffer {
             buffer: &staging_buffer,
-            layout: ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
-                rows_per_image: Some(height),
-            },
+            layout: layout.image_data_layout(),
         },
         Extent3d {
             width,
@@ -352,11 +352,11 @@ pub fn read_r32uint_texture(
     }
 
     let data = buffer_slice.get_mapped_range();
-    let mut values = Vec::with_capacity((width * height) as usize);
+    let mut values = Vec::with_capacity(width as usize * height as usize);
     for y in 0..height {
-        let row_offset = (y * padded_bytes_per_row) as usize;
+        let row_offset = y as usize * padded_bytes_per_row as usize;
         for x in 0..width {
-            let pixel_offset = row_offset + (x * bpp) as usize;
+            let pixel_offset = row_offset + x as usize * std::mem::size_of::<u32>();
             let bytes = [
                 data[pixel_offset],
                 data[pixel_offset + 1],
@@ -386,7 +386,7 @@ fn convert_to_floats(
     match format {
         TextureFormat::Rgba16Float => {
             for y in 0..height {
-                let row_offset = (y * padded_bytes_per_row) as usize;
+                let row_offset = y as usize * padded_bytes_per_row as usize;
                 for x in 0..width {
                     let pixel_offset = row_offset + (x * 8) as usize;
 
@@ -401,7 +401,7 @@ fn convert_to_floats(
         }
         TextureFormat::Rgba32Float => {
             for y in 0..height {
-                let row_offset = (y * padded_bytes_per_row) as usize;
+                let row_offset = y as usize * padded_bytes_per_row as usize;
                 for x in 0..width {
                     let pixel_offset = row_offset + (x * 16) as usize;
 

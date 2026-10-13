@@ -1,8 +1,8 @@
 use super::types::{HdrFormat, HdrTexture, HdrTextureConfig};
 use crate::core::error::{RenderError, RenderResult};
-use crate::core::memory_tracker::global_tracker;
+use crate::core::memory_tracker::{global_tracker, MemoryMetrics};
 use crate::core::resource_tracker::tracked_create_texture;
-use std::num::NonZeroU32;
+use crate::core::texture_layout::TransferLayout;
 
 pub fn create_texture_rgba32f(data: &[f32], config: HdrTextureConfig) -> RenderResult<HdrTexture> {
     if config.format != HdrFormat::Rgba32Float {
@@ -65,15 +65,10 @@ fn create_hdr_texture_internal(data: &[u8], config: HdrTextureConfig) -> RenderR
     let format = config.format.to_wgpu();
 
     let texture_size =
-        (config.width as u64) * (config.height as u64) * (config.format.bytes_per_pixel() as u64);
+        crate::core::texture_layout::resident_2d_size(config.width, config.height, format);
     let tracker = global_tracker();
     let current_metrics = tracker.get_metrics();
-    if texture_size > current_metrics.limit_bytes - current_metrics.total_bytes {
-        return Err(RenderError::upload(format!(
-            "HDR texture ({} bytes) would exceed memory budget. Current: {} bytes, limit: {} bytes",
-            texture_size, current_metrics.total_bytes, current_metrics.limit_bytes
-        )));
-    }
+    check_hdr_budget(texture_size, &current_metrics)?;
 
     let mip_level_count = if config.generate_mipmaps {
         (config.width.max(config.height) as f32).log2().floor() as u32 + 1
@@ -127,9 +122,17 @@ fn upload_texture_data(
     height: u32,
     format: HdrFormat,
 ) -> RenderResult<()> {
-    let bytes_per_pixel = format.bytes_per_pixel();
-    let row_bytes = width as usize * bytes_per_pixel;
-    let expected_size = height as usize * row_bytes;
+    let layout = TransferLayout::queue_write(
+        format.to_wgpu(),
+        wgpu::TextureAspect::All,
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    )
+    .map_err(RenderError::upload)?;
+    let expected_size = layout.payload_bytes as usize;
 
     if data.len() != expected_size {
         return Err(RenderError::upload(format!(
@@ -139,15 +142,6 @@ fn upload_texture_data(
         )));
     }
 
-    let padded_bytes_per_row = align_copy_bytes_per_row(row_bytes as u32);
-    let image_data = if padded_bytes_per_row == row_bytes as u32 {
-        data
-    } else {
-        return Err(RenderError::upload(
-            "Texture row padding not yet implemented for HDR formats".to_string(),
-        ));
-    };
-
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture,
@@ -155,12 +149,8 @@ fn upload_texture_data(
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        image_data,
-        wgpu::ImageDataLayout {
-            offset: 0,
-            bytes_per_row: Some(NonZeroU32::new(padded_bytes_per_row).unwrap().into()),
-            rows_per_image: Some(NonZeroU32::new(height).unwrap().into()),
-        },
+        data,
+        layout.image_data_layout(),
         wgpu::Extent3d {
             width,
             height,
@@ -171,9 +161,21 @@ fn upload_texture_data(
     Ok(())
 }
 
+pub(super) fn check_hdr_budget(texture_size: u64, metrics: &MemoryMetrics) -> RenderResult<()> {
+    if metrics.total_bytes > metrics.limit_bytes
+        || texture_size > metrics.limit_bytes.saturating_sub(metrics.total_bytes)
+    {
+        return Err(RenderError::upload(format!(
+            "HDR texture ({} bytes) would exceed memory budget. Current: {} bytes, limit: {} bytes",
+            texture_size, metrics.total_bytes, metrics.limit_bytes
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 pub(super) fn align_copy_bytes_per_row(bytes_per_row: u32) -> u32 {
-    let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    ((bytes_per_row + alignment - 1) / alignment) * alignment
+    crate::core::texture_layout::align_copy_row(bytes_per_row).expect("Texture row exceeds u32")
 }
 
 pub(super) fn validate_config(config: &HdrTextureConfig) -> RenderResult<()> {
