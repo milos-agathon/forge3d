@@ -1056,6 +1056,22 @@ class TestViewerCommandTransport:
             assert send(sock, {"cmd": "second"}) == {"ok": True, "id": 2}
         assert sock.recv_count == 1
 
+    @pytest.mark.parametrize(
+        "trailing_whitespace", [b"\n", b" \r\n", b"\t\n\f\v\r\n"],
+        ids=["newline", "spaces-crlf", "ascii-whitespace"],
+    )
+    def test_kept_over_blank_lines_do_not_replace_next_reply(self, command_client, trailing_whitespace):
+        _, send = command_client
+        sock = _ScriptedSocket([
+            b'{"ok":true,"id":1}\n' + trailing_whitespace,
+            b'{"ok":true,"id":2}\n',
+        ])
+
+        assert send(sock, {"cmd": "first"}) == {"ok": True, "id": 1}
+        assert send(sock, {"cmd": "second"}) == {"ok": True, "id": 2}
+        assert sock.recv_count == 2
+        assert sock.sent == [b'{"cmd": "first"}\n', b'{"cmd": "second"}\n']
+
     def test_malformed_line_leaves_next_reply_buffered(self, command_client):
         name, send = command_client
         sock = _ScriptedSocket([b'not json\n{"ok":true}\n'])
