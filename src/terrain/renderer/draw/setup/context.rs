@@ -94,7 +94,6 @@ impl TerrainScene {
         water_mask: Option<PyReadonlyArray2<f32>>,
         params: &crate::terrain::render_params::TerrainRenderParams,
     ) -> Result<UploadedHeightInputs> {
-        let terrain_data_revision = params.terrain_data_revision;
         let heightmap_array = heightmap.as_array();
         if params.water_optics.physical
             && water_mask.is_some()
@@ -150,7 +149,7 @@ impl TerrainScene {
         }
 
         let mut heightmap_data = Vec::with_capacity(width * height);
-        let terrain_data_hash = if let Some(revision) = terrain_data_revision {
+        let terrain_data_hash = if let Some(revision) = params.terrain_data_revision {
             // Caller-managed revisions let probe preparation skip per-sample hashing.
             for value in heightmap_array.iter() {
                 heightmap_data.push(*value);
@@ -175,7 +174,14 @@ impl TerrainScene {
             &heightmap_data,
         )?);
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.compute_coarse_ao_from_heightmap(width as u32, height as u32, &heightmap_data)?;
+        if self.coarse_ao_required(params) {
+            self.compute_coarse_ao_from_heightmap(width as u32, height as u32, &heightmap_data)?;
+        } else {
+            // Release a previous render's AO rather than retaining stale samples.
+            // The existing white fallback remains bound when coarse AO is unused.
+            self.coarse_ao_view = None;
+            self.coarse_ao_texture = None;
+        }
 
         let mut water_mask_max = 0.0;
         let (water_mask_texture, water_mask_view_uploaded) = if let Some(mask) = water_mask {
