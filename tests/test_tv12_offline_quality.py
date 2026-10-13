@@ -302,6 +302,84 @@ def test_begin_offline_session_raises_when_already_active(
         renderer.end_offline_accumulation()
 
 
+def test_native_tonemap_ends_session_and_explicit_end_is_idempotent(
+    runtime_assets: tuple[object, object, object, object],
+) -> None:
+    renderer, material_set, ibl, _ = runtime_assets
+    params = _make_params(aa_samples=1, aa_seed=17)
+    heightmap = _complex_heightmap()
+    renderer.begin_offline_accumulation(
+        material_set=material_set, env_maps=ibl, params=params, heightmap=heightmap
+    )
+    try:
+        renderer.accumulate_batch(1)
+        hdr, _ = renderer.resolve_offline_hdr()
+        frame = renderer.tonemap_offline_hdr(hdr)
+        assert isinstance(frame, f3d.Frame)
+        # A new begin proves native tonemapping closed the preceding session.
+        renderer.begin_offline_accumulation(
+            material_set=material_set, env_maps=ibl, params=params, heightmap=heightmap
+        )
+    finally:
+        renderer.end_offline_accumulation()
+    renderer.end_offline_accumulation()
+
+
+@pytest.mark.parametrize("stage", ["accumulate_batch", "resolve_offline_hdr", "denoise", "upload_hdr_frame", "tonemap_offline_hdr"])
+def test_offline_stage_failure_releases_native_session_and_next_render_is_fresh(
+    runtime_assets: tuple[object, object, object, object], monkeypatch, stage: str
+) -> None:
+    from forge3d import offline
+    from forge3d.terrain_params import DenoiseSettings
+
+    renderer, material_set, ibl, _ = runtime_assets
+    heightmap = _complex_heightmap()
+    params = _make_params(
+        aa_samples=1, aa_seed=17, denoise=DenoiseSettings(enabled=True, method="atrous")
+    )
+    settings = f3d.OfflineQualitySettings(enabled=True, batch_size=1)
+    error = RuntimeError(f"injected {stage} failure")
+
+    class FailingRenderer:
+        def __getattr__(self, name):
+            method = getattr(renderer, name)
+            if name != stage:
+                return method
+
+            def fail_after_native_work(*args, **kwargs):
+                method(*args, **kwargs)
+                raise error
+
+            return fail_after_native_work
+
+    with monkeypatch.context() as patch:
+        if stage == "denoise":
+            def fail_denoise(*args, **kwargs):
+                raise error
+
+            patch.setattr(offline, "atrous_denoise", fail_denoise)
+        with pytest.raises(RuntimeError) as caught:
+            f3d.render_offline(
+                FailingRenderer(), material_set, ibl, params, heightmap, settings=settings
+            )
+        assert caught.value is error
+
+    # Starting another render proves no native session was left active.
+    recovered = f3d.render_offline(
+        renderer, material_set, ibl, params, heightmap, settings=settings
+    )
+    assert recovered.metadata["samples_used"] == 1
+    assert recovered.metadata["denoiser_used"] == "atrous"
+    different = f3d.render_offline(
+        renderer, material_set, ibl, params, _flat_heightmap(), settings=settings
+    )
+    assert isinstance(recovered.frame, f3d.Frame)
+    assert isinstance(recovered.hdr_frame, f3d.HdrFrame)
+    assert float(np.mean(np.abs(
+        recovered.hdr_frame.to_numpy_f32() - different.hdr_frame.to_numpy_f32()
+    ))) > 0.0
+
+
 def test_single_sample_offline_matches_manual_session_baseline(
     runtime_assets: tuple[object, object, object, object],
 ) -> None:
