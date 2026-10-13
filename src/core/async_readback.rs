@@ -155,9 +155,19 @@ impl AsyncReadbackManager {
             }
         }
 
-        let row_bytes = width * 4; // Assume RGBA8
-        let padded_bpr = align_copy_bpr(row_bytes);
-        let buffer_size = (padded_bpr * height) as u64;
+        let layout = crate::core::texture_layout::TransferLayout::buffer_copy(
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureAspect::All,
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        )
+        .map_err(RenderError::readback)?;
+        let row_bytes = layout.row_bytes;
+        let padded_bpr = layout.bytes_per_row;
+        let buffer_size = layout.transfer_bytes;
 
         // Get or create a readback buffer
         let buffer = self.get_readback_buffer(buffer_size)?;
@@ -335,7 +345,7 @@ impl AsyncReadbackManager {
 
         // Extract data
         let data = slice.get_mapped_range();
-        let mut out = vec![0u8; (task.row_bytes * task.height) as usize];
+        let mut out = vec![0u8; task.row_bytes as usize * task.height as usize];
 
         let src_stride = task.padded_bpr as usize;
         let dst_stride = task.row_bytes as usize;
@@ -385,9 +395,9 @@ pub struct AsyncReadbackStats {
 }
 
 /// Align bytes-per-row for copy operations (256-byte alignment requirement)
+#[cfg(test)]
 fn align_copy_bpr(unpadded: u32) -> u32 {
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    ((unpadded + align - 1) / align) * align
+    crate::core::texture_layout::align_copy_row(unpadded).expect("Texture row exceeds u32")
 }
 
 #[cfg(test)]

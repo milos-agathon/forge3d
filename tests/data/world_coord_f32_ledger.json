@@ -1462,11 +1462,37 @@
   "source_commit": "f7581b9c08a351d3db2f7d28cf2b3285d7d80fd2",
   "review": "Main PR #216 changes the adjacent light_view matrix packing from to_cols_array_2d() to to_cols_array(). All 1836 narrowing operations and operands are unchanged. Reversing this exact single statement-context replacement restores the prior frozen digest; every historical ledger record is preserved."
 },
- "water_optics": {
+ "texture_layout_stats": {
   "base_count": 1836,
   "base_digest": "3d58d0cb7decfff40b2c22299813cb565fc3ecdbed2afa1f0559a52855cfb489",
+  "result_count": 1836,
+  "result_digest": "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12",
+  "removed": [
+   [
+    "src/core/texture_format.rs",
+    "calculate_compression_ratio",
+    "as_f32",
+    1,
+    "let rgba8_size = (w * h * 4) as f32"
+   ]
+  ],
+  "added": [
+   [
+    "src/core/texture_format.rs",
+    "calculate_compression_ratio",
+    "as_f32",
+    1,
+    "let rgba8_size = crate::core::texture_layout::resident_2d_size(w, h, TextureFormat::Rgba8Unorm) as f32"
+   ]
+  ],
+  "source_commit": "5f8252672cdaff08dad8c6fb3cd0eb4a4c1c41be",
+  "review": "Architecture item 30 replaces one existing integer-byte-count-to-f32 statistics operand in TextureFormatRegistry::calculate_compression_ratio with the shared resident_2d_size helper. The operands are u32 texture dimensions and the helper result is a u64 allocation-size estimate; no f64/world-position value or new narrowing primitive is introduced. Count remains 1836. Reversing this exact single-site replacement restores the preceding CSM freeze; all historical records and scanner coverage are retained."
+ },
+ "water_optics": {
+  "base_count": 1836,
+  "base_digest": "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12",
   "result_count": 1846,
-  "result_digest": "5e8cbf17b01a79dfc3eb437b2b7a9506ed8069043a11d8af4faf989c1e7a2e08",
+  "result_digest": "f833522fa331012743ce728548a7f63fb114335de11c2aab7985c90ab9192a62",
   "added": [
    [
     "src/terrain/renderer/water_reflection/surface.rs",
@@ -1540,6 +1566,6 @@
    ]
   ],
   "removed": [],
-  "review": "2026-10-13: Milos instructed completing a green and mergeable PR after this exact ten-site inventory transition was presented. Six conversions encode normalized normal components; four convert boolean flags losslessly to 0 or 1. No world-coordinate cast is added, no site is removed, and every preceding ledger record and rejecting probe is retained."
+  "review": "2026-10-13: Milos instructed completing a green and mergeable PR after this exact ten-site inventory transition was presented. Six conversions encode normalized normal components; four convert boolean flags losslessly to 0 or 1. No world-coordinate cast is added, no site is removed, and every preceding ledger record and rejecting probe is retained. Rebased after main PR #234: the base is its texture_layout_stats result; the same ten additions give 1846 sites (owner-approved 2026-10-13)."
  }
 }

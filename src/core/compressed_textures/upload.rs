@@ -1,10 +1,12 @@
 use wgpu::{
-    Device, Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, Queue, Texture, TextureAspect,
-    TextureDescriptor, TextureDimension, TextureUsages,
+    Device, Extent3d, ImageCopyTexture, Origin3d, Queue, Texture, TextureAspect, TextureDescriptor,
+    TextureDimension, TextureUsages,
 };
 
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
-use crate::core::texture_format::{global_format_registry, TextureFormatInfo};
+use crate::core::texture_format::global_format_registry;
+
+use crate::core::texture_layout::{resident_2d_size, resident_size, TransferLayout};
 
 use super::compression::{estimate_psnr, estimate_quality_score, generate_mip_levels};
 use super::{CompressedImage, CompressionStats};
@@ -45,35 +47,19 @@ impl CompressedImage {
 
     /// Upload compressed data to existing texture
     pub fn upload_to_texture(&self, texture: &Texture, queue: &Queue) -> Result<(), String> {
-        let format_info = global_format_registry()
+        global_format_registry()
             .get_format_info(self.format)
             .ok_or_else(|| format!("Unknown format: {:?}", self.format))?;
-
-        let bytes_per_row = if format_info.is_compressed {
-            let blocks_per_row = (self.width + format_info.block_size - 1) / format_info.block_size;
-            Some(
-                std::num::NonZeroU32::new(blocks_per_row * format_info.bytes_per_pixel)
-                    .ok_or("Invalid bytes per row calculation")?,
-            )
-        } else {
-            Some(
-                std::num::NonZeroU32::new(self.width * format_info.bytes_per_pixel)
-                    .ok_or("Invalid bytes per row calculation")?,
-            )
-        };
-        let rows_per_image = if format_info.is_compressed {
-            let blocks_per_column =
-                (self.height + format_info.block_size - 1) / format_info.block_size;
-            Some(
-                std::num::NonZeroU32::new(blocks_per_column)
-                    .ok_or("Invalid rows per image calculation")?,
-            )
-        } else {
-            Some(
-                std::num::NonZeroU32::new(self.height)
-                    .ok_or("Invalid rows per image calculation")?,
-            )
-        };
+        let layout = TransferLayout::queue_write(
+            self.format,
+            TextureAspect::All,
+            Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+        )
+        .map_err(str::to_string)?;
 
         queue.write_texture(
             ImageCopyTexture {
@@ -83,11 +69,7 @@ impl CompressedImage {
                 aspect: TextureAspect::All,
             },
             &self.data,
-            ImageDataLayout {
-                offset: 0,
-                bytes_per_row: bytes_per_row.map(|v| v.get()),
-                rows_per_image: rows_per_image.map(|v| v.get()),
-            },
+            layout.image_data_layout(),
             Extent3d {
                 width: self.width,
                 height: self.height,
@@ -104,36 +86,23 @@ impl CompressedImage {
 
     /// Calculate GPU memory size
     pub fn calculate_gpu_size(&self) -> u64 {
-        let fallback = TextureFormatInfo {
-            format: self.format,
-            is_compressed: false,
-            bytes_per_pixel: 4,
-            block_size: 1,
-            channels: 4,
-            bit_depth: 8,
-            supports_linear: true,
-            is_srgb: false,
-        };
-        let format_info = global_format_registry()
-            .get_format_info(self.format)
-            .unwrap_or(&fallback);
-
-        let mut total_size = 0u64;
-        let mut mip_width = self.width;
-        let mut mip_height = self.height;
-
-        for _ in 0..self.mip_levels {
-            total_size += format_info.calculate_size(mip_width, mip_height);
-            mip_width = (mip_width / 2).max(1);
-            mip_height = (mip_height / 2).max(1);
-        }
-
-        total_size
+        resident_size(
+            self.format,
+            Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            self.mip_levels,
+            1,
+        )
     }
 
     /// Get compression statistics
     pub fn get_compression_stats(&self) -> CompressionStats {
-        let uncompressed_size = (self.width * self.height * 4) as u64;
+        let uncompressed_size =
+            resident_2d_size(self.width, self.height, wgpu::TextureFormat::Rgba8Unorm);
         let compressed_size = self.data.len() as u64;
         let compression_ratio = uncompressed_size as f32 / compressed_size as f32;
 
@@ -149,25 +118,21 @@ impl CompressedImage {
 
     fn upload_mip_levels(&self, texture: &Texture, queue: &Queue) -> Result<(), String> {
         let mip_data = generate_mip_levels(&self.data, self.width, self.height, self.format)?;
-        let format_info = global_format_registry()
-            .get_format_info(self.format)
-            .unwrap();
-
         for (mip_level, (mip_data, mip_width, mip_height)) in mip_data.iter().enumerate() {
             if mip_level == 0 {
                 continue;
             }
 
-            let bytes_per_row = if format_info.is_compressed {
-                let blocks_per_row =
-                    (*mip_width + format_info.block_size - 1) / format_info.block_size;
-                Some(
-                    std::num::NonZeroU32::new(blocks_per_row * format_info.bytes_per_pixel)
-                        .unwrap(),
-                )
-            } else {
-                Some(std::num::NonZeroU32::new(*mip_width * format_info.bytes_per_pixel).unwrap())
-            };
+            let layout = TransferLayout::queue_write(
+                self.format,
+                TextureAspect::All,
+                Extent3d {
+                    width: *mip_width,
+                    height: *mip_height,
+                    depth_or_array_layers: 1,
+                },
+            )
+            .map_err(str::to_string)?;
 
             queue.write_texture(
                 ImageCopyTexture {
@@ -177,11 +142,7 @@ impl CompressedImage {
                     aspect: TextureAspect::All,
                 },
                 mip_data,
-                ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: bytes_per_row.map(|v| v.get()),
-                    rows_per_image: None,
-                },
+                layout.image_data_layout(),
                 Extent3d {
                     width: *mip_width,
                     height: *mip_height,
