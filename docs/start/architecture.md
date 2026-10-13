@@ -70,6 +70,13 @@ Everything else flows through explicit NDJSON commands over TCP. You can send
 those with `ViewerHandle.send_ipc()` or by using helper functions from
 `forge3d.viewer_ipc`.
 
+Both entry points delegate command encoding, NDJSON framing, receive buffering,
+and connection failures to the private `forge3d._viewer_transport` module. Each
+call sends one command and consumes one reply, retaining extra bytes for the
+next call on that socket. Calls on a socket must be sequential. Socket timeout
+settings stay unchanged: `ViewerHandle` keeps its exceptions, while the raw
+helpers keep their error dictionaries and partial-reply parsing at EOF/timeout.
+
 That split keeps the common workflow ergonomic while leaving the full scene
 command surface available.
 

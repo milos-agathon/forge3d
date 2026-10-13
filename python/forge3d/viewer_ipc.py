@@ -10,7 +10,6 @@ interactive loops and direct socket access.
 
 from __future__ import annotations
 
-import json
 import re
 import socket
 import subprocess
@@ -19,6 +18,8 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
+from ._viewer_transport import forget_connection as _forget_connection
+from ._viewer_transport import send_command as _transport_command
 from .viewer_contract import (
     vector_overlay_vertices as _vector_overlay_vertices,
     world_position as _world_position,
@@ -55,43 +56,7 @@ def send_ipc(sock: socket.socket, cmd: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Response dictionary from viewer
     """
-    msg = json.dumps(cmd) + "\n"
-    msg_bytes = msg.encode()
-    
-    # Log message size for debugging large payloads
-    msg_size = len(msg_bytes)
-    if msg_size > 100000:
-        print(f"  Sending large IPC message: {msg_size / 1024 / 1024:.1f} MB")
-    
-    try:
-        sock.sendall(msg_bytes)
-    except Exception as e:
-        return {"ok": False, "error": f"Send failed: {e}"}
-    
-    data = b""
-    while True:
-        try:
-            chunk = sock.recv(8192)
-            if not chunk:
-                break
-            data += chunk
-            if b"\n" in data:
-                break
-        except socket.timeout:
-            if not data:
-                return {"ok": False, "error": "Timeout waiting for response"}
-            break
-        except Exception as e:
-            return {"ok": False, "error": f"Receive failed: {e}"}
-    
-    line = data.decode().strip()
-    if not line:
-        return {"ok": False, "error": "Empty response from viewer"}
-    
-    try:
-        return json.loads(line)
-    except json.JSONDecodeError as e:
-        return {"ok": False, "error": f"Invalid JSON response: {e}"}
+    return _transport_command(sock, cmd)
 
 
 def launch_viewer(
@@ -194,6 +159,8 @@ def close_viewer(
         sock.close()
     except Exception:
         pass
+    finally:
+        _forget_connection(sock)
     
     try:
         process.terminate()
