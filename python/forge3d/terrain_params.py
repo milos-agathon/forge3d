@@ -245,6 +245,80 @@ class ReflectionSettings:
             raise ValueError("shore_atten_width must be >= 0")
 
 
+class _WaterSurfaceGrid(Sequence):
+    """An immutable float32 snapshot; materialize Python values only for export."""
+
+    def __init__(self, array: np.ndarray) -> None:
+        self._shape = array.shape
+        self._data = array.tobytes(order="C")
+
+    @property
+    def _array(self) -> np.ndarray:
+        # Bytes own the allocation: callers cannot re-enable writes on this view.
+        return np.frombuffer(self._data, dtype=np.float32).reshape(self._shape)
+
+    def __len__(self) -> int:
+        return self._shape[0]
+
+    def __getitem__(self, index):
+        return self._array[index]
+
+    def __array__(self, dtype=None, copy=None):
+        array = self._array
+        if dtype is not None and np.dtype(dtype) != array.dtype:
+            return array.astype(dtype)
+        return array.copy() if copy else array
+
+    def __deepcopy__(self, memo):
+        # dataclasses.asdict remains ordinary JSON-compatible nested lists.
+        return self._array.tolist()
+
+
+@dataclass
+class WaterOpticsSettings:
+    """Opt-in water optics, in the terrain's Z-up coordinate system.
+
+    Heights use heightmap units before ``z_scale``; normals are world-space,
+    after ``z_scale``. Arrays have the same row orientation and grid as the
+    heightmap. Inputs are snapshotted into immutable float32 buffers; ``asdict``
+    exports ordinary nested lists for deterministic serialization.
+    ``color=None`` retains the caller's material/overlay colour (linear RGB).
+    ``mode='procedural'`` reproduces the legacy shading and ignores surface inputs.
+    """
+
+    mode: str = "physical"
+    surface_height: Optional[Sequence[Sequence[float]]] = None
+    surface_normals: Optional[Sequence[Sequence[Sequence[float]]]] = None
+    color: Optional[Tuple[float, float, float]] = None
+    roughness: float = 0.02
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"physical", "procedural"}:
+            raise ValueError("water optics mode must be physical or procedural")
+        self.roughness = _as_f32(self.roughness)
+        if not math.isfinite(self.roughness) or not 0.0 <= self.roughness <= 1.0:
+            raise ValueError("water roughness must be finite and in [0, 1]")
+        if self.color is not None:
+            color = np.asarray(self.color, dtype=np.float32)
+            if color.shape != (3,) or not np.isfinite(color).all() or np.any((color < 0) | (color > 1)):
+                raise ValueError("water color must contain three finite linear RGB values in [0, 1]")
+            self.color = tuple(float(v) for v in color)
+        for name, ndim in (("surface_height", 2), ("surface_normals", 3)):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            array = np.asarray(value, dtype=np.float32)
+            if array.ndim != ndim or min(array.shape[:2]) < 2 or not np.isfinite(array).all():
+                raise ValueError(f"water {name} must be a finite grid with at least two rows and columns")
+            if ndim == 3:
+                if array.shape[2] != 3 or np.any(array[..., 2] <= 0):
+                    raise ValueError("water surface_normals must have three components and positive Z for a heightfield")
+            setattr(self, name, _WaterSurfaceGrid(array))
+        if self.surface_height is not None and self.surface_normals is not None:
+            if np.shape(self.surface_height) != np.shape(self.surface_normals)[:2]:
+                raise ValueError("water height and normal grids must have the same shape")
+
+
 @dataclass
 class WaterSettings:
     """Terrain water-mask settings for MapScene/TerrainRenderer."""
@@ -254,10 +328,15 @@ class WaterSettings:
     mask_path: Optional[str] = None
     level: Optional[float] = None
     slope_threshold: float = 0.02
+    optics: Optional[WaterOpticsSettings] = None
 
     def __post_init__(self) -> None:
         if self.slope_threshold < 0.0:
             raise ValueError("slope_threshold must be >= 0")
+        if isinstance(self.optics, dict):
+            self.optics = WaterOpticsSettings(**self.optics)
+        if self.optics is not None and not isinstance(self.optics, WaterOpticsSettings):
+            raise ValueError("optics must be WaterOpticsSettings or None")
 
 
 @dataclass
@@ -2555,6 +2634,7 @@ __all__ = [
     "FogSettings",
     "ReflectionSettings",
     "WaterSettings",
+    "WaterOpticsSettings",
     "CloudSettings",
     "BloomSettings",
     "ScreenSpaceSettings",

@@ -68,8 +68,7 @@ impl TerrainScene {
         self.ensure_shadow_atlas(&decoded.shadow)?;
 
         self.prepare_frame_lighting(decoded)?;
-        let mut height_inputs =
-            self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
+        let mut height_inputs = self.upload_height_inputs(heightmap, water_mask, params)?;
         self.prepare_geometry(
             params,
             &height_inputs.heightmap_data,
@@ -120,6 +119,9 @@ impl TerrainScene {
             &height_inputs.heightmap_data,
             height_inputs.width,
             height_inputs.height,
+            &super::water_reflection::WaterReflectionUniforms::disabled()
+                .with_optics(&params.water_optics),
+            height_inputs.water_mask_max,
         )
         .map_err(anyhow::Error::msg)?;
         let prepared_bytes = bytemuck::cast_slice(&uniforms).to_vec();

@@ -452,8 +452,7 @@ impl TerrainScene {
         let mut offline_params = params.clone();
         offline_params.msaa_samples = 1;
 
-        let height_inputs =
-            self.upload_height_inputs(heightmap, water_mask, offline_params.terrain_data_revision)?;
+        let height_inputs = self.upload_height_inputs(heightmap, water_mask, &offline_params)?;
         self.prepare_geometry(
             &offline_params,
             &height_inputs.heightmap_data,
@@ -654,6 +653,9 @@ impl TerrainScene {
             &state.height_inputs.heightmap_data,
             state.height_inputs.width,
             state.height_inputs.height,
+            &super::water_reflection::WaterReflectionUniforms::disabled()
+                .with_optics(&state.params.water_optics),
+            state.height_inputs.water_mask_max,
         )
         .map_err(anyhow::Error::msg)?;
         let uniform_buffer = tracked_create_buffer_init(

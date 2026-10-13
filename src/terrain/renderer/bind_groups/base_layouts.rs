@@ -106,7 +106,7 @@ pub(in crate::terrain::renderer) fn create_base_bind_group_layouts(
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 11,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     view_dimension: wgpu::TextureViewDimension::D2,

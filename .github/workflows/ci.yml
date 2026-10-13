@@ -327,6 +327,7 @@ jobs:
               - 'examples/terrain*.py'
               - 'tests/test_terrain_visual_goldens.py'
               - 'tests/test_terrain_tv10_goldens.py'
+              - 'tests/test_terrain_water_optics.py'
               - 'tests/test_terrain_vt_pbr_families.py'
               - 'tests/test_recipe_goldens.py'
               - 'tests/test_mapscene_sutura_integrity.py'

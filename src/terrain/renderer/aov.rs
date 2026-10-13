@@ -582,8 +582,7 @@ impl TerrainScene {
         let mut timing = self.take_render_timing();
         let height_inputs = graph.execute_with_barriers("terrain.prepare", |_barriers| {
             self.prepare_frame_lighting(decoded)?;
-            let inputs =
-                self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
+            let inputs = self.upload_height_inputs(heightmap, water_mask, params)?;
             self.prepare_geometry(
                 params,
                 &inputs.heightmap_data,
@@ -635,6 +634,9 @@ impl TerrainScene {
             &height_inputs.heightmap_data,
             height_inputs.width,
             height_inputs.height,
+            &super::water_reflection::WaterReflectionUniforms::disabled()
+                .with_optics(&params.water_optics),
+            height_inputs.water_mask_max,
         )
         .map_err(anyhow::Error::msg)?;
         let uniform_buffer = tracked_create_buffer_init(
