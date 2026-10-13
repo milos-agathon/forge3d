@@ -13,6 +13,7 @@ import numpy as np
 from ._native import get_native_module
 from .certificate import _captured_cpu_render
 
+# Import-time class bindings stay fixed to preserve type and instance identity.
 _native = get_native_module()
 # PyO3 0.21 ABI3 extension classes are not safe to construct under Python 3.14
 # in this repository build; keep smoke on the Python fallback there.

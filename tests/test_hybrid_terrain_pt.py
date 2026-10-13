@@ -737,7 +737,8 @@ def test_sun_color_valid_input_does_not_suppress_unrelated_failures(monkeypatch)
         def hybrid_render_terrain_reference(*args, **kwargs):
             raise RuntimeError("invalid device adapter state should propagate")
 
-    monkeypatch.setattr(pt, "_NATIVE", BrokenNative())
+    from forge3d import _native
+    monkeypatch.setattr(_native, "NATIVE_MODULE", BrokenNative())
     dem = np.zeros((2, 2), dtype=np.float32)
     with pytest.raises(RuntimeError, match="adapter state"):
         pt.hybrid_render_terrain_reference(
@@ -1174,7 +1175,7 @@ def test_public_wrapper_resolves_solar_time_and_reports_source(monkeypatch):
             captured.update(kwargs)
             return {}
 
-    monkeypatch.setattr(pt, "_NATIVE", Native())
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(Native(), name, None))
     assert f3d.hybrid_render_terrain_reference is pt.hybrid_render_terrain_reference
     when = SolarTime(
         utc=(2003, 10, 17, 12, 30, 30),

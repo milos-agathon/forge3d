@@ -53,6 +53,18 @@ except ImportError:
 # always available for coordinate transforms; the optional `proj` Cargo feature
 # is only a dev-time differential oracle and is never a runtime fallback. pyproj
 # (imported above) is used only for WKT/EPSG metadata lookups.
+from ._native import get_native_module, get_native_symbol, native_import_error, require_native_module
+
+
+def _has_native_proj() -> bool:
+    available = get_native_symbol("proj_available")
+    return bool(available()) if available is not None else False
+
+
+def __getattr__(name):
+    if name == "HAS_NATIVE_PROJ":
+        return _has_native_proj()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _crs_transform(from_crs, to_crs, *, always_xy: bool = True):
@@ -61,7 +73,9 @@ def _crs_transform(from_crs, to_crs, *, always_xy: bool = True):
     This is the single MENSURA transform entry point for `forge3d.crs`. No
     pyproj fallback: an unsupported CRS raises InvalidCrs/BackendUnavailable.
     """
-    from forge3d import _forge3d as _native
+    _native = get_native_module()
+    if _native is None:
+        raise ImportError("cannot import name '_forge3d' from 'forge3d'") from native_import_error()
 
     return _native.CrsTransform.from_crs(from_crs, to_crs, always_xy=always_xy)
 
@@ -329,13 +343,9 @@ def get_crs_from_geopandas(path: str, layer: Optional[str] = None) -> Optional[s
 # ---------------------------------------------------------------------------
 
 def _require_geodesy_native() -> Any:
-    try:
-        from forge3d import _forge3d as _native
-    except ImportError as exc:  # pragma: no cover - native build required
-        raise RuntimeError(
-            "forge3d native extension is required for forge3d.crs geodesy functions"
-        ) from exc
-    return _native
+    return require_native_module(
+        "forge3d native extension is required for forge3d.crs geodesy functions"
+    )
 
 
 def body_info(name: str) -> dict[str, Any]:

@@ -15,20 +15,21 @@ from .._png import encode_png as _encode_png
 from .._png import save_png as _save_png
 from ..path_tracing import render_rgba as _fallback_render_rgba
 
-# Resolve the native Scene class for isinstance checks.
-# Scene.render_rgba() is an instance method, not a module-level function.
-try:
-    from .._native import get_native_module as _get_native_module
-    _nm = _get_native_module()
-    _NativeScene = getattr(_nm, "Scene", None) if _nm is not None else None
-    del _nm
-except Exception:
-    _NativeScene = None
+from .._native import get_native_symbol
+
+# Keep recognizing existing objects if refresh changes the Scene class.
+_ImportedNativeScene = get_native_symbol("Scene")
+# Preserve the historical importable name without changing live dispatch.
+_NativeScene = _ImportedNativeScene
 
 
 def _is_native_scene(obj: Any) -> bool:
     """Return True if *obj* is a native (Rust/PyO3) Scene instance."""
-    return _NativeScene is not None and isinstance(obj, _NativeScene)
+    native_scene = get_native_symbol("Scene")
+    return (
+        (native_scene is not None and isinstance(obj, native_scene))
+        or (_ImportedNativeScene is not None and isinstance(obj, _ImportedNativeScene))
+    )
 
 
 def render_offscreen_rgba(

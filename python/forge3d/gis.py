@@ -11,6 +11,7 @@ import numpy as np
 from ._native import get_native_module
 
 
+# Import-time class bindings stay fixed to preserve type and instance identity.
 _native = get_native_module()
 
 if _native is not None and hasattr(_native, "RasterInfo"):

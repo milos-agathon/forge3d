@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ._native import NATIVE_AVAILABLE, get_native_module, native_import_error
+from ._native import get_native_module, get_native_symbol, native_import_error
 
 _REMEDIATION_NATIVE = (
     "Reinstall the compiled extension (pip install --force-reinstall forge3d) "
@@ -21,13 +21,10 @@ _REMEDIATION_ADAPTER = (
 
 
 def _native_functions() -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
-    native = get_native_module()
-    if native is None:
-        return None, None, None
     return (
-        getattr(native, "enumerate_adapters", None),
-        getattr(native, "device_probe", None),
-        getattr(native, "get_device", None),
+        get_native_symbol("enumerate_adapters"),
+        get_native_symbol("device_probe"),
+        get_native_symbol("get_device"),
     )
 
 
@@ -132,7 +129,7 @@ def determinism_probe() -> Dict:
 
 
 def has_gpu() -> bool:
-    if not NATIVE_AVAILABLE:
+    if get_native_module() is None:
         return False
     adapters = enumerate_adapters()
     if adapters:

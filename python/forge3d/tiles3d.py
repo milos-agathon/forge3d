@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
 
-from ._native import NATIVE_AVAILABLE, get_native_module
+from ._native import get_native_symbol
 from .diagnostics import (
     LayerSummary,
     ValidationReport,
@@ -148,8 +148,7 @@ class Tiles3dDataset:
         sse_threshold: float = 16.0,
         max_depth: int = 32,
     ) -> List[Dict[str, Any]]:
-        native = get_native_module() if NATIVE_AVAILABLE else None
-        native_traverse = getattr(native, "tiles3d_traverse_py", None) if native else None
+        native_traverse = get_native_symbol("tiles3d_traverse_py")
         if callable(native_traverse):
             return [
                 dict(tile)
@@ -387,8 +386,7 @@ def decode_b3dm(data: bytes) -> Dict[str, Any]:
     Raises:
         NotImplementedError: glTF mesh extraction is not yet implemented
     """
-    native = get_native_module() if NATIVE_AVAILABLE else None
-    native_decode = getattr(native, "decode_b3dm_py", None) if native else None
+    native_decode = get_native_symbol("decode_b3dm_py")
     if callable(native_decode):
         decoded = dict(native_decode(data))
         for key in ("feature_table", "batch_table"):
@@ -448,8 +446,7 @@ def decode_pnts(data: bytes) -> Dict[str, Any]:
     Returns:
         Dict with positions, colors, normals
     """
-    native = get_native_module() if NATIVE_AVAILABLE else None
-    native_decode = getattr(native, "decode_pnts_py", None) if native else None
+    native_decode = get_native_symbol("decode_pnts_py")
     if callable(native_decode):
         decoded = dict(native_decode(data))
         point_count = int(decoded.get("point_count", 0))
