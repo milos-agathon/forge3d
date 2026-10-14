@@ -248,7 +248,6 @@ impl TerrainScene {
         let leaf_keys = BTreeMap::from([(handles.height, source_key)]);
         let mut shadow_setup = None;
         let mut material_vt_started = false;
-        let mut timing_needs_resolve = false;
         let mut hzb_frame_staged = false;
         let mut visibility_frame_staged = false;
         let mut staged_lod_selection = None;
@@ -305,7 +304,6 @@ impl TerrainScene {
                             ts_end(&mut timing, context.encoder(), scope, 0);
                             Ok::<_, anyhow::Error>(setup)
                         })?;
-                        timing_needs_resolve = true;
                         shadow_setup = Some(setup);
                         let payload = if capture_output && decoded.shadow.enabled {
                             let depth = execution.read_texture_tight(
@@ -498,7 +496,6 @@ impl TerrainScene {
                                 return Err(error);
                             }
                         }
-                        timing_needs_resolve = true;
                         Ok(GraphPassOutcome::Executed(if capture_output {
                             let payload = execution.read_texture_tight(
                                 handles.beauty,
@@ -565,12 +562,8 @@ impl TerrainScene {
                             if material_vt_started {
                                 self.stage_material_vt_feedback_readback(encoder)?;
                             }
-                            if let Some(timing) = timing.as_mut() {
-                                timing.resolve_queries(encoder);
-                            }
                             Ok::<_, anyhow::Error>(())
                         })?;
-                        timing_needs_resolve = false;
                         Ok(GraphPassOutcome::Executed(if capture_output {
                             let payload = execution.read_texture_tight(
                                 handles.resolved,
@@ -614,14 +607,8 @@ impl TerrainScene {
                                 1,
                                 wgpu::TextureAspect::All,
                             )?;
-                            if timing_needs_resolve {
-                                if let Some(timing) = timing.as_mut() {
-                                    timing.resolve_queries(context.encoder());
-                                }
-                            }
                             Ok::<_, anyhow::Error>(())
                         })?;
-                        timing_needs_resolve = false;
                         Ok(GraphPassOutcome::Restored)
                     }
                     (label, _) => Err(anyhow!("unexpected native terrain graph pass {label:?}")),

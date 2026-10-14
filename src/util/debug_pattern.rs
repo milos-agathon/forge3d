@@ -135,9 +135,8 @@ pub fn render_debug_pattern(
     }
 
     timing.end(&mut encoder, scope, 1);
-    timing.resolve(&mut encoder);
 
-    queue.submit(std::iter::once(encoder.finish()));
+    timing.submit(&queue, encoder);
     device.poll(wgpu::Maintain::Wait);
 
     if !timing.record_into_certificate() {

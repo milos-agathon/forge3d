@@ -984,9 +984,10 @@ impl TerrainScene {
             ))
         })?;
         if let Some(t) = timing.as_mut() {
-            t.resolve_queries(&mut encoder);
+            t.submit(encoder);
+        } else {
+            self.queue.submit(Some(encoder.finish()));
         }
-        self.queue.submit(Some(encoder.finish()));
         graph.finish()?;
         self.finish_material_vt_frame()?;
 

@@ -170,11 +170,14 @@ impl HarnessPipeline {
         }
         if let Some(timer) = timing.as_mut() {
             timer.end(&mut encoder, scope, 1);
-            timer.resolve(&mut encoder);
             crate::core::shader_registry::record_shader_use(&self.label);
         }
         encoder.copy_buffer_to_buffer(&output, 0, &readback, 0, size);
-        queue.submit(Some(encoder.finish()));
+        if let Some(timer) = timing.as_mut() {
+            timer.submit(&queue, encoder);
+        } else {
+            queue.submit(Some(encoder.finish()));
+        }
         device.poll(wgpu::Maintain::Wait);
         if let Some(timer) = timing {
             if !timer.record_into_certificate() {

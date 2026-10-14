@@ -4,18 +4,18 @@
 //! Supports RenderDoc, Nsight Graphics, and RGP markers with configurable
 //! timestamp collection for minimal overhead.
 //!
-//! CENSOR Task 4: timestamp queries are double-buffered. Two independent query
-//! sets / resolve buffers / readback buffers are kept, selected by
-//! `frame_parity`. `begin_scope`/`end_scope` write into the current slot,
-//! `resolve_queries` resolves that slot, and `finish_frame` flips parity after
-//! the caller submits. The async `get_results` reads the *other* slot (the
-//! previously submitted frame) so it never stalls the current frame, while
-//! `get_results_blocking` reads the slot just resolved+submitted for offline
-//! single-shot renders.
+//! A submitted batch owns its written query range, submission fence, scope
+//! metadata and pending mapping. The two existing slots are reused only after
+//! their batch is consumed or dropped. Nonblocking retrieval keeps a pending
+//! mapping alive; when both slots are occupied, new work runs without timestamps.
+//! `submit` resolves and submits together. `submit_pending` seals timing across
+//! command encoders already submitted by a render graph. The legacy resolve /
+//! finish methods remain available, but production callers need no slot reset.
 
 use super::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 use wgpu::*;
 
@@ -24,7 +24,10 @@ const SLOTS: usize = 2;
 
 /// Handle for a GPU timing scope
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TimingScopeId(usize);
+pub struct TimingScopeId {
+    generation: u64,
+    index: usize,
+}
 
 /// GPU timing configuration
 #[derive(Debug, Clone)]
@@ -113,42 +116,107 @@ impl<'a> TimingScope<'a> {
     }
 }
 
-/// GPU timing manager for performance profiling
+#[derive(Default)]
+struct RecordedScope {
+    name: String,
+    draw_calls: u32,
+    query_start: Option<u32>,
+    finished: bool,
+}
+
+#[derive(Default)]
+struct RecordingTimingBatch {
+    slot: Option<usize>,
+    generation: u64,
+    query_count: u32,
+    scopes: Vec<RecordedScope>,
+    active: Vec<usize>,
+    resolved: bool,
+}
+
+/// Owns the readback and its mapping until the submitted slot is retired.
+struct SubmittedTimingBatch {
+    slot: usize,
+    submission: SubmissionIndex,
+    query_count: u32,
+    scopes: Vec<RecordedScope>,
+    readback: Arc<TrackedBuffer>,
+    mapping: Option<Receiver<Result<(), BufferAsyncError>>>,
+    mapping_active: bool,
+}
+
+impl SubmittedTimingBatch {
+    fn start_mapping(&mut self) {
+        if self.mapping.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        self.readback
+            .slice(0..u64::from(self.query_count) * 8)
+            .map_async(MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        self.mapping = Some(receiver);
+        self.mapping_active = true;
+    }
+
+    fn try_read(&mut self) -> RenderResult<Option<Vec<u64>>> {
+        match self.mapping.as_ref().expect("mapping started").try_recv() {
+            Ok(Ok(())) => {
+                let data = self
+                    .readback
+                    .slice(0..u64::from(self.query_count) * 8)
+                    .get_mapped_range();
+                let timestamps = bytemuck::cast_slice::<u8, u64>(&data).to_vec();
+                drop(data);
+                Ok(Some(timestamps))
+            }
+            Ok(Err(error)) => {
+                // A failed/cancelled map has already returned to the idle state.
+                self.mapping_active = false;
+                Err(RenderError::Readback(format!(
+                    "Failed to map timestamp buffer: {error}"
+                )))
+            }
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => {
+                self.mapping_active = false;
+                Err(RenderError::Readback(
+                    "Timestamp buffer mapping was cancelled".to_string(),
+                ))
+            }
+        }
+    }
+}
+
+impl Drop for SubmittedTimingBatch {
+    fn drop(&mut self) {
+        // Cancels a pending map or releases a completed map on every exit path.
+        if self.mapping_active {
+            self.readback.unmap();
+        }
+    }
+}
+
+/// GPU timing manager for performance profiling.
+/// Recording and submitted metadata have distinct owners; a pending batch
+/// prevents its query/readback slot from being selected for new recording.
 pub struct GpuTimingManager {
     config: GpuTimingConfig,
     device: Arc<Device>,
-
-    // Timestamp queries (double-buffered: one slot per frame in flight)
+    queue: Arc<Queue>,
     timestamp_query_set: [Option<QuerySet>; SLOTS],
     timestamp_buffer: [Option<TrackedBuffer>; SLOTS],
-    timestamp_readback_buffer: [Option<TrackedBuffer>; SLOTS],
-
-    // Pipeline statistics queries (single-buffered; disabled by default)
+    timestamp_readback_buffer: [Option<Arc<TrackedBuffer>>; SLOTS],
     pipeline_stats_query_set: Option<QuerySet>,
     pipeline_stats_buffer: Option<TrackedBuffer>,
     pipeline_stats_readback_buffer: Option<TrackedBuffer>,
-
-    // Per-slot timing state so a slot's labels always match its queries.
-    active_scopes: HashMap<TimingScopeId, String>,
-    query_index: [u32; SLOTS],
-    scope_labels: [Vec<String>; SLOTS],
-    scope_draw_calls: [Vec<u32>; SLOTS],
-
-    /// Number of pipeline-statistics queries actually begun this frame.
-    /// Single-buffered like the stats query set. Currently no scope ever begins
-    /// a statistics query, so this stays 0 and `resolve_queries` skips the stats
-    /// range (resolving a never-written range loses the device on wgpu 0.19 /
-    /// Vulkan). A future caller that wires up statistics queries must increment
-    /// this when it writes one.
     pipeline_stats_query_index: u32,
-
-    /// Which slot the current frame writes/resolves into.
-    frame_parity: usize,
-
-    // Feature support
+    recording: RecordingTimingBatch,
+    submitted: VecDeque<SubmittedTimingBatch>,
     supports_timestamps: bool,
     supports_pipeline_stats: bool,
-    timestamp_period: f64, // Nanoseconds per timestamp unit
+    timestamp_period: f64,
 }
 
 impl GpuTimingManager {
@@ -159,7 +227,6 @@ impl GpuTimingManager {
         config: GpuTimingConfig,
     ) -> RenderResult<Self> {
         let features = device.features();
-        let _limits = device.limits();
 
         let supports_timestamps =
             config.enable_timestamps && features.contains(Features::TIMESTAMP_QUERY);
@@ -176,18 +243,19 @@ impl GpuTimingManager {
         let mut manager = Self {
             config: config.clone(),
             device: device.clone(),
+            queue,
             timestamp_query_set: [None, None],
             timestamp_buffer: [None, None],
             timestamp_readback_buffer: [None, None],
             pipeline_stats_query_set: None,
             pipeline_stats_buffer: None,
             pipeline_stats_readback_buffer: None,
-            active_scopes: HashMap::new(),
-            query_index: [0; SLOTS],
-            scope_labels: [Vec::new(), Vec::new()],
-            scope_draw_calls: [Vec::new(), Vec::new()],
             pipeline_stats_query_index: 0,
-            frame_parity: 0,
+            recording: RecordingTimingBatch {
+                slot: Some(0),
+                ..Default::default()
+            },
+            submitted: VecDeque::new(),
             supports_timestamps,
             supports_pipeline_stats,
             timestamp_period,
@@ -200,7 +268,19 @@ impl GpuTimingManager {
     }
 
     fn initialize_queries(&mut self) -> RenderResult<()> {
-        let query_count = self.config.max_queries_per_frame * 2; // Begin + End for each scope
+        let query_count = self
+            .config
+            .max_queries_per_frame
+            .checked_mul(2)
+            .filter(|count| *count <= QUERY_SET_MAX_QUERIES)
+            .ok_or_else(|| {
+                RenderError::Render(
+                    "GPU timing query capacity exceeds wgpu QUERY_SET_MAX_QUERIES".to_string(),
+                )
+            })?;
+        if query_count == 0 {
+            return Ok(());
+        }
 
         // Initialize timestamp queries (one independent slot per frame in flight)
         if self.supports_timestamps {
@@ -234,7 +314,7 @@ impl GpuTimingManager {
 
                 self.timestamp_query_set[slot] = Some(query_set);
                 self.timestamp_buffer[slot] = Some(timestamp_buffer);
-                self.timestamp_readback_buffer[slot] = Some(timestamp_readback);
+                self.timestamp_readback_buffer[slot] = Some(Arc::new(timestamp_readback));
             }
         }
 
@@ -281,18 +361,39 @@ impl GpuTimingManager {
         Ok(())
     }
 
-    /// Begin a new timing scope
-    pub fn begin_scope<'a>(
-        &'a mut self,
-        encoder: &'a mut CommandEncoder,
-        label: &str,
-    ) -> TimingScopeId {
-        let slot = self.frame_parity;
-        let scope_id = TimingScopeId(self.scope_labels[slot].len());
-        self.scope_labels[slot].push(label.to_string());
-        self.scope_draw_calls[slot].push(0);
-        self.active_scopes.insert(scope_id, label.to_string());
-
+    /// Begin a new timing scope. Each scope reserves a begin/end pair so nested
+    /// scopes, exhausted capacity and unmatched ends cannot mix query labels.
+    pub fn begin_scope(&mut self, encoder: &mut CommandEncoder, label: &str) -> TimingScopeId {
+        // A compatibility caller may start recording after resolving/submitting
+        // externally. Fence that previous batch before selecting another slot.
+        if self.recording.resolved {
+            self.submit_pending();
+        }
+        if self.recording.scopes.is_empty() {
+            self.recording.slot =
+                (0..SLOTS).find(|slot| !self.submitted.iter().any(|batch| batch.slot == *slot));
+        }
+        let query_start = self.recording.slot.and_then(|slot| {
+            if self.timestamp_query_set[slot].is_some()
+                && self.recording.query_count / 2 < self.config.max_queries_per_frame
+            {
+                let index = self.recording.query_count;
+                self.recording.query_count += 2;
+                Some(index)
+            } else {
+                None
+            }
+        });
+        let scope_id = TimingScopeId {
+            generation: self.recording.generation,
+            index: self.recording.scopes.len(),
+        };
+        self.recording.scopes.push(RecordedScope {
+            name: label.to_string(),
+            query_start,
+            ..Default::default()
+        });
+        self.recording.active.push(scope_id.index);
         self.begin_scope_internal(encoder, scope_id, label);
         scope_id
     }
@@ -300,283 +401,219 @@ impl GpuTimingManager {
     fn begin_scope_internal(
         &mut self,
         encoder: &mut CommandEncoder,
-        _scope_id: TimingScopeId,
+        scope_id: TimingScopeId,
         label: &str,
     ) {
-        let full_label = format!("{}.{}", self.config.label_prefix, label);
-
-        // Insert debug marker for external profilers (RenderDoc, Nsight, RGP)
         if self.config.enable_debug_markers {
-            encoder.push_debug_group(&full_label);
+            encoder.push_debug_group(&format!("{}.{}", self.config.label_prefix, label));
         }
-
-        // Insert timestamp query into the current slot.
-        let slot = self.frame_parity;
-        if let Some(ref query_set) = self.timestamp_query_set[slot] {
-            if self.query_index[slot] < self.config.max_queries_per_frame * 2 {
-                encoder.write_timestamp(query_set, self.query_index[slot]);
-                self.query_index[slot] += 1;
-            }
+        if let (Some(slot), Some(index)) = (
+            self.recording.slot,
+            self.recording.scopes[scope_id.index].query_start,
+        ) {
+            encoder.write_timestamp(self.timestamp_query_set[slot].as_ref().unwrap(), index);
         }
     }
 
-    /// End timing scope
+    /// End a timing scope.
     pub fn end_scope(&mut self, encoder: &mut CommandEncoder, scope_id: TimingScopeId) {
         self.end_scope_internal(encoder, scope_id);
     }
 
-    /// End timing scope, recording the number of draw calls issued inside it.
+    /// End a scope and record its draw count.
     pub fn end_scope_with_draws(
         &mut self,
         encoder: &mut CommandEncoder,
         scope_id: TimingScopeId,
         draw_calls: u32,
     ) {
-        let slot = self.frame_parity;
-        if let Some(entry) = self.scope_draw_calls[slot].get_mut(scope_id.0) {
-            *entry = draw_calls;
+        if scope_id.generation == self.recording.generation {
+            if let Some(scope) = self.recording.scopes.get_mut(scope_id.index) {
+                scope.draw_calls = draw_calls;
+            }
         }
         self.end_scope_internal(encoder, scope_id);
     }
 
     fn end_scope_internal(&mut self, encoder: &mut CommandEncoder, scope_id: TimingScopeId) {
-        // Insert end timestamp into the current slot.
-        let slot = self.frame_parity;
-        if let Some(ref query_set) = self.timestamp_query_set[slot] {
-            if self.query_index[slot] < self.config.max_queries_per_frame * 2 {
-                encoder.write_timestamp(query_set, self.query_index[slot]);
-                self.query_index[slot] += 1;
-            }
+        if scope_id.generation != self.recording.generation {
+            return;
         }
-
-        // Pop debug marker
+        let Some(position) = self
+            .recording
+            .active
+            .iter()
+            .position(|id| *id == scope_id.index)
+        else {
+            return; // Duplicate or stale end: never write another scope's query.
+        };
+        let scope = &mut self.recording.scopes[scope_id.index];
+        if let (Some(slot), Some(index)) = (self.recording.slot, scope.query_start) {
+            encoder.write_timestamp(self.timestamp_query_set[slot].as_ref().unwrap(), index + 1);
+        }
+        scope.finished = true;
+        self.recording.active.remove(position);
         if self.config.enable_debug_markers {
             encoder.pop_debug_group();
         }
-
-        self.active_scopes.remove(&scope_id);
     }
 
-    /// Resolve timing queries and prepare for readback.
-    ///
-    /// Resolves the current slot (`frame_parity`) into its own readback buffer.
-    /// Per-slot query counts and scope labels are retained so a later
-    /// `get_results` / `get_results_blocking` can map them back to names.
+    /// Compatibility entry point for external encoder owners. The caller must
+    /// submit this encoder before `finish_frame` or result retrieval. Internal
+    /// callers use `submit`, which owns both operations. Only written ranges resolve.
     pub fn resolve_queries(&mut self, encoder: &mut CommandEncoder) {
-        let slot = self.frame_parity;
-        if self.query_index[slot] == 0 {
-            return; // No queries to resolve
+        if self.recording.resolved {
+            return;
         }
-
-        // Resolve timestamp queries for this slot.
-        if let (Some(ref query_set), Some(ref buffer)) = (
-            &self.timestamp_query_set[slot],
-            &self.timestamp_buffer[slot],
-        ) {
-            encoder.resolve_query_set(query_set, 0..self.query_index[slot], buffer, 0);
-
-            if let Some(ref readback_buffer) = &self.timestamp_readback_buffer[slot] {
-                let size = (self.query_index[slot] as u64) * std::mem::size_of::<u64>() as u64;
-                encoder.copy_buffer_to_buffer(buffer, 0, readback_buffer, 0, size);
+        // Complete the reserved ranges of abandoned scopes, but leave them
+        // invalid in the result metadata. Never resolve an unwritten query.
+        while let Some(index) = self.recording.active.pop() {
+            let scope = &self.recording.scopes[index];
+            if let (Some(slot), Some(start)) = (self.recording.slot, scope.query_start) {
+                encoder
+                    .write_timestamp(self.timestamp_query_set[slot].as_ref().unwrap(), start + 1);
+            }
+            if self.config.enable_debug_markers {
+                encoder.pop_debug_group();
             }
         }
-
-        // Resolve pipeline statistics queries (single-buffered).
-        //
-        // DEFENSIVE: only resolve when at least one statistics query was
-        // actually begun this frame. The scopes above write timestamps only and
-        // never begin a pipeline-statistics query, so `pipeline_stats_query_index`
-        // stays 0 and this range is skipped. Resolving a never-written
-        // statistics range loses the device (→ panic at the next submit) on
-        // wgpu 0.19 / Vulkan adapters that advertise PIPELINE_STATISTICS_QUERY,
-        // even when `enable_pipeline_stats` was requested by the config.
+        if let Some(slot) = self.recording.slot {
+            if self.recording.query_count > 0 {
+                let query_set = self.timestamp_query_set[slot].as_ref().unwrap();
+                let buffer = self.timestamp_buffer[slot].as_ref().unwrap();
+                let readback = self.timestamp_readback_buffer[slot].as_ref().unwrap();
+                encoder.resolve_query_set(query_set, 0..self.recording.query_count, buffer, 0);
+                encoder.copy_buffer_to_buffer(
+                    buffer,
+                    0,
+                    readback,
+                    0,
+                    u64::from(self.recording.query_count) * 8,
+                );
+            }
+        }
+        // Statistics are not begun by timing scopes. Preserve the guard against
+        // resolving an unwritten statistics range (wgpu 0.19 Vulkan device loss).
         if self.pipeline_stats_query_index > 0 {
-            if let (Some(ref query_set), Some(ref buffer)) =
-                (&self.pipeline_stats_query_set, &self.pipeline_stats_buffer)
-            {
-                let stats_count = self.pipeline_stats_query_index;
-                encoder.resolve_query_set(query_set, 0..stats_count, buffer, 0);
+            if let (Some(query_set), Some(buffer), Some(readback)) = (
+                self.pipeline_stats_query_set.as_ref(),
+                self.pipeline_stats_buffer.as_ref(),
+                self.pipeline_stats_readback_buffer.as_ref(),
+            ) {
+                encoder.resolve_query_set(query_set, 0..self.pipeline_stats_query_index, buffer, 0);
+                encoder.copy_buffer_to_buffer(
+                    buffer,
+                    0,
+                    readback,
+                    0,
+                    u64::from(self.pipeline_stats_query_index) * 8 * 4,
+                );
+            }
+        }
+        self.recording.resolved = true;
+    }
 
-                if let Some(ref readback_buffer) = &self.pipeline_stats_readback_buffer {
-                    let size = (stats_count as u64) * std::mem::size_of::<u64>() as u64 * 4;
-                    encoder.copy_buffer_to_buffer(buffer, 0, readback_buffer, 0, size);
+    /// Resolve and submit work, transferring its slot and metadata to a batch.
+    pub(crate) fn submit(&mut self, mut encoder: CommandEncoder) -> SubmissionIndex {
+        self.resolve_queries(&mut encoder);
+        let submission = self.queue.submit(Some(encoder.finish()));
+        let generation = self.recording.generation.wrapping_add(1);
+        let recording = std::mem::replace(
+            &mut self.recording,
+            RecordingTimingBatch {
+                generation,
+                ..Default::default()
+            },
+        );
+        if let Some(slot) = recording.slot.filter(|_| recording.query_count > 0) {
+            self.submitted.push_back(SubmittedTimingBatch {
+                slot,
+                submission: submission.clone(),
+                query_count: recording.query_count,
+                scopes: recording.scopes,
+                readback: self.timestamp_readback_buffer[slot]
+                    .as_ref()
+                    .unwrap()
+                    .clone(),
+                mapping: None,
+                mapping_active: false,
+            });
+        }
+        self.pipeline_stats_query_index = 0;
+        submission
+    }
+
+    /// Seal scopes written on already-submitted encoders (e.g. a render graph).
+    /// Queue ordering ensures this resolution follows all of that GPU work.
+    pub(crate) fn submit_pending(&mut self) {
+        if !self.recording.scopes.is_empty() || self.recording.resolved {
+            let encoder = self
+                .device
+                .create_command_encoder(&CommandEncoderDescriptor {
+                    label: Some("gpu_timing.submit_pending"),
+                });
+            self.submit(encoder);
+        }
+    }
+
+    /// Compatibility fence for callers that submitted a resolved encoder.
+    /// Slot retirement is owned by the submitted batch, never by this call.
+    pub fn finish_frame(&mut self) {
+        self.submit_pending();
+    }
+
+    /// Consume submitted results, waiting for their GPU work.
+    pub async fn get_results(&mut self) -> RenderResult<Vec<TimingResult>> {
+        self.get_results_blocking()
+    }
+
+    /// Consume ready batches without waiting. Pending mappings and labels stay
+    /// alive for the next call, and their slots cannot be overwritten.
+    pub fn try_get_results(&mut self) -> RenderResult<Vec<TimingResult>> {
+        self.read_submitted(false)
+    }
+
+    /// Consume all submitted timing, fencing legacy externally submitted work.
+    pub fn get_results_blocking(&mut self) -> RenderResult<Vec<TimingResult>> {
+        self.submit_pending();
+        self.read_submitted(true)
+    }
+
+    fn read_submitted(&mut self, blocking: bool) -> RenderResult<Vec<TimingResult>> {
+        for batch in &mut self.submitted {
+            batch.start_mapping();
+        }
+        let mut results = Vec::new();
+        while let Some(batch) = self.submitted.front_mut() {
+            self.device.poll(if blocking {
+                Maintain::WaitForSubmissionIndex(batch.submission.clone())
+            } else {
+                Maintain::Poll
+            });
+            match batch.try_read() {
+                Ok(Some(timestamps)) => {
+                    let batch = self.submitted.pop_front().unwrap();
+                    results.extend(timing_results_from_timestamps(
+                        &batch.scopes,
+                        &timestamps,
+                        self.timestamp_period,
+                    ));
+                    // Dropping the batch unmaps before its slot becomes reusable.
+                }
+                Ok(None) if !blocking => break,
+                Ok(None) => {
+                    self.submitted.pop_front();
+                    return Err(RenderError::Readback(
+                        "Timestamp mapping did not complete after its submission fence".to_string(),
+                    ));
+                }
+                Err(error) => {
+                    self.submitted.pop_front(); // Drop/unmap even on readback failure.
+                    return Err(error);
                 }
             }
         }
-    }
-
-    /// Advance the double buffer. Call AFTER submitting the encoder that
-    /// `resolve_queries` wrote into. Flips parity and clears the slot the next
-    /// frame will write into (it was drained one frame earlier).
-    pub fn finish_frame(&mut self) {
-        self.frame_parity = (self.frame_parity + 1) % SLOTS;
-        let slot = self.frame_parity;
-        self.query_index[slot] = 0;
-        self.scope_labels[slot].clear();
-        self.scope_draw_calls[slot].clear();
-        self.pipeline_stats_query_index = 0;
-    }
-
-    /// Get timing results for the previously submitted frame (async, viewer path).
-    ///
-    /// Reads the slot NOT currently being written (submitted last frame), so
-    /// waiting on it does not stall the frame in flight. If that slot has no
-    /// pending queries (e.g. the very first frame), falls back to the current
-    /// slot — safe when the caller has already submitted and polled it.
-    pub async fn get_results(&mut self) -> RenderResult<Vec<TimingResult>> {
-        // Prefer the previously submitted slot; fall back to the current one.
-        let other = (self.frame_parity + 1) % SLOTS;
-        let read_slot = if self.query_index[other] >= 2 {
-            other
-        } else {
-            self.frame_parity
-        };
-
-        self.read_results_from_slot(read_slot).await
-    }
-
-    /// Try to read the previously submitted frame without waiting for GPU
-    /// progress. If its mapping is not ready after a non-blocking poll, discard
-    /// that timing sample so the slot can be reused next frame.
-    pub fn try_get_results(&mut self) -> RenderResult<Vec<TimingResult>> {
-        let slot = (self.frame_parity + 1) % SLOTS;
-        if self.query_index[slot] < 2 {
-            return Ok(Vec::new());
-        }
-
-        let count = self.query_index[slot];
-        let Some(readback_buffer) = self.timestamp_readback_buffer[slot].as_ref() else {
-            return Ok(Vec::new());
-        };
-        let size = (count as u64) * std::mem::size_of::<u64>() as u64;
-        let slice = readback_buffer.slice(0..size);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        slice.map_async(MapMode::Read, move |result| {
-            let _ = sender.send(result);
-        });
-        self.device.poll(Maintain::Poll);
-
-        match receiver.try_recv() {
-            Ok(Ok(())) => {
-                let data = slice.get_mapped_range();
-                let timestamps = bytemuck::cast_slice::<u8, u64>(&data).to_vec();
-                drop(data);
-                readback_buffer.unmap();
-                Ok(self.timing_results_from_timestamps(slot, &timestamps))
-            }
-            Ok(Err(error)) => Err(RenderError::Readback(format!(
-                "Failed to map timestamp buffer: {error}"
-            ))),
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                readback_buffer.unmap();
-                Ok(Vec::new())
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(RenderError::Readback(
-                "Timestamp buffer mapping was cancelled".to_string(),
-            )),
-        }
-    }
-
-    /// Get timing results for the slot just resolved + submitted (offline single-shot).
-    ///
-    /// Reads the current slot (`frame_parity`) and blocks on device work with an
-    /// explicit `Maintain::Wait`. Intended for single-submit offline renders.
-    ///
-    /// Consumes and resets the current slot on success: this is the offline
-    /// counterpart to `finish_frame`'s per-slot reset, so a caller that repeats
-    /// `resolve_queries -> submit -> get_results_blocking` without ever calling
-    /// `finish_frame` does not accumulate unbounded per-slot state or
-    /// re-report scopes from a prior call.
-    pub fn get_results_blocking(&mut self) -> RenderResult<Vec<TimingResult>> {
-        let slot = self.frame_parity;
-        let results = pollster::block_on(self.read_results_from_slot(slot))?;
-        self.query_index[slot] = 0;
-        self.scope_labels[slot].clear();
-        self.scope_draw_calls[slot].clear();
-        self.pipeline_stats_query_index = 0;
         Ok(results)
-    }
-
-    async fn read_results_from_slot(&mut self, slot: usize) -> RenderResult<Vec<TimingResult>> {
-        if self.query_index[slot] < 2 {
-            return Ok(Vec::new()); // Need at least one begin/end pair
-        }
-
-        let count = self.query_index[slot];
-        let timestamps = if let Some(ref readback_buffer) = &self.timestamp_readback_buffer[slot] {
-            self.read_timestamp_buffer(readback_buffer, count).await?
-        } else {
-            Vec::new()
-        };
-
-        Ok(self.timing_results_from_timestamps(slot, &timestamps))
-    }
-
-    fn timing_results_from_timestamps(&self, slot: usize, timestamps: &[u64]) -> Vec<TimingResult> {
-        let mut results = Vec::new();
-        let scope_count = timestamps.len() / 2;
-        for scope_index in 0..scope_count {
-            let begin_idx = scope_index * 2;
-            let end_idx = begin_idx + 1;
-            let begin_ns = timestamps[begin_idx] as f64 * self.timestamp_period;
-            let end_ns = timestamps[end_idx] as f64 * self.timestamp_period;
-            let duration_ms = (end_ns - begin_ns) / 1_000_000.0; // Convert ns to ms
-
-            let name = self.scope_labels[slot]
-                .get(scope_index)
-                .cloned()
-                .unwrap_or_else(|| format!("scope_{}", scope_index));
-            let draw_calls = self.scope_draw_calls[slot]
-                .get(scope_index)
-                .copied()
-                .unwrap_or(0);
-
-            // Honest validity (CENSOR audit F-04): a zero begin stamp means the
-            // query was never written (driver skipped it), and end < begin is
-            // wraparound/garbage. Consumers must report such scopes as 0.0
-            // rather than presenting a garbage delta as a live timing.
-            let timestamp_valid =
-                timestamps[begin_idx] != 0 && timestamps[end_idx] >= timestamps[begin_idx];
-
-            results.push(TimingResult {
-                name,
-                gpu_time_ms: duration_ms as f32,
-                timestamp_valid,
-                draw_calls,
-                pipeline_stats: None, // Pipeline stats are not collected yet.
-            });
-        }
-
-        results
-    }
-
-    async fn read_timestamp_buffer(&self, buffer: &Buffer, count: u32) -> RenderResult<Vec<u64>> {
-        let size = (count as u64) * std::mem::size_of::<u64>() as u64;
-        let slice = buffer.slice(0..size);
-
-        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
-        slice.map_async(MapMode::Read, move |result| {
-            sender.send(result).ok();
-        });
-
-        self.device.poll(Maintain::Wait);
-
-        match receiver.receive().await {
-            Some(Ok(())) => {
-                let data = slice.get_mapped_range();
-                let timestamps = bytemuck::cast_slice::<u8, u64>(&data).to_vec();
-                drop(data);
-                buffer.unmap();
-                Ok(timestamps)
-            }
-            Some(Err(e)) => Err(RenderError::Readback(format!(
-                "Failed to map timestamp buffer: {}",
-                e
-            ))),
-            None => Err(RenderError::Readback(
-                "Timestamp buffer mapping was cancelled".to_string(),
-            )),
-        }
     }
 
     /// Get current configuration
@@ -600,6 +637,39 @@ impl GpuTimingManager {
         );
         info
     }
+}
+
+fn timing_results_from_timestamps(
+    scopes: &[RecordedScope],
+    timestamps: &[u64],
+    timestamp_period: f64,
+) -> Vec<TimingResult> {
+    scopes
+        .iter()
+        .map(|scope| {
+            let pair = scope.query_start.and_then(|index| {
+                Some((
+                    *timestamps.get(index as usize)?,
+                    *timestamps.get(index as usize + 1)?,
+                ))
+            });
+            let timestamp_valid =
+                scope.finished && pair.is_some_and(|(begin, end)| begin != 0 && end >= begin);
+            let gpu_time_ms = if timestamp_valid {
+                let (begin, end) = pair.unwrap();
+                ((end - begin) as f64 * timestamp_period / 1_000_000.0) as f32
+            } else {
+                0.0
+            };
+            TimingResult {
+                name: scope.name.clone(),
+                gpu_time_ms,
+                timestamp_valid,
+                draw_calls: scope.draw_calls,
+                pipeline_stats: None,
+            }
+        })
+        .collect()
 }
 
 /// Convenience macro for timing GPU work
@@ -631,8 +701,9 @@ pub fn create_default_config(device: &Device) -> GpuTimingConfig {
 ///
 /// Wraps an optional [`GpuTimingManager`]: present when the initialized global
 /// device granted `TIMESTAMP_QUERY`, absent otherwise. Callers wrap each GPU
-/// pass in `begin`/`end`, call `resolve` on the encoder BEFORE submitting it,
-/// and after submission call [`OneShotTiming::record_into_certificate`], which
+/// pass in `begin`/`end` and use `submit` for an owned encoder. When a render
+/// graph submits borrowed encoders, finalization owns a following resolve
+/// submission. [`OneShotTiming::record_into_certificate`] then
 /// blocking-reads the timestamps and records one certificate pass per scope
 /// with its live `gpu_ms`. When timing is unavailable the caller must fall
 /// back to recording the same pass labels (same order) with `gpu_ms == 0.0`
@@ -720,11 +791,20 @@ impl OneShotTiming {
         }
     }
 
-    /// Resolve the query set into its readback buffer. Must be recorded on an
-    /// encoder that is submitted before [`OneShotTiming::record_into_certificate`].
+    /// Compatibility resolution for an externally owned encoder. New callers
+    /// use `submit` or let certificate finalization seal graph-submitted work.
     pub fn resolve(&mut self, encoder: &mut CommandEncoder) {
         if let Some(t) = self.manager.as_mut() {
             t.resolve_queries(encoder);
+        }
+    }
+
+    /// Submit an owned encoder with its timing resolution. Inert timing still
+    /// submits the caller's real GPU work on the supplied queue.
+    pub(crate) fn submit(&mut self, queue: &Queue, encoder: CommandEncoder) -> SubmissionIndex {
+        match self.manager.as_mut() {
+            Some(manager) => manager.submit(encoder),
+            None => queue.submit(Some(encoder.finish())),
         }
     }
 
@@ -741,7 +821,7 @@ impl OneShotTiming {
             return false;
         };
         match manager.get_results_blocking() {
-            Ok(results) if !results.is_empty() => {
+            Ok(results) if !results.is_empty() && results.len() == self.labels.len() => {
                 for result in &results {
                     if !result.timestamp_valid {
                         crate::core::degradation::record_degradation(
@@ -759,7 +839,7 @@ impl OneShotTiming {
                 true
             }
             Ok(_) => {
-                self.record_failure("timestamp query resolved without any pass results");
+                self.record_failure("timestamp query results did not cover every recorded pass");
                 false
             }
             Err(e) => {
@@ -787,10 +867,28 @@ mod tests {
     /// is available or TIMESTAMP_QUERY was not granted.
     #[test]
     fn gpu_timing_double_buffered_measures_copy() {
-        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+        let instance = Instance::new(InstanceDescriptor::default());
+        let Some(adapter) = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
+            power_preference: PowerPreference::LowPower,
+            ..Default::default()
+        })) else {
             eprintln!("[gpu_timing test] no GPU adapter available; skipping");
             return;
         };
+        let info = adapter.get_info();
+        let query_features = adapter.features()
+            & (Features::TIMESTAMP_QUERY | Features::PIPELINE_STATISTICS_QUERY);
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &DeviceDescriptor {
+                label: Some("gpu_timing_query_features"),
+                required_features: query_features,
+                required_limits: Limits::default(),
+            }, None,
+        )).expect("device with advertised query features");
+        eprintln!(
+            "[gpu_timing test] adapter={info:?}, features={:?}",
+            device.features()
+        );
         let device = Arc::new(device);
         let queue = Arc::new(queue);
 
@@ -885,6 +983,235 @@ mod tests {
         );
         assert_eq!(results2[0].name, "test_copy");
 
+        // Consecutive owned submissions keep two independent pending batches.
+        // Delay one mapping notification deterministically while retaining the
+        // real map callback/result. The sample must survive a nonblocking read.
+        for label in ["batch.first", "batch.second"] {
+            let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+            let scope = manager.begin_scope(&mut encoder, label);
+            encoder.copy_buffer_to_buffer(&src, 0, &dst, 0, 4096);
+            manager.end_scope_with_draws(&mut encoder, scope, 1);
+            manager.submit(encoder);
+        }
+        assert_eq!(manager.submitted.len(), SLOTS);
+        let batch = manager.submitted.front_mut().unwrap();
+        batch.start_mapping();
+        let actual_mapping = batch.mapping.take();
+        let (_delayed_sender, delayed_receiver) = mpsc::channel();
+        batch.mapping = Some(delayed_receiver);
+        assert!(manager.try_get_results().unwrap().is_empty());
+        assert_eq!(
+            manager.submitted.len(),
+            SLOTS,
+            "pending reads cannot retire slots"
+        );
+        manager.submitted.front_mut().unwrap().mapping = actual_mapping;
+
+        // A third frame must execute without overwriting either pending slot.
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let skipped = manager.begin_scope(&mut encoder, "batch.no_free_slot");
+        assert!(manager.recording.slot.is_none());
+        manager.end_scope(&mut encoder, skipped);
+        manager.submit(encoder);
+        assert_eq!(manager.submitted.len(), SLOTS);
+        let consecutive = manager.get_results_blocking().unwrap();
+        assert_eq!(
+            consecutive
+                .iter()
+                .map(|r| r.name.as_str())
+                .collect::<Vec<_>>(),
+            ["batch.first", "batch.second"]
+        );
+        assert!(consecutive
+            .iter()
+            .all(|r| r.timestamp_valid && r.draw_calls == 1));
+        assert!(
+            manager.get_results_blocking().unwrap().is_empty(),
+            "results are consumed once"
+        );
+
+        // Empty submissions and empty scopes retire without stale labels.
+        manager.submit(device.create_command_encoder(&CommandEncoderDescriptor::default()));
+        assert!(manager.get_results_blocking().unwrap().is_empty());
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = manager.begin_scope(&mut encoder, "batch.empty_scope");
+        manager.end_scope(&mut encoder, scope);
+        manager.submit(encoder);
+        device.poll(Maintain::Wait);
+        let ready = manager.try_get_results().unwrap();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].name, "batch.empty_scope");
+        assert!(ready[0].timestamp_valid);
+        assert!(manager.try_get_results().unwrap().is_empty());
+
+        // Nested scopes reserve pairs, overflow stays invalid, and an unfinished
+        // scope resolves only written queries without claiming a valid duration.
+        manager.config.max_queries_per_frame = 2;
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let outer = manager.begin_scope(&mut encoder, "batch.outer");
+        let inner = manager.begin_scope(&mut encoder, "batch.inner");
+        manager.end_scope(&mut encoder, inner);
+        let overflow = manager.begin_scope(&mut encoder, "batch.overflow");
+        manager.end_scope(&mut encoder, overflow);
+        // Deliberately leave outer unfinished: submission closes it as invalid.
+        manager.submit(encoder);
+        let nested = manager.get_results_blocking().unwrap();
+        assert_eq!(nested.len(), 3);
+        assert!(!nested[0].timestamp_valid && nested[0].gpu_time_ms == 0.0);
+        assert_eq!(nested[1].name, "batch.inner");
+        assert!(nested[1].timestamp_valid);
+        assert!(!nested[2].timestamp_valid && nested[2].gpu_time_ms == 0.0);
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let fresh = manager.begin_scope(&mut encoder, "batch.fresh");
+        manager.end_scope(&mut encoder, outer); // Stale generation cannot end fresh.
+        manager.end_scope(&mut encoder, fresh);
+        manager.submit(encoder);
+        assert_eq!(
+            manager.get_results_blocking().unwrap()[0].name,
+            "batch.fresh"
+        );
+
+        // Render-graph callers submit scope-writing encoders themselves. The
+        // timing owner seals their completed work with its own resolution fence.
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = manager.begin_scope(&mut encoder, "batch.graph");
+        manager.end_scope(&mut encoder, scope);
+        queue.submit(Some(encoder.finish()));
+        let graph = pollster::block_on(manager.get_results()).unwrap();
+        assert_eq!(graph.len(), 1);
+        assert_eq!(graph[0].name, "batch.graph");
+        assert!(graph[0].timestamp_valid);
+
+        // The public external-submission compatibility path owns retirement too.
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = manager.begin_scope(&mut encoder, "batch.legacy_finish");
+        manager.end_scope(&mut encoder, scope);
+        manager.resolve_queries(&mut encoder);
+        queue.submit(Some(encoder.finish()));
+        manager.finish_frame();
+        let legacy = manager.get_results_blocking().unwrap();
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0].name, "batch.legacy_finish");
+        assert!(legacy[0].timestamp_valid);
+
+        // Dropping a mapped/pending owner must cancel mapping before reuse.
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = manager.begin_scope(&mut encoder, "batch.cancelled");
+        manager.end_scope(&mut encoder, scope);
+        manager.submit(encoder);
+        manager.submitted.front_mut().unwrap().start_mapping();
+        let cancelled = manager.submitted.pop_front().unwrap();
+        drop(cancelled);
+        device.poll(Maintain::Wait);
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = manager.begin_scope(&mut encoder, "batch.after_cancel");
+        manager.end_scope(&mut encoder, scope);
+        manager.submit(encoder);
+        assert!(manager.get_results_blocking().unwrap()[0].timestamp_valid);
+
+        // Readback failure must also retire/cancel the owner before slot reuse.
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = manager.begin_scope(&mut encoder, "batch.map_failure");
+        manager.end_scope(&mut encoder, scope);
+        manager.submit(encoder);
+        let batch = manager.submitted.front_mut().unwrap();
+        batch.start_mapping();
+        batch.readback.unmap(); // Real cancellation delivers an error callback.
+        device.poll(Maintain::Wait);
+        assert!(manager.try_get_results().is_err());
+        assert!(manager.submitted.is_empty());
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = manager.begin_scope(&mut encoder, "batch.after_failure");
+        manager.end_scope(&mut encoder, scope);
+        manager.submit(encoder);
+        assert!(manager.get_results_blocking().unwrap()[0].timestamp_valid);
+
+        // One-shot callers use the same owner for live query submission/readback.
+        let mut one_shot = OneShotTiming::for_device(device.clone(), queue.clone());
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = one_shot.begin(&mut encoder, "batch.one_shot");
+        encoder.copy_buffer_to_buffer(&src, 0, &dst, 0, 4096);
+        one_shot.end(&mut encoder, scope, 1);
+        one_shot.submit(&queue, encoder);
+        assert!(one_shot.record_into_certificate());
+
+        // The inert OneShotTiming path still submits executed GPU work.
+        let mut inert = OneShotTiming::inert();
+        let encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let submitted = inert.submit(&queue, encoder);
+        device.poll(Maintain::WaitForSubmissionIndex(submitted));
+        assert!(!inert.record_into_certificate());
+
+        // Request a real device without optional features: requested timestamps
+        // and statistics must degrade to absent instead of resolving unwritten queries.
+        let (unsupported_device, unsupported_queue) = pollster::block_on(adapter.request_device(
+            &DeviceDescriptor {
+                label: Some("gpu_timing_no_query_features"),
+                required_features: Features::empty(),
+                required_limits: Limits::default(),
+            },
+            None,
+        ))
+        .expect("device without optional features");
+        eprintln!(
+            "[gpu_timing unsupported] adapter={:?}, features={:?}",
+            adapter.get_info(),
+            unsupported_device.features()
+        );
+        let unsupported_device = Arc::new(unsupported_device);
+        let unsupported_queue = Arc::new(unsupported_queue);
+        let mut unsupported = GpuTimingManager::new(
+            unsupported_device.clone(),
+            unsupported_queue.clone(),
+            GpuTimingConfig {
+                enable_pipeline_stats: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(!unsupported.is_supported());
+        let mut encoder =
+            unsupported_device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let scope = unsupported.begin_scope(&mut encoder, "batch.unsupported");
+        unsupported.end_scope(&mut encoder, scope);
+        unsupported.submit(encoder);
+        assert!(unsupported.try_get_results().unwrap().is_empty());
+        assert!(unsupported.get_results_blocking().unwrap().is_empty());
+        drop(unsupported);
+        unsupported_device.poll(Maintain::Wait);
+        drop(unsupported_queue);
+        drop(unsupported_device);
+
+        // Explicitly disabled queries and zero capacity preserve the marker-only path.
+        for config in [
+            GpuTimingConfig {
+                enable_timestamps: false,
+                enable_pipeline_stats: false,
+                ..Default::default()
+            },
+            GpuTimingConfig {
+                max_queries_per_frame: 0,
+                ..Default::default()
+            },
+        ] {
+            let mut disabled =
+                GpuTimingManager::new(device.clone(), queue.clone(), config).unwrap();
+            let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+            let scope = disabled.begin_scope(&mut encoder, "batch.disabled");
+            disabled.end_scope(&mut encoder, scope);
+            disabled.submit(encoder);
+            assert!(disabled.get_results_blocking().unwrap().is_empty());
+        }
+        assert!(GpuTimingManager::new(
+            device.clone(),
+            queue.clone(),
+            GpuTimingConfig {
+                max_queries_per_frame: u32::MAX,
+                ..Default::default()
+            }
+        )
+        .is_err());
+
         // Teardown: drop GPU resources explicitly and poll so the backend
         // processes destruction work, then deliberately leak the device/queue.
         // On this driver stack (wgpu 0.19 / Windows), dropping a device that
@@ -899,6 +1226,44 @@ mod tests {
         device.poll(Maintain::Wait);
         std::mem::forget(device);
         std::mem::forget(queue);
+    }
+
+    #[test]
+    fn timestamp_results_preserve_labels_and_reject_unwritten_or_reversed_pairs() {
+        let scopes = [
+            RecordedScope {
+                name: "valid".into(),
+                query_start: Some(0),
+                finished: true,
+                draw_calls: 3,
+            },
+            RecordedScope {
+                name: "unwritten".into(),
+                query_start: Some(2),
+                finished: true,
+                ..Default::default()
+            },
+            RecordedScope {
+                name: "reversed".into(),
+                query_start: Some(4),
+                finished: true,
+                ..Default::default()
+            },
+            RecordedScope {
+                name: "overflow".into(),
+                finished: true,
+                ..Default::default()
+            },
+        ];
+        let results = timing_results_from_timestamps(&scopes, &[10, 20, 0, 12, 20, 10], 1.0);
+        assert_eq!(results.len(), scopes.len());
+        assert!(results[0].timestamp_valid);
+        assert_eq!(results[0].draw_calls, 3);
+        for result in &results[1..] {
+            assert!(!result.timestamp_valid);
+            assert_eq!(result.gpu_time_ms, 0.0);
+            assert_eq!(result.certificate_gpu_ms(), 0.0);
+        }
     }
 
     #[test]
