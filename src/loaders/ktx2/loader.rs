@@ -3,15 +3,8 @@ use super::types::*;
 use crate::core::compressed_textures::CompressedImage;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
-/// KTX2 loader with transcoding support
-pub struct Ktx2Loader {
-    /// Enable transcoding support
-    _transcoding_enabled: bool,
-    /// Supported target formats
-    _target_formats: Vec<wgpu::TextureFormat>,
-    /// Optional Basis transcoder (not wired yet).
-    _basis_transcoder: Option<BasisTranscoder>,
-}
+/// KTX2 container loader.
+pub struct Ktx2Loader;
 
 impl Default for Ktx2Loader {
     fn default() -> Self {
@@ -22,20 +15,7 @@ impl Default for Ktx2Loader {
 impl Ktx2Loader {
     /// Create new KTX2 loader
     pub fn new() -> Self {
-        Self {
-            _transcoding_enabled: true,
-            _target_formats: Self::default_target_formats(),
-            _basis_transcoder: None,
-        }
-    }
-
-    /// Create loader with specific target formats
-    pub fn with_target_formats(formats: Vec<wgpu::TextureFormat>) -> Self {
-        Self {
-            _transcoding_enabled: true,
-            _target_formats: formats,
-            _basis_transcoder: None,
-        }
+        Self
     }
 
     /// Load KTX2 file
@@ -196,39 +176,5 @@ impl Ktx2Loader {
             vk_format,
             43 | 132 | 136 | 148 | 152 | 164 // sRGB variants
         )
-    }
-
-    /// Get default target formats for transcoding
-    fn default_target_formats() -> Vec<wgpu::TextureFormat> {
-        vec![
-            wgpu::TextureFormat::Bc7RgbaUnorm,
-            wgpu::TextureFormat::Bc3RgbaUnorm,
-            wgpu::TextureFormat::Bc1RgbaUnorm,
-            wgpu::TextureFormat::Etc2Rgba8Unorm,
-            wgpu::TextureFormat::Rgba8Unorm,
-        ]
-    }
-}
-
-/// Stub for Basis Universal transcoder.
-pub struct BasisTranscoder {
-    // Transcoder state
-}
-
-impl BasisTranscoder {
-    /// Initialize transcoder
-    pub fn new() -> Result<Self, String> {
-        Ok(Self {})
-    }
-
-    /// Transcode to target format
-    pub fn transcode(
-        &self,
-        _data: &[u8],
-        _target_format: wgpu::TextureFormat,
-        _width: u32,
-        _height: u32,
-    ) -> Result<Vec<u8>, String> {
-        Err("Basis Universal transcoding not implemented".to_string())
     }
 }

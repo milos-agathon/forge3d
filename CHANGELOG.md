@@ -6,6 +6,10 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Removed
+- `CompressedImage::from_ktx2`, `from_ktx2_data`, `from_dds` and `from_dds_data` have been removed. They had no callers and always failed with a `format_unsupported` degradation, while the remaining KTX2 container loader lives in `src/loaders/ktx2`. KTX2 container loading is now owned solely by that loader, which gains round-trip, sRGB-mapping, malformed-input and unsupported-supercompression tests. DDS remains unimplemented and no longer advertises a public entry point.
+- `loaders::ktx2::BasisTranscoder`, `Ktx2Loader::with_target_formats`, the zero-block `compress_etc2_rgb`/`compress_etc2_rgba` placeholders, and the no-op `generate_mip_levels` stub have been removed. `compress_rgba_to_format` now wires `Bc4RUnorm` to the real `bc4::encode_channel` codec, and refuses ETC2, unencoded formats, and unimplemented multi-mip uploads loudly with structured degradations instead of fabricating zeroed blocks or leaving GPU mip levels uninitialized.
+
 ### Fixed
 - Texture accounting and transfers share one internal layout module. Public format-based size estimates now use format block geometry: R16Unorm/Snorm use 2 bytes per texel (previously 4), Rgba16Unorm/Snorm use 8 (previously 4), Stencil8 uses 1 (previously 4), and ASTC uses each format's actual block dimensions (previously always 4×4). For example, a 13×11 ASTC B12x12 level now counts 32 bytes instead of 192. Descriptor-based accounting and ledger budget enforcement are unchanged; resident sizes remain estimates of allocation bytes, without driver overhead.
 - `CompressedImage::calculate_gpu_size` uses format geometry for formats absent from the registry instead of an RGBA8 fallback. A 13×11 ASTC B8x5 image with three mips now counts 128 bytes instead of 716. Caller-constructed `TextureFormatInfo` records retain sizing from their own layout fields.
