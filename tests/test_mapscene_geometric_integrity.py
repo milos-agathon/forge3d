@@ -20,6 +20,7 @@ from PIL import Image
 
 import forge3d as f3d
 import forge3d.map_scene as map_scene
+import forge3d._map_scene_compiler as scene_compiler
 
 from _sutura_recipes import _write_raster_overlay
 from _terrain_runtime import terrain_rendering_available
@@ -368,7 +369,7 @@ def test_native_drape_vectors_and_world_labels_follow_camera(tmp_path, mode, pos
         frozen = rm.manifest_to_json(compiled.manifest)
         def fail_recompile(*args, **kwargs):
             raise AssertionError("render must consume the compiled label plan")
-        monkeypatch.setattr(map_scene, "_label_plan_from_layer", fail_recompile)
+        monkeypatch.setattr(scene_compiler, "_label_plan_from_layer", fail_recompile)
         final_path = tmp_path / "labels.png"
         scene.render(str(final_path))
         final = np.asarray(Image.open(final_path).convert("RGBA"))
@@ -473,7 +474,7 @@ def test_world_overlay_bundle_freezes_manifest_and_report(tmp_path, mode, monkey
         with monkeypatch.context() as patch:
             def no_recompile(*args, **kwargs):
                 raise AssertionError("v3 bundle load must consume frozen label/depth decisions")
-            patch.setattr(map_scene, "_label_plan_from_layer", no_recompile)
+            patch.setattr(scene_compiler, "_label_plan_from_layer", no_recompile)
             loaded = f3d.MapScene.load_bundle(scene.last_bundle_path)
         assert rm.manifest_to_json(loaded.compiled_plan.manifest) == first_manifest
         second_report = loaded.render(str(second_path))
@@ -550,7 +551,7 @@ def test_world_label_depth_is_decided_in_compile_plan(tmp_path, monkeypatch, rec
             with monkeypatch.context() as patch:
                 def no_decision(*args, **kwargs):
                     raise AssertionError("depth decisions must be frozen by compile_plan")
-                patch.setattr(map_scene, "_label_plan_from_layer", no_decision)
+                patch.setattr(scene_compiler, "_label_plan_from_layer", no_decision)
                 scene.render(str(tmp_path / (name + ".png")))
         assert not plans[0].accepted and plans[1].accepted and plans[2].accepted
         np.testing.assert_array_equal(bare, np.asarray(Image.open(tmp_path / "below.png")))

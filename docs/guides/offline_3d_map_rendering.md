@@ -48,6 +48,49 @@ records the recipe, diagnostics, support summaries, label plans, source
 references, camera, lighting, output, render backend, and renderability status
 through the public Python API.
 
+`MapScene.compile_plan()` creates a detached `CompiledScenePlan` containing
+the recipe identity, diagnostics, label placement, and occlusion decisions.
+The private scene compiler owns validation, compilation, restoration, and
+recipe-change invalidation. `validate()` refreshes diagnostics using an
+unchanged compiled plan's frozen labels; loading a bundle restores its saved
+decisions without freshly planning labels. Rendering and bundle saving reuse
+that plan until the serialized recipe changes. Explicit `compile_plan()`
+always rebuilds it. The mutable `compiled_label_plans` dictionary remains an
+inspection view; editing it does not change the frozen plan.
+
+`CompiledScenePlan.label_plans` owns private decision snapshots and returns
+detached `LabelPlan` copies when read. Editing those values or their nested
+fields cannot change the decisions used for rendering or bundle serialization.
+Snapshots normalize negative zero and retain non-finite terrain-sample metadata
+from DEM nodata, including unused candidates. Compilation and native rendering
+remain available for those scenes. Manifest and bundle serialization still
+reject non-finite values, and restoration verifies the same finite-JSON
+contract; the snapshot does not relax that separate boundary.
+`last_validation_report` reads the compiler's latest report, including render
+and bundle diagnostics. Attaching a native frame to the same plan preserves
+that latest report. CHRONOS also reads labels from the frozen plan.
+Its finite JSON frame payload represents unknown sampled elevations as `null`;
+label positions, bounds, glyph data, and other frame fields retain their strict
+non-finite checks. This encoding does not mutate the in-memory label snapshot.
+
+Label-layer IDs must be unique: validation, compilation, and restoration raise
+`ValueError` for duplicate IDs. After `validate()` succeeds on a changed recipe,
+`compiled_plan` is `None` until compilation, rendering, or bundle saving creates
+a new plan. Failed validation or compilation leaves the previous state intact;
+rendering and saving still refuse to reuse it for a changed recipe.
+
+`load_bundle()` raises `ValueError` if a saved compiled plan has a different
+recipe identity or omits a required label layer. It never silently attaches
+saved decisions to an edited recipe. Older bundles without a compiled-plan file
+retain their existing recompile path.
+
+Version 3 restoration relies on stable serialized recipe identity. A future
+serializer that changes that identity needs a supported migration before those
+saved decisions can be restored. The loader rejects a mismatch rather than
+silently recompiling a persisted plan. Fresh writers normalize negative zero,
+so standalone label JSON and its checksum can differ from older writers that
+emitted `-0.0`; the numeric decisions and rendered output are unchanged.
+
 ## Canonical Examples
 
 The MVP workflow is represented by three typed examples:

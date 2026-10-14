@@ -9,6 +9,7 @@ from the stored compiled data alone.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -100,7 +101,7 @@ def _prepare_frame_scene(
 
 def _accepted_labels(frame_scene: MapScene) -> dict[tuple[str, str], Any]:
     accepted: dict[tuple[str, str], Any] = {}
-    for layer_id, plan in frame_scene.compiled_label_plans.items():
+    for layer_id, plan in frame_scene._compiled_plan_for_current_recipe().label_plans.items():
         for label in getattr(plan, "accepted", ()) or ():
             accepted[(str(layer_id), str(label.label_id))] = label
     return accepted
@@ -134,6 +135,28 @@ def _label_timeline_events(
     return events
 
 
+def _label_payload(label: Any) -> dict[str, Any]:
+    """Encode unknown sampled elevations as null without altering decisions."""
+    payload = copy.deepcopy(label.to_dict())
+    for candidate in [payload.get("candidate"), *(payload.get("candidates") or ())]:
+        if not isinstance(candidate, Mapping):
+            continue
+        samples = [candidate.get("terrain_sample")]
+        details = candidate.get("details")
+        if isinstance(details, Mapping):
+            samples.extend(
+                gate.get("terrain_sample")
+                for gate in details.get("visibility_gates", ()) or ()
+                if isinstance(gate, Mapping)
+            )
+        for sample in samples:
+            if isinstance(sample, dict):
+                elevation = sample.get("elevation")
+                if isinstance(elevation, float) and not math.isfinite(elevation):
+                    sample["elevation"] = None
+    return payload
+
+
 def _label_records(
     keys: Sequence[tuple[str, str]],
     accepted: Mapping[tuple[str, str], Any],
@@ -151,7 +174,7 @@ def _label_records(
                 "visible": visible,
                 "appearance_frame": appearance_frame,
                 "disappearance_frame": disappearance_frame,
-                "payload": label.to_dict() if visible else {},
+                "payload": _label_payload(label) if visible else {},
             }
         )
     return records
