@@ -3,7 +3,6 @@ pub mod bc5;
 pub mod bc7;
 mod compression;
 mod load;
-mod parsing;
 mod types;
 mod upload;
 
