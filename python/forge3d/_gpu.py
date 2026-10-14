@@ -20,16 +20,15 @@ _REMEDIATION_ADAPTER = (
 )
 
 
-def _native_functions() -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
+def _native_functions() -> tuple[Optional[Any], Optional[Any]]:
     return (
         get_native_symbol("enumerate_adapters"),
         get_native_symbol("device_probe"),
-        get_native_symbol("get_device"),
     )
 
 
 def enumerate_adapters() -> List[Dict]:
-    native_enum, native_probe, _ = _native_functions()
+    native_enum, _ = _native_functions()
     if callable(native_enum):
         try:
             adapters = native_enum()
@@ -60,7 +59,7 @@ def device_probe(backend: Optional[str] = None) -> Dict:
 
     Every non-``"ok"`` status includes ``reason`` and ``remediation`` fields.
     """
-    _, native_probe, _ = _native_functions()
+    _, native_probe = _native_functions()
     if not callable(native_probe):
         import_error = native_import_error()
         reason = (
@@ -136,33 +135,3 @@ def has_gpu() -> bool:
         return True
     probe = device_probe()
     return isinstance(probe, dict) and probe.get("status") == "ok"
-
-
-def get_device() -> Any:
-    _, _, native_get_device = _native_functions()
-    if callable(native_get_device):
-        try:
-            return native_get_device()
-        except Exception:
-            pass
-
-    class MockDevice:
-        def __init__(self) -> None:
-            self.name = "Fallback CPU Device"
-            self.backend = "cpu"
-            self.limits = {"max_texture_dimension": 16384}
-
-        def create_virtual_texture(self, *args: Any, **kwargs: Any) -> "MockVirtualTexture":
-            del args, kwargs
-            return MockVirtualTexture()
-
-    return MockDevice()
-
-
-class MockVirtualTexture:
-    def __init__(self) -> None:
-        self.width = 0
-        self.height = 0
-
-    def bind(self, *_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("Virtual textures require a GPU backend")

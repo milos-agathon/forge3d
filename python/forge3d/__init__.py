@@ -42,7 +42,6 @@ from ._gpu import (
     device_probe,
     has_gpu,
     determinism_probe,
-    get_device,
 )
 from .mem import (
     memory_metrics,
@@ -891,7 +890,6 @@ __all__ = [
     # GPU utilities
     "has_gpu",
     "determinism_probe",
-    "get_device",
     "enumerate_adapters",
     "device_probe",
     "native_import_error",
