@@ -612,6 +612,146 @@ def _synthetic_scene(
     )
 
 
+@pytest.fixture
+def frozen_frame_scene(tmp_path):
+    from forge3d.chronos import _prepare_frame_scene
+
+    _require_chronos_native()
+    source = _synthetic_scene()
+    source = f3d.MapScene(
+        replace(
+            source.recipe,
+            layers=(
+                f3d.LabelLayer(
+                    layer_id="labels",
+                    labels=[
+                        {
+                            "id": "peak",
+                            "text": "Peak",
+                            "geometry": {
+                                "type": "Point", "coordinates": (32.0, 32.0, 0.0)
+                            },
+                        }
+                    ],
+                    glyph_atlas={"glyphs": sorted(set("Peak"))},
+                    occlusion="none",
+                ),
+            ),
+        )
+    )
+    return _prepare_frame_scene(source, 3, 11, 4, tmp_path / "frame.png")
+
+
+def test_frozen_frame_preserves_canonical_bytes_and_plan_ownership(frozen_frame_scene):
+    from forge3d.chronos import _camera_json, _prepare_frozen_frame, _scene_json
+
+    scene = frozen_frame_scene
+    plan = scene.compiled_plan
+    (label,) = plan.label_plans["labels"].accepted
+    events = {("labels", "peak"): (1, 10), ("labels", "hidden"): (None, None)}
+    # Independent native input records characterize the existing frozen payload.
+    expected_records = [
+        {
+            "layer_id": "labels", "label_id": "hidden", "visible": False,
+            "appearance_frame": None, "disappearance_frame": None, "payload": {},
+        },
+        {
+            "layer_id": "labels", "label_id": "peak", "visible": True,
+            "appearance_frame": 1, "disappearance_frame": 10, "payload": label.to_dict(),
+        },
+    ]
+    expected = f3d.compile_frame(
+        3, 11, 4, _camera_json(scene), _scene_json(scene, expected_records, 4)
+    )
+    # The frozen plan owns labels even if the mutable compatibility view changes.
+    scene.compiled_label_plans.clear()
+    compiled = _prepare_frozen_frame(
+        scene, 3, 11, 4, label_events=events, label_fade_frames=4
+    )
+    assert compiled.to_json() == expected.to_json()
+    payload = json.loads(compiled.to_json())
+    assert payload["frame_seed"] == f3d.frame_seed(11, 3)
+    assert [label["alpha"] for label in payload["labels"]] == [0.0, 0.75]
+    assert payload["lod"]
+    assert scene.compiled_plan is not plan
+    assert scene.compiled_plan.frame is compiled
+    assert replace(scene.compiled_plan, frame=None) == plan
+
+    restored = _prepare_frozen_frame(
+        scene, 3, 11, 4, label_events=events, label_fade_frames=4,
+        stored_canonical=compiled.to_json(),
+    )
+    assert restored is not compiled
+    assert scene.compiled_plan.frame is restored
+    assert restored.to_json() == compiled.to_json()
+    assert replace(scene.compiled_plan, frame=None) == plan
+
+
+@pytest.mark.parametrize(
+    "changed",
+    ("frame_index", "base_seed", "samples", "label_events", "label_fade_frames", "canonical_bytes"),
+)
+def test_frozen_frame_mismatch_leaves_plan_untouched(frozen_frame_scene, changed):
+    from forge3d.chronos import _prepare_frozen_frame
+
+    scene = frozen_frame_scene
+    inputs = dict(
+        frame_index=3, base_seed=11, samples=4,
+        label_events={("labels", "peak"): (1, 10)}, label_fade_frames=4,
+    )
+    compiled = _prepare_frozen_frame(scene, **inputs)
+    plan = scene.compiled_plan
+    canonical = compiled.to_json()
+    if changed == "canonical_bytes":
+        canonical = json.dumps(json.loads(canonical), indent=2)
+    elif changed == "label_events":
+        inputs[changed] = {("labels", "peak"): (2, 10)}
+    else:
+        inputs[changed] += 1
+    error = (
+        "canonical/hash revalidation"
+        if changed == "canonical_bytes"
+        else "replay inputs do not match"
+    )
+    with pytest.raises(ValueError, match=error):
+        _prepare_frozen_frame(scene, **inputs, stored_canonical=canonical)
+    assert scene.compiled_plan is plan
+    assert scene.compiled_plan.frame is compiled
+
+
+@pytest.mark.parametrize("changed", ("camera", "labels", "clipmap"))
+def test_replay_mismatch_fails_before_render(frozen_frame_scene, changed, monkeypatch, tmp_path):
+    from forge3d.chronos import _prepare_frozen_frame
+
+    source = frozen_frame_scene
+    compiled = _prepare_frozen_frame(
+        source, 3, 11, 4, label_events={("labels", "peak"): (1, 10)}, label_fade_frames=4
+    )
+    manifest = FlythroughManifest(
+        base_seed=11, samples=4, frames=(_frame_record(compiled, 3),)
+    )
+    recipe = source.recipe
+    if changed == "camera":
+        recipe = replace(
+            recipe, camera=replace(recipe.camera, distance=recipe.camera.distance + 1.0)
+        )
+    elif changed == "labels":
+        recipe = replace(recipe, layers=())
+    else:
+        metadata = dict(recipe.terrain.metadata)
+        metadata["clipmap"] = dict(metadata["clipmap"], morph_range=0.5)
+        recipe = replace(recipe, terrain=replace(recipe.terrain, metadata=metadata))
+
+    def unexpected_render(*_args, **_kwargs):
+        pytest.fail("replay rendered mismatched frozen inputs")
+
+    monkeypatch.setattr(f3d.MapScene, "render", unexpected_render)
+    output = tmp_path / "replay.png"
+    with pytest.raises(ValueError, match="replay inputs do not match"):
+        manifest.replay_frame(f3d.MapScene(recipe), 3, output)
+    assert not output.exists()
+
+
 def _rec709_luminance(rgba: np.ndarray) -> np.ndarray:
     rgb = rgba[..., :3].astype(np.float64) / 255.0
     return 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
