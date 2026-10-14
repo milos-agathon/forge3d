@@ -59,5 +59,6 @@ pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::gis::VectorInfo>()?;
     m.add_class::<crate::gis::AffineTransform>()?;
     m.add_class::<crate::gis::CrsTransform>()?;
+    m.add_class::<crate::py_functions::mesh_bvh::GpuMeshHandle>()?;
     Ok(())
 }

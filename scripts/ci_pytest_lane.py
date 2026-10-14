@@ -38,6 +38,7 @@ FAST_LANE_FILES = [
     "tests/test_device_init_failure.py",
     "tests/test_allocation_gate.py",
     "tests/test_dead_render_structure_gate.py",
+    "tests/test_mesh_bvh.py",
     "tests/test_pipeline_validation_gate.py",
     "tests/test_degradation_behavior.py",
     "tests/test_certificate_verifier.py",
