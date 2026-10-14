@@ -38,6 +38,32 @@ rather than an interactive session.
 The Rust layer owns GPU resources, the terrain renderer, point-cloud support,
 screen-space effects, and the `interactive_viewer` executable.
 
+Texture-to-host transfers used by HDR, LDR, scalar depth and source-ID reads,
+and the optional async readback manager, share `core::texture_readback`.
+It validates transfer dimensions and formats through `TransferLayout`, allocates
+tracked staging buffers, submits copies, maps them and removes row padding.
+A staging lease unmaps only after a successful mapping, before releasing its
+pool slot or tracked allocation. Never-requested and failed mappings need no
+unmap. A pending map callback retains the lease if its transfer is cancelled,
+then performs cleanup once the mapping outcome is known. The format adapters in
+`core::hdr_readback` retain little-endian float/half/integer decoding; raw-byte
+reads preserve the source channel order and color space of compatible four-byte
+texels.
+
+Blocking transfers poll the device directly and require no Tokio runtime.
+The async manager requires a runtime at construction, queues transfers on its
+worker and retains the existing configured pending-operation limit and staging
+allocation policy. Each operation reserves its pending slot atomically and
+releases it before delivering the result. Dropped result handles discard data;
+the worker still completes cleanup. Dropping the manager closes its queue and
+lets already queued transfers finish while the runtime remains alive. Runtime
+shutdown drops queued or active transfer owners and their reservations. Polling
+the device after shutdown retires any pending mapping callbacks and their
+staging leases; this cleanup requires no running Tokio worker.
+`AsyncReadbackHandle::expected_size()` continues to report padded transfer bytes;
+returned data excludes padding. The `double_buffered` flag retains its existing
+reporting behavior; it does not introduce a separate buffer-count policy.
+
 ### Python package
 
 The Python layer is the user-facing control surface. The main modules are:
