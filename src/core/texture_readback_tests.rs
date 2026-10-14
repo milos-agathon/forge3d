@@ -3,7 +3,7 @@ use crate::core::degradation::{degradations_snapshot, Degradation};
 use crate::core::hdr_readback::{
     read_hdr_texture, read_ldr_texture, read_r32_texture, read_r32uint_texture,
 };
-use crate::core::resource_tracker::ledger_snapshot;
+use crate::core::resource_tracker::{ledger_snapshot, tracked_create_texture, TrackedTexture};
 use std::cell::RefCell;
 use std::sync::Mutex;
 
@@ -188,22 +188,26 @@ pub(crate) fn upload(
     height: u32,
     format: TextureFormat,
     bytes: &[u8],
-) -> Texture {
+) -> TrackedTexture {
     let size = Extent3d {
         width,
         height,
         depth_or_array_layers: 1,
     };
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("readback-round-trip-fixture"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("readback-round-trip-fixture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        },
+    )
+    .expect("tracked readback fixture texture");
     let layout = TransferLayout::queue_write(format, TextureAspect::All, size).unwrap();
     queue.write_texture(
         texture.as_image_copy(),
