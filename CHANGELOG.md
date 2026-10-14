@@ -7,7 +7,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Removed
-- `CompressedImage::from_ktx2`, `from_ktx2_data`, `from_dds` and `from_dds_data` have been removed. They had no callers and always failed with a `format_unsupported` degradation, while a complete KTX2 container loader already lived in `src/loaders/ktx2`. KTX2 container loading is now owned solely by that loader, which gains round-trip, sRGB-mapping, malformed-input and unsupported-supercompression tests. DDS remains unimplemented and no longer advertises a public entry point.
+- `CompressedImage::from_ktx2`, `from_ktx2_data`, `from_dds` and `from_dds_data` have been removed. They had no callers and always failed with a `format_unsupported` degradation, while the remaining KTX2 container loader lives in `src/loaders/ktx2`. KTX2 container loading is now owned solely by that loader, which gains round-trip, sRGB-mapping, malformed-input and unsupported-supercompression tests. DDS remains unimplemented and no longer advertises a public entry point.
 - `loaders::ktx2::BasisTranscoder`, `Ktx2Loader::with_target_formats`, the zero-block `compress_etc2_rgb`/`compress_etc2_rgba` placeholders, and the no-op `generate_mip_levels` stub have been removed. `compress_rgba_to_format` now wires `Bc4RUnorm` to the real `bc4::encode_channel` codec, and refuses ETC2, unencoded formats, and unimplemented multi-mip uploads loudly with structured degradations instead of fabricating zeroed blocks or leaving GPU mip levels uninitialized.
 
 ### Fixed

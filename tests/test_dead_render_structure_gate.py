@@ -100,13 +100,13 @@ def test_viewer_bind_group_cache_is_invalidated_with_resources() -> None:
 # Deleted duplicate KTX2/DDS loaders. KTX2 container loading is owned solely by
 # `src/loaders/ktx2`; a second, always-failing parser in
 # `core::compressed_textures` (or a duplicate `CompressedImage::from_*` wrapper)
-# must trip this gate, not just the original path.
+# must trip this gate, not just the original path. Only the duplicate-parser
+# symbols are banned: names a real mipmap, ETC2 or Basis implementation would
+# naturally reuse are deliberately left out.
 FORBIDDEN_KTX2_DDS_SYMBOLS = re.compile(
     r"\bparse_ktx2_header\b|\bextract_ktx2_texture_data\b"
     r"|\bparse_dds_header\b|\bextract_dds_texture_data\b"
     r"|\bfrom_ktx2_data\b|\bfrom_dds_data\b"
-    r"|\bBasisTranscoder\b|\bwith_target_formats\b"
-    r"|\bcompress_etc2_rgb\b|\bcompress_etc2_rgba\b|\bgenerate_mip_levels\b"
 )
 
 KTX2_DDS_DELETED_FILES = [
