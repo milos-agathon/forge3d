@@ -670,7 +670,7 @@ def test_viewport_resize_inventory_transition_is_exact():
                 2,
                 'self.settings.resolution = [self.width as f32, self.height as f32]')]
     assert list(map(tuple, transition["added"])) == expected_added
-    sites = conversion_inventory()
+    sites = _undo_scene_pick_assembly_transition(conversion_inventory())
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )
@@ -688,6 +688,48 @@ def test_viewport_resize_inventory_transition_is_exact():
         body = _function_body(rel, "install_resize")
         assert "width" in body and "height" in body
         assert not re.search(r"\b(?:f64|DVec[234]|DMat[234])\b", body)
+def _undo_scene_pick_assembly_transition(sites):
+    """Reverse only the two screen-coordinate casts moved with scene collection.
+
+    Freeze hashes stay unchanged. Missing, duplicated or changed casts fail
+    before any historical inventory is reconstructed.
+    """
+    old_context = (
+        "} } if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) { "
+        "if let Some(label) = self.label_manager.get_label(label_id) { "
+        "let mut attributes = std::collections::HashMap::new()"
+    )
+    new_context = (
+        "let label_hit = self .label_manager "
+        ".pick_at(screen_pos.0 as f32, screen_pos.1 as f32) "
+        ".and_then(|id| self.label_manager.get_label(id))"
+    )
+    replacements = {
+        ("src/viewer/input/scene_picking.rs", "collect_scene_picks", "as_f32", occurrence, new_context):
+        ("src/viewer/input/viewer_input.rs", "pick_at_screen", "as_f32", occurrence, old_context)
+        for occurrence in (1, 2)
+    }
+    for new, old in replacements.items():
+        assert sites.count(new) == 1 and old not in sites
+    # Retain the scanner's path-component order and source-occurrence order.
+    # The moved casts preceded every other cast in viewer_input.rs.
+    restored = [site for site in sites if site not in replacements]
+    first_viewer_cast = next(
+        index for index, site in enumerate(restored)
+        if site[0] == "src/viewer/input/viewer_input.rs"
+    )
+    return (
+        restored[:first_viewer_cast]
+        + list(replacements.values())
+        + restored[first_viewer_cast:]
+    )
+
+
+def test_scene_pick_assembly_moves_only_the_two_screen_coordinate_casts():
+    sites = _undo_scene_pick_assembly_transition(conversion_inventory())
+    assert (len(sites), _inventory_digest(sites)) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
+    )
 
 
 def _undo_texture_layout_stats_transition(sites):
@@ -720,7 +762,9 @@ def test_reviewed_texture_layout_stats_transition_is_exact():
         _read("src/core/texture_layout.rs"),
         re.M,
     )
-    sites = _undo_viewport_resize_transition(conversion_inventory())
+    sites = _undo_viewport_resize_transition(
+        _undo_scene_pick_assembly_transition(conversion_inventory())
+    )
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )
@@ -752,7 +796,9 @@ def test_reviewed_csm_layout_context_transition_is_exact():
         "light_view: self.light_view_matrix.to_cols_array()",
     ) == new[4]
     sites = _undo_texture_layout_stats_transition(
-        _undo_viewport_resize_transition(conversion_inventory())
+        _undo_viewport_resize_transition(
+            _undo_scene_pick_assembly_transition(conversion_inventory())
+        )
     )
     assert sites.count(new) == 1 and old not in sites
     assert (len(sites), _inventory_digest(sites)) == (
@@ -764,7 +810,7 @@ def test_reviewed_csm_layout_context_transition_is_exact():
     )
 
 def test_exact_production_conversion_inventory_is_frozen():
-    sites = conversion_inventory()
+    sites = _undo_scene_pick_assembly_transition(conversion_inventory())
     digest = _inventory_digest(sites)
     assert (len(sites), digest) == (
         EXPECTED_CONVERSION_COUNT,
@@ -1169,7 +1215,7 @@ def test_each_viewer_world_route_calls_its_active_anchor_in_the_same_function():
         ("src/labels/mod.rs", "update_with_camera_anchored"): "anchor.to_render_f32(",
         ("src/viewer/terrain/render/screen/setup.rs", "build_screen_render_state"): "frame.anchor.to_render_f32(",
         ("src/viewer/terrain/render/offscreen/setup.rs", "build_snapshot_render_state"): "frame.anchor.to_render_f32(",
-        ("src/viewer/input/viewer_input.rs", "pick_at_screen"): ".to_world_from_render_f64(",
+        ("src/viewer/input/scene_picking.rs", "assemble_scene_picks"): ".to_world_from_render_f64(",
     }
     for (rel, function), required_call in routes.items():
         body = re.sub(r"\s+", "", _function_body(rel, function))
@@ -1236,7 +1282,9 @@ def test_sutura_screen_output_inventory_transition_is_exact():
         viewport["result_count"], viewport["result_digest"],
     )
     sites = _undo_texture_layout_stats_transition(
-        _undo_viewport_resize_transition(conversion_inventory())
+        _undo_viewport_resize_transition(
+            _undo_scene_pick_assembly_transition(conversion_inventory())
+        )
     )
     counts = collections.Counter(sites)
     for site in expected_added:

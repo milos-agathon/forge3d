@@ -11,82 +11,7 @@ use crate::viewer::camera_controller::CameraMode;
 use crate::viewer::event_loop::get_pick_events;
 use crate::viewer::Viewer;
 
-fn ray_triangle_distance(
-    origin: glam::Vec3,
-    direction: glam::Vec3,
-    a: glam::Vec3,
-    b: glam::Vec3,
-    c: glam::Vec3,
-) -> Option<f32> {
-    let edge1 = b - a;
-    let edge2 = c - a;
-    let p = direction.cross(edge2);
-    let determinant = edge1.dot(p);
-    if determinant.abs() <= 1.0e-8 {
-        return None;
-    }
-    let inverse = determinant.recip();
-    let offset = origin - a;
-    let u = offset.dot(p) * inverse;
-    if !(0.0..=1.0).contains(&u) {
-        return None;
-    }
-    let q = offset.cross(edge1);
-    let v = direction.dot(q) * inverse;
-    if v < 0.0 || u + v > 1.0 {
-        return None;
-    }
-    let distance = edge2.dot(q) * inverse;
-    (distance >= 0.0).then_some(distance)
-}
-
 impl Viewer {
-    fn pick_object_ray(
-        &self,
-        ray: &crate::picking::Ray,
-        frame: crate::viewer::viewer_types::FrameCamera,
-    ) -> Option<crate::picking::RichPickResult> {
-        let origin = glam::Vec3::from(ray.origin);
-        let direction = glam::Vec3::from(ray.direction).normalize_or_zero();
-        if direction == glam::Vec3::ZERO {
-            return None;
-        }
-        let model = self.anchored_object_model(frame);
-        let mut best: Option<(f32, glam::Vec3)> = None;
-        for triangle in self.object_source_indices.chunks_exact(3) {
-            let [Some(a), Some(b), Some(c)] = [
-                self.object_source_positions.get(triangle[0] as usize),
-                self.object_source_positions.get(triangle[1] as usize),
-                self.object_source_positions.get(triangle[2] as usize),
-            ] else {
-                continue;
-            };
-            let a = model.transform_point3(glam::Vec3::from(*a));
-            let b = model.transform_point3(glam::Vec3::from(*b));
-            let c = model.transform_point3(glam::Vec3::from(*c));
-            let Some(distance) = ray_triangle_distance(origin, direction, a, b, c) else {
-                continue;
-            };
-            if best.is_some_and(|(current, _)| distance >= current) {
-                continue;
-            }
-            best = Some((distance, origin + direction * distance));
-        }
-        best.map(
-            |(hit_distance, render_position)| crate::picking::RichPickResult {
-                feature_id: 1,
-                layer_name: "Object".to_string(),
-                world_pos: frame
-                    .anchor
-                    .to_world_from_render_f64(render_position.as_dvec3())
-                    .to_array(),
-                attributes: std::collections::HashMap::new(),
-                terrain_info: None,
-                hit_distance,
-            },
-        )
-    }
-
     /// Execute the same frozen-frame screen-space pick used by mouse input.
     /// IPC acceptance tests call this route so their absolute f64 results are
     /// produced by the shipped picking implementation, not a test-side ray.
@@ -111,78 +36,20 @@ impl Viewer {
             screen_pos: (x, y),
             shift_held,
             ctrl_held,
-            results: Vec::new(),
+            results: self.collect_scene_picks(&ray, frame, (x, y)),
         };
 
-        let mut results = self.unified_picking.handle_pick_event(&ray, &event);
-        for result in &mut results {
-            result.world_pos = frame
-                .anchor
-                .to_world_from_render_f64(glam::DVec3::from(result.world_pos))
-                .to_array();
-        }
-        if let Some(object) = self.pick_object_ray(&ray, frame) {
-            results.push(object);
-            results.sort_by(|left, right| left.hit_distance.total_cmp(&right.hit_distance));
-        }
-        if self.point_cloud_active() {
-            if let Some((index, distance, world_pos)) = self
-                .point_cloud
-                .as_ref()
-                .and_then(|point_cloud| point_cloud.pick_ray(&ray))
-            {
-                let mut attributes = std::collections::HashMap::new();
-                attributes.insert("point_index".to_string(), index.to_string());
-                results.push(crate::picking::RichPickResult {
-                    feature_id: u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1),
-                    layer_name: "PointCloud".to_string(),
-                    world_pos: world_pos.to_array(),
-                    attributes,
-                    terrain_info: None,
-                    hit_distance: distance,
-                });
-                results.sort_by(|left, right| left.hit_distance.total_cmp(&right.hit_distance));
-            }
-        }
-        if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) {
-            if let Some(label) = self.label_manager.get_label(label_id) {
-                let mut attributes = std::collections::HashMap::new();
-                attributes.insert("text".to_string(), label.text.clone());
-                attributes.insert("type".to_string(), "label".to_string());
-                results.insert(
-                    0,
-                    crate::picking::RichPickResult {
-                        feature_id: label_id.0 as u32,
-                        layer_name: "Labels".to_string(),
-                        world_pos: label.world_pos.to_array(),
-                        attributes,
-                        terrain_info: None,
-                        hit_distance: label.depth,
-                    },
-                );
-                self.unified_picking
-                    .selection_manager_mut()
-                    .handle_pick(label_id.0 as u32, shift_held);
-            }
-        }
-
-        let result_count = results.len();
-        if let Some(first_result) = results.first() {
+        self.unified_picking.apply_assembled_pick_event(&event);
+        let result_count = event.results.len();
+        if let Some(first_result) = event.results.first() {
             self.selected_feature_id = first_result.feature_id;
             self.selected_layer_name = first_result.layer_name.clone();
-            let mut result_event = event;
-            result_event.results = results;
             if let Ok(mut queue) = get_pick_events().lock() {
-                queue.push(result_event);
+                queue.push(event);
             }
         } else {
             self.selected_feature_id = 0;
             self.selected_layer_name.clear();
-            if !shift_held {
-                self.unified_picking
-                    .selection_manager_mut()
-                    .handle_pick(0, false);
-            }
         }
         result_count
     }
@@ -385,26 +252,5 @@ impl Viewer {
                 eprintln!("[viewer] FPS camera rejected: {error}");
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod object_pick_tests {
-    use super::*;
-
-    #[test]
-    fn transformed_triangle_is_intersected_at_its_visible_model_position_once() {
-        let model = glam::Mat4::from_scale_rotation_translation(
-            glam::Vec3::new(2.0, 3.0, 4.0),
-            glam::Quat::IDENTITY,
-            glam::Vec3::new(10.0, 20.0, 30.0),
-        );
-        let a = model.transform_point3(glam::Vec3::new(-1.0, -1.0, 0.0));
-        let b = model.transform_point3(glam::Vec3::new(1.0, -1.0, 0.0));
-        let c = model.transform_point3(glam::Vec3::new(0.0, 1.0, 0.0));
-        let distance =
-            ray_triangle_distance(glam::Vec3::new(10.0, 20.0, 40.0), -glam::Vec3::Z, a, b, c)
-                .unwrap();
-        assert_eq!(distance, 10.0);
     }
 }

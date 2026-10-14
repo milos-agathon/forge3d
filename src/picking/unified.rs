@@ -454,14 +454,35 @@ impl UnifiedPickingSystem {
     pub fn handle_pick_event(&mut self, ray: &Ray, event: &PickEvent) -> Vec<RichPickResult> {
         let results = self.ray_cast(ray);
 
-        // Update selection based on event
-        if !results.is_empty() && event.event_type == PickEventType::Click {
-            let feature_id = results[0].feature_id;
-            self.selection_manager
-                .handle_pick(feature_id, event.shift_held);
+        // Preserve this public BVH-only route's historical empty-hit behavior.
+        // Viewer scene picking collects every source before using the method below.
+        if !results.is_empty() {
+            apply_pick_results(&mut self.selection_manager, event, &results);
         }
 
         results
+    }
+
+    /// Apply the existing click policy once to a complete, ordered scene event.
+    pub(crate) fn apply_assembled_pick_event(&mut self, event: &PickEvent) {
+        apply_pick_results(&mut self.selection_manager, event, &event.results);
+    }
+}
+
+// Ctrl has no separate policy. Empty Shift clicks retain the selection, as
+// they did in the viewer; other empty clicks clear without toggling ID zero.
+fn apply_pick_results(
+    selection: &mut SelectionManager,
+    event: &PickEvent,
+    results: &[RichPickResult],
+) {
+    if event.event_type != PickEventType::Click {
+        return;
+    }
+    if let Some(first) = results.first() {
+        selection.handle_pick(first.feature_id, event.shift_held);
+    } else if !event.shift_held {
+        selection.handle_pick(0, false);
     }
 }
 
@@ -564,6 +585,82 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn click(id: Option<u32>, shift: bool, ctrl: bool) -> PickEvent {
+        PickEvent {
+            event_type: PickEventType::Click,
+            screen_pos: (20, 30),
+            shift_held: shift,
+            ctrl_held: ctrl,
+            results: id
+                .into_iter()
+                .map(|id| RichPickResult {
+                    feature_id: id,
+                    layer_name: "Scene".into(),
+                    world_pos: [0.0; 3],
+                    attributes: HashMap::new(),
+                    terrain_info: None,
+                    hit_distance: 1.0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn assembled_click_selects_only_the_first_result_for_each_modifier_combination() {
+        for multi in [false, true] {
+            for shift in [false, true] {
+                for ctrl in [false, true] {
+                    let mut selection = SelectionManager::new();
+                    selection.set_multi_select(multi);
+                    selection.handle_pick(99, false);
+                    let mut event = click(Some(41), shift, ctrl);
+                    event.results.extend(click(Some(17), false, false).results);
+                    apply_pick_results(&mut selection, &event, &event.results);
+                    let set = selection.primary().unwrap();
+                    assert!(set.contains(41));
+                    assert!(!set.contains(17));
+                    assert_eq!(set.contains(99), multi && shift);
+                    apply_pick_results(&mut selection, &event, &event.results);
+                    assert_eq!(selection.primary().unwrap().contains(41), !(multi && shift));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_click_clears_without_shift_and_never_toggles_background() {
+        for multi in [false, true] {
+            for shift in [false, true] {
+                for ctrl in [false, true] {
+                    let mut selection = SelectionManager::new();
+                    selection.set_multi_select(multi);
+                    selection.handle_pick(99, false);
+                    let event = click(None, shift, ctrl);
+                    apply_pick_results(&mut selection, &event, &event.results);
+                    let set = selection.primary().unwrap();
+                    assert_eq!(set.contains(99), shift);
+                    assert!(!set.contains(0));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn non_click_events_leave_selection_unchanged() {
+        for kind in [
+            PickEventType::Hover,
+            PickEventType::DoubleClick,
+            PickEventType::LassoComplete,
+        ] {
+            let mut selection = SelectionManager::new();
+            selection.handle_pick(99, false);
+            let mut event = click(Some(41), false, false);
+            event.event_type = kind;
+            apply_pick_results(&mut selection, &event, &event.results);
+            assert_eq!(selection.primary().unwrap().feature_ids(), vec![99]);
+        }
+    }
 
     #[test]
     fn test_ray_triangle_intersect() {
