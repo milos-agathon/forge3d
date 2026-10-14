@@ -386,8 +386,8 @@ pub fn geometry_instance_mesh_gpu_render_py(
             depth_or_array_layers: 1,
         },
     );
-    timing.resolve(&mut encoder);
-    g.queue.submit(Some(encoder.finish()));
+
+    timing.submit(&g.queue, encoder);
 
     // Map and pack rows without padding
     g.device.poll(wgpu::Maintain::Wait);

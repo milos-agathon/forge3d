@@ -283,7 +283,7 @@ fn render_prepared_coverage(
     let mut readback_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("vf.Vector.Coverage.ReadbackEncoder"),
     });
-    timing.resolve(&mut readback_encoder);
+
     readback_encoder.copy_buffer_to_buffer(
         &raster.coverage,
         0,
@@ -299,7 +299,7 @@ fn render_prepared_coverage(
         resolved.output_bytes,
     );
     readback_encoder.copy_buffer_to_buffer(&bins.overflow, 0, &error_readback, 0, 16);
-    let readback_submission = queue.submit(Some(readback_encoder.finish()));
+    let readback_submission = timing.submit(&queue, readback_encoder);
     device.poll(wgpu::Maintain::WaitForSubmissionIndex(readback_submission));
 
     if !timing.record_into_certificate() {

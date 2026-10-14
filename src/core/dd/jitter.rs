@@ -189,8 +189,8 @@ pub fn jitter_demo(frames: u32) -> RenderResult<DdJitterReport> {
         pass.draw(0..3, 0..1);
     }
     timing.end(&mut encoder, timing_scope, 2);
-    timing.resolve(&mut encoder);
-    queue.submit(Some(encoder.finish()));
+
+    timing.submit(&queue, encoder);
     device.poll(wgpu::Maintain::Wait);
     crate::core::shader_registry::record_shader_use(LABEL);
     if !timing.record_into_certificate() {

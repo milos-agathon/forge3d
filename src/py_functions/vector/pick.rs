@@ -61,10 +61,9 @@ pub(crate) fn vector_render_pick_map_py(
         )?;
     }
     timing.end(&mut encoder, pick_scope, 1);
-    timing.resolve(&mut encoder);
 
     scene.flush_uploads();
-    scene.queue.submit(Some(encoder.finish()));
+    timing.submit(&scene.queue, encoder);
     scene.device.poll(wgpu::Maintain::Wait);
     let result = read_u32_texture_to_py(
         py,

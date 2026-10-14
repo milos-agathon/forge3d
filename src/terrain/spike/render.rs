@@ -112,8 +112,8 @@ impl TerrainSpike {
             }
             timing.end(&mut encoder, overlay_scope, 1);
         }
-        timing.resolve(&mut encoder);
-        self.queue.submit(Some(encoder.finish()));
+
+        timing.submit(&self.queue, encoder);
 
         // Readback → PNG
         let bytes_per_pixel = 4u32;
