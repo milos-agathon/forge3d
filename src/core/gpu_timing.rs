@@ -658,17 +658,19 @@ fn timing_results_from_timestamps(
             });
             let timestamp_valid =
                 scope.finished && pair.is_some_and(|(begin, end)| begin != 0 && end >= begin);
-            let gpu_time_ms = if timestamp_valid {
+            let duration_ms = if timestamp_valid {
                 let (begin, end) = pair.unwrap();
-                ((end - begin) as f64 * timestamp_period / 1_000_000.0) as f32
+                (end - begin) as f64 * timestamp_period / 1_000_000.0
             } else {
                 0.0
             };
+            let name = scope.name.clone();
+            let draw_calls = scope.draw_calls;
             TimingResult {
-                name: scope.name.clone(),
-                gpu_time_ms,
+                name,
+                gpu_time_ms: duration_ms as f32,
                 timestamp_valid,
-                draw_calls: scope.draw_calls,
+                draw_calls,
                 pipeline_stats: None,
             }
         })
