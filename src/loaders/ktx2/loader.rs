@@ -1,5 +1,6 @@
 use super::parser;
 use super::types::*;
+use super::vk_format::vk_format_to_wgpu;
 use crate::core::compressed_textures::CompressedImage;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
@@ -56,7 +57,7 @@ impl Ktx2Loader {
         let texture_data = self.extract_texture_data(&mut reader, &header, &level_indices)?;
 
         // Convert to WGPU format
-        let wgpu_format = self.vk_format_to_wgpu(header.vk_format)?;
+        let wgpu_format = vk_format_to_wgpu(header.vk_format)?;
 
         Ok(CompressedImage {
             data: texture_data,
@@ -64,7 +65,7 @@ impl Ktx2Loader {
             height: header.pixel_height,
             mip_levels: header.level_count,
             format: wgpu_format,
-            is_srgb: self.is_srgb_format(header.vk_format),
+            is_srgb: wgpu_format.is_srgb(),
             source_format: "KTX2".to_string(),
         })
     }
@@ -139,42 +140,5 @@ impl Ktx2Loader {
             "ZLIB supercompression decoding is not implemented; the texture cannot be decoded",
         );
         Err("ZLIB decompression not implemented".to_string())
-    }
-
-    /// Convert Vulkan format to WGPU format
-    fn vk_format_to_wgpu(&self, vk_format: u32) -> Result<wgpu::TextureFormat, String> {
-        match vk_format {
-            // BC formats
-            131 => Ok(wgpu::TextureFormat::Bc1RgbaUnorm),
-            132 => Ok(wgpu::TextureFormat::Bc1RgbaUnormSrgb),
-            135 => Ok(wgpu::TextureFormat::Bc3RgbaUnorm),
-            136 => Ok(wgpu::TextureFormat::Bc3RgbaUnormSrgb),
-            139 => Ok(wgpu::TextureFormat::Bc4RUnorm),
-            141 => Ok(wgpu::TextureFormat::Bc5RgUnorm),
-            145 => Ok(wgpu::TextureFormat::Bc6hRgbUfloat),
-            147 => Ok(wgpu::TextureFormat::Bc7RgbaUnorm),
-            148 => Ok(wgpu::TextureFormat::Bc7RgbaUnormSrgb),
-
-            // ETC2 formats (using correct KTX2 format values)
-            163 => Ok(wgpu::TextureFormat::Etc2Rgb8Unorm),
-            164 => Ok(wgpu::TextureFormat::Etc2Rgb8UnormSrgb),
-            151 => Ok(wgpu::TextureFormat::Etc2Rgba8Unorm),
-            152 => Ok(wgpu::TextureFormat::Etc2Rgba8UnormSrgb),
-
-            // Basic formats
-            37 => Ok(wgpu::TextureFormat::Rgba8Unorm),
-            43 => Ok(wgpu::TextureFormat::Rgba8UnormSrgb),
-            44 => Ok(wgpu::TextureFormat::Bgra8Unorm),
-
-            _ => Err(format!("Unsupported Vulkan format: {}", vk_format)),
-        }
-    }
-
-    /// Check if format is sRGB
-    fn is_srgb_format(&self, vk_format: u32) -> bool {
-        matches!(
-            vk_format,
-            43 | 132 | 136 | 148 | 152 | 164 // sRGB variants
-        )
     }
 }
