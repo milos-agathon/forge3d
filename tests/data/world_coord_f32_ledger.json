@@ -1487,5 +1487,86 @@
   ],
   "source_commit": "5f8252672cdaff08dad8c6fb3cd0eb4a4c1c41be",
   "review": "Architecture item 30 replaces one existing integer-byte-count-to-f32 statistics operand in TextureFormatRegistry::calculate_compression_ratio with the shared resident_2d_size helper. The operands are u32 texture dimensions and the helper result is a u64 allocation-size estimate; no f64/world-position value or new narrowing primitive is introduced. Count remains 1836. Reversing this exact single-site replacement restores the preceding CSM freeze; all historical records and scanner coverage are retained."
- }
+ },
+  "viewer_viewport_resize": {
+    "base_count": 1836,
+    "base_digest": "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12",
+    "result_count": 1846,
+    "result_digest": "f4fb63ad9529ceaaff94b99fe68f0c2454e706d019e93c669b77a82fdc52eace",
+    "added": [
+      [
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "install_resize",
+        "as_f32",
+        1,
+        "self.settings.proj_scale *= prepared.height as f32 / self.height as f32"
+      ],
+      [
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "install_resize",
+        "as_f32",
+        2,
+        "self.settings.proj_scale *= prepared.height as f32 / self.height as f32"
+      ],
+      [
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "install_resize",
+        "as_f32",
+        3,
+        "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "install_resize",
+        "as_f32",
+        4,
+        "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssgi/resize.rs",
+        "install_resize",
+        "as_f32",
+        1,
+        "self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssgi/resize.rs",
+        "install_resize",
+        "as_f32",
+        2,
+        "self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssr/resize.rs",
+        "install_resize",
+        "as_f32",
+        1,
+        "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssr/resize.rs",
+        "install_resize",
+        "as_f32",
+        2,
+        "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+        "src/core/taa.rs",
+        "install_resize",
+        "as_f32",
+        1,
+        "self.settings.resolution = [self.width as f32, self.height as f32]"
+      ],
+      [
+        "src/core/taa.rs",
+        "install_resize",
+        "as_f32",
+        2,
+        "self.settings.resolution = [self.width as f32, self.height as f32]"
+      ]
+    ],
+    "removed": [],
+    "review": "Milos explicitly approved these exact ten additions on 14 October 2026 for PR #243. The operands are u32 viewport width/height values used for reciprocal resolution, SSAO projection scale and TAA resolution. No f64/world-position narrowing or scanner exemption is introduced. Removing these exact ten occurrence-locked sites restores the prior texture-layout freeze; all historical records and rejecting probes remain intact.",
+    "source_commit": "c4acb6b941c34f85c9a4d6e1e8c616aee5dec3ad"
+  }
 }

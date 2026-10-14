@@ -137,7 +137,6 @@ impl Viewer {
         }
         let vector_bvh_sources = if let Some(terrain_viewer) = self.terrain_viewer.as_mut() {
             terrain_viewer.refresh_anchor_caches(&frame.anchor);
-            terrain_viewer.invalidate_temporal_history();
             terrain_viewer.all_vector_overlay_render_data()
         } else {
             Vec::new()
@@ -151,24 +150,7 @@ impl Viewer {
                 self.unified_picking.remove_layer_bvh(id);
             }
         }
-        if let Some(gi) = self.gi.as_mut() {
-            gi.invalidate_temporal_histories();
-        }
-        if let Some(taa) = self.taa_renderer.as_mut() {
-            taa.reset_history();
-        }
-
-        let current_vp = frame.projection(self.config.width, self.config.height)
-            * frame.view()
-            * self.anchored_object_model(frame);
-        self.prev_view_proj = current_vp;
-        self.taa_jitter = if self.taa_jitter.enabled {
-            crate::core::jitter::JitterState::enabled()
-        } else {
-            crate::core::jitter::JitterState::new()
-        };
-        self.fog_frame_index = 0;
-        self.fog_history_state.invalidate();
+        self.invalidate_viewport_histories(self.config.width, self.config.height);
         self.history_invalidation_count = self.history_invalidation_count.wrapping_add(1);
     }
 }

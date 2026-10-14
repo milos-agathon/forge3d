@@ -935,6 +935,33 @@ pub fn tracked_create_buffer_init(
     })
 }
 
+#[cfg(all(test, windows))]
+thread_local! {
+    static TEXTURE_FAILURE: std::cell::RefCell<(Option<&'static str>, usize)> = const { std::cell::RefCell::new((None, 0)) };
+}
+
+/// Thread-local fault injection at the actual tracked allocation boundary.
+#[cfg(all(test, windows))]
+pub(crate) struct TextureAllocationFailure((Option<&'static str>, usize));
+
+#[cfg(all(test, windows))]
+impl TextureAllocationFailure {
+    pub(crate) fn for_label(label: &'static str) -> Self {
+        Self(TEXTURE_FAILURE.with(|state| state.replace((Some(label), 0))))
+    }
+
+    pub(crate) fn attempts(&self) -> usize {
+        TEXTURE_FAILURE.with(|state| state.borrow().1)
+    }
+}
+
+#[cfg(all(test, windows))]
+impl Drop for TextureAllocationFailure {
+    fn drop(&mut self) {
+        TEXTURE_FAILURE.with(|state| state.replace(self.0));
+    }
+}
+
 /// Create a texture and record it in the registry + allocation ledger.
 ///
 /// Textures are device-local; the 512 MiB host-visible budget does not apply,
@@ -944,6 +971,17 @@ pub fn tracked_create_texture(
     device: &wgpu::Device,
     desc: &TextureDescriptor<'_>,
 ) -> Result<TrackedTexture, RenderError> {
+    #[cfg(all(test, windows))]
+    if TEXTURE_FAILURE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.1 += 1;
+        state.0.is_some() && state.0 == desc.label
+    }) {
+        return Err(RenderError::Budget(format!(
+            "injected texture failure: {:?}",
+            desc.label
+        )));
+    }
     let call_site = caller_site!();
     let label = desc
         .label

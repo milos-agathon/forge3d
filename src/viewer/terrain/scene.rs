@@ -215,6 +215,14 @@ impl ViewerTerrainScene {
         };
     }
 
+    #[cfg(all(test, windows))]
+    pub(crate) fn attach_test_taa(&mut self, taa: crate::core::taa::TaaRenderer) {
+        assert!(taa.is_enabled());
+        assert!(taa.history_valid());
+        self.taa_renderer = Some(taa);
+        self.taa_jitter = crate::core::jitter::JitterState::enabled();
+    }
+
     pub(crate) fn is_taa_enabled(&self) -> bool {
         self.taa_renderer
             .as_ref()

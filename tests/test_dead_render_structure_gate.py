@@ -78,22 +78,28 @@ def test_viewer_bind_group_cache_is_invalidated_with_resources() -> None:
         encoding="utf-8"
     )
     resize = (ROOT / "src/viewer/state/resize.rs").read_text(encoding="utf-8")
+    targets = (ROOT / "src/viewer/render_targets.rs").read_text(encoding="utf-8")
+    assert "PreparedViewportTargets::prepare(self, width, height)?.install(self)" in resize
+    prepare = targets[targets.index("fn prepare_with("):targets.index("pub(crate) fn install(")]
+    assert "borrow_mut()" not in prepare
+    assert "invalidate_viewport_histories" not in prepare
     ibl = (ROOT / "src/viewer/state/viewer_helpers/ibl.rs").read_text(
         encoding="utf-8"
     )
 
     assert "lit_bind_group_cache.borrow().is_some()" in cache
     assert "comp_bind_group_cache.borrow().contains_key" in cache
-    assert "lit_bind_group_cache.borrow_mut().take()" in resize
-    assert "comp_bind_group_cache.borrow_mut().clear()" in resize
+    assert "lit_bind_group_cache.borrow_mut().take()" in targets
+    assert "comp_bind_group_cache.borrow_mut().clear()" in targets
     for cache in (
         "sky_bg0_cache",
+        "sky_present_bg_cache",
         "fog_bg0_cache",
         "fog_bg2_cache",
         "fog_bg2_half_cache",
         "fog_upsample_bg_cache",
     ):
-        assert f"{cache}.borrow_mut().take()" in resize
+        assert f"{cache}.borrow_mut().take()" in targets
     assert "lit_bind_group_cache.borrow_mut().take()" in ibl
 
 

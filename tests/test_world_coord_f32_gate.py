@@ -86,9 +86,12 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # world/camera projection in f64; see its exact ledger transition.
 # Texture layout changes one existing integer-size statistics operand; the
 # exact ledger transition restores the prior freeze without adding casts.
+# W18 viewport replacement adds ten u32 dimension/reciprocal/projection-scale
+# conversions. Its exact transition reverses to the prior texture-layout freeze;
+# no world-coordinate narrowing or scanner exemption is added.
 # Scanner unchanged.
-EXPECTED_CONVERSION_COUNT = 1836
-EXPECTED_CONVERSION_SHA256 = "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12"
+EXPECTED_CONVERSION_COUNT = 1846
+EXPECTED_CONVERSION_SHA256 = "f4fb63ad9529ceaaff94b99fe68f0c2454e706d019e93c669b77a82fdc52eace"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -587,6 +590,104 @@ def _function_body(rel: str, function: str) -> str:
 
 
 
+def _undo_viewport_resize_transition(sites):
+    transition = _ledger_data()["viewer_viewport_resize"]
+    added = set(map(tuple, transition["added"]))
+    assert len(added) == 10
+    assert transition["removed"] == []
+    for site in added:
+        assert sites.count(site) == 1, f"resize conversion missing or duplicated: {site}"
+    restored = [site for site in sites if site not in added]
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+    return restored
+
+
+def test_viewport_resize_inventory_transition_is_exact():
+    transition = _ledger_data()["viewer_viewport_resize"]
+    previous = _ledger_data()["texture_layout_stats"]
+    assert transition["review"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        previous["result_count"], previous["result_digest"],
+    )
+    expected_added = [       (       'src/core/screen_space_effects/ssao/mod.rs',
+                'install_resize',
+                'as_f32',
+                1,
+                'self.settings.proj_scale *= prepared.height as f32 / self.height as '
+                'f32'),
+        (       'src/core/screen_space_effects/ssao/mod.rs',
+                'install_resize',
+                'as_f32',
+                2,
+                'self.settings.proj_scale *= prepared.height as f32 / self.height as '
+                'f32'),
+        (       'src/core/screen_space_effects/ssao/mod.rs',
+                'install_resize',
+                'as_f32',
+                3,
+                'self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / '
+                'self.height as f32]'),
+        (       'src/core/screen_space_effects/ssao/mod.rs',
+                'install_resize',
+                'as_f32',
+                4,
+                'self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / '
+                'self.height as f32]'),
+        (       'src/core/screen_space_effects/ssgi/resize.rs',
+                'install_resize',
+                'as_f32',
+                1,
+                'self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as '
+                'f32]'),
+        (       'src/core/screen_space_effects/ssgi/resize.rs',
+                'install_resize',
+                'as_f32',
+                2,
+                'self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as '
+                'f32]'),
+        (       'src/core/screen_space_effects/ssr/resize.rs',
+                'install_resize',
+                'as_f32',
+                1,
+                'self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / '
+                'self.height as f32]'),
+        (       'src/core/screen_space_effects/ssr/resize.rs',
+                'install_resize',
+                'as_f32',
+                2,
+                'self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / '
+                'self.height as f32]'),
+        (       'src/core/taa.rs',
+                'install_resize',
+                'as_f32',
+                1,
+                'self.settings.resolution = [self.width as f32, self.height as f32]'),
+        (       'src/core/taa.rs',
+                'install_resize',
+                'as_f32',
+                2,
+                'self.settings.resolution = [self.width as f32, self.height as f32]')]
+    assert list(map(tuple, transition["added"])) == expected_added
+    sites = _undo_scene_pick_assembly_transition(conversion_inventory())
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    _undo_viewport_resize_transition(sites)
+    # Every added operand comes from u32 viewport state, never a world pose.
+    for rel in (
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "src/core/screen_space_effects/ssgi/resize.rs",
+        "src/core/screen_space_effects/ssr/resize.rs",
+        "src/core/taa.rs",
+    ):
+        body = _function_body(rel, "install_resize")
+        assert "width" in body and "height" in body
+        assert not re.search(r"\b(?:f64|DVec[234]|DMat[234])\b", body)
 def _undo_scene_pick_assembly_transition(sites):
     """Reverse only the two screen-coordinate casts moved with scene collection.
 
@@ -632,7 +733,6 @@ def test_scene_pick_assembly_moves_only_the_two_screen_coordinate_casts():
 
 
 def _undo_texture_layout_stats_transition(sites):
-    sites = _undo_scene_pick_assembly_transition(sites)
     transition = _ledger_data()["texture_layout_stats"]
     old, = map(tuple, transition["removed"])
     new, = map(tuple, transition["added"])
@@ -662,14 +762,17 @@ def test_reviewed_texture_layout_stats_transition_is_exact():
         _read("src/core/texture_layout.rs"),
         re.M,
     )
-    sites = _undo_scene_pick_assembly_transition(conversion_inventory())
+    sites = _undo_viewport_resize_transition(
+        _undo_scene_pick_assembly_transition(conversion_inventory())
+    )
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )
-    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+    viewport = _ledger_data()["viewer_viewport_resize"]
+    assert (viewport["base_count"], viewport["base_digest"]) == (
         transition["result_count"], transition["result_digest"],
     )
-    restored = _undo_texture_layout_stats_transition(conversion_inventory())
+    restored = _undo_texture_layout_stats_transition(sites)
     assert (len(restored), _inventory_digest(restored)) == (
         transition["base_count"], transition["base_digest"],
     )
@@ -692,7 +795,11 @@ def test_reviewed_csm_layout_context_transition_is_exact():
         "light_view: self.light_view_matrix.to_cols_array_2d()",
         "light_view: self.light_view_matrix.to_cols_array()",
     ) == new[4]
-    sites = _undo_texture_layout_stats_transition(conversion_inventory())
+    sites = _undo_texture_layout_stats_transition(
+        _undo_viewport_resize_transition(
+            _undo_scene_pick_assembly_transition(conversion_inventory())
+        )
+    )
     assert sites.count(new) == 1 and old not in sites
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
@@ -1167,10 +1274,18 @@ def test_sutura_screen_output_inventory_transition_is_exact():
     assert (csm["result_count"], csm["result_digest"]) == (
         texture["base_count"], texture["base_digest"],
     )
-    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
-        texture["result_count"], texture["result_digest"],
+    viewport = _ledger_data()["viewer_viewport_resize"]
+    assert (texture["result_count"], texture["result_digest"]) == (
+        viewport["base_count"], viewport["base_digest"],
     )
-    sites = _undo_texture_layout_stats_transition(conversion_inventory())
+    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+        viewport["result_count"], viewport["result_digest"],
+    )
+    sites = _undo_texture_layout_stats_transition(
+        _undo_viewport_resize_transition(
+            _undo_scene_pick_assembly_transition(conversion_inventory())
+        )
+    )
     counts = collections.Counter(sites)
     for site in expected_added:
         assert counts[site] == 1, f"screen output addition missing or duplicated: {site}"

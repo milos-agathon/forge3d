@@ -12,10 +12,7 @@ pub(super) struct SsaoSharedBuffers {
     pub comp_uniform: TrackedBuffer,
 }
 
-pub(super) struct SsaoTextures {
-    pub noise_texture: TrackedTexture,
-    pub noise_view: TextureView,
-    pub noise_sampler: Sampler,
+pub(crate) struct SsaoViewportTextures {
     pub ssao_texture: TrackedTexture,
     pub ssao_view: TextureView,
     pub ssao_blurred: TrackedTexture,
@@ -28,6 +25,13 @@ pub(super) struct SsaoTextures {
     pub ssao_tmp_view: TextureView,
     pub ssao_composited: TrackedTexture,
     pub ssao_composited_view: TextureView,
+}
+
+pub(super) struct SsaoTextures {
+    pub viewport: SsaoViewportTextures,
+    pub noise_texture: TrackedTexture,
+    pub noise_view: TextureView,
+    pub noise_sampler: Sampler,
 }
 
 pub(super) fn create_shared_buffers(
@@ -125,6 +129,19 @@ pub(super) fn create_textures(
     height: u32,
 ) -> RenderResult<SsaoTextures> {
     let (noise_texture, noise_view, noise_sampler) = create_noise_resources(device)?;
+    Ok(SsaoTextures {
+        viewport: create_viewport_textures(device, width, height)?,
+        noise_texture,
+        noise_view,
+        noise_sampler,
+    })
+}
+
+pub(super) fn create_viewport_textures(
+    device: &Device,
+    width: u32,
+    height: u32,
+) -> RenderResult<SsaoViewportTextures> {
     let (ssao_texture, ssao_view) = create_viewed_texture(
         device,
         "ssao_texture",
@@ -177,10 +194,7 @@ pub(super) fn create_textures(
         TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
     )?;
 
-    Ok(SsaoTextures {
-        noise_texture,
-        noise_view,
-        noise_sampler,
+    Ok(SsaoViewportTextures {
         ssao_texture,
         ssao_view,
         ssao_blurred,

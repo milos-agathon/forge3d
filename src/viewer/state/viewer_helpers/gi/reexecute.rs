@@ -54,14 +54,18 @@ impl Viewer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: wgpu::BindingResource::TextureView(env_view),
+                        resource: wgpu::BindingResource::TextureView(&self.lit_output_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
-                        resource: wgpu::BindingResource::Sampler(env_samp),
+                        resource: wgpu::BindingResource::TextureView(env_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 5,
+                        resource: wgpu::BindingResource::Sampler(env_samp),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
                         resource: self.lit_uniform.as_entire_binding(),
                     },
                 ],

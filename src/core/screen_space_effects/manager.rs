@@ -4,6 +4,7 @@ use crate::render::params::SsrParams;
 mod accessors;
 mod core;
 mod execute;
+mod resize;
 
 /// Screen-space effects manager
 pub struct ScreenSpaceEffectsManager {
@@ -16,3 +17,5 @@ pub struct ScreenSpaceEffectsManager {
     ssr_params: SsrParams,
     last_hzb_ms: f32,
 }
+
+pub(crate) use resize::PreparedScreenSpaceTargets;

@@ -4,6 +4,7 @@ use crate::core::temporal_history::TemporalHistoryState;
 
 mod accessors;
 mod constructor;
+mod resize;
 mod runtime;
 mod stats;
 
@@ -65,3 +66,5 @@ pub struct SsrRenderer {
     last_fallback_ms: f32,
     stats_readback_pending: bool,
 }
+
+pub(crate) use resize::PreparedSsrTargets;

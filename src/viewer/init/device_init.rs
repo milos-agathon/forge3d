@@ -56,12 +56,17 @@ pub async fn create_device_and_surface(
     // Create surface
     let surface = instance.create_surface(Arc::clone(&window))?;
 
+    #[cfg(all(test, windows))]
+    let force_fallback = std::env::var("FORGE3D_VIEWPORT_TEST_FALLBACK").as_deref() == Ok("1");
+    #[cfg(not(all(test, windows)))]
+    let force_fallback = false;
+
     // Request adapter
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
+            force_fallback_adapter: force_fallback,
         })
         .await
         .ok_or("Failed to find suitable adapter")?;

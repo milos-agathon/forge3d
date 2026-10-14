@@ -1,13 +1,12 @@
 // src/viewer/init/gbuffer_init.rs
 // GBuffer pipeline initialization for the Viewer
 
+use crate::viewer::render_targets::{Target, TargetKind};
 use std::sync::Arc;
 use wgpu::{BindGroup, BindGroupLayout, Device, RenderPipeline, Sampler, TextureView};
 
 use crate::core::error::RenderResult;
-use crate::core::resource_tracker::{
-    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
-};
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer, TrackedTexture};
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 
 /// Resources created during GBuffer initialization
@@ -158,24 +157,10 @@ pub fn create_gbuffer_resources(
     };
 
     // Z-buffer for rasterization
-    let z_texture = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.gbuf.z"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-    )?;
-    let z_view = z_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: z_texture,
+        view: z_view,
+    } = TargetKind::Depth.create(device, width, height)?;
 
     // Camera uniform
     let geom_camera_buffer = tracked_create_buffer(
