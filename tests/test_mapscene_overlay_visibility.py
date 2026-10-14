@@ -5,6 +5,7 @@ from PIL import Image
 
 import forge3d as f3d
 from forge3d import map_scene
+from forge3d import _map_scene_compiler as scene_compiler
 from forge3d._map_scene_projection import TerrainProjector, project_vector_recipe
 from test_mapscene_geometric_integrity import _scene, N, requires_gpu
 
@@ -181,7 +182,7 @@ def test_automatic_world_line_and_area_label_pixels(tmp_path,direction,text,reco
         with monkeypatch.context() as patch:
             def frozen(*args,**kwargs):
                 pytest.fail("saved label geometry must be consumed without projection or relayout")
-            patch.setattr(map_scene,"_label_plan_from_layer",frozen)
+            patch.setattr(scene_compiler,"_label_plan_from_layer",frozen)
             loaded=f3d.MapScene.load_bundle(scene.last_bundle_path)
             rerender=loaded.render(str(tmp_path/"loaded.png"))
         assert rm.manifest_to_json(loaded.compiled_plan.manifest)==manifest

@@ -655,6 +655,52 @@ def _path_free_scene(scene: "f3d.MapScene") -> dict:
     return value
 
 
+def test_accepted_labels_reads_frozen_plan_after_inspection_view_edits(tmp_path):
+    from forge3d.chronos import _accepted_labels
+    from _sutura_recipes import build_scene
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    compiled = scene.compile_plan()
+    expected = {
+        (str(layer_id), str(label.label_id)): label.to_dict()
+        for layer_id, plan in compiled.label_plans.items()
+        for label in plan.accepted
+    }
+    assert expected
+    scene.compiled_label_plans = {}
+    actual = {key: label.to_dict() for key, label in _accepted_labels(scene).items()}
+    assert actual == expected
+
+
+@pytest.mark.parametrize("unknown_elevation", [float("nan"), float("inf"), -float("inf")])
+def test_label_payload_only_normalizes_unknown_terrain_elevation(tmp_path, unknown_elevation):
+    import math
+    from forge3d.chronos import _canonical_json_text, _label_payload
+    from _sutura_recipes import build_scene
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    label = scene.compile_plan().label_plans["labels"].accepted[0]
+    assert _canonical_json_text(_label_payload(label), "labels") == _canonical_json_text(
+        label.to_dict(), "labels"
+    ), "finite label payloads must retain their canonical bytes"
+    label.candidate.terrain_sample["elevation"] = unknown_elevation
+    label.candidate.details["visibility_gates"] = [
+        {"kind": "occlusion", "terrain_sample": {"elevation": unknown_elevation}}
+    ]
+    payload = _label_payload(label)
+    assert payload["candidate"]["terrain_sample"]["elevation"] is None
+    assert not math.isfinite(label.candidate.terrain_sample["elevation"])
+    assert payload["candidate"]["details"]["visibility_gates"][0]["terrain_sample"]["elevation"] is None
+    assert not math.isfinite(
+        label.candidate.details["visibility_gates"][0]["terrain_sample"]["elevation"]
+    )
+    _canonical_json_text(payload, "labels")
+
+    label.candidate.anchor = (float("nan"), 0.0, 0.0)
+    with pytest.raises(ValueError, match="NaN|infinite"):
+        _canonical_json_text(_label_payload(label), "labels")
+
+
 def test_frame_free_cache_context_preserves_existing_bytes(monkeypatch, tmp_path):
     from forge3d._canonical_json import canonical_json_bytes
 
@@ -797,6 +843,23 @@ def test_different_cameras_do_not_share_cache_entry(tmp_path):
     reason="CHRONOS physical render runs only in the GPU golden lane",
 )
 class TestFlythroughPhysical:
+    def test_nodata_label_candidates_render_and_replay(self, tmp_path):
+        from _sutura_recipes import build_scene
+
+        scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+        terrain_path = Path(scene.recipe.terrain.path)
+        heightmap = np.load(terrain_path)
+        heightmap[:heightmap.shape[0] // 4] = np.nan
+        np.save(terrain_path, heightmap)
+        output_dir = tmp_path / "nodata_flythrough"
+        manifest = render_flythrough([scene], base_seed=7, samples=1, out_dir=output_dir)
+        assert len(manifest.frames) == 1
+        record = manifest.frame_record(0)
+        rgba = _load_rgba(output_dir / record["image"])
+        assert hashlib.sha256(rgba.tobytes()).hexdigest() == record["pixel_hash"]
+        replay = manifest.replay_frame(scene, 0, tmp_path / "nodata_replay.png")
+        assert replay["pixel_hash"] == record["pixel_hash"]
+
     def test_static_path_hash_identical_and_replay(self, tmp_path):
         if not _physical_render_available():
             pytest.skip("CHRONOS physical render requires GPU-backed native module")
