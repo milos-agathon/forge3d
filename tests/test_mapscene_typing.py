@@ -48,6 +48,9 @@ def build_scene(output: Path) -> f3d.MapScene:
     passes = [f3d.RenderPassSpec("color", "color", ("source",))]
     report = scene.render_passes(passes, {"source": image}, str(output))
     assert report.status is not None
+    validation_report: f3d.ValidationReport | None = scene.last_validation_report
+    if validation_report is not None:
+        validation_report.to_dict()
     return scene
 
 

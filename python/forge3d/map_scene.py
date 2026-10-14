@@ -29,6 +29,7 @@ from ._map_scene_common import (
     _sequence,
     _stable_hash,
 )
+from ._map_scene_compiler import _FrozenLabelPlans, _SceneCompiler
 from ._map_scene_labels import (
     _atlas_glyph_set,
     _diagnostic_for_layer,
@@ -180,6 +181,10 @@ class CompiledScenePlan:
     frame: Any | None = None
     render_passes_json: str | None = None
     render_pass_inputs: Mapping[str, RenderPassInput] = field(default_factory=dict, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.label_plans, _FrozenLabelPlans):
+            object.__setattr__(self, "label_plans", _FrozenLabelPlans(self.label_plans))
 
 
 def _native_scene_class() -> Any | None:
@@ -4143,6 +4148,9 @@ class TerrainSource:
     dtype: str = "float32"
     nodata_policy: str = "fill"
     style: Any | None = None
+    _serialized_data_summary: Mapping[str, Any] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         import numpy as np
@@ -4158,7 +4166,9 @@ class TerrainSource:
                 self.data = _single(self.data)
 
     def to_dict(self) -> dict[str, Any]:
-        data_summary = None
+        # Unstyled bundles record a descriptor, not the array's pixels. Keep
+        # that identity on decode without claiming the samples are available.
+        data_summary = copy.deepcopy(self._serialized_data_summary)
         if self.data is not None:
             import numpy as np
 
@@ -5545,9 +5555,7 @@ class MapScene:
         self.recipe = recipe
         self.render_policy = recipe.render_policy
         self.reproducibility_profile = recipe.reproducibility_profile
-        self.last_validation_report: ValidationReport | None = None
-        self.compiled_label_plans: dict[str, Any] = {}
-        self.compiled_plan: CompiledScenePlan | None = None
+        self._compiler = _SceneCompiler()
         self.last_render_path: str | None = None
         self.last_render_backend: str | None = None
         self.last_render_metadata: dict[str, Any] | None = None
@@ -5664,17 +5672,20 @@ class MapScene:
         furniture_data = data.get("map_furniture")
         reproducibility_data = data.get("reproducibility_profile")
         passes, inputs = decode_passes(data.get("render_passes") or {}, pass_inputs)
+        terrain = TerrainSource(
+            path=terrain_data.get("path"),
+            crs=terrain_data.get("crs"),
+            metadata=terrain_data.get("metadata") or {},
+            elevation_sampling_available=bool(terrain_data.get("elevation_sampling_available", False)),
+            dtype=str(terrain_data.get("dtype", "float32")),
+            nodata_policy=str(terrain_data.get("nodata_policy", "fill")),
+            style=raster_style_from_dict(terrain_data.get("style")),
+            data=raster_values_from_dict(terrain_data.get("values")),
+        )
+        if terrain.data is None and terrain_data.get("data") is not None:
+            terrain._serialized_data_summary = _metadata(terrain_data["data"])
         return SceneRecipe(
-            terrain=TerrainSource(
-                path=terrain_data.get("path"),
-                crs=terrain_data.get("crs"),
-                metadata=terrain_data.get("metadata") or {},
-                elevation_sampling_available=bool(terrain_data.get("elevation_sampling_available", False)),
-                dtype=str(terrain_data.get("dtype", "float32")),
-                nodata_policy=str(terrain_data.get("nodata_policy", "fill")),
-                style=raster_style_from_dict(terrain_data.get("style")),
-                data=raster_values_from_dict(terrain_data.get("values")),
-            ),
+            terrain=terrain,
             camera=OrbitCamera(
                 target=camera_data.get("target") or (0.0, 0.0, 0.0),
                 distance=float(camera_data.get("distance", 1.0)),
@@ -5786,871 +5797,49 @@ class MapScene:
                 scene.last_validation_report = ValidationReport.from_dict(report_payload)
         return scene
 
+    @property
+    def last_validation_report(self) -> ValidationReport | None:
+        return self._compiler.report
+
+    @last_validation_report.setter
+    def last_validation_report(self, report: ValidationReport | None) -> None:
+        self._compiler.report = report
+
+    @property
+    def compiled_label_plans(self) -> dict[str, Any]:
+        """Mutable inspection view; render and bundle use the frozen plan."""
+        return self._compiler.label_plans
+
+    @compiled_label_plans.setter
+    def compiled_label_plans(self, plans: dict[str, Any]) -> None:
+        self._compiler.label_plans = plans
+
+    @property
+    def compiled_plan(self) -> CompiledScenePlan | None:
+        return self._compiler.plan
+
+    @compiled_plan.setter
+    def compiled_plan(self, plan: CompiledScenePlan | None) -> None:
+        self._compiler.plan = plan
+
     def validate(self) -> ValidationReport:
-        projection_context: dict[str, Any] = {}
-        try:
-            return self._validate_with_projection(projection_context)
-        finally:
-            # Drop the shared depth input before releasing its host reservation.
-            projection_context.pop("depth", None)
-            reservation = projection_context.pop("depth_reservation", None)
-            if reservation is not None:
-                reservation.close()
-
-    def _validate_with_projection(self, projection_context: dict[str, Any]) -> ValidationReport:
-        if self.recipe.pass_specs or self.recipe.pass_inputs:
-            self.recipe._pass_payload()
-        self.compiled_label_plans = {}
-        diagnostics: list[Diagnostic] = []
-        layer_summaries: list[LayerSummary] = []
-        supported_features: dict[str, str] = {
-            "mapscene.recipe": "underdeveloped",
-            "mapscene.validation": "supported",
-        }
-        unsupported_features: dict[str, str] = {}
-        total_memory = 0
-        memory_known = False
-
-        preset_override = _preset_override_diagnostic(self.recipe.lighting)
-        if preset_override is not None:
-            diagnostics.append(preset_override)
-        lighting_settings = _metadata_dict(self.recipe.lighting.settings)
-        if lighting_settings.get("resolved_preset"):
-            supported_features["mapscene.presets"] = "supported"
-            supported_features["mapscene.lighting_preset"] = "supported"
-
-        output = self.recipe.output
-        if output is not None and str(output.format).lower() not in {"png", "exr"}:
-            diagnostics.append(_unsupported_output_format_diagnostic(str(output.format).lower()))
-            unsupported_features["output.format"] = "unsupported"
-        elif output is not None:
-            supported_features[f"output.format.{str(output.format).lower()}"] = "supported"
-            supported_features[f"output.bit_depth.{int(output.bit_depth)}"] = "supported"
-            if int(output.samples) > 1:
-                supported_features["mapscene.offline_accumulation"] = "supported"
-            if output.aovs:
-                supported_features["mapscene.aov_export"] = "supported"
-            if bool(output.hdr) or str(output.format).lower() == "exr":
-                supported_features["mapscene.hdr_output"] = "supported"
-
-        furniture = self.recipe.map_furniture
-        if furniture is not None:
-            supported_features["mapscene.furniture"] = "supported"
-            if furniture.graticule is not None:
-                supported_features["mapscene.graticule"] = "supported"
-            if furniture.scale_bar is not None:
-                supported_features["mapscene.scale_bar"] = "supported"
-                scale_bar_options = _metadata_dict(furniture.scale_bar)
-                if bool(scale_bar_options.get("geodesic", True)):
-                    supported_features["mapscene.scale_bar.geodesic"] = "supported"
-            if furniture.north_arrow is not None:
-                supported_features["mapscene.north_arrow"] = "supported"
-            if furniture.legend is not None:
-                supported_features["mapscene.legend"] = "underdeveloped"
-
-        output_bytes = _output_memory_bytes(output)
-        if output_bytes is not None:
-            total_memory += output_bytes
-            memory_known = True
-
-        terrain = self.recipe.terrain
-        scene_crs = self.recipe.target_crs or terrain.crs
-        terrain_metadata = _metadata_dict(terrain.metadata)
-        terrain_memory = _dimension_memory_bytes(terrain.metadata)
-        if terrain_memory is not None:
-            total_memory += terrain_memory
-            memory_known = True
-
-        vt_report = _virtual_texture_report_from_metadata(terrain.metadata)
-        if vt_report is not None:
-            _merge_report(
-                vt_report,
-                diagnostics=diagnostics,
-                layer_summaries=layer_summaries,
-                supported_features=supported_features,
-                unsupported_features=unsupported_features,
-            )
-
-        terrain_support_level = "supported"
-        terrain_details = {
-            "crs": scene_crs,
-            "elevation_sampling_available": bool(terrain.elevation_sampling_available),
-            "path": _path_to_str(terrain.path),
-        }
-        if terrain.style is not None:
-            try:
-                styled = terrain.style.apply(_load_raw_heightmap(terrain))
-                terrain_details["style"] = terrain.style.to_dict()
-                terrain_details["legend"] = styled.legend
-                supported_features["terrain.population_height_shade"] = "supported"
-            except (ValueError, TypeError, RuntimeError) as exc:
-                diagnostics.append(Diagnostic(code="invalid_raster_style", severity="error", message=str(exc),
-                    remediation="Correct the population values, nodata or scale.", layer_id="terrain", support_level="unsupported"))
-                terrain_support_level = "unsupported"
-        terrain_resource_diagnostics, terrain_resource_details, terrain_resource_support = (
-            _p2_resource_availability_diagnostics(
-                terrain.metadata,
-                layer_id="terrain",
-                layer_type="terrain_source",
-            )
-        )
-        if terrain_resource_diagnostics:
-            diagnostics.extend(terrain_resource_diagnostics)
-            terrain_details.update(terrain_resource_details)
-            if any(diagnostic.code == "unavailable_cache_lod_stats" for diagnostic in terrain_resource_diagnostics):
-                unsupported_features["terrain.cache_lod_stats"] = "underdeveloped"
-            if terrain_resource_support == "underdeveloped":
-                terrain_support_level = "underdeveloped"
-        if not _has_identity_path_or_metadata(terrain.path, terrain.metadata):
-            diagnostics.append(
-                _missing_source_identity_diagnostic(
-                    "terrain_source",
-                    layer_id="terrain",
-                    source_fields=("path", "metadata"),
-                )
-            )
-            unsupported_features["terrain.source_identity"] = "unsupported"
-            terrain_support_level = "unsupported"
-        else:
-            terrain_asset_diagnostics = _asset_path_diagnostics(
-                "terrain_source",
-                layer_id="terrain",
-                path=terrain.path,
-                metadata=terrain.metadata,
-                supported_extensions=_TERRAIN_ASSET_EXTENSIONS,
-            )
-            if terrain_asset_diagnostics:
-                diagnostics.extend(terrain_asset_diagnostics)
-                unsupported_features["terrain.asset"] = "unsupported"
-                terrain_support_level = "unsupported"
-        if not scene_crs:
-            diagnostics.append(_missing_crs_diagnostic(None, layer_id="terrain"))
-            unsupported_features["terrain.crs"] = "unsupported"
-            terrain_support_level = "unsupported"
-        if terrain_metadata.get("alignment_transform_applied"):
-            source_crs = str(terrain_metadata.get("source_crs") or terrain.crs or "")
-            target = str(terrain_metadata.get("target_crs") or scene_crs or "")
-            diagnostics.append(_alignment_transform_diagnostic("terrain", source_crs, target))
-            supported_features["mapscene.alignment"] = "supported"
-
-        layer_summaries.append(
-            LayerSummary(
-                layer_id="terrain",
-                layer_type="terrain_source",
-                support_level=terrain_support_level,
-                diagnostic_codes=_diagnostic_codes_for_layer(diagnostics, "terrain"),
-                memory_estimate_bytes=terrain_memory,
-                details=terrain_details,
-            )
-        )
-        supported_features["layer.terrain"] = "supported"
-        if self.recipe.target_crs:
-            supported_features["mapscene.alignment"] = "supported"
-
-        from ._map_scene_rasters import raster_route_blocks
-        raster_blocks = {block["layer"]: block for block in raster_route_blocks(self.recipe)}
-        for index, layer in enumerate(self.recipe.layers):
-            layer_id = _layer_id(layer, f"layer_{index}")
-            layer_diagnostics: list[Diagnostic] = []
-            layer_memory: int | None = None
-            support_level = "supported"
-            layer_type = type(layer).__name__
-            object_count: int | None = None
-            details: dict[str, Any] = {}
-            layer_metadata = _metadata_dict(getattr(layer, "metadata", None))
-            terrain_resolution = _metadata_resolution(terrain.metadata)
-            layer_resolution = _metadata_resolution(layer_metadata)
-            if terrain_resolution is not None and layer_resolution is not None:
-                rel_x = abs(layer_resolution[0] - terrain_resolution[0]) / max(abs(terrain_resolution[0]), 1.0e-12)
-                rel_y = abs(layer_resolution[1] - terrain_resolution[1]) / max(abs(terrain_resolution[1]), 1.0e-12)
-                if max(rel_x, rel_y) > 1.0e-6:
-                    layer_diagnostics.append(
-                        _resolution_mismatch_diagnostic(layer_id, terrain_resolution, layer_resolution)
-                    )
-            residual = layer_metadata.get("alignment_residual")
-            if isinstance(residual, Mapping):
-                max_residual = float(residual.get("max", residual.get("max_error", 0.0)) or 0.0)
-                threshold = float(residual.get("threshold", residual.get("tolerance", 1.0)) or 1.0)
-                if max_residual > threshold:
-                    layer_diagnostics.append(_alignment_residual_diagnostic(layer_id, residual))
-            if layer_metadata.get("alignment_transform_applied"):
-                source_crs = str(layer_metadata.get("source_crs"))
-                target = str(layer_metadata.get("target_crs") or scene_crs)
-                layer_diagnostics.append(_alignment_transform_diagnostic(layer_id, source_crs, target))
-                supported_features["mapscene.alignment"] = "supported"
-
-            layer_crs = getattr(layer, "crs", None)
-            has_crs_field = hasattr(layer, "crs")
-            if scene_crs and has_crs_field and layer_crs is None and not _has_explicit_crs_policy(layer):
-                layer_diagnostics.append(_missing_crs_diagnostic(str(scene_crs), layer_id=layer_id))
-                support_level = "unsupported"
-            elif scene_crs and layer_crs and not _same_crs(scene_crs, str(layer_crs)) and not _has_explicit_crs_policy(layer):
-                layer_diagnostics.append(
-                    crs_mismatch_diagnostic(
-                        str(scene_crs),
-                        str(layer_crs),
-                        layer_id=layer_id,
-                    )
-                )
-                support_level = "unsupported"
-
-            if isinstance(layer, RasterOverlay) and str(layer_id) in raster_blocks:
-                block = raster_blocks[str(layer_id)]
-                layer_type = "raster_overlay"
-                layer_memory = _dimension_memory_bytes(layer.metadata)
-                layer_diagnostics.append(Diagnostic(
-                    code="unsupported_raster_route", severity="fatal",
-                    message=block["reason"],
-                    remediation="Use one styled overlay or an ordered stack of unstyled overlays.",
-                    layer_id=layer_id, support_level="unsupported", details=block,
-                ))
-                unsupported_features["raster.overlay_route"] = "unsupported"
-                support_level = "unsupported"
-            elif isinstance(layer, RasterOverlay) and layer.style is not None:
-                layer_type = "raster_overlay"
-                layer_memory = _dimension_memory_bytes(layer.metadata)
-                details = {"style": layer.style.to_dict(), "opacity": layer.opacity}
-                try:
-                    styled = _styled_raster_result(layer)
-                    terrain_shape = _load_native_heightmap(terrain).shape
-                    _mapscene_thematic_surface(self.recipe, terrain_shape)
-                    details["legend"] = styled.legend
-                    supported_features["raster.thematic_style"] = "supported"
-                except (ValueError, TypeError, RuntimeError, AttributeError) as exc:
-                    layer_diagnostics.append(Diagnostic(code="invalid_raster_style", severity="error", message=str(exc),
-                        remediation="Correct thematic inputs and align both raster axes to the terrain grid.", layer_id=layer_id, support_level="unsupported"))
-                    support_level = "unsupported"
-            elif isinstance(layer, RasterOverlay):
-                layer_type = "raster_overlay"
-                layer_memory = _dimension_memory_bytes(layer.metadata)
-                details = {"path": _path_to_str(layer.path), "crs": layer.crs, "opacity": float(layer.opacity)}
-                supported_features["layer.raster_overlay"] = "supported"
-                if not _has_identity_path_or_metadata(layer.path, layer.metadata):
-                    layer_diagnostics.append(
-                        _missing_source_identity_diagnostic(
-                            layer_type,
-                            layer_id=layer_id,
-                            source_fields=("path", "metadata"),
-                        )
-                    )
-                    unsupported_features["raster.source_identity"] = "unsupported"
-                    support_level = "unsupported"
-                else:
-                    layer_diagnostics.extend(
-                        _asset_path_diagnostics(
-                            layer_type,
-                            layer_id=layer_id,
-                            path=layer.path,
-                            metadata=layer.metadata,
-                            supported_extensions=_RASTER_ASSET_EXTENSIONS,
-                        )
-                    )
-                    if any(
-                        diagnostic.code in {"missing_external_asset", "unsupported_asset_format"}
-                        for diagnostic in layer_diagnostics
-                    ):
-                        unsupported_features["raster.asset"] = "unsupported"
-                        support_level = "unsupported"
-            elif isinstance(layer, VectorOverlay):
-                layer_type = "vector_overlay"
-                object_count = len(layer.features or ())
-                details = {
-                    "path": _path_to_str(layer.path),
-                    "crs": layer.crs,
-                    "feature_count": object_count,
-                    "width_px": layer.width_px,
-                    "width_world": layer.width_world,
-                    "line_join": layer.line_join,
-                    "line_cap": layer.line_cap,
-                    "dash_array": _sequence(layer.dash_array),
-                }
-                supported_features["layer.vector_overlay"] = "supported"
-                supported_features["vector.stroke.joins_caps"] = "supported"
-                if layer.dash_array:
-                    supported_features["vector.stroke.dashes"] = "supported"
-                if layer.width_px is not None:
-                    supported_features["vector.stroke.width_px"] = "supported"
-                if layer.width_world is not None:
-                    supported_features["vector.stroke.width_world"] = "supported"
-                if not layer.path and not layer.features:
-                    layer_diagnostics.append(
-                        _missing_renderable_data_diagnostic(
-                            layer_type,
-                            layer_id=layer_id,
-                            required_any_of=("path", "features"),
-                        )
-                    )
-                    unsupported_features["vector.renderable_data"] = "unsupported"
-                    support_level = "unsupported"
-                elif layer.path and not layer.features:
-                    layer_diagnostics.append(placeholder_fallback_diagnostic("vector path loader", layer_id=layer_id))
-                    unsupported_features["vector.path_loader"] = "placeholder/fallback"
-                    support_level = "placeholder/fallback"
-                if layer.features and _is_3d_camera_mode(_mapscene_effective_camera_mode(self.recipe)):
-                    from ._map_scene_projection import project_vector_recipe
-                    try:
-                        projection_recipe = copy.copy(self.recipe)
-                        projection_recipe.layers = (layer,)
-                        project_vector_recipe(projection_recipe)
-                    except (MapSceneNativeUnavailable, ValueError, TypeError, RuntimeError) as exc:
-                        layer_diagnostics.append(Diagnostic(
-                            code="world_overlay_projection_unavailable", severity="error", message=str(exc),
-                            remediation="Provide finite world coordinates inside the terrain footprint.",
-                            support_level="unsupported", layer_id=layer_id))
-                        unsupported_features["vector.world_projection"] = "unsupported"
-                        support_level = "unsupported"
-                if layer.style:
-                    for style_layer in (layer.style.get("layers", ()) if isinstance(layer.style, Mapping) else ()):
-                        if not isinstance(style_layer, Mapping) or str(style_layer.get("type", "")).lower() != "line":
-                            continue
-                        paint = style_layer.get("paint") if isinstance(style_layer.get("paint"), Mapping) else {}
-                        layout = style_layer.get("layout") if isinstance(style_layer.get("layout"), Mapping) else {}
-                        if paint.get("line-dasharray"):
-                            supported_features["vector.stroke.dashes"] = "supported"
-                        if layout.get("line-cap") or layout.get("line-join"):
-                            supported_features["vector.stroke.joins_caps"] = "supported"
-                    from .style import validate_style_support
-
-                    style_report = validate_style_support(dict(layer.style))
-                    _merge_report(
-                        style_report,
-                        diagnostics=diagnostics,
-                        layer_summaries=layer_summaries,
-                        supported_features=supported_features,
-                        unsupported_features=unsupported_features,
-                    )
-                    if style_report.status in {"error", "fatal"}:
-                        support_level = "unsupported"
-                    elif style_report.status == "warning" and support_level == "supported":
-                        support_level = "underdeveloped"
-            elif isinstance(layer, LabelLayer):
-                layer_type = "label_layer"
-                labels = list(layer.labels or ())
-                object_count = len(labels)
-                details = {"label_count": object_count, "occlusion": str(layer.occlusion)}
-                supported_features["layer.label_layer"] = "supported"
-                if layer.occlusion == "terrain":
-                    supported_features["labels.occlusion.terrain"] = "supported"
-                    layer_metadata = _metadata_dict(layer.metadata)
-                    terrain_metadata = _metadata_dict(terrain.metadata)
-                    if any(
-                        key in layer_metadata or key in terrain_metadata
-                        for key in ("depth_occlusion", "depth_aov", "depth_buffer", "depth_image")
-                    ):
-                        supported_features["labels.occlusion.depth_aov"] = "supported"
-                else:
-                    supported_features["labels.occlusion.none"] = "supported"
-                layer_diagnostics.extend(
-                    diagnostic if isinstance(diagnostic, Diagnostic) else Diagnostic.from_dict(diagnostic)
-                    for diagnostic in (layer.diagnostics or ())
-                )
-                if not _has_labels_or_plan(layer):
-                    layer_diagnostics.append(
-                        _missing_renderable_data_diagnostic(
-                            layer_type,
-                            layer_id=layer_id,
-                            required_any_of=("labels", "plan"),
-                        )
-                    )
-                    unsupported_features["labels.renderable_data"] = "unsupported"
-                    support_level = "unsupported"
-                label_report = validate_label_support(
-                    labels,
-                    atlas_glyphs=_atlas_glyph_set(layer.glyph_atlas),
-                    layer_id=layer_id,
-                )
-                _merge_report(
-                    label_report,
-                    diagnostics=diagnostics,
-                    layer_summaries=layer_summaries,
-                    supported_features=supported_features,
-                    unsupported_features=unsupported_features,
-                )
-                if _has_labels_or_plan(layer):
-                    frozen_plans = getattr(self, "_frozen_validation_label_plans", None)
-                    if frozen_plans is not None and layer_id in frozen_plans:
-                        plan = frozen_plans[layer_id]
-                    else:
-                        try:
-                            plan = _label_plan_from_layer(layer, recipe=self.recipe, terrain=terrain,
-                                projection_context=projection_context)
-                        except (MapSceneNativeUnavailable, ValueError, TypeError, RuntimeError) as exc:
-                            from .label_plan import LabelPlan
-                            world_projection = _is_3d_camera_mode(_mapscene_effective_camera_mode(self.recipe))
-                            plan = LabelPlan(accepted=(), rejected=(), diagnostics=[Diagnostic(
-                                code="world_overlay_projection_unavailable" if world_projection else "label_plan_compile_unavailable",
-                                severity="error", message=str(exc),
-                                remediation="Provide valid label geometry, projection and depth metadata.",
-                                support_level="unsupported", layer_id=layer_id,
-                            )])
-                    self.compiled_label_plans[layer_id] = plan
-                    plan_diagnostics = [_diagnostic_for_layer(diagnostic, layer_id) for diagnostic in plan.diagnostics]
-                    existing_diagnostic_keys = {
-                        (diagnostic.code, diagnostic.layer_id, diagnostic.object_id)
-                        for diagnostic in diagnostics
-                    }
-                    plan_diagnostics = [
-                        diagnostic
-                        for diagnostic in plan_diagnostics
-                        if (diagnostic.code, diagnostic.layer_id, diagnostic.object_id) not in existing_diagnostic_keys
-                    ]
-                    diagnostics.extend(plan_diagnostics)
-                    details["compiled_label_plan"] = {
-                        "accepted_count": len(plan.accepted),
-                        "rejected_count": len(plan.rejected),
-                        "diagnostic_codes": sorted({diagnostic.code for diagnostic in plan_diagnostics}),
-                        "seed": plan.seed,
-                    }
-                    if any(diagnostic.severity in {"error", "fatal"} for diagnostic in plan_diagnostics):
-                        support_level = "underdeveloped"
-                    elif support_level == "supported":
-                        support_level = "supported"
-            elif isinstance(layer, PointCloudLayer):
-                layer_type = "point_cloud_layer"
-                object_count = layer.point_count
-                layer_memory = _point_cloud_memory_bytes(layer.point_count)
-                details = {"path": _path_to_str(layer.path), "crs": layer.crs, "point_count": layer.point_count}
-                has_renderable_points = "positions" in _metadata_dict(layer.metadata) or bool(layer.path)
-                supported_features["layer.point_cloud"] = "supported" if has_renderable_points else "underdeveloped"
-                if has_renderable_points:
-                    supported_features["point_cloud.mapscene_render"] = "supported"
-                support_level = "supported" if has_renderable_points else "underdeveloped"
-                if not layer.path and layer.point_count is None and not _metadata_dict(layer.metadata):
-                    layer_diagnostics.append(
-                        _missing_source_identity_diagnostic(
-                            layer_type,
-                            layer_id=layer_id,
-                            source_fields=("path", "point_count", "metadata"),
-                        )
-                    )
-                    unsupported_features["point_cloud.source_identity"] = "unsupported"
-                    support_level = "unsupported"
-                else:
-                    layer_diagnostics.extend(
-                        _asset_path_diagnostics(
-                            layer_type,
-                            layer_id=layer_id,
-                            path=layer.path,
-                            metadata=layer.metadata,
-                            supported_extensions=_POINT_CLOUD_ASSET_EXTENSIONS,
-                        )
-                    )
-                    if any(
-                        diagnostic.code in {"missing_external_asset", "unsupported_asset_format"}
-                        for diagnostic in layer_diagnostics
-                    ):
-                        unsupported_features["point_cloud.asset"] = "unsupported"
-                        support_level = "unsupported"
-                if support_level == "underdeveloped":
-                    layer_diagnostics.append(
-                        placeholder_fallback_diagnostic("point cloud MapScene render path", layer_id=layer_id)
-                    )
-                    unsupported_features["point_cloud.mapscene_render"] = "placeholder/fallback"
-                    support_level = "placeholder/fallback"
-            elif isinstance(layer, Tiles3DLayer):
-                layer_type = "tiles3d_layer"
-                object_count = None
-                layer_memory = _explicit_memory_bytes(layer.metadata)
-                source_path = _source_path(layer.source)
-                source_kind = _source_kind(layer.source, layer.metadata)
-                details = {
-                    "source_kind": source_kind,
-                    "cache_budget": layer.cache_budget,
-                    "cache_stats": _metadata(layer.cache_stats),
-                    "lod": _metadata(layer.lod),
-                }
-                supported_features["layer.tiles3d_intent"] = "underdeveloped"
-                support_level = layer.support_level
-                layer_diagnostics.extend(
-                    diagnostic if isinstance(diagnostic, Diagnostic) else Diagnostic.from_dict(diagnostic)
-                    for diagnostic in (layer.diagnostics or ())
-                )
-                if layer.source is None and not _metadata_dict(layer.metadata):
-                    layer_diagnostics.append(
-                        _missing_source_identity_diagnostic(
-                            layer_type,
-                            layer_id=layer_id,
-                            source_fields=("source", "metadata"),
-                        )
-                    )
-                    unsupported_features["tiles3d.source_identity"] = "unsupported"
-                    support_level = "unsupported"
-                else:
-                    if source_path:
-                        if not source_path.lower().endswith(("tileset.json", ".b3dm", ".pnts")):
-                            layer_diagnostics.append(
-                                unsupported_tile_format_diagnostic(
-                                    Path(source_path).suffix.lstrip(".") or source_kind or "unknown",
-                                    layer_id=layer_id,
-                                    object_id=source_path,
-                                )
-                            )
-                            unsupported_features["tiles3d.format"] = "unsupported"
-                            support_level = "unsupported"
-                        layer_diagnostics.extend(
-                            _asset_path_diagnostics(
-                                layer_type,
-                                layer_id=layer_id,
-                                path=source_path,
-                                metadata=layer.metadata,
-                                supported_extensions=("tileset.json", ".b3dm", ".pnts"),
-                            )
-                        )
-                    for feature in _metadata_dict(layer.metadata).get("unsupported_features", ()) or ():
-                        layer_diagnostics.append(
-                            unsupported_tile_feature_diagnostic(str(feature), layer_id=layer_id)
-                        )
-                        unsupported_features["tiles3d.feature"] = "unsupported"
-                        support_level = "unsupported"
-                    if support_level != "unsupported" and _tiles3d_layer_has_native_geometry(layer):
-                        supported_features["layer.tiles3d_intent"] = "supported"
-                        supported_features["tiles3d.mapscene_render"] = "supported"
-                        support_level = "supported"
-                    elif support_level != "unsupported":
-                        layer_diagnostics.append(python_public_3dtiles_incomplete_diagnostic(layer_id=layer_id))
-                        unsupported_features["tiles3d.public_python_render"] = "underdeveloped"
-                        support_level = "underdeveloped"
-            elif isinstance(layer, BuildingLayer):
-                layer_type = "building_layer"
-                object_count = layer.geometry_count
-                layer_memory = _geometry_memory_bytes(layer.geometry_count)
-                source_kind = _source_kind(layer.source, layer.metadata)
-                support_level = layer.support_level
-                details = {
-                    "geometry_count": layer.geometry_count,
-                    "material_status": layer.material_status,
-                    "source_kind": source_kind,
-                }
-                scalar_building = str(layer.material_status or "").lower().startswith("scalar")
-                supported_features["layer.building_intent"] = "supported" if scalar_building else "underdeveloped"
-                if scalar_building:
-                    supported_features["buildings.scalar_materials"] = "supported"
-                    supported_features["buildings.mapscene_render"] = "supported"
-                if layer.source is None and not _metadata_dict(layer.metadata):
-                    layer_diagnostics.append(
-                        _missing_source_identity_diagnostic(
-                            layer_type,
-                            layer_id=layer_id,
-                            source_fields=("source", "metadata"),
-                        )
-                    )
-                    unsupported_features["buildings.source_identity"] = "unsupported"
-                    support_level = "unsupported"
-                elif (
-                    layer.support_level == "supported"
-                    or (layer.support_level == "underdeveloped" and bool(layer.features))
-                ) and scalar_building:
-                    layer_diagnostics.extend(
-                        _asset_path_diagnostics(
-                            layer_type,
-                            layer_id=layer_id,
-                            path=_source_path(layer.source),
-                            metadata=layer.metadata,
-                            supported_extensions=_BUILDING_ASSET_EXTENSIONS,
-                        )
-                    )
-                    if any(
-                        diagnostic.code in {"missing_external_asset", "unsupported_asset_format"}
-                        for diagnostic in layer_diagnostics
-                    ):
-                        unsupported_features["buildings.asset"] = "unsupported"
-                        support_level = "unsupported"
-                    else:
-                        support_level = "supported"
-                if source_kind == "3dtiles":
-                    layer_diagnostics.append(python_public_3dtiles_incomplete_diagnostic(layer_id=layer_id))
-                    unsupported_features["tiles3d.public_python_render"] = "underdeveloped"
-                    support_level = "underdeveloped"
-                if layer.support_level == "Pro-gated":
-                    layer_diagnostics.append(pro_gated_path_diagnostic("building layer", layer_id=layer_id))
-                    unsupported_features["buildings.pro_gated_path"] = "Pro-gated"
-                if str(layer.material_status or "").lower() in {"textured_pbr_unsupported", "textured pbr unsupported"}:
-                    layer_diagnostics.append(
-                        _unsupported_feature_diagnostic("building textured PBR", layer_id=layer_id)
-                    )
-                    unsupported_features["buildings.textured_pbr"] = "unsupported"
-                elif layer.support_level == "placeholder/fallback" or (
-                    layer.geometry_count == 0 and layer.support_level not in {"experimental", "underdeveloped"}
-                ):
-                    layer_diagnostics.append(placeholder_fallback_diagnostic("building layer", layer_id=layer_id))
-                    unsupported_features["buildings.placeholder_fallback"] = "placeholder/fallback"
-                    support_level = "placeholder/fallback"
-                elif layer.support_level == "experimental":
-                    layer_diagnostics.append(experimental_feature_diagnostic("building layer", layer_id=layer_id))
-                    unsupported_features["buildings.experimental"] = "experimental"
-                elif layer.support_level == "unsupported":
-                    layer_diagnostics.append(_unsupported_feature_diagnostic("building layer", layer_id=layer_id))
-                    unsupported_features["buildings.unsupported"] = "unsupported"
-                texture_diagnostics, texture_details, texture_support = _p2_building_texture_diagnostics(
-                    layer.metadata,
-                    layer_id=layer_id,
-                )
-                if texture_details:
-                    details.update(texture_details)
-                if texture_diagnostics:
-                    layer_diagnostics.extend(texture_diagnostics)
-                    if any(diagnostic.code == "missing_texture_path" for diagnostic in texture_diagnostics):
-                        unsupported_features["buildings.missing_texture_path"] = "unsupported"
-                    if any(diagnostic.code == "missing_uvs" for diagnostic in texture_diagnostics):
-                        unsupported_features["buildings.missing_uvs"] = "unsupported"
-                    if any(diagnostic.code == "unsupported_texture_format" for diagnostic in texture_diagnostics):
-                        unsupported_features["buildings.unsupported_texture_format"] = "unsupported"
-                    if any(diagnostic.code == "placeholder_fallback" for diagnostic in texture_diagnostics):
-                        unsupported_features["buildings.textured_material_fallback"] = "placeholder/fallback"
-                    if any(diagnostic.code == "unsupported_feature" for diagnostic in texture_diagnostics):
-                        unsupported_features["buildings.textured_pbr"] = "unsupported"
-                    if texture_support == "unsupported":
-                        support_level = "unsupported"
-                    elif texture_support == "placeholder/fallback" and support_level not in {"unsupported", "Pro-gated"}:
-                        support_level = "placeholder/fallback"
-                elif texture_support == "supported":
-                    supported_features["buildings.textured_pbr"] = "supported"
-            else:
-                layer_diagnostics.append(_unsupported_layer_type_diagnostic(layer, layer_id=layer_id))
-                unsupported_features["layer.unknown"] = "unsupported"
-                support_level = "unsupported"
-                details = {"python_type": type(layer).__name__}
-
-            resource_diagnostics, resource_details, resource_support = _p2_resource_availability_diagnostics(
-                getattr(layer, "metadata", None),
-                layer_id=layer_id,
-                layer_type=layer_type,
-            )
-            if resource_diagnostics:
-                layer_diagnostics.extend(resource_diagnostics)
-                details.update(resource_details)
-                if any(diagnostic.code == "unavailable_cache_lod_stats" for diagnostic in resource_diagnostics):
-                    unsupported_features[f"{layer_type}.cache_lod_stats"] = "underdeveloped"
-                if any(diagnostic.code == "unsupported_instancing_path" for diagnostic in resource_diagnostics):
-                    unsupported_features[f"{layer_type}.instancing"] = "unsupported"
-                if resource_support == "unsupported":
-                    support_level = "unsupported"
-                elif resource_support == "underdeveloped" and support_level == "supported":
-                    support_level = "underdeveloped"
-
-            if layer_memory is not None:
-                total_memory += layer_memory
-                memory_known = True
-            if any(diagnostic.code in {"crs_mismatch", "missing_crs"} for diagnostic in layer_diagnostics):
-                support_level = "unsupported"
-
-            diagnostics.extend(layer_diagnostics)
-            layer_summaries.append(
-                LayerSummary(
-                    layer_id=layer_id,
-                    layer_type=layer_type,
-                    support_level=support_level,
-                    diagnostic_codes=_diagnostic_codes_for_layer(diagnostics, layer_id),
-                    object_count=object_count,
-                    bounds=getattr(layer, "bounds", None),
-                    memory_estimate_bytes=layer_memory,
-                    details=details,
-                )
-            )
-
-        estimated_memory = total_memory if memory_known else None
-        budget = None
-        diagnostics_policy = _metadata_dict(self.recipe.diagnostics_policy)
-        if "gpu_memory_budget_bytes" in diagnostics_policy:
-            try:
-                budget = int(diagnostics_policy["gpu_memory_budget_bytes"])
-            except (TypeError, ValueError):
-                budget = None
-        if estimated_memory is not None and budget is not None:
-            diagnostics.append(
-                estimated_gpu_memory_diagnostic(
-                    estimated_memory,
-                    budget,
-                    layer_id="scene",
-                )
-            )
-
-        if bool(diagnostics_policy.get("large_scene_summary")):
-            layer_summaries.append(
-                _large_scene_resource_summary(
-                    layer_summaries,
-                    estimated_memory=estimated_memory,
-                    diagnostics=diagnostics,
-                )
-            )
-
-        report = ValidationReport(
-            diagnostics=diagnostics,
-            layer_summaries=layer_summaries,
-            estimated_gpu_memory_bytes=estimated_memory,
-            supported_features=supported_features,
-            unsupported_features=unsupported_features,
-        )
-        self.last_validation_report = report
-        return report
+        """Refresh diagnostics without replacing unchanged frozen decisions."""
+        return self._compiler.validate(self.recipe)
 
     def compile_plan(self) -> CompiledScenePlan:
-        """Resolve and freeze the render plan from serialized inputs only.
+        """Resolve and freeze labels, depth culling and recipe identity.
 
-        Runs BEFORE any drawing and BEFORE serialization: label placements
-        are resolved, depth-occlusion culling is evaluated against the
-        deterministic CPU camera/terrain proxy (never a live GPU frame), and
-        the resulting label set, decluttering decisions, and per-label
-        visibility flags are frozen into a ``RecipeManifest``. The output is
-        a total function of the serialized recipe, so a reloaded bundle
-        reproduces the identical cull.
+        Explicit compilation rebuilds decisions from serialized recipe inputs.
+        Rendering and bundle saving reuse them until the recipe changes.
         """
-        from types import MappingProxyType
-
-        from .recipe_manifest import RecipeManifest
-
-        report = self.validate()
-        recipe_payload = self.recipe.to_dict(include_pass_data=False)
-        recipe_hash = _stable_hash(recipe_payload)
-        camera_terrain_key = _stable_hash(
-            {
-                "camera": self.recipe.camera.to_dict(),
-                "terrain": _json_safe(self.recipe.terrain),
-                "output": self.recipe.output.to_dict() if self.recipe.output is not None else None,
-            }
-        )
-        label_plans = dict(self.compiled_label_plans)
-        compiled_label_plans = {
-            str(layer_id): plan.to_dict() for layer_id, plan in sorted(label_plans.items())
-        }
-        depth_cull_layers: dict[str, Any] = {}
-        for layer_id, plan in sorted(label_plans.items()):
-            visibility: dict[str, Any] = {}
-            for visible, labels_for_state in (
-                (True, plan.accepted),
-                (False, plan.rejected),
-            ):
-                for label in labels_for_state:
-                    instance_id = "label-instance:" + _stable_hash(
-                        {
-                            "layer_id": str(layer_id),
-                            "label_id": str(label.label_id),
-                            "source_id": str(label.source_id),
-                            "ordering_key": str(label.ordering_key or ""),
-                        }
-                    )
-                    entry = {
-                        "instance_id": instance_id,
-                        "label_id": str(label.label_id),
-                        "source_id": str(label.source_id),
-                        "visible": visible,
-                    }
-                    if not visible:
-                        entry["reason"] = str(label.reason)
-                    visibility[instance_id] = entry
-            depth_cull_layers[str(layer_id)] = {
-                "accepted": [str(label.label_id) for label in plan.accepted],
-                "rejected": [
-                    {"label_id": str(label.label_id), "reason": str(label.reason)}
-                    for label in plan.rejected
-                ],
-                # Public label ids are presentation metadata and need not be
-                # unique.  Stable instance/source identity prevents duplicate
-                # ids from overwriting each other's frozen visibility state.
-                "visibility": visibility,
-            }
-        depth_authorities = sorted(
-            {
-                str(sample["depth_authority"])
-                for plan in label_plans.values()
-                for sample in (
-                    *(
-                        dict(candidate.terrain_sample or {})
-                        for label in plan.accepted
-                        for candidate in label.candidates
-                    ),
-                    *(
-                        dict(label.details.get("terrain_sample") or {})
-                        for label in plan.rejected
-                    ),
-                )
-                if sample.get("depth_authority")
-            }
-        )
-        manifest = RecipeManifest(
-            recipe_family="mapscene_showcases",
-            recipe_id=f"mapscene-compiled-{recipe_hash[:16]}",
-            status="proven_in_forge3d",
-            camera_defaults=self.recipe.camera.to_dict(),
-            lighting_defaults=self.recipe.lighting.to_dict(),
-            render_export_defaults=(
-                self.recipe.output.to_dict() if self.recipe.output is not None else {}
-            ),
-            compiled_label_plans=compiled_label_plans,
-            compiled_render_passes=recipe_payload.get("render_passes") or {},
-            depth_cull={
-                "source": "compile_phase",
-                "depth_inputs": depth_authorities,
-                "depth_proxy": (
-                    "pre_supplied_authoritative"
-                    if "pre_supplied_authoritative" in depth_authorities
-                    else "deterministic_terrain_proxy"
-                ),
-                "camera_terrain_key": camera_terrain_key,
-                "layers": depth_cull_layers,
-            },
-        )
-        compiled = CompiledScenePlan(
-            recipe_hash=recipe_hash,
-            camera_terrain_key=camera_terrain_key,
-            label_plans=MappingProxyType(label_plans),
-            manifest=manifest,
-            validation_report=report,
-            render_passes_json=(json.dumps(manifest.compiled_render_passes, sort_keys=True, allow_nan=False)
-                                if manifest.compiled_render_passes else None),
-            render_pass_inputs=MappingProxyType(dict(self.recipe.pass_inputs)),
-        )
-        self.compiled_plan = compiled
-        return compiled
+        return self._compiler.compile(self.recipe)
 
     def _rehydrate_compiled_plan(self, manifest: Any) -> CompiledScenePlan:
-        """Restore a frozen compiled plan verbatim from a bundle manifest."""
-        from types import MappingProxyType
-
-        from .label_plan import LabelPlan
-
-        label_plans = {
-            str(layer_id): LabelPlan.from_dict(payload)
-            for layer_id, payload in dict(manifest.compiled_label_plans or {}).items()
-        }
-        # Validate the recipe and frozen plan diagnostics without making new
-        # label/depth decisions while loading a v3 manifest.
-        self._frozen_validation_label_plans = label_plans
-        try:
-            report = self.validate()
-        finally:
-            del self._frozen_validation_label_plans
-        self.compiled_label_plans = dict(label_plans)
-        depth_cull = dict(manifest.depth_cull or {})
-        pass_payload = self.recipe.to_dict(include_pass_data=False).get("render_passes") or {}
-        if manifest.compiled_render_passes != pass_payload:
-            raise ValueError("compiled render passes do not match the bundle recipe")
-        compiled = CompiledScenePlan(
-            recipe_hash=_stable_hash(self.recipe.to_dict(include_pass_data=False)),
-            camera_terrain_key=str(depth_cull.get("camera_terrain_key") or ""),
-            label_plans=MappingProxyType(label_plans),
-            manifest=manifest,
-            validation_report=report,
-            render_passes_json=(json.dumps(manifest.compiled_render_passes, sort_keys=True, allow_nan=False)
-                                if manifest.compiled_render_passes else None),
-            render_pass_inputs=MappingProxyType(dict(self.recipe.pass_inputs)),
-        )
-        self.compiled_plan = compiled
-        return compiled
+        """Restore persisted decisions without running fresh label planning."""
+        return self._compiler.restore(self.recipe, manifest)
 
     def _compiled_plan_for_current_recipe(self) -> CompiledScenePlan:
-        """Reuse the compiled plan only when it still matches the recipe.
-
-        A compiled plan is a total function of the serialized recipe; after
-        any recipe mutation it is stale and must be recompiled once, or a
-        render/bundle would carry frozen state from a recipe that no longer
-        exists.
-        """
-        current_hash = _stable_hash(self.recipe.to_dict(include_pass_data=False))
-        compiled = self.compiled_plan
-        if compiled is None or compiled.recipe_hash != current_hash:
-            return self.compile_plan()
-        return compiled
+        return self._compiler.current(self.recipe)
 
     def _report_with_feature(self, report: ValidationReport, feature: str, support_level: str) -> ValidationReport:
         payload = report.to_dict()
