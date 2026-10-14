@@ -28,6 +28,12 @@ fn mesh_cpu_from_py(
 ) -> PyResult<MeshCPU> {
     let v = vertices.as_array();
     let i = indices.as_array();
+    if v.shape()[1] != 3 {
+        return Err(PyValueError::new_err("vertices must have shape (N, 3)"));
+    }
+    if i.shape()[1] != 3 {
+        return Err(PyValueError::new_err("indices must have shape (M, 3)"));
+    }
     if v.shape()[0] == 0 {
         return Err(PyValueError::new_err("vertices must not be empty"));
     }
@@ -93,10 +99,18 @@ fn bvh_cpu_from_py(
             tri.len()
         )));
     }
+    // A true permutation is required: duplicates would upload one triangle twice
+    // and drop another, with every index still in range.
+    let mut seen = vec![false; triangle_count as usize];
     for &index in tri {
         if index >= triangle_count {
             return Err(PyValueError::new_err(
-                "tri_indices must be a permutation of the triangle indices",
+                "tri_indices must only reference triangles inside the mesh",
+            ));
+        }
+        if std::mem::replace(&mut seen[index as usize], true) {
+            return Err(PyValueError::new_err(
+                "tri_indices must be a permutation without duplicate triangles",
             ));
         }
     }
@@ -190,14 +204,6 @@ fn bvh_cpu_from_py(
     })
 }
 
-/// Total bytes held by the four tracked atlas buffers.
-fn atlas_bytes(atlas: &MeshAtlas) -> u64 {
-    atlas.vertex_buffer.size()
-        + atlas.index_buffer.size()
-        + atlas.bvh_buffer.size()
-        + atlas.descs_buffer.size()
-}
-
 /// Handle to a mesh and BVH uploaded into tracked GPU buffers.
 #[pyclass(module = "forge3d._forge3d", name = "GpuMeshHandle")]
 pub struct GpuMeshHandle {
@@ -205,8 +211,6 @@ pub struct GpuMeshHandle {
     vertex_count: u32,
     triangle_count: u32,
     node_count: u32,
-    world_aabb_min: [f32; 3],
-    world_aabb_max: [f32; 3],
 }
 
 #[pymethods]
@@ -214,7 +218,10 @@ impl GpuMeshHandle {
     /// Bytes of tracked GPU memory held by the mesh, index, BVH and descriptor buffers.
     #[getter]
     fn gpu_memory_bytes(&self) -> u64 {
-        atlas_bytes(&self.atlas)
+        self.atlas.vertex_buffer.size()
+            + self.atlas.index_buffer.size()
+            + self.atlas.bvh_buffer.size()
+            + self.atlas.descs_buffer.size()
     }
 
     #[getter]
@@ -230,30 +237,6 @@ impl GpuMeshHandle {
     #[getter]
     fn node_count(&self) -> u32 {
         self.node_count
-    }
-
-    /// Number of BLAS descriptors in the uploaded atlas (one per mesh).
-    #[getter]
-    fn blas_desc_count(&self) -> u32 {
-        self.atlas.desc_count
-    }
-
-    #[getter]
-    fn world_aabb_min(&self) -> (f32, f32, f32) {
-        (
-            self.world_aabb_min[0],
-            self.world_aabb_min[1],
-            self.world_aabb_min[2],
-        )
-    }
-
-    #[getter]
-    fn world_aabb_max(&self) -> (f32, f32, f32) {
-        (
-            self.world_aabb_max[0],
-            self.world_aabb_max[1],
-            self.world_aabb_max[2],
-        )
     }
 
     fn __repr__(&self) -> String {
@@ -349,8 +332,6 @@ pub(crate) fn mesh_upload_gpu(
     let vertex_count = mesh.vertex_count();
     let triangle_count = mesh.triangle_count();
     let node_count = bvh.node_count();
-    let world_aabb_min = bvh.world_aabb.min;
-    let world_aabb_max = bvh.world_aabb.max;
 
     let device = Arc::clone(&crate::core::gpu::try_ctx()?.device);
     let atlas = build_mesh_atlas(&device, &[(mesh, bvh)])
@@ -361,7 +342,5 @@ pub(crate) fn mesh_upload_gpu(
         vertex_count,
         triangle_count,
         node_count,
-        world_aabb_min,
-        world_aabb_max,
     })
 }

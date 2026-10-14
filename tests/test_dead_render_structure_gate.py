@@ -137,13 +137,13 @@ def test_dead_ktx2_dds_duplicate_loaders_do_not_return() -> None:
 
 
 # `forge3d.mesh.build_bvh_cpu` and `upload_mesh` must build the real Rust BVH and
-# upload tracked GPU buffers. The retired hand-written estimate and the no-op
-# handle must not return.
+# upload tracked GPU buffers. Only the retired mock's distinctive phrases are
+# banned: bare identifiers a real estimator or builder could reuse (for example
+# `estimated_leaves`) are deliberately left out, so this gate cannot fail a
+# correct future implementation with a misleading message.
 FORBIDDEN_MESH_MOCK_MARKERS = (
     "for now return mock data",
     "Mock BVH statistics",
-    "estimated_leaves",
-    "estimated_nodes",
     "In real implementation, this would call Rust code",
 )
 

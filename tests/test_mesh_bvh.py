@@ -20,6 +20,16 @@ from forge3d._native import get_native_symbol
 _BVH_NODE_BYTES = 40
 
 
+def _triangle_mesh():
+    vertices, indices = M.create_triangle_mesh()
+    return M.make_mesh(vertices, indices)
+
+
+def _quad_mesh():
+    vertices, indices = M.create_quad_mesh()
+    return M.make_mesh(vertices, indices)
+
+
 def _cube_mesh():
     vertices, indices = M.create_cube_mesh()
     return M.make_mesh(vertices, indices)
@@ -145,7 +155,9 @@ def test_build_bvh_cpu_rejects_invalid_requests():
     get_native_symbol("mesh_build_bvh_cpu") is None,
     reason="native BVH builder not available",
 )
-@pytest.mark.parametrize("mesh_factory", [_cube_mesh, _clustered_mesh])
+@pytest.mark.parametrize(
+    "mesh_factory", [_triangle_mesh, _quad_mesh, _cube_mesh, _clustered_mesh]
+)
 def test_python_fallback_matches_native_build(mesh_factory):
     mesh = mesh_factory()
     native = M.build_bvh_cpu(mesh)
@@ -192,6 +204,34 @@ def test_upload_mesh_rejects_mismatched_triangle_counts():
     bvh["triangle_count"] = bvh["triangle_count"] + 1
     with pytest.raises(ValueError):
         M.upload_mesh(mesh, bvh)
+
+
+@pytest.mark.skipif(
+    get_native_symbol("mesh_build_bvh_cpu") is None,
+    reason="native BVH builder not available",
+)
+def test_native_builder_rejects_wrongly_shaped_arrays():
+    native = get_native_symbol("mesh_build_bvh_cpu")
+    # A 4-wide vertex array must not be read as the first three columns.
+    with pytest.raises(ValueError):
+        native(np.zeros((3, 4), dtype=np.float32), np.zeros((1, 3), dtype=np.uint32), "median", 4)
+    # A 2-wide index array must not panic on the third column.
+    with pytest.raises(ValueError):
+        native(np.zeros((3, 3), dtype=np.float32), np.zeros((1, 2), dtype=np.uint32), "median", 4)
+
+
+@pytest.mark.skipif(
+    get_native_symbol("mesh_upload_gpu") is None,
+    reason="native mesh upload not available",
+)
+def test_upload_mesh_rejects_a_duplicate_triangle_order():
+    mesh = _cube_mesh()
+    bvh = M.build_bvh_cpu(mesh)
+    duplicated = np.array(bvh["tri_indices"], dtype=np.uint32)
+    duplicated[0] = duplicated[1]  # duplicate one triangle, drop another
+    corrupt = dict(bvh, tri_indices=duplicated)
+    with pytest.raises(ValueError):
+        M.upload_mesh(mesh, corrupt)
 
 
 @pytest.mark.skipif(
