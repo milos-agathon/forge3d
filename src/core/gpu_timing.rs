@@ -16,7 +16,7 @@ use super::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use wgpu::*;
 
 /// Number of frames in flight for the timestamp double buffer.
@@ -141,7 +141,9 @@ struct SubmittedTimingBatch {
     query_count: u32,
     scopes: Vec<RecordedScope>,
     readback: Arc<TrackedBuffer>,
-    mapping: Option<Receiver<Result<(), BufferAsyncError>>>,
+    // Preserve the manager's native Send + Sync contract. Reading uses exclusive
+    // mutable access through get_mut, so this mutex never needs to be locked.
+    mapping: Option<Mutex<Receiver<Result<(), BufferAsyncError>>>>,
     mapping_active: bool,
 }
 
@@ -156,12 +158,13 @@ impl SubmittedTimingBatch {
             .map_async(MapMode::Read, move |result| {
                 let _ = sender.send(result);
             });
-        self.mapping = Some(receiver);
+        self.mapping = Some(Mutex::new(receiver));
         self.mapping_active = true;
     }
 
     fn try_read(&mut self) -> RenderResult<Option<Vec<u64>>> {
-        match self.mapping.as_ref().expect("mapping started").try_recv() {
+        match self.mapping.as_mut().expect("mapping started")
+            .get_mut().expect("private timing receiver mutex is never locked").try_recv() {
             Ok(Ok(())) => {
                 let data = self
                     .readback
@@ -998,7 +1001,7 @@ mod tests {
         batch.start_mapping();
         let actual_mapping = batch.mapping.take();
         let (_delayed_sender, delayed_receiver) = mpsc::channel();
-        batch.mapping = Some(delayed_receiver);
+        batch.mapping = Some(Mutex::new(delayed_receiver));
         assert!(manager.try_get_results().unwrap().is_empty());
         assert_eq!(
             manager.submitted.len(),
@@ -1226,6 +1229,13 @@ mod tests {
         device.poll(Maintain::Wait);
         std::mem::forget(device);
         std::mem::forget(queue);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn gpu_timing_manager_preserves_native_thread_traits() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<GpuTimingManager>();
     }
 
     #[test]
