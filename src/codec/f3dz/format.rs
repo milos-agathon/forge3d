@@ -4,6 +4,7 @@
 //! bit pattern, never by text. The fixed header and every page-index record
 //! are 64 bytes so readers can range-fetch the index without decoding pages.
 
+use super::predict::PlaneModel;
 use super::{F3dzError, F3dzResult};
 
 pub const MAGIC: [u8; 4] = *b"F3DZ";
@@ -11,6 +12,7 @@ pub const PAGE_MAGIC: [u8; 4] = *b"F3PG";
 pub const VERSION: u16 = 1;
 pub const FIXED_HEADER_LEN: usize = 64;
 pub const PAGE_INDEX_LEN: usize = 64;
+pub(crate) const PAGE_HEADER_LEN: usize = 56;
 pub const MAX_GPU_PAGE_SIZE: u16 = 64;
 
 pub const FLAG_PROGRESSIVE: u32 = 1 << 0;
@@ -142,6 +144,214 @@ impl PageIndexEntry {
     pub fn gpu_direct(&self) -> bool {
         self.flags & PAGE_FLAG_GPU_DIRECT != 0
     }
+}
+
+/// Structural facts checked before either execution adapter decodes symbols.
+/// Entropy layers borrow the original bytes; validation never entropy-decodes.
+pub(crate) struct ValidatedPage<'a> {
+    pub entry: PageIndexEntry,
+    pub enhancement_predictor: u8,
+    pub plane: PlaneModel,
+    pub fine_step: f32,
+    pub base_step: f32,
+    pub base_scale: u32,
+    pub enhancement_scale: u32,
+    pub base_layer: &'a [u8],
+    pub enhancement_layer: &'a [u8],
+}
+
+pub(crate) struct ValidatedStream<'a> {
+    pub header: ContainerHeader,
+    pub pages: Vec<ValidatedPage<'a>>,
+}
+
+pub(crate) fn validate_stream(data: &[u8]) -> F3dzResult<ValidatedStream<'_>> {
+    let (header, entries) = parse_prefix(data)?;
+    let pages = validate_pages(data, &header, entries)?;
+    Ok(ValidatedStream { header, pages })
+}
+
+/// Keep prefix parsing separate for callers that compare the demanded epsilon
+/// before validating payloads, and for range readers that only have the index.
+pub(crate) fn validate_pages<'a>(
+    data: &'a [u8],
+    header: &ContainerHeader,
+    entries: Vec<PageIndexEntry>,
+) -> F3dzResult<Vec<ValidatedPage<'a>>> {
+    let mut pages = Vec::with_capacity(entries.len());
+    let mut expected_payload_offset = header.payload_offset;
+    let pages_x = header.width.div_ceil(u32::from(header.tile_size));
+    for (page_index, entry) in entries.into_iter().enumerate() {
+        let corrupt = |reason| F3dzError::CorruptPage {
+            page: page_index,
+            reason,
+        };
+        if entry.page_x != page_index as u32 % pages_x
+            || entry.page_y != page_index as u32 / pages_x
+        {
+            return Err(corrupt(
+                "page index entries must appear once in canonical row-major order".to_string(),
+            ));
+        }
+        if entry.payload_offset != expected_payload_offset {
+            return Err(corrupt(format!(
+                "payload offset is not canonical/contiguous: expected={expected_payload_offset} actual={}",
+                entry.payload_offset
+            )));
+        }
+        let start = usize::try_from(entry.payload_offset)
+            .map_err(|_| corrupt("payload offset exceeds usize".to_string()))?;
+        let end = start
+            .checked_add(entry.payload_len as usize)
+            .ok_or_else(|| corrupt("payload range overflow".to_string()))?;
+        require_len(data, end)?;
+        let payload = &data[start..end];
+        let actual_crc = crc32(payload);
+        if actual_crc != entry.crc32 {
+            return Err(corrupt(format!(
+                "CRC mismatch: stored=0x{:08x} actual=0x{actual_crc:08x}",
+                entry.crc32
+            )));
+        }
+        expected_payload_offset = entry
+            .payload_offset
+            .checked_add(u64::from(entry.payload_len))
+            .ok_or_else(|| corrupt("payload offset overflow".to_string()))?;
+        let page =
+            validate_page(header, entry, payload).map_err(|error| corrupt(error.to_string()))?;
+        pages.push(page);
+    }
+    if expected_payload_offset != data.len() as u64 {
+        return Err(F3dzError::InvalidHeader(format!(
+            "container has trailing or missing payload bytes: indexed_end={expected_payload_offset} actual={}",
+            data.len()
+        )));
+    }
+    Ok(pages)
+}
+
+fn validate_page<'a>(
+    header: &ContainerHeader,
+    entry: PageIndexEntry,
+    payload: &'a [u8],
+) -> F3dzResult<ValidatedPage<'a>> {
+    require_len(payload, PAGE_HEADER_LEN)?;
+    if payload[0..4] != PAGE_MAGIC {
+        return Err(F3dzError::InvalidArgument(
+            "page payload magic must be F3PG".to_string(),
+        ));
+    }
+    if get_u16(payload, 4) != VERSION {
+        return Err(F3dzError::InvalidArgument(
+            "page payload version mismatch".to_string(),
+        ));
+    }
+    if get_u16(payload, 6) != u16::from(entry.flags)
+        || get_u16(payload, 10) != 0
+        || get_u32(payload, 52) != 0
+    {
+        return Err(F3dzError::InvalidArgument(
+            "page payload flags/reserved fields disagree with its container".to_string(),
+        ));
+    }
+    let predictor_id = payload[8];
+    let enhancement_predictor = payload[9];
+    if !matches!(
+        predictor_id,
+        PREDICTOR_LORENZO | PREDICTOR_PLANE | PREDICTOR_ORDER_ZERO
+    ) || (header.progressive() && enhancement_predictor != PREDICTOR_PREVIOUS_LOD)
+        || (!header.progressive() && enhancement_predictor != predictor_id)
+    {
+        return Err(F3dzError::InvalidArgument(
+            "invalid base/enhancement predictor ids".to_string(),
+        ));
+    }
+    if predictor_id != entry.predictor_id {
+        return Err(F3dzError::InvalidArgument(
+            "payload predictor disagrees with page index".to_string(),
+        ));
+    }
+    if get_u32(payload, 32) != entry.sample_count {
+        return Err(F3dzError::InvalidArgument(
+            "page token count disagrees with page index".to_string(),
+        ));
+    }
+    let fine_step = f32::from_bits(get_u32(payload, 36));
+    let base_step = f32::from_bits(get_u32(payload, 40));
+    if !fine_step.is_finite() || fine_step <= 0.0 || !base_step.is_finite() || base_step <= 0.0 {
+        return Err(F3dzError::InvalidArgument(
+            "invalid page quantization steps".to_string(),
+        ));
+    }
+    let expected_fine_step = header.epsilon * 2.0;
+    let expected_base_step = if header.progressive() {
+        header.epsilon * 8.0
+    } else {
+        expected_fine_step
+    };
+    if fine_step.to_bits() != expected_fine_step.to_bits()
+        || base_step.to_bits() != expected_base_step.to_bits()
+    {
+        return Err(F3dzError::InvalidArgument(format!(
+            "page quantization steps disagree with container epsilon: fine=0x{:08x}/0x{:08x} base=0x{:08x}/0x{:08x}",
+            fine_step.to_bits(), expected_fine_step.to_bits(), base_step.to_bits(), expected_base_step.to_bits()
+        )));
+    }
+    let base_scale = get_u32(payload, 44);
+    let enhancement_scale = get_u32(payload, 48);
+    if base_scale == 0
+        || base_scale > i32::MAX as u32
+        || enhancement_scale == 0
+        || enhancement_scale > i32::MAX as u32
+    {
+        return Err(F3dzError::InvalidArgument(
+            "page residual scales must be in 1..=i32::MAX".to_string(),
+        ));
+    }
+    let base_layer_len = get_u32(payload, 24) as usize;
+    let enhancement_layer_len = get_u32(payload, 28) as usize;
+    let base_end = PAGE_HEADER_LEN
+        .checked_add(base_layer_len)
+        .ok_or_else(|| F3dzError::InvalidArgument("base page layer overflow".to_string()))?;
+    let payload_end = base_end
+        .checked_add(enhancement_layer_len)
+        .ok_or_else(|| F3dzError::InvalidArgument("enhancement page layer overflow".to_string()))?;
+    if base_end != entry.base_layer_len as usize || payload_end != payload.len() {
+        return Err(F3dzError::InvalidArgument(
+            "page layer lengths disagree with the index/payload".to_string(),
+        ));
+    }
+    if (header.base_only() || !header.progressive()) && enhancement_layer_len != 0 {
+        return Err(F3dzError::InvalidArgument(format!(
+            "page quality mode forbids enhancement bytes: {enhancement_layer_len}"
+        )));
+    }
+    if header.progressive() && !header.base_only() && enhancement_layer_len == 0 {
+        return Err(F3dzError::InvalidArgument(
+            "refined progressive page is missing its enhancement layer".to_string(),
+        ));
+    }
+    let plane = PlaneModel {
+        x_slope: get_u32(payload, 12) as i32,
+        y_slope: get_u32(payload, 16) as i32,
+        intercept: get_u32(payload, 20) as i32,
+    };
+    if predictor_id != PREDICTOR_PLANE && plane != PlaneModel::default() {
+        return Err(F3dzError::InvalidArgument(
+            "non-plane predictor carries non-zero plane coefficients".to_string(),
+        ));
+    }
+    Ok(ValidatedPage {
+        entry,
+        enhancement_predictor,
+        plane,
+        fine_step,
+        base_step,
+        base_scale,
+        enhancement_scale,
+        base_layer: &payload[PAGE_HEADER_LEN..base_end],
+        enhancement_layer: &payload[base_end..payload_end],
+    })
 }
 
 /// Serialize the header, datum bytes, and fixed-size page index. Page payloads
@@ -574,5 +784,284 @@ mod tests {
     #[test]
     fn crc32_matches_standard_check_vector() {
         assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+    }
+
+    fn stream(progressive: bool) -> Vec<u8> {
+        let mut options = super::super::EncodeOptions::new(0.125);
+        options.tile_size = 4;
+        options.progressive = progressive;
+        options.force_order_zero = true;
+        options.height_datum = "EGM96".to_string();
+        let source: Vec<_> = (0..35).map(|index| index as f32 * 0.3).collect();
+        super::super::encode_dem(&source, 7, 5, &options).unwrap()
+    }
+
+    fn assert_shared_rejection(data: &[u8], reason: &str) {
+        let shared = match validate_stream(data) {
+            Err(error) => error,
+            Ok(_) => panic!("shared validator accepted malformed stream: {reason}"),
+        };
+        assert!(
+            shared.to_string().contains(reason),
+            "{shared}: expected {reason}"
+        );
+        assert_eq!(super::super::decode_dem(data, None).unwrap_err(), shared);
+        assert_eq!(
+            super::super::gpu::validate_stream(data).unwrap_err(),
+            shared
+        );
+    }
+
+    fn edit_payload(data: &[u8], page: usize, offset: usize, bytes: &[u8]) -> Vec<u8> {
+        let (header, entries) = parse_prefix(data).unwrap();
+        let entry = &entries[page];
+        let start = entry.payload_offset as usize;
+        let end = start + entry.payload_len as usize;
+        let mut edited = data.to_vec();
+        edited[start + offset..start + offset + bytes.len()].copy_from_slice(bytes);
+        let checksum = crc32(&edited[start..end]);
+        put_u32(
+            &mut edited,
+            header.index_offset as usize + page * PAGE_INDEX_LEN + 32,
+            checksum,
+        );
+        edited
+    }
+
+    #[test]
+    fn structural_page_errors_agree_before_cpu_or_gpu_execution() {
+        let refined = stream(true);
+        let base = super::super::base_only_stream(&refined).unwrap();
+        let single = stream(false);
+        for data in [&refined, &base, &single] {
+            let (_, entries) = parse_prefix(data).unwrap();
+            let cases = [
+                (0, b"BAD!".to_vec(), "magic"),
+                (4, 2u16.to_le_bytes().to_vec(), "version"),
+                (
+                    6,
+                    (u16::from(entries[0].flags) ^ 0x10).to_le_bytes().to_vec(),
+                    "flags/reserved",
+                ),
+                (10, 1u16.to_le_bytes().to_vec(), "flags/reserved"),
+                (52, 1u32.to_le_bytes().to_vec(), "flags/reserved"),
+                (8, vec![PREDICTOR_PREVIOUS_LOD], "predictor ids"),
+                (8, vec![0xff], "predictor ids"),
+                (
+                    8,
+                    vec![
+                        PREDICTOR_LORENZO,
+                        if data == &single {
+                            PREDICTOR_LORENZO
+                        } else {
+                            PREDICTOR_PREVIOUS_LOD
+                        },
+                    ],
+                    "predictor disagrees",
+                ),
+                (9, vec![0xff], "predictor ids"),
+                (12, 1i32.to_le_bytes().to_vec(), "plane coefficients"),
+                (24, 0u32.to_le_bytes().to_vec(), "layer lengths"),
+                (28, u32::MAX.to_le_bytes().to_vec(), "layer"),
+                (32, 0u32.to_le_bytes().to_vec(), "token count"),
+                (
+                    36,
+                    0.0f32.to_bits().to_le_bytes().to_vec(),
+                    "quantization steps",
+                ),
+                (
+                    36,
+                    (-0.25f32).to_bits().to_le_bytes().to_vec(),
+                    "quantization steps",
+                ),
+                (
+                    36,
+                    f32::NAN.to_bits().to_le_bytes().to_vec(),
+                    "quantization steps",
+                ),
+                (
+                    40,
+                    f32::INFINITY.to_bits().to_le_bytes().to_vec(),
+                    "quantization steps",
+                ),
+                (
+                    36,
+                    (0.25f32.to_bits() + 1).to_le_bytes().to_vec(),
+                    "container epsilon",
+                ),
+                (
+                    40,
+                    (if data == &single { 0.25f32 } else { 1.0f32 })
+                        .to_bits()
+                        .wrapping_add(1)
+                        .to_le_bytes()
+                        .to_vec(),
+                    "container epsilon",
+                ),
+                (44, 0u32.to_le_bytes().to_vec(), "residual scales"),
+                (44, u32::MAX.to_le_bytes().to_vec(), "residual scales"),
+                (48, 0u32.to_le_bytes().to_vec(), "residual scales"),
+                (48, u32::MAX.to_le_bytes().to_vec(), "residual scales"),
+            ];
+            for (offset, bytes, reason) in cases {
+                assert_shared_rejection(&edit_payload(data, 0, offset, &bytes), reason);
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_prefix_index_and_payload_ranges_agree() {
+        let data = stream(true);
+        let (header, entries) = parse_prefix(&data).unwrap();
+        let index = header.index_offset as usize;
+        let payload = header.payload_offset as usize;
+        let cases = [
+            (8, 0x80u32.to_le_bytes().to_vec(), "unknown container flag"),
+            (
+                index + 13,
+                vec![entries[0].flags | 0x80],
+                "unknown page flag",
+            ),
+            (
+                index + 13,
+                vec![entries[0].flags ^ PAGE_FLAG_PROGRESSIVE],
+                "quality flags",
+            ),
+            (
+                index + 13,
+                vec![PAGE_FLAG_PROGRESSIVE | PAGE_FLAG_GPU_DIRECT],
+                "low-barrier path",
+            ),
+            (index + 14, vec![1], "reserved page-index"),
+            (index + 52, vec![1], "reserved page-index"),
+            (index + 12, vec![0xff], "unknown page predictor"),
+            (
+                index + 44,
+                0u32.to_le_bytes().to_vec(),
+                "sample/nodata counts",
+            ),
+            (
+                index + 16,
+                (entries[0].payload_offset + 1).to_le_bytes().to_vec(),
+                "canonical/contiguous",
+            ),
+            (
+                index + PAGE_INDEX_LEN + 16,
+                entries[0].payload_offset.to_le_bytes().to_vec(),
+                "canonical/contiguous",
+            ),
+            (
+                index + PAGE_INDEX_LEN + 16,
+                (entries[1].payload_offset + 1).to_le_bytes().to_vec(),
+                "canonical/contiguous",
+            ),
+            (
+                index + PAGE_INDEX_LEN,
+                0u32.to_le_bytes().to_vec(),
+                "grid-edge extent",
+            ),
+            (payload, vec![data[payload] ^ 1], "CRC mismatch"),
+        ];
+        for (offset, bytes, reason) in cases {
+            let mut edited = data.clone();
+            edited[offset..offset + bytes.len()].copy_from_slice(&bytes);
+            if offset < FIXED_HEADER_LEN {
+                put_u32(&mut edited, 52, 0);
+                let checksum = crc32(&edited[..index]);
+                put_u32(&mut edited, 52, checksum);
+            }
+            assert_shared_rejection(&edited, reason);
+        }
+        let mut edited = data.clone();
+        edited[24] ^= 1;
+        assert_shared_rejection(&edited, "header CRC mismatch");
+        assert_shared_rejection(&data[..data.len() - 1], "truncated_stream");
+        assert_shared_rejection(&data[..FIXED_HEADER_LEN - 1], "truncated_stream");
+        let mut edited = data.clone();
+        edited.push(0);
+        assert_shared_rejection(&edited, "trailing or missing payload");
+        let mut edited = data.clone();
+        edited[index..index + 2 * PAGE_INDEX_LEN].rotate_left(PAGE_INDEX_LEN);
+        assert_shared_rejection(&edited, "canonical row-major");
+        // Duplicate coordinates on equal-sized pages reach the coverage check.
+        let mut duplicate = super::super::encode_dem(
+            &vec![0.0; 128 * 64],
+            128,
+            64,
+            &super::super::EncodeOptions::new(0.125),
+        )
+        .unwrap();
+        put_u32(&mut duplicate, FIXED_HEADER_LEN + PAGE_INDEX_LEN, 0);
+        assert_shared_rejection(&duplicate, "canonical row-major");
+    }
+
+    #[test]
+    fn quality_modes_reject_missing_or_forbidden_enhancement_layers() {
+        let refined = stream(true);
+        let (header, entries) = parse_prefix(&refined).unwrap();
+        let entry = &entries[0];
+        let start = entry.payload_offset as usize;
+        let mut missing = refined.clone();
+        let base_len = entry.payload_len - PAGE_HEADER_LEN as u32;
+        put_u32(&mut missing, start + 24, base_len);
+        put_u32(&mut missing, start + 28, 0);
+        put_u32(
+            &mut missing,
+            header.index_offset as usize + 28,
+            entry.payload_len,
+        );
+        let checksum = crc32(&missing[start..start + entry.payload_len as usize]);
+        put_u32(&mut missing, header.index_offset as usize + 32, checksum);
+        assert_shared_rejection(&missing, "missing its enhancement");
+
+        for data in [
+            stream(false),
+            super::super::base_only_stream(&refined).unwrap(),
+        ] {
+            let (header, entries) = parse_prefix(&data).unwrap();
+            let entry = &entries[0];
+            let start = entry.payload_offset as usize;
+            let mut forbidden = data.clone();
+            // Move one stored byte from the base layer to the enhancement layer.
+            put_u32(
+                &mut forbidden,
+                start + 24,
+                entry.payload_len - PAGE_HEADER_LEN as u32 - 1,
+            );
+            put_u32(&mut forbidden, start + 28, 1);
+            put_u32(
+                &mut forbidden,
+                header.index_offset as usize + 28,
+                entry.payload_len - 1,
+            );
+            let checksum = crc32(&forbidden[start..start + entry.payload_len as usize]);
+            put_u32(&mut forbidden, header.index_offset as usize + 32, checksum);
+            assert_shared_rejection(
+                &forbidden,
+                if header.progressive() {
+                    "forbids enhancement"
+                } else {
+                    "exactly one layer"
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn all_structural_pages_are_checked_before_entropy_decoding() {
+        let data = stream(true);
+        // Structurally valid but invalid entropy framing on the first page.
+        let mut edited = edit_payload(&data, 0, PAGE_HEADER_LEN, &0u32.to_le_bytes());
+        assert!(validate_stream(&edited).is_ok());
+        assert!(super::super::decode_dem(&edited, None).is_err());
+        assert!(super::super::gpu::validate_stream(&edited).is_err());
+        // Both paths must now report the later structural error first.
+        let (_, entries) = parse_prefix(&data).unwrap();
+        edited[entries[2].payload_offset as usize] ^= 1;
+        assert_shared_rejection(&edited, "CRC mismatch");
+        assert!(matches!(
+            super::super::decode_dem(&edited, None),
+            Err(F3dzError::CorruptPage { page: 2, .. })
+        ));
     }
 }
