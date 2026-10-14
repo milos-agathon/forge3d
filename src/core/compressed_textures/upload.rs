@@ -8,7 +8,7 @@ use crate::core::texture_format::global_format_registry;
 
 use crate::core::texture_layout::{resident_2d_size, resident_size, TransferLayout};
 
-use super::compression::{estimate_psnr, estimate_quality_score, generate_mip_levels};
+use super::compression::{estimate_psnr, estimate_quality_score};
 use super::{CompressedImage, CompressionStats};
 
 impl CompressedImage {
@@ -116,41 +116,12 @@ impl CompressedImage {
         }
     }
 
-    fn upload_mip_levels(&self, texture: &Texture, queue: &Queue) -> Result<(), String> {
-        let mip_data = generate_mip_levels(&self.data, self.width, self.height, self.format)?;
-        for (mip_level, (mip_data, mip_width, mip_height)) in mip_data.iter().enumerate() {
-            if mip_level == 0 {
-                continue;
-            }
-
-            let layout = TransferLayout::queue_write(
-                self.format,
-                TextureAspect::All,
-                Extent3d {
-                    width: *mip_width,
-                    height: *mip_height,
-                    depth_or_array_layers: 1,
-                },
-            )
-            .map_err(str::to_string)?;
-
-            queue.write_texture(
-                ImageCopyTexture {
-                    texture,
-                    mip_level: mip_level as u32,
-                    origin: Origin3d::ZERO,
-                    aspect: TextureAspect::All,
-                },
-                mip_data,
-                layout.image_data_layout(),
-                Extent3d {
-                    width: *mip_width,
-                    height: *mip_height,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-
-        Ok(())
+    fn upload_mip_levels(&self, _texture: &Texture, _queue: &Queue) -> Result<(), String> {
+        crate::core::degradation::record_degradation(
+            "not_implemented",
+            "compressed_textures.mip_generation",
+            "Compressed mipmap generation is not implemented; mip levels above 0 cannot be populated",
+        );
+        Err("Compressed mipmap generation not implemented".to_string())
     }
 }

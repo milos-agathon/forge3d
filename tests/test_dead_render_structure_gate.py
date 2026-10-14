@@ -105,6 +105,8 @@ FORBIDDEN_KTX2_DDS_SYMBOLS = re.compile(
     r"\bparse_ktx2_header\b|\bextract_ktx2_texture_data\b"
     r"|\bparse_dds_header\b|\bextract_dds_texture_data\b"
     r"|\bfrom_ktx2_data\b|\bfrom_dds_data\b"
+    r"|\bBasisTranscoder\b|\bwith_target_formats\b"
+    r"|\bcompress_etc2_rgb\b|\bcompress_etc2_rgba\b|\bgenerate_mip_levels\b"
 )
 
 KTX2_DDS_DELETED_FILES = [

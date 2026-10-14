@@ -8,7 +8,7 @@ mod parser;
 mod types;
 mod validation;
 
-pub use loader::{BasisTranscoder, Ktx2Loader};
+pub use loader::Ktx2Loader;
 pub use types::{
     Ktx2ChannelInfo, Ktx2DataFormatDescriptor, Ktx2Header, Ktx2LevelIndex, SuperCompressionScheme,
     KTX2_MAGIC,
@@ -112,15 +112,8 @@ mod tests {
 
     #[test]
     fn test_loader_creation() {
-        let loader = Ktx2Loader::new();
-        // Accessing private fields for testing requires these to be pub(crate) or similar
-        // Or we just test public API behavior.
-        // The original tests accessed private fields, so I might need to make them visible to tests.
-        // Stick to public API behavior or basic creation here.
-        let _ = loader;
-
-        let custom_formats = vec![wgpu::TextureFormat::Rgba8Unorm];
-        let _custom_loader = Ktx2Loader::with_target_formats(custom_formats.clone());
+        let _loader = Ktx2Loader::new();
+        let _default_loader = Ktx2Loader;
     }
 
     #[test]
