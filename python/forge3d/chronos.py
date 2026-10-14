@@ -100,7 +100,7 @@ def _prepare_frame_scene(
 
 def _accepted_labels(frame_scene: MapScene) -> dict[tuple[str, str], Any]:
     accepted: dict[tuple[str, str], Any] = {}
-    for layer_id, plan in frame_scene.compiled_label_plans.items():
+    for layer_id, plan in frame_scene.compiled_plan.label_plans.items():
         for label in getattr(plan, "accepted", ()) or ():
             accepted[(str(layer_id), str(label.label_id))] = label
     return accepted
@@ -274,6 +274,53 @@ def _scene_json(
 
 def _camera_json(frame_scene: MapScene) -> str:
     return _canonical_json_text(frame_scene.recipe.camera.to_dict(), "chronos camera")
+
+
+def _prepare_frozen_frame(
+    frame_scene: MapScene,
+    frame_index: int,
+    base_seed: int,
+    samples: int,
+    *,
+    label_events: Mapping[tuple[str, str], tuple[int | None, int | None]],
+    label_fade_frames: int = _DEFAULT_LABEL_FADE_FRAMES,
+    stored_canonical: str | None = None,
+) -> Any:
+    """Compile and attach a frozen frame using the caller's label timeline.
+
+    Labels come from the already compiled scene plan. Replay attaches the
+    validated stored native frame only after recompilation matches its exact
+    canonical bytes; a mismatch leaves the scene plan untouched.
+    """
+    f3d = _native()
+    stored = (
+        f3d.CompiledFrame.from_json(stored_canonical)
+        if stored_canonical is not None
+        else None
+    )
+
+    def events_for(layer_id: str, label_id: str, _visible: bool):
+        return label_events[(layer_id, label_id)]
+
+    label_records = _label_records(
+        tuple(label_events), _accepted_labels(frame_scene), events_for
+    )
+    compiled = f3d.compile_frame(
+        int(frame_index),
+        base_seed,
+        samples,
+        _camera_json(frame_scene),
+        _scene_json(frame_scene, label_records, label_fade_frames),
+    )
+    if stored is not None:
+        if compiled.to_json() != stored_canonical:
+            raise ValueError(
+                "CHRONOS replay inputs do not match the stored compiled frame "
+                f"for frame_index {frame_index}"
+            )
+        compiled = stored
+    frame_scene.compiled_plan = replace(frame_scene.compiled_plan, frame=compiled)
+    return compiled
 
 
 def _frame_png_name(frame_index: int) -> str:
@@ -526,7 +573,6 @@ class FlythroughManifest:
         f3d = _native()
         record = self.frame_record(frame_index)
         canonical = str(record["compiled_frame"])
-        compiled = f3d.CompiledFrame.from_json(canonical)
         stored_scene = json.loads(canonical).get("scene") or {}
         stored_labels = stored_scene.get("labels") or []
         stored_fade = stored_scene.get("label_fade_frames")
@@ -545,24 +591,15 @@ class FlythroughManifest:
         frame_scene = _prepare_frame_scene(
             scene, int(frame_index), self.base_seed, self.samples, out_path
         )
-        accepted = _accepted_labels(frame_scene)
-
-        def events_for(layer_id: str, label_id: str, _visible: bool):
-            return stored_events.get((layer_id, label_id), (None, None))
-
-        label_records = _label_records(sorted(stored_events), accepted, events_for)
-        camera_json = _camera_json(frame_scene)
-        scene_json = _scene_json(frame_scene, label_records, label_fade_frames)
-        candidate = f3d.compile_frame(
-            int(frame_index), self.base_seed, self.samples, camera_json, scene_json
+        compiled = _prepare_frozen_frame(
+            frame_scene,
+            int(frame_index),
+            self.base_seed,
+            self.samples,
+            label_events=stored_events,
+            label_fade_frames=label_fade_frames,
+            stored_canonical=canonical,
         )
-        if candidate.to_json() != canonical:
-            raise ValueError(
-                "CHRONOS replay inputs do not match the stored compiled frame "
-                f"for frame_index {frame_index}"
-            )
-        plan = frame_scene.compiled_plan
-        frame_scene.compiled_plan = replace(plan, frame=compiled)
         frame_scene.render(str(out_path))
         rgba = _decode_png_rgba(out_path)
         provenance = json.loads(f3d.render_compiled_frame(compiled, rgba))
@@ -633,40 +670,29 @@ def render_flythrough(
     sorted_indices = [index for index, _ in items]
 
     frame_scenes: dict[int, MapScene] = {}
-    accepted_maps: dict[int, dict[tuple[str, str], Any]] = {}
     per_frame_keys: dict[int, set] = {}
     for index, source in items:
         frame_scene = _prepare_frame_scene(
             source, index, base_seed, samples, out_dir / _frame_png_name(index)
         )
-        accepted = _accepted_labels(frame_scene)
         frame_scenes[index] = frame_scene
-        accepted_maps[index] = accepted
-        per_frame_keys[index] = set(accepted.keys())
+        per_frame_keys[index] = set(_accepted_labels(frame_scene))
 
     events = _label_timeline_events(per_frame_keys, sorted_indices)
     all_keys = sorted({key for keys in per_frame_keys.values() for key in keys})
 
     compiled_by_index: dict[int, Any] = {}
     for index in sorted_indices:
-        frame_scene = frame_scenes[index]
-
-        def events_for(layer_id: str, label_id: str, visible: bool, _i: int = index):
-            if not visible:
-                return (None, None)
-            return events.get((layer_id, label_id), {}).get(_i, (None, None))
-
-        label_records = _label_records(all_keys, accepted_maps[index], events_for)
-        compiled = f3d.compile_frame(
+        compiled_by_index[index] = _prepare_frozen_frame(
+            frame_scenes[index],
             index,
             int(base_seed),
             int(samples),
-            _camera_json(frame_scene),
-            _scene_json(frame_scene, label_records, label_fade_frames),
+            label_events={
+                key: events[key].get(index, (None, None)) for key in all_keys
+            },
+            label_fade_frames=label_fade_frames,
         )
-        plan = frame_scene.compiled_plan
-        frame_scene.compiled_plan = replace(plan, frame=compiled)
-        compiled_by_index[index] = compiled
 
     png_paths = {index: out_dir / _frame_png_name(index) for index in sorted_indices}
     with _shared_terrain_render_context():
