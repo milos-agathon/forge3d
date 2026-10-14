@@ -93,9 +93,10 @@ Local results on Windows, 14 October 2026:
   validation claim is made. Clean native frame evidence comes from Direct3D12.
 - Canonical `cargo forge3d-clippy`, `cargo fmt --check`, formatting checks on all
   changed Rust sources, `git diff --check` and CI YAML parsing passed.
-- The 16 allocation and temporal source contract checks passed with
-  `FORGE3D_NO_BOOTSTRAP=1`, `PYTHONPATH=tests`, and worktree-local pytest temporary
-  data. Python native bindings were not exercised.
+- The 23 allocation, temporal and exact matrix-inventory source checks passed
+  with `FORGE3D_NO_BOOTSTRAP=1` and `PYTHONPATH=tests`. The inventory retains the
+  same four reset-matrix operations at their new shared owner, which consumes the
+  frozen frame. Python native bindings were not exercised.
 
 The existing physical NVIDIA Windows CI job now runs these Rust tests on
 Direct3D12 with an explicit NVIDIA/discrete-adapter assertion, preserves commands,
