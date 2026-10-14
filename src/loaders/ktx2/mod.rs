@@ -3,6 +3,7 @@
 //! This module provides comprehensive KTX2 format support with transcoding
 //! and decoder integration for compressed texture pipelines.
 
+mod vk_format;
 mod loader;
 mod parser;
 mod types;
