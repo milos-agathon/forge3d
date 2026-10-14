@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from ._native import get_native_module, get_native_symbol, native_import_error
 
@@ -20,15 +20,8 @@ _REMEDIATION_ADAPTER = (
 )
 
 
-def _native_functions() -> tuple[Optional[Any], Optional[Any]]:
-    return (
-        get_native_symbol("enumerate_adapters"),
-        get_native_symbol("device_probe"),
-    )
-
-
 def enumerate_adapters() -> List[Dict]:
-    native_enum, _ = _native_functions()
+    native_enum = get_native_symbol("enumerate_adapters")
     if callable(native_enum):
         try:
             adapters = native_enum()
@@ -59,7 +52,7 @@ def device_probe(backend: Optional[str] = None) -> Dict:
 
     Every non-``"ok"`` status includes ``reason`` and ``remediation`` fields.
     """
-    _, native_probe = _native_functions()
+    native_probe = get_native_symbol("device_probe")
     if not callable(native_probe):
         import_error = native_import_error()
         reason = (
