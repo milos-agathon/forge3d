@@ -30,6 +30,11 @@ documents older-writer compatibility. Current-main render-pass inputs, manifest
 fields, label instance visibility, depth authority and projection-reservation
 cleanup are preserved.
 
+Unstyled in-memory terrain descriptors also survive decoding, so composition
+bundles retain their saved identity without inventing terrain samples or
+relaxing identity checks. The physical composition example and a CPU bundle
+round-trip test cover this integration case.
+
 Review against the PR's base and head, including `_map_scene_compiler.py`,
 `map_scene.py`, `chronos.py`, the public stubs, the guide and affected tests.
 For each requirement above, identify the owning code and an executed test or

@@ -4148,6 +4148,9 @@ class TerrainSource:
     dtype: str = "float32"
     nodata_policy: str = "fill"
     style: Any | None = None
+    _serialized_data_summary: Mapping[str, Any] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         import numpy as np
@@ -4163,7 +4166,9 @@ class TerrainSource:
                 self.data = _single(self.data)
 
     def to_dict(self) -> dict[str, Any]:
-        data_summary = None
+        # Unstyled bundles record a descriptor, not the array's pixels. Keep
+        # that identity on decode without claiming the samples are available.
+        data_summary = copy.deepcopy(self._serialized_data_summary)
         if self.data is not None:
             import numpy as np
 
@@ -5667,17 +5672,20 @@ class MapScene:
         furniture_data = data.get("map_furniture")
         reproducibility_data = data.get("reproducibility_profile")
         passes, inputs = decode_passes(data.get("render_passes") or {}, pass_inputs)
+        terrain = TerrainSource(
+            path=terrain_data.get("path"),
+            crs=terrain_data.get("crs"),
+            metadata=terrain_data.get("metadata") or {},
+            elevation_sampling_available=bool(terrain_data.get("elevation_sampling_available", False)),
+            dtype=str(terrain_data.get("dtype", "float32")),
+            nodata_policy=str(terrain_data.get("nodata_policy", "fill")),
+            style=raster_style_from_dict(terrain_data.get("style")),
+            data=raster_values_from_dict(terrain_data.get("values")),
+        )
+        if terrain.data is None and terrain_data.get("data") is not None:
+            terrain._serialized_data_summary = _metadata(terrain_data["data"])
         return SceneRecipe(
-            terrain=TerrainSource(
-                path=terrain_data.get("path"),
-                crs=terrain_data.get("crs"),
-                metadata=terrain_data.get("metadata") or {},
-                elevation_sampling_available=bool(terrain_data.get("elevation_sampling_available", False)),
-                dtype=str(terrain_data.get("dtype", "float32")),
-                nodata_policy=str(terrain_data.get("nodata_policy", "fill")),
-                style=raster_style_from_dict(terrain_data.get("style")),
-                data=raster_values_from_dict(terrain_data.get("values")),
-            ),
+            terrain=terrain,
             camera=OrbitCamera(
                 target=camera_data.get("target") or (0.0, 0.0, 0.0),
                 distance=float(camera_data.get("distance", 1.0)),

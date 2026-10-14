@@ -84,6 +84,11 @@ recipe identity or omits a required label layer. It never silently attaches
 saved decisions to an edited recipe. Older bundles without a compiled-plan file
 retain their existing recompile path.
 
+Composition bundles also retain the serialized shape/dtype descriptor of an
+unstyled in-memory terrain array, so restoration keeps its original recipe
+identity and saved render passes. This descriptor does not reconstruct terrain
+samples: `TerrainSource.data` remains `None` when no values were persisted.
+
 Version 3 restoration relies on stable serialized recipe identity. A future
 serializer that changes that identity needs a supported migration before those
 saved decisions can be restored. The loader rejects a mismatch rather than
