@@ -1,5 +1,7 @@
 use super::pipelines::{create_layouts, create_pipelines, SsaoLayouts, SsaoPipelines};
-use super::resources::{create_shared_buffers, create_textures, SsaoSharedBuffers, SsaoTextures};
+use super::resources::{
+    create_shared_buffers, create_textures, SsaoSharedBuffers, SsaoTextures, SsaoViewportTextures,
+};
 use super::*;
 use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
@@ -89,18 +91,21 @@ impl SsaoRenderer {
             noise_texture,
             noise_view,
             noise_sampler,
-            ssao_texture,
-            ssao_view,
-            ssao_blurred,
-            ssao_blurred_view,
-            ssao_history,
-            ssao_history_view,
-            ssao_resolved,
-            ssao_resolved_view,
-            ssao_tmp,
-            ssao_tmp_view,
-            ssao_composited,
-            ssao_composited_view,
+            viewport:
+                SsaoViewportTextures {
+                    ssao_texture,
+                    ssao_view,
+                    ssao_blurred,
+                    ssao_blurred_view,
+                    ssao_history,
+                    ssao_history_view,
+                    ssao_resolved,
+                    ssao_resolved_view,
+                    ssao_tmp,
+                    ssao_tmp_view,
+                    ssao_composited,
+                    ssao_composited_view,
+                },
         } = create_textures(device, width, height)?;
 
         Ok(Self {

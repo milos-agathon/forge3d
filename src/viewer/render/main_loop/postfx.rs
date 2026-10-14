@@ -147,7 +147,8 @@ impl Viewer {
                     // P1.3: Use TAA output if TAA was applied
                     if taa_applied {
                         if let Some(ref taa) = self.taa_renderer {
-                            (0u32, taa.output_view())
+                            // execute has swapped the freshly written history into the read slot.
+                            (0u32, taa.history_view())
                         } else {
                             (0u32, &self.lit_output_view)
                         }

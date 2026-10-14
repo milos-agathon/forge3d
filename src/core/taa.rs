@@ -75,6 +75,13 @@ pub struct TaaRenderer {
     first_frame: bool,
 }
 
+pub(crate) struct PreparedTaaTargets {
+    width: u32,
+    height: u32,
+    textures: [TrackedTexture; 2],
+    views: [TextureView; 2],
+}
+
 impl TaaRenderer {
     /// Create new TAA renderer
     pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
@@ -216,7 +223,7 @@ impl TaaRenderer {
             push_constant_ranges: &[],
         });
 
-        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        let pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
             device,
             &ComputePipelineDescriptor {
                 label: Some("taa.pipeline"),
@@ -224,7 +231,8 @@ impl TaaRenderer {
                 module: &shader,
                 entry_point: "taa_resolve",
             },
-        );
+        )
+        .map_err(crate::core::error::RenderError::Render)?;
 
         Ok(Self {
             settings,
@@ -335,6 +343,43 @@ impl TaaRenderer {
     pub fn output_texture(&self) -> &Texture {
         let write_index = 1 - self.read_index;
         &self.history_textures[write_index]
+    }
+
+    /// Resize TAA buffers
+    #[cfg(all(test, windows))]
+    pub(crate) fn viewport_textures(&self) -> &[TrackedTexture; 2] {
+        &self.history_textures
+    }
+
+    pub(crate) fn prepare_resize(
+        &self,
+        device: &Device,
+        width: u32,
+        height: u32,
+    ) -> RenderResult<PreparedTaaTargets> {
+        let textures = [
+            Self::create_history_texture(device, width, height, 0)?,
+            Self::create_history_texture(device, width, height, 1)?,
+        ];
+        let views = [
+            textures[0].create_view(&TextureViewDescriptor::default()),
+            textures[1].create_view(&TextureViewDescriptor::default()),
+        ];
+        Ok(PreparedTaaTargets {
+            width,
+            height,
+            textures,
+            views,
+        })
+    }
+
+    pub(crate) fn install_resize(&mut self, prepared: PreparedTaaTargets) {
+        self.width = prepared.width;
+        self.height = prepared.height;
+        self.settings.resolution = [self.width as f32, self.height as f32];
+        self.history_textures = prepared.textures;
+        self.history_views = prepared.views;
+        self.reset_history();
     }
 
     /// Resize TAA buffers

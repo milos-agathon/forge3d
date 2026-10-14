@@ -37,14 +37,21 @@ def test_rebase_callback_invalidates_every_named_temporal_consumer():
     body = _function(
         _read("src/viewer/render/main_loop/frame_anchor.rs"), "refresh_after_rebase"
     )
+    assert "self.invalidate_viewport_histories(self.config.width, self.config.height)" in body
+    assert "self.history_invalidation_count" in body
+    resize = _function(_read("src/viewer/render_targets.rs"), "install")
+    assert "viewer.invalidate_viewport_histories(self.width, self.height)" in resize
+    body = _function(_read("src/viewer/temporal_history.rs"), "invalidate_viewport_histories")
+    body = re.sub(r"\s+", " ", body)
+    assert "tracked_create_" not in body
+    assert "create_texture" not in body
     for token in (
-        "terrain_viewer.invalidate_temporal_history()",
+        "terrain.invalidate_temporal_history()",
         "gi.invalidate_temporal_histories()",
         "taa.reset_history()",
-        "self.prev_view_proj = current_vp",
+        "self.prev_view_proj = frame.projection(width, height)",
         "self.fog_frame_index = 0",
         "self.fog_history_state.invalidate()",
-        "self.history_invalidation_count",
     ):
         assert token in body
 

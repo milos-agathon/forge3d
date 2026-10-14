@@ -54,12 +54,15 @@ pub struct Viewer {
     #[cfg(feature = "extension-module")]
     pub(crate) adapter: Arc<Adapter>,
     pub(crate) config: SurfaceConfiguration,
+    /// Failed window extent; only a new resize event retries target preparation.
+    pub(crate) failed_window_resize: Option<winit::dpi::PhysicalSize<u32>>,
     pub(crate) camera: CameraController,
     /// Sole persistent anchor owned by the interactive viewer.
     pub(crate) camera_anchor: Anchor,
     /// Immutable pose/anchor copied at the latest frame boundary.
     pub(crate) frame_camera: Option<FrameCamera>,
     pub(crate) camera_rebase_count: u64,
+    /// IPC counter for anchor-rebase invalidations, excluding viewport changes.
     pub(crate) history_invalidation_count: u64,
     pub(crate) last_vector_source_delta: [f64; 3],
     pub(crate) last_vector_packed_delta: [f32; 3],

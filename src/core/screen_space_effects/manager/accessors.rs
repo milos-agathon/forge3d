@@ -321,7 +321,7 @@ impl ScreenSpaceEffectsManager {
             ssao.invalidate_history();
         }
         if let Some(ref mut ssgi) = self.ssgi_renderer {
-            ssgi.invalidate_history();
+            ssgi.reset_history();
         }
         if let Some(ref mut ssr) = self.ssr_renderer {
             ssr.invalidate_history();

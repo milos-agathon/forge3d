@@ -1,6 +1,7 @@
 // src/viewer/init/fog_init.rs
 // Fog pipeline initialization for the Viewer
 
+use crate::viewer::render_targets::{Target, TargetKind};
 use std::sync::Arc;
 use wgpu::{BindGroupLayout, ComputePipeline, Device, Sampler, TextureView};
 
@@ -272,89 +273,26 @@ pub fn create_fog_resources(
     )?;
 
     // Fog output textures
-    let fog_output = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.fog.output"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        },
-    )?;
-    let fog_output_view = fog_output.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: fog_output,
+        view: fog_output_view,
+    } = TargetKind::FogOutput.create(device, width, height)?;
 
-    let fog_history = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.fog.history"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        },
-    )?;
-    let fog_history_view = fog_history.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: fog_history,
+        view: fog_history_view,
+    } = TargetKind::FogHistory.create(device, width, height)?;
 
     // Half-res fog textures
-    let half_w = width.max(1) / 2;
-    let half_h = height.max(1) / 2;
-    let fog_output_half = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.fog.output.half"),
-            size: wgpu::Extent3d {
-                width: half_w,
-                height: half_h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        },
-    )?;
-    let fog_output_half_view = fog_output_half.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: fog_output_half,
+        view: fog_output_half_view,
+    } = TargetKind::FogOutputHalf.create(device, width, height)?;
 
-    let fog_history_half = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.fog.history.half"),
-            size: wgpu::Extent3d {
-                width: half_w,
-                height: half_h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        },
-    )?;
-    let fog_history_half_view =
-        fog_history_half.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: fog_history_half,
+        view: fog_history_half_view,
+    } = TargetKind::FogHistoryHalf.create(device, width, height)?;
 
     // Samplers
     let fog_depth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {

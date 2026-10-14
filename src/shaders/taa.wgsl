@@ -39,8 +39,13 @@ fn ycocg_to_rgb(ycocg: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(r, g, b);
 }
 
+struct NeighborhoodBounds {
+    min_color: vec3<f32>,
+    max_color: vec3<f32>,
+}
+
 // Sample 3x3 neighborhood and compute min/max in YCoCg space
-fn compute_neighborhood_aabb(uv: vec2<f32>, texel_size: vec2<f32>) -> array<vec3<f32>, 2> {
+fn compute_neighborhood_aabb(uv: vec2<f32>, texel_size: vec2<f32>) -> NeighborhoodBounds {
     var min_color = vec3<f32>(1e10);
     var max_color = vec3<f32>(-1e10);
     
@@ -56,11 +61,11 @@ fn compute_neighborhood_aabb(uv: vec2<f32>, texel_size: vec2<f32>) -> array<vec3
         }
     }
     
-    return array<vec3<f32>, 2>(min_color, max_color);
+    return NeighborhoodBounds(min_color, max_color);
 }
 
 // Variance-based neighborhood clamp (more robust than simple min/max)
-fn compute_neighborhood_variance(uv: vec2<f32>, texel_size: vec2<f32>, gamma: f32) -> array<vec3<f32>, 2> {
+fn compute_neighborhood_variance(uv: vec2<f32>, texel_size: vec2<f32>, gamma: f32) -> NeighborhoodBounds {
     var m1 = vec3<f32>(0.0); // Mean
     var m2 = vec3<f32>(0.0); // Mean of squares
     
@@ -83,7 +88,7 @@ fn compute_neighborhood_variance(uv: vec2<f32>, texel_size: vec2<f32>, gamma: f3
     let min_color = m1 - gamma * sigma;
     let max_color = m1 + gamma * sigma;
     
-    return array<vec3<f32>, 2>(min_color, max_color);
+    return NeighborhoodBounds(min_color, max_color);
 }
 
 // Clamp color to AABB
@@ -144,8 +149,8 @@ fn taa_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     
     // Compute neighborhood bounds using variance-based clamp (better quality)
     let aabb = compute_neighborhood_variance(unjittered_uv, texel_size, settings.clamp_gamma);
-    let aabb_min = aabb[0];
-    let aabb_max = aabb[1];
+    let aabb_min = aabb.min_color;
+    let aabb_max = aabb.max_color;
     
     // Convert colors to YCoCg for clamping
     let current_ycocg = rgb_to_ycocg(current.rgb);

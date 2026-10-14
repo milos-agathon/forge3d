@@ -3,7 +3,7 @@ use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 mod layouts;
 mod pipelines;
-mod resources;
+pub(super) mod resources;
 
 struct ConstructorLayouts {
     trace_bind_group_layout: BindGroupLayout,
@@ -27,25 +27,29 @@ struct ConstructorBuffers {
     composite_uniform: TrackedBuffer,
 }
 
-struct ConstructorResources {
-    ssgi_hit: TrackedTexture,
-    ssgi_hit_view: TextureView,
-    ssgi_texture: TrackedTexture,
-    ssgi_view: TextureView,
-    ssgi_history: TrackedTexture,
-    ssgi_history_view: TextureView,
-    ssgi_filtered: TrackedTexture,
-    ssgi_filtered_view: TextureView,
-    ssgi_upscaled: TrackedTexture,
-    ssgi_upscaled_view: TextureView,
-    ssgi_composited: TrackedTexture,
-    ssgi_composited_view: TextureView,
-    scene_history: [TrackedTexture; 2],
-    scene_history_views: [TextureView; 2],
-    env_texture: TrackedTexture,
-    env_view: TextureView,
-    env_sampler: Sampler,
-    linear_sampler: Sampler,
+pub(super) struct ViewportTextures {
+    pub(super) ssgi_hit: TrackedTexture,
+    pub(super) ssgi_hit_view: TextureView,
+    pub(super) ssgi_texture: TrackedTexture,
+    pub(super) ssgi_view: TextureView,
+    pub(super) ssgi_history: TrackedTexture,
+    pub(super) ssgi_history_view: TextureView,
+    pub(super) ssgi_filtered: TrackedTexture,
+    pub(super) ssgi_filtered_view: TextureView,
+    pub(super) ssgi_upscaled: TrackedTexture,
+    pub(super) ssgi_upscaled_view: TextureView,
+    pub(super) ssgi_composited: TrackedTexture,
+    pub(super) ssgi_composited_view: TextureView,
+    pub(super) scene_history: [TrackedTexture; 2],
+    pub(super) scene_history_views: [TextureView; 2],
+}
+
+pub(super) struct ConstructorResources {
+    pub(super) viewport: ViewportTextures,
+    pub(super) env_texture: TrackedTexture,
+    pub(super) env_view: TextureView,
+    pub(super) env_sampler: Sampler,
+    pub(super) linear_sampler: Sampler,
 }
 
 impl SsgiRenderer {
@@ -61,7 +65,7 @@ impl SsgiRenderer {
         let buffers = resources::create_buffers(device)?;
         let layouts = layouts::create_layouts(device);
         let pipelines = pipelines::create_pipelines(device, &layouts);
-        let textures = resources::create_textures(device, width, height, material_format)?;
+        let textures = resources::create_textures(device, width, height, material_format, false)?;
 
         Ok(Self {
             settings,
@@ -78,22 +82,22 @@ impl SsgiRenderer {
             upsample_bind_group_layout: layouts.upsample_bind_group_layout,
             composite_pipeline: pipelines.composite_pipeline,
             composite_bind_group_layout: layouts.composite_bind_group_layout,
-            ssgi_hit: textures.ssgi_hit,
-            ssgi_hit_view: textures.ssgi_hit_view,
-            ssgi_texture: textures.ssgi_texture,
-            ssgi_view: textures.ssgi_view,
-            ssgi_history: textures.ssgi_history,
-            ssgi_history_view: textures.ssgi_history_view,
+            ssgi_hit: textures.viewport.ssgi_hit,
+            ssgi_hit_view: textures.viewport.ssgi_hit_view,
+            ssgi_texture: textures.viewport.ssgi_texture,
+            ssgi_view: textures.viewport.ssgi_view,
+            ssgi_history: textures.viewport.ssgi_history,
+            ssgi_history_view: textures.viewport.ssgi_history_view,
             history_valid: false,
-            ssgi_filtered: textures.ssgi_filtered,
-            ssgi_filtered_view: textures.ssgi_filtered_view,
-            ssgi_upscaled: textures.ssgi_upscaled,
-            ssgi_upscaled_view: textures.ssgi_upscaled_view,
-            _ssgi_composited: textures.ssgi_composited,
-            ssgi_composited_view: textures.ssgi_composited_view,
+            ssgi_filtered: textures.viewport.ssgi_filtered,
+            ssgi_filtered_view: textures.viewport.ssgi_filtered_view,
+            ssgi_upscaled: textures.viewport.ssgi_upscaled,
+            ssgi_upscaled_view: textures.viewport.ssgi_upscaled_view,
+            _ssgi_composited: textures.viewport.ssgi_composited,
+            ssgi_composited_view: textures.viewport.ssgi_composited_view,
             composite_uniform: buffers.composite_uniform,
-            scene_history: textures.scene_history,
-            scene_history_views: textures.scene_history_views,
+            scene_history: textures.viewport.scene_history,
+            scene_history_views: textures.viewport.scene_history_views,
             scene_history_index: 0,
             scene_history_ready: false,
             linear_sampler: textures.linear_sampler,

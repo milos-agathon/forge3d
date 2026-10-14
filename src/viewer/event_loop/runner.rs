@@ -154,7 +154,12 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 }
             }
             Event::AboutToWait => {
-                window.request_redraw();
+                if viewer_opt
+                    .as_ref()
+                    .is_some_and(|viewer| viewer.window_can_render())
+                {
+                    window.request_redraw();
+                }
             }
             Event::WindowEvent {
                 event: WindowEvent::RedrawRequested,
@@ -174,10 +179,13 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     last_frame = now;
 
                     viewer.update(dt);
+                    if !viewer.window_can_render() {
+                        return;
+                    }
                     match viewer.render() {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            viewer.resize(viewer.window.inner_size())
+                            viewer.recover_surface();
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => {
                             eprintln!("Out of memory!");
@@ -400,9 +408,14 @@ pub fn run_viewer_with_ipc(
                     }
                     has_pending_snapshot = viewer.snapshot_request.is_some();
                 }
-                window.request_redraw();
+                let can_render = viewer_opt
+                    .as_ref()
+                    .is_some_and(|viewer| viewer.window_can_render());
+                if can_render {
+                    window.request_redraw();
+                }
                 // If snapshot is pending, keep requesting redraws until it's captured
-                if has_pending_snapshot {
+                if has_pending_snapshot && can_render {
                     window.request_redraw();
                 }
             }
@@ -424,10 +437,13 @@ pub fn run_viewer_with_ipc(
                     last_frame = now;
 
                     viewer.update(dt);
+                    if !viewer.window_can_render() {
+                        return;
+                    }
                     match viewer.render() {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            viewer.resize(viewer.window.inner_size())
+                            viewer.recover_surface();
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => {
                             eprintln!("Out of memory!");
