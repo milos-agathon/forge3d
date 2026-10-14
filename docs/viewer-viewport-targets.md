@@ -98,8 +98,13 @@ Local results on Windows, 14 October 2026:
   same four reset-matrix operations at their new shared owner, which consumes the
   frozen frame. Python native bindings were not exercised.
 
-The existing physical NVIDIA Windows CI job now runs these Rust tests on
-Direct3D12 with an explicit NVIDIA/discrete-adapter assertion, preserves commands,
+The exact narrowing inventory records the ten new u32 viewport-size conversions,
+with Milos's explicit approval on 14 October 2026. Removing those exact entries
+restores the previous frozen inventory; historical hashes and rejection probes
+remain intact. No world-coordinate conversion or scanner exemption was added.
+
+The existing physical NVIDIA Windows CI job now runs these Rust tests with its
+required portable feature matrix on Direct3D12 with an explicit NVIDIA/discrete-adapter assertion, preserves commands,
 logs and captures, and requires both tests to execute without skips. Its existing
 M-06 NVIDIA Vulkan gate is restored for the subsequent acceptance steps. The
 hosted Windows test is not skipped; the local WARP run checks its software path.

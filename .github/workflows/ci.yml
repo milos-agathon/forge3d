@@ -1974,10 +1974,10 @@ jobs:
           $env:RUN_M06_VIEWER_CI = '0'
           $env:FORGE3D_VIEWPORT_REQUIRE_PHYSICAL = '1'
           $env:FORGE3D_VIEWPORT_EVIDENCE_DIR = Join-Path $env:FORGE3D_M06_ARTIFACT_DIR 'viewport-resize'
-          $command = 'cargo test --lib --features default,async_readback viewer::render_targets::tests -- --test-threads=1 --nocapture'
+          $command = 'cargo test --lib --features async_readback,cog_streaming,copc_laz,default,enable-globe,enable-hdr-offscreen,enable-inverse-pt,enable-normal-mapping,enable-pbr,enable-renderer-config,enable-staging-rings,enable-tbn,geos-topology,gis-remote,shader-contract-asserts,splat-fusion,weighted-oit,wsI_bigbuf,wsI_double_buf viewer::render_targets::tests -- --test-threads=1 --nocapture'
           $command | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/viewport-resize-command.txt"
           try {
-            cargo test --lib --features default,async_readback viewer::render_targets::tests -- --test-threads=1 --nocapture *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/viewport-resize.log"
+            cargo test --lib --features async_readback,cog_streaming,copc_laz,default,enable-globe,enable-hdr-offscreen,enable-inverse-pt,enable-normal-mapping,enable-pbr,enable-renderer-config,enable-staging-rings,enable-tbn,geos-topology,gis-remote,shader-contract-asserts,splat-fusion,weighted-oit,wsI_bigbuf,wsI_double_buf viewer::render_targets::tests -- --test-threads=1 --nocapture *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/viewport-resize.log"
             $code = $LASTEXITCODE
             "viewport_resize=$code" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/viewport-resize-exit-code.txt"
             if ($code -ne 0) { exit $code }
