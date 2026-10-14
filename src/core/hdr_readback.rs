@@ -1,15 +1,8 @@
-// src/core/hdr_readback.rs
-// GPU texture readback utilities for HDR rendering
-// RELEVANT FILES: shaders/postprocess_tonemap.wgsl
+// GPU texture readback format adapters. Transfer mechanics live in texture_readback.
+use crate::core::texture_readback::read_texture_sync;
+use wgpu::{Device, Queue, Texture, TextureFormat};
 
-use crate::core::resource_tracker::tracked_create_buffer;
-use crate::core::texture_layout::TransferLayout;
-use wgpu::{
-    BufferDescriptor, BufferUsages, Device, Extent3d, ImageCopyTexture, Origin3d, Queue, Texture,
-    TextureAspect, TextureFormat,
-};
-
-/// Read HDR data from a floating-point texture
+/// Read HDR data from a floating-point texture.
 pub fn read_hdr_texture(
     device: &Device,
     queue: &Queue,
@@ -24,78 +17,27 @@ pub fn read_hdr_texture(
     ) {
         return Err("Unsupported HDR format for readback".to_string());
     }
-    let layout = TransferLayout::buffer_copy(
-        format,
-        TextureAspect::All,
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    )
-    .map_err(str::to_string)?;
-    let padded_bytes_per_row = layout.bytes_per_row;
-
-    let staging_buffer = tracked_create_buffer(
+    let bytes = read_texture_sync(
         device,
-        &BufferDescriptor {
-            label: Some("hdr_readback.hdr_staging"),
-            size: layout.transfer_bytes,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        },
+        queue,
+        texture,
+        width,
+        height,
+        format,
+        "hdr_readback.hdr_staging",
     )
     .map_err(|e| e.to_string())?;
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("hdr_copy_encoder"),
-    });
-
-    encoder.copy_texture_to_buffer(
-        ImageCopyTexture {
-            texture,
-            mip_level: 0,
-            origin: Origin3d::ZERO,
-            aspect: TextureAspect::All,
-        },
-        wgpu::ImageCopyBuffer {
-            buffer: &staging_buffer,
-            layout: layout.image_data_layout(),
-        },
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-
-    queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
-
-    // Map and read the buffer
-    let buffer_slice = staging_buffer.slice(..);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-        sender.send(result).unwrap();
-    });
-    device.poll(wgpu::Maintain::Wait);
-    receiver
-        .recv()
-        .unwrap()
-        .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
-
-    let data = buffer_slice.get_mapped_range();
-
-    // Convert to float data
-    let hdr_data = convert_to_floats(&data, width, height, padded_bytes_per_row, format)?;
-
-    drop(data);
-    staging_buffer.unmap();
-
-    Ok(hdr_data)
+    Ok(match format {
+        TextureFormat::Rgba16Float => bytes
+            .chunks_exact(2)
+            .map(|b| half::f16::from_le_bytes([b[0], b[1]]).to_f32())
+            .collect(),
+        TextureFormat::Rgba32Float => decode_f32(&bytes),
+        _ => unreachable!("HDR format was validated before transfer"),
+    })
 }
 
-/// Read LDR data from RGBA8 texture
+/// Read LDR bytes, preserving the source channel order and color space.
 pub fn read_ldr_texture(
     device: &Device,
     queue: &Queue,
@@ -103,82 +45,16 @@ pub fn read_ldr_texture(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, String> {
-    let layout = TransferLayout::buffer_copy(
-        TextureFormat::Rgba8Unorm,
-        TextureAspect::All,
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    )
-    .map_err(str::to_string)?;
-    let unpadded_bytes_per_row = layout.row_bytes;
-    let padded_bytes_per_row = layout.bytes_per_row;
-
-    let staging_buffer = tracked_create_buffer(
+    read_texture_sync(
         device,
-        &BufferDescriptor {
-            label: Some("hdr_readback.ldr_staging"),
-            size: layout.transfer_bytes,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        },
+        queue,
+        texture,
+        width,
+        height,
+        TextureFormat::Rgba8Unorm,
+        "hdr_readback.ldr_staging",
     )
-    .map_err(|e| e.to_string())?;
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("ldr_copy_encoder"),
-    });
-
-    encoder.copy_texture_to_buffer(
-        ImageCopyTexture {
-            texture,
-            mip_level: 0,
-            origin: Origin3d::ZERO,
-            aspect: TextureAspect::All,
-        },
-        wgpu::ImageCopyBuffer {
-            buffer: &staging_buffer,
-            layout: layout.image_data_layout(),
-        },
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-
-    queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
-
-    // Map and read the buffer
-    let buffer_slice = staging_buffer.slice(..);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-        sender.send(result).unwrap();
-    });
-    device.poll(wgpu::Maintain::Wait);
-    receiver
-        .recv()
-        .unwrap()
-        .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
-
-    let data = buffer_slice.get_mapped_range();
-
-    // Copy LDR data (remove padding)
-    let mut ldr_data = Vec::with_capacity(layout.payload_bytes as usize);
-
-    for y in 0..height {
-        let row_offset = y as usize * padded_bytes_per_row as usize;
-        let row_data = &data[row_offset..row_offset + unpadded_bytes_per_row as usize];
-        ldr_data.extend_from_slice(row_data);
-    }
-
-    drop(data);
-    staging_buffer.unmap();
-
-    Ok(ldr_data)
+    .map_err(|e| e.to_string())
 }
 
 /// Read scalar R32Float data from a texture.
@@ -189,90 +65,21 @@ pub fn read_r32_texture(
     width: u32,
     height: u32,
 ) -> Result<Vec<f32>, String> {
-    let layout = TransferLayout::buffer_copy(
-        TextureFormat::R32Float,
-        TextureAspect::All,
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    )
-    .map_err(str::to_string)?;
-    let padded_bytes_per_row = layout.bytes_per_row;
-
-    let staging_buffer = tracked_create_buffer(
+    let bytes = read_texture_sync(
         device,
-        &BufferDescriptor {
-            label: Some("hdr_readback.r32_staging"),
-            size: layout.transfer_bytes,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        },
+        queue,
+        texture,
+        width,
+        height,
+        TextureFormat::R32Float,
+        "hdr_readback.r32_staging",
     )
     .map_err(|e| e.to_string())?;
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("r32_copy_encoder"),
-    });
-
-    encoder.copy_texture_to_buffer(
-        ImageCopyTexture {
-            texture,
-            mip_level: 0,
-            origin: Origin3d::ZERO,
-            aspect: TextureAspect::All,
-        },
-        wgpu::ImageCopyBuffer {
-            buffer: &staging_buffer,
-            layout: layout.image_data_layout(),
-        },
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-
-    queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
-
-    let buffer_slice = staging_buffer.slice(..);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-        sender.send(result).unwrap();
-    });
-    device.poll(wgpu::Maintain::Wait);
-    receiver
-        .recv()
-        .unwrap()
-        .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
-
-    let data = buffer_slice.get_mapped_range();
-    let mut values = Vec::with_capacity(width as usize * height as usize);
-
-    for y in 0..height {
-        let row_offset = y as usize * padded_bytes_per_row as usize;
-        for x in 0..width {
-            let pixel_offset = row_offset + x as usize * std::mem::size_of::<u32>();
-            let bytes = [
-                data[pixel_offset],
-                data[pixel_offset + 1],
-                data[pixel_offset + 2],
-                data[pixel_offset + 3],
-            ];
-            values.push(f32::from_le_bytes(bytes));
-        }
-    }
-
-    drop(data);
-    staging_buffer.unmap();
-    Ok(values)
+    Ok(decode_f32(&bytes))
 }
 
-/// VERITAS: read scalar R32Uint data (per-pixel source-id map) from a
-/// texture. The transient host-visible staging buffer is routed through the
-/// memory tracker and released before returning.
+/// Read scalar R32Uint source IDs. The tracked staging allocation is released
+/// before this function returns, including on a mapping failure.
 pub fn read_r32uint_texture(
     device: &Device,
     queue: &Queue,
@@ -280,146 +87,25 @@ pub fn read_r32uint_texture(
     width: u32,
     height: u32,
 ) -> Result<Vec<u32>, String> {
-    let layout = TransferLayout::buffer_copy(
-        TextureFormat::R32Uint,
-        TextureAspect::All,
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    )
-    .map_err(str::to_string)?;
-    let padded_bytes_per_row = layout.bytes_per_row;
-    // Host-visible staging buffer; the tracked wrapper records it in the
-    // registry + ledger and frees on drop (superseding the prior manual
-    // track/free accounting).
-    let staging_buffer = tracked_create_buffer(
+    let bytes = read_texture_sync(
         device,
-        &BufferDescriptor {
-            label: Some("hdr_readback.r32uint_staging"),
-            size: layout.transfer_bytes,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        },
+        queue,
+        texture,
+        width,
+        height,
+        TextureFormat::R32Uint,
+        "hdr_readback.r32uint_staging",
     )
     .map_err(|e| e.to_string())?;
-
-    let release_staging = |staging_buffer: &wgpu::Buffer| {
-        staging_buffer.destroy();
-    };
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("r32uint_copy_encoder"),
-    });
-    encoder.copy_texture_to_buffer(
-        ImageCopyTexture {
-            texture,
-            mip_level: 0,
-            origin: Origin3d::ZERO,
-            aspect: TextureAspect::All,
-        },
-        wgpu::ImageCopyBuffer {
-            buffer: &staging_buffer,
-            layout: layout.image_data_layout(),
-        },
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-
-    queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
-
-    let buffer_slice = staging_buffer.slice(..);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = sender.send(result);
-    });
-    device.poll(wgpu::Maintain::Wait);
-    let map_result = receiver
-        .recv()
-        .map_err(|e| format!("Buffer mapping callback lost: {e}"));
-    let map_result = match map_result {
-        Ok(inner) => inner.map_err(|e| format!("Buffer mapping failed: {e:?}")),
-        Err(e) => Err(e),
-    };
-    if let Err(e) = map_result {
-        release_staging(&staging_buffer);
-        return Err(e);
-    }
-
-    let data = buffer_slice.get_mapped_range();
-    let mut values = Vec::with_capacity(width as usize * height as usize);
-    for y in 0..height {
-        let row_offset = y as usize * padded_bytes_per_row as usize;
-        for x in 0..width {
-            let pixel_offset = row_offset + x as usize * std::mem::size_of::<u32>();
-            let bytes = [
-                data[pixel_offset],
-                data[pixel_offset + 1],
-                data[pixel_offset + 2],
-                data[pixel_offset + 3],
-            ];
-            values.push(u32::from_le_bytes(bytes));
-        }
-    }
-
-    drop(data);
-    staging_buffer.unmap();
-    release_staging(&staging_buffer);
-    Ok(values)
+    Ok(bytes
+        .chunks_exact(4)
+        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect())
 }
 
-/// Convert raw buffer data to f32 vector based on texture format
-fn convert_to_floats(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    padded_bytes_per_row: u32,
-    format: TextureFormat,
-) -> Result<Vec<f32>, String> {
-    let mut hdr_data = Vec::new();
-
-    match format {
-        TextureFormat::Rgba16Float => {
-            for y in 0..height {
-                let row_offset = y as usize * padded_bytes_per_row as usize;
-                for x in 0..width {
-                    let pixel_offset = row_offset + (x * 8) as usize;
-
-                    for c in 0..4 {
-                        let half_bytes =
-                            [data[pixel_offset + c * 2], data[pixel_offset + c * 2 + 1]];
-                        let half_val = half::f16::from_le_bytes(half_bytes);
-                        hdr_data.push(half_val.to_f32());
-                    }
-                }
-            }
-        }
-        TextureFormat::Rgba32Float => {
-            for y in 0..height {
-                let row_offset = y as usize * padded_bytes_per_row as usize;
-                for x in 0..width {
-                    let pixel_offset = row_offset + (x * 16) as usize;
-
-                    for c in 0..4 {
-                        let float_bytes = [
-                            data[pixel_offset + c * 4],
-                            data[pixel_offset + c * 4 + 1],
-                            data[pixel_offset + c * 4 + 2],
-                            data[pixel_offset + c * 4 + 3],
-                        ];
-                        let float_val = f32::from_le_bytes(float_bytes);
-                        hdr_data.push(float_val);
-                    }
-                }
-            }
-        }
-        _ => return Err("Unsupported HDR format".to_string()),
-    }
-
-    Ok(hdr_data)
+fn decode_f32(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect()
 }
