@@ -32,7 +32,10 @@ from forge3d._map_scene_validation import (
 )
 
 from _sutura_recipes import RECIPE_NAMES, _write_raster_overlay, build_scene
-from _terrain_runtime import terrain_rendering_available
+from _terrain_runtime import (
+    _running_on_unsupported_hosted_windows_ci,
+    terrain_rendering_available,
+)
 
 PACKAGE_ROOT = Path(f3d.__file__).resolve().parent
 
@@ -469,10 +472,17 @@ def test_nodata_candidates_compile_and_render_without_relaxing_manifest_json(tmp
         for candidate in label.candidates
     ), "the regression requires an unselected candidate sampling nodata"
     output_path = tmp_path / "nodata_labels.png"
-    report = scene.render(str(output_path))
-    assert report.status == "ok"
-    assert scene.last_render_backend == "gpu_terrain"
-    assert _load_png_rgba(output_path).shape == (64, 96, 4)
+    try:
+        report = scene.render(str(output_path))
+    except f3d.MapSceneNativeUnavailable as exc:
+        if not _running_on_unsupported_hosted_windows_ci():
+            raise
+        _assert_structured_block(exc)
+        assert not output_path.exists(), "a blocked render must not write pixels"
+    else:
+        assert report.status == "ok"
+        assert scene.last_render_backend == "gpu_terrain"
+        assert _load_png_rgba(output_path).shape == (64, 96, 4)
     assert scene.compiled_plan is compiled
     # In-memory candidate metadata and persisted finite JSON are different
     # boundaries. Preserve the existing manifest rejection contract.
