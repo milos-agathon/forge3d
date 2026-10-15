@@ -497,8 +497,8 @@ def _build_detail_settings(args: Any) -> DetailSettings | None:
             strength = 0.5  # Existing P6 preset strength.
         if detail_path is None and strength > 0.0:
             generated_path = Path(args.output).with_suffix(".detail-normal.png").resolve()
-            script = Path(__file__).resolve().parents[2] / "scripts" / "detail_normals.py"
-            command = [sys.executable, str(script), "--dem", str(Path(args.dem).resolve()),
+            command = [sys.executable, "-m", "forge3d._detail_normals",
+                       "--dem", str(Path(args.dem).resolve()),
                        "--sigma-px", str(sigma), "--output", str(generated_path), "--flip-y"]
             if getattr(args, "overwrite", False):
                 command.append("--overwrite")
