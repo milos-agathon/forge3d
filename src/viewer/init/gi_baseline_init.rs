@@ -1,11 +1,12 @@
 // src/viewer/init/gi_baseline_init.rs
 // GI baseline pipeline initialization for the Viewer
 
+use crate::viewer::render_targets::{Target, TargetKind};
 use std::sync::Arc;
 use wgpu::{BindGroupLayout, ComputePipeline, Device, TextureView};
 
 use crate::core::error::RenderResult;
-use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
+use crate::core::resource_tracker::TrackedTexture;
 
 /// GI baseline shader source (copy lit to HDR)
 pub const GI_BASELINE_SHADER: &str = r#"
@@ -208,106 +209,30 @@ pub fn create_gi_baseline_resources(
         });
 
     // Create HDR textures
-    let gi_baseline_hdr = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.gi.baseline.hdr"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        },
-    )?;
-    let gi_baseline_hdr_view = gi_baseline_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: gi_baseline_hdr,
+        view: gi_baseline_hdr_view,
+    } = TargetKind::GiBaseline.create(device, width, height)?;
 
-    let gi_baseline_diffuse_hdr = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.gi.baseline.diffuse.hdr"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-    )?;
-    let gi_baseline_diffuse_hdr_view =
-        gi_baseline_diffuse_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: gi_baseline_diffuse_hdr,
+        view: gi_baseline_diffuse_hdr_view,
+    } = TargetKind::GiDiffuse.create(device, width, height)?;
 
-    let gi_baseline_spec_hdr = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.gi.baseline.spec.hdr"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-    )?;
-    let gi_baseline_spec_hdr_view =
-        gi_baseline_spec_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: gi_baseline_spec_hdr,
+        view: gi_baseline_spec_hdr_view,
+    } = TargetKind::GiSpecular.create(device, width, height)?;
 
-    let gi_output_hdr = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.gi.output.hdr"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        },
-    )?;
-    let gi_output_hdr_view = gi_output_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: gi_output_hdr,
+        view: gi_output_hdr_view,
+    } = TargetKind::GiOutput.create(device, width, height)?;
 
-    let gi_debug = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.gi.debug"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-    )?;
-    let gi_debug_view = gi_debug.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: gi_debug,
+        view: gi_debug_view,
+    } = TargetKind::GiDebug.create(device, width, height)?;
 
     Ok(GiBaselineResources {
         gi_baseline_bgl,

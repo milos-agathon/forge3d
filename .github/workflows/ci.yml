@@ -1966,6 +1966,33 @@ jobs:
           }
           exit $code
 
+      - name: Prove transactional viewer resize on physical Direct3D12
+        shell: pwsh
+        run: |
+          $savedBackends = $env:WGPU_BACKENDS
+          $env:WGPU_BACKENDS = 'dx12'
+          $env:WGPU_BACKEND = 'dx12'
+          $env:RUN_M06_VIEWER_CI = '0'
+          $env:FORGE3D_VIEWPORT_REQUIRE_PHYSICAL = '1'
+          $env:FORGE3D_VIEWPORT_EVIDENCE_DIR = Join-Path $env:FORGE3D_M06_ARTIFACT_DIR 'viewport-resize'
+          $command = 'cargo test --lib --features async_readback,cog_streaming,copc_laz,default,enable-globe,enable-hdr-offscreen,enable-inverse-pt,enable-normal-mapping,enable-pbr,enable-renderer-config,enable-staging-rings,enable-tbn,geos-topology,gis-remote,shader-contract-asserts,splat-fusion,weighted-oit,wsI_bigbuf,wsI_double_buf viewer::render_targets::tests -- --test-threads=1 --nocapture'
+          $command | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/viewport-resize-command.txt"
+          try {
+            cargo test --lib --features async_readback,cog_streaming,copc_laz,default,enable-globe,enable-hdr-offscreen,enable-inverse-pt,enable-normal-mapping,enable-pbr,enable-renderer-config,enable-staging-rings,enable-tbn,geos-topology,gis-remote,shader-contract-asserts,splat-fusion,weighted-oit,wsI_bigbuf,wsI_double_buf viewer::render_targets::tests -- --test-threads=1 --nocapture *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/viewport-resize.log"
+            $code = $LASTEXITCODE
+            "viewport_resize=$code" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/viewport-resize-exit-code.txt"
+            if ($code -ne 0) { exit $code }
+            if (-not (Select-String -Path "$env:FORGE3D_M06_ARTIFACT_DIR/viewport-resize.log" -Pattern '2 passed; 0 failed; 0 ignored')) {
+              throw 'Viewport descriptor and physical resize tests did not both execute'
+            }
+          } finally {
+            if ($null -eq $savedBackends) { Remove-Item Env:WGPU_BACKENDS } else { $env:WGPU_BACKENDS = $savedBackends }
+            $env:WGPU_BACKEND = 'vulkan'
+            $env:RUN_M06_VIEWER_CI = '1'
+            Remove-Item Env:FORGE3D_VIEWPORT_REQUIRE_PHYSICAL
+            Remove-Item Env:FORGE3D_VIEWPORT_EVIDENCE_DIR
+          }
+
       - name: Require the exact NVIDIA Vulkan adapter
         shell: pwsh
         run: |

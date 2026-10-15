@@ -80,7 +80,7 @@ from .diagnostics import (
     RenderFailurePolicy,
     SeverityPolicy,
     SupportMatrixEntry,
-    ValidationReport,
+    ValidationReport as ValidationReport,
     crs_mismatch_diagnostic,
     estimated_gpu_memory_diagnostic,
     memory_tracking_completeness_report,

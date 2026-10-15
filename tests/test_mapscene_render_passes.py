@@ -169,6 +169,38 @@ def test_public_bundle_replay_is_bitexact_and_uses_frozen_plan(tmp_path, monkeyp
     assert np.asarray(load_png_rgba(tmp_path / "first.png")).shape == (1, 1, 4)
 
 
+def test_composition_bundle_retains_unpersisted_terrain_descriptor(tmp_path, monkeypatch):
+    image = f3d.RenderPassInput(np.array([[[64, 128, 192, 255]]], dtype=np.uint8))
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((2, 3), dtype=np.float32), crs="EPSG:3857",
+            metadata={"source_id": "fixture", "asset_status": "fixture"},
+        ),
+        lighting=f3d.LightingPreset(),
+        output=f3d.OutputSpec(1, 1),
+        pass_specs=[f3d.RenderPassSpec("color", "color", ("image",))],
+        pass_inputs={"image": image},
+    )
+    scene.render_passes(path=str(tmp_path / "original.png"))
+    scene.save_bundle(tmp_path / "original")
+    loaded = f3d.MapScene.load_bundle(tmp_path / "original.forge3d")
+    assert loaded.to_dict() == scene.to_dict()
+    assert loaded.recipe.terrain.data is None
+    assert loaded.compiled_plan.recipe_hash == scene.compiled_plan.recipe_hash
+    original_plan = loaded.compiled_plan
+    monkeypatch.setattr(loaded, "compile_plan", lambda: pytest.fail("replay recompiled"))
+    loaded.validate()
+    loaded.render_passes(path=str(tmp_path / "replay.png"))
+    assert loaded.compiled_plan is original_plan
+    assert (tmp_path / "replay.png").read_bytes() == (tmp_path / "original.png").read_bytes()
+    loaded.render_passes(path=str(tmp_path / "original.png"))
+    loaded.save_bundle(tmp_path / "again")
+    for original in (tmp_path / "original.forge3d").rglob("*"):
+        if original.is_file():
+            relative = original.relative_to(tmp_path / "original.forge3d")
+            assert original.read_bytes() == (tmp_path / "again.forge3d" / relative).read_bytes()
+
+
 def test_no_pass_serialization_and_render_delegate_unchanged(tmp_path, monkeypatch):
     scene = _scene()
     assert "render_passes" not in scene.recipe.to_dict()

@@ -32,6 +32,16 @@ pub struct GiPass {
 }
 
 impl GiPass {
+    #[cfg(all(test, windows))]
+    pub(crate) fn dimensions(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    pub(crate) fn resize(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+    }
+
     pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,

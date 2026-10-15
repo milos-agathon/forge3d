@@ -17,6 +17,7 @@ pub(super) fn compress_rgba_to_format(
         TextureFormat::Bc7RgbaUnorm | TextureFormat::Bc7RgbaUnormSrgb => {
             super::bc7::encode_bc7_rgba8(data, width, height)
         }
+        TextureFormat::Bc4RUnorm => super::bc4::encode_channel(data, width, height, 4, 0),
         TextureFormat::Bc5RgUnorm => {
             let mut rg = Vec::with_capacity(width as usize * height as usize * 2);
             for rgba in data.chunks_exact(4) {
@@ -24,16 +25,31 @@ pub(super) fn compress_rgba_to_format(
             }
             super::bc5::encode_bc5_rg8(&rg, width, height)
         }
-        TextureFormat::Etc2Rgb8Unorm | TextureFormat::Etc2Rgb8UnormSrgb => {
-            compress_etc2_rgb(data, width, height)
+        TextureFormat::Etc2Rgb8Unorm
+        | TextureFormat::Etc2Rgb8UnormSrgb
+        | TextureFormat::Etc2Rgba8Unorm
+        | TextureFormat::Etc2Rgba8UnormSrgb => {
+            crate::core::degradation::record_degradation(
+                "format_unsupported",
+                "compressed_textures.etc2",
+                "ETC2 compression is not implemented; refusing to emit zeroed placeholder blocks",
+            );
+            Err(format!(
+                "Compression to {:?} not implemented",
+                target_format
+            ))
         }
-        TextureFormat::Etc2Rgba8Unorm | TextureFormat::Etc2Rgba8UnormSrgb => {
-            compress_etc2_rgba(data, width, height)
+        _ => {
+            crate::core::degradation::record_degradation(
+                "format_unsupported",
+                "compressed_textures.encode",
+                "Requested compressed texture format has no encoder",
+            );
+            Err(format!(
+                "Compression to {:?} not implemented",
+                target_format
+            ))
         }
-        _ => Err(format!(
-            "Compression to {:?} not implemented",
-            target_format
-        )),
     }
 }
 
@@ -116,34 +132,10 @@ fn compress_bc3(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String>
     Ok(compressed)
 }
 
-/// ETC2 RGB compression fallback; returns zeroed blocks.
-fn compress_etc2_rgb(_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
-    Ok(vec![0u8; (blocks_x * blocks_y * 8) as usize])
-}
-
-/// ETC2 RGBA compression fallback; returns zeroed blocks.
-fn compress_etc2_rgba(_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
-    Ok(vec![0u8; (blocks_x * blocks_y * 16) as usize])
-}
-
 /// Calculate number of mip levels for given dimensions
 pub(super) fn calculate_mip_levels(width: u32, height: u32) -> u32 {
     let max_dimension = width.max(height);
     (32 - max_dimension.leading_zeros()).max(1)
-}
-
-/// Generate mip level data; currently returns none until downsampling is wired.
-pub(super) fn generate_mip_levels(
-    _base_data: &[u8],
-    _base_width: u32,
-    _base_height: u32,
-    _format: TextureFormat,
-) -> Result<Vec<(Vec<u8>, u32, u32)>, String> {
-    Ok(Vec::new())
 }
 
 /// Estimate quality score for format

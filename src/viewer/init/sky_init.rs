@@ -1,13 +1,12 @@
 // src/viewer/init/sky_init.rs
 // Sky pipeline initialization for the Viewer
 
+use crate::viewer::render_targets::{Target, TargetKind};
 use std::sync::Arc;
 use wgpu::{BindGroupLayout, ComputePipeline, Device, TextureView};
 
 use crate::core::error::{RenderError, RenderResult};
-use crate::core::resource_tracker::{
-    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
-};
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer, TrackedTexture};
 
 use super::super::viewer_types::SkyUniforms;
 
@@ -154,8 +153,10 @@ pub fn create_sky_resources(
     )?;
 
     // Sky output texture
-    let sky_output = tracked_create_texture(device, &sky_output_descriptor(width, height))?;
-    let sky_output_view = sky_output.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: sky_output,
+        view: sky_output_view,
+    } = TargetKind::Sky.create(device, width, height)?;
     let sky_present_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("viewer.sky.present.bgl"),

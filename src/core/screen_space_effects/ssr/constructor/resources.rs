@@ -82,19 +82,7 @@ pub(super) fn create_textures(
     width: u32,
     height: u32,
 ) -> RenderResult<ConstructorResources> {
-    let (ssr_spec_texture, ssr_spec_view) =
-        rgba16_texture(device, "p5.ssr.spec", width, height, true)?;
-    let (ssr_final_texture, ssr_final_view) =
-        rgba16_texture(device, "p5.ssr.final", width, height, true)?;
-    let (ssr_history_texture, ssr_history_view) =
-        rgba16_texture(device, "p5.ssr.history", width, height, false)?;
-    let (ssr_filtered_texture, ssr_filtered_view) =
-        rgba16_texture(device, "p5.ssr.filtered", width, height, true)?;
-    let (ssr_hit_texture, ssr_hit_view) =
-        rgba16_texture(device, "p5.ssr.hit", width, height, true)?;
-    let (ssr_composited_texture, ssr_composited_view) =
-        rgba8_texture(device, "p5.ssr.composited", width, height)?;
-
+    let viewport = create_viewport_textures(device, width, height)?;
     let env_texture = tracked_create_texture(
         device,
         &TextureDescriptor {
@@ -126,6 +114,33 @@ pub(super) fn create_textures(
     let linear_sampler = linear_sampler(device, "p5.ssr.linear");
 
     Ok(ConstructorResources {
+        viewport,
+        env_texture,
+        env_view,
+        env_sampler,
+        linear_sampler,
+    })
+}
+
+pub(in super::super) fn create_viewport_textures(
+    device: &Device,
+    width: u32,
+    height: u32,
+) -> RenderResult<ViewportTextures> {
+    let (ssr_spec_texture, ssr_spec_view) =
+        rgba16_texture(device, "p5.ssr.spec", width, height, true)?;
+    let (ssr_final_texture, ssr_final_view) =
+        rgba16_texture(device, "p5.ssr.final", width, height, true)?;
+    let (ssr_history_texture, ssr_history_view) =
+        rgba16_texture(device, "p5.ssr.history", width, height, false)?;
+    let (ssr_filtered_texture, ssr_filtered_view) =
+        rgba16_texture(device, "p5.ssr.filtered", width, height, true)?;
+    let (ssr_hit_texture, ssr_hit_view) =
+        rgba16_texture(device, "p5.ssr.hit", width, height, true)?;
+    let (ssr_composited_texture, ssr_composited_view) =
+        rgba8_texture(device, "p5.ssr.composited", width, height)?;
+
+    Ok(ViewportTextures {
         ssr_spec_texture,
         ssr_spec_view,
         ssr_final_texture,
@@ -138,10 +153,6 @@ pub(super) fn create_textures(
         ssr_hit_view,
         ssr_composited_texture,
         ssr_composited_view,
-        env_texture,
-        env_view,
-        env_sampler,
-        linear_sampler,
     })
 }
 

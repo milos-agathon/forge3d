@@ -138,6 +138,7 @@ class CompiledScenePlan:
 
 class MapScene:
     recipe: SceneRecipe
+    last_validation_report: ValidationReport | None
     last_render_path: str | None
     last_render_backend: str | None
     last_render_metadata: dict[str, Any] | None

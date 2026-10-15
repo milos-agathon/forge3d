@@ -54,14 +54,18 @@ impl Viewer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: wgpu::BindingResource::TextureView(env_view),
+                        resource: wgpu::BindingResource::TextureView(&self.lit_output_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
-                        resource: wgpu::BindingResource::Sampler(env_samp),
+                        resource: wgpu::BindingResource::TextureView(env_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 5,
+                        resource: wgpu::BindingResource::Sampler(env_samp),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
                         resource: self.lit_uniform.as_entire_binding(),
                     },
                 ],
@@ -204,11 +208,11 @@ impl Viewer {
                 )?;
             }
 
-            if let Some(timer) = timing_opt.as_deref_mut() {
-                timer.resolve_queries(&mut enc);
+            if let Some(timer) = timing_opt {
+                timer.submit(enc);
+            } else {
+                self.queue.submit(std::iter::once(enc.finish()));
             }
-
-            self.queue.submit(std::iter::once(enc.finish()));
 
             if let Some(timer) = self.gi_timing.as_mut() {
                 if timer.is_supported() {
@@ -237,10 +241,6 @@ impl Viewer {
                             eprintln!("[P5.6] GPU timing readback failed: {e}");
                         }
                     }
-                    // Advance the double buffer now that this frame is submitted:
-                    // next frame writes/resolves the other slot while this one's
-                    // readback stays valid for the following get_results().
-                    timer.finish_frame();
                 }
             }
         }

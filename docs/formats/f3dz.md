@@ -61,6 +61,15 @@ lengths, and the selected page CRC before entropy decoding. Unknown flags,
 inconsistent counts, non-finite error fields, and truncated ranges are hard
 errors.
 
+The format module validates every indexed page before CPU entropy decoding or
+GPU batch preparation. Both adapters consume the same checked page facts:
+canonical row-major page coverage, contiguous payload ranges, CRCs, page-header
+flags and reserved fields, predictors, sample counts, exact quantization-step
+bits, residual scales, plane metadata, and quality-dependent layer boundaries.
+Prefix-only parsing remains available for range readers. Entropy decoding stays
+in the CPU decoder or WGSL kernel; GPU preparation additionally checks its i32
+plane-arithmetic limits and rANS framing without decoding symbols.
+
 ## Page payload
 
 Every payload begins with this 56-byte page header:

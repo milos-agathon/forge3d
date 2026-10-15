@@ -95,10 +95,8 @@ impl Scene {
         }
     }
 
-    /// Finalize a render's timing: resolve+read the timestamps and record each
-    /// timed pass into the global certificate capture. Must be called AFTER the
-    /// encoder that recorded `resolve_queries` was submitted (the readback
-    /// encoder does that here). Consumes the manager's current slot.
+    /// Finalize submitted render work. The timing manager owns any remaining
+    /// query resolution, its submission fence, readback and slot retirement.
     pub(super) fn record_render_timings(
         &self,
         timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,

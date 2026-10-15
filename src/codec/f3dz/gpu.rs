@@ -6,12 +6,7 @@
 //! predictor reconstruction, and final binary32 conversion. Dispatches are
 //! bounded to [`MAX_BATCH_PAGES`] so staging stays independent of DEM size.
 
-use super::encode::PAGE_HEADER_LEN;
-use super::format::{
-    crc32, parse_prefix, ContainerHeader, PageIndexEntry, PAGE_FLAG_BASE_ONLY,
-    PAGE_FLAG_GPU_DIRECT, PAGE_FLAG_GPU_FAST, PAGE_FLAG_PROGRESSIVE, PAGE_MAGIC, PREDICTOR_LORENZO,
-    PREDICTOR_ORDER_ZERO, PREDICTOR_PLANE, PREDICTOR_PREVIOUS_LOD, VERSION,
-};
+use super::format::{ContainerHeader, ValidatedPage};
 use super::rans::{RansEncoded, RANS_L, SCALE};
 use super::{F3dzError, F3dzResult};
 use crate::core::resource_tracker::{
@@ -777,10 +772,10 @@ struct PreparedStream {
 }
 
 fn prepare_stream(data: &[u8]) -> F3dzResult<PreparedStream> {
-    let (header, entries) = parse_prefix(data)?;
-    let mut expected_offset = header.payload_offset;
+    let validated = super::format::validate_stream(data)?;
+    let header = validated.header;
     let mut batches = Vec::new();
-    for (batch_index, chunk) in entries.chunks(MAX_BATCH_PAGES).enumerate() {
+    for (batch_index, chunk) in validated.pages.chunks(MAX_BATCH_PAGES).enumerate() {
         let first_page = batch_index * MAX_BATCH_PAGES;
         let mut batch = PreparedBatch {
             first_page,
@@ -793,189 +788,40 @@ fn prepare_stream(data: &[u8]) -> F3dzResult<PreparedStream> {
             gpu_fast: true,
             gpu_direct: true,
         };
-        for (local_page, entry) in chunk.iter().enumerate() {
-            let absolute_page = first_page + local_page;
-            let pages_x = header.width.div_ceil(u32::from(header.tile_size));
-            if entry.page_x != absolute_page as u32 % pages_x
-                || entry.page_y != absolute_page as u32 / pages_x
-            {
-                return corrupt(
-                    absolute_page,
-                    "page index entries must appear once in canonical row-major order".to_string(),
-                );
-            }
-            if entry.payload_offset != expected_offset {
-                return corrupt(
-                    absolute_page,
-                    format!(
-                        "payload offset is not canonical: expected={expected_offset} actual={}",
-                        entry.payload_offset
-                    ),
-                );
-            }
-            let start = usize::try_from(entry.payload_offset)
-                .map_err(|_| F3dzError::InvalidHeader("payload offset exceeds usize".into()))?;
-            let end = start
-                .checked_add(entry.payload_len as usize)
-                .ok_or_else(|| F3dzError::InvalidHeader("payload range overflow".into()))?;
-            if data.len() < end {
-                return Err(F3dzError::Truncated {
-                    needed: end,
-                    available: data.len(),
-                });
-            }
-            let payload = &data[start..end];
-            if crc32(payload) != entry.crc32 {
-                return corrupt(absolute_page, "CRC mismatch".to_string());
-            }
+        for (local_page, page) in chunk.iter().enumerate() {
             prepare_page(
                 &header,
-                entry,
-                payload,
-                absolute_page,
+                page,
+                first_page + local_page,
                 local_page,
                 &mut batch,
             )?;
-            expected_offset = expected_offset
-                .checked_add(u64::from(entry.payload_len))
-                .ok_or_else(|| F3dzError::InvalidHeader("payload offset overflow".into()))?;
         }
         batches.push(batch);
-    }
-    if expected_offset != data.len() as u64 {
-        return Err(F3dzError::InvalidHeader(format!(
-            "container has trailing or missing payload bytes: indexed_end={expected_offset} actual={}",
-            data.len()
-        )));
     }
     Ok(PreparedStream { header, batches })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn prepare_page(
     header: &ContainerHeader,
-    entry: &PageIndexEntry,
-    payload: &[u8],
+    page: &ValidatedPage<'_>,
     absolute_page: usize,
     local_page: usize,
     batch: &mut PreparedBatch,
 ) -> F3dzResult<()> {
-    if payload.len() < PAGE_HEADER_LEN
-        || payload[0..4] != PAGE_MAGIC
-        || get_u16(payload, 4) != VERSION
-    {
-        return corrupt(absolute_page, "invalid page header".to_string());
-    }
-    let expected_flags = (if header.progressive() {
-        u16::from(PAGE_FLAG_PROGRESSIVE)
-            | if header.base_only() {
-                u16::from(PAGE_FLAG_BASE_ONLY)
-            } else {
-                0
-            }
-    } else {
-        0
-    }) | u16::from(entry.flags & (PAGE_FLAG_GPU_FAST | PAGE_FLAG_GPU_DIRECT));
-    if get_u16(payload, 6) != expected_flags
-        || get_u16(payload, 10) != 0
-        || get_u32(payload, 52) != 0
-    {
-        return corrupt(
-            absolute_page,
-            "page flags/reserved fields disagree with container".to_string(),
-        );
-    }
-    let predictor = payload[8];
-    let enhancement_predictor = payload[9];
-    if !matches!(
-        predictor,
-        PREDICTOR_LORENZO | PREDICTOR_PLANE | PREDICTOR_ORDER_ZERO
-    ) || (header.progressive() && enhancement_predictor != PREDICTOR_PREVIOUS_LOD)
-        || (!header.progressive() && enhancement_predictor != predictor)
-        || predictor != entry.predictor_id
-    {
-        return corrupt(absolute_page, "invalid predictor contract".to_string());
-    }
-    let sample_count = usize::from(entry.width)
-        .checked_mul(usize::from(entry.height))
-        .ok_or_else(|| F3dzError::InvalidHeader("page sample count overflow".into()))?;
-    if get_u32(payload, 32) as usize != sample_count || entry.sample_count as usize != sample_count
-    {
-        return corrupt(absolute_page, "page sample count mismatch".to_string());
-    }
-    let fine_step = f32::from_bits(get_u32(payload, 36));
-    let base_step = f32::from_bits(get_u32(payload, 40));
-    let base_scale = get_u32(payload, 44);
-    let enhancement_scale = get_u32(payload, 48);
-    let expected_fine = header.epsilon * 2.0;
-    let expected_base = if header.progressive() {
-        header.epsilon * 8.0
-    } else {
-        expected_fine
-    };
-    if fine_step.to_bits() != expected_fine.to_bits()
-        || base_step.to_bits() != expected_base.to_bits()
-    {
-        return corrupt(
-            absolute_page,
-            "quantization step disagrees with epsilon".to_string(),
-        );
-    }
-    if base_scale == 0
-        || base_scale > i32::MAX as u32
-        || enhancement_scale == 0
-        || enhancement_scale > i32::MAX as u32
-    {
-        return corrupt(absolute_page, "invalid residual scale".to_string());
-    }
-    let plane = [
-        get_i32(payload, 12),
-        get_i32(payload, 16),
-        get_i32(payload, 20),
-    ];
-    if predictor != PREDICTOR_PLANE && plane != [0; 3] {
-        return corrupt(
-            absolute_page,
-            "non-plane predictor carries plane coefficients".to_string(),
-        );
-    }
+    let entry = &page.entry;
+    let sample_count = entry.sample_count as usize;
+    let plane = [page.plane.x_slope, page.plane.y_slope, page.plane.intercept];
     validate_plane(plane, entry.width, entry.height).map_err(|reason| F3dzError::CorruptPage {
         page: absolute_page,
         reason,
     })?;
-    let base_len = get_u32(payload, 24) as usize;
-    let enhancement_len = get_u32(payload, 28) as usize;
-    let base_end = PAGE_HEADER_LEN
-        .checked_add(base_len)
-        .ok_or_else(|| F3dzError::InvalidHeader("base layer overflow".into()))?;
-    let payload_end = base_end
-        .checked_add(enhancement_len)
-        .ok_or_else(|| F3dzError::InvalidHeader("enhancement layer overflow".into()))?;
-    if base_end != entry.base_layer_len as usize || payload_end != payload.len() {
-        return corrupt(absolute_page, "page layer lengths mismatch".to_string());
-    }
-    if (header.base_only() || !header.progressive()) && enhancement_len != 0 {
-        return corrupt(
-            absolute_page,
-            "quality mode forbids enhancement bytes".to_string(),
-        );
-    }
-    if header.progressive() && !header.base_only() && enhancement_len == 0 {
-        return corrupt(
-            absolute_page,
-            "refined page is missing enhancement bytes".to_string(),
-        );
-    }
-    let base = parse_layer(
-        &payload[PAGE_HEADER_LEN..base_end],
-        sample_count,
-        absolute_page,
-    )?;
-    let enhancement = if enhancement_len == 0 {
+    let base = parse_layer(page.base_layer, sample_count, absolute_page)?;
+    let enhancement = if page.enhancement_layer.is_empty() {
         None
     } else {
         Some(parse_layer(
-            &payload[base_end..payload_end],
+            page.enhancement_layer,
             sample_count,
             absolute_page,
         )?)
@@ -988,17 +834,17 @@ fn prepare_page(
     descriptor[3] = entry.page_x * u32::from(header.tile_size);
     descriptor[4] = entry.page_y * u32::from(header.tile_size);
     descriptor[7] = u32::from(enhancement.is_none());
-    descriptor[8] = u32::from(predictor);
-    descriptor[9] = u32::from(enhancement_predictor);
-    descriptor[10] = fine_step.to_bits();
-    descriptor[11] = base_step.to_bits();
+    descriptor[8] = u32::from(entry.predictor_id);
+    descriptor[9] = u32::from(page.enhancement_predictor);
+    descriptor[10] = page.fine_step.to_bits();
+    descriptor[11] = page.base_step.to_bits();
     descriptor[12] = plane[0] as u32;
     descriptor[13] = plane[1] as u32;
     descriptor[14] = plane[2] as u32;
     descriptor[33] = batch.samples as u32;
-    descriptor[34] = base_scale;
+    descriptor[34] = page.base_scale;
     descriptor[35] = batch.samples as u32;
-    descriptor[36] = enhancement_scale;
+    descriptor[36] = page.enhancement_scale;
     descriptor[37] = if entry.gpu_direct() {
         2
     } else {
@@ -1123,18 +969,6 @@ fn byte_size(words: usize) -> F3dzResult<u64> {
             .ok_or_else(|| F3dzError::InvalidHeader("GPU buffer size overflow".to_string()))?,
     )
     .map_err(|_| F3dzError::InvalidHeader("GPU buffer exceeds u64".to_string()))
-}
-
-fn get_u16(data: &[u8], offset: usize) -> u16 {
-    u16::from_le_bytes([data[offset], data[offset + 1]])
-}
-
-fn get_u32(data: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
-}
-
-fn get_i32(data: &[u8], offset: usize) -> i32 {
-    i32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
 }
 
 fn record_base_quality() {
@@ -1359,5 +1193,29 @@ mod tests {
             Err(F3dzError::CorruptPage { page: 1, reason })
                 if reason.contains("canonical row-major")
         ));
+    }
+
+    #[test]
+    fn gpu_preparation_does_not_entropy_decode() {
+        let stream = encode_dem(&terrain(8, 8), 8, 8, &EncodeOptions::new(0.1)).unwrap();
+        let (header, entries) = super::super::format::parse_prefix(&stream).unwrap();
+        let entry = &entries[0];
+        let start = entry.payload_offset as usize;
+        let end = start + entry.payload_len as usize;
+        let layer_start = start + super::super::format::PAGE_HEADER_LEN;
+        let (mut layer, consumed) = RansEncoded::from_bytes(&stream[layer_start..end]).unwrap();
+        let mut corrupt = stream;
+        // A normalized initial state passes rANS framing but cannot decode the
+        // original canonical symbol stream. Preparation must leave it to WGSL.
+        layer.states[0] = u32::MAX;
+        let bytes = layer.to_bytes().unwrap();
+        assert_eq!(bytes.len(), consumed);
+        corrupt[layer_start..layer_start + consumed].copy_from_slice(&bytes);
+        let checksum = super::super::format::crc32(&corrupt[start..end]);
+        let crc_offset = header.index_offset as usize + 32;
+        corrupt[crc_offset..crc_offset + 4].copy_from_slice(&checksum.to_le_bytes());
+        assert!(super::super::format::validate_stream(&corrupt).is_ok());
+        assert!(validate_stream(&corrupt).is_ok());
+        assert!(decode_dem(&corrupt, None).is_err());
     }
 }

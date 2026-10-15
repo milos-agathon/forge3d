@@ -40,6 +40,7 @@ pub mod gpu_types;
 pub mod memory_tracker;
 pub mod resource_tracker;
 pub(crate) mod texture_layout;
+pub(crate) mod texture_readback;
 
 // Q3: GPU profiling and timing
 pub mod gpu_timing;

@@ -1,6 +1,7 @@
 // src/viewer/init/lit_init.rs
 // Lit compute pipeline initialization for the Viewer
 
+use crate::viewer::render_targets::{Target, TargetKind};
 use std::sync::Arc;
 use wgpu::{BindGroupLayout, ComputePipeline, Device, Sampler, TextureView};
 
@@ -273,24 +274,10 @@ pub fn create_lit_resources(
         ..Default::default()
     });
 
-    let lit_output = tracked_create_texture(
-        device,
-        &wgpu::TextureDescriptor {
-            label: Some("viewer.lit.output"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-    )?;
-    let lit_output_view = lit_output.create_view(&wgpu::TextureViewDescriptor::default());
+    let Target {
+        texture: lit_output,
+        view: lit_output_view,
+    } = TargetKind::Lit.create(device, width, height)?;
 
     Ok(LitResources {
         lit_bind_group_layout: lit_bgl,

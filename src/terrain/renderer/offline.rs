@@ -893,11 +893,16 @@ impl TerrainScene {
         self.stage_material_vt_feedback_readback(&mut encoder)?;
         if let Some(draws) = batch_scope_draws {
             ts_end(timing, &mut encoder, batch_scope, draws);
-            if let Some(manager) = timing.as_mut() {
-                manager.resolve_queries(&mut encoder);
-            }
         }
-        self.queue.submit(Some(encoder.finish()));
+        if batch_scope_draws.is_some() {
+            if let Some(manager) = timing.as_mut() {
+                manager.submit(encoder);
+            } else {
+                self.queue.submit(Some(encoder.finish()));
+            }
+        } else {
+            self.queue.submit(Some(encoder.finish()));
+        }
         self.finish_material_vt_frame()?;
         state.total_samples += 1;
         Ok(())

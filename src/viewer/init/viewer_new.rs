@@ -146,6 +146,7 @@ impl Viewer {
             #[cfg(feature = "extension-module")]
             adapter,
             config: surface_config,
+            failed_window_resize: None,
             camera: CameraController::new(),
             camera_anchor: crate::camera::Anchor::new(),
             frame_camera: None,
