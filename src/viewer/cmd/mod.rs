@@ -14,7 +14,7 @@ mod legacy_handler;
 mod pointcloud_command;
 mod scene_command;
 mod scene_review_command;
-mod terrain_command;
+pub(crate) mod terrain_command;
 mod vector_overlay_command;
 
 // handler.rs contains the main handle_cmd impl block on Viewer

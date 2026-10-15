@@ -190,7 +190,12 @@ class ViewerHandle:
         up: WorldPosition = ...,
     ) -> None: ...
     def set_fov(self, deg: float) -> None: ...
-    def set_sun(self, azimuth_deg: float, elevation_deg: float) -> None: ...
+    def set_sun(
+        self,
+        azimuth_deg: float,
+        elevation_deg: float,
+        intensity: Optional[float] = None,
+    ) -> None: ...
     def set_sun_time(
         self,
         solar_time: SolarTime | Mapping[str, object],

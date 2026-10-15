@@ -37,8 +37,11 @@ class _DummyHandle:
             ("set_orbit_camera", phi_deg, theta_deg, radius, fov_deg, target)
         )
 
-    def set_sun(self, azimuth_deg, elevation_deg):
-        self.commands.append(("set_sun", azimuth_deg, elevation_deg))
+    def set_sun(self, azimuth_deg, elevation_deg, intensity=None):
+        if intensity is None:
+            self.commands.append(("set_sun", azimuth_deg, elevation_deg))
+        else:
+            self.commands.append(("set_sun", azimuth_deg, elevation_deg, intensity))
 
     def snapshot(self, path, width=None, height=None):
         self.commands.append(("snapshot", path, width, height))

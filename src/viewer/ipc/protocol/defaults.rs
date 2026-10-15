@@ -30,10 +30,6 @@ pub(super) fn default_sun_elevation() -> f32 {
     35.0
 }
 
-pub(super) fn default_sun_intensity() -> f32 {
-    1.0
-}
-
 pub(super) fn default_primitive() -> String {
     "triangles".to_string()
 }
