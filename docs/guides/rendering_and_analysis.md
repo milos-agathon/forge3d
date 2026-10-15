@@ -47,7 +47,8 @@ set `fade_start` beyond it too if you want the full specified strength.
 and `--detail-sigma-px`, with `--detail-fade-start` and `--detail-fade-end` for
 these distances. Its JSON `detail_normals` section accepts `fade_start` and
 `fade_end`; explicit CLI values take precedence. P6 automatic generation uses
-`scripts/detail_normals.py` and raises an error if generation fails.
+the packaged `python -m forge3d._detail_normals` encoder and raises an error
+if generation fails. The source-tree `scripts/detail_normals.py` CLI remains available.
 The generated map is saved beside the output image and uses `--flip-y` to
 match the demo's legacy DEM row flip. `--overwrite` applies to that generated
 map too; an existing map is never silently reused for different DEM inputs.

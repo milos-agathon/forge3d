@@ -81,8 +81,9 @@ def test_p6_explicit_zero_does_not_generate(tmp_path, monkeypatch, flag):
 @pytest.mark.parametrize("returncode", [0, 1])
 def test_p6_generation_failure_is_explicit(tmp_path, monkeypatch, returncode):
     def failed(command, **kwargs):
-        assert Path(command[1]) == ROOT / "scripts" / "detail_normals.py"
-        assert Path(command[1]).is_file()
+        assert command[1:3] == ["-m", "forge3d._detail_normals"]
+        encoder_spec = importlib.util.find_spec(command[2])
+        assert encoder_spec is not None and Path(encoder_spec.origin).is_file()
         assert "--flip-y" in command
         return SimpleNamespace(returncode=returncode, stderr="generation failed", stdout="")
     monkeypatch.setattr("subprocess.run", failed)

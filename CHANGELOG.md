@@ -19,6 +19,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - `loaders::ktx2::BasisTranscoder`, `Ktx2Loader::with_target_formats`, the zero-block `compress_etc2_rgb`/`compress_etc2_rgba` placeholders, and the no-op `generate_mip_levels` stub have been removed. `compress_rgba_to_format` now wires `Bc4RUnorm` to the real `bc4::encode_channel` codec, and refuses ETC2, unencoded formats, and unimplemented multi-mip uploads loudly with structured degradations instead of fabricating zeroed blocks or leaving GPU mip levels uninitialized.
 
 ### Fixed
+- Package the DEM detail-normal encoder so P6 generation works from installed wheels; retain the source-tree encoder CLI and its path conventions.
 - DEM detail-normal maps are decoded, uploaded and sampled by native terrain rendering. CLI/JSON settings, row orientation and distance fade controls reach the renderer; zero strength preserves existing output (#224).
 - Terrain upload no longer computes an unused full-resolution CPU coarse-AO texture. Explicit AO consumers and debug mode 28 retain their existing computation (#225).
 - Restore thematic-raster validation helper imports after the compiled-plan ownership refactor, retain OBLIQUA camera-wrapper assertions against the shared native lookup, and isolate the Windows viewport test's event loop from other viewer fixtures.
