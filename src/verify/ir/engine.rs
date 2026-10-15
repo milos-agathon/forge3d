@@ -9,7 +9,8 @@ const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xd904_56ee_98b5_6d96;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x32c0_583b_cf1a_f865;
 // Updated from the assembled terrain module whenever its source changes.
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xf8f9_0a5f_da99_33d0;
+// Combined WATER-OPTICS + MAP-DETAIL-NORMAL terrain source (owner-approved 2026-10-13).
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xeb41_75bc_1e2b_5963;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {

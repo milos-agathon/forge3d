@@ -658,8 +658,9 @@ fn runtime_assert_report(mode: Option<&str>) -> serde_json::Value {
                 })
                 .collect::<Vec<_>>();
             return json!({
-                "status": if failures.is_empty() { "passed" } else { "failed" },
-                "checked_scenes": observations.len(),
+                "status": if !failures.is_empty() { "failed" } else if observations.iter().any(|o| o.status == "excluded") { "excluded" } else { "passed" },
+                "checked_scenes": observations.iter().filter(|o| o.status != "excluded").count(),
+                "excluded_scenes": observations.iter().filter(|o| o.status == "excluded").count(),
                 "checked_entries": observations,
                 "feature": "shader-contract-asserts",
                 "feature_enabled": feature_enabled,

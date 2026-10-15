@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.43.0"
+__version__ = "1.44.0"
 version = __version__
 
 import numpy as np
@@ -265,6 +265,7 @@ from .terrain_params import (
     FogSettings,
     ReflectionSettings,
     WaterSettings,
+    WaterOpticsSettings,
     CloudSettings,
     HeightAoSettings,
     ScreenSpaceSettings,
@@ -859,6 +860,7 @@ __all__ = [
     "FogSettings",
     "ReflectionSettings",
     "WaterSettings",
+    "WaterOpticsSettings",
     "CloudSettings",
     "HeightAoSettings",
     "ScreenSpaceSettings",

@@ -19,6 +19,7 @@ pub(super) struct OverlayUniforms {
     pub(super) params4: [f32; 4],
     pub(super) params5: [f32; 4],
     pub(super) params6: [f32; 4],
+    pub(super) params7: [f32; 4],
 }
 
 #[repr(C, align(16))]

@@ -47,6 +47,7 @@ from .terrain_params import (
     FogSettings,
     ReflectionSettings,
     WaterSettings,
+    WaterOpticsSettings,
     CloudSettings,
     HeightAoSettings,
     ScreenSpaceSettings,
@@ -598,6 +599,11 @@ class OverlayLayer:
     def kind(self) -> str: ...
 
 class TerrainRenderParams:
+    """Decode a terrain configuration, including its typed DetailSettings.
+
+    DEM detail normals require enabled=True, detail_normal_path and positive
+    detail_strength. detail_sigma_px is metadata for the precomputed map.
+    """
     size_px: Tuple[int, int]
     render_scale: float
     msaa_samples: int

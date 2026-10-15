@@ -74,6 +74,22 @@ fn target_descriptors_preserve_formats_usages_and_half_resolution() {
 #[cfg(windows)]
 #[test]
 fn viewport_resize_is_transactional_and_renders_viewer_frames() {
+    // Winit permits one event loop per process. Keep every resize assertion in
+    // an isolated test process so the screen-picking fixture can own its loop.
+    if std::env::var_os("FORGE3D_VIEWPORT_TEST_CHILD").is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "viewer::render_targets::tests::viewport_resize_is_transactional_and_renders_viewer_frames",
+                "--nocapture",
+            ])
+            .env("FORGE3D_VIEWPORT_TEST_CHILD", "1")
+            .status()
+            .expect("isolated viewport test process");
+        assert!(status.success(), "isolated viewport test failed: {status}");
+        return;
+    }
+
     use crate::core::resource_tracker::{
         begin_owner_capture, owner_group_report, AllocationOwner, TextureAllocationFailure,
     };

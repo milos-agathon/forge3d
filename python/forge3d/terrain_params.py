@@ -245,6 +245,80 @@ class ReflectionSettings:
             raise ValueError("shore_atten_width must be >= 0")
 
 
+class _WaterSurfaceGrid(Sequence):
+    """An immutable float32 snapshot; materialize Python values only for export."""
+
+    def __init__(self, array: np.ndarray) -> None:
+        self._shape = array.shape
+        self._data = array.tobytes(order="C")
+
+    @property
+    def _array(self) -> np.ndarray:
+        # Bytes own the allocation: callers cannot re-enable writes on this view.
+        return np.frombuffer(self._data, dtype=np.float32).reshape(self._shape)
+
+    def __len__(self) -> int:
+        return self._shape[0]
+
+    def __getitem__(self, index):
+        return self._array[index]
+
+    def __array__(self, dtype=None, copy=None):
+        array = self._array
+        if dtype is not None and np.dtype(dtype) != array.dtype:
+            return array.astype(dtype)
+        return array.copy() if copy else array
+
+    def __deepcopy__(self, memo):
+        # dataclasses.asdict remains ordinary JSON-compatible nested lists.
+        return self._array.tolist()
+
+
+@dataclass
+class WaterOpticsSettings:
+    """Opt-in water optics, in the terrain's Z-up coordinate system.
+
+    Heights use heightmap units before ``z_scale``; normals are world-space,
+    after ``z_scale``. Arrays have the same row orientation and grid as the
+    heightmap. Inputs are snapshotted into immutable float32 buffers; ``asdict``
+    exports ordinary nested lists for deterministic serialization.
+    ``color=None`` retains the caller's material/overlay colour (linear RGB).
+    ``mode='procedural'`` reproduces the legacy shading and ignores surface inputs.
+    """
+
+    mode: str = "physical"
+    surface_height: Optional[Sequence[Sequence[float]]] = None
+    surface_normals: Optional[Sequence[Sequence[Sequence[float]]]] = None
+    color: Optional[Tuple[float, float, float]] = None
+    roughness: float = 0.02
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"physical", "procedural"}:
+            raise ValueError("water optics mode must be physical or procedural")
+        self.roughness = _as_f32(self.roughness)
+        if not math.isfinite(self.roughness) or not 0.0 <= self.roughness <= 1.0:
+            raise ValueError("water roughness must be finite and in [0, 1]")
+        if self.color is not None:
+            color = np.asarray(self.color, dtype=np.float32)
+            if color.shape != (3,) or not np.isfinite(color).all() or np.any((color < 0) | (color > 1)):
+                raise ValueError("water color must contain three finite linear RGB values in [0, 1]")
+            self.color = tuple(float(v) for v in color)
+        for name, ndim in (("surface_height", 2), ("surface_normals", 3)):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            array = np.asarray(value, dtype=np.float32)
+            if array.ndim != ndim or min(array.shape[:2]) < 2 or not np.isfinite(array).all():
+                raise ValueError(f"water {name} must be a finite grid with at least two rows and columns")
+            if ndim == 3:
+                if array.shape[2] != 3 or np.any(array[..., 2] <= 0):
+                    raise ValueError("water surface_normals must have three components and positive Z for a heightfield")
+            setattr(self, name, _WaterSurfaceGrid(array))
+        if self.surface_height is not None and self.surface_normals is not None:
+            if np.shape(self.surface_height) != np.shape(self.surface_normals)[:2]:
+                raise ValueError("water height and normal grids must have the same shape")
+
+
 @dataclass
 class WaterSettings:
     """Terrain water-mask settings for MapScene/TerrainRenderer."""
@@ -254,10 +328,15 @@ class WaterSettings:
     mask_path: Optional[str] = None
     level: Optional[float] = None
     slope_threshold: float = 0.02
+    optics: Optional[WaterOpticsSettings] = None
 
     def __post_init__(self) -> None:
         if self.slope_threshold < 0.0:
             raise ValueError("slope_threshold must be >= 0")
+        if isinstance(self.optics, dict):
+            self.optics = WaterOpticsSettings(**self.optics)
+        if self.optics is not None and not isinstance(self.optics, WaterOpticsSettings):
+            raise ValueError("optics must be WaterOpticsSettings or None")
 
 
 @dataclass
@@ -480,8 +559,17 @@ class DetailSettings:
     Gradient-match fields:
     ``detail_normal_path`` points to an optional DEM-derived detail-normal
     texture, ``detail_sigma_px`` records the Gaussian sigma used to generate it,
-    and ``detail_strength`` controls how strongly it blends with the procedural
-    detail path.
+    and ``detail_strength`` controls its contribution independently of
+    ``normal_strength``. Enable detail and supply both a path and a positive
+    strength to sample the map; zero strength leaves rendering unchanged.
+    RGB encodes tangent-space normals in linear [0, 1]: red is east (+U),
+    green is south (+V, increasing raster row), and blue is surface-up.
+    The map spans the same UV extent as the heightmap and fades with distance.
+    Contribution is full through ``fade_start`` and zero at/beyond
+    ``fade_end``, in camera-to-fragment world units. For distant map views,
+    set ``fade_end`` beyond the visible terrain distance (and ``fade_start``
+    beyond it to retain full strength).
+    ``detail_sigma_px`` is generation metadata; the renderer does not blur it.
     """
 
     enabled: bool = False  # Disabled by default (P5 compatibility)
@@ -506,10 +594,16 @@ class DetailSettings:
             raise ValueError("fade_start must be >= 0")
         if self.fade_end <= self.fade_start:
             raise ValueError("fade_end must be > fade_start")
-        if self.detail_sigma_px <= 0.0:
-            raise ValueError("detail_sigma_px must be > 0")
+        if self.detail_normal_path is not None and (
+            not isinstance(self.detail_normal_path, str) or not self.detail_normal_path.strip()
+        ):
+            raise ValueError("detail_normal_path must be a non-empty string or None")
+        if not math.isfinite(self.detail_sigma_px) or self.detail_sigma_px <= 0.0:
+            raise ValueError("detail_sigma_px must be finite and > 0")
         if not 0.0 <= self.detail_strength <= 1.0:
             raise ValueError("detail_strength must be in [0, 1]")
+        if self.enabled and self.detail_strength > 0.0 and self.detail_normal_path is None:
+            raise ValueError("detail_normal_path is required when detail is enabled and detail_strength > 0")
 
 
 @dataclass
@@ -2555,6 +2649,7 @@ __all__ = [
     "FogSettings",
     "ReflectionSettings",
     "WaterSettings",
+    "WaterOpticsSettings",
     "CloudSettings",
     "BloomSettings",
     "ScreenSpaceSettings",

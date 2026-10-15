@@ -5,7 +5,7 @@ Computes high-frequency detail from a DEM by subtracting a Gaussian-blurred
 version, then converts the residual heightmap into a tangent-space normal map.
 
 Usage:
-    python tools/detail_normals.py --dem assets/Gore_Range_Albers_1m.tif \\
+    python scripts/detail_normals.py --dem assets/Gore_Range_Albers_1m.tif \\
         --sigma-px 3.0 --output assets/generated/detail_normal.png
 
 Output format:
@@ -150,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Normal strength scale factor (default: 1.0)",
     )
     parser.add_argument(
+        "--flip-y", action="store_true",
+        help="Flip DEM rows before encoding, matching terrain_demo's rendered heightmap.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -210,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
     
     print(f"Loading DEM: {dem_path}")
     height = load_dem(dem_path)
+    if args.flip_y:
+        height = np.flipud(height).copy()
     print(f"  Shape: {height.shape}")
     print(f"  Range: [{height.min():.2f}, {height.max():.2f}]")
     
@@ -234,6 +240,8 @@ def main(argv: list[str] | None = None) -> int:
         "height_shape": list(height.shape),
         "detail_range": [float(detail.min()), float(detail.max())],
     }
+    if args.flip_y:
+        meta["flip_y"] = True
     
     meta_path = args.meta
     if meta_path is None:

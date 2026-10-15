@@ -22,6 +22,7 @@ impl TerrainRenderParams {
         let sampling = params.getattr("sampling")?;
         let clamp = params.getattr("clamp")?;
 
+        let water_optics = super::native_water::parse_water_optics(&params)?;
         let decoded = DecodedTerrainSettings {
             light: parse_light_settings(&light)?,
             triplanar: parse_triplanar_settings(&triplanar)?,
@@ -32,7 +33,7 @@ impl TerrainRenderParams {
             shadow: parse_shadow_settings(&shadows)?,
             fog: parse_fog_settings(&params),
             reflection: parse_reflection_settings(&params),
-            detail: parse_detail_settings(&params),
+            detail: parse_detail_settings(&params)?,
             height_ao: parse_height_ao_settings(&params),
             sun_visibility: parse_sun_visibility_settings(&params),
             bloom: parse_bloom_settings(&params),
@@ -128,6 +129,7 @@ impl TerrainRenderParams {
             clamp: clamp.unbind(),
             python_object: params.into_py(py),
             decoded,
+            water_optics,
         })
     }
 

@@ -1568,5 +1568,85 @@
     "removed": [],
     "review": "Milos explicitly approved these exact ten additions on 14 October 2026 for PR #243. The operands are u32 viewport width/height values used for reciprocal resolution, SSAO projection scale and TAA resolution. No f64/world-position narrowing or scanner exemption is introduced. Removing these exact ten occurrence-locked sites restores the prior texture-layout freeze; all historical records and rejecting probes remain intact.",
     "source_commit": "c4acb6b941c34f85c9a4d6e1e8c616aee5dec3ad"
+  },
+  "water_optics": {
+    "base_count": 1836,
+    "base_digest": "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12",
+    "result_count": 1846,
+    "result_digest": "f833522fa331012743ce728548a7f63fb114335de11c2aab7985c90ab9192a62",
+    "added": [
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        1,
+        "n.map(|v| (f64::from(v) / length) as f32)"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        2,
+        "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        3,
+        "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        4,
+        "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        5,
+        "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        6,
+        "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/uniforms.rs",
+        "with_optics",
+        "as_f32",
+        1,
+        "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/uniforms.rs",
+        "with_optics",
+        "as_f32",
+        2,
+        "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/uniforms.rs",
+        "with_optics",
+        "as_f32",
+        3,
+        "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/uniforms.rs",
+        "with_optics",
+        "as_f32",
+        4,
+        "self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]"
+      ]
+    ],
+    "removed": [],
+    "review": "2026-10-13: Milos instructed completing a green and mergeable PR after this exact ten-site inventory transition was presented. Six conversions encode normalized normal components; four convert boolean flags losslessly to 0 or 1. No world-coordinate cast is added, no site is removed, and every preceding ledger record and rejecting probe is retained. Rebased after main PR #234: the base is its texture_layout_stats result; the same ten additions give 1846 sites (owner-approved 2026-10-13)."
   }
 }

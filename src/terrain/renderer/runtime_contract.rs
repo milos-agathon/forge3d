@@ -1,4 +1,4 @@
-use super::OverlayUniforms;
+use super::{water_reflection::WaterReflectionUniforms, OverlayUniforms};
 use crate::core::shader_contract_runtime::RuntimeContractObservation;
 
 pub(super) fn build_observation(
@@ -9,6 +9,8 @@ pub(super) fn build_observation(
     heightmap: &[f32],
     width: u32,
     height: u32,
+    water: &WaterReflectionUniforms,
+    water_mask_max: f32,
 ) -> Result<RuntimeContractObservation, String> {
     if terrain.len() != 44 || shading.len() != 44 {
         return Err("terrain contract uniforms have an unexpected ABI length".to_string());
@@ -128,6 +130,7 @@ pub(super) fn build_observation(
         overlay.params4,
         overlay.params5,
         overlay.params6,
+        overlay.params7,
     ]
     .iter()
     .enumerate()
@@ -163,6 +166,66 @@ pub(super) fn build_observation(
         height.into(),
         1,
     );
+    check_slice(
+        &mut observation,
+        "water_reflection_uniforms.optics.mode_range",
+        0,
+        &water.optics[..1],
+        0.0,
+        1.0,
+    );
+    if water.optics[0] != 0.0 {
+        observation.exclude_input(
+            "water_reflection_uniforms.optics.x",
+            0,
+            water.optics[0],
+            "physical water optics is outside the legacy/zero-water static proof domain",
+        );
+    } else {
+        check_slice(
+            &mut observation,
+            "water_reflection_uniforms.optics.x",
+            0,
+            &water.optics[..1],
+            0.0,
+            0.0,
+        );
+    }
+    for (index, name) in ["y", "z", "w"].into_iter().enumerate() {
+        check_slice(
+            &mut observation,
+            &format!("water_reflection_uniforms.optics.{name}"),
+            0,
+            &water.optics[index + 1..index + 2],
+            0.0,
+            1.0,
+        );
+    }
+    check_slice(
+        &mut observation,
+        "water_reflection_uniforms.water_color",
+        0,
+        &water.water_color,
+        0.0,
+        1.0,
+    );
+    if water_mask_max > 0.0 {
+        observation.exclude_input(
+            "water_mask_tex.samples_max",
+            11,
+            water_mask_max,
+            "masked water is outside the zero-water static proof domain",
+        );
+    } else {
+        check_slice(
+            &mut observation,
+            "water_mask_tex.samples_max",
+            11,
+            &[water_mask_max],
+            0.0,
+            0.0,
+        );
+    }
     Ok(observation)
 }
 
@@ -174,12 +237,22 @@ pub(super) fn record_observation(
     heightmap: &[f32],
     width: u32,
     height: u32,
+    water: &WaterReflectionUniforms,
+    water_mask_max: f32,
 ) -> Result<(), String> {
     if !crate::core::shader_contract_runtime::capture_active() {
         return Ok(());
     }
     crate::core::shader_contract_runtime::record_observation(build_observation(
-        scene, terrain, shading, overlay, heightmap, width, height,
+        scene,
+        terrain,
+        shading,
+        overlay,
+        heightmap,
+        width,
+        height,
+        water,
+        water_mask_max,
     )?)
 }
 
@@ -241,10 +314,13 @@ mod tests {
                 params4: [0.0; 4],
                 params5: [0.0; 4],
                 params6: [0.0; 4],
+                params7: [0.0; 4],
             },
             &[0.0, 0.5, 1.0, 0.25],
             2,
             2,
+            &WaterReflectionUniforms::disabled(),
+            0.0,
         )
         .unwrap();
         let names = observation
@@ -285,10 +361,13 @@ mod tests {
                 params4: [0.0; 4],
                 params5: [0.0; 4],
                 params6: [0.0; 4],
+                params7: [0.0; 4],
             },
             &[0.0, 0.5, 1.0, 0.25],
             2,
             2,
+            &WaterReflectionUniforms::disabled(),
+            0.0,
         )
         .unwrap()
     }

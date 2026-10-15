@@ -29,6 +29,41 @@ terrain rendering. It groups settings into focused dataclasses such as:
 Use it directly when you are building repeatable terrain render presets or
 feeding `TerrainRenderer`.
 
+`DetailSettings` supports a precomputed DEM detail-normal image on the native
+terrain path. Set `enabled=True`, `detail_normal_path="ridge.png"`, and
+`detail_strength` in `(0, 1]`; `normal_strength` controls procedural detail
+separately. The image covers the heightmap's UV extent, with linear RGB normals
+encoded as `normal * 0.5 + 0.5`: red points east (+U), green points south (+V,
+increasing raster row), and blue points away from the surface. The renderer
+uses a terrain-UV-aligned tangent frame and the existing distance fade. Water
+does not receive detail normals.
+
+Fade uses camera-to-fragment distance in terrain world units: contribution is
+full at or below `fade_start` (default 50), smoothly decreases between the two
+distances, and is zero at or beyond `fade_end` (default 200). For a map viewed
+from kilometres away, set `fade_end` beyond the visible terrain's distance;
+set `fade_start` beyond it too if you want the full specified strength.
+`examples/terrain_demo.py` forwards `--detail-normals`, `--detail-strength`,
+and `--detail-sigma-px`, with `--detail-fade-start` and `--detail-fade-end` for
+these distances. Its JSON `detail_normals` section accepts `fade_start` and
+`fade_end`; explicit CLI values take precedence. P6 automatic generation uses
+`scripts/detail_normals.py` and raises an error if generation fails.
+The generated map is saved beside the output image and uses `--flip-y` to
+match the demo's legacy DEM row flip. `--overwrite` applies to that generated
+map too; an existing map is never silently reused for different DEM inputs.
+
+`scripts/detail_normals.py` generates this convention from a DEM residual.
+`detail_sigma_px` records the generation sigma; it does not request runtime
+blurring. Active maps that cannot be read raise an error naming
+`detail_normal_path`. Disabled detail and zero DEM strength do not load the map
+and preserve the existing rendering path. The static terrain shader contract
+continues to admit default-off micro-detail; enabled DEM detail is validated
+by physical-render tests, not certified by that default-only proof profile.
+
+Spatial orientation tests use a nadir `mesh:zup` view of the complete map.
+Screen mode's oversized triangle currently shows only UV `[0, 0.5]²`; use
+constant-tilt inputs when checking channel orientation in that mode.
+
 ## Native And Offscreen Rendering
 
 forge3d exposes two lower-level rendering layers.
