@@ -56,54 +56,54 @@ def detail_to_normal_map(
     scale: float = 1.0,
 ) -> np.ndarray:
     """Convert detail heightmap to tangent-space normal map.
-    
+
     Args:
         detail: 2D float array of height residuals
         scale: Vertical scale factor for normal strength
-    
+
     Returns:
         RGB uint8 array (H, W, 3) with tangent-space normals
         Channel mapping: R=X, G=Y, B=Z (OpenGL convention)
     """
     h, w = detail.shape
-    
+
     # Compute gradients using Sobel-like finite differences
     # Central differences for interior, one-sided at edges
     dx = np.zeros_like(detail)
     dy = np.zeros_like(detail)
-    
+
     # Central differences for X gradient
     dx[:, 1:-1] = (detail[:, 2:] - detail[:, :-2]) * 0.5
     dx[:, 0] = detail[:, 1] - detail[:, 0]
     dx[:, -1] = detail[:, -1] - detail[:, -2]
-    
+
     # Central differences for Y gradient
     dy[1:-1, :] = (detail[2:, :] - detail[:-2, :]) * 0.5
     dy[0, :] = detail[1, :] - detail[0, :]
     dy[-1, :] = detail[-1, :] - detail[-2, :]
-    
+
     # Scale gradients
     dx *= scale
     dy *= scale
-    
+
     # Construct normal vectors: n = normalize(-dx, -dy, 1)
     # For a heightfield z=f(x,y), the normal is (-dz/dx, -dz/dy, 1) normalized
     nx = -dx
     ny = -dy
     nz = np.ones_like(detail)
-    
+
     # Normalize
     length = np.sqrt(nx*nx + ny*ny + nz*nz)
     length = np.maximum(length, 1e-8)
     nx /= length
     ny /= length
     nz /= length
-    
+
     # Encode to [0, 255]: n * 0.5 + 0.5 -> [0, 1] -> [0, 255]
     r = ((nx * 0.5 + 0.5) * 255.0).astype(np.uint8)
     g = ((ny * 0.5 + 0.5) * 255.0).astype(np.uint8)
     b = ((nz * 0.5 + 0.5) * 255.0).astype(np.uint8)
-    
+
     return np.stack([r, g, b], axis=-1)
 
 
@@ -173,18 +173,18 @@ def main(argv: list[str] | None = None, *, base_dir: Path | None = None) -> int:
         default=None,
         help="Output metadata JSON path",
     )
-    
+
     args = parser.parse_args(argv)
-    
+
     # Resolve paths
     dem_path = args.dem
     if not dem_path.is_absolute():
         dem_path = base_path / dem_path
-    
+
     if not dem_path.exists():
         print(f"ERROR: DEM file not found: {dem_path}")
         return 1
-    
+
     # Determine output path
     out_name = f"detail_normal_sigma{args.sigma_px:.1f}.png"
     if args.output is not None:
@@ -199,33 +199,33 @@ def main(argv: list[str] | None = None, *, base_dir: Path | None = None) -> int:
         output_path = outdir / out_name
     else:
         output_path = base_path / "assets" / "generated" / out_name
-    
+
     # Check overwrite
     if output_path.exists() and not args.overwrite:
         print(f"ERROR: Output file exists: {output_path}")
         print("Use --overwrite to replace it.")
         return 1
-    
+
     # Ensure parent directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"Loading DEM: {dem_path}")
     height = load_dem(dem_path)
     if args.flip_y:
         height = np.flipud(height).copy()
     print(f"  Shape: {height.shape}")
     print(f"  Range: [{height.min():.2f}, {height.max():.2f}]")
-    
+
     print(f"Computing detail residual (sigma={args.sigma_px} px)...")
     detail = compute_detail_residual(height, args.sigma_px)
     print(f"  Detail range: [{detail.min():.4f}, {detail.max():.4f}]")
-    
+
     print(f"Converting to normal map (scale={args.normal_scale})...")
     normal_map = detail_to_normal_map(detail, scale=args.normal_scale)
-    
+
     print(f"Saving: {output_path}")
     save_normal_map(normal_map, output_path)
-    
+
     # Save metadata
     meta = {
         "dem_path": str(dem_path),
@@ -239,18 +239,18 @@ def main(argv: list[str] | None = None, *, base_dir: Path | None = None) -> int:
     }
     if args.flip_y:
         meta["flip_y"] = True
-    
+
     meta_path = args.meta
     if meta_path is None:
         meta_path = output_path.with_suffix(".json")
     else:
         if not meta_path.is_absolute():
             meta_path = base_path / meta_path
-    
+
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     print(f"Metadata: {meta_path}")
-    
+
     print("Done.")
     return 0
 
