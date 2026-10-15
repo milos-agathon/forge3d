@@ -134,3 +134,23 @@ def test_dead_ktx2_dds_duplicate_loaders_do_not_return() -> None:
         "a second KTX2/DDS parser returned; KTX2 loading is owned solely by "
         f"src/loaders/ktx2: {hits}"
     )
+
+
+# `forge3d.mesh.build_bvh_cpu` and `upload_mesh` must build the real Rust BVH and
+# upload tracked GPU buffers. Only the retired mock's distinctive phrases are
+# banned: bare identifiers a real estimator or builder could reuse (for example
+# `estimated_leaves`) are deliberately left out, so this gate cannot fail a
+# correct future implementation with a misleading message.
+FORBIDDEN_MESH_MOCK_MARKERS = (
+    "for now return mock data",
+    "Mock BVH statistics",
+    "In real implementation, this would call Rust code",
+)
+
+
+def test_forge3d_mesh_bvh_is_not_mocked() -> None:
+    source = (ROOT / "python/forge3d/mesh.py").read_text(encoding="utf-8")
+    hits = [marker for marker in FORBIDDEN_MESH_MOCK_MARKERS if marker in source]
+    assert hits == [], f"retired mesh BVH mocks returned: {hits}"
+    assert "mesh_build_bvh_cpu" in source
+    assert "mesh_upload_gpu" in source

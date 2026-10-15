@@ -11,6 +11,8 @@ pub mod geodesy;
 #[cfg(all(feature = "extension-module", feature = "enable-inverse-pt"))]
 pub mod inverse;
 pub mod labels;
+#[cfg(feature = "extension-module")]
+pub mod mesh_bvh;
 pub mod path_tracing;
 pub mod pointcloud;
 pub mod precision;
@@ -34,6 +36,8 @@ pub(crate) use geodesy::*;
 #[cfg(all(feature = "extension-module", feature = "enable-inverse-pt"))]
 pub(crate) use inverse::*;
 pub(crate) use labels::*;
+#[cfg(feature = "extension-module")]
+pub(crate) use mesh_bvh::*;
 pub(crate) use path_tracing::*;
 pub(crate) use pointcloud::*;
 pub(crate) use precision::*;
