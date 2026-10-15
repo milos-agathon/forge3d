@@ -2989,3 +2989,40 @@ jobs:
             fi
           fi
           exit "$failed"
+
+  release-metal-diagnostic:
+    name: Isolated release Metal diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'core' && github.ref_name == 'codex/release-1.44-acceptance-fixes'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-macos
+          run-id: 38731236943
+          github-token: ${{ github.token }}
+          path: release-diagnostic-wheel
+      - name: Install exact existing release wheel
+        run: |
+          python scripts/install_compatible_wheel.py release-diagnostic-wheel
+          python -m pip install pytest numpy pillow pyproj rasterio
+      - name: Run unchanged raster pixel assertions in a fresh process
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_TEST_INSTALLED_WHEEL: '1'
+          WGPU_BACKEND: metal
+        run: |
+          cat > /tmp/release_gpu_diagnostic.py <<'PY'
+          import json
+          import forge3d
+          def pytest_sessionfinish(session, exitstatus):
+              print('RELEASE_ADAPTER', json.dumps(forge3d.device_probe('metal')))
+              print('RELEASE_DEGRADATIONS', json.dumps(forge3d.native_degradations()))
+          PY
+          PYTHONPATH=/tmp python -m pytest -p release_gpu_diagnostic tests/test_raster_styles_gpu.py -v -s --tb=short
