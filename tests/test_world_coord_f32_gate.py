@@ -1300,11 +1300,127 @@ def test_sutura_screen_output_inventory_transition_is_exact():
     )
 
 
+def _sky_lighting_conversion_relocations():
+    solar = (
+        "let solar_direction = night::horizontal_direction( "
+        "f64::from(sun.azimuth.value() as f32), "
+        "f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+    )
+    moon = (
+        "( night::horizontal_direction(moon.azimuth.value(), moon.altitude.value()) "
+        ".as_vec3() .to_array(), night::normalized_moonlight( "
+        "observation.moon_phase.phase_angle.value(), moon.altitude.value(), ), )"
+    )
+    owner = "src/viewer/sky_lighting.rs"
+    previous = "src/viewer/state/viewer_helpers/core.rs"
+    return {
+        (owner, "observe", "as_f32", 1, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_f32",
+            1,
+            "let azimuth = sun.azimuth.value() as f32",
+        ),
+        (owner, "observe", "as_f32", 2, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_f32",
+            2,
+            "let elevation = sun.altitude.value() as f32",
+        ),
+        (owner, "observe", "as_vec", 1, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_vec",
+            1,
+            "self.sky_sun_direction_ws = crate::astro::night::horizontal_direction(f64::from(azimuth), f64::from(elevation)) .as_vec3() .to_array()",
+        ),
+        (owner, "observe", "as_vec", 2, moon): (
+            previous,
+            "sync_astro_observation",
+            "as_vec",
+            2,
+            "self.lit_sun_direction_ws = crate::astro::night::horizontal_direction( moon.azimuth.value(), moon.altitude.value(), ) .as_vec3() .to_array()",
+        ),
+    }
+
+
+def _undo_sky_lighting_transition(sites):
+    """Re-own four existing angle/unit-direction sites, preserving every freeze.
+
+    No conversion is excluded or added. The raw scanner is unchanged; missing,
+    duplicated, altered or additional owner conversions fail before restoring
+    the historical source order. Absolute world positions are not involved.
+    """
+    replacements = _sky_lighting_conversion_relocations()
+    owner_sites = [site for site in sites if site[0] == "src/viewer/sky_lighting.rs"]
+    assert owner_sites == list(replacements)
+    for new, old in replacements.items():
+        assert sites.count(new) == 1 and old not in sites
+    restored = [site for site in sites if site not in replacements]
+    # These four casts followed both existing lit-uniform enum casts in core.rs.
+    anchor = [
+        index
+        for index, site in enumerate(restored)
+        if site[:4]
+        == (
+            "src/viewer/state/viewer_helpers/core.rs",
+            "update_lit_uniform",
+            "as_f32",
+            2,
+        )
+    ]
+    assert len(anchor) == 1
+    index = anchor[0] + 1
+    return restored[:index] + list(replacements.values()) + restored[index:]
+
+
+def test_sky_lighting_relocation_is_exact_and_preserves_inventory_size():
+    sites = conversion_inventory()
+    restored = _undo_sky_lighting_transition(sites)
+    assert len(restored) == len(sites)
+    added = collections.Counter(sites) - collections.Counter(restored)
+    removed = collections.Counter(restored) - collections.Counter(sites)
+    replacements = _sky_lighting_conversion_relocations()
+    assert added == collections.Counter(replacements.keys())
+    assert removed == collections.Counter(replacements.values())
+    # Existing historical checks independently prove the entire restored freeze.
+    _inventory_before_water_optics()
+
+
+def test_sky_lighting_relocation_rejects_missing_duplicate_changed_and_extra_sites():
+    import pytest
+
+    replacements = _sky_lighting_conversion_relocations()
+    sites = list(replacements)
+    sites.append(
+        (
+            "src/viewer/state/viewer_helpers/core.rs",
+            "update_lit_uniform",
+            "as_f32",
+            2,
+            "existing debug-mode cast",
+        )
+    )
+    first = sites[0]
+    changed = (*first[:4], "changed conversion")
+    extra = (
+        "src/viewer/sky_lighting.rs",
+        "observe",
+        "as_f32",
+        3,
+        "world_position.x as f32",
+    )
+    for mutated in (sites[1:], sites + [first], [changed] + sites[1:], sites + [extra]):
+        with pytest.raises(AssertionError):
+            _undo_sky_lighting_transition(mutated)
+
+
 def _inventory_before_water_optics():
     """Check both approved branch inventories without replacing either freeze."""
     water = _ledger_data()["water_optics"]
     viewport = _ledger_data()["viewer_viewport_resize"]
-    sites = conversion_inventory()
+    sites = _undo_sky_lighting_transition(conversion_inventory())
     normalized = _undo_scene_pick_assembly_transition(sites)
     water_added = set(map(tuple, water["added"]))
     viewport_added = set(map(tuple, viewport["added"]))
