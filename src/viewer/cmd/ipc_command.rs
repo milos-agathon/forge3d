@@ -11,7 +11,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             azimuth_deg,
             elevation_deg,
         } => {
-            if ![*azimuth_deg, *elevation_deg].into_iter().all(f32::is_finite) {
+            if ![*azimuth_deg, *elevation_deg]
+                .into_iter()
+                .all(f32::is_finite)
+            {
                 viewer.reject_command(
                     "sun_direction_rejected: non-finite manual sun unchanged_state=true",
                 );
@@ -40,14 +43,11 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                             *height_m,
                         )
                         .and_then(|observer| {
-                            crate::astro::observation::set_observation(utc, observer).map(|_| ())
+                            crate::astro::observation::set_observation(utc, observer)
                         })
                     });
             match result {
-                Ok(()) => {
-                    viewer.astro_observation_active = true;
-                    viewer.sync_astro_observation();
-                }
+                Ok(observation) => viewer.apply_sky_observation(&observation),
                 Err(error) => viewer.reject_command(format!("observation_rejected: {error}")),
             }
             true
