@@ -1,8 +1,7 @@
-use super::types::{BlasDesc, GpuMesh, GpuVertex, MeshAtlas};
+use super::types::{BlasDesc, GpuVertex, MeshAtlas};
 use crate::accel::cpu_bvh::{BvhCPU, BvhNode, MeshCPU};
 use crate::core::resource_tracker::tracked_create_buffer_init;
-use anyhow::Result;
-use wgpu::{BufferUsages, Device, Queue};
+use wgpu::{BufferUsages, Device};
 
 /// BVH node padded to the WGSL `BvhNode` layout consumed by the wavefront
 /// kernels (pt_intersect/pt_shadow): vec3 members force a 16-byte struct
@@ -130,93 +129,5 @@ pub fn build_mesh_atlas(device: &Device, items: &[(MeshCPU, BvhCPU)]) -> anyhow:
         bvh_buffer,
         descs_buffer,
         desc_count: descs.len() as u32,
-    })
-}
-
-/// Upload mesh and BVH data to GPU buffers
-/// This is the main integration point for getting CPU mesh data into GPU format
-pub fn upload_mesh_and_bvh(
-    device: &Device,
-    _queue: &Queue,
-    mesh: &MeshCPU,
-    bvh: &BvhCPU,
-) -> Result<GpuMesh> {
-    // Validate input data
-    if mesh.vertices.is_empty() {
-        anyhow::bail!("Cannot upload empty mesh");
-    }
-    if mesh.indices.is_empty() {
-        anyhow::bail!("Cannot upload mesh with no triangles");
-    }
-    if bvh.nodes.is_empty() {
-        anyhow::bail!("Cannot upload empty BVH");
-    }
-
-    // Convert vertices to GPU format
-    let gpu_vertices: Vec<GpuVertex> = mesh
-        .vertices
-        .iter()
-        .map(|&pos| GpuVertex::from(pos))
-        .collect();
-
-    // Flatten triangle indices to u32 array
-    let flat_indices: Vec<u32> = mesh
-        .indices
-        .iter()
-        .flat_map(|tri| tri.iter().copied())
-        .collect();
-
-    // Create vertex buffer
-    let vertex_buffer = tracked_create_buffer_init(
-        device,
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Mesh Vertex Buffer"),
-            contents: bytemuck::cast_slice(&gpu_vertices),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        },
-    )?;
-
-    // Create index buffer
-    let index_buffer = tracked_create_buffer_init(
-        device,
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Mesh Index Buffer"),
-            contents: bytemuck::cast_slice(&flat_indices),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        },
-    )?;
-
-    // Create BVH buffer
-    let bvh_buffer = tracked_create_buffer_init(
-        device,
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Mesh BVH Buffer"),
-            contents: bytemuck::cast_slice(&bvh.nodes),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        },
-    )?;
-
-    log::info!(
-        "Uploaded mesh to GPU: {} vertices, {} triangles, {} BVH nodes",
-        gpu_vertices.len(),
-        mesh.indices.len(),
-        bvh.nodes.len()
-    );
-    log::info!(
-        "GPU memory usage: vertices={} bytes, indices={} bytes, BVH={} bytes",
-        vertex_buffer.size(),
-        index_buffer.size(),
-        bvh_buffer.size()
-    );
-
-    Ok(GpuMesh {
-        vertex_buffer,
-        index_buffer,
-        bvh_buffer,
-        vertex_count: gpu_vertices.len() as u32,
-        triangle_count: mesh.triangle_count(),
-        node_count: bvh.node_count(),
-        world_aabb: bvh.world_aabb,
-        build_stats: bvh.build_stats.clone(),
     })
 }

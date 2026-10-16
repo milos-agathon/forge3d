@@ -144,7 +144,6 @@ def test_device_probe_probe_error(monkeypatch):
             raise RuntimeError("simulated driver crash")
 
         enumerate_adapters = None
-        get_device = None
 
     monkeypatch.setattr(native_mod, "NATIVE_MODULE", _BrokenNative())
     probe = gpu_mod.device_probe()
@@ -238,3 +237,55 @@ def test_engine_info_reports_fallback_honesty():
     assert "software_fallback" in info
     assert isinstance(info["software_fallback"], bool)
     assert "device_type" in info
+
+
+# ---------------------------------------------------------------------------
+# No fabricated device: the GPU surface reports probes, not a fake object
+# ---------------------------------------------------------------------------
+
+
+def test_public_package_exposes_no_fabricated_device():
+    """`get_device()` always returned a fake CPU device; it must not return."""
+    assert "get_device" not in f3d.__all__
+    assert not hasattr(f3d, "get_device")
+    assert not hasattr(gpu_mod, "get_device")
+    assert not hasattr(gpu_mod, "MockDevice")
+    assert not hasattr(gpu_mod, "MockVirtualTexture")
+
+
+@pytest.mark.skipif(not NATIVE_AVAILABLE, reason="native extension not available")
+def test_native_module_never_had_a_get_device_symbol():
+    """The retired probe targeted a symbol that does not exist; lock that fact."""
+    assert not hasattr(native_mod.get_native_module(), "get_device")
+
+
+def test_gpu_surface_still_reports_real_probes():
+    probe = f3d.device_probe()
+    assert isinstance(probe, dict) and "status" in probe
+    assert isinstance(f3d.enumerate_adapters(), list)
+    assert isinstance(f3d.has_gpu(), bool)
+
+
+# ---------------------------------------------------------------------------
+# DEMData keeps no dangling GPU promise
+# ---------------------------------------------------------------------------
+
+
+def test_io_dem_surface_has_no_broken_gpu_upload():
+    from dataclasses import fields
+
+    from forge3d import io as io_mod
+
+    assert not hasattr(io_mod, "upload_dem_to_gpu")
+    assert "texture_view" not in {field.name for field in fields(io_mod.DEMData)}
+
+
+def test_load_dem_from_array_still_loads():
+    import numpy as np
+
+    from forge3d import io as io_mod
+
+    dem = io_mod.load_dem_from_array(np.arange(16, dtype=np.float32).reshape(4, 4))
+    assert dem.data.shape == (4, 4)
+    assert dem.domain[1] > dem.domain[0]
+
