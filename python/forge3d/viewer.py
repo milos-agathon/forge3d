@@ -1115,21 +1115,28 @@ class ViewerHandle:
         """Set camera field of view in degrees."""
         self._send_command({"cmd": "set_fov", "deg": float(deg)})
     
-    def set_sun(self, azimuth_deg: float, elevation_deg: float) -> None:
-        """Set sun direction (azimuth and elevation in degrees)."""
+    def set_sun(
+        self,
+        azimuth_deg: float,
+        elevation_deg: float,
+        intensity: Optional[float] = None,
+    ) -> None:
+        """Set sun direction (azimuth and elevation in degrees) and optional intensity."""
         command = {
             "cmd": "lit_sun",
             "azimuth_deg": float(azimuth_deg),
             "elevation_deg": float(elevation_deg),
         }
         self._send_command(command)
-        self._send_command({
+        terrain_command: Dict[str, Any] = {
             "cmd": "set_terrain_sun",
             "azimuth_deg": command["azimuth_deg"],
             "elevation_deg": command["elevation_deg"],
-            "intensity": 1.0,
             "source": "manual_angles",
-        })
+        }
+        if intensity is not None:
+            terrain_command["intensity"] = float(intensity)
+        self._send_command(terrain_command)
 
     def set_sun_time(self, solar_time: "Any", intensity: float = 1.0) -> None:
         """Set the terrain sun from a :class:`forge3d.geo.SolarTime`."""

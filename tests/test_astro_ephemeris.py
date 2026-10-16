@@ -861,6 +861,14 @@ def test_set_sun_handler_is_live_not_print_only():
     )[0]
     assert "viewer.sync_terrain_sun_to_lit()" in load_handler
 
+    scene_review = (
+        Path(__file__).parents[1] / "src" / "viewer" / "scene_review.rs"
+    ).read_text(encoding="utf-8")
+    preset_handler = scene_review.split("fn apply_scene_review_preset", 1)[1].split(
+        "fn review_label_world_points", 1
+    )[0]
+    assert "self.apply_manual_sun(" in preset_handler
+
     viewer = (Path(__file__).parents[1] / "python" / "forge3d" / "viewer.py").read_text(
         encoding="utf-8"
     )

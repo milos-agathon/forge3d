@@ -3,8 +3,8 @@ use serde::Deserialize;
 use super::defaults::{
     default_depth_bias, default_drape_offset, default_fov, default_intensity, default_line_width,
     default_max_points, default_oit_mode, default_opacity, default_phi, default_point_size,
-    default_primitive, default_radius, default_sun_azimuth, default_sun_elevation,
-    default_sun_intensity, default_theta, default_true, default_up,
+    default_primitive, default_radius, default_sun_azimuth, default_sun_elevation, default_theta,
+    default_true, default_up,
 };
 use super::payloads::{
     IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
@@ -39,7 +39,7 @@ pub enum IpcRequest {
         #[serde(default = "default_fov")] fov_deg: f32,
         #[serde(default)] target: Option<[f64; 3]>,
     },
-    SetTerrainSun { #[serde(default = "default_sun_azimuth")] azimuth_deg: f32, #[serde(default = "default_sun_elevation")] elevation_deg: f32, #[serde(default = "default_sun_intensity")] intensity: f32, #[serde(default)] source: Option<String> },
+    SetTerrainSun { #[serde(default = "default_sun_azimuth")] azimuth_deg: f32, #[serde(default = "default_sun_elevation")] elevation_deg: f32, #[serde(default)] intensity: Option<f32>, #[serde(default)] source: Option<String> },
     SetTerrain {
         #[serde(default)] phi: Option<f32>, #[serde(default)] theta: Option<f32>, #[serde(default)] radius: Option<f32>,
         #[serde(default)] fov: Option<f32>, #[serde(default)] sun_azimuth: Option<f32>, #[serde(default)] sun_elevation: Option<f32>,

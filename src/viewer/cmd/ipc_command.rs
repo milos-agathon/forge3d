@@ -11,6 +11,12 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             azimuth_deg,
             elevation_deg,
         } => {
+            if ![*azimuth_deg, *elevation_deg].into_iter().all(f32::is_finite) {
+                viewer.reject_command(
+                    "sun_direction_rejected: non-finite manual sun unchanged_state=true",
+                );
+                return true;
+            }
             viewer.apply_manual_sun(*azimuth_deg, *elevation_deg, None);
             true
         }
