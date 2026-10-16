@@ -58,6 +58,16 @@ pub fn parse_header(reader: &mut Cursor<&[u8]>) -> Result<Ktx2Header, String> {
     if level_count == 0 {
         return Err("Invalid mip level count".to_string());
     }
+    // levelCount must not exceed the mip chain the dimensions can hold:
+    // floor(log2(max(width, height))) + 1 levels. This also bounds the level
+    // index array before it is allocated.
+    let max_levels = 32 - pixel_width.max(pixel_height).leading_zeros();
+    if level_count > max_levels {
+        return Err(format!(
+            "Invalid mip level count {} for {}x{} (max {})",
+            level_count, pixel_width, pixel_height, max_levels
+        ));
+    }
 
     Ok(Ktx2Header {
         vk_format,
@@ -133,22 +143,41 @@ pub fn parse_key_value_data(
     reader: &mut Cursor<&[u8]>,
     header: &Ktx2Header,
 ) -> Result<HashMap<String, Vec<u8>>, String> {
+    // Reject a key/value span outside the container before any allocation:
+    // kv_length is attacker-controlled and otherwise bounded only by this
+    // declared region.
+    let container_len = reader.get_ref().len() as u64;
+    let kvd_end = u64::from(header.kvd_byte_offset)
+        .checked_add(u64::from(header.kvd_byte_length))
+        .ok_or_else(|| "KTX2 key/value byte span overflows u64".to_string())?;
+    if kvd_end > container_len {
+        return Err(format!(
+            "KTX2 key/value span ({}..{}) exceeds container size {}",
+            header.kvd_byte_offset, kvd_end, container_len
+        ));
+    }
+
     // Seek to KVD offset
     reader
         .seek(SeekFrom::Start(header.kvd_byte_offset as u64))
         .map_err(|e| format!("Failed to seek to KVD: {}", e))?;
 
     let mut kvd = HashMap::new();
-    let mut bytes_read = 0u32;
+    let mut bytes_read: u64 = 0;
+    let kvd_limit = u64::from(header.kvd_byte_length);
 
-    while bytes_read < header.kvd_byte_length {
+    while bytes_read < kvd_limit {
         // Read key-value pair length
         let kv_length = read_u32_le(reader)?;
-        bytes_read += 4;
-
-        if kv_length == 0 || bytes_read + kv_length > header.kvd_byte_length {
+        let Some(next_after_len) = bytes_read.checked_add(4) else {
+            break;
+        };
+        if kv_length == 0
+            || u64::from(kv_length) > kvd_limit.saturating_sub(next_after_len)
+        {
             break;
         }
+        bytes_read = next_after_len;
 
         // Read key-value data
         let mut kv_data = vec![0u8; kv_length as usize];
@@ -163,7 +192,7 @@ pub fn parse_key_value_data(
             kvd.insert(key, value);
         }
 
-        bytes_read += kv_length;
+        bytes_read = bytes_read.saturating_add(u64::from(kv_length));
 
         // Align to 4-byte boundary
         let padding = (4 - (kv_length % 4)) % 4;
@@ -171,7 +200,7 @@ pub fn parse_key_value_data(
             reader
                 .seek(SeekFrom::Current(padding as i64))
                 .map_err(|e| format!("Failed to skip KVD padding: {}", e))?;
-            bytes_read += padding;
+            bytes_read = bytes_read.saturating_add(u64::from(padding));
         }
     }
 

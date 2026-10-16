@@ -36,17 +36,19 @@ mod tests {
         out.extend_from_slice(&value.to_le_bytes());
     }
 
-    /// Build a single-level KTX2 container whose base level is `payload`.
+    /// Build a KTX2 container whose level index entries point at `levels`,
+    /// laid out back-to-back immediately after the index table.
     ///
     /// `dfd_byte_length` and `kvd_byte_length` are zero so the loader skips the
-    /// optional data-format-descriptor and key/value sections; the level index
-    /// points at the payload that immediately follows it.
-    fn build_ktx2(
+    /// optional data-format-descriptor and key/value sections. Each entry
+    /// declares the payload's own length, which is what a well-formed
+    /// uncompressed container does.
+    fn build_ktx2_levels(
         vk_format: u32,
         supercompression: u32,
         width: u32,
         height: u32,
-        payload: &[u8],
+        levels: &[&[u8]],
     ) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&KTX2_MAGIC);
@@ -57,7 +59,7 @@ mod tests {
         push_u32(&mut out, 1); // pixel_depth
         push_u32(&mut out, 1); // layer_count
         push_u32(&mut out, 1); // face_count
-        push_u32(&mut out, 1); // level_count
+        push_u32(&mut out, levels.len() as u32); // level_count
         push_u32(&mut out, supercompression);
         push_u32(&mut out, 0); // dfd_byte_offset
         push_u32(&mut out, 0); // dfd_byte_length
@@ -67,14 +69,31 @@ mod tests {
         push_u64(&mut out, 0); // sgd_byte_length
         assert_eq!(out.len() as u64, HEADER_BYTES, "header layout drifted");
 
-        let data_offset = HEADER_BYTES + LEVEL_INDEX_BYTES;
-        push_u64(&mut out, data_offset);
-        push_u64(&mut out, payload.len() as u64);
-        push_u64(&mut out, payload.len() as u64);
+        let data_offset = HEADER_BYTES + LEVEL_INDEX_BYTES * levels.len() as u64;
+        let mut offset = data_offset;
+        for payload in levels {
+            push_u64(&mut out, offset);
+            push_u64(&mut out, payload.len() as u64);
+            push_u64(&mut out, payload.len() as u64);
+            offset += payload.len() as u64;
+        }
         assert_eq!(out.len() as u64, data_offset, "level index layout drifted");
 
-        out.extend_from_slice(payload);
+        for payload in levels {
+            out.extend_from_slice(payload);
+        }
         out
+    }
+
+    /// Build a single-level KTX2 container whose base level is `payload`.
+    fn build_ktx2(
+        vk_format: u32,
+        supercompression: u32,
+        width: u32,
+        height: u32,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        build_ktx2_levels(vk_format, supercompression, width, height, &[payload])
     }
 
     #[test]
@@ -98,17 +117,14 @@ mod tests {
     #[test]
     fn test_supercompression_scheme_conversion() {
         assert_eq!(
-            SuperCompressionScheme::from(0),
+            SuperCompressionScheme::try_from(0).unwrap(),
             SuperCompressionScheme::None
         );
         assert_eq!(
-            SuperCompressionScheme::from(1),
+            SuperCompressionScheme::try_from(1).unwrap(),
             SuperCompressionScheme::BasisLZ
         );
-        assert_eq!(
-            SuperCompressionScheme::from(999),
-            SuperCompressionScheme::None
-        );
+        assert!(SuperCompressionScheme::try_from(999).is_err());
     }
 
     #[test]
@@ -186,5 +202,112 @@ mod tests {
                 "scheme {scheme} must record the {name} degradation"
             );
         }
+    }
+
+    #[test]
+    fn unknown_supercompression_scheme_is_refused_loudly() {
+        use crate::core::degradation::{begin_degradation_capture, finish_degradation_capture};
+
+        let bytes = build_ktx2(37, 999, 2, 2, &[0u8; 16]);
+
+        begin_degradation_capture();
+        let result = Ktx2Loader::new().load_from_memory(&bytes);
+        let captured = finish_degradation_capture();
+
+        assert!(result.is_err(), "unknown scheme must not masquerade as none");
+        assert!(
+            captured
+                .iter()
+                .any(|d| d.kind == "format_unsupported"
+                    && d.name == "ktx2.unknown_supercompression"),
+            "unknown scheme must record ktx2.unknown_supercompression"
+        );
+    }
+
+    #[test]
+    fn multi_level_ktx2_packs_every_level_in_order() {
+        // 4x2 RGBA8: level 0 is 32 bytes, level 1 (2x1) is 8 bytes.
+        let level0: Vec<u8> = (0..32u8).collect();
+        let level1: Vec<u8> = (32..40u8).collect();
+        let bytes = build_ktx2_levels(37, 0, 4, 2, &[&level0, &level1]);
+
+        let image = Ktx2Loader::new()
+            .load_from_memory(&bytes)
+            .expect("multi-level KTX2 must decode every level");
+
+        assert_eq!(image.mip_levels, 2);
+        let mut expected = level0;
+        expected.extend_from_slice(&level1);
+        assert_eq!(image.data, expected);
+    }
+
+    #[test]
+    fn level_length_must_match_its_format_footprint() {
+        // 4x2 RGBA8 needs 32 bytes; a 31-byte payload is not a level.
+        let bytes = build_ktx2(37, 0, 4, 2, &[0u8; 31]);
+
+        let err = Ktx2Loader::new()
+            .load_from_memory(&bytes)
+            .expect_err("mismatched level length must be rejected");
+        assert!(err.contains("footprint"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn oversized_level_claim_is_rejected_before_allocation() {
+        let mut bytes = build_ktx2(37, 0, 2, 2, &[0u8; 16]);
+        // Overwrite level 0's byte_length (right after its byte_offset) with a
+        // length no small container could hold.
+        let length_offset = (HEADER_BYTES + 8) as usize;
+        bytes[length_offset..length_offset + 8].copy_from_slice(&(1u64 << 40).to_le_bytes());
+
+        let err = Ktx2Loader::new()
+            .load_from_memory(&bytes)
+            .expect_err("oversized level claim must be rejected");
+        assert!(err.contains("exceeds container size"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn oversized_key_value_span_is_rejected_before_allocation() {
+        let mut bytes = build_ktx2(37, 0, 2, 2, &[0u8; 16]);
+        // kvd_byte_length sits at header offset 60; a claimed 4 GiB region
+        // cannot fit in this container and must be refused before allocation.
+        bytes[60..64].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let err = Ktx2Loader::new()
+            .load_from_memory(&bytes)
+            .expect_err("key/value span beyond the container must be rejected");
+        assert!(err.contains("key/value"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn level_count_beyond_dimensions_is_rejected() {
+        // 2x2 admits at most 2 mip levels (2x2, 1x1).
+        let bytes = build_ktx2_levels(37, 0, 2, 2, &[&[0u8; 16], &[0u8; 16], &[0u8; 16]]);
+
+        let err = Ktx2Loader::new()
+            .load_from_memory(&bytes)
+            .expect_err("impossible mip chain must be rejected");
+        assert!(err.contains("mip level count"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn array_and_volume_shapes_are_refused_loudly() {
+        use crate::core::degradation::{begin_degradation_capture, finish_degradation_capture};
+
+        // pixel_depth sits at header offset 28 (12 magic + 4 four-u32 fields).
+        let mut bytes = build_ktx2(37, 0, 2, 2, &[0u8; 16]);
+        bytes[28..32].copy_from_slice(&2u32.to_le_bytes());
+
+        begin_degradation_capture();
+        let result = Ktx2Loader::new().load_from_memory(&bytes);
+        let captured = finish_degradation_capture();
+
+        assert!(result.is_err(), "3D container must not be read as 2D");
+        assert!(
+            captured
+                .iter()
+                .any(|d| d.kind == "format_unsupported" && d.name == "ktx2.texture_shape"),
+            "unsupported shape must record ktx2.texture_shape"
+        );
     }
 }
