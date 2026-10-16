@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Added
+- Compressed textures carry a packed mip chain: `CompressedImage::from_rgba_data` box-filters and compresses every level when mipmaps are requested, `upload_to_texture` writes each level into its own mip slice, and multi-level KTX2 containers decode every level in container order.
+
+### Changed
+- The loud refusal for `mip_levels > 1` compressed uploads is gone because the mip data now exists: `from_rgba_data` populates the chain and KTX2 level payloads are packed base level first.
+
+### Fixed
+- KTX2 level payloads are validated against their exact per-level format footprint before allocation, so a container cannot drive an allocation from a claimed byte length; mismatched lengths, impossible mip counts and unknown supercompression schemes fail loudly with structured degradations.
+- KTX2 array, cubemap and volume containers are refused explicitly instead of being misread by the single-layer 2D loader.
+
 ## [1.44.0] - 2026-10-15
 
 ### Added

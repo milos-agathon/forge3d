@@ -6,7 +6,7 @@ use wgpu::{
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::core::texture_format::global_format_registry;
 
-use crate::core::texture_layout::{resident_2d_size, resident_size, TransferLayout};
+use crate::core::texture_layout::{mip_extent, resident_size, TransferLayout};
 
 use super::compression::{estimate_psnr, estimate_quality_score};
 use super::{CompressedImage, CompressionStats};
@@ -45,40 +45,71 @@ impl CompressedImage {
         Ok(texture)
     }
 
+    /// Tight extent/layout for every mip level in the packed payload.
+    ///
+    /// `data` holds one tightly packed payload per level, base level first.
+    /// Level `n` occupies exactly the format footprint of that level's
+    /// extent, the same rule `from_rgba_data` and the KTX2 loader follow.
+    pub(crate) fn packed_level_layouts(&self) -> Result<Vec<(Extent3d, TransferLayout)>, String> {
+        let base = Extent3d {
+            width: self.width,
+            height: self.height,
+            depth_or_array_layers: 1,
+        };
+        (0..self.mip_levels)
+            .map(|mip| {
+                let extent = mip_extent(base, TextureDimension::D2, mip);
+                let layout = TransferLayout::queue_write(self.format, TextureAspect::All, extent)
+                    .map_err(str::to_string)?;
+                Ok((extent, layout))
+            })
+            .collect()
+    }
+
     /// Upload compressed data to existing texture
     pub fn upload_to_texture(&self, texture: &Texture, queue: &Queue) -> Result<(), String> {
         global_format_registry()
             .get_format_info(self.format)
             .ok_or_else(|| format!("Unknown format: {:?}", self.format))?;
-        let layout = TransferLayout::queue_write(
-            self.format,
-            TextureAspect::All,
-            Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
-        )
-        .map_err(str::to_string)?;
 
-        queue.write_texture(
-            ImageCopyTexture {
-                texture,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            &self.data,
-            layout.image_data_layout(),
-            Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
-        );
+        let levels = self.packed_level_layouts()?;
+        let required = levels
+            .iter()
+            .map(|(_, layout)| layout.payload_bytes)
+            .fold(0u64, u64::saturating_add);
+        if required != self.data.len() as u64 {
+            crate::core::degradation::record_degradation(
+                "invalid_data",
+                "compressed_textures.mip_payload",
+                "Compressed image payload does not match its mip chain; refusing a partial upload",
+            );
+            return Err(format!(
+                "Compressed image data has {} bytes but {} mip level(s) require {} bytes",
+                self.data.len(),
+                self.mip_levels,
+                required
+            ));
+        }
 
-        if self.mip_levels > 1 {
-            self.upload_mip_levels(texture, queue)?;
+        let mut offset = 0usize;
+        for (mip, (extent, layout)) in levels.iter().enumerate() {
+            let len = usize::try_from(layout.payload_bytes)
+                .map_err(|_| "Compressed mip level exceeds addressable size".to_string())?;
+            let end = offset
+                .checked_add(len)
+                .ok_or_else(|| "Compressed mip chain size overflows".to_string())?;
+            queue.write_texture(
+                ImageCopyTexture {
+                    texture,
+                    mip_level: mip as u32,
+                    origin: Origin3d::ZERO,
+                    aspect: TextureAspect::All,
+                },
+                &self.data[offset..end],
+                layout.image_data_layout(),
+                *extent,
+            );
+            offset = end;
         }
 
         Ok(())
@@ -101,8 +132,17 @@ impl CompressedImage {
 
     /// Get compression statistics
     pub fn get_compression_stats(&self) -> CompressionStats {
-        let uncompressed_size =
-            resident_2d_size(self.width, self.height, wgpu::TextureFormat::Rgba8Unorm);
+        let uncompressed_size = resident_size(
+            wgpu::TextureFormat::Rgba8Unorm,
+            Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            self.mip_levels.max(1),
+            1,
+        );
         let compressed_size = self.data.len() as u64;
         let compression_ratio = uncompressed_size as f32 / compressed_size as f32;
 
@@ -114,14 +154,5 @@ impl CompressedImage {
             quality_score: estimate_quality_score(self.format),
             psnr_db: estimate_psnr(self.format),
         }
-    }
-
-    fn upload_mip_levels(&self, _texture: &Texture, _queue: &Queue) -> Result<(), String> {
-        crate::core::degradation::record_degradation(
-            "not_implemented",
-            "compressed_textures.mip_generation",
-            "Compressed mipmap generation is not implemented; mip levels above 0 cannot be populated",
-        );
-        Err("Compressed mipmap generation not implemented".to_string())
     }
 }
