@@ -677,13 +677,8 @@ impl Viewer {
             }
         }
         if let Some((azimuth, elevation, intensity)) =
-            crate::viewer::cmd::terrain_command::requested_manual_sun(
-                self.lit_sun_direction_ws,
-                self.lit_sun_intensity,
-                sun_azimuth,
-                sun_elevation,
-                sun_intensity,
-            )
+            self.sky_lighting
+                .requested_manual_sun(sun_azimuth, sun_elevation, sun_intensity)
         {
             self.apply_manual_sun(azimuth, elevation, Some(intensity));
         }

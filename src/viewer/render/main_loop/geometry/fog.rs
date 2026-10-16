@@ -50,7 +50,7 @@ impl Viewer {
         self.queue
             .write_buffer(&self.fog_camera, 0, bytemuck::bytes_of(&fog_cam));
 
-        let sun_dir_ws = glam::Vec3::from_array(self.lit_sun_direction_ws).normalize();
+        let sun_dir_ws = glam::Vec3::from_array(self.sky_lighting.light_direction()).normalize();
         let steps = if self.fog_half_res_enabled {
             (self.fog_steps.max(1) / 2).max(16)
         } else {
@@ -68,11 +68,7 @@ impl Viewer {
             scattering_color: [1.0, 1.0, 1.0],
             absorption: 1.0,
             sun_direction: [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
-            sun_intensity: if sun_dir_ws.y > 0.0 {
-                (self.lit_sun_intensity * self.lit_directional_scale).max(0.0)
-            } else {
-                0.0
-            },
+            sun_intensity: self.sky_lighting.effective_intensity(),
             ambient_color: [0.2, 0.25, 0.3],
             temporal_alpha: self
                 .fog_history_state

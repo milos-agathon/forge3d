@@ -143,7 +143,8 @@ impl Viewer {
             );
 
             // Update sky params each frame based on viewer-set fields
-            let sun_dir_ws = glam::Vec3::from_array(self.sky_sun_direction_ws).normalize();
+            let sun_dir_ws =
+                glam::Vec3::from_array(self.sky_lighting.solar_direction()).normalize();
             let model_id: u32 = self.sky_model_id;
             let turb: f32 = self.sky_turbidity.clamp(1.0, 10.0);
             let ground: f32 = self.sky_ground_albedo.clamp(0.0, 1.0);
@@ -184,7 +185,7 @@ impl Viewer {
                 cpass.set_bind_group(1, sky_bg1.as_ref().unwrap(), &[]);
                 cpass.dispatch_workgroups(gx, gy, 1);
             }
-            if self.night_instance_count > 0 {
+            if self.sky_lighting.night_instance_count() > 0 {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("viewer.night.overlay"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -202,7 +203,7 @@ impl Viewer {
                 pass.set_pipeline(&self.night_pipeline);
                 pass.set_bind_group(0, &self.night_bind_group, &[]);
                 pass.set_bind_group(1, sky_bg1.as_ref().unwrap(), &[]);
-                pass.draw(0..6, 0..self.night_instance_count);
+                pass.draw(0..6, 0..self.sky_lighting.night_instance_count());
             }
         }
 
