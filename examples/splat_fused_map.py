@@ -33,13 +33,18 @@ geographically coherent.
 
 Camera control
 --------------
-  --view canonical|oblique|high|top|low   framing presets
-  --azimuth/--elevation/--distance        orbit around --target
-  --fov                                    vertical field of view
-  --origin/--look-at                       raw camera (overrides all)
+  --view hero|canonical|oblique|high|top|low   framing presets
+  --azimuth/--elevation/--distance            orbit around --target
+  --fov                                        vertical field of view
+  --origin/--look-at                           raw camera (overrides all)
+
+The default for ``--dem`` is ``hero``: a low cinematic oblique (az 35,
+el 10, fov 55) with sky above the summit, warm side lighting and a
+brighter sky. ``--view top`` gives the north-up hypsometric map view.
 
 Run:
     python examples/splat_fused_map.py
+    python examples/splat_fused_map.py --dem fuji
     python examples/splat_fused_map.py --dem fuji --view top --aovs
     python examples/splat_fused_map.py --view low --azimuth 120 --elevation 8
 """
@@ -92,6 +97,7 @@ HIT_LEGEND = {
 #: view presets as (azimuth deg, elevation deg); "canonical" = fixture camera
 VIEW_PRESETS: Dict[str, Optional[Tuple[float, float]]] = {
     "canonical": None,
+    "hero": (35.0, 10.0),  # cinematic low oblique with sky above the summit
     "oblique": (35.0, 50.0),
     "high": (30.0, 60.0),
     "top": (0.0, 88.0),
@@ -187,11 +193,11 @@ def _hypso_map(heights: np.ndarray) -> np.ndarray:
     t = (heights - lo) / (hi - lo) if hi > lo else np.zeros_like(heights)
     stops = np.array(
         [
-            [0.00, 56, 104, 52],
-            [0.22, 88, 126, 60],
-            [0.42, 158, 142, 84],
+            [0.00, 38, 68, 40],   # dense forest: dark, desaturated green
+            [0.22, 58, 86, 48],   # upper forest / scrub
+            [0.42, 150, 138, 86], # alpine tan
             [0.60, 140, 106, 72],
-            [0.74, 108, 92, 92],
+            [0.74, 108, 92, 92],  # bare rock
             [0.86, 148, 148, 158],
             [0.94, 206, 208, 216],
             [1.00, 252, 252, 255],
@@ -226,7 +232,9 @@ def _derive_splat_cloud(
     half_x = (cols - 1) / 2.0 * spacing[0]
     half_z = (rows - 1) / 2.0 * spacing[1]
     centre_x, centre_z = 0.38 * half_x, 0.34 * half_z
-    radius = 0.45 * min(half_x, half_z)
+    # Clamped so a full-extent DEM still gets a survey-sized block (0.9 km)
+    # instead of one scaled to the whole mountain.
+    radius = min(0.45 * min(half_x, half_z), 130.0)
     block_area = math.pi * radius * radius
     step = max(2, int(round(math.sqrt(block_area / max(target_count, 1)))))
     rz = np.arange(0, rows, step)
@@ -270,7 +278,9 @@ def _derive_splat_cloud(
     rgb = tint[gr, gc].reshape(-1, 3).astype(np.float32) / 255.0
     # Semi-translucent violet survey-overlay tint — deliberately different
     # from the base map and matching the "Gaussian splats" legend swatch.
-    rgb = 0.30 * rgb + 0.70 * np.array([0.55, 0.55, 0.92], dtype=np.float32)
+    # Only a touch of the ground tint bleeds through, so over green or tan
+    # terrain the block still reads as one clean violet layer, not a smudge.
+    rgb = 0.10 * rgb + 0.90 * np.array([0.44, 0.42, 0.95], dtype=np.float32)
     sh0 = ((rgb - 0.5) / SH_C0).astype(np.float32)
     cloud = splat.GaussianSplatCloud.from_arrays(positions, scales, rotations, opacities, sh0)
     meta = {
@@ -425,6 +435,27 @@ def _cover_distance(
         else:
             hi_d = mid
     return lo_d
+
+
+def _hero_distance(
+    bounds,
+    target: Sequence[float],
+    fov_y_deg: float,
+    elevation_deg: float,
+    margin: float = 0.8,
+) -> float:
+    """Distance for the `hero` low oblique: the frame's bottom ray must land
+    inside the terrain (ground fills the bottom of the frame instead of a void
+    under the near edge), while the shot stays wide enough for sky above the
+    summit. Solves  d*cos(el) - (ty + d*sin(el)) / tan(el + fov/2) = m*half."""
+    (x0, _, z0), (x1, _, z1) = bounds
+    half = min((x1 - x0), (z1 - z0)) / 2.0
+    el = math.radians(elevation_deg)
+    delta = math.radians(elevation_deg + fov_y_deg / 2.0)  # bottom-ray depression
+    denom = math.cos(el) - math.sin(el) / math.tan(delta)
+    if denom <= 1e-6:
+        return _fit_distance(bounds, target, 35.0, elevation_deg, fov_y_deg, 800, 560)
+    return (margin * half + target[1] / math.tan(delta)) / denom
 
 
 def _project(
@@ -755,11 +786,11 @@ def build_parser() -> argparse.ArgumentParser:
     scene.add_argument("--dem", choices=sorted(DEM_PRESETS), default=None,
                        help="bundled real DEM preset (fetched from the web on first run)")
     scene.add_argument("--terrain", default=None, help="path to a GeoTIFF DEM")
-    scene.add_argument("--crop-size", type=int, default=256,
-                       help="crop real DEMs to this square size from centre (0 = no crop)")
+    scene.add_argument("--crop-size", type=int, default=0,
+                       help="crop real DEMs to this square size from centre (0 = full extent)")
     scene.add_argument("--splats", default=None, help="path to a 3DGS .ply splat cloud")
-    scene.add_argument("--splat-count", type=int, default=2400,
-                       help="splat count for the derived scan block")
+    scene.add_argument("--splat-count", type=int, default=None,
+                       help="splat count for the derived scan block (default 2400; 6000 for hero)")
     scene.add_argument("--splat-lift", type=float, default=0.8,
                        help="height of the derived splat block above the terrain (world units)")
     scene.add_argument("--splat-offset", nargs=3, type=float, default=None,
@@ -771,7 +802,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     view = p.add_argument_group("camera (y-up, terrain centred on origin)")
     view.add_argument("--view", choices=sorted(VIEW_PRESETS), default=None,
-                      help="framing preset (default: canonical for the fixture, top for --dem)")
+                      help="framing preset (default: canonical for the fixture, hero for --dem)")
     view.add_argument("--azimuth", type=float, default=None,
                       help="orbit azimuth in degrees (0 = +z, 90 = +x)")
     view.add_argument("--elevation", type=float, default=None,
@@ -793,9 +824,15 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--seed", type=int, default=7, help="deterministic render seed")
     render.add_argument("--sun-azimuth", type=float, default=None, help="sun azimuth in degrees")
     render.add_argument("--sun-elevation", type=float, default=None, help="sun elevation in degrees")
+    render.add_argument("--sun-color", nargs=3, type=float, default=None,
+                        metavar=("R", "G", "B"), help="sun colour (linear RGB)")
     render.add_argument("--exposure", type=float, default=1.0)
     render.add_argument("--sky-intensity", type=float, default=None,
-                        help="sky/ambient intensity (default 0.35; 0.6 for --dem)")
+                        help="sky/ambient intensity (default 0.35; 0.6 map views; 2.5 hero)")
+    render.add_argument("--sky-turbidity", type=float, default=None,
+                        help="Hosek-Wilkie turbidity (default 2.5; 4.0 hero)")
+    render.add_argument("--sky-ground-albedo", type=float, default=None,
+                        help="sky-model ground albedo (default 0.2; 0.5 hero for a hazy horizon band)")
     render.add_argument("--aovs", action="store_true",
                         help="add hit-kind / depth / transmittance inset panels")
     render.add_argument("--certificate", action="store_true", help="write a signed render certificate")
@@ -822,6 +859,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     manifest: Dict[str, Any] = {}
     splat_meta: Dict[str, Any] = {}
     lidar_meta: Optional[Dict[str, Any]] = None
+    # Resolved view / lighting mode up front: it also drives the derived
+    # splat-block density below, before the camera section runs.
+    effective_view = args.view or ("hero" if use_dem else "canonical")
+    is_hero = effective_view == "hero"
 
     # ---- terrain ---------------------------------------------------------
     albedo_map: Optional[np.ndarray] = None
@@ -848,7 +889,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         metres_per_world = metres_per_cell
         scene_name = place
         terrain_desc = (
-            f"{place} {heights.shape[1]}x{heights.shape[0]} crop, {datum}, "
+            f"{place} {heights.shape[1]}x{heights.shape[0]} grid, {datum}, "
             f"relief {z_range_m:.0f} m"
         )
         print(
@@ -893,7 +934,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"[splats] {splat_path.name}: count={cloud.count}, sh_degree={cloud.sh_degree}")
     elif use_dem:
         cloud, splat_meta = _derive_splat_cloud(
-            heights, (1.0, 1.0), albedo_map, target_count=args.splat_count, lift=args.splat_lift
+            heights,
+            (1.0, 1.0),
+            albedo_map,
+            target_count=args.splat_count or (6000 if is_hero else 2400),
+            lift=args.splat_lift,
         )
         splat_desc = (
             f"{int(splat_meta['count']):,} digitized scan block "
@@ -941,7 +986,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     orbit_given = any(
         v is not None for v in (args.azimuth, args.elevation, args.distance, args.target)
     )
-    effective_view = args.view or ("canonical" if manifest else "top")
     view_label = args.view
     if args.origin is not None and args.look_at is not None:
         camera = splat.FusedCamera(
@@ -962,11 +1006,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         preset_name = "oblique" if effective_view == "canonical" else effective_view
         preset = VIEW_PRESETS[preset_name]
+        if is_hero and args.fov is None:
+            fov = 55.0  # wider frame: summit below the top edge, sky above it
         azimuth = args.azimuth if args.azimuth is not None else (preset[0] if preset else 35.0)
         elevation = args.elevation if args.elevation is not None else (preset[1] if preset else 28.0)
-        target = tuple(args.target) if args.target is not None else centre
+        if args.target is not None:
+            target = tuple(args.target)
+        elif is_hero:
+            # Aim slightly above the base: the summit lands ~20% below the
+            # top edge instead of crowding it, and foreground compresses.
+            target = (centre[0], 0.16 * maxs[1], centre[2])
+        else:
+            target = centre
         if args.distance is not None:
             distance = args.distance
+        elif is_hero:
+            distance = _hero_distance(scene_bounds, target, fov, elevation)
         else:
             distance = _fit_distance(
                 scene_bounds, target, azimuth, elevation, fov, args.width, args.height
@@ -997,19 +1052,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
 
     # ---- sun -------------------------------------------------------------
+    # The hero shot gets warm low side lighting (~90 deg off the camera
+    # azimuth) for form-shading on the flanks; map-style views keep the
+    # cartographic NW light; the fixture keeps its canonical acceptance sun
+    # from scene.json.
     if args.sun_azimuth is not None:
         sun_az = args.sun_azimuth
+    elif is_hero:
+        sun_az = 125.0
     else:
-        # Raking default light for real terrain; the fixture keeps its
-        # canonical acceptance sun from scene.json.
         # DEM default: cartographic NW light (az 215 = WNW of +x-toward-+z,
         # north = -z), the standard relief-map convention of light from the
         # upper left when north is up.
         sun_az = float(manifest.get("sun_azimuth_deg", 215.0)) if manifest else 215.0
     if args.sun_elevation is not None:
         sun_el = args.sun_elevation
+    elif is_hero:
+        sun_el = 15.0
     else:
         sun_el = float(manifest.get("sun_elevation_deg", 45.0)) if manifest else 45.0
+
+    sun_intensity = 6.0 if is_hero else SUN_INTENSITY
+    sun_color = (1.0, 0.93, 0.82) if is_hero else SUN_COLOR
+    if args.sun_color is not None:
+        sun_color = tuple(args.sun_color)
 
     # ---- render ----------------------------------------------------------
     print(f"[render] {args.width}x{args.height}, {args.samples} spp ...")
@@ -1026,11 +1092,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         exposure=args.exposure,
         sky_intensity=args.sky_intensity
         if args.sky_intensity is not None
-        else (0.6 if use_dem else 0.35),
+        else (2.5 if is_hero else (0.6 if use_dem else 0.35)),
+        sky_turbidity=args.sky_turbidity
+        if args.sky_turbidity is not None
+        else (4.0 if is_hero else 2.5),
+        sky_ground_albedo=args.sky_ground_albedo
+        if args.sky_ground_albedo is not None
+        else (0.5 if is_hero else 0.2),
         sun_azimuth_deg=sun_az,
         sun_elevation_deg=sun_el,
-        sun_intensity=SUN_INTENSITY,
-        sun_color=SUN_COLOR,
+        sun_intensity=sun_intensity,
+        sun_color=sun_color,
         lidar_radius=float(manifest.get("lidar_radius", 0.2)),
         return_aovs=True,
         certificate=args.certificate,
@@ -1090,7 +1162,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ("Size", f"{args.width} x {args.height} px"),
         ("Samples", f"{args.samples} spp"),
         ("Seed", f"{args.seed} (deterministic)"),
-        ("Time", f"{render_s:.1f} s"),
         ("Sun", f"az {sun_az:.0f} / el {sun_el:.0f}"),
         ("Primitives", f"{int(result.stats.get('logical_primitives', 0)):,}"),
     ]

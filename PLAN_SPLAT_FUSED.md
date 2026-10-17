@@ -47,6 +47,14 @@ A single CLI-driven script that renders the fused scene as a cartographic map sh
 - `--aovs` adds hit-kind / depth / sun-transmittance insets beside the beauty.
 - Hypsometric palette tuned for contrast across the full elevation range (green → tan → rock → cool snow).
 
+### Phase 3b — hero revision (done, v3)
+- `--dem` default view is now `hero`: low cinematic oblique (az 35, el 10, fov 55) solved by `_hero_distance` so the frame's bottom ray lands inside the terrain while the summit keeps sky above it; aim lifted to 0.16 × relief so the summit sits ~20% below the top edge. `--view top` keeps the north-up map view.
+- Full DEM extent by default (`--crop-size` default 0): true mountain proportions and a horizon-to-horizon landscape; `--crop-size N` still zooms to a central square.
+- Realism defaults for the hero shot: warm low side light (az 125 / el 15, intensity 6, warm colour), bright Hosek-Wilkie sky (sky 2.5, turbidity 4, ground albedo 0.5 → the below-horizon band reads as distant haze instead of a dark slab); all overridable (`--sun-color`, `--sky-turbidity`, `--sky-ground-albedo`).
+- Hypsometric greens darkened to forest tones; the derived scan block is a cleaner saturated violet (0.10 ground-tint bleed) with 6,000 finer splats in hero view (σ 2.7 vs 4.5).
+- Block radius clamped to 130 cells so a full-extent DEM gets a survey-sized block, not one scaled to the mountain.
+- The sheet's RENDER block dropped the wall-clock time row, so the "seed N reproduces this sheet byte-for-byte" footer is literally true (beauty and sheet sha256-verified identical across reruns).
+
 ### Phase 4 — regression gate (done)
 - `tests/test_splat_fused_map_example.py`, 3 tests:
   - `test_example_module_loads`: module import + parser exists.

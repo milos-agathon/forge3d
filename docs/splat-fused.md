@@ -39,18 +39,28 @@ optional AOV insets (hit kind, depth, sun transmittance) and a sidecar
 
 ```bash
 python examples/splat_fused_map.py                # offline fixture: ridge + 3,500 splats + COPC swath
-python examples/splat_fused_map.py --dem fuji     # real DEM fetched from the web (cached); hypsometric
-                                                  # tint + a splat scan block derived from the same DEM
-python examples/splat_fused_map.py --dem fuji --view oblique --aovs
+python examples/splat_fused_map.py --dem fuji     # real DEM fetched from the web (cached), full extent:
+                                                  # hypsometric tint + a splat scan block from the same DEM
+python examples/splat_fused_map.py --dem fuji --view top --aovs   # north-up hypsometric map
 ```
 
 The camera is a rig, not a hard-coded pose: `--view
-canonical|oblique|high|top|low` presets, `--azimuth/--elevation/--distance/
---target/--fov` orbit controls (or raw `--origin/--look-at`), and the chosen
-pose is printed and echoed in the sheet's CAMERA block. `--dem` scenes convert
-elevation into the same world units as the grid, so terrain slopes keep their
-real steepness and path-traced relief stays crisp. Reruns with the same seed
-reproduce the sheet byte for byte.
+hero|canonical|oblique|high|top|low` presets (`hero` — the `--dem` default —
+is a low cinematic oblique at az 35 / el 10 / fov 55 with sky above the
+summit), `--azimuth/--elevation/--distance/--target/--fov` orbit controls
+(or raw `--origin/--look-at`), and the chosen pose is printed and echoed in
+the sheet's CAMERA block. `--dem` scenes convert elevation into the same
+world units as the grid, so terrain slopes keep their real steepness and
+path-traced relief stays crisp; the full DEM extent is used by default and
+`--crop-size N` zooms to a central square.
+
+Lighting follows the view: the hero shot uses warm low side lighting (sun
+az 125 / el 15, intensity 6) with a bright Hosek-Wilkie sky (turbidity 4,
+ground albedo 0.5) so the horizon band reads as distant haze; map views keep
+the cartographic NW light (az 215 / el 45). Every knob is overridable with
+`--sun-azimuth/--sun-elevation/--sun-color/--sky-intensity/
+--sky-turbidity/--sky-ground-albedo/--exposure`. Reruns with the same seed
+reproduce the beauty and the sheet byte for byte.
 
 ## Options
 
