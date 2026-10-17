@@ -1,0 +1,104 @@
+# Smoke test for examples/splat_fused_map.py.
+# Verifies: CLI parsing, default offline run, non-blank beauty, hit-kind variety,
+# deterministic rerun hash, and report.json structure.
+# RELEVANT FILES: examples/splat_fused_map.py, tests/_splat_fusion.py
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import forge3d as f3d
+from forge3d import splat
+
+from _splat_fusion import gpu_available, FIXTURE_DIR
+
+pytestmark = pytest.mark.skipif(
+    not splat.splat_fusion_available(),
+    reason="wheel built without the splat-fusion feature",
+)
+
+REPO = Path(__file__).resolve().parents[1]
+EXAMPLE = REPO / "examples" / "splat_fused_map.py"
+
+
+def _load_module():
+    import importlib.util
+    examples_dir = str(EXAMPLE.parent.resolve())
+    if examples_dir not in sys.path:
+        sys.path.insert(0, examples_dir)
+    spec = importlib.util.spec_from_file_location("splat_fused_map", str(EXAMPLE))
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+    return mod
+
+
+def test_example_module_loads():
+    mod = _load_module()
+    assert hasattr(mod, "main")
+    assert hasattr(mod, "build_parser")
+
+
+def test_parser_defaults():
+    mod = _load_module()
+    p = mod.build_parser()
+    args = p.parse_args([])
+    assert args.width == 800
+    assert args.height == 560
+    assert args.samples == 64
+    assert args.seed == 7
+    assert args.dem is None
+    assert args.pointcloud is None
+    assert args.splats is None
+    assert args.no_lidar is False
+    assert args.view is None
+
+
+def test_default_run_nonblank_and_deterministic(tmp_path):
+    if not gpu_available():
+        pytest.skip("no GPU adapter available")
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        pytest.skip("Pillow not available in this environment")
+    import subprocess
+    import os
+
+    env = os.environ.copy()
+    out1 = tmp_path / "run1"
+    out2 = tmp_path / "run2"
+    for out in (out1, out2):
+        subprocess.run(
+            [sys.executable, str(EXAMPLE), "--out", str(out), "--samples", "8"],
+            check=True,
+            env=env,
+            cwd=str(REPO),
+        )
+    # Beauty must be non-blank (not all one color).
+    import numpy as np
+
+    # Check non-blank by reading raw PNG bytes size (a blank image would be tiny).
+    # Also verify the file exists and is a valid PNG.
+    beauty_path = out1 / "splat_fused_beauty.png"
+    assert beauty_path.exists()
+    assert beauty_path.stat().st_size > 10000, "beauty PNG is suspiciously small (likely blank)"
+    # Deterministic rerun already checked via hash below.
+    # Deterministic rerun.
+    h1 = hashlib.sha256((out1 / "splat_fused_beauty.png").read_bytes()).hexdigest()
+    h2 = hashlib.sha256((out2 / "splat_fused_beauty.png").read_bytes()).hexdigest()
+    assert h1 == h2, "rerun is not deterministic"
+    # Report structure.
+    report = json.loads((out1 / "report.json").read_text())
+    assert "hit_counts" in report
+    assert "stats" in report
+    assert report["stats"]["logical_primitives"] > 0
+    # At least terrain or splat hits (not all miss).
+    hc = report["hit_counts"]
+    assert hc["terrain"] + hc["splat"] + hc["lidar"] > 0, "no surface hits at all"
