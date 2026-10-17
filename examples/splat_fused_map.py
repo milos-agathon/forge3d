@@ -458,6 +458,111 @@ def _hero_distance(
     return (margin * half + target[1] / math.tan(delta)) / denom
 
 
+def _nice_contour_interval(relief_m: float) -> float:
+    for step in (10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 250.0, 500.0, 1000.0, 2000.0):
+        if relief_m / step <= 20.0:
+            return step
+    return 5000.0
+
+
+def _draw_contours(
+    rgba: np.ndarray,
+    heights: np.ndarray,
+    metres_per_world: float,
+    cam: splat.FusedCamera,
+    interval_m: Optional[float] = None,
+) -> Tuple[np.ndarray, str]:
+    """Marching-squares elevation contours projected through the camera.
+
+    Contours are cartographic annotation, not render output: the beauty PNG
+    stays untouched and only the sheet's map area receives the overlay, so
+    the path-traced image itself remains exactly what the tracer produced.
+    Every fifth contour is an index line (darker, thicker). Cells with the
+    ambiguous four-crossing marching-squares case are skipped; at DEM
+    resolution the gap is invisible.
+    """
+    from PIL import Image, ImageDraw  # noqa: E402
+
+    rows, cols = heights.shape
+    lo, hi = float(heights.min()), float(heights.max())
+    relief_m = (hi - lo) * metres_per_world
+    step_m = interval_m or _nice_contour_interval(relief_m)
+    step_w = step_m / metres_per_world
+    index_m = step_m * 5.0
+    frame_h, frame_w = rgba.shape[:2]
+    overlay = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    hx, hz = (cols - 1) / 2.0, (rows - 1) / 2.0
+
+    h00, h01 = heights[:-1, :-1], heights[:-1, 1:]
+    h10, h11 = heights[1:, :-1], heights[1:, 1:]
+    first = math.ceil(lo / step_w) * step_w
+    levels = [first + i * step_w for i in range(int((hi - first) / step_w) + 1)]
+    n_segments = 0
+    for level in levels:
+        below = heights < level
+        e_t = below[:-1, :-1] != below[:-1, 1:]
+        e_b = below[1:, :-1] != below[1:, 1:]
+        e_l = below[:-1, :-1] != below[1:, :-1]
+        e_r = below[:-1, 1:] != below[1:, 1:]
+        ncross = e_t.astype(np.uint8) + e_b + e_l + e_r
+        sel = ncross == 2
+        n_sel = int(sel.sum())
+        if n_sel == 0:
+            continue
+        p0x = np.empty(n_sel)
+        p0z = np.empty(n_sel)
+        p1x = np.empty(n_sel)
+        p1z = np.empty(n_sel)
+        filled = np.zeros(n_sel, dtype=bool)
+        pos = np.full(e_t.shape, -1, dtype=np.int64)
+        pos[sel] = np.arange(n_sel)
+        for edge, kind in ((e_t, "t"), (e_b, "b"), (e_l, "l"), (e_r, "r")):
+            idx = np.flatnonzero(sel & edge)
+            if idx.size == 0:
+                continue
+            r, c = np.unravel_index(idx, sel.shape)
+            if kind == "t":
+                t = (level - h00[r, c]) / (h01[r, c] - h00[r, c])
+                wx, wz = c + t - hx, np.full(idx.size, r - hz, dtype=np.float64)
+            elif kind == "b":
+                t = (level - h10[r, c]) / (h11[r, c] - h10[r, c])
+                wx, wz = c + t - hx, np.full(idx.size, r + 1.0 - hz, dtype=np.float64)
+            elif kind == "l":
+                t = (level - h00[r, c]) / (h10[r, c] - h00[r, c])
+                wx, wz = np.full(idx.size, c - hx, dtype=np.float64), r + t - hz
+            else:
+                t = (level - h01[r, c]) / (h11[r, c] - h01[r, c])
+                wx, wz = np.full(idx.size, c + 1.0 - hx, dtype=np.float64), r + t - hz
+            j = pos[r, c]
+            take0 = ~filled[j]
+            i0 = j[take0]
+            p0x[i0] = wx[take0]
+            p0z[i0] = wz[take0]
+            filled[i0] = True
+            take1 = ~take0
+            i1 = j[take1]
+            p1x[i1] = wx[take1]
+            p1z[i1] = wz[take1]
+        ratio = (level * metres_per_world) / index_m
+        is_index = abs(ratio - round(ratio)) < 1e-6
+        colour = (70, 46, 28, 150) if is_index else (94, 62, 38, 85)
+        width = 2 if is_index else 1
+        for i in range(n_sel):
+            a = _project(cam, (p0x[i], level, p0z[i]), frame_w, frame_h)
+            if a is None:
+                continue
+            b = _project(cam, (p1x[i], level, p1z[i]), frame_w, frame_h)
+            if b is None:
+                continue
+            draw.line([a[0], a[1], b[0], b[1]], fill=colour, width=width)
+            n_segments += 1
+    base = Image.fromarray(rgba, "RGBA")
+    base.alpha_composite(overlay)
+    desc = f"every {step_m:.0f} m (index {index_m:.0f} m), {n_segments:,} segments"
+    return np.asarray(base), desc
+
+
 def _project(
     cam: splat.FusedCamera, point: Sequence[float], width: int, height: int
 ) -> Optional[Tuple[float, float, float]]:
@@ -757,14 +862,17 @@ def _compose_sheet(
     y = block(y, "SCENE", meta["scene_rows"])
     y = block(y, "CAMERA", meta["camera_rows"])
     y = block(y, "RENDER", meta["render_rows"])
-    # unified occlusion note
-    draw.text((px + 16, py + map_h - 44), "one integrator, one pass:", font=small_font, fill=muted)
-    draw.text(
-        (px + 16, py + map_h - 28),
-        "T = T_splat x T_lidar x T_terrain",
-        font=head_font,
-        fill=ink,
-    )
+    # Unified-occlusion note, anchored to the panel bottom. Dropped when the
+    # readout blocks would collide with it (the footer states the formula too).
+    note_y = py + map_h - 44
+    if y <= note_y - 10:
+        draw.text((px + 16, note_y), "one integrator, one pass:", font=small_font, fill=muted)
+        draw.text(
+            (px + 16, py + map_h - 28),
+            "T = T_splat x T_lidar x T_terrain",
+            font=head_font,
+            fill=ink,
+        )
 
     # ---- footer ----------------------------------------------------------
     fy = canvas_h - footer_h + 6
@@ -835,6 +943,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="sky-model ground albedo (default 0.2; 0.5 hero for a hazy horizon band)")
     render.add_argument("--aovs", action="store_true",
                         help="add hit-kind / depth / transmittance inset panels")
+    render.add_argument("--no-contours", action="store_true",
+                        help="skip the elevation-contour overlay on --dem plan views")
+    render.add_argument("--tile", nargs=2, type=int, default=None, metavar=("W", "H"),
+                        help="render in seamless tiles of this size (large frames, low memory)")
+    render.add_argument("--animate", type=int, default=0, metavar="N",
+                        help="also render an N-frame deterministic orbit fly-through GIF")
+    render.add_argument("--anim-size", default="640x450",
+                        help="fly-through frame size as WxH (default 640x450)")
     render.add_argument("--certificate", action="store_true", help="write a signed render certificate")
     render.add_argument("--out", default=str(DEFAULT_OUT), help="output directory")
     return p
@@ -1078,6 +1194,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sun_color = tuple(args.sun_color)
 
     # ---- render ----------------------------------------------------------
+    # Shared lighting kwargs: the still, every fly-through frame and the AOVs
+    # all use exactly the same sun/sky configuration.
+    sky_i = (
+        args.sky_intensity
+        if args.sky_intensity is not None
+        else (2.5 if is_hero else (0.6 if use_dem else 0.35))
+    )
+    sky_t = args.sky_turbidity if args.sky_turbidity is not None else (4.0 if is_hero else 2.5)
+    sky_ga = (
+        args.sky_ground_albedo
+        if args.sky_ground_albedo is not None
+        else (0.5 if is_hero else 0.2)
+    )
+    light_kwargs = dict(
+        exposure=args.exposure,
+        sky_intensity=sky_i,
+        sky_turbidity=sky_t,
+        sky_ground_albedo=sky_ga,
+        sun_azimuth_deg=sun_az,
+        sun_elevation_deg=sun_el,
+        sun_intensity=sun_intensity,
+        sun_color=sun_color,
+        lidar_radius=float(manifest.get("lidar_radius", 0.2)),
+    )
     print(f"[render] {args.width}x{args.height}, {args.samples} spp ...")
     t0 = time.time()
     result = splat.render_fused(
@@ -1089,23 +1229,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         height=args.height,
         samples=args.samples,
         seed=args.seed,
-        exposure=args.exposure,
-        sky_intensity=args.sky_intensity
-        if args.sky_intensity is not None
-        else (2.5 if is_hero else (0.6 if use_dem else 0.35)),
-        sky_turbidity=args.sky_turbidity
-        if args.sky_turbidity is not None
-        else (4.0 if is_hero else 2.5),
-        sky_ground_albedo=args.sky_ground_albedo
-        if args.sky_ground_albedo is not None
-        else (0.5 if is_hero else 0.2),
-        sun_azimuth_deg=sun_az,
-        sun_elevation_deg=sun_el,
-        sun_intensity=sun_intensity,
-        sun_color=sun_color,
-        lidar_radius=float(manifest.get("lidar_radius", 0.2)),
         return_aovs=True,
         certificate=args.certificate,
+        tile=tuple(args.tile) if args.tile else None,
+        **light_kwargs,
     )
     render_s = time.time() - t0
 
@@ -1146,6 +1273,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ("Splats", splat_desc),
         ("LiDAR", lidar_desc or "not loaded"),
     ]
+    # Cartographic annotation for plan views: contours are drawn over the
+    # sheet's map copy only — the beauty PNG stays the raw tracer output.
+    map_rgba = result.rgba
+    if use_dem and not args.no_contours and effective_view in ("top", "high"):
+        print("[sheet] drawing elevation contours ...")
+        map_rgba, contour_desc = _draw_contours(result.rgba, heights, metres_per_world, camera)
+        scene_rows.append(("Contours", contour_desc))
+        print(f"[sheet] contours: {contour_desc}")
     if use_dem:
         distance_str = f"{dist:.0f} cells (~{dist * metres_per_world / 1000.0:.2f} km)"
     else:
@@ -1182,11 +1317,58 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
     }
     sheet = _compose_sheet(
-        result.rgba, result.hit_kind, result.depth, result.transmittance, camera, meta, args.aovs
+        map_rgba, result.hit_kind, result.depth, result.transmittance, camera, meta, args.aovs
     )
     sheet_path = out_dir / "splat_fused_map.png"
     sheet.save(sheet_path)
     print(f"[sheet] {sheet_path}")
+
+    # ---- fly-through ------------------------------------------------------
+    if args.animate > 0:
+        from PIL import Image  # noqa: E402
+
+        try:
+            aw, ah = (int(v) for v in args.anim_size.lower().split("x"))
+        except ValueError:
+            print(f"error: bad --anim-size {args.anim_size!r}, expected WxH", file=sys.stderr)
+            return 2
+        print(f"[anim] {args.animate} frames orbiting at {aw}x{ah}, {args.samples} spp ...")
+        t0 = time.time()
+        frames = []
+        for i in range(args.animate):
+            frame_cam = _orbit_camera(
+                camera.look_at, az + 360.0 * i / args.animate, el, dist, camera.fov_y_deg
+            )
+            frame = splat.render_fused(
+                splats=cloud,
+                pointcloud=pointcloud,
+                terrain=terrain,
+                camera=frame_cam,
+                width=aw,
+                height=ah,
+                samples=args.samples,
+                seed=args.seed,
+                return_aovs=False,
+                certificate=False,
+                **light_kwargs,
+            )
+            frame_rgba = frame if isinstance(frame, np.ndarray) else frame.rgba
+            frames.append(
+                Image.fromarray(frame_rgba, "RGBA")
+                .convert("RGB")
+                .convert("P", palette=Image.ADAPTIVE, colors=256)
+            )
+            print(f"[anim] frame {i + 1}/{args.animate}  ({time.time() - t0:.0f}s elapsed)")
+        gif_path = out_dir / "splat_fused_fly.gif"
+        frames[0].save(
+            gif_path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=110,
+            loop=0,
+            optimize=True,
+        )
+        print(f"[anim] {gif_path} ({gif_path.stat().st_size / 1e6:.1f} MB, {time.time() - t0:.0f}s)")
 
     report = {
         "scene": scene_name,

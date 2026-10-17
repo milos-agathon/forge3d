@@ -54,6 +54,7 @@ A single CLI-driven script that renders the fused scene as a cartographic map sh
 - Hypsometric greens darkened to forest tones; the derived scan block is a cleaner saturated violet (0.10 ground-tint bleed) with 6,000 finer splats in hero view (σ 2.7 vs 4.5).
 - Block radius clamped to 130 cells so a full-extent DEM gets a survey-sized block, not one scaled to the mountain.
 - The sheet's RENDER block dropped the wall-clock time row, so the "seed N reproduces this sheet byte-for-byte" footer is literally true (beauty and sheet sha256-verified identical across reruns).
+- v3.1 (motion + cartography): plan views get a projected elevation-contour overlay (marching squares, index lines every fifth; annotation on the sheet copy only, beauty untouched; panel note drops instead of overlapping when readouts grow). `--animate N` renders a deterministic orbit fly-through GIF (sha256-verified identical across reruns). `--tile W H` exposed so large stills (1280×896 @128 spp) fit the 512 MiB budget via seamless tiling.
 
 ### Phase 4 — regression gate (done)
 - `tests/test_splat_fused_map_example.py`, 3 tests:

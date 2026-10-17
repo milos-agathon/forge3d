@@ -62,6 +62,16 @@ the cartographic NW light (az 215 / el 45). Every knob is overridable with
 --sky-turbidity/--sky-ground-albedo/--exposure`. Reruns with the same seed
 reproduce the beauty and the sheet byte for byte.
 
+Cartography and motion: plan views (`--view top|high`) get an
+elevation-contour overlay — marching squares projected through the actual
+camera, an interval chosen for the relief, index lines every fifth contour
+(`--no-contours` disables it). Annotation is drawn on the sheet's map copy
+only; the beauty PNG stays the raw tracer output. `--animate N` additionally
+renders an N-frame orbit fly-through GIF (`--anim-size WxH`): every frame is
+its own deterministic fused render with the still's lighting, so the GIF
+reruns byte-for-byte too. Large stills render in seamless tiles
+(`--tile W H`) so e.g. 1280 x 896 at 128 spp fits the 512 MiB budget.
+
 ## Options
 
 * `tile=(w, h)`: the frame is rendered in seamless tiles. Every fused render
