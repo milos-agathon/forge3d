@@ -29,6 +29,29 @@ position, depth, the per-pixel transmittance split
 `(T_total, T_splat, T_lidar, T_terrain)`, the hit kind, the self-shadow bias
 and paging/memory statistics.
 
+## Map-sheet example
+
+`examples/splat_fused_map.py` renders all three representations as one lit
+"sensor + terrain" map sheet: title, legend with per-layer hit counts,
+scene/camera/render info blocks, a scale bar in real metres, a north arrow,
+optional AOV insets (hit kind, depth, sun transmittance) and a sidecar
+`report.json`.
+
+```bash
+python examples/splat_fused_map.py                # offline fixture: ridge + 3,500 splats + COPC swath
+python examples/splat_fused_map.py --dem fuji     # real DEM fetched from the web (cached); hypsometric
+                                                  # tint + a splat scan block derived from the same DEM
+python examples/splat_fused_map.py --dem fuji --view oblique --aovs
+```
+
+The camera is a rig, not a hard-coded pose: `--view
+canonical|oblique|high|top|low` presets, `--azimuth/--elevation/--distance/
+--target/--fov` orbit controls (or raw `--origin/--look-at`), and the chosen
+pose is printed and echoed in the sheet's CAMERA block. `--dem` scenes convert
+elevation into the same world units as the grid, so terrain slopes keep their
+real steepness and path-traced relief stays crisp. Reruns with the same seed
+reproduce the sheet byte for byte.
+
 ## Options
 
 * `tile=(w, h)`: the frame is rendered in seamless tiles. Every fused render
