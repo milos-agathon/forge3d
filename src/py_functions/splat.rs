@@ -25,8 +25,9 @@ use crate::splat::fusion::{
 };
 use crate::splat::kernel::{ray_gaussian, splat_transmittance};
 use crate::splat::stream::{
-    write_splat_page_store, write_synthetic_point_field, CopcPageSource, PageSource,
-    PageStoreFile, PageStoreSummary, PointCloudFrame, SplatCloudSource, SyntheticFieldDesc,
+    write_splat_page_store, write_synthetic_point_field, srgb_byte_to_linear, CopcPageSource,
+    PageSource, PageStoreFile, PageStoreSummary, PointArraySource, PointCloudFrame,
+    SplatCloudSource, SyntheticFieldDesc,
 };
 use crate::splat::{inverse_covariance, GaussianSplatCloud, ShRest};
 
@@ -401,6 +402,8 @@ fn build_scene(
     splat_page_size: Option<u32>,
     splat_stores: Vec<String>,
     pointclouds: Vec<(String, (f64, f64, f64), bool)>,
+    point_positions: Option<PyReadonlyArray2<'_, f32>>,
+    point_colors: Option<PyReadonlyArray2<'_, u8>>,
     heights: Option<PyReadonlyArray2<'_, f32>>,
     spacing: (f32, f32),
     exaggeration: f32,
@@ -471,6 +474,54 @@ fn build_scene(
             )?));
         }
     }
+    // In-memory point arrays: world-space y-up positions with optional sRGB
+    // byte colours (the terrain albedo map convention), paged like any other
+    // point source. No file, no origin transform — the caller owns the frame.
+    if point_colors.is_some() && point_positions.is_none() {
+        return Err(PyValueError::new_err(
+            "point_colors was given without point_positions",
+        ));
+    }
+    if let Some(array) = point_positions {
+        let positions = rows::<3>(&array, "point_positions")?;
+        if positions.is_empty() {
+            return Err(PyValueError::new_err(
+                "point_positions must contain at least one (N, 3) row",
+            ));
+        }
+        if positions.iter().any(|p| p.iter().any(|v| !v.is_finite())) {
+            return Err(PyValueError::new_err(
+                "point_positions must be finite world coordinates",
+            ));
+        }
+        let colors = match point_colors {
+            None => None,
+            Some(map) => {
+                let view = map.as_array();
+                if view.shape() != [positions.len(), 3] {
+                    return Err(PyValueError::new_err(format!(
+                        "point_colors shape {:?} must be ({}, 3)",
+                        view.shape(),
+                        positions.len()
+                    )));
+                }
+                let mut colors = Vec::with_capacity(positions.len());
+                for r in 0..view.shape()[0] {
+                    colors.push([
+                        srgb_byte_to_linear(view[[r, 0]]),
+                        srgb_byte_to_linear(view[[r, 1]]),
+                        srgb_byte_to_linear(view[[r, 2]]),
+                    ]);
+                }
+                Some(colors)
+            }
+        };
+        sources.push(Arc::new(PointArraySource::new(
+            positions,
+            colors,
+            params.page_capacity as usize,
+        )));
+    }
     if heights.is_none() && terrain_albedo_map.is_some() {
         return Err(PyValueError::new_err(
             "terrain albedo_map was given without terrain heights",
@@ -518,7 +569,8 @@ fn build_scene(
     };
     if sources.is_empty() && terrain.is_none() {
         return Err(PyValueError::new_err(
-            "fused render has no inputs: pass at least one of splats, pointcloud or terrain",
+            "fused render has no inputs: pass at least one of splats, pointcloud, \
+             point_positions or terrain",
         ));
     }
     Ok(SceneInputs {
@@ -619,6 +671,8 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
     splats = None,
     splat_stores = Vec::new(),
     pointclouds = Vec::new(),
+    point_positions = None,
+    point_colors = None,
     heights = None,
     spacing = (1.0, 1.0),
     exaggeration = 1.0,
@@ -674,6 +728,8 @@ pub(crate) fn render_fused(
     splats: Option<PyRef<'_, PyGaussianSplatCloud>>,
     splat_stores: Vec<String>,
     pointclouds: Vec<(String, (f64, f64, f64), bool)>,
+    point_positions: Option<PyReadonlyArray2<'_, f32>>,
+    point_colors: Option<PyReadonlyArray2<'_, u8>>,
     heights: Option<PyReadonlyArray2<'_, f32>>,
     spacing: (f32, f32),
     exaggeration: f32,
@@ -758,6 +814,8 @@ pub(crate) fn render_fused(
         splat_page_size,
         splat_stores,
         pointclouds,
+        point_positions,
+        point_colors,
         heights,
         spacing,
         exaggeration,
@@ -1101,6 +1159,8 @@ pub(crate) fn render_fused_sequence(
         splat_page_size,
         splat_stores,
         pointclouds,
+        None,
+        None,
         heights,
         spacing,
         exaggeration,
@@ -1259,6 +1319,8 @@ pub(crate) fn render_fused_reference_py(
         splat_page_size,
         splat_stores,
         pointclouds,
+        None,
+        None,
         heights,
         spacing,
         exaggeration,

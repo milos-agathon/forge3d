@@ -300,6 +300,31 @@ def test_render_fused_rejects_missing_and_malformed_inputs(tmp_path):
         splat.render_fused(terrain=flat, camera=camera, brdf="velvet")
     with pytest.raises(Exception, match="kappa"):
         splat.render_fused(terrain=flat, camera=camera, kappa=0.0)
+    # In-memory point arrays: pairing, shape, finiteness and colour format.
+    with pytest.raises(ValueError, match="point_colors.*without point_positions"):
+        splat.render_fused(terrain=flat, camera=camera, point_colors=np.zeros((4, 3), np.uint8))
+    with pytest.raises(ValueError, match="point_positions"):
+        splat.render_fused(camera=camera, point_positions=np.zeros((4, 2), np.float32))
+    with pytest.raises(ValueError, match="point_positions"):
+        splat.render_fused(camera=camera, point_positions=np.zeros(4, np.float32))
+    with pytest.raises(ValueError, match="point_positions"):
+        splat.render_fused(camera=camera, point_positions=np.zeros((0, 3), np.float32))
+    with pytest.raises(ValueError, match="finite"):
+        splat.render_fused(
+            camera=camera, point_positions=np.full((3, 3), np.nan, np.float32)
+        )
+    with pytest.raises(ValueError, match="point_colors"):
+        splat.render_fused(
+            camera=camera,
+            point_positions=np.zeros((4, 3), np.float32),
+            point_colors=np.zeros((5, 3), np.uint8),
+        )
+    with pytest.raises(ValueError, match="uint8"):
+        splat.render_fused(
+            camera=camera,
+            point_positions=np.zeros((4, 3), np.float32),
+            point_colors=np.zeros((4, 3), np.float32),
+        )
     # A point page store is not a splat source (and vice versa).
     m = manifest()
     cloud = splat.load_gaussian_splats(FIXTURE_DIR / m["splat_file"])
@@ -428,6 +453,30 @@ def test_render_fused_single_representations_and_options():
         pointcloud=kwargs["pointcloud"], lidar_radius=kwargs["lidar_radius"], **common
     )
     assert set(np.unique(lidar_only.hit_kind).tolist()) == {splat.HIT_MISS, splat.HIT_LIDAR}
+
+    # In-memory point arrays page like a file-backed cloud: the same grid
+    # rendered twice is byte-identical, and its returns are real LiDAR hits.
+    xs = np.linspace(-4.0, 4.0, 20, dtype=np.float32)
+    gx, gz = np.meshgrid(xs, xs)
+    positions = np.stack([gx, np.full_like(gx, 0.6), gz], axis=-1).reshape(-1, 3)
+    colors = np.tile(np.array([[214, 74, 58]], np.uint8), (positions.shape[0], 1))
+    array_camera = splat.FusedCamera(origin=(0.0, 3.0, 8.0), look_at=(0.0, 0.6, 0.0))
+    arrays_scene = dict(
+        camera=array_camera,
+        samples=4,
+        width=64,
+        height=48,
+        point_positions=positions,
+        point_colors=colors,
+        return_aovs=True,
+    )
+    arrays_only = splat.render_fused(terrain=np.zeros((17, 17), np.float32), **arrays_scene)
+    kinds = set(np.unique(arrays_only.hit_kind).tolist())
+    assert splat.HIT_LIDAR in kinds, "no LiDAR pixels from the in-memory swath"
+    assert kinds <= {splat.HIT_MISS, splat.HIT_TERRAIN, splat.HIT_LIDAR}
+    assert arrays_only.stats["logical_primitives"] == positions.shape[0]
+    again = splat.render_fused(terrain=np.zeros((17, 17), np.float32), **arrays_scene)
+    np.testing.assert_array_equal(arrays_only.rgba, again.rgba)
 
     # Fog attenuates the sun beam: with density the direct AOV dims.
     foggy = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.02, **common)

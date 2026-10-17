@@ -294,6 +294,82 @@ def _derive_splat_cloud(
     return cloud, meta
 
 
+def _derive_lidar_swath(
+    heights: np.ndarray,
+    spacing: Tuple[float, float],
+    target_count: int = 10000,
+    seed: int = 0,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """Simulate an airborne LiDAR scan swath over the DEM.
+
+    Flight lines run east-west across a survey strip on the same flank as
+    the digitized scan block — the strip sits in front of the block and
+    partly underlaps it, so splat and point returns share a region and the
+    unified transmittance (T_splat x T_lidar x T_terrain) has somewhere to
+    act. Pulse spacing, line spacing and a small perpendicular jitter follow
+    a real multi-pulse pattern; return intensity is approximated from the
+    local slope (steep ground returns darker and warmer), so the swath reads
+    as an intensity image draped on the relief.
+
+    The result is world-space y-up float32 positions plus sRGB byte colours
+    — exactly what ``render_fused(point_positions=..., point_colors=...)``
+    accepts — so no file is written and the run stays deterministic.
+    """
+    rows, cols = heights.shape
+    half_x = (cols - 1) / 2.0 * spacing[0]
+    half_z = (rows - 1) / 2.0 * spacing[1]
+    centre_x, centre_z = 0.38 * half_x, 0.34 * half_z
+    radius = min(0.45 * min(half_x, half_z), 130.0)
+    # Survey strip: laid on the camera-facing flank in front of the block and
+    # partly underlapping it, so the violet quilt and the sand-coloured scan
+    # interleave at the boundary and all three representations are legible
+    # from the hero camera. (The example's hero and top views both look down
+    # the +x/+z quadrant, so "front" is a fixed world direction here.)
+    x_lo = max(-half_x, centre_x - 0.7 * radius)
+    x_hi = min(half_x, centre_x + 1.7 * radius)
+    z_lo = max(-half_z, centre_z + 0.4 * radius)
+    z_hi = min(half_z, centre_z + 1.4 * radius)
+    if x_hi - x_lo < 4.0 or z_hi - z_lo < 4.0:
+        return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint8), {"count": 0}
+    area = (x_hi - x_lo) * (z_hi - z_lo)
+    along = max(1.0, math.sqrt(area / max(target_count, 1)))
+    cross = along * 1.45
+    rng = np.random.default_rng(seed)
+    line_z = np.arange(z_lo + 0.5 * cross, z_hi, cross)
+    if line_z.size == 0:
+        line_z = np.array([0.5 * (z_lo + z_hi)])
+    x_line = np.arange(x_lo, x_hi, along)
+    gz, gx = np.meshgrid(line_z, x_line, indexing="ij")
+    # Perpendicular pulse jitter (deterministic for a given seed).
+    jx = gx + (rng.random(gx.shape) - 0.5) * along * 0.8
+    jz = gz + (rng.random(gz.shape) - 0.5) * cross * 0.6
+    xw = jx.ravel()
+    zw = jz.ravel()
+    col_i = np.clip(np.rint(xw / spacing[0] + (cols - 1) / 2.0).astype(int), 0, cols - 1)
+    row_i = np.clip(np.rint(zw / spacing[1] + (rows - 1) / 2.0).astype(int), 0, rows - 1)
+    yw = heights[row_i, col_i] + 0.05
+    positions = np.stack([xw, yw, zw], axis=-1).astype(np.float32)
+    # Slope-driven intensity: gentle ground returns pale sand, steep ground
+    # warm terracotta — the legend's "LiDAR returns" swatch family.
+    d_row, d_col = np.gradient(heights)
+    slope = np.hypot(d_row, d_col)[row_i, col_i]
+    lo_p, hi_p = (float(v) for v in np.percentile(slope, (5, 95)))
+    t = np.clip((slope - lo_p) / max(hi_p - lo_p, 1e-9), 0.0, 1.0).astype(np.float32)
+    color_lo = np.array([243.0, 225.0, 196.0], np.float32)
+    color_hi = np.array([168.0, 76.0, 66.0], np.float32)
+    rgb = color_lo + (color_hi - color_lo) * t[:, None]
+    rgb *= (0.94 + 0.12 * rng.random(rgb.shape)).astype(np.float32)
+    colors = np.clip(np.rint(rgb), 0, 255).astype(np.uint8)
+    meta = {
+        "count": int(positions.shape[0]),
+        "flight_lines": int(line_z.size),
+        "along_spacing": along,
+        "cross_spacing": cross,
+        "strip": (x_lo, z_lo, x_hi, z_hi),
+    }
+    return positions, colors, meta
+
+
 # ---------------------------------------------------------------------------
 # Camera rig (y-up, terrain centred on origin)
 # ---------------------------------------------------------------------------
@@ -906,7 +982,11 @@ def build_parser() -> argparse.ArgumentParser:
     scene.add_argument("--splat-scale", type=float, default=None,
                        help="uniform scale for a supplied splat cloud")
     scene.add_argument("--pointcloud", default=None, help="path to a COPC/point-store file")
-    scene.add_argument("--no-lidar", action="store_true", help="drop the fixture LiDAR layer")
+    scene.add_argument(
+        "--no-lidar",
+        action="store_true",
+        help="drop the LiDAR layer (fixture COPC, or the swath derived from the DEM)",
+    )
 
     view = p.add_argument_group("camera (y-up, terrain centred on origin)")
     view.add_argument("--view", choices=sorted(VIEW_PRESETS), default=None,
@@ -1088,6 +1168,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if pointcloud is None:
         lidar_desc = None
 
+    # ---- derived LiDAR (DEM runs without an explicit file) ----------------
+    point_arrays = None
+    if use_dem and pointcloud is None and not args.no_lidar:
+        positions, colors, lidar_meta = _derive_lidar_swath(
+            heights, (1.0, 1.0), seed=args.seed
+        )
+        if lidar_meta.get("count", 0) > 0:
+            point_arrays = (positions, colors)
+            lidar_desc = (
+                f"derived scan swath - {lidar_meta['count']:,} pts, "
+                f"{lidar_meta['flight_lines']} flight lines (slope-intensity tint)"
+            )
+            print(f"[pointcloud] derived LiDAR swath: {lidar_desc}")
+
     # ---- camera ----------------------------------------------------------
     fov = args.fov if args.fov is not None else (manifest.get("fov_y_deg", 45.0) if manifest else 45.0)
     all_bounds = [
@@ -1184,12 +1278,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.sun_elevation is not None:
         sun_el = args.sun_elevation
     elif is_hero:
-        sun_el = 15.0
+        # Golden hour: a low warm sun reads the relief and warms the Hosek
+        # sky into a cream-to-blue gradient instead of a flat pale band.
+        sun_el = 8.0
     else:
         sun_el = float(manifest.get("sun_elevation_deg", 45.0)) if manifest else 45.0
 
     sun_intensity = 6.0 if is_hero else SUN_INTENSITY
-    sun_color = (1.0, 0.93, 0.82) if is_hero else SUN_COLOR
+    sun_color = (1.0, 0.85, 0.62) if is_hero else SUN_COLOR
     if args.sun_color is not None:
         sun_color = tuple(args.sun_color)
 
@@ -1199,13 +1295,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sky_i = (
         args.sky_intensity
         if args.sky_intensity is not None
-        else (2.5 if is_hero else (0.6 if use_dem else 0.35))
+        else (3.0 if is_hero else (0.6 if use_dem else 0.35))
     )
-    sky_t = args.sky_turbidity if args.sky_turbidity is not None else (4.0 if is_hero else 2.5)
+    sky_t = args.sky_turbidity if args.sky_turbidity is not None else (5.0 if is_hero else 2.5)
     sky_ga = (
         args.sky_ground_albedo
         if args.sky_ground_albedo is not None
-        else (0.5 if is_hero else 0.2)
+        else (0.35 if is_hero else 0.2)
     )
     light_kwargs = dict(
         exposure=args.exposure,
@@ -1216,13 +1312,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sun_elevation_deg=sun_el,
         sun_intensity=sun_intensity,
         sun_color=sun_color,
-        lidar_radius=float(manifest.get("lidar_radius", 0.2)),
+        # A derived swath gets a pulse-sized radius (0.7 x along-spacing) so
+        # neighbouring returns overlap into a scan strip; a file-backed cloud
+        # keeps the manifest's radius.
+        lidar_radius=(
+            float(lidar_meta["along_spacing"] * 0.7)
+            if (point_arrays is not None and lidar_meta)
+            else float(manifest.get("lidar_radius", 0.2))
+        ),
     )
     print(f"[render] {args.width}x{args.height}, {args.samples} spp ...")
     t0 = time.time()
     result = splat.render_fused(
         splats=cloud,
         pointcloud=pointcloud,
+        point_positions=None if point_arrays is None else point_arrays[0],
+        point_colors=None if point_arrays is None else point_arrays[1],
         terrain=terrain,
         camera=camera,
         width=args.width,
@@ -1342,6 +1447,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             frame = splat.render_fused(
                 splats=cloud,
                 pointcloud=pointcloud,
+        point_positions=None if point_arrays is None else point_arrays[0],
+        point_colors=None if point_arrays is None else point_arrays[1],
                 terrain=terrain,
                 camera=frame_cam,
                 width=aw,

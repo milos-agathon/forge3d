@@ -18,7 +18,8 @@ Ship a runnable, self-contained example that renders **splats + LiDAR + terrain 
 - `load_gaussian_splats("tests/fixtures/splat_fusion/cloud.ply")` → 3,500 splats, SH degree 1.
 - Test fixtures are coherent: `cloud.ply` + `dem_65x65.f32` + `swath.copc.laz`.
 - Real DEM fetch works: `Mount_Fuji_30m.tif` (LFS CDN, cached in `~/.forge3d/datasets/`).
-- `examples/splat_fused_map.py` exists (v2) and `tests/test_splat_fused_map_example.py` passes 3/3.
+- `examples/splat_fused_map.py` exists (v3.2) and `tests/test_splat_fused_map_example.py` passes 3/3.
+- `render_fused` accepts in-memory point arrays (`point_positions`/`point_colors`), so `--dem` runs show all three representations derived from the DEM.
 
 ## Phases
 
@@ -56,6 +57,45 @@ A single CLI-driven script that renders the fused scene as a cartographic map sh
 - The sheet's RENDER block dropped the wall-clock time row, so the "seed N reproduces this sheet byte-for-byte" footer is literally true (beauty and sheet sha256-verified identical across reruns).
 - v3.1 (motion + cartography): plan views get a projected elevation-contour overlay (marching squares, index lines every fifth; annotation on the sheet copy only, beauty untouched; panel note drops instead of overlapping when readouts grow). `--animate N` renders a deterministic orbit fly-through GIF (sha256-verified identical across reruns). `--tile W H` exposed so large stills (1280×896 @128 spp) fit the 512 MiB budget via seamless tiling.
 
+### Phase 3c — LiDAR from arrays + golden-hour sky (done, v3.2)
+- Engine gap closed: the fused path ingested points only from files (COPC /
+  page stores), so a DEM run could not show a LiDAR layer at all. New
+  `PointArraySource` in `src/splat/stream.rs` mirrors `SplatCloudSource`
+  (k-d `paginate`, identical `PageSource` contract, `PagePayload::Points`,
+  linear-white default colour) over in-memory arrays; `render_fused` accepts
+  `point_positions=(N,3) float32` world-space y-up and `point_colors=(N,3)`
+  uint8 sRGB (the albedo-map convention). No new integrator behaviour: the
+  arrays are paged through the same residency pool and unified
+  `T_splat × T_lidar × T_terrain` as a streamed COPC cloud. Other
+  `build_scene` callers (sequence, reference) pass `None`.
+- Validation both sides: the Python wrapper rejects bad shapes, non-finite
+  positions, colour/position pairing and non-uint8 colours *before* any GPU
+  touch; the Rust boundary re-checks (defence in depth).
+- Example: `_derive_lidar_swath` digitizes an airborne scan from the DEM
+  grid itself — flight lines with sqrt(area/N) pulse spacing, 1.45× line
+  spacing, deterministic jitter, slope-driven intensity colouring (sand →
+  terracotta, the legend swatch family) and a pulse-sized sphelet radius
+  (0.7 × along-spacing) so returns overlap into a scan strip. The strip
+  underlaps the violet splat block, so all three representations share a
+  region. Provenance is stated on the sheet ("derived scan swath - N pts, M
+  flight lines"); `--no-lidar` drops it, `--pointcloud FILE` replaces it.
+- Golden-hour hero default (probed at 640×448/32 spp, P1 chosen over a
+  deeper el-5 variant): sun el 8, warm colour (1.0, 0.85, 0.62), turbidity
+  5, ground albedo 0.35, sky intensity 3.0 — the Hosek sky grades cream →
+  blue instead of a flat pale band, and the low sun reads the relief.
+- Determinism re-verified end to end with the swath in scene: two full runs
+  produce sha256-identical beauty *and* sheet.
+- Gates: Rust unit test (`point_array_source_pages_an_in_memory_swath…`,
+  run with `PYO3_PYTHON=.venv/bin/python cargo test --features
+  default,splat-fusion point_array_source --lib` → 1 passed), new
+  diagnostics + GPU byte-identity test in `tests/test_splat_api.py`, and
+  `tests/test_splat_api.py + test_splat_fused_map_example.py +
+  test_api_contracts.py` → 196 passed. `cargo check` clean (only
+  pre-existing `fetch_update` deprecation warnings in untouched core files);
+  `cargo forge3d-clippy` fails repo-wide on a newer local clippy
+  (146 pre-existing `chunks_exact`/deprecation lints in untouched files, 0
+  in the files changed here).
+
 ### Phase 4 — regression gate (done)
 - `tests/test_splat_fused_map_example.py`, 3 tests:
   - `test_example_module_loads`: module import + parser exists.
@@ -79,6 +119,15 @@ A single CLI-driven script that renders the fused scene as a cartographic map sh
 ## Known limitations
 
 - No public remote splat `.ply` exists; users supply their own 3DGS `.ply` via `--splats`.
-- Mt St Helens COPC and Mount Fuji DEM are in different coordinate systems; a coherent multi-layer visualization requires matching data (the example's own layers are always derived from one source per run).
+- Mt St Helens COPC and Mount Fuji DEM are in different coordinate systems, so a
+  real-file multi-layer run still needs user-supplied matching data. `--dem`
+  runs instead derive every layer from the one DEM (heightfield, splat block,
+  LiDAR swath) — geographically coherent, but the splat block and the swath
+  are synthetic digitizations, not real captures.
+- The fused sky is the analytic Hosek-Wilkie model only: `render_fused` has no
+  HDRI/env-map input (the terrain path has `f3d.IBL.from_hdr`, the fused kernel
+  does not). A fused IBL path would need an env texture + miss-shader wiring in
+  the fused kernel plus CENSOR capability/degradation gates — a scoped engine
+  feature, not an example change.
 - Physical water (WaterOptics) + fused path not yet wired together.
 - The DEM scan block is derived synthetic data (a demo of the fused pipeline), not a real 3DGS capture; pass `--splats` with a real capture to replace it.
