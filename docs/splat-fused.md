@@ -29,6 +29,15 @@ position, depth, the per-pixel transmittance split
 `(T_total, T_splat, T_lidar, T_terrain)`, the hit kind, the self-shadow bias
 and paging/memory statistics.
 
+LiDAR points enter either from a file (`pointcloud=` a COPC path, a point page
+store path or a `FusedPointCloud`) or straight from memory: pass
+`point_positions` — an `(N, 3)` float32 array of world-space y-up positions —
+optionally with `point_colors`, an `(N, 3)` uint8 sRGB array. In-memory points
+are k-d paginated exactly like a file-backed cloud (same residency pool,
+traversal and unified transmittance), so no file is written and a point set
+derived in the calling script renders with the same pipeline as a streamed
+COPC scan.
+
 ## Map-sheet example
 
 `examples/splat_fused_map.py` renders all three representations as one lit
@@ -40,7 +49,8 @@ optional AOV insets (hit kind, depth, sun transmittance) and a sidecar
 ```bash
 python examples/splat_fused_map.py                # offline fixture: ridge + 3,500 splats + COPC swath
 python examples/splat_fused_map.py --dem fuji     # real DEM fetched from the web (cached), full extent:
-                                                  # hypsometric tint + a splat scan block from the same DEM
+                                                  # hypsometric tint + a splat scan block + a derived
+                                                  # LiDAR swath, all digitized from the same DEM
 python examples/splat_fused_map.py --dem fuji --view top --aovs   # north-up hypsometric map
 ```
 
@@ -54,13 +64,26 @@ world units as the grid, so terrain slopes keep their real steepness and
 path-traced relief stays crisp; the full DEM extent is used by default and
 `--crop-size N` zooms to a central square.
 
-Lighting follows the view: the hero shot uses warm low side lighting (sun
-az 125 / el 15, intensity 6) with a bright Hosek-Wilkie sky (turbidity 4,
-ground albedo 0.5) so the horizon band reads as distant haze; map views keep
-the cartographic NW light (az 215 / el 45). Every knob is overridable with
+Lighting follows the view: the hero shot is golden hour (sun az 125 / el 8,
+intensity 6, warm color) with a bright Hosek-Wilkie sky (turbidity 5, ground
+albedo 0.35) so the sky grades from cream at the horizon to blue at the zenith
+and the low sun reads the relief; map views keep the cartographic NW light
+(az 215 / el 45). Every knob is overridable with
 `--sun-azimuth/--sun-elevation/--sun-color/--sky-intensity/
 --sky-turbidity/--sky-ground-albedo/--exposure`. Reruns with the same seed
 reproduce the beauty and the sheet byte for byte.
+
+`--dem` runs digitize all three representations from the DEM itself, so the
+sheet shows the full fusion story with no external dataset: the hypsometric
+heightfield, the violet splat scan block, and — since no public LiDAR archive
+matches the DEM's coordinates — an airborne scan swath derived from the same
+grid (`_derive_lidar_swath`): flight lines with realistic pulse and line
+spacing plus deterministic jitter, returns sitting on the terrain, colour
+driven by local slope as an intensity proxy, and a pulse-sized sphelet radius
+so neighbouring returns overlap into a scan strip. The strip underlaps the
+splat block, so `T_splat x T_lidar x T_terrain` acts in a shared region. The
+SCENE block states the provenance ("derived scan swath") and `--no-lidar`
+drops the layer; passing `--pointcloud FILE` replaces it with a real cloud.
 
 Cartography and motion: plan views (`--view top|high`) get an
 elevation-contour overlay — marching squares projected through the actual
@@ -85,6 +108,15 @@ reruns byte-for-byte too. Large stills render in seamless tiles
   a `(rows, cols, 3|4)` uint8 sRGB colour map on the DEM grid, stored as
   RGBA8 sRGB (4 B per cell). With four channels, alpha 255 marks a mapped
   cell and any other alpha falls back to the uniform `albedo`.
+* `point_positions=(N, 3) float32, point_colors=(N, 3) uint8`: an in-memory
+  LiDAR point set in world space (y-up), an alternative to `pointcloud=` that
+  never touches disk. Positions must be finite; colours are sRGB bytes
+  (absent = white). The arrays are k-d paginated with the file-backed sources
+  and share one residency pool, so their pages appear in the same paging
+  stats and behave identically at render time. The only provenance
+  difference is the Rust-side source list (`FusedScene::describe()`, which
+  labels them `point-array[N points, memory]`); the Python stats dict
+  reports paging totals, not per-source labels.
 * `terrain_smooth_normals=True`: terrain is shaded with central-difference
   vertex normals interpolated across each cell, continuous across cell
   edges. A normal that would face away from the cell's bilinear patch falls

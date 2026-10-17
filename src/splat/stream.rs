@@ -282,6 +282,89 @@ impl PageSource for SplatCloudSource {
 }
 
 // ---------------------------------------------------------------------------
+// In-memory point set as a page source
+// ---------------------------------------------------------------------------
+
+/// Pages over an in-memory point set — e.g. a scan swath derived from a DEM
+/// in the calling script, or points that never touch disk. Positions are
+/// world-space y-up `f32`; colours are linear RGB (absent = white). Pages are
+/// k-d paginated like every other point source, so residency, traversal and
+/// pool accounting behave exactly as they do for a streamed COPC cloud.
+pub struct PointArraySource {
+    positions: Vec<[f32; 3]>,
+    colors: Vec<[f32; 3]>,
+    pages: Vec<Vec<u32>>,
+    metas: Vec<PageMeta>,
+}
+
+impl PointArraySource {
+    pub fn new(
+        positions: Vec<[f32; 3]>,
+        colors: Option<Vec<[f32; 3]>>,
+        page_capacity: usize,
+    ) -> Self {
+        let colors = colors
+            .filter(|c| c.len() == positions.len())
+            .unwrap_or_else(|| vec![[1.0; 3]; positions.len()]);
+        let pages = paginate(&positions, page_capacity.max(1));
+        let metas = pages
+            .iter()
+            .map(|page| {
+                let mut aabb = Aabb::EMPTY;
+                for &i in page {
+                    let p = positions[i as usize];
+                    aabb = aabb.union(Aabb::new(p, p));
+                }
+                PageMeta {
+                    kind: PageKind::Points,
+                    count: page.len() as u32,
+                    aabb,
+                }
+            })
+            .collect();
+        Self {
+            positions,
+            colors,
+            pages,
+            metas,
+        }
+    }
+}
+
+impl PageSource for PointArraySource {
+    fn kind(&self) -> PageKind {
+        PageKind::Points
+    }
+
+    fn page_count(&self) -> u32 {
+        self.pages.len() as u32
+    }
+
+    fn meta(&self, page: u32) -> PageMeta {
+        self.metas[page as usize]
+    }
+
+    fn load(&self, page: u32) -> Result<PagePayload, RenderError> {
+        let indices = &self.pages[page as usize];
+        Ok(PagePayload::Points {
+            positions: indices
+                .iter()
+                .map(|&i| self.positions[i as usize])
+                .collect(),
+            colors: indices.iter().map(|&i| self.colors[i as usize]).collect(),
+        })
+    }
+
+    fn logical_primitives(&self) -> u64 {
+        self.positions.len() as u64
+    }
+
+    fn label(&self) -> String {
+        format!("point-array[{} points, memory]", self.positions.len())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // On-disk page store
 // ---------------------------------------------------------------------------
 
@@ -1828,6 +1911,45 @@ pub fn pages_for(count: u64, capacity: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn point_array_source_pages_an_in_memory_swath_with_linear_colors() {
+        let positions: Vec<[f32; 3]> = (0..1000).map(|i| [i as f32 * 0.1, 0.0, 0.0]).collect();
+        let colors = vec![[0.5, 0.25, 0.125]; positions.len()];
+        let source = PointArraySource::new(positions.clone(), Some(colors), 256);
+        assert_eq!(source.kind(), PageKind::Points);
+        assert_eq!(source.page_count(), 4);
+        assert_eq!(source.logical_primitives(), 1000);
+        assert!(source.label().contains("1000 points"));
+        let mut loaded = 0usize;
+        for page in 0..source.page_count() {
+            let meta = source.meta(page);
+            assert_eq!(meta.kind, PageKind::Points);
+            assert!(meta.aabb.is_valid());
+            assert!(meta.aabb.min[0] <= meta.aabb.max[0]);
+            let PagePayload::Points {
+                positions,
+                colors,
+            } = source.load(page).unwrap()
+            else {
+                panic!("point source returned a splat payload");
+            };
+            assert_eq!(positions.len(), meta.count as usize);
+            assert_eq!(colors.len(), positions.len());
+            assert!(positions
+                .iter()
+                .zip(&colors)
+                .all(|(p, c)| p[1] == 0.0 && *c == [0.5, 0.25, 0.125]));
+            loaded += positions.len();
+        }
+        assert_eq!(loaded, 1000);
+        // Absent colours fall back to white, never to another point's colour.
+        let white = PointArraySource::new(positions, None, 4096);
+        let PagePayload::Points { colors, .. } = white.load(0).unwrap() else {
+            panic!("point source returned a splat payload");
+        };
+        assert!(colors.iter().all(|c| *c == [1.0; 3]));
+    }
 
     #[test]
     fn small_copc_nodes_are_packed_without_losing_or_duplicating_points() {
