@@ -284,21 +284,26 @@ def _derive_splat_cloud(
 ) -> Tuple[Any, Dict[str, float]]:
     """Digitize a *scan block* of the DEM into a Gaussian-splat layer.
 
-    Splats are sampled on a step grid inside a circle on the summit flank,
-    oriented perpendicular to the local terrain normal and lifted along it,
-    so together they form one semi-translucent, violet-tinted quilted skin
-    that follows the relief instead of burying into it. Everywhere outside
-    the circle the exact heightfield shows untouched — "one sensor block
-    fused over the base map" instead of confetti — and both representations
-    take hits in roughly the block/terrain area ratio.
+    Splats are sampled on a step grid inside a small circle high on the
+    summit's east shoulder, oriented perpendicular to the local terrain
+    normal and lifted along it, so together they form one semi-translucent,
+    violet-tinted quilted skin that follows the relief instead of burying
+    into it. Everywhere outside the circle the exact heightfield shows
+    untouched — "one sensor block fused over the base map" instead of
+    confetti. The block sits high and tight to the peak, well clear of the
+    low, wide LiDAR swath of :func:`_derive_lidar_swath` in the foreground
+    valley, so the two sensor layers read as two distinct things rather than
+    one blended blob.
     """
     rows, cols = heights.shape
     half_x = (cols - 1) / 2.0 * spacing[0]
     half_z = (rows - 1) / 2.0 * spacing[1]
-    centre_x, centre_z = 0.38 * half_x, 0.34 * half_z
-    # Clamped so a full-extent DEM still gets a survey-sized block (0.9 km)
-    # instead of one scaled to the whole mountain.
-    radius = min(0.45 * min(half_x, half_z), 130.0)
+    # Near-summit east shoulder (high elevation): kept deliberately away from
+    # the LiDAR swath, which lies much further out in the +z foreground.
+    centre_x, centre_z = 0.26 * half_x, 0.04 * half_z
+    # Clamped so a full-extent DEM still gets a survey-sized block (~1.3 km
+    # across) instead of one scaled to the whole mountain.
+    radius = min(0.30 * min(half_x, half_z), 95.0)
     block_area = math.pi * radius * radius
     step = max(2, int(round(math.sqrt(block_area / max(target_count, 1)))))
     rz = np.arange(0, rows, step)
@@ -366,14 +371,16 @@ def _derive_lidar_swath(
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """Simulate an airborne LiDAR scan swath over the DEM.
 
-    Flight lines run east-west across a survey strip on the same flank as
-    the digitized scan block — the strip sits in front of the block and
-    partly underlaps it, so splat and point returns share a region and the
-    unified transmittance (T_splat x T_lidar x T_terrain) has somewhere to
-    act. Pulse spacing, line spacing and a small perpendicular jitter follow
-    a real multi-pulse pattern; return intensity is approximated from the
-    local slope (steep ground returns darker and warmer), so the swath reads
-    as an intensity image draped on the relief.
+    Flight lines run east-west across a wide, low survey strip in the near
+    foreground valley (the +z side of the DEM, well out from the summit at a
+    lower elevation). The strip is deliberately kept on different ground from
+    the violet splat block of :func:`_derive_splat_cloud`, which sits high and
+    tight to the peak's east shoulder — so the point layer and the splat layer
+    read as two distinct sensors fused onto the base map, not one blended
+    region. Pulse spacing, line spacing and a small perpendicular jitter follow
+    a real multi-pulse pattern; return intensity is approximated from the local
+    slope (steep ground returns darker and warmer), so the swath reads as an
+    intensity image draped on the relief.
 
     The result is world-space y-up float32 positions plus sRGB byte colours
     — exactly what ``render_fused(point_positions=..., point_colors=...)``
@@ -382,17 +389,12 @@ def _derive_lidar_swath(
     rows, cols = heights.shape
     half_x = (cols - 1) / 2.0 * spacing[0]
     half_z = (rows - 1) / 2.0 * spacing[1]
-    centre_x, centre_z = 0.38 * half_x, 0.34 * half_z
-    radius = min(0.45 * min(half_x, half_z), 130.0)
-    # Survey strip: laid on the camera-facing flank in front of the block and
-    # partly underlapping it, so the violet quilt and the sand-coloured scan
-    # interleave at the boundary and all three representations are legible
-    # from the hero camera. (The example's hero and top views both look down
-    # the +x/+z quadrant, so "front" is a fixed world direction here.)
-    x_lo = max(-half_x, centre_x - 0.7 * radius)
-    x_hi = min(half_x, centre_x + 1.7 * radius)
-    z_lo = max(-half_z, centre_z + 0.4 * radius)
-    z_hi = min(half_z, centre_z + 1.4 * radius)
+    # A wide, low band across the near foreground valley (+z, lower
+    # elevation), east-west, clear of the summit-flank splat block.
+    x_lo = max(-half_x, -0.50 * half_x)
+    x_hi = min(half_x, 0.34 * half_x)
+    z_lo = max(-half_z, 0.44 * half_z)
+    z_hi = min(half_z, 0.72 * half_z)
     if x_hi - x_lo < 4.0 or z_hi - z_lo < 4.0:
         return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint8), {"count": 0}
     area = (x_hi - x_lo) * (z_hi - z_lo)
@@ -853,16 +855,76 @@ def _compose_sheet(
     if insets:
         inset_block = int(map_h * 0.42) + 30
     footer_h = 40
-    canvas_h = map_y + map_h + inset_block + footer_h + margin
-
-    canvas = Image.new("RGBA", (canvas_w, canvas_h), paper + (255,))
-    draw = ImageDraw.Draw(canvas, "RGBA")
 
     title_font = _load_font(27)
     sub_font = _load_font(13)
     head_font = _load_font(12)
     body_font = _load_font(12)
     small_font = _load_font(11)
+
+    # Measure the right-panel readout before sizing the canvas: once AOVs are
+    # off, the readout blocks are taller than the map, so the sheet must grow
+    # to fit whichever column is taller instead of clipping the RENDER block.
+    scratch = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    key_w = 84
+    value_max = panel_w - key_w - 30
+
+    def wrap_lines(value: str, max_width: int, font) -> List[str]:
+        """Wrap to a column, hard-breaking over-wide tokens (a long HDRI
+        filename) by characters so nothing can overflow the panel."""
+        lines: List[str] = []
+        current = ""
+
+        def width(text: str) -> float:
+            return scratch.textlength(text, font=font)
+
+        for word in value.split():
+            while word:
+                trial = f"{current} {word}".strip() if current else word
+                if width(trial) <= max_width:
+                    current = trial
+                    break
+                if current:
+                    lines.append(current)
+                    current = ""
+                    continue
+                # current is empty and the word alone is too wide: take the
+                # longest prefix that fits, emit it, continue with the rest.
+                take = word
+                while take and width(take) > max_width:
+                    take = take[:-1]
+                take = take or word[:1]
+                lines.append(take)
+                word = word[len(take):]
+            if len(lines) >= 3:
+                break
+        if current and len(lines) < 3:
+            lines.append(current)
+        return lines[:3] or [""]
+
+    def block_height(rows: List[Tuple[str, str]]) -> int:
+        h = 21  # heading
+        for _key, value in rows:
+            h += 17 * len(wrap_lines(value, value_max, body_font))
+        return h + 8
+
+    panel_content_h = (
+        16
+        + 19  # "FUSED LAYERS" heading
+        + 17  # sub-caption
+        + 19 * len(meta["hits"])
+        + 8
+        + block_height(meta["scene_rows"])
+        + block_height(meta.get("atmosphere_rows", []))
+        + block_height(meta["camera_rows"])
+        + block_height(meta["render_rows"])
+    )
+    panel_h = max(map_h, panel_content_h)
+    body_h = max(map_h + inset_block, panel_h)
+    canvas_h = map_y + body_h + footer_h + margin
+
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), paper + (255,))
+    draw = ImageDraw.Draw(canvas, "RGBA")
 
     # ---- header ----------------------------------------------------------
     draw.text((margin, 18), meta["title"], font=title_font, fill=ink)
@@ -957,31 +1019,13 @@ def _compose_sheet(
     # ---- right panel -----------------------------------------------------
     px = margin + map_w + panel_gap
     py = map_y
-    draw.rectangle((px, py, px + panel_w, py + map_h), fill=panel_tone + (255,))
-
-    def wrap(value: str, max_width: int, font) -> List[str]:
-        lines: List[str] = []
-        current = ""
-        for word in value.split():
-            trial = f"{current} {word}".strip()
-            if not current or draw.textlength(trial, font=font) <= max_width:
-                current = trial
-            else:
-                lines.append(current)
-                current = word
-                if len(lines) == 3:
-                    break
-        if current and len(lines) < 3:
-            lines.append(current)
-        return lines or [""]
+    draw.rectangle((px, py, px + panel_w, py + panel_h), fill=panel_tone + (255,))
 
     def block(y: int, heading: str, rows: List[Tuple[str, str]]) -> int:
         draw.text((px + 16, y), heading, font=head_font, fill=muted)
         y += 21
-        key_w = 84
-        value_max = panel_w - key_w - 30
         for key, value in rows:
-            lines = wrap(value, value_max, body_font)
+            lines = wrap_lines(value, value_max, body_font)
             draw.text((px + 16, y), key, font=body_font, fill=ink)
             for i, line in enumerate(lines):
                 draw.text((px + 16 + key_w, y), line, font=body_font, fill=muted)
@@ -989,8 +1033,12 @@ def _compose_sheet(
         return y + 8
 
     y = py + 16
-    draw.text((px + 16, y), "LAYERS (HIT PIXELS)", font=head_font, fill=muted)
-    y += 21
+    draw.text((px + 16, y), "FUSED LAYERS", font=head_font, fill=muted)
+    y += 19
+    draw.text(
+        (px + 16, y), "hit pixels per representation", font=small_font, fill=muted
+    )
+    y += 17
     for kind, count in meta["hits"]:
         label, color = HIT_LEGEND[kind]
         draw.rectangle((px + 16, y + 1, px + 30, y + 15), fill=color + (255,))
@@ -1000,15 +1048,16 @@ def _compose_sheet(
         y += 19
     y += 8
     y = block(y, "SCENE", meta["scene_rows"])
+    y = block(y, "ATMOSPHERE", meta["atmosphere_rows"])
     y = block(y, "CAMERA", meta["camera_rows"])
     y = block(y, "RENDER", meta["render_rows"])
     # Unified-occlusion note, anchored to the panel bottom. Dropped when the
     # readout blocks would collide with it (the footer states the formula too).
-    note_y = py + map_h - 44
+    note_y = py + panel_h - 44
     if y <= note_y - 10:
         draw.text((px + 16, note_y), "one integrator, one pass:", font=small_font, fill=muted)
         draw.text(
-            (px + 16, py + map_h - 28),
+            (px + 16, py + panel_h - 28),
             "T = T_splat x T_lidar x T_terrain",
             font=head_font,
             fill=ink,
@@ -1465,8 +1514,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if use_dem:
         title = f"SPLAT-FUSED - {scene_name}"
         subtitle = (
-            f"hypsometric base map + {int(splat_meta.get('count', 0)):,} splats digitized from "
-            f"a summit-flank scan block  |  {rows}x{cols} cells  |  seed {args.seed}  |  "
+            f"hypsometric base map  |  {int(splat_meta.get('count', 0)):,} splats on the "
+            f"summit shoulder  +  {int((lidar_meta or {}).get('count', 0)):,} LiDAR returns "
+            f"in the foreground swath  |  {rows}x{cols} cells  |  seed {args.seed}  |  "
             f"view: {view_label}"
         )
     else:
@@ -1479,8 +1529,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     scene_rows = [
         ("Terrain", terrain_desc),
+        ("Scale", f"1 world unit = {metres_per_world:.0f} m"),
         ("Splats", splat_desc),
         ("LiDAR", lidar_desc or "not loaded"),
+    ]
+    # ---- atmosphere provenance -------------------------------------------
+    # The HDRI swap and aerial fog are the headline features of this sheet, so
+    # they get their own readout rather than hiding in a footnote.
+    if hdr_path is not None:
+        sky_line = f"HDRI {Path(hdr_path).stem}"
+        if args.hdr_rotation:
+            sky_line += f", rot {args.hdr_rotation:.0f} deg"
+    else:
+        sky_line = f"Hosek-Wilkie  T {sky_t:.1f}  gnd {sky_ga:.2f}"
+    fog_line = (
+        f"density {fog_density:.1e}, falloff {fog_falloff:.1e}"
+        if fog_density > 0.0
+        else "off"
+    )
+    atmosphere_rows = [
+        ("Sky", sky_line),
+        ("Sky gain", f"{sky_i:.2f} x"),
+        ("Sun", f"az {sun_az:.0f} / el {sun_el:.0f}, I {sun_intensity:.1f}"),
+        ("Aerial fog", fog_line),
     ]
     # Cartographic annotation for plan views: contours are drawn over the
     # sheet's map copy only — the beauty PNG stays the raw tracer output.
@@ -1514,6 +1585,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "subtitle": subtitle,
         "hits": legend_hits,
         "scene_rows": scene_rows,
+        "atmosphere_rows": atmosphere_rows,
         "camera_rows": camera_rows,
         "render_rows": render_rows,
         "meters_per_world": metres_per_world,

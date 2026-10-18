@@ -135,6 +135,32 @@ A single CLI-driven script that renders the fused scene as a cartographic map sh
   `test_splat_fused_map_example.py` (32 passed), native-signature +
   validation checks.
 
+### Phase 3e — separated layers + professional sheet (done, v4)
+- The splat block and the LiDAR swath used to sit on the *same* flank and
+  deliberately overlap, so they read as one blended blob. Repositioned onto
+  clearly different ground: the violet **splat block** is now a compact circle
+  high on the summit's east shoulder (`centre (0.26·half_x, 0.04·half_z)`,
+  r ≤ 95), while the **LiDAR swath** is a wide, low band across the foreground
+  valley (`x ∈ [−0.50, 0.34]·half_x`, `z ∈ [0.44, 0.72]·half_z`, east-west
+  flight lines). Both stay on the camera-facing side, so the hero view shows
+  two legible, spatially distinct sensor layers.
+- Sheet readout gained an **ATMOSPHERE** block (sky = HDRI filename or
+  Hosek-Wilkie T/gnd, sky gain, sun az/el/intensity, aerial-fog density +
+  falloff) so the new HDRI/fog path is documented on the sheet itself, plus a
+  `Scale` row (world unit → metres) in SCENE. The legend header is now
+  `FUSED LAYERS / hit pixels per representation`, and the subtitle names both
+  derived layers with their counts.
+- Sheet canvas is now **content-aware**: the right-panel readout is measured
+  first (a scratch `ImageDraw` walks every block's wrapped rows) and the
+  canvas grows to the taller of the map+AOV column and the panel column, so
+  adding the ATMOSPHERE block can no longer clip the RENDER block. The
+  unified-occlusion note anchors to the real `panel_h`.
+- `wrap_lines` hard-breaks over-wide single tokens by characters, so a long
+  HDRI filename (`kloofendal_48d_partly_cloudy_puresky_2k`) wraps inside the
+  column instead of overflowing the panel edge.
+- Verified: 800×560 sheet fits with all four blocks + note visible; high-quality
+  hero render at 1280×896 @ 128 spp, `--tile 256 175` (fits the 512 MiB budget).
+
 ### Phase 4 — regression gate (done)
 - `tests/test_splat_fused_map_example.py`, 3 tests:
   - `test_example_module_loads`: module import + parser exists.
