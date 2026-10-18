@@ -64,11 +64,21 @@ world units as the grid, so terrain slopes keep their real steepness and
 path-traced relief stays crisp; the full DEM extent is used by default and
 `--crop-size N` zooms to a central square.
 
-Lighting follows the view: the hero shot is golden hour (sun az 125 / el 8,
-intensity 6, warm color) with a bright Hosek-Wilkie sky (turbidity 5, ground
-albedo 0.35) so the sky grades from cream at the horizon to blue at the zenith
-and the low sun reads the relief; map views keep the cartographic NW light
-(az 215 / el 45). Every knob is overridable with
+Lighting follows the view: the hero shot is daytime (sun az 125 / el 42,
+intensity 3, near-neutral color) with a lit sky. The sky is a real HDRI by
+default on `--dem` runs — a CC0 Poly Haven "pure sky" equirect (midday,
+partly cloudy, fetched once into the dataset cache) passed through
+`splat.render_fused(env_map=...)`, which replaces the Hosek-Wilkie bake,
+normalises the HDRI's exposure on load and clamps its sun disc so it reads
+as a bright blob instead of an IBL firefly; `--hdr PATH` supplies any
+`.hdr/.rgbe/.exr`, `--hdr none` forces the analytic Hosek-Wilkie sky
+(turbidity 5, ground albedo 0.35), and `--hdr-rotation DEG` places the
+HDRI's sun. Map views keep the cartographic NW light (az 215 / el 45).
+Distance is rendered as aerial perspective: the same exponential height fog
+that dims sun rays also blends distant surfaces toward the sky colour
+(`--fog` density, default 4e-4, and `--fog-falloff`, default 1.5e-3, both
+0 for the fixture), so far ridges recede into haze instead of ending at a
+hard silhouette. Every other knob is overridable with
 `--sun-azimuth/--sun-elevation/--sun-color/--sky-intensity/
 --sky-turbidity/--sky-ground-albedo/--exposure`. Reruns with the same seed
 reproduce the beauty and the sheet byte for byte.

@@ -613,18 +613,24 @@ fn shadow_transmittance(ray: Ray) -> f32 {
 
 // Exponential height fog in the VolumetricParams convention: optical depth
 // tau = density * integral exp(-height_falloff * y) ds, closed form along a
-// straight ray. Applied once, as its own factor next to shadow_transmittance.
-fn fusion_media_transmittance(ray: Ray) -> f32 {
+// straight ray. `fusion_media_transmittance` integrates a ray's own span
+// (next to shadow_transmittance on sun rays); `fusion_media_along` takes an
+// explicit distance — the beauty pass's aerial perspective to the primary
+// hit, which blends distant surfaces toward the environment colour.
+fn fusion_media_along(origin: vec3<f32>, dir: vec3<f32>, dist: f32) -> f32 {
     if (fusion_media.density <= 0.0) { return 1.0; }
-    let distance = min(ray.tmax, fusion_media.max_distance) - ray.tmin;
-    if (distance <= 0.0) { return 1.0; }
-    let base = fusion_media.density * exp(-fusion_media.height_falloff * ray.origin.y);
-    let k = fusion_media.height_falloff * ray.direction.y;
-    var tau = base * distance;
+    if (dist <= 0.0) { return 1.0; }
+    let base = fusion_media.density * exp(-fusion_media.height_falloff * origin.y);
+    let k = fusion_media.height_falloff * dir.y;
+    var tau = base * dist;
     if (abs(k) >= 1e-6) {
-        tau = base * (1.0 - exp(-k * distance)) / k;
+        tau = base * (1.0 - exp(-k * dist)) / k;
     }
     return exp(-max(tau, 0.0));
+}
+fn fusion_media_transmittance(ray: Ray) -> f32 {
+    let distance = min(ray.tmax, fusion_media.max_distance) - ray.tmin;
+    return fusion_media_along(ray.origin, ray.direction, distance);
 }
 
 // ---------------------------------------------------------------------------

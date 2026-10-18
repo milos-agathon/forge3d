@@ -181,6 +181,21 @@ const FUSED_TERRAIN_EDITS: &[(&str, &str, &str)] = &[
         "            sun = albedo * sampled_spectrum * nd * vis;",
         "            sun = fusion_surface_response(n, -rd, sun_dir, albedo) * sampled_spectrum * nd * vis;",
     ),
+    // Aerial perspective: the same height fog that dims sun visibility also
+    // blends the camera response toward the environment over the distance to
+    // the hit, so far terrain recedes into the horizon's colour instead of
+    // ending at a hard silhouette. At fog density 0 the transmittance is
+    // exactly 1 and this is the base line, bit for bit.
+    (
+        "aerial perspective on the beauty response",
+        "        frame_radiance = frame_radiance + sun + ibl;\n",
+        concat!(
+            "        let aer_t = fusion_media_along(\n",
+            "            camera.origin, rd, length(hit.point - camera.origin));\n",
+            "        frame_radiance = frame_radiance + (sun + ibl) * aer_t\n",
+            "            + terrain_env_effective(rd) * (1.0 - aer_t);\n",
+        ),
+    ),
     (
         "AOV centre ray",
         "        let chit = intersect_hybrid(cray);",
