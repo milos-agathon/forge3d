@@ -41,10 +41,12 @@ COPC scan.
 ## Map-sheet example
 
 `examples/splat_fused_map.py` renders all three representations as one lit
-"sensor + terrain" map sheet: title, legend with per-layer hit counts,
-scene/camera/render info blocks, a scale bar in real metres, a north arrow,
-optional AOV insets (hit kind, depth, sun transmittance) and a sidecar
-`report.json`.
+"sensor + terrain" map sheet: title, a fused-layers legend with per-layer hit
+counts, scene/atmosphere/camera/render info blocks (the atmosphere block
+records the HDRI or analytic sky, sky gain, sun and aerial-fog settings), a
+scale bar in real metres, a north arrow, optional AOV insets (hit kind, depth,
+sun transmittance) and a sidecar `report.json`. The sheet canvas is sized to
+the taller of the map and the readout panel, so the info blocks never clip.
 
 ```bash
 python examples/splat_fused_map.py                # offline fixture: ridge + 3,500 splats + COPC swath
@@ -85,15 +87,18 @@ reproduce the beauty and the sheet byte for byte.
 
 `--dem` runs digitize all three representations from the DEM itself, so the
 sheet shows the full fusion story with no external dataset: the hypsometric
-heightfield, the violet splat scan block, and — since no public LiDAR archive
-matches the DEM's coordinates — an airborne scan swath derived from the same
-grid (`_derive_lidar_swath`): flight lines with realistic pulse and line
-spacing plus deterministic jitter, returns sitting on the terrain, colour
-driven by local slope as an intensity proxy, and a pulse-sized sphelet radius
-so neighbouring returns overlap into a scan strip. The strip underlaps the
-splat block, so `T_splat x T_lidar x T_terrain` acts in a shared region. The
-SCENE block states the provenance ("derived scan swath") and `--no-lidar`
-drops the layer; passing `--pointcloud FILE` replaces it with a real cloud.
+heightfield, a violet splat scan block on the summit's east shoulder, and —
+since no public LiDAR archive matches the DEM's coordinates — an airborne scan
+swath derived from the same grid (`_derive_lidar_swath`): flight lines with
+realistic pulse and line spacing plus deterministic jitter, returns sitting on
+the terrain, colour driven by local slope as an intensity proxy, and a
+pulse-sized sphelet radius so neighbouring returns overlap into a scan strip.
+The swath is laid as a wide, low band across the foreground valley, on
+deliberately different ground from the splat block, so the point layer and the
+splat layer read as two distinct sensors fused onto the base map rather than one
+blended region. The SCENE block states the provenance ("derived scan swath") and
+`--no-lidar` drops the layer; passing `--pointcloud FILE` replaces it with a real
+cloud.
 
 Cartography and motion: plan views (`--view top|high`) get an
 elevation-contour overlay — marching squares projected through the actual
