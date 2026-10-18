@@ -286,6 +286,7 @@ __pycache__/
 
 # Whitelist doc/gallery images that must be in the repo
 !docs/assets/highres.png
+!docs/assets/splat-fused-map.png
 !tests/golden/
 !tests/golden/terrain/
 !tests/golden/terrain/*.png

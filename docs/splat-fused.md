@@ -48,6 +48,12 @@ scale bar in real metres, a north arrow, optional AOV insets (hit kind, depth,
 sun transmittance) and a sidecar `report.json`. The sheet canvas is sized to
 the taller of the map and the readout panel, so the info blocks never clip.
 
+![SPLAT-FUSED Mount Fuji map sheet](assets/splat-fused-map.png)
+
+*The `--dem fuji` hero run at 1280x896 @ 128 spp: hypsometric terrain, a violet
+splat block on the summit shoulder and a terracotta LiDAR swath in the
+foreground valley, under an HDRI sky with aerial-perspective fog.*
+
 ```bash
 python examples/splat_fused_map.py                # offline fixture: ridge + 3,500 splats + COPC swath
 python examples/splat_fused_map.py --dem fuji     # real DEM fetched from the web (cached), full extent:
