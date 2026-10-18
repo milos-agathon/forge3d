@@ -480,6 +480,23 @@ def _certificate_arg(certificate: Any) -> Any:
     return os.fspath(certificate)
 
 
+def _env_kwargs(
+    env_map: "str | os.PathLike[str] | None", env_rotation_deg: float
+) -> Dict[str, Any]:
+    """Validate the HDRI environment arguments into native-call kwargs."""
+    if env_map is None:
+        if env_rotation_deg:
+            raise ValueError("env_rotation_deg was given without env_map")
+        return {}
+    path = os.fspath(env_map)
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in (".hdr", ".rgbe", ".exr"):
+        raise ValueError(f"env_map must be a .hdr, .rgbe or .exr file, got '{path}'")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"env_map not found: {path}")
+    return {"env_map": path, "env_rotation_deg": float(env_rotation_deg)}
+
+
 def render_fused(
     *,
     splats: Any = None,
@@ -501,6 +518,8 @@ def render_fused(
     sky_turbidity: float = 2.5,
     sky_ground_albedo: float = 0.2,
     sky_intensity: float = 0.35,
+    env_map: "str | os.PathLike[str] | None" = None,
+    env_rotation_deg: float = 0.0,
     kappa: float = 4.0,
     lidar_radius: float = 0.2,
     lidar_opacity: float = 1.0,
@@ -548,6 +567,16 @@ def render_fused(
         sun_*: direction (azimuth measured in the xz plane from +x toward +z,
             elevation above the horizon), intensity and colour of the sun.
         sky_*: Hosek-Wilkie sky turbidity, ground albedo and intensity.
+        env_map: path to an equirect HDRI (``.hdr`` / ``.rgbe`` / ``.exr``)
+            whose sky replaces the Hosek-Wilkie bake: downsampled to at most
+            1024 texels wide, exposure-normalised so its median upper-hemisphere
+            luminance is 1 (then ``sky_intensity`` scales it as usual), and
+            clamped so its own sun disc reads as a bright blob instead of an
+            IBL firefly. ``sky_turbidity`` / ``sky_ground_albedo`` are ignored
+            when an HDRI is given; the analytic ``sun_*`` still lights the
+            surfaces. ``None`` keeps the Hosek-Wilkie sky.
+        env_rotation_deg: rotation of the HDRI about +y in degrees (the sun
+            azimuth convention), to place its sun where the scene wants it.
         kappa: splat extinction scale — the optical depth of a fully opaque
             splat through its centre (``T = exp(-kappa * rho)``).
         lidar_radius, lidar_opacity: sphelet radius (world units) and peak
@@ -613,6 +642,7 @@ def render_fused(
     if width < 1 or height < 1:
         raise ValueError(f"width and height must be >= 1, got {width}x{height}")
     cam = _resolve_camera(camera)
+    env_kwargs = _env_kwargs(env_map, env_rotation_deg)
     arrays_kwargs: Dict[str, Any] = {}
     if point_positions is not None:
         pos = np.asarray(point_positions, dtype=np.float32)
@@ -698,6 +728,7 @@ def render_fused(
         cache=cache,
         **tile_kwargs,
         **arrays_kwargs,
+        **env_kwargs,
         **scene,
     )
     return _fused_result(out, return_aovs)
@@ -755,6 +786,8 @@ def render_fused_sequence(
     sky_turbidity: float = 2.5,
     sky_ground_albedo: float = 0.2,
     sky_intensity: float = 0.35,
+    env_map: "str | os.PathLike[str] | None" = None,
+    env_rotation_deg: float = 0.0,
     kappa: float = 4.0,
     lidar_radius: float = 0.2,
     lidar_opacity: float = 1.0,
@@ -821,6 +854,7 @@ def render_fused_sequence(
             )
         )
     scene, resolved_terrain = _scene_kwargs(splats, pointcloud, terrain)
+    env_kwargs = _env_kwargs(env_map, env_rotation_deg)
     spp = min(int(samples), 4) if samples_per_frame is None else int(samples_per_frame)
     if not 1 <= spp <= 64:
         raise ValueError(f"samples_per_frame must be in 1..=64, got {spp}")
@@ -868,6 +902,7 @@ def render_fused_sequence(
         certificate=_certificate_arg(certificate),
         cache=cache,
         **tile_kwargs,
+        **env_kwargs,
         **scene,
     )
     return [_fused_result(out, return_aovs) for out in outs]

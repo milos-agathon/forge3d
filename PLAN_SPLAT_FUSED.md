@@ -96,6 +96,45 @@ A single CLI-driven script that renders the fused scene as a cartographic map sh
   (146 pre-existing `chunks_exact`/deprecation lints in untouched files, 0
   in the files changed here).
 
+### Phase 3d — HDRI sky + aerial-perspective fog (done, v4)
+- Engine gap closed (the "no HDRI" limitation below): `render_fused` and
+  `render_fused_sequence` accept `env_map` (a `.hdr/.rgbe/.exr` path) +
+  `env_rotation_deg`. `FusedRenderDesc.env_map: Option<Arc<FusedEnvMap>>`
+  carries a pre-loaded equirect radiance; when set it replaces the
+  Hosek-Wilkie bake in `render_fused_view` (the kernel already samples
+  whatever equirect is uploaded, so **no shader change was needed** for the
+  env swap itself). Loader `env_from_hdr_image` (`render_fused.rs`) reuses
+  the `IBL.from_hdr` format dispatch, box-averages to ≤1024 texels wide,
+  rotates about +y, normalises exposure to the **median** upper-hemisphere
+  luminance (the sun disc is an outlier the mean would chase) and clamps at
+  12× so the HDRI's own sun reads as a bright blob instead of an IBL
+  firefly. Certificate now records `fused.env_map` (path or
+  `hosek-wilkie`) alongside `fused.fog_*`.
+- Real aerial perspective (the "ugly background" fix): the fused fog was
+  shadow-ray-only, so distant surfaces ended at a hard silhouette. Added
+  `fusion_media_along(origin, dir, dist)` in `unified_occlusion.wgsl`
+  (the closed-form height-fog integral, refactored out of
+  `fusion_media_transmittance`, which now calls it — bit-identical) and a
+  `FUSED_TERRAIN_EDITS` anchor at the beauty composition so
+  `L = L·T + env·(1−T)` with `T` the transmittance to the primary hit. At
+  fog density 0 it is exactly the base line; verified bit-for-bit by the
+  unchanged fixture path.
+- Example: `--hdr auto|none|PATH` (auto = fetch the CC0 Poly Haven
+  *Kloofendal 48d Partly Cloudy (pure sky)* 2k HDRI once into
+  `~/.forge3d/datasets/hdri/`, md5-checked; `none`/fixture keep Hosek),
+  `--hdr-rotation`, `--fog` (default 4e-4), `--fog-falloff` (default
+  1.5e-3). Hero lighting moved golden-hour → **lit daytime** (sun el 42,
+  near-neutral colour, sky 1.4). Fog is gated **off** on the `top` plan
+  view: every ray there points down through the whole camera altitude, so
+  the same density would only mute the hypsometric edges.
+- Verified on the RTX 3070: hero A/B (`--hdr none --fog 0` vs default) —
+  the analytic sky is a flat band with a hard horizon, the HDRI+ fog sky is
+  a real partly-cloudy dome with ridges receding into haze; plan view stays
+  crisp; two full hero runs sha256-identical (`d34c9750…`). Gates: 3
+  `env_map` + 7 `fused_kernel` Rust tests, `test_splat_api.py` +
+  `test_splat_fused_map_example.py` (32 passed), native-signature +
+  validation checks.
+
 ### Phase 4 — regression gate (done)
 - `tests/test_splat_fused_map_example.py`, 3 tests:
   - `test_example_module_loads`: module import + parser exists.
@@ -124,10 +163,9 @@ A single CLI-driven script that renders the fused scene as a cartographic map sh
   runs instead derive every layer from the one DEM (heightfield, splat block,
   LiDAR swath) — geographically coherent, but the splat block and the swath
   are synthetic digitizations, not real captures.
-- The fused sky is the analytic Hosek-Wilkie model only: `render_fused` has no
-  HDRI/env-map input (the terrain path has `f3d.IBL.from_hdr`, the fused kernel
-  does not). A fused IBL path would need an env texture + miss-shader wiring in
-  the fused kernel plus CENSOR capability/degradation gates — a scoped engine
-  feature, not an example change.
+- ~~The fused sky is the analytic Hosek-Wilkie model only: `render_fused` has no
+  HDRI/env-map input~~ — **resolved in Phase 3d**: `render_fused` /
+  `render_fused_sequence` take `env_map` + `env_rotation_deg` and the kernel
+  samples the uploaded equirect. Hosek-Wilkie remains the offline default.
 - Physical water (WaterOptics) + fused path not yet wired together.
 - The DEM scan block is derived synthetic data (a demo of the fused pipeline), not a real 3DGS capture; pass `--splats` with a real capture to replace it.

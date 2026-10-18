@@ -334,6 +334,27 @@ def test_render_fused_rejects_missing_and_malformed_inputs(tmp_path):
         splat.render_fused(pointcloud=store, camera=camera)
 
 
+def test_render_fused_env_map_validation(tmp_path):
+    """env_map must name an existing equirect HDRI; rotation needs an env."""
+    camera = splat.FusedCamera(origin=(0, 5, 10), look_at=(0, 0, 0))
+    flat = np.zeros((4, 4), np.float32)
+    # A wrong extension is rejected even when the file exists.
+    png = tmp_path / "sky.png"
+    png.write_bytes(b"not an hdri")
+    with pytest.raises(ValueError, match=r"\.hdr, \.rgbe or \.exr"):
+        splat.render_fused(terrain=flat, camera=camera, env_map=png)
+    # A correct extension with no file on disk is FileNotFoundError.
+    with pytest.raises(FileNotFoundError):
+        splat.render_fused(terrain=flat, camera=camera, env_map=tmp_path / "missing.hdr")
+    # Rotation without an environment is a silent no-op -> reject it.
+    with pytest.raises(ValueError, match="without env_map"):
+        splat.render_fused(terrain=flat, camera=camera, env_rotation_deg=15.0)
+    # The same contract holds on the sequence entry point.
+    views = [splat.FusedView(camera=camera)]
+    with pytest.raises(ValueError, match=r"\.hdr, \.rgbe or \.exr"):
+        splat.render_fused_sequence(terrain=flat, views=views, env_map=png)
+
+
 # ---------------------------------------------------------------------------
 # Section 5: render_fused on the GPU
 # ---------------------------------------------------------------------------
@@ -364,6 +385,45 @@ def test_render_fused_returns_rgba_image():
     np.testing.assert_array_equal(image, again)
     other_seed = splat.render_fused(**kwargs, samples=8, width=80, height=64, seed=8)
     assert (image != other_seed).any()
+
+
+def _write_tiny_hdr(path: Path) -> None:
+    """Write a minimal uncompressed Radiance HDR (old-style scanlines).
+
+    Upper hemisphere is a blue sky, lower a dark ground, so the file has a
+    non-zero median luminance to normalise against.
+    """
+    width, height = 16, 8
+    header = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n" + f"-Y {height} +X {width}\n".encode()
+    body = bytearray()
+    for y in range(height):  # row 0 is the zenith in -Y +X orientation
+        for x in range(width):
+            if y < height // 2:
+                body += bytes((60, 110, 255, 128))  # sky
+            else:
+                body += bytes((40, 34, 26, 120))  # ground
+    path.write_bytes(bytes(header) + bytes(body))
+
+
+def test_render_fused_env_map_is_applied(tmp_path):
+    """The env_map kwarg must reach the renderer, not be silently dropped."""
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    hdr = tmp_path / "sky.hdr"
+    _write_tiny_hdr(hdr)
+    kwargs = scene_kwargs(manifest())
+    base = splat.render_fused(**kwargs, samples=8, width=80, height=64, seed=7)
+    with_env = splat.render_fused(
+        **kwargs, samples=8, width=80, height=64, seed=7, env_map=hdr
+    )
+    # Swapping the Hosek-Wilkie bake for the HDRI changes the background, so
+    # the bytes must differ (a silently ignored kwarg would match `base`).
+    assert (base != with_env).any(), "env_map had no effect on the render"
+    # And the HDRI path is just as deterministic as the analytic sky.
+    again = splat.render_fused(
+        **kwargs, samples=8, width=80, height=64, seed=7, env_map=hdr
+    )
+    np.testing.assert_array_equal(with_env, again)
 
 
 def test_render_fused_aovs_shapes_and_contents(fused_result):

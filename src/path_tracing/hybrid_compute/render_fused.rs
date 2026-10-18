@@ -55,6 +55,18 @@ pub struct FusedTerrainDesc {
     pub albedo_sampling: AlbedoSampling,
 }
 
+/// Equirect environment (an HDRI) the fused kernel samples instead of the
+/// Hosek-Wilkie bake: `width * height * 3` linear f32 samples, already
+/// box-averaged, exposure-normalised and clamped by [`env_from_hdr_image`].
+/// Shared through the desc as an `Arc`, so every view of a sequence
+/// references one upload source.
+#[derive(Debug)]
+pub struct FusedEnvMap {
+    pub pixels: Vec<f32>,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// Full description of a fused render.
 #[derive(Clone)]
 pub struct FusedRenderDesc<'a> {
@@ -76,6 +88,11 @@ pub struct FusedRenderDesc<'a> {
     pub sky_ground_albedo: f32,
     /// Scale of the (irradiance-normalised) sky environment.
     pub sky_intensity: f32,
+    /// Optional HDRI replacing the Hosek-Wilkie bake. Both sources are
+    /// exposure-normalised before `sky_intensity` scales them, so that
+    /// parameter keeps one role either way; when an HDRI is set,
+    /// `sky_turbidity` / `sky_ground_albedo` are ignored.
+    pub env_map: Option<Arc<FusedEnvMap>>,
     pub width: u32,
     pub height: u32,
     pub seed: u32,
@@ -155,6 +172,14 @@ pub struct FusedRenderOutput {
 
 const ENV_WIDTH: u32 = 256;
 const ENV_HEIGHT: u32 = 128;
+/// Cap on normalised environment radiance. An HDRI's own sun disc can be
+/// 10^4x the sky; one hot texel in the cosine-lobe IBL would firefly the
+/// accumulation. Clamping at 12x the mean keeps a bright sun blob in the
+/// background while the analytic sun keeps providing the direct light.
+const ENV_CLAMP: f32 = 12.0;
+/// Widest environment uploaded for an HDRI source (the Hosek bake stays at
+/// 256x128): 1024 texels give the background sun ~0.35 deg detail.
+const ENV_MAX_WIDTH: u32 = 1024;
 const MAX_RESTARTS: u32 = 256;
 /// Terrain tiles per axis in the top-level structure (upper bound).
 const TERRAIN_TILE_GRID: u32 = 8;
@@ -305,6 +330,118 @@ fn bake_sky_environment(sun_dir: [f32; 3], turbidity: f32, ground_albedo: f32) -
         *value = (f64::from(*value) * scale).min(65_504.0) as f32;
     }
     pixels
+}
+
+/// Turn an equirect HDR image into the environment the fused kernel samples:
+/// box-averaged to at most [`ENV_MAX_WIDTH`] texels wide (every target
+/// texel averages the source texels that fall in it, so no aliasing and no
+/// dependency on source resolution beyond its content), shifted by
+/// `rotate_deg` about +y (same azimuth convention as the sun), then
+/// normalised so the MEDIAN luminance of the upper hemisphere is 1 — the
+/// median rather than the bake's cosine-weighted mean because an HDRI's sun
+/// disc is an outlier that would otherwise set the exposure of the whole
+/// sky — and clamped to [`ENV_CLAMP`], which keeps the disc as a bright
+/// sun blob instead of a firefly-scale IBL spike.
+pub fn env_from_hdr_image(
+    img: &crate::formats::hdr::HdrImage,
+    rotate_deg: f32,
+) -> Result<FusedEnvMap, RenderError> {
+    let (sw, sh) = (img.width, img.height);
+    if sw == 0 || sh == 0 || img.data.len() != sw as usize * sh as usize * 3 {
+        return Err(RenderError::Render(format!(
+            "environment map dims {sw}x{sh} do not match {} samples",
+            img.data.len()
+        )));
+    }
+    if img.data.iter().any(|v| !v.is_finite()) {
+        return Err(RenderError::Render(
+            "environment map contains non-finite samples".into(),
+        ));
+    }
+    let w = sw.clamp(1, ENV_MAX_WIDTH);
+    let h = ((u64::from(w) * u64::from(sh) / u64::from(sw)).max(1)) as u32;
+    let rot = (rotate_deg.rem_euclid(360.0) as f64 / 360.0).fract();
+
+    // One pass over the source: each source texel accumulates into the
+    // target texel containing its (rotated) centre.
+    let mut sums = vec![0.0f64; (w * h * 3) as usize];
+    let mut counts = vec![0u32; (w * h) as usize];
+    for sy in 0..sh as usize {
+        let ty = sy * h as usize / sh as usize;
+        for sx in 0..sw as usize {
+            let u = ((sx as f64 + 0.5) / sw as f64 + rot).fract();
+            let tx = ((u * w as f64) as usize).min(w as usize - 1);
+            let ti = ty * w as usize + tx;
+            let si = (sy * sw as usize + sx) * 3;
+            sums[ti * 3] += f64::from(img.data[si]);
+            sums[ti * 3 + 1] += f64::from(img.data[si + 1]);
+            sums[ti * 3 + 2] += f64::from(img.data[si + 2]);
+            counts[ti] += 1;
+        }
+    }
+
+    // Averaged samples + the upper-hemisphere luminances the exposure is
+    // normalised from (median: robust against the sun disc outlier).
+    let mut pixels = Vec::with_capacity((w * h * 3) as usize);
+    let mut upper_lum = Vec::with_capacity((w as usize * h as usize / 2) + 1);
+    for py in 0..h {
+        let theta = (f32_from_u32(py) + 0.5) / f32_from_u32(h) * std::f32::consts::PI;
+        let cos_t = theta.cos();
+        for px in 0..w {
+            let ti = (py * w + px) as usize;
+            let inv = 1.0 / f64::from(counts[ti].max(1));
+            let radiance = [
+                (sums[ti * 3] * inv).max(0.0) as f32,
+                (sums[ti * 3 + 1] * inv).max(0.0) as f32,
+                (sums[ti * 3 + 2] * inv).max(0.0) as f32,
+            ];
+            if cos_t >= 0.0 {
+                upper_lum.push(
+                    0.2126 * radiance[0] + 0.7152 * radiance[1] + 0.0722 * radiance[2],
+                );
+            }
+            pixels.extend_from_slice(&radiance);
+        }
+    }
+    upper_lum.sort_by(f32::total_cmp);
+    let median = upper_lum.get(upper_lum.len() / 2).copied().unwrap_or(0.0);
+    let scale = if median.is_finite() && median > 0.0 {
+        1.0 / f64::from(median)
+    } else {
+        0.0
+    };
+    let clamp = f64::from(ENV_CLAMP);
+    for value in &mut pixels {
+        *value = (f64::from(*value) * scale).clamp(0.0, clamp) as f32;
+    }
+    Ok(FusedEnvMap {
+        pixels,
+        width: w,
+        height: h,
+    })
+}
+
+/// Load an environment map for a fused render — the same formats
+/// `IBL.from_hdr` accepts (.hdr / .rgbe / .exr). See [`env_from_hdr_image`]
+/// for what the loader does to the pixels.
+pub fn load_fused_env(path: &str, rotate_deg: f32) -> Result<Arc<FusedEnvMap>, RenderError> {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    let img = match ext.as_str() {
+        "hdr" | "rgbe" => crate::formats::load_hdr(path),
+        "exr" => crate::formats::load_exr(path),
+        other => {
+            return Err(RenderError::Render(format!(
+                "unsupported environment map format '.{other}' for '{path}': expected .hdr, \
+                 .rgbe, or .exr"
+            )))
+        }
+    }
+    .map_err(|e| RenderError::Render(format!("failed to load HDR file '{path}': {e}")))?;
+    Ok(Arc::new(env_from_hdr_image(&img, rotate_deg)?))
 }
 
 /// Terrain tiles for the top-level structure: the boxes of a coarse level of
@@ -633,24 +770,31 @@ impl HybridPathTracer {
         let (width, height) = (desc.width, desc.height);
         fused.begin_view(queue);
 
-        // --- Sun + Hosek-Wilkie sky environment ---
+        // --- Sun + environment: a supplied HDRI replaces the Hosek bake ---
         let az = desc.sun_azimuth_deg.to_radians();
         let el = desc.sun_elevation_deg.to_radians();
         // Direction from the surface TOWARD the sun (kernel convention).
         let light_dir = [az.cos() * el.cos(), el.sin(), az.sin() * el.cos()];
-        let env = bake_sky_environment(light_dir, desc.sky_turbidity, desc.sky_ground_albedo);
+        {
+            let baked;
+            let (env, env_w, env_h): (&[f32], u32, u32) = match &desc.env_map {
+                Some(e) => (&e.pixels, e.width, e.height),
+                None => {
+                    baked = bake_sky_environment(
+                        light_dir,
+                        desc.sky_turbidity,
+                        desc.sky_ground_albedo,
+                    );
+                    (baked.as_slice(), ENV_WIDTH, ENV_HEIGHT)
+                }
+            };
 
-        // --- Terrain: the sequence's shared heightfield scene with this
-        // view's sky environment swapped in.
-        terrain_scene.set_environment(
-            device,
-            queue,
-            Some((env.as_slice(), ENV_WIDTH, ENV_HEIGHT)),
-            desc.sky_intensity,
-        )?;
+            // --- Terrain: the sequence's shared heightfield scene with this
+            // view's sky environment swapped in.
+            terrain_scene.set_environment(device, queue, Some((env, env_w, env_h)), desc.sky_intensity)?;
+        }
         let terrain_bytes = terrain_scene.byte_size();
         let terrain_minmax_f16 = desc.terrain.is_some() && terrain_scene.minmax_is_f16();
-        drop(env);
         let mut terrain_uniforms = terrain_scene.uniforms(desc.spp, 1);
         if desc.terrain.is_none() {
             terrain_uniforms.mips[1] &= !1;
@@ -1678,5 +1822,105 @@ mod tiling_tests {
         assert_eq!(default_tile(640, 480), (640, 480));
         assert_eq!(default_tile(1920, 1080), (1024, 1024));
         assert_eq!(default_tile(3840, 2160), (1024, 1024));
+    }
+}
+
+#[cfg(test)]
+mod env_map_tests {
+    use super::*;
+    use crate::formats::hdr::HdrImage;
+
+    fn image(width: u32, height: u32, pixel: impl Fn(u32, u32) -> [f32; 3]) -> HdrImage {
+        let mut data = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                data.extend_from_slice(&pixel(x, y));
+            }
+        }
+        HdrImage {
+            width,
+            height,
+            data,
+        }
+    }
+
+    fn luminance(p: &[f32]) -> f32 {
+        0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]
+    }
+
+    #[test]
+    fn env_downsamples_normalises_and_clamps_the_sun_disc() {
+        // Bright uniform sky over dark ground with one extremely hot texel
+        // (an unclipped HDRI sun): the exposure must ignore the outlier and
+        // the disc must come out clamped instead of firefly-scale.
+        let mut img = image(2048, 1024, |_, y| {
+            if y < 512 {
+                [0.4, 0.5, 0.6]
+            } else {
+                [0.05, 0.05, 0.05]
+            }
+        });
+        img.data[3 * (10 * 2048 + 100)] = 50_000.0;
+        let env = env_from_hdr_image(&img, 0.0).unwrap();
+        assert_eq!(
+            (env.width, env.height),
+            (1024, 512),
+            "a 2:1 source downsamples to 1024 wide"
+        );
+
+        let sky_lum = luminance(&env.pixels[0..3]);
+        assert!(
+            (sky_lum - 1.0).abs() < 1e-3,
+            "median-normalised sky luminance {sky_lum}"
+        );
+        assert!(env.pixels.iter().all(|v| v.is_finite() && *v <= ENV_CLAMP));
+        // The disc survived as a clamped hot blob (source (100,10) -> (50,5)).
+        assert_eq!(env.pixels[(5 * 1024 + 50) * 3], ENV_CLAMP);
+        // The ground half stays below the normalised sky.
+        assert!(luminance(&env.pixels[(300 * 1024) * 3..][..3]) < sky_lum);
+    }
+
+    #[test]
+    fn env_rotation_shifts_columns_by_the_requested_angle() {
+        // One marker column in an otherwise uniform sky: +180 deg (the sun's
+        // azimuth convention) must move it half a turn around.
+        let img = image(64, 32, |x, y| {
+            if y < 16 && x == 10 {
+                [0.9, 0.1, 0.1]
+            } else if y < 16 {
+                [0.3, 0.3, 0.3]
+            } else {
+                [0.05, 0.05, 0.05]
+            }
+        });
+        let env0 = env_from_hdr_image(&img, 0.0).unwrap();
+        let env180 = env_from_hdr_image(&img, 180.0).unwrap();
+        let r = |e: &FusedEnvMap, col: usize| e.pixels[(5 * 64 + col) * 3];
+        let marker0 = r(&env0, 10);
+        assert!(marker0 > r(&env0, 11) * 1.5, "marker visible at column 10");
+        assert!(
+            (r(&env180, 42) - marker0).abs() < 1e-4,
+            "marker moved to column 42"
+        );
+        assert!(
+            (r(&env180, 10) - r(&env0, 11)).abs() < 1e-4,
+            "column 10 is ordinary sky after the turn"
+        );
+    }
+
+    #[test]
+    fn env_loader_rejects_bad_input() {
+        let bad = image(4, 2, |_, _| [f32::NAN, 1.0, 1.0]);
+        assert!(env_from_hdr_image(&bad, 0.0).is_err(), "non-finite samples");
+        let mut mismatch = image(4, 2, |_, _| [1.0, 1.0, 1.0]);
+        mismatch.data.pop();
+        assert!(env_from_hdr_image(&mismatch, 0.0).is_err(), "dims vs length");
+        // Extension dispatch: unknown extension and unreadable file.
+        assert!(load_fused_env("scene.sky", 0.0).is_err());
+        assert!(load_fused_env("no/such/file.hdr", 0.0).is_err());
+        // A uniform environment normalises to its own luminance.
+        let uniform = image(4, 2, |_, _| [1.0, 1.0, 1.0]);
+        let env = env_from_hdr_image(&uniform, 0.0).unwrap();
+        assert!((luminance(&env.pixels[0..3]) - 1.0).abs() < 1e-3);
     }
 }

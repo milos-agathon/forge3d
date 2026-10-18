@@ -39,13 +39,28 @@ Camera control
   --origin/--look-at                           raw camera (overrides all)
 
 The default for ``--dem`` is ``hero``: a low cinematic oblique (az 35,
-el 10, fov 55) with sky above the summit, warm side lighting and a
-brighter sky. ``--view top`` gives the north-up hypsometric map view.
+el 10, fov 55) with sky above the summit, daytime sun and a real HDRI sky.
+``--view top`` gives the north-up hypsometric map view.
+
+Sky and distance
+----------------
+``--dem`` renders use a real equirect HDRI as the sky by default (a CC0
+Poly Haven "pure sky", fetched once and cached): ``splat.render_fused
+(env_map=...)`` swaps it in for the Hosek-Wilkie bake, normalises its
+exposure on load and clamps its sun disc so it lights the scene without
+fireflies. ``--hdr PATH`` uses any ``.hdr/.rgbe/.exr``, ``--hdr none``
+falls back to the analytic Hosek-Wilkie sky, and ``--hdr-rotation DEG``
+places the HDRI's sun. Distant terrain is rendered as aerial perspective:
+the same exponential height fog that dims sun rays blends far surfaces
+toward the sky colour (``--fog`` density, ``--fog-falloff``), so ridges
+recede into haze instead of a hard silhouette. Fog is off on the ``top``
+plan view, where it would only mute the hypsometric edges.
 
 Run:
     python examples/splat_fused_map.py
     python examples/splat_fused_map.py --dem fuji
     python examples/splat_fused_map.py --dem fuji --view top --aovs
+    python examples/splat_fused_map.py --dem fuji --hdr none --fog 0
     python examples/splat_fused_map.py --view low --azimuth 120 --elevation 8
 """
 
@@ -81,6 +96,13 @@ DEM_PRESETS = {
 }
 
 LFS_BASE_URL = "https://media.githubusercontent.com/media/milos-agathon/forge3d/main/assets"
+
+# CC0 daytime "pure sky" HDRI (Poly Haven: Kloofendal 48d Partly Cloudy).
+# Sky-only, so nothing from a captured ground bleeds into the map lighting;
+# fetched once into the dataset cache and used as the default fused sky.
+HDR_PRESET = "kloofendal_48d_partly_cloudy_puresky"
+HDR_PRESET_URL = f"https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/{HDR_PRESET}_2k.hdr"
+HDR_PRESET_MD5 = "2eba3a4d7eeb23cbfbeca364c97e7980"
 
 SUN_INTENSITY = 2.5
 SUN_COLOR = (1.0, 0.97, 0.92)
@@ -148,6 +170,48 @@ def _resolve_dem_path(path: Path) -> Path:
         raise RuntimeError(f"downloaded file for {path.name} is too small (still a pointer?)")
     print(f"[dem] downloaded {cached.stat().st_size // 1024} KiB -> {cached}")
     return cached
+
+
+def _resolve_hdr(spec: str, use_dem: bool) -> Optional[str]:
+    """Return a path to an equirect HDRI, or None for the analytic sky.
+
+    ``none`` forces the Hosek-Wilkie sky. ``auto`` uses the CC0 daytime
+    preset for ``--dem`` renders and keeps the analytic sky for the fixture
+    (whose acceptance path stays offline and byte-stable); anything else is
+    a file path. With no network the preset falls back to the analytic sky
+    and says so.
+    """
+    if spec == "none":
+        return None
+    if spec == "auto" and not use_dem:
+        return None
+    if spec not in ("auto", "preset"):
+        p = Path(spec)
+        if not p.exists():
+            raise FileNotFoundError(f"--hdr not found: {p}")
+        return str(p)
+    cache_dir = Path.home() / ".forge3d" / "datasets" / "hdri"
+    cached = cache_dir / f"{HDR_PRESET}_2k.hdr"
+    if cached.exists() and cached.stat().st_size > 1000:
+        return str(cached)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    import hashlib
+    import urllib.request
+
+    print(f"[hdr] fetching CC0 daytime sky {HDR_PRESET} ...")
+    try:
+        urllib.request.urlretrieve(HDR_PRESET_URL, cached)
+    except Exception as exc:  # pragma: no cover - network dependent
+        cached.unlink(missing_ok=True)
+        print(f"[hdr] could not fetch HDRI ({exc}); using Hosek-Wilkie sky")
+        return None
+    digest = hashlib.md5(cached.read_bytes()).hexdigest()
+    if digest != HDR_PRESET_MD5:
+        cached.unlink(missing_ok=True)
+        print("[hdr] preset checksum mismatch; using Hosek-Wilkie sky")
+        return None
+    print(f"[hdr] cached {cached.stat().st_size // 1024} KiB -> {cached}")
+    return str(cached)
 
 
 def _load_dem(path: Path) -> Tuple[np.ndarray, Tuple[float, float], float, str, str]:
@@ -1016,11 +1080,23 @@ def build_parser() -> argparse.ArgumentParser:
                         metavar=("R", "G", "B"), help="sun colour (linear RGB)")
     render.add_argument("--exposure", type=float, default=1.0)
     render.add_argument("--sky-intensity", type=float, default=None,
-                        help="sky/ambient intensity (default 0.35; 0.6 map views; 2.5 hero)")
+                        help="sky/ambient intensity (default 0.35; 0.6 map views; 1.4 hero; "
+                             "scales the HDRI too)")
     render.add_argument("--sky-turbidity", type=float, default=None,
                         help="Hosek-Wilkie turbidity (default 2.5; 4.0 hero)")
     render.add_argument("--sky-ground-albedo", type=float, default=None,
                         help="sky-model ground albedo (default 0.2; 0.5 hero for a hazy horizon band)")
+    render.add_argument("--hdr", default="auto", metavar="PATH",
+                        help="equirect HDRI (.hdr/.rgbe/.exr) as the sky; 'auto' uses the CC0 "
+                             "daytime preset for --dem renders (analytic sky for the fixture), "
+                             "'none' forces the analytic Hosek-Wilkie sky")
+    render.add_argument("--hdr-rotation", type=float, default=0.0,
+                        help="rotate the HDRI about +y in degrees to place its sun")
+    render.add_argument("--fog", type=float, default=0.0004,
+                        help="aerial-perspective fog density per world unit "
+                             "(distance haze toward the sky; 0 disables)")
+    render.add_argument("--fog-falloff", type=float, default=0.0015,
+                        help="fog height falloff per world unit (0 = uniform fog)")
     render.add_argument("--aovs", action="store_true",
                         help="add hit-kind / depth / transmittance inset panels")
     render.add_argument("--no-contours", action="store_true",
@@ -1278,16 +1354,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.sun_elevation is not None:
         sun_el = args.sun_elevation
     elif is_hero:
-        # Golden hour: a low warm sun reads the relief and warms the Hosek
-        # sky into a cream-to-blue gradient instead of a flat pale band.
-        sun_el = 8.0
+        # Daytime: a high, near-neutral sun over a lit sky. The HDRI carries
+        # the sky colour and its own bright sun disc; the analytic sun here
+        # lights the surfaces so shadows and form-shading stay crisp.
+        sun_el = 42.0
     else:
         sun_el = float(manifest.get("sun_elevation_deg", 45.0)) if manifest else 45.0
 
-    sun_intensity = 6.0 if is_hero else SUN_INTENSITY
-    sun_color = (1.0, 0.85, 0.62) if is_hero else SUN_COLOR
+    sun_intensity = 3.0 if is_hero else SUN_INTENSITY
+    sun_color = (1.0, 0.96, 0.9) if is_hero else SUN_COLOR
     if args.sun_color is not None:
         sun_color = tuple(args.sun_color)
+
+    # ---- sky / fog --------------------------------------------------------
+    # The HDRI replaces the Hosek-Wilkie bake when present. Sky intensity
+    # scales it the same way (its exposure is normalised on load), so the
+    # hero no longer needs the old golden-hour 3.0 boost.
+    hdr_path = _resolve_hdr(args.hdr, use_dem)
+    env_desc = "Hosek-Wilkie analytic sky"
+    if hdr_path is not None:
+        env_desc = f"{Path(hdr_path).name} (rot {args.hdr_rotation:.0f} deg)"
+    print(f"[sky] {env_desc}")
+    # Aerial perspective reads correctly on oblique/hero frames (distant
+    # ridges recede). On the top-down plan every ray points down through the
+    # whole camera altitude, so the same fog would just mute the hypsometric
+    # cartograph's edges — off there.
+    is_plan = effective_view == "top"
+    fog_density = args.fog if (use_dem and not is_plan) else 0.0
+    fog_falloff = args.fog_falloff if (use_dem and not is_plan) else 0.0
+    if fog_density > 0.0:
+        print(f"[fog] aerial perspective: density {fog_density}, falloff {fog_falloff}")
 
     # ---- render ----------------------------------------------------------
     # Shared lighting kwargs: the still, every fly-through frame and the AOVs
@@ -1295,7 +1391,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sky_i = (
         args.sky_intensity
         if args.sky_intensity is not None
-        else (3.0 if is_hero else (0.6 if use_dem else 0.35))
+        else (1.4 if is_hero else (0.6 if use_dem else 0.35))
     )
     sky_t = args.sky_turbidity if args.sky_turbidity is not None else (5.0 if is_hero else 2.5)
     sky_ga = (
@@ -1312,6 +1408,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sun_elevation_deg=sun_el,
         sun_intensity=sun_intensity,
         sun_color=sun_color,
+        # An HDRI replaces the analytic sky (its exposure is normalised on
+        # load, so sky_intensity scales it like the Hosek-Wilkie bake).
+        env_map=hdr_path,
+        env_rotation_deg=args.hdr_rotation,
+        # Aerial perspective: distant terrain recedes into the sky colour
+        # instead of ending at a hard silhouette. Off for the fixture.
+        fog_density=fog_density,
+        fog_height_falloff=fog_falloff,
         # A derived swath gets a pulse-sized radius (0.7 x along-spacing) so
         # neighbouring returns overlap into a scan strip; a file-backed cloud
         # keeps the manifest's radius.

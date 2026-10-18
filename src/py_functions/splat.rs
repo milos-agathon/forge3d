@@ -692,6 +692,8 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
     sky_turbidity = 2.5,
     sky_ground_albedo = 0.2,
     sky_intensity = 0.35,
+    env_map = None,
+    env_rotation_deg = 0.0,
     kappa = 4.0,
     lidar_radius = 0.2,
     lidar_opacity = 1.0,
@@ -749,6 +751,8 @@ pub(crate) fn render_fused(
     sky_turbidity: f32,
     sky_ground_albedo: f32,
     sky_intensity: f32,
+    env_map: Option<&str>,
+    env_rotation_deg: f32,
     kappa: f32,
     lidar_radius: f32,
     lidar_opacity: f32,
@@ -788,6 +792,14 @@ pub(crate) fn render_fused(
     // render-graph cache (its paged scene is streamed per view).
     let _ = cache;
     let policy_name = policy;
+    // Load the HDRI before any scene/GPU work: a bad path is a cheap error.
+    let env = match env_map {
+        Some(path) => Some(crate::path_tracing::hybrid_compute::load_fused_env(
+            path,
+            env_rotation_deg,
+        )?),
+        None => None,
+    };
     let params = fusion_params(
         kappa,
         lidar_radius,
@@ -844,6 +856,9 @@ pub(crate) fn render_fused(
         ("fused.spp", spp.to_string()),
         ("fused.frames", frames.to_string()),
         ("fused.brdf", brdf.to_string()),
+        ("fused.env_map", env_map.unwrap_or("hosek-wilkie").to_string()),
+        ("fused.fog_density", fog_density.to_string()),
+        ("fused.fog_height_falloff", fog_height_falloff.to_string()),
     ] {
         crate::core::certificate::record_input(key, value);
     }
@@ -864,6 +879,7 @@ pub(crate) fn render_fused(
             sky_turbidity,
             sky_ground_albedo,
             sky_intensity,
+            env_map: env.clone(),
             width,
             height,
             seed,
@@ -1039,6 +1055,8 @@ fn sequence_view(index: usize, view: &Bound<'_, PyDict>) -> PyResult<SequenceVie
     sky_turbidity = 2.5,
     sky_ground_albedo = 0.2,
     sky_intensity = 0.35,
+    env_map = None,
+    env_rotation_deg = 0.0,
     kappa = 4.0,
     lidar_radius = 0.2,
     lidar_opacity = 1.0,
@@ -1085,6 +1103,8 @@ pub(crate) fn render_fused_sequence(
     sky_turbidity: f32,
     sky_ground_albedo: f32,
     sky_intensity: f32,
+    env_map: Option<&str>,
+    env_rotation_deg: f32,
     kappa: f32,
     lidar_radius: f32,
     lidar_opacity: f32,
@@ -1132,6 +1152,14 @@ pub(crate) fn render_fused_sequence(
                 "tile_width and tile_height must be given together",
             ))
         }
+    };
+    // Load the HDRI before any scene/GPU work: a bad path is a cheap error.
+    let env = match env_map {
+        Some(path) => Some(crate::path_tracing::hybrid_compute::load_fused_env(
+            path,
+            env_rotation_deg,
+        )?),
+        None => None,
     };
     let params = fusion_params(
         kappa,
@@ -1184,6 +1212,9 @@ pub(crate) fn render_fused_sequence(
         ("fused.views", views.len().to_string()),
         ("fused.spp", spp.to_string()),
         ("fused.frames", frames.to_string()),
+        ("fused.env_map", env_map.unwrap_or("hosek-wilkie").to_string()),
+        ("fused.fog_density", fog_density.to_string()),
+        ("fused.fog_height_falloff", fog_height_falloff.to_string()),
     ] {
         crate::core::certificate::record_input(key, value);
     }
@@ -1206,6 +1237,7 @@ pub(crate) fn render_fused_sequence(
                     sky_turbidity,
                     sky_ground_albedo,
                     sky_intensity,
+                    env_map: env.clone(),
                     width,
                     height,
                     seed: view.seed,
