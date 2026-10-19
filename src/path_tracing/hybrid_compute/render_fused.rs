@@ -1906,6 +1906,19 @@ mod env_map_tests {
             (r(&env180, 10) - r(&env0, 11)).abs() < 1e-4,
             "column 10 is ordinary sky after the turn"
         );
+        // A quarter turn is NOT sign-symmetric, so it pins the rotation
+        // direction to the sun-azimuth convention (increasing azimuth ->
+        // increasing u). A flipped sign would place the marker at column 58.
+        let env90 = env_from_hdr_image(&img, 90.0).unwrap();
+        assert!(
+            (r(&env90, 26) - marker0).abs() < 1e-4,
+            "marker moved to column 26 for +90 deg (got {})",
+            r(&env90, 26)
+        );
+        assert!(
+            (r(&env90, 58) - marker0).abs() > 1e-2,
+            "a flipped rotation must not reproduce the marker at column 58"
+        );
     }
 
     #[test]
