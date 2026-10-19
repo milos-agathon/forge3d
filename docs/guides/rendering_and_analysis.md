@@ -153,7 +153,7 @@ satellite photographs.
 Use the top-level helpers and `forge3d.mem` when you need environment or memory
 information:
 
-- `has_gpu()`, `enumerate_adapters()`, `device_probe()`, `get_device()`
+- `has_gpu()`, `enumerate_adapters()`, `device_probe()`
 - `memory_metrics()`, `budget_remaining()`, `utilization_ratio()`
 
 These are useful when a script needs to decide between a viewer path, a native
