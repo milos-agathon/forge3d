@@ -1132,6 +1132,36 @@ def test_splat_fused_inventory_transition_is_exact():
         assert current[site] > 0, f"recorded addition missing: {site}"
 
 
+def test_splat_fused_env_map_inventory_transition_is_exact():
+    transition = _ledger_data()["splat_fused_env_map"]
+    assert transition["review"]
+    assert transition["removed"] == []
+    # Base is the frozen 1846-site production inventory (the shared viewport /
+    # water freeze), bridged forward by exactly the four HDRI env-map sites.
+    assert (transition["base_count"], transition["base_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
+    )
+    added = list(map(tuple, transition["added"]))
+    assert len(added) == 4 and len(set(added)) == 4
+    assert transition["base_count"] + len(added) == transition["result_count"] == 1850
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1850, "0ccc642b11a24a05a58fa989fe781137ca0fca169d22a6f422d9ec2cc9efb866",
+    )
+    # Every site is an env_from_hdr_image radiance/texture narrowing, never a
+    # world coordinate: positions still cross f64 -> f32 only through Anchor.
+    for rel, fn, op, _occ, _stmt in added:
+        assert rel == "src/path_tracing/hybrid_compute/render_fused.rs"
+        assert fn == "env_from_hdr_image" and op == "as_f32"
+    body = _function_body("src/path_tracing/hybrid_compute/render_fused.rs", "env_from_hdr_image")
+    assert "position" not in body.lower()
+    assert "anchor" not in body.lower()
+    assert "to_render_f32" not in body
+
+    current = collections.Counter(conversion_inventory())
+    for site in added:
+        assert current[site] > 0, f"recorded addition missing: {site}"
+
+
 def test_tessella_and_splat_combined_freeze_is_exact():
     tessella = REVIEWED_TESSELLA_INVENTORY_TRANSITION
     splat = _ledger_data()["splat_fused"]
@@ -1417,23 +1447,34 @@ def test_sky_lighting_relocation_rejects_missing_duplicate_changed_and_extra_sit
 
 
 def _inventory_before_water_optics():
-    """Check both approved branch inventories without replacing either freeze."""
+    """Check both approved branch inventories without replacing either freeze.
+
+    The SPLAT-FUSED HDRI env-map record (``splat_fused_env_map``) adds four
+    non-world ``env_from_hdr_image`` radiance sites on top of the frozen 1846
+    production inventory. They are stripped here so both branch freezes below
+    reconstruct byte-identically to main; the four sites are locked separately
+    by ``test_splat_fused_env_map_inventory_transition_is_exact``.
+    """
     water = _ledger_data()["water_optics"]
     viewport = _ledger_data()["viewer_viewport_resize"]
+    env_map = _ledger_data()["splat_fused_env_map"]
     sites = _undo_sky_lighting_transition(conversion_inventory())
     normalized = _undo_scene_pick_assembly_transition(sites)
     water_added = set(map(tuple, water["added"]))
     viewport_added = set(map(tuple, viewport["added"]))
+    env_added = set(map(tuple, env_map["added"]))
     assert len(water_added) == 10 and water["removed"] == []
     assert len(viewport_added) == 10 and viewport["removed"] == []
+    assert len(env_added) == 4 and env_map["removed"] == []
     assert water_added.isdisjoint(viewport_added)
-    for site in water_added | viewport_added:
+    assert env_added.isdisjoint(water_added | viewport_added)
+    for site in water_added | viewport_added | env_added:
         assert normalized.count(site) == 1, f"reviewed conversion missing or duplicated: {site}"
-    historical_water = [site for site in normalized if site not in viewport_added]
+    historical_water = [site for site in normalized if site not in viewport_added and site not in env_added]
     assert (len(historical_water), _inventory_digest(historical_water)) == (
         water["result_count"], water["result_digest"],
     )
-    baseline = [site for site in sites if site not in water_added]
+    baseline = [site for site in sites if site not in water_added and site not in env_added]
     normalized_main = _undo_scene_pick_assembly_transition(baseline)
     assert (len(normalized_main), _inventory_digest(normalized_main)) == (
         EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,

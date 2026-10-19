@@ -1648,5 +1648,44 @@
     ],
     "removed": [],
     "review": "2026-10-13: Milos instructed completing a green and mergeable PR after this exact ten-site inventory transition was presented. Six conversions encode normalized normal components; four convert boolean flags losslessly to 0 or 1. No world-coordinate cast is added, no site is removed, and every preceding ledger record and rejecting probe is retained. Rebased after main PR #234: the base is its texture_layout_stats result; the same ten additions give 1846 sites (owner-approved 2026-10-13)."
+  },
+  "splat_fused_env_map": {
+    "base_commit": "140e6e68",
+    "base_count": 1846,
+    "base_digest": "f4fb63ad9529ceaaff94b99fe68f0c2454e706d019e93c669b77a82fdc52eace",
+    "result_count": 1850,
+    "result_digest": "0ccc642b11a24a05a58fa989fe781137ca0fca169d22a6f422d9ec2cc9efb866",
+    "added": [
+      [
+        "src/path_tracing/hybrid_compute/render_fused.rs",
+        "env_from_hdr_image",
+        "as_f32",
+        1,
+        "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+      ],
+      [
+        "src/path_tracing/hybrid_compute/render_fused.rs",
+        "env_from_hdr_image",
+        "as_f32",
+        2,
+        "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+      ],
+      [
+        "src/path_tracing/hybrid_compute/render_fused.rs",
+        "env_from_hdr_image",
+        "as_f32",
+        3,
+        "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+      ],
+      [
+        "src/path_tracing/hybrid_compute/render_fused.rs",
+        "env_from_hdr_image",
+        "as_f32",
+        4,
+        "*value = (f64::from(*value) * scale).clamp(0.0, clamp) as f32"
+      ]
+    ],
+    "removed": [],
+    "review": "2026-10-19: SPLAT-FUSED HDRI env-map path (env_from_hdr_image). Four additions, none narrowing an absolute world coordinate: three narrow the accumulated HDR sky radiance (sums[ti*3..]*inv, a per-texel half-float range normalisation of the baked environment map) and one narrows the same clamped radiance scalar when the env texture is uploaded (*value * scale). All four operate on environment-map radiance and texture values, never on a camera, terrain or splat position; world positions continue to cross f64 -> f32 only through Anchor::to_render_f32. The base is the frozen 1846-site production inventory; the four env-map sites bridge it to 1850. Recorded by the SPLAT-FUSED implementation, pending owner review."
   }
 }
