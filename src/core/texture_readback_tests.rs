@@ -353,6 +353,42 @@ fn supported_formats_round_trip_padded_and_aligned_rows() {
 }
 
 #[test]
+fn rgba_frame_reader_uses_completion_owned_mapping() {
+    let Some(context) = gpu() else { return };
+    let (device, queue) = (&context.device, &context.queue);
+    let before = ledger_snapshot().by_label.get("forge3d-readback-staging").copied();
+    for width in [7, 64] {
+        for format in [
+            TextureFormat::Rgba8Unorm,
+            TextureFormat::Rgba8UnormSrgb,
+            TextureFormat::Bgra8Unorm,
+            TextureFormat::Bgra8UnormSrgb,
+            TextureFormat::Rgba16Float,
+        ] {
+            let pixel_bytes = if format == TextureFormat::Rgba16Float { 8 } else { 4 };
+            let bytes: Vec<u8> = (0..width * 3 * pixel_bytes).map(|index| index as u8).collect();
+            let texture = upload(device, queue, width, 3, format, &bytes);
+            assert_eq!(
+                crate::renderer::readback::read_texture_tight(
+                    device, queue, &texture, (width, 3), format,
+                ).unwrap(),
+                bytes,
+            );
+        }
+    }
+    // Exercise the shared mapping owner through Frame's actual RGBA helper.
+    // The former separate blocking-wait implementation bypassed this owner.
+    let texture = upload(device, queue, 7, 3, TextureFormat::Rgba8Unorm, &[37; 84]);
+    let _abort = abort_next_mapping();
+    let error = crate::renderer::readback::read_texture_tight(
+        device, queue, &texture, (7, 3), TextureFormat::Rgba8Unorm,
+    ).unwrap_err();
+    assert!(error.to_string().contains("Buffer mapping failed"), "{error}");
+    assert_eq!(ledger_snapshot().by_label.get("forge3d-readback-staging").copied(), before);
+    context.assert_clean();
+}
+
+#[test]
 fn mapping_failure_and_discarded_callback_release_tracked_staging() {
     let Some(context) = gpu() else { return };
     let (device, queue) = (&context.device, &context.queue);

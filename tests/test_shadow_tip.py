@@ -567,7 +567,18 @@ def test_viewer_set_sun_updates_generic_and_terrain_lighting() -> None:
             "cmd": "set_terrain_sun",
             "azimuth_deg": 123.0,
             "elevation_deg": 45.0,
-            "intensity": 1.0,
+            "source": "manual_angles",
+        },
+    ]
+    sent.clear()
+    handle.set_sun(123.0, 45.0, intensity=2.5)
+    assert sent == [
+        {"cmd": "lit_sun", "azimuth_deg": 123.0, "elevation_deg": 45.0},
+        {
+            "cmd": "set_terrain_sun",
+            "azimuth_deg": 123.0,
+            "elevation_deg": 45.0,
+            "intensity": 2.5,
             "source": "manual_angles",
         },
     ]

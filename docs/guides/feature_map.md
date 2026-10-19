@@ -16,6 +16,7 @@ organized by workflow rather than by Rust module layout.
 | Point clouds | `ViewerHandle.load_point_cloud`, `forge3d.pointcloud` | `pointcloud_viewer_interactive.py` |
 | Camera automation | `forge3d.animation`, `forge3d.camera_rigs` | `camera_animation_demo.py`, `terrain_camera_rigs_demo.py` |
 | Terrain quality controls | `terrain_params`, `presets`, `terrain_scatter` | `terrain_atmosphere_path_demo.py`, `pnoa_river_showcase_video.py` |
+| Caller-driven water surfaces and optics | `WaterOpticsSettings` through `TerrainRenderer` | [Water optics](water_optics.md), `terrain_water_optics.py` |
 | Native/offscreen rendering | `Scene`, `Session`, `TerrainRenderer`, `render_offline` | `terrain_atmosphere_path_demo.py`, `triangle_png.py` |
 | Match a compatible terrain reference | `recover_scene`, `RecoveredScene` | GPU acceptance scene; this estimates surface colour, sunlight, and haze without changing an existing map on its own |
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |

@@ -8,9 +8,32 @@ pub(in crate::terrain::renderer) struct WaterReflectionUniforms {
     pub(in crate::terrain::renderer) reflection_params: [f32; 4],
     pub(in crate::terrain::renderer) camera_world_pos: [f32; 4],
     pub(in crate::terrain::renderer) enable_flags: [f32; 4],
+    /// physical mode, height supplied, colour supplied, perceptual roughness
+    pub(in crate::terrain::renderer) optics: [f32; 4],
+    pub(in crate::terrain::renderer) water_color: [f32; 4],
 }
 
 impl WaterReflectionUniforms {
+    pub(in crate::terrain::renderer) fn with_optics(
+        mut self,
+        optics: &render_params::WaterOpticsSettingsNative,
+    ) -> Self {
+        self.optics = [
+            u8::from(optics.physical) as f32,
+            u8::from(optics.surface_height.is_some()) as f32,
+            u8::from(optics.color.is_some()) as f32,
+            optics.roughness,
+        ];
+        let color = optics.color.unwrap_or([0.0; 3]);
+        self.water_color = [
+            color[0],
+            color[1],
+            color[2],
+            u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32,
+        ];
+        self
+    }
+
     pub(in crate::terrain::renderer) fn disabled() -> Self {
         Self {
             reflection_view_proj: [
@@ -23,6 +46,8 @@ impl WaterReflectionUniforms {
             reflection_params: [0.8, 5.0, 0.02, 0.3],
             camera_world_pos: [0.0, 0.0, 0.0, 1.0],
             enable_flags: [0.0, 0.0, 0.5, 0.0],
+            optics: [0.0; 4],
+            water_color: [0.0; 4],
         }
     }
 
@@ -42,6 +67,8 @@ impl WaterReflectionUniforms {
             reflection_params: [intensity, fresnel_power, wave_strength, shore_atten_width],
             camera_world_pos: [camera_pos[0], camera_pos[1], camera_pos[2], 1.0],
             enable_flags: [1.0, 0.0, resolution_scale, 0.0],
+            optics: [0.0; 4],
+            water_color: [0.0; 4],
         }
     }
 
@@ -57,6 +84,8 @@ impl WaterReflectionUniforms {
             reflection_params: [0.0, 0.0, 0.0, 0.0],
             camera_world_pos: [0.0, 0.0, 0.0, 1.0],
             enable_flags: [0.0, 1.0, 0.0, 0.0],
+            optics: [0.0; 4],
+            water_color: [0.0; 4],
         }
     }
 }

@@ -670,7 +670,7 @@ def test_viewport_resize_inventory_transition_is_exact():
                 2,
                 'self.settings.resolution = [self.width as f32, self.height as f32]')]
     assert list(map(tuple, transition["added"])) == expected_added
-    sites = _undo_scene_pick_assembly_transition(conversion_inventory())
+    sites = _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )
@@ -726,7 +726,7 @@ def _undo_scene_pick_assembly_transition(sites):
 
 
 def test_scene_pick_assembly_moves_only_the_two_screen_coordinate_casts():
-    sites = _undo_scene_pick_assembly_transition(conversion_inventory())
+    sites = _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
     assert (len(sites), _inventory_digest(sites)) == (
         EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
     )
@@ -763,7 +763,7 @@ def test_reviewed_texture_layout_stats_transition_is_exact():
         re.M,
     )
     sites = _undo_viewport_resize_transition(
-        _undo_scene_pick_assembly_transition(conversion_inventory())
+        _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
     )
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
@@ -797,7 +797,7 @@ def test_reviewed_csm_layout_context_transition_is_exact():
     ) == new[4]
     sites = _undo_texture_layout_stats_transition(
         _undo_viewport_resize_transition(
-            _undo_scene_pick_assembly_transition(conversion_inventory())
+            _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
         )
     )
     assert sites.count(new) == 1 and old not in sites
@@ -810,7 +810,7 @@ def test_reviewed_csm_layout_context_transition_is_exact():
     )
 
 def test_exact_production_conversion_inventory_is_frozen():
-    sites = _undo_scene_pick_assembly_transition(conversion_inventory())
+    sites = _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
     digest = _inventory_digest(sites)
     assert (len(sites), digest) == (
         EXPECTED_CONVERSION_COUNT,
@@ -1283,7 +1283,7 @@ def test_sutura_screen_output_inventory_transition_is_exact():
     )
     sites = _undo_texture_layout_stats_transition(
         _undo_viewport_resize_transition(
-            _undo_scene_pick_assembly_transition(conversion_inventory())
+            _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
         )
     )
     counts = collections.Counter(sites)
@@ -1298,3 +1298,232 @@ def test_sutura_screen_output_inventory_transition_is_exact():
     assert (len(baseline), _inventory_digest(baseline)) == (
         sutura["base_count"], sutura["base_digest"],
     )
+
+
+def _sky_lighting_conversion_relocations():
+    solar = (
+        "let solar_direction = night::horizontal_direction( "
+        "f64::from(sun.azimuth.value() as f32), "
+        "f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+    )
+    moon = (
+        "( night::horizontal_direction(moon.azimuth.value(), moon.altitude.value()) "
+        ".as_vec3() .to_array(), night::normalized_moonlight( "
+        "observation.moon_phase.phase_angle.value(), moon.altitude.value(), ), )"
+    )
+    owner = "src/viewer/sky_lighting.rs"
+    previous = "src/viewer/state/viewer_helpers/core.rs"
+    return {
+        (owner, "observe", "as_f32", 1, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_f32",
+            1,
+            "let azimuth = sun.azimuth.value() as f32",
+        ),
+        (owner, "observe", "as_f32", 2, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_f32",
+            2,
+            "let elevation = sun.altitude.value() as f32",
+        ),
+        (owner, "observe", "as_vec", 1, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_vec",
+            1,
+            "self.sky_sun_direction_ws = crate::astro::night::horizontal_direction(f64::from(azimuth), f64::from(elevation)) .as_vec3() .to_array()",
+        ),
+        (owner, "observe", "as_vec", 2, moon): (
+            previous,
+            "sync_astro_observation",
+            "as_vec",
+            2,
+            "self.lit_sun_direction_ws = crate::astro::night::horizontal_direction( moon.azimuth.value(), moon.altitude.value(), ) .as_vec3() .to_array()",
+        ),
+    }
+
+
+def _undo_sky_lighting_transition(sites):
+    """Re-own four existing angle/unit-direction sites, preserving every freeze.
+
+    No conversion is excluded or added. The raw scanner is unchanged; missing,
+    duplicated, altered or additional owner conversions fail before restoring
+    the historical source order. Absolute world positions are not involved.
+    """
+    replacements = _sky_lighting_conversion_relocations()
+    owner_sites = [site for site in sites if site[0] == "src/viewer/sky_lighting.rs"]
+    assert owner_sites == list(replacements)
+    for new, old in replacements.items():
+        assert sites.count(new) == 1 and old not in sites
+    restored = [site for site in sites if site not in replacements]
+    # These four casts followed both existing lit-uniform enum casts in core.rs.
+    anchor = [
+        index
+        for index, site in enumerate(restored)
+        if site[:4]
+        == (
+            "src/viewer/state/viewer_helpers/core.rs",
+            "update_lit_uniform",
+            "as_f32",
+            2,
+        )
+    ]
+    assert len(anchor) == 1
+    index = anchor[0] + 1
+    return restored[:index] + list(replacements.values()) + restored[index:]
+
+
+def test_sky_lighting_relocation_is_exact_and_preserves_inventory_size():
+    sites = conversion_inventory()
+    restored = _undo_sky_lighting_transition(sites)
+    assert len(restored) == len(sites)
+    added = collections.Counter(sites) - collections.Counter(restored)
+    removed = collections.Counter(restored) - collections.Counter(sites)
+    replacements = _sky_lighting_conversion_relocations()
+    assert added == collections.Counter(replacements.keys())
+    assert removed == collections.Counter(replacements.values())
+    # Existing historical checks independently prove the entire restored freeze.
+    _inventory_before_water_optics()
+
+
+def test_sky_lighting_relocation_rejects_missing_duplicate_changed_and_extra_sites():
+    import pytest
+
+    replacements = _sky_lighting_conversion_relocations()
+    sites = list(replacements)
+    sites.append(
+        (
+            "src/viewer/state/viewer_helpers/core.rs",
+            "update_lit_uniform",
+            "as_f32",
+            2,
+            "existing debug-mode cast",
+        )
+    )
+    first = sites[0]
+    changed = (*first[:4], "changed conversion")
+    extra = (
+        "src/viewer/sky_lighting.rs",
+        "observe",
+        "as_f32",
+        3,
+        "world_position.x as f32",
+    )
+    for mutated in (sites[1:], sites + [first], [changed] + sites[1:], sites + [extra]):
+        with pytest.raises(AssertionError):
+            _undo_sky_lighting_transition(mutated)
+
+
+def _inventory_before_water_optics():
+    """Check both approved branch inventories without replacing either freeze."""
+    water = _ledger_data()["water_optics"]
+    viewport = _ledger_data()["viewer_viewport_resize"]
+    sites = _undo_sky_lighting_transition(conversion_inventory())
+    normalized = _undo_scene_pick_assembly_transition(sites)
+    water_added = set(map(tuple, water["added"]))
+    viewport_added = set(map(tuple, viewport["added"]))
+    assert len(water_added) == 10 and water["removed"] == []
+    assert len(viewport_added) == 10 and viewport["removed"] == []
+    assert water_added.isdisjoint(viewport_added)
+    for site in water_added | viewport_added:
+        assert normalized.count(site) == 1, f"reviewed conversion missing or duplicated: {site}"
+    historical_water = [site for site in normalized if site not in viewport_added]
+    assert (len(historical_water), _inventory_digest(historical_water)) == (
+        water["result_count"], water["result_digest"],
+    )
+    baseline = [site for site in sites if site not in water_added]
+    normalized_main = _undo_scene_pick_assembly_transition(baseline)
+    assert (len(normalized_main), _inventory_digest(normalized_main)) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
+    )
+    return baseline
+
+
+def test_water_optics_inventory_transition_is_exact():
+    transition = _ledger_data()["water_optics"]
+    texture = _ledger_data()["texture_layout_stats"]
+    assert transition["review"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        texture["result_count"], texture["result_digest"],
+    )
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1846, 'f833522fa331012743ce728548a7f63fb114335de11c2aab7985c90ab9192a62',
+    )
+    expected_added = [
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            1,
+            'n.map(|v| (f64::from(v) / length) as f32)',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            2,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            3,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            4,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            5,
+            'let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            6,
+            'let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            1,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            2,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            3,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            4,
+            'self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]',
+        ],
+    ]
+    assert transition["added"] == expected_added
+    assert transition["removed"] == []
+    assert transition["result_count"] == transition["base_count"] + len(expected_added)
+    _inventory_before_water_optics()

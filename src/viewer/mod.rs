@@ -17,6 +17,7 @@ pub mod pointcloud;
 mod render;
 mod render_targets;
 mod scene_review;
+mod sky_lighting;
 mod state;
 mod temporal_history;
 mod terrain;

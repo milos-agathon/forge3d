@@ -203,11 +203,19 @@ impl TextureReadback {
 
     pub fn read_sync(self, device: &Device) -> Result<Vec<u8>, RenderError> {
         let receiver = self.start_mapping();
-        device.poll(wgpu::Maintain::Wait);
-        let result = receiver
-            .recv()
-            .map_err(|e| RenderError::readback(format!("Buffer mapping callback lost: {e}")))?;
-        self.mapped_bytes(result)
+        loop {
+            // wgpu 0.19's blocking wait discards the HAL timeout result and
+            // can retire unfinished Metal work. Poll the actual fence until
+            // the mapping callback proves this transfer has completed.
+            device.poll(wgpu::Maintain::Poll);
+            match receiver.try_recv() {
+                Ok(result) => return self.mapped_bytes(result),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err(RenderError::readback("Buffer mapping callback lost"));
+                }
+                Err(mpsc::TryRecvError::Empty) => std::thread::yield_now(),
+            }
+        }
     }
 
     #[cfg(feature = "async_readback")]

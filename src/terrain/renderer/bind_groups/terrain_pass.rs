@@ -20,6 +20,7 @@ impl TerrainScene {
         colormap_view: &wgpu::TextureView,
         colormap_sampler: &wgpu::Sampler,
         overlay_buffer: &wgpu::Buffer,
+        detail_normal_view: Option<&wgpu::TextureView>,
         height_curve_view: &wgpu::TextureView,
         water_mask_view_uploaded: Option<&wgpu::TextureView>,
         height_ao_computed: bool,
@@ -103,7 +104,9 @@ impl TerrainScene {
                 },
                 wgpu::BindGroupEntry {
                     binding: 14,
-                    resource: wgpu::BindingResource::TextureView(&self.detail_normal_fallback_view),
+                    resource: wgpu::BindingResource::TextureView(
+                        detail_normal_view.unwrap_or(&self.detail_normal_fallback_view),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 15,
@@ -177,6 +180,7 @@ impl TerrainScene {
         colormap_view: &wgpu::TextureView,
         colormap_sampler: &wgpu::Sampler,
         overlay_buffer: &wgpu::Buffer,
+        detail_normal_view: Option<&wgpu::TextureView>,
         height_curve_view: &wgpu::TextureView,
         water_mask_view_uploaded: Option<&wgpu::TextureView>,
         sky_view: &wgpu::TextureView,
@@ -199,6 +203,7 @@ impl TerrainScene {
             colormap_view,
             colormap_sampler,
             overlay_buffer,
+            detail_normal_view,
             height_curve_view,
             water_mask_view_uploaded,
             height_ao_computed,

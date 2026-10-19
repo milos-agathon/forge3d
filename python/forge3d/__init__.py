@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.43.0"
+__version__ = "1.44.0"
 version = __version__
 
 import numpy as np
@@ -42,7 +42,6 @@ from ._gpu import (
     device_probe,
     has_gpu,
     determinism_probe,
-    get_device,
 )
 from .mem import (
     memory_metrics,
@@ -265,6 +264,7 @@ from .terrain_params import (
     FogSettings,
     ReflectionSettings,
     WaterSettings,
+    WaterOpticsSettings,
     CloudSettings,
     HeightAoSettings,
     ScreenSpaceSettings,
@@ -859,6 +859,7 @@ __all__ = [
     "FogSettings",
     "ReflectionSettings",
     "WaterSettings",
+    "WaterOpticsSettings",
     "CloudSettings",
     "HeightAoSettings",
     "ScreenSpaceSettings",
@@ -891,7 +892,6 @@ __all__ = [
     # GPU utilities
     "has_gpu",
     "determinism_probe",
-    "get_device",
     "enumerate_adapters",
     "device_probe",
     "native_import_error",

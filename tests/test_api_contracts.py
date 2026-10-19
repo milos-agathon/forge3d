@@ -842,6 +842,7 @@ class TestPackageLevelApiContracts:
         "Session",
         "TerrainRenderer",
         "TerrainRenderParams",
+        "WaterOpticsSettings",
         "Colormap1D",
         "MaterialSet",
         "IBL",

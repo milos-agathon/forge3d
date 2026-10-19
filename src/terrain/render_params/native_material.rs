@@ -118,6 +118,12 @@ pub struct DetailSettingsNative {
     pub fade_start: f32,
     /// Distance at which detail is fully faded (world units)
     pub fade_end: f32,
+    /// Linear RGB tangent-space normal map in terrain UV coordinates.
+    pub detail_normal_path: Option<String>,
+    /// Metadata for the precomputed DEM residual (not a runtime blur).
+    pub detail_sigma_px: f32,
+    /// DEM normal strength, independent of the procedural normal strength.
+    pub detail_strength: f32,
 }
 
 #[cfg(feature = "extension-module")]
@@ -130,6 +136,9 @@ impl Default for DetailSettingsNative {
             albedo_noise: 0.1,
             fade_start: 50.0,
             fade_end: 200.0,
+            detail_normal_path: None,
+            detail_sigma_px: 3.0,
+            detail_strength: 0.0,
         }
     }
 }

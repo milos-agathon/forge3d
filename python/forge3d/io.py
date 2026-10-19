@@ -37,8 +37,6 @@ class DEMData:
         (x_resolution, y_resolution) in CRS units
     bounds : Optional[Tuple[float, float, float, float]]
         (minx, miny, maxx, maxy) bounding box in CRS units
-    texture_view : Optional[Any]
-        GPU texture view (populated when uploaded to GPU)
     stats : Dict[str, float]
         Statistics: mean, std, min, max, median, etc.
     """
@@ -49,7 +47,6 @@ class DEMData:
     transform: Optional[Any] = None
     resolution: Tuple[float, float] = (1.0, 1.0)
     bounds: Optional[Tuple[float, float, float, float]] = None
-    texture_view: Optional[Any] = None
     stats: Dict[str, float] = None  # type: ignore
 
     def __post_init__(self):
@@ -373,7 +370,6 @@ def load_dem(
         transform=transform,
         resolution=resolution,
         bounds=(bounds.left, bounds.bottom, bounds.right, bounds.top) if bounds else None,
-        texture_view=None,
         stats=calculate_dem_stats(data, nodata),
     )
 
@@ -424,57 +420,8 @@ def load_dem_from_array(
         transform=None,
         resolution=(1.0, 1.0),
         bounds=None,
-        texture_view=None,
         stats=calculate_dem_stats(data, nodata),
     )
-
-
-def upload_dem_to_gpu(dem: DEMData, session: Optional[Any] = None) -> DEMData:
-    """Upload DEM data to GPU as a texture.
-
-    Parameters
-    ----------
-    dem : DEMData
-        DEM data to upload
-    session : Optional[Session]
-        GPU session (uses global context if None)
-
-    Returns
-    -------
-    DEMData
-        Same DEM with texture_view populated
-
-    Notes
-    -----
-    This creates an R32Float texture on the GPU for use in shaders.
-    """
-    _forge3d = _ensure_native()
-
-    # Ensure data is C-contiguous float32
-    data = np.ascontiguousarray(dem.data, dtype=np.float32)
-
-    # Get GPU context
-    if session is not None:
-        _device = session.device
-        _queue = session.queue
-    else:
-        # Use global context
-        from . import _gpu
-        _gpu.device()
-        _gpu.queue()
-
-    # Create texture using native module
-    height, width = data.shape
-
-    # For now, store the data and mark as ready for upload.
-    dem.texture_view = {
-        "data": data,
-        "width": width,
-        "height": height,
-        "format": "R32Float",
-    }
-
-    return dem
 
 
 @dataclass

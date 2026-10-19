@@ -377,12 +377,15 @@ def _validate_with_projection(
         _alignment_residual_diagnostic,
         _alignment_transform_diagnostic,
         _is_3d_camera_mode,
+        _load_native_heightmap,
         _load_raw_heightmap,
         _mapscene_effective_camera_mode,
+        _mapscene_thematic_surface,
         _metadata_resolution,
         _path_to_str,
         _preset_override_diagnostic,
         _resolution_mismatch_diagnostic,
+        _styled_raster_result,
         _tiles3d_layer_has_native_geometry,
     )
 

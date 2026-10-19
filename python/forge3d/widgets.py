@@ -464,11 +464,20 @@ else:
                 raise RuntimeError("Viewer process is not running")
             self._handle.set_orbit_camera(phi_deg=phi_deg, theta_deg=theta_deg, radius=radius, fov_deg=fov_deg)
 
-        def set_sun(self, azimuth_deg: float, elevation_deg: float) -> None:
+        def set_sun(
+            self,
+            azimuth_deg: float,
+            elevation_deg: float,
+            intensity: Optional[float] = None,
+        ) -> None:
             """Set the sun direction on the running viewer."""
             if self._handle is None:
                 raise RuntimeError("Viewer process is not running")
-            self._handle.set_sun(azimuth_deg=azimuth_deg, elevation_deg=elevation_deg)
+            self._handle.set_sun(
+                azimuth_deg=azimuth_deg,
+                elevation_deg=elevation_deg,
+                intensity=intensity,
+            )
 
         def set_z_scale(self, value: float) -> None:
             """Set terrain height exaggeration on the running viewer."""

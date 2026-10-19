@@ -16,6 +16,7 @@ from .terrain_params import (
     FogSettings as TerrainFogSettings,
     ReflectionSettings as TerrainReflectionSettings,
     TriplanarSettings,
+    DetailSettings,
     load_height_curve_lut,
     make_terrain_params_config,
 )
@@ -470,6 +471,53 @@ def _build_colormap(
     return f3d.Colormap1D.from_stops(stops=stops, domain=domain)
 
 
+def _build_detail_settings(args: Any) -> DetailSettings | None:
+    """Resolve demo DEM-detail flags, failing explicitly if generation fails."""
+    import subprocess
+    import sys
+
+    defaults = DetailSettings()
+    strength = float(getattr(args, "detail_strength", defaults.detail_strength))
+    sigma = float(getattr(args, "detail_sigma_px", defaults.detail_sigma_px))
+    fade_start = getattr(args, "detail_fade_start", None)
+    fade_end = getattr(args, "detail_fade_end", None)
+    detail_path = getattr(args, "detail_normals", None)
+    detail = DetailSettings(
+        normal_strength=0.0, albedo_noise=0.0,
+        detail_normal_path=str(detail_path) if detail_path is not None else None,
+        detail_strength=strength, detail_sigma_px=sigma,
+        fade_start=defaults.fade_start if fade_start is None else float(fade_start),
+        fade_end=defaults.fade_end if fade_end is None else float(fade_end),
+    )
+    for field in ("fade_start", "fade_end"):
+        if not math.isfinite(getattr(detail, field)):
+            raise ValueError(f"{field} must be finite")
+    if getattr(args, "render", None) == "p6":
+        if strength == 0.0 and not _arg_was_explicit(args, "detail_strength"):
+            strength = 0.5  # Existing P6 preset strength.
+        if detail_path is None and strength > 0.0:
+            generated_path = Path(args.output).with_suffix(".detail-normal.png").resolve()
+            command = [sys.executable, "-m", "forge3d._detail_normals",
+                       "--dem", str(Path(args.dem).resolve()),
+                       "--sigma-px", str(sigma), "--output", str(generated_path), "--flip-y"]
+            if getattr(args, "overwrite", False):
+                command.append("--overwrite")
+            print(f"[P6] Generating detail normal map (sigma={sigma} px)...")
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode != 0 or not generated_path.is_file():
+                raise RuntimeError(f"detail_normal_path generation failed: {result.stderr or result.stdout}")
+            print(f"[P6] Generated: {generated_path}")
+            detail_path = generated_path
+    if detail_path is None and strength == 0.0:
+        return None
+    return DetailSettings(
+        enabled=strength > 0.0, normal_strength=0.0, albedo_noise=0.0,
+        detail_normal_path=str(detail_path) if detail_path is not None else None,
+        detail_strength=strength, detail_sigma_px=sigma,
+        fade_start=detail.fade_start, fade_end=detail.fade_end,
+    )
+
+
 def _build_params(
     size: tuple[int, int],
     render_scale: float,
@@ -506,6 +554,7 @@ def _build_params(
     lambert_contrast: float = 0.0,  # P5-L: Lambert contrast curve strength
     colormap_srgb: bool = False,  # P6.1: Use Rgba8UnormSrgb for colormap texture
     output_srgb_eotf: bool = False,  # P6.1: Use exact linear_to_srgb() output encoding
+    detail_config: DetailSettings | None = None,
 ):
     overlays = [
         f3d.OverlayLayer.from_colormap1d(
@@ -549,6 +598,7 @@ def _build_params(
         fog=fog_config,  # P2: Pass fog config (None = disabled)
         reflection=reflection_config,  # P4: Pass reflection config (None = disabled)
         triplanar=triplanar_config,  # P5-N: Pass triplanar config for normal_strength
+        detail=detail_config,
         lambert_contrast=lambert_contrast,  # P5-L: Pass lambert contrast
     )
     
@@ -1066,43 +1116,11 @@ def run(args: Any) -> int:
             water_plane_height=reflection_plane_height,
         )
 
-    # P6: Parse detail normal parameters from CLI
-    render_mode = getattr(args, "render", None)
-    detail_normal_path = getattr(args, "detail_normals", None)
-    detail_strength = float(getattr(args, "detail_strength", 0.0) or 0.0)
-    detail_sigma_px = float(getattr(args, "detail_sigma_px", 3.0) or 3.0)
-    
-    # P6 render mode preset: auto-generate detail normals if not provided
-    if render_mode == "p6":
-        if detail_normal_path is None:
-            # Auto-generate detail normals from DEM
-            generated_path = Path("assets/generated") / f"detail_normal_sigma{detail_sigma_px:.1f}.png"
-            if not generated_path.exists():
-                print(f"[P6] Generating detail normal map (sigma={detail_sigma_px} px)...")
-                import subprocess
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        str(Path(__file__).parent.parent.parent / "tools" / "detail_normals.py"),
-                        "--dem", str(args.dem),
-                        "--sigma-px", str(detail_sigma_px),
-                        "--output", str(generated_path),
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                if result.returncode != 0:
-                    print(f"[P6] Warning: Failed to generate detail normals: {result.stderr}")
-                else:
-                    print(f"[P6] Generated: {generated_path}")
-            detail_normal_path = generated_path
-        # P6 preset: enable detail normals with default strength
-        if detail_strength <= 0.0:
-            detail_strength = 0.5  # P6 default strength
-    
-    # Log P6 detail normal configuration
-    if detail_normal_path is not None and detail_strength > 0.0:
-        print(f"[P6] Detail normals: {detail_normal_path} (strength={detail_strength:.2f})")
+    detail_config = _build_detail_settings(args)
+    if detail_config is not None and detail_config.enabled:
+        print(f"[P6] Detail normals: {detail_config.detail_normal_path} "
+              f"(strength={detail_config.detail_strength:.2f}, "
+              f"fade={detail_config.fade_start:g}–{detail_config.fade_end:g} world units)")
 
     # Log shadow technique selection (P6.2 acceptance criterion B)
     shadow_cfg = renderer_config.shadows
@@ -1145,6 +1163,7 @@ def run(args: Any) -> int:
         lambert_contrast=float(getattr(args, "lambert_contrast", 0.0)),  # P5-L
         colormap_srgb=bool(getattr(args, "colormap_srgb", False)),  # P6.1
         output_srgb_eotf=bool(getattr(args, "output_srgb_eotf", False)),  # P6.1
+        detail_config=detail_config,
     )
 
     renderer = f3d.TerrainRenderer(sess)

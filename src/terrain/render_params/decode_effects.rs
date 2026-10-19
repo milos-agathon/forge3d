@@ -73,7 +73,7 @@ pub(super) fn parse_reflection_settings(params: &Bound<'_, PyAny>) -> Reflection
     }
 }
 
-pub(super) fn parse_detail_settings(params: &Bound<'_, PyAny>) -> DetailSettingsNative {
+pub(super) fn parse_detail_settings(params: &Bound<'_, PyAny>) -> PyResult<DetailSettingsNative> {
     if let Ok(det) = params.getattr("detail") {
         let enabled: bool = det
             .getattr("enabled")
@@ -99,16 +99,61 @@ pub(super) fn parse_detail_settings(params: &Bound<'_, PyAny>) -> DetailSettings
             .getattr("fade_end")
             .and_then(|v| v.extract())
             .unwrap_or(200.0);
-        DetailSettingsNative {
+        let detail_normal_path: Option<String> = if det.hasattr("detail_normal_path")? {
+            det.getattr("detail_normal_path")?.extract().map_err(|_| {
+                PyValueError::new_err("detail_normal_path must be a non-empty string or None")
+            })?
+        } else {
+            None
+        };
+        if detail_normal_path
+            .as_ref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            return Err(PyValueError::new_err(
+                "detail_normal_path must not be empty",
+            ));
+        }
+        let detail_sigma_px = if det.hasattr("detail_sigma_px")? {
+            super::parse::to_finite_f32(
+                det.getattr("detail_sigma_px")?.as_gil_ref(),
+                "detail_sigma_px",
+            )?
+        } else {
+            3.0
+        };
+        if detail_sigma_px <= 0.0 {
+            return Err(PyValueError::new_err("detail_sigma_px must be > 0"));
+        }
+        let detail_strength = if det.hasattr("detail_strength")? {
+            super::parse::to_finite_f32(
+                det.getattr("detail_strength")?.as_gil_ref(),
+                "detail_strength",
+            )?
+        } else {
+            0.0
+        };
+        if !(0.0..=1.0).contains(&detail_strength) {
+            return Err(PyValueError::new_err("detail_strength must be in [0, 1]"));
+        }
+        if enabled && detail_strength > 0.0 && detail_normal_path.is_none() {
+            return Err(PyValueError::new_err(
+                "detail_normal_path is required when detail is enabled and detail_strength > 0",
+            ));
+        }
+        Ok(DetailSettingsNative {
             enabled,
             detail_scale,
             normal_strength,
             albedo_noise,
             fade_start,
             fade_end,
-        }
+            detail_normal_path,
+            detail_sigma_px,
+            detail_strength,
+        })
     } else {
-        DetailSettingsNative::default()
+        Ok(DetailSettingsNative::default())
     }
 }
 

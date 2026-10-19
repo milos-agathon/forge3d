@@ -137,7 +137,6 @@ struct RecordingTimingBatch {
 /// Owns the readback and its mapping until the submitted slot is retired.
 struct SubmittedTimingBatch {
     slot: usize,
-    submission: SubmissionIndex,
     query_count: u32,
     scopes: Vec<RecordedScope>,
     readback: Arc<TrackedBuffer>,
@@ -531,7 +530,6 @@ impl GpuTimingManager {
         if let Some(slot) = recording.slot.filter(|_| recording.query_count > 0) {
             self.submitted.push_back(SubmittedTimingBatch {
                 slot,
-                submission: submission.clone(),
                 query_count: recording.query_count,
                 scopes: recording.scopes,
                 readback: self.timestamp_readback_buffer[slot]
@@ -588,11 +586,11 @@ impl GpuTimingManager {
         }
         let mut results = Vec::new();
         while let Some(batch) = self.submitted.front_mut() {
-            self.device.poll(if blocking {
-                Maintain::WaitForSubmissionIndex(batch.submission.clone())
-            } else {
-                Maintain::Poll
-            });
+            // wgpu 0.19's blocking wait can retire a submission after its
+            // internal HAL timeout, before Metal has finished executing it.
+            // Polling observes the real fence; the mapping callback owns the
+            // completion proof for this batch in both API modes.
+            self.device.poll(Maintain::Poll);
             match batch.try_read() {
                 Ok(Some(timestamps)) => {
                     let batch = self.submitted.pop_front().unwrap();
@@ -604,12 +602,7 @@ impl GpuTimingManager {
                     // Dropping the batch unmaps before its slot becomes reusable.
                 }
                 Ok(None) if !blocking => break,
-                Ok(None) => {
-                    self.submitted.pop_front();
-                    return Err(RenderError::Readback(
-                        "Timestamp mapping did not complete after its submission fence".to_string(),
-                    ));
-                }
+                Ok(None) => std::thread::yield_now(),
                 Err(error) => {
                     self.submitted.pop_front(); // Drop/unmap even on readback failure.
                     return Err(error);

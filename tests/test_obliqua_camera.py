@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import forge3d.path_tracing as pt
+from forge3d import _native
 
 from _obliqua_gpu_guard import require_qualifying_gpu
 
@@ -14,7 +15,7 @@ class _CaptureNative:
 
 
 def test_reference_wrapper_forwards_obliqua_camera_contract(monkeypatch):
-    monkeypatch.setattr(pt, "_NATIVE", _CaptureNative())
+    monkeypatch.setattr(_native, "NATIVE_MODULE", _CaptureNative())
     camera = {
         "origin": (0.0, 3.0, 8.0),
         "look_at": (0.0, 0.0, 0.0),
@@ -46,7 +47,7 @@ def test_reference_wrapper_forwards_obliqua_camera_contract(monkeypatch):
 
 @pytest.mark.parametrize("model", ["fisheye", "", "ORTHOGRAPHIC"])
 def test_reference_wrapper_rejects_unknown_camera_model(monkeypatch, model):
-    monkeypatch.setattr(pt, "_NATIVE", _CaptureNative())
+    monkeypatch.setattr(_native, "NATIVE_MODULE", _CaptureNative())
     with pytest.raises(ValueError, match="camera model"):
         pt.hybrid_render_terrain_reference(
             np.zeros((2, 2), dtype=np.float32),
@@ -59,7 +60,7 @@ def test_reference_wrapper_rejects_unknown_camera_model(monkeypatch, model):
 
 
 def test_reference_wrapper_rejects_explicit_empty_camera_model(monkeypatch):
-    monkeypatch.setattr(pt, "_NATIVE", _CaptureNative())
+    monkeypatch.setattr(_native, "NATIVE_MODULE", _CaptureNative())
     with pytest.raises(ValueError, match="camera model"):
         pt.hybrid_render_terrain_reference(
             np.zeros((2, 2), dtype=np.float32),
@@ -73,7 +74,7 @@ def test_reference_wrapper_rejects_explicit_empty_camera_model(monkeypatch):
 
 
 def test_reference_wrapper_rejects_underspecified_crop(monkeypatch):
-    monkeypatch.setattr(pt, "_NATIVE", _CaptureNative())
+    monkeypatch.setattr(_native, "NATIVE_MODULE", _CaptureNative())
     with pytest.raises(ValueError, match="full_width and full_height"):
         pt.hybrid_render_terrain_reference(
             np.zeros((2, 2), dtype=np.float32),
@@ -272,7 +273,7 @@ def test_native_camera_dict_sensor_rect_matches_top_level():
         "variance_threshold": 1e9,
         "seed": 31,
     }
-    from_dict = pt._NATIVE.hybrid_render_terrain_reference(
+    from_dict = _native.get_native_module().hybrid_render_terrain_reference(
         dem,
         4,
         4,
@@ -281,7 +282,7 @@ def test_native_camera_dict_sensor_rect_matches_top_level():
         full_height=8,
         **options,
     )["rgba"]
-    from_kwarg = pt._NATIVE.hybrid_render_terrain_reference(
+    from_kwarg = _native.get_native_module().hybrid_render_terrain_reference(
         dem,
         4,
         4,

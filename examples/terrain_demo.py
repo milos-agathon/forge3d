@@ -61,6 +61,7 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
     """
     if cli_explicit is None:
         cli_explicit = set()
+    cli_explicit = set(cli_explicit) | set(getattr(args, "_explicit_cli_args", set()))
 
     with open(preset_path) as f:
         preset = json.load(f)
@@ -88,6 +89,7 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
         "albedo_mode": ("albedo_mode", "--albedo-mode"), "normal_strength": ("normal_strength", "--normal-strength"),
         "lambert_contrast": ("lambert_contrast", "--lambert-contrast"), "unsharp_strength": ("unsharp_strength", "--unsharp-strength"),
         "detail_strength": ("detail_strength", "--detail-strength"), "detail_sigma_px": ("detail_sigma_px", "--detail-sigma-px"),
+        "detail_fade_start": ("detail_fade_start", "--detail-fade-start"), "detail_fade_end": ("detail_fade_end", "--detail-fade-end"),
         # P6.1: Color space correctness toggles
         "colormap_srgb": ("colormap_srgb", "--colormap-srgb"),
         "output_srgb_eotf": ("output_srgb_eotf", "--output-srgb-eotf"),
@@ -128,10 +130,14 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
     detail_normals = preset.get("detail_normals", {})
     if detail_normals.get("enabled", False):
         detail_path = detail_normals.get("detail_normal_path")
-        if detail_path:
+        if detail_path and "detail_normals" not in cli_explicit:
             args.detail_normals = project_root / detail_path
-        if "detail_strength" in detail_normals:
-            args.detail_strength = detail_normals["detail_strength"]
+        for key, arg_name in (("detail_strength", "detail_strength"),
+                              ("detail_sigma_px", "detail_sigma_px"),
+                              ("fade_start", "detail_fade_start"),
+                              ("fade_end", "detail_fade_end")):
+            if key in detail_normals and arg_name not in cli_explicit:
+                setattr(args, arg_name, detail_normals[key])
 
 
 def _was_cli_set(args_or_name: argparse.Namespace | str, arg_name: str | None = None) -> bool:
@@ -399,6 +405,14 @@ def _parse_args() -> argparse.Namespace:
         default=3.0,
         help="P6: Gaussian sigma used to generate detail normals (for metadata).",
     )
+    parser.add_argument(
+        "--detail-fade-start", type=float, default=None,
+        help="DEM detail starts fading at this camera-to-fragment distance in world units (default: 50).",
+    )
+    parser.add_argument(
+        "--detail-fade-end", type=float, default=None,
+        help="DEM detail is zero past this camera-to-fragment distance in world units (default: 200). Set beyond the terrain viewing distance.",
+    )
     # P6: Render mode for validator
     parser.add_argument(
         "--render",
@@ -457,7 +471,7 @@ def _parse_args() -> argparse.Namespace:
     import sys
 
     explicit_args = set()
-    argv_flags = set(arg for arg in sys.argv[1:] if arg.startswith("--"))
+    argv_flags = set(arg.split("=", 1)[0] for arg in sys.argv[1:] if arg.startswith("--"))
     for action in parser._actions:
         if any(option in argv_flags for option in action.option_strings):
             explicit_args.add(action.dest)
@@ -519,6 +533,8 @@ def main() -> int:
             "--sun-intensity": "sun_intensity", "--z-scale": "z_scale",
             "--cam-radius": "cam_radius", "--cam-phi": "cam_phi", "--cam-theta": "cam_theta",
             "--unsharp-strength": "unsharp_strength", "--detail-strength": "detail_strength",
+            "--detail-normals": "detail_normals", "--detail-sigma-px": "detail_sigma_px",
+            "--detail-fade-start": "detail_fade_start", "--detail-fade-end": "detail_fade_end",
             "--colormap-strength": "colormap_strength", "--normal-strength": "normal_strength",
             "--lambert-contrast": "lambert_contrast", "--msaa": "msaa",
             "--shadow-technique": "shadow_technique", "--shadows": "shadow_technique",
