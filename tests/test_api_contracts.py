@@ -145,6 +145,8 @@ class TestNativeModuleSymbols:
         # SPLAT-FUSED: structure-of-arrays Gaussian splat cloud
         "GaussianSplatCloud",
         "CompiledFrame",
+        # forge3d.mesh: real CPU BVH build + tracked GPU mesh upload handle
+        "GpuMeshHandle",
     ]
 
     def test_registered_classes_exist(self):
@@ -226,6 +228,9 @@ class TestNativeModuleSymbols:
         # P0.4: TBN mesh generation
         "mesh_generate_cube_tbn",
         "mesh_generate_plane_tbn",
+        # CPU BVH construction and tracked GPU mesh upload for forge3d.mesh
+        "mesh_build_bvh_cpu",
+        "mesh_upload_gpu",
         # CARTOGRAPHER-PRIME: bounded-optimal label declutter
         "_reserve_label_depth_host_allocation",
         "declutter",
