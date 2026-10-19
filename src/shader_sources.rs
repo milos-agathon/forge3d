@@ -184,16 +184,29 @@ const FUSED_TERRAIN_EDITS: &[(&str, &str, &str)] = &[
     // Aerial perspective: the same height fog that dims sun visibility also
     // blends the camera response toward the environment over the distance to
     // the hit, so far terrain recedes into the horizon's colour instead of
-    // ending at a hard silhouette. At fog density 0 the transmittance is
-    // exactly 1 and this is the base line, bit for bit.
+    // ending at a hard silhouette.
+    //
+    // At fog density 0 the media transmittance is exactly 1, and the edit
+    // keeps the base line's STATEMENT VERBATIM in that case. Folding the
+    // transmittance into the sum instead would re-associate
+    // `frame + sun + ibl` into `frame + (sun + ibl)`, which is equal in exact
+    // arithmetic but differs by 1 ULP in f32 for a large share of pixels —
+    // small enough for the tolerance-based golden not to notice, large
+    // enough to break byte identity (and any sha256 sidecar gate).
+    // Keeping the two branches separate is what makes "fog off" provably
+    // byte-identical to the base line, not merely close to it.
     (
         "aerial perspective on the beauty response",
         "        frame_radiance = frame_radiance + sun + ibl;\n",
         concat!(
             "        let aer_t = fusion_media_along(\n",
             "            camera.origin, rd, length(hit.point - camera.origin));\n",
-            "        frame_radiance = frame_radiance + (sun + ibl) * aer_t\n",
-            "            + terrain_env_effective(rd) * (1.0 - aer_t);\n",
+            "        if (aer_t < 1.0) {\n",
+            "            frame_radiance = frame_radiance + (sun + ibl) * aer_t\n",
+            "                + terrain_env_effective(rd) * (1.0 - aer_t);\n",
+            "        } else {\n",
+            "            frame_radiance = frame_radiance + sun + ibl;\n",
+            "        }\n",
         ),
     ),
     (
@@ -1381,6 +1394,68 @@ mod fused_kernel_tests {
         assert!(!base.contains("fusion_"));
         assert!(!base.contains("shadow_transmittance"));
         assert!(base.contains("fn intersect_hybrid(ray: Ray) -> HybridHitResult {"));
+    }
+
+    /// The aerial-perspective edit must leave the fog-disabled path
+    /// BYTE-IDENTICAL to the base line, not merely close to it.
+    ///
+    /// Folding the media transmittance into the radiance sum would re-associate
+    /// `frame + sun + ibl` into `frame + (sun + ibl)`. That is equal in exact
+    /// arithmetic but differs by 1 ULP in f32 for a large share of pixels,
+    /// which the tolerance-based golden does not notice but a byte-identity
+    /// gate would. So the edit keeps the base line's STATEMENT verbatim on
+    /// the `aer_t == 1` branch, and `fusion_media_along` returns exactly
+    /// `1.0` when the density is zero.
+    #[test]
+    fn fog_disabled_aerial_perspective_keeps_the_base_line_statement() {
+        let source = fused_kernel().expect("fused kernel assembly");
+        // The base line's statement survives verbatim, in the fog-off branch.
+        let base_statement = "frame_radiance = frame_radiance + sun + ibl;";
+        assert_eq!(
+            source.matches(base_statement).count(),
+            1,
+            "the base line's radiance statement must appear exactly once, \
+             and it must be the fog-disabled branch"
+        );
+        // ...and that occurrence is the one the fog-off branch executes.
+        let aerial = body(&source, "main_terrain");
+        let if_at = aerial
+            .find("if (aer_t < 1.0)")
+            .expect("the aerial-perspective branch");
+        let else_at = aerial
+            .find("} else {")
+            .expect("the fog-disabled else branch");
+        let base_at = aerial
+            .find(base_statement)
+            .expect("the base line's statement");
+        let fog_at = aerial
+            .find("(sun + ibl) * aer_t")
+            .expect("the fog branch's re-associated sum");
+        // The re-associated sum may only exist INSIDE the fog branch: the
+        // branch that a zero density takes must be the base line's own
+        // statement, and the base line's statement must not appear anywhere
+        // else (the count above pins that).
+        assert!(if_at < fog_at, "the fog sum must be inside the fog branch");
+        assert!(
+            fog_at < else_at,
+            "the fog sum must be inside the fog branch, not the fog-disabled one"
+        );
+        assert!(
+            else_at < base_at,
+            "the fog-disabled branch must run the base line's statement"
+        );
+    }
+
+    /// The media transmittance is exactly 1 when the fog density is zero, so
+    /// the branch above is the one a disabled fog actually takes.
+    #[test]
+    fn media_transmittance_is_exactly_one_without_fog() {
+        let source = fused_kernel().expect("fused kernel assembly");
+        let media = body(&source, "fusion_media_along");
+        assert!(
+            media.contains("if (fusion_media.density <= 0.0) { return 1.0; }"),
+            "zero density must short-circuit to exactly 1.0"
+        );
     }
 
     /// Text of `fn name(` up to the next top-level `fn` / `@compute`.
