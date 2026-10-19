@@ -30,6 +30,8 @@ data loading, cartography, export, and the runnable examples in ``examples/``.
    guides/large_scene_support
    guides/competitive_positioning
    guides/data_and_scene_workflows
+   guides/data_to_scene
+   guides/c05_real_data
    guides/rendering_and_analysis
    terrain/offline-render-quality
    guides/output_and_integration

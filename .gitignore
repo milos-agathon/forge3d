@@ -407,6 +407,13 @@ examples/**/*.py
 !examples/mapscene_thematic_rasters.py
 !examples/vector_line_drape.py
 !examples/terrain_water_optics.py
+!examples/prepare_scene.py
+!examples/c05_sources.py
+!examples/c05_real_data.py
+!examples/c05_render.py
+!examples/c05_qgis.py
+!examples/c05_qgis_3d.py
+!examples/c05_report.py
 tests/test_*example*.py
 tests/test_*examples*.py
 .superpowers/
