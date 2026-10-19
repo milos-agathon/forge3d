@@ -367,6 +367,28 @@ pub(crate) fn splat_ray_gaussian(
     Ok(d.into())
 }
 
+/// Identity of the HDRI a fused render used, for the signed certificate.
+///
+/// The certificate has to be comparable across machines, so it records the
+/// file's BASENAME together with the SHA256 of its bytes:
+///
+///   * the absolute path would leak the machine's directory layout into the
+///     signed payload, and
+///   * the path alone would not distinguish two different files that share a
+///     name — the content hash does.
+fn fused_env_identity(path: &str) -> PyResult<String> {
+    let bytes = std::fs::read(path).map_err(|err| {
+        PyValueError::new_err(format!("cannot read env_map {path}: {err}"))
+    })?;
+    let digest = crate::core::provenance::sha256(&bytes);
+    let name = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "env.hdr".to_string());
+    Ok(format!("{name}#{}", crate::core::provenance::to_hex(&digest)))
+}
+
 fn brdf_index(name: &str) -> PyResult<u32> {
     Ok(match name {
         "lambert" => 0,
@@ -856,7 +878,14 @@ pub(crate) fn render_fused(
         ("fused.spp", spp.to_string()),
         ("fused.frames", frames.to_string()),
         ("fused.brdf", brdf.to_string()),
-        ("fused.env_map", env_map.unwrap_or("hosek-wilkie").to_string()),
+        (
+            "fused.env_map",
+            match env_map {
+                Some(path) => fused_env_identity(path)?,
+                None => "hosek-wilkie".to_string(),
+            },
+        ),
+        ("fused.env_rotation_deg", env_rotation_deg.to_string()),
         ("fused.fog_density", fog_density.to_string()),
         ("fused.fog_height_falloff", fog_height_falloff.to_string()),
     ] {
@@ -1210,9 +1239,21 @@ pub(crate) fn render_fused_sequence(
         ("fused.logical_primitives", inputs.scene.logical_primitive_count().to_string()),
         ("fused.paging_policy", policy.to_string()),
         ("fused.views", views.len().to_string()),
+        ("fused.kappa", kappa.to_string()),
+        ("fused.lidar_radius", lidar_radius.to_string()),
+        ("fused.lidar_opacity", lidar_opacity.to_string()),
+        ("fused.lidar_surfels", lidar_surfels.to_string()),
+        ("fused.brdf", brdf.to_string()),
         ("fused.spp", spp.to_string()),
         ("fused.frames", frames.to_string()),
-        ("fused.env_map", env_map.unwrap_or("hosek-wilkie").to_string()),
+        (
+            "fused.env_map",
+            match env_map {
+                Some(path) => fused_env_identity(path)?,
+                None => "hosek-wilkie".to_string(),
+            },
+        ),
+        ("fused.env_rotation_deg", env_rotation_deg.to_string()),
         ("fused.fog_density", fog_density.to_string()),
         ("fused.fog_height_falloff", fog_height_falloff.to_string()),
     ] {

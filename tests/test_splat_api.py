@@ -611,6 +611,68 @@ def test_render_fused_emits_a_signed_certificate(tmp_path):
     assert cert_module.payload_sha256(written)
 
 
+def test_signed_inputs_identify_the_env_map_without_leaking_the_path(tmp_path):
+    """The certificate must name the HDRI by CONTENT, not by local path.
+
+    A signed payload that carries an absolute path leaks the machine's
+    directory layout and is not comparable across machines; one that carries
+    only the path cannot tell two different files that share a name. So the
+    recorded identity is the basename plus the SHA256 of the bytes, and the
+    rotation that changes the pixels is recorded too.
+    """
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    from forge3d.diagnostics import render_certificate
+
+    hdr = tmp_path / "sky.hdr"
+    _write_tiny_hdr(hdr)
+    kwargs = scene_kwargs(manifest())
+    splat.render_fused(
+        **kwargs,
+        samples=4,
+        width=48,
+        height=48,
+        env_map=hdr,
+        env_rotation_deg=30.0,
+    )
+    live = render_certificate(sign=False)
+    recorded = live["inputs"]["fused.env_map"]
+
+    # No machine-specific path leaks into the signed inputs.
+    assert str(tmp_path) not in recorded
+    assert not any(str(tmp_path) in value for value in live["inputs"].values())
+    # The identity names the file and pins its CONTENT.
+    assert recorded.startswith("sky.hdr#")
+    digest = recorded.split("#", 1)[1]
+    assert len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)
+    # The rotation changes the pixels, so it must be part of the signed input.
+    assert float(live["inputs"]["fused.env_rotation_deg"]) == 30.0
+
+    # Two different files with the SAME name must not share an identity.
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    other = other_dir / "sky.hdr"
+    _write_tiny_hdr(other)
+    other.write_bytes(other.read_bytes() + b"\x00" * 7)
+    splat.render_fused(
+        **kwargs, samples=4, width=48, height=48, env_map=other
+    )
+    assert render_certificate(sign=False)["inputs"]["fused.env_map"] != recorded
+
+    # And a different rotation must change the signed inputs.
+    splat.render_fused(
+        **kwargs,
+        samples=4,
+        width=48,
+        height=48,
+        env_map=hdr,
+        env_rotation_deg=90.0,
+    )
+    rotated = render_certificate(sign=False)["inputs"]
+    assert float(rotated["fused.env_rotation_deg"]) == 90.0
+    assert rotated["fused.env_map"] == recorded
+
+
 def test_render_fused_reference_emits_a_certificate():
     if not gpu_available():
         pytest.skip("no usable GPU adapter for the fused render")
