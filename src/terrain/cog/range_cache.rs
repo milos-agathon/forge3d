@@ -23,9 +23,9 @@ pub(crate) struct DiskCache {
 
 pub(crate) fn source_cache_prefix(source: &str) -> String {
     let digest = Sha256::digest(source.as_bytes());
-    let head = u64::from_be_bytes(digest[..8].try_into().expect("8-byte sha256 prefix"));
-    let tail = u64::from_be_bytes(digest[8..16].try_into().expect("8-byte sha256 prefix"));
-    format!("{head:016x}{tail:016x}_")
+    let mut prefix: String = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
+    prefix.push('_');
+    prefix
 }
 
 impl DiskCache {
