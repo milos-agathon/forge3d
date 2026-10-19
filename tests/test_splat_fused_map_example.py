@@ -116,6 +116,16 @@ def test_default_run_nonblank_and_deterministic(tmp_path):
     h1 = hashlib.sha256((out1 / "splat_fused_beauty.png").read_bytes()).hexdigest()
     h2 = hashlib.sha256((out2 / "splat_fused_beauty.png").read_bytes()).hexdigest()
     assert h1 == h2, "rerun is not deterministic"
+    # The SHEET is what the sheet's own footer promises ("seed N reproduces
+    # this sheet byte-for-byte"), so it earns the same byte-identity check as
+    # the beauty. A sheet that drifts between runs would make that claim
+    # false while the beauty test still passed.
+    sheet1 = out1 / "splat_fused_map.png"
+    sheet2 = out2 / "splat_fused_map.png"
+    assert sheet1.exists() and sheet1.stat().st_size > 10000, "sheet PNG is missing or blank"
+    s1 = hashlib.sha256(sheet1.read_bytes()).hexdigest()
+    s2 = hashlib.sha256(sheet2.read_bytes()).hexdigest()
+    assert s1 == s2, "the map sheet is not byte-identical across reruns"
     # Report structure.
     report = json.loads((out1 / "report.json").read_text())
     assert "hit_counts" in report

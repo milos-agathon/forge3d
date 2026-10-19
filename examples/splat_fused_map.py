@@ -50,7 +50,10 @@ Poly Haven "pure sky", fetched once and cached): ``splat.render_fused
 exposure on load and clamps its sun disc so it lights the scene without
 fireflies. ``--hdr PATH`` uses any ``.hdr/.rgbe/.exr``, ``--hdr none``
 falls back to the analytic Hosek-Wilkie sky, and ``--hdr-rotation DEG``
-places the HDRI's sun. Distant terrain is rendered as aerial perspective:
+places the HDRI's sun. The rotation uses the same convention as
+``--sun-azimuth`` (0 deg = +x, 90 deg = +z; note the map sheet's world
+north is -z), so a positive angle moves a feature in the HDRI toward +z.
+Distant terrain is rendered as aerial perspective:
 the same exponential height fog that dims sun rays blends far surfaces
 toward the sky colour (``--fog`` density, ``--fog-falloff``), so ridges
 recede into haze instead of a hard silhouette. Fog is off on the ``top``
@@ -1165,7 +1168,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "daytime preset for --dem renders (analytic sky for the fixture), "
                              "'none' forces the analytic Hosek-Wilkie sky")
     render.add_argument("--hdr-rotation", type=float, default=0.0,
-                        help="rotate the HDRI about +y in degrees to place its sun")
+                        help="rotate the HDRI about +y in degrees to place its sun; "
+                             "same convention as --sun-azimuth (0 deg = +x, 90 deg = +z; "
+                             "world north is -z), so a positive angle moves a feature toward +z")
     render.add_argument("--fog", type=float, default=0.0004,
                         help="aerial-perspective fog density per world unit "
                              "(distance haze toward the sky; 0 disables)")
@@ -1444,7 +1449,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # The HDRI replaces the Hosek-Wilkie bake when present. Sky intensity
     # scales it the same way (its exposure is normalised on load), so the
     # hero no longer needs the old golden-hour 3.0 boost.
-    hdr_path = _resolve_hdr(args.hdr, use_dem)
+    try:
+        hdr_path = _resolve_hdr(args.hdr, use_dem)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     env_desc = "Hosek-Wilkie analytic sky"
     if hdr_path is not None:
         env_desc = f"{Path(hdr_path).name} (rot {args.hdr_rotation:.0f} deg)"
