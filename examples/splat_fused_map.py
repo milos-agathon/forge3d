@@ -172,14 +172,30 @@ def _resolve_dem_path(path: Path) -> Path:
     return cached
 
 
+def _hdr_cache_ok(path: Path) -> bool:
+    """Whether a cached preset is a real, complete download.
+
+    A cache hit is trusted only when the file is non-trivial *and* hashes to
+    :data:`HDR_PRESET_MD5`; a truncated or corrupted cache must re-download
+    rather than render as a wrong sky.
+    """
+    import hashlib
+
+    return (
+        path.exists()
+        and path.stat().st_size > 1000
+        and hashlib.md5(path.read_bytes()).hexdigest() == HDR_PRESET_MD5
+    )
+
+
 def _resolve_hdr(spec: str, use_dem: bool) -> Optional[str]:
     """Return a path to an equirect HDRI, or None for the analytic sky.
 
     ``none`` forces the Hosek-Wilkie sky. ``auto`` uses the CC0 daytime
     preset for ``--dem`` renders and keeps the analytic sky for the fixture
     (whose acceptance path stays offline and byte-stable); anything else is
-    a file path. With no network the preset falls back to the analytic sky
-    and says so.
+    a file path. The preset is md5-checked on every hit, cached or fresh.
+    With no network the preset falls back to the analytic sky and says so.
     """
     if spec == "none":
         return None
@@ -192,10 +208,11 @@ def _resolve_hdr(spec: str, use_dem: bool) -> Optional[str]:
         return str(p)
     cache_dir = Path.home() / ".forge3d" / "datasets" / "hdri"
     cached = cache_dir / f"{HDR_PRESET}_2k.hdr"
-    if cached.exists() and cached.stat().st_size > 1000:
+    if _hdr_cache_ok(cached):
         return str(cached)
+    # A stale or corrupt cache must not shadow a good download.
+    cached.unlink(missing_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    import hashlib
     import urllib.request
 
     print(f"[hdr] fetching CC0 daytime sky {HDR_PRESET} ...")
@@ -205,8 +222,7 @@ def _resolve_hdr(spec: str, use_dem: bool) -> Optional[str]:
         cached.unlink(missing_ok=True)
         print(f"[hdr] could not fetch HDRI ({exc}); using Hosek-Wilkie sky")
         return None
-    digest = hashlib.md5(cached.read_bytes()).hexdigest()
-    if digest != HDR_PRESET_MD5:
+    if not _hdr_cache_ok(cached):
         cached.unlink(missing_ok=True)
         print("[hdr] preset checksum mismatch; using Hosek-Wilkie sky")
         return None
