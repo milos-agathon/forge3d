@@ -411,10 +411,13 @@ def _load_native_raster_overlay(
                 resampling=resampling,
                 dst_nodata=metadata.get("dst_nodata", metadata.get("nodata")),
             )
-            overlay = _raster_to_rgba8(result["array"])
+            values = result["array"]
+            if values.ndim == 3:
+                values = np.moveaxis(values, 0, -1)
+            overlay = _raster_to_rgba8(values)
         else:
             with rasterio.open(path) as src:
-                overlay = _raster_to_rgba8(src.read())
+                overlay = _raster_to_rgba8(np.moveaxis(src.read(), 0, -1))
     return _resize_nearest_rgba(overlay, target_shape)
 
 
@@ -1992,6 +1995,19 @@ def _pixel_to_ndc(point: tuple[int, int], width: int, height: int) -> tuple[floa
     return (max(-1.0, min(1.0, x)), max(-1.0, min(1.0, y)))
 
 
+def _vector_point_to_pixel(point: Sequence[Any], layer: "VectorOverlay", width: int, height: int) -> tuple[int, int]:
+    grid = _metadata_dict(layer.metadata).get("preparation_grid")
+    if grid is None or getattr(point, "terrain_projected", False):
+        # Camera-projected terrain pixels already carry the native viewport convention.
+        return _render_point_to_pixel(point, width, height)
+    from .alignment import _affine_from_metadata
+    column, row = ~_affine_from_metadata(grid["geotransform"]) * (float(point[0]), float(point[1]))
+    # Prepared vectors keep geographic coordinates in the recipe. Only this
+    # explicit display seam converts them to the shared target-grid footprint.
+    return (int(round(column / grid["width"] * (width - 1))),
+            int(round(row / grid["height"] * (height - 1))))
+
+
 def _vector_layer_requires_precise_raster(layer: "VectorOverlay") -> bool:
     """Return True when the layer needs the deterministic Python stroke path.
 
@@ -2118,14 +2134,14 @@ def _native_vector_payload_for_layer(layer: "VectorOverlay", width: int, height:
                 continue
             for polygon_rings in _render_geometry_polygon_rings(geometry):
                 for ring in polygon_rings:
-                    points = [_render_point_to_pixel(point, width, height) for point in ring]
+                    points = [_vector_point_to_pixel(point, layer, width, height) for point in ring]
                     if len(points) < 2:
                         continue
                     if points[0] != points[-1]:
                         points.append(points[0])
                     append_line(points, feature_rgba, feature_width)
             continue
-        points = [_render_point_to_pixel(point, width, height) for point in _render_geometry_points(geometry)]
+        points = [_vector_point_to_pixel(point, layer, width, height) for point in _render_geometry_points(geometry)]
         if geometry_type == "point" and points:
             points_xy.append(_pixel_to_ndc(points[0], width, height))
             point_rgba_values.append(feature_rgba)
@@ -2187,13 +2203,13 @@ def _native_polygon_payload_for_layers(
             for polygon_rings in _render_geometry_polygon_rings(geometry):
                 if not polygon_rings:
                     continue
-                exterior = [_pixel_to_ndc(_render_point_to_pixel(point, width, height), width, height) for point in polygon_rings[0]]
+                exterior = [_pixel_to_ndc(_vector_point_to_pixel(point, layer, width, height), width, height) for point in polygon_rings[0]]
                 if len(exterior) < 3:
                     continue
                 exteriors.append(np.asarray(exterior, dtype=np.float64))
                 hole_set = []
                 for ring in polygon_rings[1:]:
-                    hole = [_pixel_to_ndc(_render_point_to_pixel(point, width, height), width, height) for point in ring]
+                    hole = [_pixel_to_ndc(_vector_point_to_pixel(point, layer, width, height), width, height) for point in ring]
                     if len(hole) >= 3:
                         hole_set.append(np.asarray(hole, dtype=np.float64))
                 holes.append(hole_set)
@@ -2308,7 +2324,7 @@ def _composite_python_precise_vector_layers(
             if geometry_type in {"polygon", "multipolygon"}:
                 for polygon_rings in _render_geometry_polygon_rings(geometry):
                     pixel_rings = [
-                        [_render_point_to_pixel(point, width, height) for point in ring]
+                        [_vector_point_to_pixel(point, layer, width, height) for point in ring]
                         for ring in polygon_rings
                         if len(ring) >= 3
                     ]
@@ -2331,7 +2347,7 @@ def _composite_python_precise_vector_layers(
                             )
                 continue
             points = [
-                _render_point_to_pixel(point, width, height)
+                _vector_point_to_pixel(point, layer, width, height)
                 for point in _render_geometry_points(geometry)
             ]
             if len(points) == 1:

@@ -6,6 +6,13 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Added
+- Reusable local data-to-scene preparation: `PreparationRecipe` declares each input's CRS, height units/datum, nodata and resampling once; `prepare_scene` warps elevation, categorical, count, imagery, vector and observation inputs onto one target grid without resampling counts or class IDs, refuses unsupported datum conversions such as NAP/LN02, and records operations, coverage and checkpoint residuals. `PreparedScene` saves hash-checked snapshots reusable without the original sources and writes coverage previews, registered viewer assets and `MapScene` scenes whose display rasters drape on the terrain. Failures, including malformed recipes and existing outputs, are structured `PreparationError` diagnostics. CLI: `examples/prepare_scene.py`; guides: data-to-scene and C05 real data (#257).
+- Optional single-extent Unreal Landscape packages: `export_landscape` writes a 16-bit heightmap with a declared reconstruction formula and quantization bound, one mask per land-cover class, a geographic sidecar and complete manual import settings; `verify_landscape_import` compares measured Editor vertices with the package (#257).
+
+### Fixed
+- MapScene GeoTIFF raster overlays only 1, 3 or 4 pixels wide keep their band order instead of being misread as band-last arrays (#257).
+
 ## [1.44.0] - 2026-10-15
 
 ### Added
