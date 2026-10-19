@@ -61,6 +61,28 @@ def test_parser_defaults():
     assert args.view is None
 
 
+def test_hdr_cache_is_checksum_validated(tmp_path, monkeypatch):
+    """A cached preset must be md5-checked, not trusted on size alone."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    mod = _load_module()
+    cache = tmp_path / ".forge3d" / "datasets" / "hdri" / f"{mod.HDR_PRESET}_2k.hdr"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"corrupt" + b"\x00" * 4000)  # non-trivial size, wrong hash
+
+    def _offline(*args, **kwargs):  # noqa: ARG001
+        raise OSError("offline")
+
+    monkeypatch.setattr("urllib.request.urlretrieve", _offline)
+    # Old behavior returned the corrupt path; a validated cache falls back.
+    assert mod._resolve_hdr("auto", use_dem=True) is None
+    assert not cache.exists(), "the rejected cache must be discarded"
+
+    # A cache whose hash matches the preset is accepted without any network.
+    monkeypatch.setattr(mod, "HDR_PRESET_MD5", hashlib.md5(cache_bytes := b"good" * 2000).hexdigest())
+    cache.write_bytes(cache_bytes)
+    assert mod._resolve_hdr("auto", use_dem=True) == str(cache)
+
+
 def test_default_run_nonblank_and_deterministic(tmp_path):
     if not gpu_available():
         pytest.skip("no GPU adapter available")
