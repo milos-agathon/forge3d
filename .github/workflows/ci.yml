@@ -949,6 +949,13 @@ jobs:
           python scripts/install_compatible_wheel.py dist
           pip install pytest pyyaml numpy pillow pyproj rasterio
 
+      - uses: dtolnay/rust-toolchain@1.97.1
+
+      # NEPHELE's slow naga gate builds an offline scratch crate against the
+      # locked naga; prefetch so it validates instead of failing to resolve.
+      - name: Prefetch locked crates for offline naga validation
+        run: cargo fetch --locked
+
       - name: Run accounted slow Python lane
         env:
           FORGE3D_NO_BOOTSTRAP: '1'

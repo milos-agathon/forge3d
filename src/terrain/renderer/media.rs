@@ -3504,7 +3504,14 @@ mod tests {
         csm.upload_uniforms(&queue);
 
         let run = |depth_clear: f32| {
-            let mut pass = ViewerMediaPass::new(&device, &queue, viewport, medium.clone(), 7)
+            let mut pass = ViewerMediaPass::new(
+                &device,
+                &queue,
+                viewport,
+                medium.clone(),
+                7,
+                ViewerMediaOptions::default(),
+            )
                 .expect("live viewer media pass must construct");
             pass.prepare_viewer_terrain_trace(
                 &device,
@@ -4445,7 +4452,15 @@ mod tests")
         )
         .unwrap();
         let medium_identity = medium.identity(1);
-        let mut viewer = ViewerMediaPass::new(&device, &queue, (1, 1), medium, 1).unwrap();
+        let mut viewer = ViewerMediaPass::new(
+            &device,
+            &queue,
+            (1, 1),
+            medium,
+            1,
+            ViewerMediaOptions::default(),
+        )
+        .unwrap();
         viewer
             .prepare_viewer_frame(
                 &queue,
