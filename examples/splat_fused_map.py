@@ -95,7 +95,16 @@ DEM_PRESETS = {
     "luxembourg": ASSET_DIR / "tif" / "luxembourg_dem.tif",
 }
 
-LFS_BASE_URL = "https://media.githubusercontent.com/media/milos-agathon/forge3d/main/assets"
+# The DEMs are Git LFS objects, so a local checkout holds a pointer and the
+# real bytes come from the media CDN. The ref is a FIXED COMMIT, not `main`:
+# a branch ref would let the asset change under a render that already
+# recorded its own hash, and the map would stop being reproducible. This is
+# the v1.44.0 release commit, the version this script ships with.
+LFS_ASSET_COMMIT = "5a6642205a1865b7a21f45a36e98e717cbf1e16a"
+LFS_BASE_URL = (
+    f"https://media.githubusercontent.com/media/milos-agathon/forge3d/"
+    f"{LFS_ASSET_COMMIT}/assets"
+)
 
 # CC0 daytime "pure sky" HDRI (Poly Haven: Kloofendal 48d Partly Cloudy).
 # Sky-only, so nothing from a captured ground bleeds into the map lighting;
