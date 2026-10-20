@@ -1924,12 +1924,16 @@ impl HybridPathTracer {
                 cpass.set_bind_group(3, &bg3, &[]);
                 cpass.dispatch_workgroups(wg_x, wg_y, 1);
             }
-            if time_this_frame {
+            let submission = if time_this_frame {
                 timing.end(&mut enc, publish_scope, 1);
-                timing.submit(queue, enc);
+                timing.submit(queue, enc)
             } else {
-                queue.submit([enc.finish()]);
-            }
+                queue.submit([enc.finish()])
+            };
+            // Complete each frame before accumulating another: large poster
+            // tiles otherwise queue a whole convergence window of terrain
+            // dispatches. The window still controls statistics readback below.
+            device.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
             frames += 1;
 
             let window_full = frames.is_multiple_of(WELFORD_WINDOW);
