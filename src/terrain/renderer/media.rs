@@ -1219,10 +1219,23 @@ impl TerrainMediaResources {
                         })
                     })
                     .collect::<Vec<_>>();
-                let mut ordered = handles
+                // Join every worker so the scope never re-raises a panic; a
+                // panicked worker fails the upload instead of the process.
+                let joined = handles
                     .into_iter()
-                    .flat_map(|handle| handle.join().expect("media upload worker panicked"))
+                    .map(|handle| handle.join())
                     .collect::<Vec<_>>();
+                let mut ordered = Vec::new();
+                for part in joined {
+                    match part {
+                        Ok(part) => ordered.extend(part),
+                        Err(_) => {
+                            return vec![Err(crate::core::error::RenderError::render(
+                                "media upload worker panicked",
+                            ))]
+                        }
+                    }
+                }
                 ordered.sort_by_key(|(z, _)| *z);
                 ordered.into_iter().map(|(_, result)| result).collect()
             });
@@ -3956,7 +3969,9 @@ mod tests {
     fn single_scatter_is_filtered_before_multiple_scatter_and_integration() {
         let shader = include_str!("../../shaders/nephele_froxel.wgsl");
         assert!(shader.contains("fn cs_nephele_filter_single"));
-        let rust = include_str!("media.rs")
+        // Normalize CRLF checkouts (Windows CI) before splitting off the tests.
+        let source = include_str!("media.rs").replace("\r\n", "\n");
+        let rust = source
             .split("#[cfg(test)]
 mod tests")
             .next()
@@ -3968,7 +3983,9 @@ mod tests")
     }
     #[test]
     fn viewer_media_encode_does_not_require_clear_texture_feature() {
-        let rust = include_str!("media.rs")
+        // Normalize CRLF checkouts (Windows CI) before splitting off the tests.
+        let source = include_str!("media.rs").replace("\r\n", "\n");
+        let rust = source
             .split("#[cfg(test)]
 mod tests")
             .next()
