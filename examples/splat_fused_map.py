@@ -1461,10 +1461,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Aerial perspective reads correctly on oblique/hero frames (distant
     # ridges recede). On the top-down plan every ray points down through the
     # whole camera altitude, so the same fog would just mute the hypsometric
-    # cartograph's edges — off there.
+    # cartograph's edges — off there, and said out loud rather than dropped.
     is_plan = effective_view == "top"
-    fog_density = args.fog if (use_dem and not is_plan) else 0.0
-    fog_falloff = args.fog_falloff if (use_dem and not is_plan) else 0.0
+    if is_plan:
+        fog_density = 0.0
+        fog_falloff = 0.0
+        if args.fog > 0.0:
+            print("[fog] off on the top-down plan view (it would mute the hypsometric edges)")
+    else:
+        fog_density = args.fog
+        fog_falloff = args.fog_falloff
     if fog_density > 0.0:
         print(f"[fog] aerial perspective: density {fog_density}, falloff {fog_falloff}")
 
@@ -1657,8 +1663,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             frame = splat.render_fused(
                 splats=cloud,
                 pointcloud=pointcloud,
-        point_positions=None if point_arrays is None else point_arrays[0],
-        point_colors=None if point_arrays is None else point_arrays[1],
+                point_positions=None if point_arrays is None else point_arrays[0],
+                point_colors=None if point_arrays is None else point_arrays[1],
                 terrain=terrain,
                 camera=frame_cam,
                 width=aw,
