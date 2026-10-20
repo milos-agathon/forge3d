@@ -98,14 +98,17 @@ mod tests {
     #[test]
     fn test_supercompression_scheme_conversion() {
         assert_eq!(
-            SuperCompressionScheme::try_from(0).unwrap(),
+            SuperCompressionScheme::from(0),
             SuperCompressionScheme::None
         );
         assert_eq!(
-            SuperCompressionScheme::try_from(1).unwrap(),
+            SuperCompressionScheme::from(1),
             SuperCompressionScheme::BasisLZ
         );
-        assert!(SuperCompressionScheme::try_from(999).is_err());
+        assert_eq!(
+            SuperCompressionScheme::from(999),
+            SuperCompressionScheme::None
+        );
     }
 
     #[test]

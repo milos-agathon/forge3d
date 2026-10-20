@@ -82,18 +82,14 @@ pub enum SuperCompressionScheme {
     ZLIB = 3,
 }
 
-use std::convert::TryFrom;
-
-impl TryFrom<u32> for SuperCompressionScheme {
-    type Error = String;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+impl From<u32> for SuperCompressionScheme {
+    fn from(value: u32) -> Self {
         match value {
-            0 => Ok(Self::None),
-            1 => Ok(Self::BasisLZ),
-            2 => Ok(Self::ZStandard),
-            3 => Ok(Self::ZLIB),
-            other => Err(format!("Unknown KTX2 supercompression scheme: {}", other)),
+            0 => Self::None,
+            1 => Self::BasisLZ,
+            2 => Self::ZStandard,
+            3 => Self::ZLIB,
+            _ => Self::None,
         }
     }
 }

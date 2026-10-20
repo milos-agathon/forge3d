@@ -96,10 +96,7 @@ impl Ktx2Loader {
             .map_err(|e| format!("Failed to read texture data: {}", e))?;
 
         // Handle supercompression
-        let supercompression = match SuperCompressionScheme::try_from(header.supercompression_scheme) {
-        Ok(scheme) => scheme,
-        Err(err) => return Err(err),
-    };
+        let supercompression = SuperCompressionScheme::from(header.supercompression_scheme);
         match supercompression {
             SuperCompressionScheme::None => Ok(texture_data),
             SuperCompressionScheme::BasisLZ => self.transcode_basis_universal(texture_data, header),
