@@ -58,7 +58,8 @@ raises an error. No CPU vertex/index arrays are added.
 
 Existing mesh modes retain their 512² beauty grid and 1024² shadow grid.
 Public defaults, signatures, registration, exports, serialized formats,
-goldens, signed certificates, dependencies and gates are unchanged.
+goldens, signed certificates and dependencies are unchanged. The exact
+owner-approved conversion-inventory gate transition is recorded below.
 The WGSL source pin was refreshed after explicit owner approval;
 approval and final validation are recorded separately from the initial results.
 The existing `camera_mode` getter is now represented in the
@@ -184,8 +185,9 @@ The existing native registration, exports and API symbol lists need no new
 entry because this is an option on the existing string property.
 
 Review reopened the local `MAP-TERRAIN-SCALE` item because rectangular
-silhouette sampling was unproven. It is now closed after the correction,
-explicit source-pin approval and final native proof/GPU verification below.
+silhouette sampling was unproven. The correction, explicit source-pin approval
+and final native proof/GPU verification are recorded below; publication
+acceptance also requires green checks on the latest PR commit.
 The independent 05 ORBIS and 19 TESSELLA atlas assessments are unchanged.
 
 The initial verification did not exercise the full Cargo/Python/hosted CI matrix,
@@ -201,7 +203,7 @@ applied to contracts or skills: select registry/roadmap JSON entries through a
 parser, since a text match can print their entire single-line payload; use
 `rg -g` file filters in PowerShell; set writable task `TEMP`/`TMP` before venv
 creation; use a private target on a volume with sufficient space when the
-shared target fills. The source, gate and skill contracts were not edited.
+shared target fills. Agent contracts and skills were not edited.
 
 ## Review remediation — 2026-10-20
 
@@ -330,11 +332,39 @@ The 30-test GPU/offline/golden run and 174 exact array comparisons above are
 retained for the unchanged WGSL/geometry. Between those captures and final
 verification, only the approved verifier pin/comment changed; the geometry
 test-file hash remains identical. No golden, signed certificate, other
-determinism reference, dependency or gate was changed. The roadmap item is
-**done**. Publication was subsequently authorized. Unrelated file deletions
+determinism reference or dependency was changed. The conversion-inventory gate
+transition approved during publication is recorded below. Publication was
+subsequently authorized. Unrelated file deletions
 present on resumption were preserved, not restored or included in this change.
 
-Full CI, other physical backends and the film compositor remain unrun. No
+Full acceptance CI, other physical backends and the film compositor remain unrun. No
 fresh certificate/signing claim is made. Reusable guidance proposed, not
 applied to agent contracts: geometry-density proof should include a non-square
 input in each orientation and test alignment to source samples on both axes.
+
+### Approved conversion-inventory transition and PR checks
+
+Publication is PR [#261](https://github.com/milos-agathon/forge3d/pull/261).
+The first hosted CI run passed formatting, Clippy and the native build, then
+Fast Contract reported eight failures from the frozen conversion inventory
+(583 passed, 29 skipped). The DEM grid changes three cast-site records and
+removes four old records, changing the raw inventory from 1856 to 1855 sites.
+
+On 2026-10-20 Milos explicitly approved this exact transition in
+`tests/test_world_coord_f32_gate.py` and
+`tests/data/world_coord_f32_ledger.json`. The new record pins both complete
+inventories, checks the exact three additions and four removals, reconstructs
+the main inventory, then runs the existing historical checks. Every earlier
+ledger record, frozen digest, scanner rule and rejecting probe is retained.
+New negative controls reject missing, duplicate, changed and extra sites.
+The operands are integer render-grid dimensions; no world-coordinate cast is
+introduced.
+
+The active command
+`python -m pytest tests/test_world_coord_f32_gate.py -q --junitxml=artifacts/terrain-dem-resolution/remediation/ci-inventory-active.xml`
+passed **31 tests in 71.67s**, with zero skips. It used the worktree venv,
+`FORGE3D_NO_BOOTSTRAP=1` and `PYTHONPATH` set to the worktree's `python/`.
+The log and JUnit report are retained under `remediation/`. These publication
+changes affect tests and documentation only; the recorded native/GPU evidence
+above applies to the unchanged production source. Hosted checks must pass on
+the latest PR commit before the local roadmap item is closed.

@@ -1648,5 +1648,65 @@
     ],
     "removed": [],
     "review": "2026-10-13: Milos instructed completing a green and mergeable PR after this exact ten-site inventory transition was presented. Six conversions encode normalized normal components; four convert boolean flags losslessly to 0 or 1. No world-coordinate cast is added, no site is removed, and every preceding ledger record and rejecting probe is retained. Rebased after main PR #234: the base is its texture_layout_stats result; the same ten additions give 1846 sites (owner-approved 2026-10-13)."
+  },
+  "terrain_dem_mesh": {
+    "base_count": 1856,
+    "base_digest": "bd31cb70466826afdfb900d4fb492895aa68d297727f0084a95ab1722c52d9de",
+    "result_count": 1855,
+    "result_digest": "4ee971a29b48314d55e2cb52e65161539e775d4d372360c099f4c2e981a4f1f7",
+    "added": [
+      [
+        "src/terrain/renderer/shadows/render.rs",
+        "<module>",
+        "as_f32",
+        6,
+        "light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, height_exag, height_min, height_max], grid_params: [grid_size.0 as f32, grid_size.1 as f32, 0.0, 0.0], height_curve,"
+      ],
+      [
+        "src/terrain/renderer/shadows/render.rs",
+        "<module>",
+        "as_f32",
+        7,
+        "light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, height_exag, height_min, height_max], grid_params: [grid_size.0 as f32, grid_size.1 as f32, 0.0, 0.0], height_curve,"
+      ],
+      [
+        "src/terrain/renderer/upload.rs",
+        "build_uniforms_with_matrices",
+        "as_f32",
+        1,
+        "let grid_size = terrain_grid_size(&params.camera_mode, height_dims).0 as f32"
+      ]
+    ],
+    "removed": [
+      [
+        "src/terrain/renderer/draw/mod.rs",
+        "render_internal",
+        "as_f32",
+        1,
+        "let uniforms = self.build_uniforms( params, decoded, height_inputs.width as f32, height_inputs.height as f32, )?"
+      ],
+      [
+        "src/terrain/renderer/draw/mod.rs",
+        "render_internal",
+        "as_f32",
+        2,
+        "let uniforms = self.build_uniforms( params, decoded, height_inputs.width as f32, height_inputs.height as f32, )?"
+      ],
+      [
+        "src/terrain/renderer/shadows/render.rs",
+        "<module>",
+        "as_f32",
+        6,
+        "light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, height_exag, height_min, height_max], grid_params: [SHADOW_GRID_RES as f32, 0.0, 0.0, 0.0], height_curve,"
+      ],
+      [
+        "src/terrain/renderer/upload.rs",
+        "build_uniforms_with_matrices",
+        "as_f32",
+        1,
+        "let grid_size = clipmap_camera_config(&params.camera_mode) .map(|config| config.ring_resolution as f32) .unwrap_or(512.0)"
+      ]
+    ],
+    "review": "2026-10-20: Milos explicitly approved this exact 1856-to-1855 DEM mesh conversion-inventory transition for PR #261. Three grid-dimension casts replace four prior dimension casts. Two redundant call-site conversions are removed; the caster now uploads both axes. No absolute-world-coordinate narrowing, scanner exemption, historical freeze replacement or gate relaxation."
   }
 }

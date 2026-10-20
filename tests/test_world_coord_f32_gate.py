@@ -1420,7 +1420,9 @@ def _inventory_before_water_optics():
     """Check both approved branch inventories without replacing either freeze."""
     water = _ledger_data()["water_optics"]
     viewport = _ledger_data()["viewer_viewport_resize"]
-    sites = _undo_sky_lighting_transition(conversion_inventory())
+    sites = _undo_sky_lighting_transition(
+        _undo_dem_mesh_transition(conversion_inventory())
+    )
     normalized = _undo_scene_pick_assembly_transition(sites)
     water_added = set(map(tuple, water["added"]))
     viewport_added = set(map(tuple, viewport["added"]))
@@ -1527,3 +1529,114 @@ def test_water_optics_inventory_transition_is_exact():
     assert transition["removed"] == []
     assert transition["result_count"] == transition["base_count"] + len(expected_added)
     _inventory_before_water_optics()
+
+
+def _dem_mesh_conversion_sites():
+    """Exact integer render-dimension sites; no world coordinates cross this boundary."""
+    added = [('src/terrain/renderer/shadows/render.rs',
+      '<module>',
+      'as_f32',
+      6,
+      'light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, '
+      'height_exag, height_min, height_max], grid_params: [grid_size.0 as f32, '
+      'grid_size.1 as f32, 0.0, 0.0], height_curve,'),
+     ('src/terrain/renderer/shadows/render.rs',
+      '<module>',
+      'as_f32',
+      7,
+      'light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, '
+      'height_exag, height_min, height_max], grid_params: [grid_size.0 as f32, '
+      'grid_size.1 as f32, 0.0, 0.0], height_curve,'),
+     ('src/terrain/renderer/upload.rs',
+      'build_uniforms_with_matrices',
+      'as_f32',
+      1,
+      'let grid_size = terrain_grid_size(&params.camera_mode, height_dims).0 as '
+      'f32')]
+    removed = [('src/terrain/renderer/draw/mod.rs',
+      'render_internal',
+      'as_f32',
+      1,
+      'let uniforms = self.build_uniforms( params, decoded, height_inputs.width as '
+      'f32, height_inputs.height as f32, )?'),
+     ('src/terrain/renderer/draw/mod.rs',
+      'render_internal',
+      'as_f32',
+      2,
+      'let uniforms = self.build_uniforms( params, decoded, height_inputs.width as '
+      'f32, height_inputs.height as f32, )?'),
+     ('src/terrain/renderer/shadows/render.rs',
+      '<module>',
+      'as_f32',
+      6,
+      'light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, '
+      'height_exag, height_min, height_max], grid_params: [SHADOW_GRID_RES as f32, '
+      '0.0, 0.0, 0.0], height_curve,'),
+     ('src/terrain/renderer/upload.rs',
+      'build_uniforms_with_matrices',
+      'as_f32',
+      1,
+      'let grid_size = clipmap_camera_config(&params.camera_mode) .map(|config| '
+      'config.ring_resolution as f32) .unwrap_or(512.0)')]
+    return added, removed
+
+
+def _undo_dem_mesh_transition(sites):
+    """Prove the complete current freeze, then reconstruct the unchanged main freeze."""
+    transition = _ledger_data()["terrain_dem_mesh"]
+    added, removed = _dem_mesh_conversion_sites()
+    assert transition["added"] == [list(site) for site in added]
+    assert transition["removed"] == [list(site) for site in removed]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        1856, "bd31cb70466826afdfb900d4fb492895aa68d297727f0084a95ab1722c52d9de",
+    )
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1855, "4ee971a29b48314d55e2cb52e65161539e775d4d372360c099f4c2e981a4f1f7",
+    )
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    assert all(sites.count(site) == 1 for site in added)
+    assert all(site not in sites for site in removed)
+    # The first and third additions replace the old caster-width and upload sites.
+    # Both caster axes share one normalized statement, but remain distinct occurrences.
+    replacements = {added[0]: removed[2], added[2]: removed[3]}
+    restored = [replacements.get(site, site) for site in sites if site != added[1]]
+    # The removed draw-call dimensions were the only casts in draw/mod.rs.
+    draw_path = removed[0][0]
+    assert not any(site[0] == draw_path for site in restored)
+    index = next(i for i, site in enumerate(restored) if site[0] > draw_path)
+    restored[index:index] = removed[:2]
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+    return restored
+
+
+def test_dem_mesh_conversion_transition_is_exact():
+    sites = conversion_inventory()
+    restored = _undo_dem_mesh_transition(sites)
+    added, removed = _dem_mesh_conversion_sites()
+    assert collections.Counter(sites) - collections.Counter(restored) == collections.Counter(added)
+    assert collections.Counter(restored) - collections.Counter(sites) == collections.Counter(removed)
+    assert _ledger_data()["terrain_dem_mesh"]["review"]
+    _inventory_before_water_optics()
+
+
+def test_dem_mesh_conversion_transition_rejects_missing_duplicate_changed_and_extra_sites():
+    import pytest
+
+    sites = conversion_inventory()
+    first = _dem_mesh_conversion_sites()[0][0]
+    index = sites.index(first)
+    changed = (*first[:4], "world_position.x as f32")
+    extra = (first[0], "world_position", "as_f32", 1, "world_position.x as f32")
+    mutants = (
+        sites[:index] + sites[index + 1:],
+        sites + [first],
+        sites[:index] + [changed] + sites[index + 1:],
+        sites + [extra],
+    )
+    for mutated in mutants:
+        with pytest.raises(AssertionError):
+            _undo_dem_mesh_transition(mutated)
