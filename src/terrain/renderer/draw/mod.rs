@@ -108,8 +108,7 @@ impl TerrainScene {
         let uniforms = self.build_uniforms(
             params,
             decoded,
-            height_inputs.width as f32,
-            height_inputs.height as f32,
+            (height_inputs.width, height_inputs.height),
         )?;
         super::runtime_contract::record_observation(
             "terrain.render_internal",

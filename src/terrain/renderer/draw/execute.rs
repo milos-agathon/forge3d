@@ -100,6 +100,7 @@ impl TerrainScene {
             camera_view,
             camera_proj,
             main_height_view,
+            (height_inputs.width, height_inputs.height),
             materials.material_view(),
             materials.material_sampler(),
             &materials.shading_buffer,

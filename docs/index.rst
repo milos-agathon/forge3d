@@ -34,6 +34,7 @@ data loading, cartography, export, and the runnable examples in ``examples/``.
    guides/c05_real_data
    guides/rendering_and_analysis
    terrain/offline-render-quality
+   terrain/dem-mesh
    guides/output_and_integration
    examples/index
 

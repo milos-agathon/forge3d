@@ -294,7 +294,7 @@ impl TerrainRenderParams {
         self.output_srgb_eotf
     }
 
-    /// P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
+    /// Camera mode; `mesh:zup:dem` opts into DEM-driven procedural grid density.
     #[getter]
     pub fn camera_mode(&self) -> &str {
         &self.camera_mode

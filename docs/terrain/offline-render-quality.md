@@ -4,6 +4,10 @@ This page documents the repo's terrain offline-rendering path. It is the
 high-quality accumulation workflow behind `forge3d.offline.render_offline()`
 and the lower-level `TerrainRenderer` accumulation API.
 
+For silhouettes at the DEM's sampling density, opt into
+[`camera_mode="mesh:zup:dem"`](dem-mesh.md). Existing mesh modes keep their
+512-by-512 grid.
+
 ## When To Use It
 
 Use the offline path when an interactive viewer snapshot is not enough and you

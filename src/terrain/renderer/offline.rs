@@ -643,8 +643,13 @@ impl TerrainScene {
             state.internal_width,
             state.internal_height,
         );
-        let uniforms =
-            Self::build_uniforms_with_matrices(&state.params, &state.decoded, view, jittered_proj);
+        let uniforms = Self::build_uniforms_with_matrices(
+            &state.params,
+            &state.decoded,
+            (state.height_inputs.width, state.height_inputs.height),
+            view,
+            jittered_proj,
+        );
         super::runtime_contract::record_observation(
             "terrain.accumulate_batch",
             &uniforms,
@@ -794,6 +799,7 @@ impl TerrainScene {
                 view,
                 jittered_proj,
                 main_height_view,
+                (state.height_inputs.width, state.height_inputs.height),
                 state.materials.material_view(),
                 state.materials.material_sampler(),
                 &state.materials.shading_buffer,

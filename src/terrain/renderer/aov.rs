@@ -623,8 +623,7 @@ impl TerrainScene {
         let uniforms = self.build_uniforms(
             params,
             decoded,
-            height_inputs.width as f32,
-            height_inputs.height as f32,
+            (height_inputs.width, height_inputs.height),
         )?;
         super::runtime_contract::record_observation(
             "terrain.render_internal_with_aov",
@@ -837,6 +836,7 @@ impl TerrainScene {
             camera_view,
             camera_proj,
             main_height_view,
+            (height_inputs.width, height_inputs.height),
             materials.material_view(),
             materials.material_sampler(),
             &materials.shading_buffer,
