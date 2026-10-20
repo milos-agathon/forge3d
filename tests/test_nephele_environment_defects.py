@@ -6,10 +6,20 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 
+from _terrain_runtime import _running_on_unsupported_hosted_windows_ci
 from scripts.generate_media_fixture import _aces_srgb8
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Owner-approved (Milos, 2026-10-20): hosted Windows runners have no Vulkan
+# adapter for these Vulkan-pinned readbacks. Hosted Linux (lavapipe) and the
+# opted-in physical NVIDIA lanes still run them.
+pytestmark = pytest.mark.skipif(
+    _running_on_unsupported_hosted_windows_ci(),
+    reason="hosted Windows CI has no Vulkan adapter for NEPHELE environment readbacks",
+)
 
 
 def test_camera_visible_uniform_environment_readback(tmp_path: Path) -> None:
