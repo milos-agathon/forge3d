@@ -305,6 +305,35 @@ pub(super) fn is_mesh_camera_mode(camera_mode: &str) -> bool {
     terrain_camera_mode_tag(camera_mode).eq_ignore_ascii_case("mesh")
 }
 
+pub(super) fn is_dem_mesh_camera_mode(camera_mode: &str) -> bool {
+    is_mesh_camera_mode(camera_mode)
+        && camera_mode
+            .split(':')
+            .skip(1)
+            .any(|part| part.trim().eq_ignore_ascii_case("dem"))
+}
+
+/// Grid vertices along each axis. A quad needs at least two vertices per axis;
+/// singleton DEM axes repeat their sole sample. Legacy grids stay square.
+pub(super) fn terrain_grid_size(camera_mode: &str, height_dims: (u32, u32)) -> (u32, u32) {
+    if is_dem_mesh_camera_mode(camera_mode) {
+        return (height_dims.0.max(2), height_dims.1.max(2));
+    }
+    let size = clipmap_camera_config(camera_mode)
+        .map(|config| config.ring_resolution)
+        .unwrap_or(512);
+    (size, size)
+}
+
+pub(super) fn terrain_grid_vertex_count(grid_size: (u32, u32)) -> Result<u32> {
+    grid_size
+        .0
+        .checked_sub(1)
+        .and_then(|cells_x| grid_size.1.checked_sub(1)?.checked_mul(cells_x))
+        .and_then(|quads| quads.checked_mul(6))
+        .ok_or_else(|| anyhow!("terrain mesh grid exceeds the u32 draw vertex range"))
+}
+
 pub(super) fn is_clipmap_camera_mode(camera_mode: &str) -> bool {
     terrain_camera_mode_tag(camera_mode).eq_ignore_ascii_case("clipmap")
 }
@@ -399,18 +428,12 @@ impl TerrainScene {
     pub(super) fn terrain_vertex_count(
         &self,
         params: &crate::terrain::render_params::TerrainRenderParams,
-    ) -> u32 {
-        if is_clipmap_camera_mode(&params.camera_mode) {
-            let grid_size = clipmap_camera_config(&params.camera_mode)
-                .map(|config| config.ring_resolution.max(4))
-                .unwrap_or(64);
-            return 6 * (grid_size - 1) * (grid_size - 1);
+        height_dims: (u32, u32),
+    ) -> Result<u32> {
+        if is_mesh_camera_mode(&params.camera_mode) || is_clipmap_camera_mode(&params.camera_mode) {
+            return terrain_grid_vertex_count(terrain_grid_size(&params.camera_mode, height_dims));
         }
-        if is_mesh_camera_mode(&params.camera_mode) {
-            let grid_size: u32 = 512;
-            return 6 * (grid_size - 1) * (grid_size - 1);
-        }
-        3
+        Ok(3)
     }
 }
 
@@ -548,7 +571,31 @@ impl Drop for TerrainScene {
 
 #[cfg(test)]
 mod camera_mode_tests {
-    use super::{is_clipmap_camera_mode, is_mesh_camera_mode, is_zup_camera_mode};
+    use super::{
+        is_clipmap_camera_mode, is_dem_mesh_camera_mode, is_mesh_camera_mode, is_zup_camera_mode,
+        terrain_grid_size, terrain_grid_vertex_count,
+    };
+
+    #[test]
+    fn dem_grid_density_is_opt_in_and_composes_with_camera_options() {
+        for mode in ["mesh:dem", "mesh:zup:dem", "mesh:DEM:zup:north"] {
+            assert!(is_dem_mesh_camera_mode(mode));
+            assert_eq!(terrain_grid_size(mode, (3000, 2080)), (3000, 2080));
+            assert_eq!(terrain_grid_size(mode, (2080, 3000)), (2080, 3000));
+            assert_eq!(terrain_grid_size(mode, (1, 32)), (2, 32));
+            assert_eq!(terrain_grid_size(mode, (32, 1)), (32, 2));
+        }
+        for mode in ["mesh", "mesh:zup", "mesh:demonstration", "screen:dem"] {
+            assert!(!is_dem_mesh_camera_mode(mode));
+            assert_eq!(terrain_grid_size(mode, (3000, 2080)), (512, 512));
+        }
+        assert_eq!(terrain_grid_size("clipmap:4:128", (3000, 2080)), (128, 128));
+        assert_eq!(terrain_grid_vertex_count((3000, 3000)).unwrap(), 53_964_006);
+        assert_eq!(terrain_grid_vertex_count((700, 1025)).unwrap(), 4_294_656);
+        assert_eq!(terrain_grid_vertex_count((512, 512)).unwrap(), 1_566_726);
+        assert!(terrain_grid_vertex_count((u32::MAX, 2)).is_err());
+        assert!(terrain_grid_vertex_count((2, u32::MAX)).is_err());
+    }
 
     #[test]
     fn zup_suffix_is_detected_and_tag_helpers_still_match() {

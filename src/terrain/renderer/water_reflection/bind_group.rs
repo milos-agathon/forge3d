@@ -15,6 +15,7 @@ impl TerrainScene {
         view_matrix: glam::Mat4,
         proj_matrix: glam::Mat4,
         heightmap_view: &wgpu::TextureView,
+        height_dims: (u32, u32),
         material_view: &wgpu::TextureView,
         material_sampler: &wgpu::Sampler,
         shading_buffer: &wgpu::Buffer,
@@ -42,8 +43,9 @@ impl TerrainScene {
                 glam::Mat4::from_cols_array_2d(&mirrored_arr)
             };
 
-            let reflection_uniforms =
-                Self::build_uniforms_with_matrices(params, decoded, mirrored_view, proj_matrix);
+            let reflection_uniforms = Self::build_uniforms_with_matrices(
+                params, decoded, height_dims, mirrored_view, proj_matrix,
+            );
             let reflection_uniform_buffer = tracked_create_buffer_init(
                 &self.device,
                 &wgpu::util::BufferInitDescriptor {
@@ -159,7 +161,7 @@ impl TerrainScene {
                 pass.set_bind_group(4, fog_bind_group, &[]);
                 pass.set_bind_group(5, &reflection_pass_water_bind_group, &[]);
                 pass.set_bind_group(6, material_layer_bind_group, &[]);
-                let vertex_count = self.terrain_vertex_count(params);
+                let vertex_count = self.terrain_vertex_count(params, height_dims)?;
                 pass.draw(0..vertex_count, 0..1);
             }
 

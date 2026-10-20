@@ -617,6 +617,7 @@ class TerrainRenderParams:
 
     DEM detail normals require enabled=True, detail_normal_path and positive
     detail_strength. detail_sigma_px is metadata for the precomputed map.
+    camera_mode="mesh:zup:dem" opts into DEM-driven mesh density.
     """
     size_px: Tuple[int, int]
     render_scale: float
@@ -628,6 +629,7 @@ class TerrainRenderParams:
     cam_theta_deg: float
     cam_gamma_deg: float
     fov_y_deg: float
+    camera_mode: str
     clip: Tuple[float, float]
     exposure: float
     gamma: float

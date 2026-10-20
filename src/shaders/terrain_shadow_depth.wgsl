@@ -9,7 +9,7 @@ struct ShadowPassUniforms {
     light_view_proj: mat4x4<f32>,
     // Terrain params: (terrain_span, z_scale, min_h, max_h) (16 bytes)
     terrain_params: vec4<f32>,
-    // Grid params: (grid_resolution, _pad, _pad, _pad) (16 bytes)
+    // Grid params: (grid_width, grid_height, _pad, _pad) (16 bytes)
     grid_params: vec4<f32>,
     // Height curve params: (mode, strength, power, _pad) (16 bytes)
     // mode: 0=linear, 1=pow, 2=smoothstep, 3=lut
@@ -102,11 +102,11 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     let z_scale = u_shadow.terrain_params.y;
     let height_min = u_shadow.terrain_params.z;
     let height_max = u_shadow.terrain_params.w;
-    let grid_res = u32(u_shadow.grid_params.x);
+    let grid_res = vec2<u32>(u_shadow.grid_params.xy);
     
     // Decode vertex position from index
-    // We're rendering as triangles, 6 vertices per quad, (grid_res-1)^2 quads
-    let quads_per_row = grid_res - 1u;
+    // Six vertices per quad in a width-by-height grid.
+    let quads_per_row = grid_res.x - 1u;
     
     // Which quad and which vertex within the quad
     let triangle_idx = vertex_id / 3u;
@@ -139,8 +139,8 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     
     // Convert grid position to UV [0,1]
     let uv = vec2<f32>(
-        det_div(f32(grid_x), f32(grid_res - 1u)),
-        det_div(f32(grid_y), f32(grid_res - 1u))
+        det_div(f32(grid_x), f32(grid_res.x - 1u)),
+        det_div(f32(grid_y), f32(grid_res.y - 1u))
     );
     
     let h_raw = det_barrier(sample_height_bilinear(uv));

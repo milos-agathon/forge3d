@@ -79,6 +79,11 @@ fn terrain_cache_options<'py>(
             shadow_projection.set_item(key, value)?;
         }
     }
+    if is_dem_mesh_camera_mode(&params.camera_mode) {
+        // DEM density changes the shadow caster grid. Keep legacy cache keys
+        // unchanged, while preventing reuse across the opt-in geometry modes.
+        shadow_projection.set_item("camera_mode", &params.camera_mode)?;
+    }
     kwargs.set_item("error_context", "native terrain ANAMNESIS shadow state")?;
     let mut shadow_bytes = canonical
         .getattr("canonical_json_bytes")?

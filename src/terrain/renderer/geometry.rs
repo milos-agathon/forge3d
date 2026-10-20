@@ -748,7 +748,7 @@ impl TerrainScene {
     ) -> Result<()> {
         let Some(config) = clipmap_camera_config(&params.camera_mode) else {
             self.geometry_provider = Some(TerrainGeometryProvider::Grid {
-                vertex_count: self.terrain_vertex_count(params),
+                vertex_count: self.terrain_vertex_count(params, height_dims)?,
             });
             self.two_phase_culler = None;
             return Ok(());

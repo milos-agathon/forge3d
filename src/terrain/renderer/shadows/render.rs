@@ -9,6 +9,7 @@ impl TerrainScene {
         height_curve_view: &wgpu::TextureView,
         heightmap_width: u32,
         heightmap_height: u32,
+        grid_size: (u32, u32),
         terrain_spacing: f32,
         height_exag: f32,
         height_min: f32,
@@ -127,8 +128,7 @@ impl TerrainScene {
         }
         self.csm_renderer.upload_uniforms(&self.queue);
 
-        const SHADOW_GRID_RES: u32 = 1024;
-        let vertices_per_cascade = (SHADOW_GRID_RES - 1) * (SHADOW_GRID_RES - 1) * 6;
+        let vertices_per_cascade = terrain_grid_vertex_count(grid_size)?;
 
         #[cfg(feature = "enable-gpu-instancing")]
         let scatter_shadow = if self.scatter_batches.is_empty() {
@@ -182,7 +182,7 @@ impl TerrainScene {
             let shadow_uniforms = ShadowPassUniforms {
                 light_view_proj: stored_light_view_proj,
                 terrain_params: [terrain_spacing, height_exag, height_min, height_max],
-                grid_params: [SHADOW_GRID_RES as f32, 0.0, 0.0, 0.0],
+                grid_params: [grid_size.0 as f32, grid_size.1 as f32, 0.0, 0.0],
                 height_curve,
             };
 

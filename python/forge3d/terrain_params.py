@@ -2127,6 +2127,9 @@ class TerrainRenderParams:
     # views rolled (its up vector is a grid axis). With zup, cam_theta_deg is
     # the polar angle from +Z (0 = top-down, 90 = horizon) and cam_phi_deg the
     # azimuth within the terrain plane; plain "mesh" keeps legacy output.
+    # Add ":dem" to a mesh mode for one grid vertex per heightmap sample on each axis.
+    # Singleton axes repeat their sample to supply the two vertices of a quad.
+    # Beauty, AOV, offline, reflection and shadow passes share this opt-in density.
     camera_mode: str = "screen"
     # Terrain submission policy. HZB mode is conservative and only active for clipmap/MSAA1.
     culling: str = "frustum"
@@ -2427,7 +2430,7 @@ def make_terrain_params_config(
     cam_theta_deg: float = 45.0,
     cam_target: Sequence[float] = (0.0, 0.0, 0.0),
     fov_y_deg: float = 55.0,
-    camera_mode: str = "screen",  # "screen", "mesh", or "mesh:zup" (Z-up orbit, see TerrainParams)
+    camera_mode: str = "screen",  # "screen", "mesh", "mesh:zup", or "mesh:zup:dem"; see TerrainParams
     culling: str = "frustum",  # "none", "frustum", or "hzb_two_phase"
     shading: str = "forward",  # "forward" or "visibility"
     vt_store: Optional[object] = None,

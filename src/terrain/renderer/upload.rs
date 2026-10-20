@@ -333,11 +333,10 @@ impl TerrainScene {
         &self,
         params: &render_params::TerrainRenderParams,
         decoded: &render_params::DecodedTerrainSettings,
-        _terrain_width: f32,
-        _terrain_height: f32,
+        height_dims: (u32, u32),
     ) -> Result<Vec<f32>> {
         let (_eye, view, proj) = Self::build_camera_matrices(params);
-        let mut uniforms = Self::build_uniforms_with_matrices(params, decoded, view, proj);
+        let mut uniforms = Self::build_uniforms_with_matrices(params, decoded, height_dims, view, proj);
         if let Some(blend) = self.height_detail_blend_override {
             uniforms[39] = -(blend.clamp(0.0, 1.0) + 1.0);
         }
@@ -347,6 +346,7 @@ impl TerrainScene {
     pub(super) fn build_uniforms_with_matrices(
         params: &render_params::TerrainRenderParams,
         decoded: &render_params::DecodedTerrainSettings,
+        height_dims: (u32, u32),
         view: glam::Mat4,
         proj: glam::Mat4,
     ) -> Vec<f32> {
@@ -369,14 +369,14 @@ impl TerrainScene {
         };
         uniforms.extend_from_slice(&[spacing, spacing, params.z_scale, params.render_scale]);
 
-        let camera_mode = if is_mesh_mode || is_clipmap_mode {
+        let camera_mode = if is_dem_mesh_camera_mode(&params.camera_mode) {
+            2.0 // Per-axis DEM grid, resolved from the height texture in WGSL.
+        } else if is_mesh_mode || is_clipmap_mode {
             1.0
         } else {
             0.0
         };
-        let grid_size = clipmap_camera_config(&params.camera_mode)
-            .map(|config| config.ring_resolution as f32)
-            .unwrap_or(512.0);
+        let grid_size = terrain_grid_size(&params.camera_mode, height_dims).0 as f32;
         uniforms.extend_from_slice(&[camera_mode, grid_size, params.clip.0, params.clip.1]);
 
         uniforms

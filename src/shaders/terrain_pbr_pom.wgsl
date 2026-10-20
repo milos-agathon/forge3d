@@ -163,7 +163,7 @@ struct TerrainUniforms {
     proj : mat4x4<f32>,
     sun_exposure : vec4<f32>,
     spacing_h_exag : vec4<f32>,
-    // x=camera_mode (0=screen, 1=mesh), y=grid_size (for mesh mode),
+    // x=camera_mode (0=screen, 1=legacy mesh, 2=per-axis DEM mesh), y=legacy grid_size,
     // z=clip_near, w=clip_far
     camera_mode_params : vec4<f32>,
 };
@@ -1975,26 +1975,35 @@ fn calculate_texel_size() -> vec2<f32> {
     );
 }
 
+// Preserve the legacy square grid; DEM mode visits each source sample on both
+// axes. Repeating a singleton axis supplies the two vertices needed for a quad.
+fn terrain_mesh_grid_dimensions() -> vec2<u32> {
+    if (u_terrain.camera_mode_params.x == 2.0) {
+        return max(textureDimensions(height_tex, 0), vec2<u32>(2u));
+    }
+    return vec2<u32>(u32(max(u_terrain.camera_mode_params.y, 64.0)));
+}
+
 /// Vertex shader for terrain rendering.
-/// Supports two modes controlled by camera_mode_params.x:
+/// Supports three modes controlled by camera_mode_params.x:
 /// - Mode 0 (screen): Fullscreen triangle with orthographic screen coverage (default, preserves legacy behavior)
 /// - Mode 1 (mesh): Grid mesh with perspective-correct view*proj transformation
+/// - Mode 2 (DEM mesh): Same camera, with one grid vertex per DEM sample
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     det_seed(f32(vertex_id));
     var out : VertexOutput;
 
     let camera_mode = u32(u_terrain.camera_mode_params.x);
-    let grid_size = u32(max(u_terrain.camera_mode_params.y, 64.0));
+    let grid_size = terrain_mesh_grid_dimensions();
 
     var uv : vec2<f32>;
 
-    if (camera_mode == 1u) {
+    if (camera_mode != 0u) {
         // MESH MODE: Use grid coordinates for perspective-correct terrain rendering
         // Generate triangle mesh from vertex_id
-        // For a grid_size x grid_size grid, we have (grid_size-1)^2 quads, each with 2 triangles
-        // Each triangle has 3 vertices, so total vertices = 6 * (grid_size-1)^2
-        let quads_per_row = grid_size - 1u;
+        // Each quad in the width-by-height grid emits two triangles.
+        let quads_per_row = grid_size.x - 1u;
         let vertices_per_quad = 6u; // 2 triangles * 3 vertices
 
         // Compute which quad and which vertex within the quad
@@ -2026,8 +2035,8 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
 
         // UV coordinates [0,1] from grid position
         uv = vec2<f32>(
-            det_div(f32(grid_x), f32(grid_size - 1u)),
-            det_div(f32(grid_y), f32(grid_size - 1u))
+            det_div(f32(grid_x), f32(grid_size.x - 1u)),
+            det_div(f32(grid_y), f32(grid_size.y - 1u))
         );
     } else {
         // SCREEN MODE: Fullscreen triangle (legacy orthographic-style rendering)
@@ -2068,7 +2077,7 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     out.tex_coord = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
     out.tile_id = 0u;
 
-    if (camera_mode == 1u) {
+    if (camera_mode != 0u) {
         // MESH MODE: Apply view and projection matrices for proper perspective
         // Use centered Z for clip position so terrain is visible from camera at origin
         let mesh_world_pos = vec3<f32>(world_xy.x, world_xy.y, world_z_centered);
@@ -6050,26 +6059,26 @@ fn water_terrain_vertex(uv: vec2<f32>) -> vec3<f32> {
 
 fn water_trace_terrain(origin: vec3<f32>, direction: vec3<f32>) -> vec4<f32> {
     let span = u_terrain.spacing_h_exag.x;
-    let cells = i32(max(u_terrain.camera_mode_params.y, 64.0)) - 1;
+    let cells = vec2<i32>(terrain_mesh_grid_dimensions()) - vec2<i32>(1);
     let start_uv = det_div2(origin.xy, vec2<f32>(span)) + vec2<f32>(0.5);
     let speed = det_div2(direction.xy, vec2<f32>(span));
-    var cell = clamp(vec2<i32>(floor(start_uv * f32(cells))), vec2<i32>(0), vec2<i32>(cells - 1));
+    var cell = clamp(vec2<i32>(floor(start_uv * vec2<f32>(cells))), vec2<i32>(0), cells - vec2<i32>(1));
     let step = vec2<i32>(select(-1, 1, speed.x >= 0.0), select(-1, 1, speed.y >= 0.0));
     var begin = 0.0;
     loop {
-        if (any(cell < vec2<i32>(0)) || any(cell >= vec2<i32>(cells))) { break; }
+        if (any(cell < vec2<i32>(0)) || any(cell >= cells)) { break; }
         var crossing = vec2<f32>(3.402823466e38);
         if (speed.x != 0.0) {
             let edge = cell.x + select(0, 1, step.x > 0);
-            crossing.x = det_div(det_div(f32(edge), f32(cells)) - det_barrier(start_uv.x), speed.x);
+            crossing.x = det_div(det_div(f32(edge), f32(cells.x)) - det_barrier(start_uv.x), speed.x);
         }
         if (speed.y != 0.0) {
             let edge = cell.y + select(0, 1, step.y > 0);
-            crossing.y = det_div(det_div(f32(edge), f32(cells)) - det_barrier(start_uv.y), speed.y);
+            crossing.y = det_div(det_div(f32(edge), f32(cells.y)) - det_barrier(start_uv.y), speed.y);
         }
         let end = max(begin, min(crossing.x, crossing.y));
-        let uv0 = det_div2(vec2<f32>(cell), vec2<f32>(f32(cells)));
-        let uv1 = det_div2(vec2<f32>(cell + vec2<i32>(1)), vec2<f32>(f32(cells)));
+        let uv0 = det_div2(vec2<f32>(cell), vec2<f32>(cells));
+        let uv1 = det_div2(vec2<f32>(cell + vec2<i32>(1)), vec2<f32>(cells));
         let a = det_barrier3(water_terrain_vertex(uv0));
         let b = det_barrier3(water_terrain_vertex(vec2<f32>(uv1.x, uv0.y)));
         let c = det_barrier3(water_terrain_vertex(uv1));
