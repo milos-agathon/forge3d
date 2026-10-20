@@ -2830,6 +2830,21 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+      - name: Restore committed LF bytes in the reused workspace
+        shell: pwsh
+        run: |
+          # The self-hosted workspace persists across runs. A file whose blob is
+          # unchanged keeps the CRLF bytes of an earlier checkout made without
+          # NEPHELE's eol=lf attributes, so evidence hashes would see stale bytes.
+          $stale = @(git ls-files --eol | Where-Object { $_ -match 'w/crlf\s+attr/text eol=lf' } |
+            ForEach-Object { ($_ -split "`t", 2)[1] })
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($path in $stale) {
+            Remove-Item -LiteralPath $path -Force
+            git checkout -- $path
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          Write-Host "Restored LF bytes for $($stale.Count) eol=lf file(s)"
       - name: Initialize exact-head NEPHELE evidence
         shell: pwsh
         run: |
