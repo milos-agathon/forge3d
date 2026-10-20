@@ -258,6 +258,8 @@ def render_fused_sequence(
     *,
     splats: SplatsInput = ...,
     pointcloud: PointCloudInput = ...,
+    point_positions: Optional[np.ndarray] = ...,
+    point_colors: Optional[np.ndarray] = ...,
     terrain: TerrainInput = ...,
     views: Sequence[FusedView],
     samples: int = ...,

@@ -538,6 +538,31 @@ def test_render_fused_single_representations_and_options():
     again = splat.render_fused(terrain=np.zeros((17, 17), np.float32), **arrays_scene)
     np.testing.assert_array_equal(arrays_only.rgba, again.rgba)
 
+    # The sequence entry point takes the same in-memory cloud: the single
+    # view of a one-view sequence must equal the standalone render.
+    view = splat.FusedView(camera=array_camera)
+    sequence = splat.render_fused_sequence(
+        terrain=np.zeros((17, 17), np.float32),
+        views=[view],
+        samples=4,
+        width=64,
+        height=48,
+        point_positions=positions,
+        point_colors=colors,
+        return_aovs=True,
+    )
+    sequence_only = sequence[0]
+    sequence_kinds = set(np.unique(sequence_only.hit_kind).tolist())
+    assert splat.HIT_LIDAR in sequence_kinds, "no LiDAR pixels in the sequence"
+    np.testing.assert_array_equal(arrays_only.rgba, sequence_only.rgba)
+    # The same validation applies here.
+    with pytest.raises(ValueError, match="point_colors.*without point_positions"):
+        splat.render_fused_sequence(
+            terrain=np.zeros((17, 17), np.float32),
+            views=[view],
+            point_colors=colors,
+        )
+
     # Fog attenuates the sun beam: with density the direct AOV dims.
     foggy = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.02, **common)
     lit = (terrain_only.transmittance[..., 0] > 0.99) & (terrain_only.hit_kind == splat.HIT_TERRAIN)

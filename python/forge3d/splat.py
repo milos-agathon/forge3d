@@ -480,6 +480,42 @@ def _certificate_arg(certificate: Any) -> Any:
     return os.fspath(certificate)
 
 
+def _point_array_kwargs(
+    point_positions: Any, point_colors: Any
+) -> Dict[str, Any]:
+    """Validate an in-memory point set into native-call kwargs.
+
+    Shared by :func:`render_fused` and :func:`render_fused_sequence`: both
+    take the same in-memory cloud, so the contract is checked once, here.
+    """
+    if point_positions is None:
+        if point_colors is not None:
+            raise ValueError("point_colors was given without point_positions")
+        return {}
+    pos = np.asarray(point_positions, dtype=np.float32)
+    if pos.ndim != 2 or pos.shape[1] != 3 or pos.shape[0] < 1:
+        raise ValueError(
+            f"point_positions must be (N, 3) with N >= 1, got shape {pos.shape}"
+        )
+    if not np.isfinite(pos).all():
+        raise ValueError("point_positions must be finite world coordinates")
+    out: Dict[str, Any] = {"point_positions": pos}
+    if point_colors is not None:
+        col = np.asarray(point_colors)
+        if col.ndim != 2 or col.shape[0] != pos.shape[0] or col.shape[1] != 3:
+            raise ValueError(
+                f"point_colors shape {col.shape} must be ({pos.shape[0]}, 3) "
+                "to match point_positions"
+            )
+        if col.dtype != np.uint8:
+            raise ValueError(
+                f"point_colors must be uint8 sRGB bytes of shape (N, 3), "
+                f"got dtype {col.dtype}"
+            )
+        out["point_colors"] = col
+    return out
+
+
 def _env_kwargs(
     env_map: "str | os.PathLike[str] | None", env_rotation_deg: float
 ) -> Dict[str, Any]:
@@ -643,31 +679,7 @@ def render_fused(
         raise ValueError(f"width and height must be >= 1, got {width}x{height}")
     cam = _resolve_camera(camera)
     env_kwargs = _env_kwargs(env_map, env_rotation_deg)
-    arrays_kwargs: Dict[str, Any] = {}
-    if point_positions is not None:
-        pos = np.asarray(point_positions, dtype=np.float32)
-        if pos.ndim != 2 or pos.shape[1] != 3 or pos.shape[0] < 1:
-            raise ValueError(
-                f"point_positions must be (N, 3) with N >= 1, got shape {pos.shape}"
-            )
-        if not np.isfinite(pos).all():
-            raise ValueError("point_positions must be finite world coordinates")
-        arrays_kwargs["point_positions"] = pos
-        if point_colors is not None:
-            col = np.asarray(point_colors)
-            if col.ndim != 2 or col.shape[0] != pos.shape[0] or col.shape[1] != 3:
-                raise ValueError(
-                    f"point_colors shape {col.shape} must be ({pos.shape[0]}, 3) "
-                    "to match point_positions"
-                )
-            if col.dtype != np.uint8:
-                raise ValueError(
-                    f"point_colors must be uint8 sRGB bytes of shape (N, 3), "
-                    f"got dtype {col.dtype}"
-                )
-            arrays_kwargs["point_colors"] = col
-    elif point_colors is not None:
-        raise ValueError("point_colors was given without point_positions")
+    arrays_kwargs: Dict[str, Any] = _point_array_kwargs(point_positions, point_colors)
     scene, resolved_terrain = _scene_kwargs(
         splats, pointcloud, terrain, has_points=point_positions is not None
     )
@@ -777,6 +789,8 @@ def render_fused_sequence(
     *,
     splats: Any = None,
     pointcloud: Any = None,
+    point_positions: Any = None,
+    point_colors: Any = None,
     terrain: Any = None,
     views: Sequence[FusedView],
     samples: int = 64,
@@ -853,8 +867,11 @@ def render_fused_sequence(
                 seed=int(view.seed),
             )
         )
-    scene, resolved_terrain = _scene_kwargs(splats, pointcloud, terrain)
+    scene, resolved_terrain = _scene_kwargs(
+        splats, pointcloud, terrain, has_points=point_positions is not None
+    )
     env_kwargs = _env_kwargs(env_map, env_rotation_deg)
+    arrays_kwargs: Dict[str, Any] = _point_array_kwargs(point_positions, point_colors)
     spp = min(int(samples), 4) if samples_per_frame is None else int(samples_per_frame)
     if not 1 <= spp <= 64:
         raise ValueError(f"samples_per_frame must be in 1..=64, got {spp}")
@@ -902,6 +919,7 @@ def render_fused_sequence(
         certificate=_certificate_arg(certificate),
         cache=cache,
         **tile_kwargs,
+        **arrays_kwargs,
         **env_kwargs,
         **scene,
     )
