@@ -60,11 +60,12 @@ SHA256_RE = re.compile(r"[0-9a-f]{64}")
 # (terrain/mod.rs); main e8e9b119/d8200e4e/0d7bee07 reformat test assertions and
 # add the cfg(test) CSM layout module (shader_sources.rs); main a7a99274 submits
 # the GPU timing encoder through the timer instead of resolve + queue.submit
-# (render_terrain.rs). None changes the reference transport.
+# (render_terrain.rs); main 9595d6c5 then waits for each frame's submission
+# before queuing the next (render_terrain.rs). None changes the reference transport.
 REFERENCE_SOURCE_ALLOWLIST = {
     "src/terrain/mod.rs": "f47115f0ebbe80350b927d5075d8cadf4ef63fb411584a9b656004307dbcfa92",
     "src/shader_sources.rs": "0742c246b9ba1f44671121900b5893bec0051dc3995be11441758e1b72c801c0",
-    "src/path_tracing/hybrid_compute/render_terrain.rs": "ecb7ab3112de270f5db4f056b827998788ae2754e92e1ee2272159b3a9b95f6f",
+    "src/path_tracing/hybrid_compute/render_terrain.rs": "7b54cd624c52b0530a14c01f7c3747427195f0ed859c8ca45ebb05b7a23a0f1e",
     "src/path_tracing/hybrid_compute/terrain_heightfield.rs": "da6e5c5027b98f3845ea5d7e02819ef1528d6fa0a3c2b48dc3badd12aeefeeed",
 }
 

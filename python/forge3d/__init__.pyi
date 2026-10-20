@@ -134,6 +134,20 @@ from .map_scene import (
     VectorOverlay as VectorOverlay,
 )
 from .recipe_manifest import recipe_manifest as recipe_manifest
+from .preparation import (
+    PreparationError as PreparationError,
+    PreparationGrid as PreparationGrid,
+    PreparationSource as PreparationSource,
+    PreparationRecipe as PreparationRecipe,
+    PreparedLayer as PreparedLayer,
+    PreparedScene as PreparedScene,
+    prepare_scene as prepare_scene,
+)
+from .landscape import (
+    LandscapeLayout as LandscapeLayout,
+    export_landscape as export_landscape,
+    verify_landscape_import as verify_landscape_import,
+)
 from .chronos import (
     FlythroughManifest as FlythroughManifest,
     render_flythrough as render_flythrough,

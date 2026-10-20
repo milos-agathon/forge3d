@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.44.0"
+__version__ = "1.45.0"
 version = __version__
 
 import numpy as np
@@ -707,6 +707,11 @@ from .map_scene import (
     VectorOverlay,
 )
 from . import recipe_manifest
+from .preparation import (
+    PreparationError, PreparationGrid, PreparationSource, PreparationRecipe,
+    PreparedLayer, PreparedScene, prepare_scene,
+)
+from .landscape import LandscapeLayout, export_landscape, verify_landscape_import
 from .chronos import FlythroughManifest, render_flythrough
 from .alignment import (
     alignment_report,
@@ -1082,6 +1087,16 @@ __all__ = [
     "FlythroughManifest",
     "render_flythrough",
     "recipe_manifest",
+    "PreparationError",
+    "PreparationGrid",
+    "PreparationSource",
+    "PreparationRecipe",
+    "PreparedLayer",
+    "PreparedScene",
+    "prepare_scene",
+    "LandscapeLayout",
+    "export_landscape",
+    "verify_landscape_import",
     "alignment_report",
     "alignment_residual",
     "reproject_dem_to_target",

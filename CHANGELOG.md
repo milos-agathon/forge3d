@@ -6,6 +6,26 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.45.0] - 2026-10-19
+
+### Added
+- Reusable local data-to-scene preparation: `PreparationRecipe` declares each input's CRS, height units/datum, nodata and resampling once; `prepare_scene` warps elevation, categorical, count, imagery, vector and observation inputs onto one target grid without resampling counts or class IDs, refuses unsupported datum conversions such as NAP/LN02, and records operations, coverage and checkpoint residuals. `PreparedScene` saves hash-checked snapshots reusable without the original sources and writes coverage previews, registered viewer assets and `MapScene` scenes whose display rasters drape on the terrain. Failures, including malformed recipes and existing outputs, are structured `PreparationError` diagnostics. CLI: `examples/prepare_scene.py`; guides: data-to-scene and C05 real data (#257).
+- Optional single-extent Unreal Landscape packages: `export_landscape` writes a 16-bit heightmap with a declared reconstruction formula and quantization bound, one mask per land-cover class, a geographic sidecar and complete manual import settings; `verify_landscape_import` compares measured Editor vertices with the package (#257).
+- `forge3d.mesh.build_bvh_cpu` runs the real Rust median-split BVH builder and reports measured node, leaf, depth and memory values with the packed node array and triangle order; `forge3d.mesh.upload_mesh` allocates tracked GPU buffers through the path-tracing mesh atlas. Mesh, index, triangle-order and node-layout inputs are validated (#245).
+
+### Changed
+- Viewer manual and observed sky lighting share one internal state owner; partial terrain sun edits restore the unscaled daylight base instead of inheriting moon-dimmed intensity (#252).
+
+### Removed
+- `forge3d.get_device()` and its `MockDevice`/`MockVirtualTexture` fallbacks are gone. No native `get_device` symbol ever existed, so the function always returned a fabricated CPU device; `device_probe()`, `enumerate_adapters()` and `engine_info()` report the real adapter instead. `forge3d.io.upload_dem_to_gpu()` and the `DEMData.texture_view` field are also removed: the function called a non-existent `_gpu.device()` and always raised `AttributeError`, and the field was never read. (#246)
+- `path_tracing::mesh::upload_mesh_and_bvh` is removed. It had no caller and wrote 40-byte `BvhNode` records into a buffer that the wavefront shaders read at a 48-byte stride; `build_mesh_atlas` is the correct upload path. `path_tracing::mesh::{create_mesh_bind_group, create_mesh_bind_group_layout}` are also removed: neither had a caller, and `compute/setup.rs` builds the group-1 layout it needs inline. `GpuMesh` stays for now: its `triangle_density` holds two of the frozen world-coordinate f32 narrowing sites, so removing the type requires an owner-approved inventory update. (#246)
+
+### Fixed
+- Large terrain posters synchronize accumulation frames to avoid intermittent device loss on NVIDIA Vulkan, preserving tile sizes, sample counts and convergence checks.
+- MapScene GeoTIFF raster overlays only 1, 3 or 4 pixels wide keep their band order instead of being misread as band-last arrays (#257).
+- `ViewerHandle.set_sun(azimuth_deg, elevation_deg)` keeps the previous sun intensity when none is given; non-finite manual sun inputs are rejected before changing viewer state, and scene-review presets keep sky, lit meshes and terrain lighting in sync (#250).
+- COG disk-cache file names use a deterministic SHA-256 source prefix that is stable across Rust toolchains and processes, and truncated or corrupted cached ranges are rejected (#250, #256).
+
 ## [1.44.0] - 2026-10-15
 
 ### Added
@@ -17,8 +37,6 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ### Removed
 - `CompressedImage::from_ktx2`, `from_ktx2_data`, `from_dds` and `from_dds_data` have been removed. They had no callers and always failed with a `format_unsupported` degradation, while the remaining KTX2 container loader lives in `src/loaders/ktx2`. KTX2 container loading is now owned solely by that loader, which gains round-trip, sRGB-mapping, malformed-input and unsupported-supercompression tests. DDS remains unimplemented and no longer advertises a public entry point.
 - `loaders::ktx2::BasisTranscoder`, `Ktx2Loader::with_target_formats`, the zero-block `compress_etc2_rgb`/`compress_etc2_rgba` placeholders, and the no-op `generate_mip_levels` stub have been removed. `compress_rgba_to_format` now wires `Bc4RUnorm` to the real `bc4::encode_channel` codec, and refuses ETC2, unencoded formats, and unimplemented multi-mip uploads loudly with structured degradations instead of fabricating zeroed blocks or leaving GPU mip levels uninitialized.
-- `forge3d.get_device()` and its `MockDevice`/`MockVirtualTexture` fallbacks are gone. No native `get_device` symbol ever existed, so the function always returned a fabricated CPU device; `device_probe()`, `enumerate_adapters()` and `engine_info()` report the real adapter instead. `forge3d.io.upload_dem_to_gpu()` and the `DEMData.texture_view` field are also removed: the function called a non-existent `_gpu.device()` and always raised `AttributeError`, and the field was never read.
-- `path_tracing::mesh::upload_mesh_and_bvh` is removed. It had no caller and wrote 40-byte `BvhNode` records into a buffer that the wavefront shaders read at a 48-byte stride; `build_mesh_atlas` is the correct upload path. `path_tracing::mesh::{create_mesh_bind_group, create_mesh_bind_group_layout}` are also removed: neither had a caller, and `compute/setup.rs` builds the group-1 layout it needs inline. `GpuMesh` stays for now: its `triangle_density` holds two of the frozen world-coordinate f32 narrowing sites, so removing the type requires an owner-approved inventory update.
 
 ### Fixed
 - GPU frame and timing readback wait for completed mappings, avoiding premature fence retirement when Metal work exceeds wgpu 0.19's internal blocking-wait timeout.

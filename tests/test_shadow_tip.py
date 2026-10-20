@@ -585,11 +585,29 @@ def test_viewer_set_sun_updates_generic_and_terrain_lighting() -> None:
 
 
 def test_set_terrain_angles_reset_solar_time_provenance() -> None:
-    source = (
-        Path(__file__).parents[1] / "src" / "viewer" / "cmd" / "terrain_command.rs"
-    ).read_text(encoding="utf-8")
-    assert "if sun_azimuth.is_some() || sun_elevation.is_some()" in source
-    assert 'terrain.sun_source = "manual_angles".to_string();' in source
+    viewer = Path(__file__).parents[1] / "src" / "viewer"
+    command = " ".join((viewer / "cmd" / "terrain_command.rs").read_text(encoding="utf-8").split())
+    helpers = " ".join(
+        (viewer / "state" / "viewer_helpers" / "core.rs").read_text(encoding="utf-8").split()
+    )
+    lighting = (viewer / "sky_lighting.rs").read_text(encoding="utf-8")
+
+    # SetTerrain must publish manual edits through the shared lighting owner.
+    assert (
+        "viewer.sky_lighting.requested_manual_sun( *sun_azimuth, *sun_elevation, *sun_intensity, )"
+        in command
+    )
+    assert (
+        "if let Some((azimuth, elevation, intensity)) = manual_sun { "
+        "viewer.apply_manual_sun(azimuth, elevation, Some(intensity));"
+        in command
+    )
+    assert "self.apply_manual_sun_with_source(azimuth_deg, elevation_deg, intensity, None);" in helpers
+    assert "self.sky_lighting .set_manual_sun(azimuth_deg, elevation_deg, intensity, source);" in helpers
+
+    manual = lighting.split("pub(crate) fn set_manual_sun(", 1)[1].split("\n    }", 1)[0]
+    assert "self.observation_revision = None;" in manual
+    assert 'self.terrain_source = source.unwrap_or("manual_angles").into();' in manual
 
 
 @gpu_required
