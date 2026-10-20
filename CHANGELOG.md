@@ -21,6 +21,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - `path_tracing::mesh::upload_mesh_and_bvh` is removed. It had no caller and wrote 40-byte `BvhNode` records into a buffer that the wavefront shaders read at a 48-byte stride; `build_mesh_atlas` is the correct upload path. `path_tracing::mesh::{create_mesh_bind_group, create_mesh_bind_group_layout}` are also removed: neither had a caller, and `compute/setup.rs` builds the group-1 layout it needs inline. `GpuMesh` stays for now: its `triangle_density` holds two of the frozen world-coordinate f32 narrowing sites, so removing the type requires an owner-approved inventory update. (#246)
 
 ### Fixed
+- Large terrain posters synchronize accumulation frames to avoid intermittent device loss on NVIDIA Vulkan, preserving tile sizes, sample counts and convergence checks.
 - MapScene GeoTIFF raster overlays only 1, 3 or 4 pixels wide keep their band order instead of being misread as band-last arrays (#257).
 - `ViewerHandle.set_sun(azimuth_deg, elevation_deg)` keeps the previous sun intensity when none is given; non-finite manual sun inputs are rejected before changing viewer state, and scene-review presets keep sky, lit meshes and terrain lighting in sync (#250).
 - COG disk-cache file names use a deterministic SHA-256 source prefix that is stable across Rust toolchains and processes, and truncated or corrupted cached ranges are rejected (#250, #256).
