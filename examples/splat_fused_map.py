@@ -1515,6 +1515,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
     )
     print(f"[render] {args.width}x{args.height}, {args.samples} spp ...")
+    if args.tile:
+        tw, th = (int(v) for v in args.tile)
+        if not (1 <= tw <= args.width and 1 <= th <= args.height):
+            print(
+                f"error: --tile {tw}x{th} must be at least 1x1 and fit the "
+                f"{args.width}x{args.height} image",
+                file=sys.stderr,
+            )
+            return 2
     t0 = time.time()
     result = splat.render_fused(
         splats=cloud,
@@ -1654,6 +1663,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"error: bad --anim-size {args.anim_size!r}, expected WxH", file=sys.stderr)
             return 2
         print(f"[anim] {args.animate} frames orbiting at {aw}x{ah}, {args.samples} spp ...")
+        # The still render's tile does not fit the fly-through frame, so the
+        # fly-through tiles by its own size. Silently ignoring --tile here
+        # would spend the memory budget the user was trying to save.
+        anim_tile = None
+        if args.tile:
+            tw, th = (int(v) for v in args.tile)
+            if 1 <= tw <= aw and 1 <= th <= ah:
+                anim_tile = (tw, th)
+            else:
+                print(
+                    f"[anim] --tile {tw}x{th} does not fit the {aw}x{ah} frame; "
+                    "rendering the fly-through untiled"
+                )
         t0 = time.time()
         frames = []
         for i in range(args.animate):
@@ -1673,6 +1695,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 seed=args.seed,
                 return_aovs=False,
                 certificate=False,
+                tile=anim_tile,
                 **light_kwargs,
             )
             frame_rgba = frame if isinstance(frame, np.ndarray) else frame.rgba
