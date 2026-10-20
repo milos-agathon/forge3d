@@ -137,7 +137,10 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
     installed native file, so mutations never leak between tests.
     """
     if "root" not in _FIXTURE_TEMPLATE:
-        root = Path(tempfile.mkdtemp(prefix="nephele-evidence-template-"))
+        # Resolve like pytest's tmp_path: macOS /var is a symlink and Windows
+        # runners expose an 8.3 short temp path, both of which break the
+        # recorder's resolved-path relative_to().
+        root = Path(tempfile.mkdtemp(prefix="nephele-evidence-template-")).resolve()
         atexit.register(shutil.rmtree, root, ignore_errors=True)
         _FIXTURE_TEMPLATE["head"] = _build_fixture(root)[2]
         _FIXTURE_TEMPLATE["root"] = root
