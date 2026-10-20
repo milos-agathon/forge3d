@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ._license import _check_pro_access
+from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle
 from .diagnostics import (
     LayerSummary,
     ValidationReport,

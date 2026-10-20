@@ -38,6 +38,32 @@ rather than an interactive session.
 The Rust layer owns GPU resources, the terrain renderer, point-cloud support,
 screen-space effects, and the `interactive_viewer` executable.
 
+Texture-to-host transfers used by HDR, LDR, scalar depth and source-ID reads,
+and the optional async readback manager, share `core::texture_readback`.
+It validates transfer dimensions and formats through `TransferLayout`, allocates
+tracked staging buffers, submits copies, maps them and removes row padding.
+A staging lease unmaps only after a successful mapping, before releasing its
+pool slot or tracked allocation. Never-requested and failed mappings need no
+unmap. A pending map callback retains the lease if its transfer is cancelled,
+then performs cleanup once the mapping outcome is known. The format adapters in
+`core::hdr_readback` retain little-endian float/half/integer decoding; raw-byte
+reads preserve the source channel order and color space of compatible four-byte
+texels.
+
+Blocking transfers poll the device directly and require no Tokio runtime.
+The async manager requires a runtime at construction, queues transfers on its
+worker and retains the existing configured pending-operation limit and staging
+allocation policy. Each operation reserves its pending slot atomically and
+releases it before delivering the result. Dropped result handles discard data;
+the worker still completes cleanup. Dropping the manager closes its queue and
+lets already queued transfers finish while the runtime remains alive. Runtime
+shutdown drops queued or active transfer owners and their reservations. Polling
+the device after shutdown retires any pending mapping callbacks and their
+staging leases; this cleanup requires no running Tokio worker.
+`AsyncReadbackHandle::expected_size()` continues to report padded transfer bytes;
+returned data excludes padding. The `double_buffered` flag retains its existing
+reporting behavior; it does not introduce a separate buffer-count policy.
+
 ### Python package
 
 The Python layer is the user-facing control surface. The main modules are:
@@ -47,6 +73,33 @@ The Python layer is the user-facing control surface. The main modules are:
 - `forge3d.terrain_params`, `forge3d.presets`, `forge3d.animation`, and `forge3d.camera_rigs` for scene configuration
 - `forge3d.pointcloud`, `forge3d.buildings`, `forge3d.tiles3d`, and `forge3d.style` for non-raster scene assets
 - `forge3d.map_plate`, `forge3d.export`, and `forge3d.bundle` for packaged outputs
+
+Point-cloud LOD traversal consumes only `root_node()` and `children(key)` spatial
+facts. COPC and EPT adapters share key-to-bounds subdivision and child enumeration
+in the private `_pointcloud_octree` module, with children ordered by octant. Each
+adapter retains its own format parsing, hierarchy loading, point counts and
+spacing rules: COPC uses its declared spacing divided by `2 ** depth`, while EPT uses
+node width divided by span. Decoding capabilities remain format-specific; sharing
+hierarchy traversal does not give EPT a point decoder. The existing selection,
+depth and point-budget policies remain in `PointCloudRenderer`.
+
+Native capability dispatch belongs to `forge3d._native`. Runtime callers resolve
+the current module with `get_native_module()` or an optional symbol with
+`get_native_symbol()`; required-module guards use `require_native_module()`.
+These lookups do not retry imports or create a GPU context. An explicit
+`refresh_native_module()` invalidates Python's import caches and retries the
+extension import, updating the module, availability flag, import-error cause,
+and legacy `python.forge3d._forge3d` alias together. It does not reload an already
+imported binary; replacing a loaded extension binary requires a new process.
+
+Imports of availability flags by value are snapshots. Exported classes and
+exception types in the package facade, animation, GIS, text, and smoke modules
+retain their import-time identities. Smoke's backend selection stays coupled to
+its exported classes and Python-version safety guard. Existing native objects
+retain their owning module; newly created wrappers resolve current capabilities.
+Missing native-only facade exports resolve against the current module without
+rebinding exports that are already present. Extension absence and missing
+symbols continue to use each caller's existing fallback or error behavior.
 
 ### Examples, tutorials, and gallery
 
@@ -69,6 +122,13 @@ recipe-style references tied to concrete outputs.
 Everything else flows through explicit NDJSON commands over TCP. You can send
 those with `ViewerHandle.send_ipc()` or by using helper functions from
 `forge3d.viewer_ipc`.
+
+Both entry points delegate command encoding, NDJSON framing, receive buffering,
+and connection failures to the private `forge3d._viewer_transport` module. Each
+call sends one command and consumes one reply, retaining extra bytes for the
+next call on that socket. Calls on a socket must be sequential. Socket timeout
+settings stay unchanged: `ViewerHandle` keeps its exceptions, while the raw
+helpers keep their error dictionaries and partial-reply parsing at EOF/timeout.
 
 That split keeps the common workflow ergonomic while leaving the full scene
 command surface available.

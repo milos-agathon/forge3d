@@ -35,6 +35,26 @@ offline sequence is:
 you want the built-in adaptive loop, progress callback, and optional denoise
 integration instead of managing the batches yourself.
 
+### Session lifetime
+
+`render_offline()` uses one internal session to own accumulation, adaptive
+stopping, and completion in resolve → denoise → upload (when needed) → tonemap
+order. It explicitly ends every session it successfully begins, including when
+a batch, metrics query, progress callback, resolve, denoiser, upload, or tonemap
+fails. Callback cancellation such as `KeyboardInterrupt` also releases the
+session. A rejected begin leaves an already active session with its owner.
+
+The lower-level native `tonemap_offline_hdr()` continues to end an active
+session on success. `end_offline_accumulation()` is idempotent, so manual callers
+can use it in a `finally` block after beginning successfully. If rendering and
+cleanup both fail, the render error remains primary with the cleanup error as
+its cause; a cleanup failure after success is raised instead of returning a
+result.
+
+Each call accumulates and resolves fresh native frames. `cache=` currently
+chooses an explicit cache miss for this stateful pipeline. Sample metadata and
+progress use the actual sample counts reported by the renderer.
+
 ## Output Contract
 
 `resolve_offline_hdr()` returns the resolved linear HDR beauty buffer together

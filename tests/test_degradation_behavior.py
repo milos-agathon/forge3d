@@ -14,7 +14,8 @@ def test_all_lighting_no_effect_paths_record_degradation(monkeypatch):
     from forge3d import _degradation, lighting
 
     _degradation.clear()
-    monkeypatch.setattr(lighting, "_forge3d", SimpleNamespace())
+    from forge3d import _native
+    monkeypatch.setattr(_native, "NATIVE_MODULE", SimpleNamespace())
 
     lighting.set_exposure_stops(1.0)
     controller = lighting.CsmController()
@@ -63,7 +64,8 @@ def test_building_placeholder_records_empty_geometry(monkeypatch, tmp_path):
     from forge3d import _degradation, buildings
 
     _degradation.clear()
-    monkeypatch.setattr(buildings, "_NATIVE", None)
+    from forge3d import _native
+    monkeypatch.setattr(_native, "NATIVE_MODULE", None)
     monkeypatch.setattr(buildings, "_check_pro_access", lambda _feature: None)
     payload = {
         "type": "FeatureCollection",

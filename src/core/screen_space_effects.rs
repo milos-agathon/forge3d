@@ -48,3 +48,5 @@ pub use settings::{CameraParams, SsaoSettings, SsgiSettings, SsrSettings, SsrSta
 pub use ssao::SsaoRenderer;
 pub use ssgi::SsgiRenderer;
 pub use ssr::SsrRenderer;
+
+pub(crate) use manager::PreparedScreenSpaceTargets;

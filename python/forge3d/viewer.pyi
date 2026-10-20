@@ -6,6 +6,7 @@ from .bundle import LoadedBundle
 from .diagnostics import Diagnostic
 from .geo import SolarTime
 from .media import Medium
+from .vector_line import VectorLineLayer
 
 WorldPosition: TypeAlias = tuple[float, float, float]
 VectorOverlayVertex: TypeAlias = tuple[float, float, float, float, float, float, float, int]
@@ -102,6 +103,7 @@ class ViewerHandle:
         text_size: Optional[float] = ...,
         text_color: Optional[tuple[float, float, float, float]] = ...,
     ) -> int | LabelOperationResult: ...
+    def add_vector_line(self, line: VectorLineLayer) -> int: ...
     def add_vector_overlay(
         self,
         name: str,
@@ -190,7 +192,12 @@ class ViewerHandle:
         up: WorldPosition = ...,
     ) -> None: ...
     def set_fov(self, deg: float) -> None: ...
-    def set_sun(self, azimuth_deg: float, elevation_deg: float) -> None: ...
+    def set_sun(
+        self,
+        azimuth_deg: float,
+        elevation_deg: float,
+        intensity: Optional[float] = None,
+    ) -> None: ...
     def set_sun_time(
         self,
         solar_time: SolarTime | Mapping[str, object],

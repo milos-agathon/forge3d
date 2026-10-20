@@ -231,9 +231,8 @@ pub(crate) fn vector_render_polygons_fill_py(
             .map_err(vector_runtime_err)?;
     }
     timing.end(&mut encoder, fill_scope, packed.len() as u32);
-    timing.resolve(&mut encoder);
 
-    queue.submit(Some(encoder.finish()));
+    timing.submit(&queue, encoder);
     crate::core::gpu::wait_for_device_idle(&device);
     let rgba = read_rgba_texture_to_py(
         py,

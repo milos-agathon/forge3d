@@ -520,10 +520,8 @@ impl TerrainScene {
         }
     }
 
-    /// Finalize a render's timing: resolve+read the timestamps and record each
-    /// timed pass into the global certificate capture. Consumes the manager's
-    /// current slot (offline single-shot pattern). Must be called AFTER the
-    /// render encoder was submitted (with `resolve_queries` recorded into it).
+    /// Finalize submitted render work. The timing manager owns any remaining
+    /// query resolution, its submission fence, readback and slot retirement.
     pub(super) fn record_render_timings(
         &self,
         timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,

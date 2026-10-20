@@ -14,6 +14,17 @@ pub struct PySmokeEmitter {
     pub inner: SmokeEmitter,
 }
 
+impl PySmokeEmitter {
+    /// Validate a proposed edit before replacing the live emitter.
+    fn update_validated(&mut self, edit: impl FnOnce(&mut SmokeEmitter)) -> PyResult<()> {
+        let mut proposed = self.inner.clone();
+        edit(&mut proposed);
+        proposed.validate().map_err(PyValueError::new_err)?;
+        self.inner = proposed;
+        Ok(())
+    }
+}
+
 #[pymethods]
 impl PySmokeEmitter {
     #[new]
@@ -67,8 +78,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_center(&mut self, value: (f32, f32, f32)) -> PyResult<()> {
-        self.inner.center = tuple3(value);
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.center = tuple3(value))
     }
 
     #[getter]
@@ -78,8 +88,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_radius(&mut self, value: f32) -> PyResult<()> {
-        self.inner.radius = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.radius = value)
     }
 
     #[getter]
@@ -89,8 +98,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_velocity(&mut self, value: (f32, f32, f32)) -> PyResult<()> {
-        self.inner.velocity = tuple3(value);
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.velocity = tuple3(value))
     }
 
     fn __repr__(&self) -> String {
@@ -110,8 +118,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_density_rate(&mut self, value: f32) -> PyResult<()> {
-        self.inner.density_rate = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.density_rate = value)
     }
 
     #[getter]
@@ -121,8 +128,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_temperature_rate(&mut self, value: f32) -> PyResult<()> {
-        self.inner.temperature_rate = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.temperature_rate = value)
     }
 
     #[getter]
@@ -132,8 +138,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_fuel_rate(&mut self, value: f32) -> PyResult<()> {
-        self.inner.fuel_rate = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.fuel_rate = value)
     }
 
     #[getter]
@@ -143,8 +148,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_soot_rate(&mut self, value: f32) -> PyResult<()> {
-        self.inner.soot_rate = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.soot_rate = value)
     }
 
     #[getter]
@@ -154,8 +158,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_humidity_rate(&mut self, value: f32) -> PyResult<()> {
-        self.inner.humidity_rate = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.humidity_rate = value)
     }
 
     #[getter]
@@ -165,8 +168,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_emission_rate(&mut self, value: f32) -> PyResult<()> {
-        self.inner.emission_rate = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.emission_rate = value)
     }
 
     #[getter]
@@ -176,8 +178,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_start_time(&mut self, value: f32) -> PyResult<()> {
-        self.inner.start_time = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.start_time = value)
     }
 
     #[getter]
@@ -187,8 +188,7 @@ impl PySmokeEmitter {
 
     #[setter]
     fn set_end_time(&mut self, value: f32) -> PyResult<()> {
-        self.inner.end_time = value;
-        self.inner.validate().map_err(PyValueError::new_err)
+        self.update_validated(|proposed| proposed.end_time = value)
     }
 }
 

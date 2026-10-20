@@ -186,78 +186,45 @@ def test_resample_raster_to_explicit_grid(tmp_path: Path) -> None:
     assert result["array"].dtype == np.dtype("uint8")
 
 
-def test_mapscene_render_resamples_geotiff_overlay_to_terrain_grid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mapscene_prepares_geotiff_drape_on_terrain_grid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     rasterio = pytest.importorskip("rasterio")
     from rasterio.transform import from_origin
+    from rasterio.enums import Resampling
+    from forge3d._map_scene_rasters import _overlay_in_terrain_uv
 
-    overlay_path = tmp_path / "classes.tif"
-    _write_raster(overlay_path, np.arange(4, dtype=np.uint8).reshape(2, 2), crs="EPSG:3857")
-    target_transform = from_origin(100.0, 200.0, 10.0, 10.0)
-    calls: dict[str, object] = {}
-
-    def fake_resample(source, target_grid, *, output_path=None, resampling="nearest", dst_nodata=None):
-        calls["source"] = str(source)
-        calls["target_grid"] = dict(target_grid)
-        calls["resampling"] = resampling
-        calls["dst_nodata"] = dst_nodata
-        return {
-            "array": np.full((int(target_grid["height"]), int(target_grid["width"])), 255, dtype=np.uint8),
-            "metadata": {},
-            "profile": {},
-            "path": None,
-        }
-
-    def fake_terrain_result(recipe, heightmap):
-        rgba = np.zeros((int(recipe.output.height), int(recipe.output.width), 4), dtype=np.uint8)
-        rgba[..., 3] = 255
-        return map_scene._MapSceneNativeRenderResult(
-            rgba=rgba,
-            aov_frame=None,
-            hdr_frame=None,
-            metadata={"samples_used": 1, "target_samples": 1, "denoiser_used": "none", "adaptive": False},
-        )
-
-    monkeypatch.setattr(f3d.alignment, "resample_raster_to_grid", fake_resample)
-    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain_result)
+    path = tmp_path / "classes.tif"
+    transform = from_origin(100.0, 200.0, 10.0, 10.0)
+    source = np.array([[0, 1], [2, 3]], dtype=np.uint8)
+    with rasterio.open(path, "w", driver="GTiff", height=2, width=2, count=1,
+                       dtype="uint8", crs="EPSG:3857", transform=transform, nodata=0) as dst:
+        dst.write(source, 1)
+    calls = []
+    from rasterio import warp
+    real_reproject = warp.reproject
+    def capture(*args, **kwargs):
+        calls.append(kwargs)
+        return real_reproject(*args, **kwargs)
+    monkeypatch.setattr(warp, "reproject", capture)
+    layer = f3d.RasterOverlay(layer_id="classes", path=str(path), crs="EPSG:3857",
+        metadata={"source_id": "classes", "alignment_resampling": "mode", "nodata": 0})
     scene = f3d.MapScene(
-        terrain=f3d.TerrainSource(
-            data=np.zeros((3, 4), dtype=np.float32),
-            crs="EPSG:3857",
-            metadata={
-                "source_id": "dem",
-                "width": 4,
-                "height": 3,
-                "geotransform": list(target_transform.to_gdal()),
-                "resolution": [10.0, 10.0],
-            },
-            elevation_sampling_available=True,
-        ),
-        lighting=f3d.LightingPreset(),
-        output=f3d.OutputSpec(width=8, height=6, path=str(tmp_path / "aligned-overlay.png")),
-        target_crs="EPSG:3857",
-        layers=[
-            f3d.RasterOverlay(
-                layer_id="classes",
-                path=overlay_path,
-                crs="EPSG:3857",
-                opacity=1.0,
-                metadata={"source_id": "classes", "alignment_resampling": "mode", "nodata": 0},
-            )
-        ],
-    )
-
-    report = scene.render()
-    target_grid = calls["target_grid"]
-
-    assert report.status == "ok"
-    assert Path(scene.last_render_path).exists()
-    assert calls["source"] == str(overlay_path)
-    assert calls["resampling"] == "mode"
-    assert calls["dst_nodata"] == 0
-    assert target_grid["crs"] == "EPSG:3857"
-    assert target_grid["width"] == 4
-    assert target_grid["height"] == 3
-    assert target_grid["transform"] == list(target_transform.to_gdal())
+        terrain=f3d.TerrainSource(data=np.zeros((3, 4), dtype=np.float32), crs="EPSG:3857",
+            metadata={"source_id": "dem", "width": 4, "height": 3,
+                      "geotransform": list(transform.to_gdal()), "resolution": [10.0, 10.0]},
+            elevation_sampling_available=True),
+        lighting=f3d.LightingPreset(), output=f3d.OutputSpec(width=8, height=6),
+        target_crs="EPSG:3857", layers=[layer])
+    rgba = _overlay_in_terrain_uv(scene.recipe.layers[0], scene.recipe, (3, 4))
+    assert rgba.shape == (3, 4, 4)
+    np.testing.assert_array_equal(rgba[:2, :2, 0], source)
+    np.testing.assert_array_equal(rgba[:2, :2, 3], [[0, 255], [255, 255]])
+    assert not rgba[2:, :, 3].any() and not rgba[:, 2:, 3].any()
+    assert len(calls) == 4
+    for call in calls:
+        assert call["resampling"] == Resampling.mode
+        assert call["dst_nodata"] == 0
+        assert call["dst_crs"] == "EPSG:3857"
+        assert call["dst_transform"] == transform
 
 
 def test_alignment_residual_roundtrip_and_misregistered_controls() -> None:

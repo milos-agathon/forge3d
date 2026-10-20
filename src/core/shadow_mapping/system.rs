@@ -166,7 +166,7 @@ impl ShadowMapping {
         if let Some(uniform_buffer) = &self.uniform_buffer {
             // Convert cascades to GPU format
             let mut cascade_data = [CsmCascadeData {
-                light_projection: [[0.0; 4]; 4],
+                light_projection: [0.0; 16],
                 light_view_proj: [[0.0; 4]; 4],
                 near_distance: 0.0,
                 far_distance: 0.0,
@@ -178,7 +178,7 @@ impl ShadowMapping {
                 if i < 4 {
                     let light_view_proj = cascade.light_projection * self.light_view_matrix;
                     cascade_data[i] = CsmCascadeData {
-                        light_projection: cascade.light_projection.to_cols_array_2d(),
+                        light_projection: cascade.light_projection.to_cols_array(),
                         light_view_proj: light_view_proj.to_cols_array_2d(),
                         near_distance: cascade.near_distance,
                         far_distance: cascade.far_distance,
@@ -196,7 +196,7 @@ impl ShadowMapping {
                     0.0,
                 )
                 .to_array(),
-                light_view: self.light_view_matrix.to_cols_array_2d(),
+                light_view: self.light_view_matrix.to_cols_array(),
                 cascades: cascade_data,
                 cascade_count: self.cascades.len().min(4) as u32,
                 pcf_kernel_size: self.config.pcf_quality as u32,

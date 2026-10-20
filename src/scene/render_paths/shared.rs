@@ -18,7 +18,7 @@ impl Scene {
     /// Copy the color target to a mappable buffer and read it back to RGBA
     /// bytes. `timing` threads the render's [`GpuTimingManager`] so the
     /// texture→buffer copy is recorded as the `scene.readback_copy` pass, and
-    /// `resolve_queries` is emitted into this final encoder — the last submit
+    /// Timing owns resolution and submission of this final encoder — the last submit
     /// of the render — so every timestamp written across the render (main and
     /// readback encoders) is resolved before [`Scene::record_render_timings`]
     /// reads it.
@@ -71,9 +71,10 @@ impl Scene {
         );
         scene_ts_end(timing, &mut enc, copy_scope, 1);
         if let Some(t) = timing.as_mut() {
-            t.resolve_queries(&mut enc);
+            t.submit(enc);
+        } else {
+            g.queue.submit(Some(enc.finish()));
         }
-        g.queue.submit(Some(enc.finish()));
 
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});

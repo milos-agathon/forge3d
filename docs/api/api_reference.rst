@@ -18,6 +18,31 @@ Viewer, Notebook, And IPC
    :members:
    :no-index:
 
+Local Vector Line Overlays
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Create a ``forge3d.VectorLineLayer`` from an open world-coordinate path and
+submit it with ``ViewerHandle.add_vector_line`` on a terrain-loaded viewer.
+The helper builds stroke and halo geometry and returns the overlay id, using
+the existing native ``add_vector_overlay`` submission. Width and halo use
+horizontal world units; caps support ``butt``/``square`` and joins support
+``bevel``/``miter``. Defaults are butt caps and miter joins, with miter length
+clamped at four times the stroke half-width or halo outer radius.
+
+Native drape adds ``(height - domain_min) * z_scale + z_offset`` to display Y
+at each generated vertex. Without drape, only ``z_offset`` is added. Tight
+corners with short segments or wide halos can produce folded ribbons and are
+rejected before submission. ``VectorLineLayer.from_style`` translates the
+documented local subset and raises ``VectorLineStyleError`` with structured
+diagnostics for unsupported fields. See :doc:`../guides/style_support_matrix`
+for units, defaults, geometry limits and the runnable
+``examples/vector_line_drape.py`` example. Streamed MVT, full Mapbox parity and
+SUTURA ``MapScene`` projection are outside this helper's scope.
+
+.. automodule:: forge3d.vector_line
+   :members:
+   :no-index:
+
 Label API Truth
 ~~~~~~~~~~~~~~~
 
@@ -85,6 +110,18 @@ renders. ``forge3d.recipe_manifest(scene)`` returns a deterministic JSON-safe
 manifest for CI/review tooling. ``MapScene.save_bundle`` writes review metadata
 and diagnostics; blocked scenes are recorded as non-renderable instead of being
 represented as successful renders.
+
+``RenderPassInput`` and ``RenderPassSpec`` define named color, relief and overlay
+image passes. ``MapScene.render_passes`` composes supplied RGBA snapshots in
+explicit order with multiply, screen or alpha-over, retains alpha and declared
+color-space semantics, and replays the frozen specification from a bundle.
+Its backend is ``python_ordered_rgba_composition``; it is separate from native
+``MapScene.render``. See ``guides/ordered_map_composition`` for the equations,
+validation rules, serialization and executable physical-render example.
+Composition summaries include the compact pass specification and use the same
+recipe hash as the compiled plan. Version-4 composition bundles require nonempty
+passes and load through ``MapScene.load_bundle``; generic and viewer bundle
+loaders retain their version-3 gate.
 
 Feature ``005-map-assets-bundles-p1`` extends this product path without
 changing the legacy building module export. Use ``forge3d.map_scene.LabelLayer``

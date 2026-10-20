@@ -91,8 +91,10 @@ class ViewerProcess:
         *,
         effects: bool = False,
         extra_env: dict[str, str] | None = None,
+        extra_args: list[str] | None = None,
     ) -> None:
         args = [str(_viewer_binary()), "--ipc-port", "0", "--size", "640x400"]
+        args += extra_args or []
         if effects:
             args += [
                 "--gi",

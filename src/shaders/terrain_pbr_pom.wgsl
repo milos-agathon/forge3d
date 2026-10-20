@@ -191,7 +191,8 @@ struct OverlayUniforms {
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
-    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, terrain_shading_model
+    params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, raster_rgba
+    params7 : vec4<f32>, // DEM detail strength, terrain_shading_model, reserved, reserved
 };
 
 struct IblUniforms {
@@ -796,10 +797,45 @@ struct WaterReflectionUniforms {
     camera_world_pos: vec4<f32>,
     // Enable flags: (enable_reflections, debug_mode, resolution, _pad)
     enable_flags: vec4<f32>,
+    // physical mode, supplied height, supplied colour, perceptual roughness
+    optics: vec4<f32>,
+    water_color: vec4<f32>,
 }
 
 @group(5) @binding(0)
 var<uniform> water_reflection_uniforms: WaterReflectionUniforms;
+
+fn physical_water_enabled() -> bool {
+    return water_reflection_uniforms.optics.x > 0.5;
+}
+
+// Explicit bilinear loads keep RGBA32Float portable without FLOAT32_FILTERABLE.
+fn water_surface_sample(uv: vec2<f32>) -> vec4<f32> {
+    let dims = vec2<i32>(textureDimensions(water_mask_tex));
+    let last = max(dims - vec2<i32>(1), vec2<i32>(0));
+    let p = det_barrier2(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * vec2<f32>(last));
+    let a = clamp(vec2<i32>(floor(p)), vec2<i32>(0), last);
+    let b = clamp(a + vec2<i32>(1), vec2<i32>(0), last);
+    let w = p - vec2<f32>(a);
+    return det_mix4(det_mix4(textureLoad(water_mask_tex, a, 0),
+                   textureLoad(water_mask_tex, vec2<i32>(b.x, a.y), 0), w.x),
+               det_mix4(textureLoad(water_mask_tex, vec2<i32>(a.x, b.y), 0),
+                   textureLoad(water_mask_tex, b, 0), w.x), w.y);
+}
+
+fn water_surface_normal(uv: vec2<f32>) -> vec3<f32> {
+    let p = water_surface_sample(uv).yz;
+    let squared = det_barrier(det_dot2(p, p));
+    return det_div3(vec3<f32>(2.0 * p, 1.0 - squared), vec3<f32>(1.0 + squared));
+}
+
+fn water_geometry_height(uv: vec2<f32>, terrain_height: f32) -> f32 {
+    if (physical_water_enabled() && water_reflection_uniforms.optics.y > 0.5 &&
+        textureSampleLevel(water_mask_tex, height_samp, uv, 0.0).r > 0.001) {
+        return water_surface_sample(uv).w;
+    }
+    return terrain_height;
+}
 
 @group(5) @binding(1)
 var reflection_texture: texture_2d<f32>;
@@ -934,6 +970,10 @@ var material_mask_tex: texture_2d<f32>;
 
 @group(6) @binding(15)
 var material_map_samp: sampler;
+
+// SUTURA: straight-alpha raster drape in the heightmap UV frame.
+@group(6) @binding(17)
+var material_drape_tex: texture_2d<f32>;
 
 struct TerrainFrameCounters {
     material_invocations: atomic<u32>,
@@ -2040,7 +2080,7 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
-    let h_disp = det_fma(apply_height_curve01(t_geom), h_max - h_min, h_min);
+    let h_disp = water_geometry_height(uv, det_fma(apply_height_curve01(t_geom), h_max - h_min, h_min));
 
     // For mesh mode: center terrain vertically around Z=0 so camera at origin can see it
     // For screen mode: keep original height for fragment shader compatibility
@@ -3350,7 +3390,9 @@ fn apply_slope_hue_variation(albedo: vec3<f32>, slope_factor: f32, height_norm: 
 /// Returns tangent-space normal decoded from RGB [0,1] -> [-1,1]
 fn sample_dem_detail_normal(uv: vec2<f32>) -> vec3<f32> {
     // Sample the detail normal texture
-    let sample = textureSample(detail_normal_tex, detail_normal_samp, uv);
+    // The uploaded map has one mip. Explicit LOD also allows distance/water
+    // gating without relying on derivatives in non-uniform control flow.
+    let sample = textureSampleLevel(detail_normal_tex, detail_normal_samp, uv, 0.0);
     // Decode from [0,1] to [-1,1] per channel (tangent space: R=X, G=Y, B=Z)
     let decoded = det_barrier3(sample.rgb * 2.0) - 1.0;
     // Ensure valid normal (avoid NaN from zero-length vectors)
@@ -3415,6 +3457,7 @@ fn apply_detail_normal(
 /// UV: terrain UV (0-1 across terrain extent)
 fn apply_dem_detail_normal(
     base_normal: vec3<f32>,
+    surface_up: vec3<f32>,
     terrain_uv: vec2<f32>,
     view_distance: f32,
     detail_strength: f32,
@@ -3437,14 +3480,44 @@ fn apply_dem_detail_normal(
         return base_normal;
     }
 
-    // Build TBN from base normal
-    let tbn = build_tbn(base_normal);
+    // The map's red/green axes follow +U/+V, not an arbitrary normal frame.
+    let tbn = build_terrain_uv_tbn(base_normal, surface_up);
 
-    // Apply RNM blend with strength and fade
+    // Perturb the neutral tangent normal, then transform once. Passing the
+    // world-space base normal into tangent-space RNM would rotate it twice.
     let effective_strength = detail_strength * fade;
-    let blended = blend_rnm(base_normal, det_mix3(vec3<f32>(0.0, 0.0, 1.0), detail_tangent, effective_strength));
+    let blended = det_mix3(vec3<f32>(0.0, 0.0, 1.0), detail_tangent, effective_strength);
 
     return det_normalize3(det_mat3_mul_vec3(tbn, blended));
+}
+
+/// DEM normals use +U east, +V south (increasing raster row), +Z surface-up.
+/// Follow the U derivative of a Z-up heightfield; Gram-Schmidt completes V.
+fn build_terrain_uv_tbn(normal: vec3<f32>, surface_up: vec3<f32>) -> mat3x3<f32> {
+    var east = vec3<f32>(1.0, 0.0, 0.0);
+    var south = vec3<f32>(0.0, 1.0, 0.0);
+    var handedness = 1.0;
+    if (terrain_yup_active()) {
+        // `mesh:yup` swaps raster south onto +Z, which flips the frame's handedness.
+        south = vec3<f32>(0.0, 0.0, 1.0);
+        handedness = -1.0;
+    }
+    if (orbis_globe_active()) {
+        east = det_barrier3(det_cross3(orbis_render_pole(), surface_up));
+        if (det_dot3(east, east) == 0.0) {
+            east = det_barrier3(det_cross3(vec3<f32>(1.0, 0.0, 0.0), surface_up));
+        }
+        east = det_normalize3(east);
+        south = -det_cross3(surface_up, east);
+        handedness = -1.0;
+    }
+    var tangent = det_cross3(south, normal) * handedness;
+    if (det_dot3(tangent, tangent) == 0.0) {
+        tangent = east - det_barrier3(normal * det_dot3(east, normal));
+    }
+    tangent = det_normalize3(tangent);
+    let bitangent = det_cross3(normal, tangent) * handedness;
+    return mat3x3<f32>(tangent, bitangent, normal);
 }
 
 /// True for the `mesh:yup` terrain mode, whose geometry frame is already Y-up
@@ -4160,7 +4233,15 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         }
     }
 
-    let uv = input.tex_coord;
+    var uv = input.tex_coord;
+    // Legacy screen UVs clamp the oversized triangle's vertices. For the
+    // new raster source reconstruct its full, row-zero-north grid from the
+    // interpolated XY plane; keep the historical colormap path unchanged.
+    if (u_overlay.params6.w > 0.5 && u_terrain.camera_mode_params.x < 0.5) {
+        let inv_span = det_div(1.0, u_terrain.spacing_h_exag.x);
+        uv = det_barrier2(vec2<f32>(det_barrier(input.world_position.x * inv_span) + 0.5,
+                                  0.5 - det_barrier(input.world_position.y * inv_span)));
+    }
     // No-data cells (params6.z enables, params6.y is the raw-height
     // threshold): the caller stores them just below the lowest valid height,
     // so a fragment whose unclamped height falls under the threshold lies on
@@ -4169,7 +4250,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         discard;
     }
     let debug_mode = u32(u_overlay.params1.y + 0.5);
-    let lambert_physical = u_overlay.params6.w > 0.5;
+    let lambert_physical = u_overlay.params7.y > 0.5;
 
     // Compute all normal variants for diagnostics
     let base_normal = det_normalize3(input.world_normal);
@@ -4264,7 +4345,13 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         -(det_barrier(det_barrier(r01 * tx) + det_barrier(r11 * ty)) + det_barrier(r21 * tz)),
         -(det_barrier(det_barrier(r02 * tx) + det_barrier(r12 * ty)) + det_barrier(r22 * tz))),
     );
-    let view_dir = det_normalize3(det_barrier3(camera_pos) - input.world_position);
+    var view_dir = det_normalize3(det_barrier3(camera_pos) - input.world_position);
+    let physical_water_here = physical_water_enabled() &&
+        textureSampleLevel(water_mask_tex, height_samp, uv, 0.0).r > 0.001;
+    if (physical_water_here) {
+        let center_z = det_barrier((u_shading.clamp0.x + u_shading.clamp0.y) * 0.5) * u_terrain.spacing_h_exag.z;
+        view_dir = det_normalize3(det_barrier3(camera_pos + det_barrier3(vec3<f32>(0.0, 0.0, center_z))) - input.world_position);
+    }
     let view_dir_tangent = det_mat3_mul_vec3(tbn, view_dir);
 
     let min_steps = clamp(u32(u_shading.pom_steps.x + 0.5), 1u, 128u);
@@ -4274,7 +4361,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let pom_flags = u32(u_shading.pom_steps.w + 0.5);
     // Globe geometry is displaced and its UV spans the whole Earth, so a
     // parallax offset would leave the loaded tiles entirely.
-    let pom_enabled = (pom_flags & 0x1u) != 0u && pom_scale > 0.0 && !orbis_globe;
+    let pom_enabled = (pom_flags & 0x1u) != 0u && pom_scale > 0.0 && !orbis_globe && !physical_water_here;
     let occlusion_enabled = (pom_flags & 0x2u) != 0u;
     let shadow_enabled = (pom_flags & 0x4u) != 0u;
 
@@ -4300,6 +4387,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // Water mask: 0.0 = not water, >0.0 = water (value is shore-distance ratio)
     // Use small epsilon to detect any water, not just shore-distance > 0.5
     let is_water = water_mask_value > 0.001;
+    let is_physical_water = is_water && physical_water_enabled();
     let height_sample = sample_height(parallax_uv);
     let height_clamped = clamp(height_sample, u_shading.clamp0.x, u_shading.clamp0.y);
     var occlusion = 1.0;
@@ -4473,7 +4561,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     var shading_normal = blended_normal;
     var water_scatter = vec3<f32>(0.0); // Subsurface scatter contribution for water
     var water_depth_value = 0.0; // Water depth for attenuation (promoted to outer scope)
-    if (is_water) {
+    if (is_water && !is_physical_water) {
         // Water material properties
         // Use slightly higher roughness (0.02) for stable highlights without fireflies
         // Still low enough for crisp sun glint but avoids subpixel needle highlights
@@ -4549,6 +4637,15 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         // Build perturbed normal in the terrain geometry frame (Z is up)
         shading_normal = det_normalize3(terrain_zup_to_geometry(vec3<f32>(wave_dx, wave_dy, 1.0)));
     }
+    if (is_physical_water) {
+        shading_normal = n_dd;
+        if (water_reflection_uniforms.water_color.w > 0.5) {
+            shading_normal = det_normalize3(water_surface_normal(uv));
+        }
+        roughness = det_barrier(apply_material_roughness_map(
+            water_reflection_uniforms.optics.w, uv, material_map_mask(uv)));
+        metallic = 0.0;
+    }
 
     if (!is_water) {
         var map_mask = material_map_mask(parallax_uv);
@@ -4607,6 +4704,17 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             detail_fade_start,
             detail_fade_end
         );
+        if (u_overlay.params7.x > 0.0) {
+            shading_normal = apply_dem_detail_normal(
+                shading_normal,
+                base_normal,
+                input.tex_coord,
+                view_distance,
+                u_overlay.params7.x,
+                detail_fade_start,
+                detail_fade_end
+            );
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -4624,7 +4732,14 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         lut_u = clamp(height_clamped, 0.0, 1.0);
     }
     let lut_uv = vec2<f32>(clamp(lut_u, 0.0, 1.0), 0.5);
-    let overlay_rgb = textureSample(colormap_tex, colormap_samp, lut_uv).rgb;
+    var overlay_rgba = textureSample(colormap_tex, colormap_samp, lut_uv);
+    if (u_overlay.params6.w > 0.5) {
+        let dims = textureDimensions(colormap_tex);
+        let cell = clamp(vec2<u32>(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * vec2<f32>(dims)), vec2<u32>(0u), dims - vec2<u32>(1u));
+        overlay_rgba = textureLoad(colormap_tex, vec2<i32>(cell), 0);
+        if (overlay_rgba.a == 0.0) { discard; }
+    }
+    let overlay_rgb = overlay_rgba.rgb;
 
     // Apply overlay blend to material albedo (if overlay is active)
     if (lambert_physical && !is_water && u_shading.physical_base_color.w > 0.5) {
@@ -4633,7 +4748,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         albedo = u_shading.physical_base_color.rgb;
     }
     var material_albedo = albedo; // Store original triplanar albedo
-    if (overlay_strength_raw > 1e-5) {
+    if (overlay_strength_raw > 1e-5 && u_overlay.params6.w < 0.5) {
         let strength = clamp(overlay_strength_raw, 0.0, 1.0);
 
         // Blend modes:
@@ -4658,7 +4773,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // 2 = mix (blend between material and colormap using colormap_strength)
     // IMPORTANT: Water always uses its own albedo regardless of albedo_mode
     var final_albedo = albedo;
-    if (is_water) {
+    if (is_water && !is_physical_water) {
         // Water keeps its blue underwater color - don't override with colormap
         final_albedo = material_albedo;
     } else if (albedo_mode == 0u) { // material
@@ -4673,6 +4788,26 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         final_albedo = det_mix3(material_albedo, overlay_rgb, colormap_strength);
     }
 
+    if (u_overlay.params6.w > 0.5 && (!is_water || is_physical_water)) {
+        final_albedo = det_mix3(material_albedo, overlay_rgb, clamp(overlay_strength_raw * overlay_rgba.a, 0.0, 1.0));
+    }
+
+    if (material_layer_uniforms.map_flags.w > 0.5) {
+        var drape_uv = input.tex_coord;
+        if (u_terrain.camera_mode_params.x < 0.5) {
+            // Legacy fullscreen vertices clamp (0,2) UVs before interpolation,
+            // leaving the existing material/height samples in [0,0.5]. Keep
+            // those pixels unchanged; raster imagery covers the complete tile
+            // and retains the screen compositor's top-to-bottom row convention.
+            drape_uv = vec2<f32>(input.tex_coord.x * 2.0, 1.0 - det_barrier(input.tex_coord.y * 2.0));
+        }
+        let drape = textureSample(material_drape_tex, material_map_samp, drape_uv);
+        final_albedo = det_mix3(final_albedo, drape.rgb, drape.a);
+    }
+
+    if (is_physical_water && water_reflection_uniforms.optics.z > 0.5) {
+        final_albedo = water_reflection_uniforms.water_color.rgb;
+    }
     albedo = clamp(final_albedo, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));
 
     // P6: Apply procedural albedo brightness noise (terrain only)
@@ -4777,7 +4912,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // P3: Roughness floor - lowered to 0.25 for land (from 0.65) to restore specular detail
     // Toksvig anti-aliasing handles sparkles instead of a high roughness floor
     // Water keeps low roughness (0.02) for crisp reflections (unchanged per P3 constraint)
-    let roughness_floor = select(0.25, 0.02, is_water);
+    let roughness_floor = select(select(0.25, 0.02, is_water), 0.0, is_physical_water);
     base_roughness = clamp(base_roughness, roughness_floor, 1.0);
     specular_roughness = clamp(specular_roughness, roughness_floor, 1.0);
     // Legacy roughness variable for IBL and other uses (use specular_roughness)
@@ -5423,7 +5558,10 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         // Normal PBR shading path
         var shaded = vec3<f32>(0.0);
 
-        if (is_water) {
+        if (is_physical_water) {
+            shaded = shade_physical_water(input.world_position, uv, shading_normal, view_dir,
+                                          light_dir, albedo, roughness, f0, shadow_visibility);
+        } else if (is_water) {
             // Water: specular-dominant shading (minimal diffuse, strong reflections)
             // Fresnel is already baked into eval_ibl via fresnel_schlick_roughness
             // Direct specular from sun
@@ -6049,6 +6187,168 @@ fn clipmap_raster_position(
     // Planetary vertices use their physical height above the reference sphere
     // so a ground-relative camera anchor remains outside the globe.
     return select(resolved.centered_position, resolved.world_position, clip_morph.y < 0.0);
+}
+
+// Ray/triangle traversal follows the same 00-10-11 / 00-11-01 mesh diagonal
+// as vs_main. The loop ends at the grid boundary, without a distance/step cap.
+fn water_triangle_hit(origin: vec3<f32>, direction: vec3<f32>, a: vec3<f32>,
+                      b: vec3<f32>, c: vec3<f32>, begin: f32, end: f32) -> f32 {
+    let e1 = b - a;
+    let e2 = c - a;
+    let p = det_cross3(direction, e2);
+    let determinant = det_dot3(e1, p);
+    if (determinant == 0.0) { return -1.0; }
+    let delta = origin - a;
+    let u = det_div(det_dot3(delta, p), determinant);
+    let q = det_cross3(delta, e1);
+    let v = det_div(det_dot3(direction, q), determinant);
+    let t = det_div(det_dot3(e2, q), determinant);
+    if (u >= 0.0 && v >= 0.0 && u + v <= 1.0 && t > 0.0 && t >= begin && t <= end) {
+        return t;
+    }
+    return -1.0;
+}
+
+fn water_terrain_vertex(uv: vec2<f32>) -> vec3<f32> {
+    let raw = det_barrier(sample_height_bilinear(uv));
+    let h = det_fma(apply_height_curve01(get_height_geom_t(raw)),
+                    u_shading.clamp0.y - u_shading.clamp0.x, u_shading.clamp0.x);
+    return vec3<f32>((uv - vec2<f32>(0.5)) * u_terrain.spacing_h_exag.x,
+                     h * u_terrain.spacing_h_exag.z);
+}
+
+fn water_trace_terrain(origin: vec3<f32>, direction: vec3<f32>) -> vec4<f32> {
+    let span = u_terrain.spacing_h_exag.x;
+    let cells = i32(max(u_terrain.camera_mode_params.y, 64.0)) - 1;
+    let start_uv = det_div2(origin.xy, vec2<f32>(span)) + vec2<f32>(0.5);
+    let speed = det_div2(direction.xy, vec2<f32>(span));
+    var cell = clamp(vec2<i32>(floor(start_uv * f32(cells))), vec2<i32>(0), vec2<i32>(cells - 1));
+    let step = vec2<i32>(select(-1, 1, speed.x >= 0.0), select(-1, 1, speed.y >= 0.0));
+    var begin = 0.0;
+    loop {
+        if (any(cell < vec2<i32>(0)) || any(cell >= vec2<i32>(cells))) { break; }
+        var crossing = vec2<f32>(3.402823466e38);
+        if (speed.x != 0.0) {
+            let edge = cell.x + select(0, 1, step.x > 0);
+            crossing.x = det_div(det_div(f32(edge), f32(cells)) - det_barrier(start_uv.x), speed.x);
+        }
+        if (speed.y != 0.0) {
+            let edge = cell.y + select(0, 1, step.y > 0);
+            crossing.y = det_div(det_div(f32(edge), f32(cells)) - det_barrier(start_uv.y), speed.y);
+        }
+        let end = max(begin, min(crossing.x, crossing.y));
+        let uv0 = det_div2(vec2<f32>(cell), vec2<f32>(f32(cells)));
+        let uv1 = det_div2(vec2<f32>(cell + vec2<i32>(1)), vec2<f32>(f32(cells)));
+        let a = det_barrier3(water_terrain_vertex(uv0));
+        let b = det_barrier3(water_terrain_vertex(vec2<f32>(uv1.x, uv0.y)));
+        let c = det_barrier3(water_terrain_vertex(uv1));
+        let d = det_barrier3(water_terrain_vertex(vec2<f32>(uv0.x, uv1.y)));
+        let t0 = water_triangle_hit(origin, direction, a, b, c, begin, end);
+        let t1 = water_triangle_hit(origin, direction, a, c, d, begin, end);
+        var hit = t0;
+        if (t1 > 0.0 && (hit < 0.0 || t1 < hit)) { hit = t1; }
+        if (hit > 0.0) { return vec4<f32>(origin + det_barrier3(direction * hit), 1.0); }
+        // A vertical ray stays in this cell; both terrain triangles were tested.
+        if (all(speed == vec2<f32>(0.0))) { break; }
+        if (direction.z >= 0.0 && origin.z + det_barrier(direction.z * end) >
+            u_shading.clamp0.y * u_terrain.spacing_h_exag.z) { break; }
+        if (crossing.x <= crossing.y) { cell.x = cell.x + step.x; }
+        if (crossing.y <= crossing.x) { cell.y = cell.y + step.y; }
+        begin = end;
+    }
+    return vec4<f32>(0.0);
+}
+
+fn water_reflected_terrain(hit: vec3<f32>, light_dir: vec3<f32>, roughness: f32) -> vec3<f32> {
+    let uv = det_barrier2(det_div2(hit.xy, vec2<f32>(u_terrain.spacing_h_exag.x)) + vec2<f32>(0.5));
+    let raw_height = det_barrier(sample_height_bilinear(uv));
+    let t = clamp((raw_height - u_overlay.params0.x) * u_overlay.params0.y, 0.0, 1.0);
+    var overlay = textureSampleLevel(colormap_tex, colormap_samp, vec2<f32>(t, 0.5), 0.0).rgb;
+    if (u_overlay.params6.w > 0.5) {
+        let dims = vec2<i32>(textureDimensions(colormap_tex));
+        let texel = clamp(vec2<i32>(uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+        overlay = textureLoad(colormap_tex, texel, 0).rgb;
+    }
+    let normal = calculate_normal(uv, calculate_texel_size());
+    var material = vec3<f32>(0.0);
+    var total = 0.0;
+    let count = clamp(i32(u_shading.layer_control.x), 1, 4);
+    let sigma = max(u_shading.layer_control.y * 1.5, 1.1920929e-7);
+    for (var i = 0; i < count; i = i + 1) {
+        let distance = get_height_geom_t(raw_height) - u_shading.layer_heights[i];
+        let weight = det_exp(det_div(-distance * distance, det_barrier(2.0 * sigma) * sigma));
+        let weights = compute_triplanar_weights(normal, u_shading.triplanar_params.y);
+        let pos = hit * u_shading.triplanar_params.x;
+        let mip = roughness * f32(textureNumLevels(material_albedo_tex) - 1u);
+        let rgb = det_barrier3(det_barrier3(textureSampleLevel(material_albedo_tex, material_samp, pos.yz, i, mip).rgb * weights.x) +
+                  det_barrier3(textureSampleLevel(material_albedo_tex, material_samp, pos.xz, i, mip).rgb * weights.y)) +
+                  det_barrier3(textureSampleLevel(material_albedo_tex, material_samp, pos.xy, i, mip).rgb * weights.z);
+        material = det_barrier3(material + det_barrier3(rgb * weight));
+        total = det_barrier(total + weight);
+    }
+    material = det_div3(material, vec3<f32>(max(total, 1.1920929e-7)));
+    let mode = u32(u_overlay.params1.z + 0.5);
+    var albedo = material;
+    if (mode == 1u) { albedo = overlay; }
+    if (mode == 2u) { albedo = det_mix3(material, overlay, clamp(u_overlay.params1.w, 0.0, 1.0)); }
+    if (u_overlay.params6.w > 0.5) {
+        albedo = det_mix3(material, overlay, clamp(u_overlay.params0.z, 0.0, 1.0));
+    }
+    if (material_layer_uniforms.map_flags.w > 0.5) {
+        let drape = textureSampleLevel(material_drape_tex, material_map_samp, uv, 0.0);
+        albedo = det_mix3(albedo, drape.rgb, drape.a);
+    }
+    let env_normal = rotate_y(terrain_to_env(normal), u_ibl.sin_theta, u_ibl.cos_theta);
+    let sky_light = det_barrier3(textureSampleLevel(envIrradiance, envSampler, env_normal, 0.0).rgb * u_ibl.intensity);
+    var visibility = 1.0;
+    let nl = max(det_dot3(normal, light_dir), 0.0);
+    if (nl > 0.0 && any(u_shading.light_params.rgb > vec3<f32>(0.0))) {
+        let epsilon = det_barrier(4.0 * 1.1920929e-7 * max(u_terrain.spacing_h_exag.x, abs(hit.z)));
+        if (water_trace_terrain(det_barrier3(hit + det_barrier3(normal * epsilon)), light_dir).w > 0.5) { visibility = 0.0; }
+    }
+    return albedo * (sky_light + det_barrier3(u_shading.light_params.rgb * det_div(nl * visibility, PI)));
+}
+
+fn shade_physical_water(position: vec3<f32>, uv: vec2<f32>, normal: vec3<f32>, view: vec3<f32>,
+                         light: vec3<f32>, albedo: vec3<f32>, roughness: f32,
+                         f0: vec3<f32>, shadow_visibility: f32) -> vec3<f32> {
+    let nv = max(det_dot3(normal, view), 0.0);
+    let nl = max(det_dot3(normal, light), 0.0);
+    let reflection = det_reflect3(-view, normal);
+    let env_direction = rotate_y(terrain_to_env(reflection), u_ibl.sin_theta, u_ibl.cos_theta);
+    let mip = det_barrier(roughness * roughness) * max(u_ibl.specular_mip_count - 1.0, 0.0);
+    var reflected = det_barrier3(textureSampleLevel(envSpecular, envSampler, env_direction, mip).rgb * u_ibl.intensity);
+    // Four float32 rounding units cover the coordinate arithmetic at ray origin.
+    let epsilon = det_barrier(4.0 * 1.1920929e-7 * max(u_terrain.spacing_h_exag.x, abs(position.z)));
+    let origin = det_barrier3(position + det_barrier3(normal * epsilon));
+    let terrain_hit = water_trace_terrain(origin, reflection);
+    if (terrain_hit.w > 0.5) { reflected = det_barrier3(water_reflected_terrain(det_barrier3(terrain_hit.xyz), light, roughness)); }
+    let fresnel = det_barrier3(f0 + det_barrier3((vec3<f32>(1.0) - f0) * det_pow(1.0 - nv, 5.0)));
+    let half_vector = det_normalize3(view + light);
+    let nh = max(det_dot3(normal, half_vector), 0.0);
+    let vh = max(det_dot3(view, half_vector), 0.0);
+    let alpha = det_barrier(roughness * roughness);
+    // Numerical regularization of the ideal delta BRDF, shared with legacy water.
+    let alpha2 = max(alpha * alpha, 1e-8);
+    let denominator = (det_barrier(1.0 - det_barrier(nh * nh))) + det_barrier(det_barrier(nh * nh) * alpha2);
+    let distribution = det_div(alpha2, det_barrier(PI * denominator) * denominator);
+    let k = det_div(alpha, 2.0);
+    let gv = det_div(nv, max(det_barrier(nv * (1.0 - k)) + k, 1.1920929e-7));
+    let gl = det_div(nl, max(det_barrier(nl * (1.0 - k)) + k, 1.1920929e-7));
+    let sun_fresnel = f0 + det_barrier3((vec3<f32>(1.0) - f0) * det_pow(1.0 - vh, 5.0));
+    var visibility = shadow_visibility;
+    if (water_trace_terrain(origin, light).w > 0.5) { visibility = 0.0; }
+    if (textureDimensions(sun_vis_tex).x > 1u) {
+        visibility = det_barrier(visibility * textureSampleLevel(sun_vis_tex, sun_vis_samp, uv, 0.0).r);
+    }
+    let sun = det_barrier3(det_barrier3(det_barrier3(det_div3(det_barrier3(det_barrier3(distribution * sun_fresnel) * gv) * gl, vec3<f32>(max(det_barrier(4.0 * nv) * nl, 1.1920929e-7)))
+              * u_shading.light_params.rgb) * nl) * visibility);
+    // Irradiance cubes already contain the Lambert normalization, matching eval_ibl.
+    let env_normal = rotate_y(terrain_to_env(normal), u_ibl.sin_theta, u_ibl.cos_theta);
+    let sky_body = det_barrier3(textureSampleLevel(envIrradiance, envSampler, env_normal, 0.0).rgb * u_ibl.intensity);
+    let sun_body = det_barrier3(u_shading.light_params.rgb * det_div(nl * visibility, PI));
+    let body = det_barrier3(det_barrier3(albedo * (vec3<f32>(1.0) - fresnel)) * (sky_body + sun_body));
+    return det_barrier3(body + det_barrier3(reflected * fresnel)) + sun;
 }
 
 @fragment

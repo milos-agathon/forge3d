@@ -10,14 +10,17 @@ organized by workflow rather than by Rust module layout.
 | Interactive terrain viewing | `open_viewer_async`, `ViewerHandle`, `ViewerWidget` | `terrain_viewer_interactive.py`, `terrain_camera_rigs_demo.py` |
 | Terrain inputs and datasets | `mini_dem`, `fetch_dem`, `datasets`, `cog.open_cog` | `terrain_single_tile.py`, `cog_streaming_demo.py` |
 | Raster overlays | `ViewerHandle.load_overlay` | `swiss_terrain_landcover_viewer.py`, `bosnia_terrain_landcover_viewer.py`, `belgium_bivariate_climate_map.py` |
-| Vector overlays and labels | `ViewerHandle.add_vector_overlay`, `ViewerHandle.add_label`, `ViewerHandle.add_labels`, `ViewerHandle.add_line_label`, `ViewerHandle.add_callout` | `luxembourg_rail_overlay.py`, `fuji_labels_demo.py` |
+| Population and thematic rasters | `RasterHeightSurfaceStyle`, `CategoricalRasterStyle`, `BivariateRasterStyle` through `MapScene` | [Style contracts](thematic_raster_styles.md), `mapscene_thematic_rasters.py` |
+| Vector overlays and labels | `VectorLineLayer`, `ViewerHandle.add_vector_line`, `ViewerHandle.add_vector_overlay`, `ViewerHandle.add_label`, `ViewerHandle.add_labels`, `ViewerHandle.add_line_label`, `ViewerHandle.add_callout` | `vector_line_drape.py`, `luxembourg_rail_overlay.py`, `fuji_labels_demo.py` |
 | Picking and selection | `viewer_ipc` picking helpers | `picking_demo.py`, `picking_test_interactive.py` |
 | Point clouds | `ViewerHandle.load_point_cloud`, `forge3d.pointcloud` | `pointcloud_viewer_interactive.py` |
 | Camera automation | `forge3d.animation`, `forge3d.camera_rigs` | `camera_animation_demo.py`, `terrain_camera_rigs_demo.py` |
 | Terrain quality controls | `terrain_params`, `presets`, `terrain_scatter` | `terrain_atmosphere_path_demo.py`, `pnoa_river_showcase_video.py` |
+| Caller-driven water surfaces and optics | `WaterOpticsSettings` through `TerrainRenderer` | [Water optics](water_optics.md), `terrain_water_optics.py` |
 | Native/offscreen rendering | `Scene`, `Session`, `TerrainRenderer`, `render_offline` | `terrain_atmosphere_path_demo.py`, `triangle_png.py` |
 | Match a compatible terrain reference | `recover_scene`, `RecoveredScene` | GPU acceptance scene; this estimates surface colour, sunlight, and haze without changing an existing map on its own |
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |
+| Ordered map composition | `RenderPassInput`, `RenderPassSpec`, `MapScene.render_passes` | [Composition contracts](ordered_map_composition.md), [physical render example](../examples/mapscene_render_passes.py) |
 | Geometry, mesh, vector, SDF, path tracing | `geometry`, `mesh`, `vector`, `sdf`, `path_tracing` | API-level usage; not every module has a dedicated showcase script |
 | Device and memory diagnostics | `has_gpu`, `device_probe`, `mem` | diagnostics and tooling flows rather than gallery scripts |
 

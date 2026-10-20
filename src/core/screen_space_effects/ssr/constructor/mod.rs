@@ -3,7 +3,7 @@ use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 mod layouts;
 mod pipelines;
-mod resources;
+pub(super) mod resources;
 
 struct ConstructorLayouts {
     trace_bind_group_layout: BindGroupLayout,
@@ -30,23 +30,27 @@ struct ConstructorBuffers {
     temporal_params: TrackedBuffer,
 }
 
-struct ConstructorResources {
-    ssr_spec_texture: TrackedTexture,
-    ssr_spec_view: TextureView,
-    ssr_final_texture: TrackedTexture,
-    ssr_final_view: TextureView,
-    ssr_history_texture: TrackedTexture,
-    ssr_history_view: TextureView,
-    ssr_filtered_texture: TrackedTexture,
-    ssr_filtered_view: TextureView,
-    ssr_hit_texture: TrackedTexture,
-    ssr_hit_view: TextureView,
-    ssr_composited_texture: TrackedTexture,
-    ssr_composited_view: TextureView,
-    env_texture: TrackedTexture,
-    env_view: TextureView,
-    env_sampler: Sampler,
-    linear_sampler: Sampler,
+pub(super) struct ViewportTextures {
+    pub(super) ssr_spec_texture: TrackedTexture,
+    pub(super) ssr_spec_view: TextureView,
+    pub(super) ssr_final_texture: TrackedTexture,
+    pub(super) ssr_final_view: TextureView,
+    pub(super) ssr_history_texture: TrackedTexture,
+    pub(super) ssr_history_view: TextureView,
+    pub(super) ssr_filtered_texture: TrackedTexture,
+    pub(super) ssr_filtered_view: TextureView,
+    pub(super) ssr_hit_texture: TrackedTexture,
+    pub(super) ssr_hit_view: TextureView,
+    pub(super) ssr_composited_texture: TrackedTexture,
+    pub(super) ssr_composited_view: TextureView,
+}
+
+pub(super) struct ConstructorResources {
+    pub(super) viewport: ViewportTextures,
+    pub(super) env_texture: TrackedTexture,
+    pub(super) env_view: TextureView,
+    pub(super) env_sampler: Sampler,
+    pub(super) linear_sampler: Sampler,
 }
 
 impl SsrRenderer {
@@ -74,18 +78,18 @@ impl SsrRenderer {
             composite_pipeline: pipelines.composite_pipeline,
             composite_bind_group_layout: layouts.composite_bind_group_layout,
             composite_params: buffers.composite_params,
-            _ssr_spec_texture: textures.ssr_spec_texture,
-            ssr_spec_view: textures.ssr_spec_view,
-            _ssr_final_texture: textures.ssr_final_texture,
-            ssr_final_view: textures.ssr_final_view,
-            ssr_history_texture: textures.ssr_history_texture,
-            ssr_history_view: textures.ssr_history_view,
-            ssr_filtered_texture: textures.ssr_filtered_texture,
-            ssr_filtered_view: textures.ssr_filtered_view,
-            ssr_hit_texture: textures.ssr_hit_texture,
-            ssr_hit_view: textures.ssr_hit_view,
-            _ssr_composited_texture: textures.ssr_composited_texture,
-            ssr_composited_view: textures.ssr_composited_view,
+            _ssr_spec_texture: textures.viewport.ssr_spec_texture,
+            ssr_spec_view: textures.viewport.ssr_spec_view,
+            _ssr_final_texture: textures.viewport.ssr_final_texture,
+            ssr_final_view: textures.viewport.ssr_final_view,
+            ssr_history_texture: textures.viewport.ssr_history_texture,
+            ssr_history_view: textures.viewport.ssr_history_view,
+            ssr_filtered_texture: textures.viewport.ssr_filtered_texture,
+            ssr_filtered_view: textures.viewport.ssr_filtered_view,
+            ssr_hit_texture: textures.viewport.ssr_hit_texture,
+            ssr_hit_view: textures.viewport.ssr_hit_view,
+            _ssr_composited_texture: textures.viewport.ssr_composited_texture,
+            ssr_composited_view: textures.viewport.ssr_composited_view,
             scene_color_override: None,
             _env_texture: textures.env_texture,
             env_view: textures.env_view,

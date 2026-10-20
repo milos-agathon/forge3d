@@ -64,8 +64,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   var sdf: f32;
   // Decode SDF/MSDF
   if (U.channels >= 2.5) {
-    // MSDF: use median of RGB
-    sdf = median3(sample.rgb) - 0.5;
+    // MSDF: take each texel's median before bilinear filtering. Filtering the
+    // channels first lets neighbouring single-channel texels in glyph padding
+    // blend into a false edge and draw stray halo far from the glyph.
+    let dims = vec2<i32>(textureDimensions(atlas_tex, 0));
+    let texel = in.uv * vec2<f32>(dims) - vec2<f32>(0.5);
+    let base = vec2<i32>(floor(texel));
+    let t = texel - floor(texel);
+    let hi = dims - vec2<i32>(1);
+    let m00 = median3(textureLoad(atlas_tex, clamp(base, vec2<i32>(0), hi), 0).rgb);
+    let m10 = median3(textureLoad(atlas_tex, clamp(base + vec2<i32>(1, 0), vec2<i32>(0), hi), 0).rgb);
+    let m01 = median3(textureLoad(atlas_tex, clamp(base + vec2<i32>(0, 1), vec2<i32>(0), hi), 0).rgb);
+    let m11 = median3(textureLoad(atlas_tex, clamp(base + vec2<i32>(1, 1), vec2<i32>(0), hi), 0).rgb);
+    sdf = mix(mix(m00, m10, t.x), mix(m01, m11, t.x), t.y) - 0.5;
   } else {
     // SDF: use single channel (assume red)
     sdf = sample.r - 0.5;

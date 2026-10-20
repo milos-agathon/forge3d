@@ -4,6 +4,7 @@ use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 mod accessors;
 mod constructor;
 mod controls;
+mod resize;
 mod runtime;
 
 /// SSGI renderer
@@ -73,3 +74,5 @@ pub struct SsgiRenderer {
     last_temporal_ms: f32,
     last_upsample_ms: f32,
 }
+
+pub(crate) use resize::PreparedSsgiTargets;

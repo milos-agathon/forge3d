@@ -148,9 +148,9 @@ class TestCompileFrame:
             )["labels"]
         (record,) = labels_payload(4)
         assert record["visible"] is True
-        assert abs(record["alpha"] - 1.0 / 256.0) < 1e-9
+        assert abs(record["alpha"] - 1.0 / 8.0) < 1e-9
         (record,) = labels_payload(8)
-        assert abs(record["alpha"] - 4.0 / 256.0) < 1e-9
+        assert abs(record["alpha"] - 4.0 / 8.0) < 1e-9
         (record,) = labels_payload(3)
         assert record["alpha"] == 0.0
         (record,) = labels_payload(12)
@@ -167,6 +167,91 @@ class TestCompileFrame:
             f3d.compile_frame(6, 0, 1, CAMERA_JSON, _scene_json(labels=[hidden])).to_json()
         )["labels"]
         assert record["alpha"] == 0.0
+
+    def test_label_fade_frames_in_scene_sets_fade_and_hashes(self):
+        _require_chronos_native()
+        label = {
+            "layer_id": "cities",
+            "label_id": "summit",
+            "visible": True,
+            "appearance_frame": 4,
+            "disappearance_frame": 300,
+            "payload": {"text": "Summit"},
+        }
+
+        def payload(frame: int, **fade):
+            return json.loads(
+                f3d.compile_frame(
+                    frame, 0, 1, CAMERA_JSON, _scene_json(labels=[label], **fade)
+                ).to_json()
+            )
+
+        assert payload(8, label_fade_frames=256)["labels"][0]["alpha"] == pytest.approx(
+            5.0 / 256.0
+        )
+        assert payload(8, label_fade_frames=4)["labels"][0]["alpha"] == 1.0
+        short, long = payload(8, label_fade_frames=8), payload(8, label_fade_frames=256)
+        assert short["scene_hash"] != long["scene_hash"]
+        assert short["label_set_hash"] != long["label_set_hash"]
+        for bad in (0, -3, 2.5, "8", True):
+            with pytest.raises(Exception, match="label_fade_frames"):
+                f3d.compile_frame(
+                    0, 0, 1, CAMERA_JSON, _scene_json(labels=[label], label_fade_frames=bad)
+                )
+
+    def test_label_leaving_before_last_frame_is_opaque_until_its_fade(self):
+        # Regression: a 256-frame look-ahead fade drew a label leaving at frame
+        # N at 10/256 opacity on frame N-10.
+        _require_chronos_native()
+        from forge3d.chronos import (
+            _DEFAULT_LABEL_FADE_FRAMES,
+            _label_records,
+            _label_timeline_events,
+        )
+
+        frame_count = 360
+        leave = 300  # visible on frames 0..leave-1, hidden from `leave` on
+        key = ("labels", "peak")
+        sorted_indices = list(range(frame_count))
+        per_frame_keys = {i: ({key} if i < leave else set()) for i in sorted_indices}
+        events = _label_timeline_events(per_frame_keys, sorted_indices)
+
+        def alpha_at(frame: int) -> float:
+            accepted = {key: SimpleNamespace(to_dict=lambda: {"text": "Peak"})} if (
+                frame < leave
+            ) else {}
+
+            def events_for(layer_id, label_id, visible):
+                if not visible:
+                    return (None, None)
+                return events[(layer_id, label_id)][frame]
+
+            records = _label_records([key], accepted, events_for)
+            (record,) = json.loads(
+                f3d.compile_frame(
+                    frame,
+                    0,
+                    1,
+                    CAMERA_JSON,
+                    _scene_json(labels=records, label_fade_frames=_DEFAULT_LABEL_FADE_FRAMES),
+                ).to_json()
+            )["labels"]
+            return record["alpha"]
+
+        assert _DEFAULT_LABEL_FADE_FRAMES == 8
+        assert alpha_at(0) == 1.0  # present from the first frame: no fade-in
+        assert alpha_at(leave - 10) == 1.0
+        assert alpha_at(leave - _DEFAULT_LABEL_FADE_FRAMES) == 1.0
+        assert alpha_at(leave - 1) == pytest.approx(1.0 / _DEFAULT_LABEL_FADE_FRAMES)
+        assert alpha_at(leave) == 0.0
+
+    def test_render_flythrough_rejects_bad_label_fade_frames(self, tmp_path):
+        scene = SimpleNamespace()
+        for bad, error in ((0, ValueError), (-1, ValueError), (2.5, TypeError), (True, TypeError)):
+            with pytest.raises(error, match="label_fade_frames"):
+                render_flythrough(
+                    [scene], base_seed=0, samples=1, out_dir=tmp_path, label_fade_frames=bad
+                )
 
     def test_compile_rejects_zero_samples(self):
         _require_chronos_native()
@@ -527,6 +612,146 @@ def _synthetic_scene(
     )
 
 
+@pytest.fixture
+def frozen_frame_scene(tmp_path):
+    from forge3d.chronos import _prepare_frame_scene
+
+    _require_chronos_native()
+    source = _synthetic_scene()
+    source = f3d.MapScene(
+        replace(
+            source.recipe,
+            layers=(
+                f3d.LabelLayer(
+                    layer_id="labels",
+                    labels=[
+                        {
+                            "id": "peak",
+                            "text": "Peak",
+                            "geometry": {
+                                "type": "Point", "coordinates": (32.0, 32.0, 0.0)
+                            },
+                        }
+                    ],
+                    glyph_atlas={"glyphs": sorted(set("Peak"))},
+                    occlusion="none",
+                ),
+            ),
+        )
+    )
+    return _prepare_frame_scene(source, 3, 11, 4, tmp_path / "frame.png")
+
+
+def test_frozen_frame_preserves_canonical_bytes_and_plan_ownership(frozen_frame_scene):
+    from forge3d.chronos import _camera_json, _prepare_frozen_frame, _scene_json
+
+    scene = frozen_frame_scene
+    plan = scene.compiled_plan
+    (label,) = plan.label_plans["labels"].accepted
+    events = {("labels", "peak"): (1, 10), ("labels", "hidden"): (None, None)}
+    # Independent native input records characterize the existing frozen payload.
+    expected_records = [
+        {
+            "layer_id": "labels", "label_id": "hidden", "visible": False,
+            "appearance_frame": None, "disappearance_frame": None, "payload": {},
+        },
+        {
+            "layer_id": "labels", "label_id": "peak", "visible": True,
+            "appearance_frame": 1, "disappearance_frame": 10, "payload": label.to_dict(),
+        },
+    ]
+    expected = f3d.compile_frame(
+        3, 11, 4, _camera_json(scene), _scene_json(scene, expected_records, 4)
+    )
+    # The frozen plan owns labels even if the mutable compatibility view changes.
+    scene.compiled_label_plans.clear()
+    compiled = _prepare_frozen_frame(
+        scene, 3, 11, 4, label_events=events, label_fade_frames=4
+    )
+    assert compiled.to_json() == expected.to_json()
+    payload = json.loads(compiled.to_json())
+    assert payload["frame_seed"] == f3d.frame_seed(11, 3)
+    assert [label["alpha"] for label in payload["labels"]] == [0.0, 0.75]
+    assert payload["lod"]
+    assert scene.compiled_plan is not plan
+    assert scene.compiled_plan.frame is compiled
+    assert replace(scene.compiled_plan, frame=None) == plan
+
+    restored = _prepare_frozen_frame(
+        scene, 3, 11, 4, label_events=events, label_fade_frames=4,
+        stored_canonical=compiled.to_json(),
+    )
+    assert restored is not compiled
+    assert scene.compiled_plan.frame is restored
+    assert restored.to_json() == compiled.to_json()
+    assert replace(scene.compiled_plan, frame=None) == plan
+
+
+@pytest.mark.parametrize(
+    "changed",
+    ("frame_index", "base_seed", "samples", "label_events", "label_fade_frames", "canonical_bytes"),
+)
+def test_frozen_frame_mismatch_leaves_plan_untouched(frozen_frame_scene, changed):
+    from forge3d.chronos import _prepare_frozen_frame
+
+    scene = frozen_frame_scene
+    inputs = dict(
+        frame_index=3, base_seed=11, samples=4,
+        label_events={("labels", "peak"): (1, 10)}, label_fade_frames=4,
+    )
+    compiled = _prepare_frozen_frame(scene, **inputs)
+    plan = scene.compiled_plan
+    canonical = compiled.to_json()
+    if changed == "canonical_bytes":
+        canonical = json.dumps(json.loads(canonical), indent=2)
+    elif changed == "label_events":
+        inputs[changed] = {("labels", "peak"): (2, 10)}
+    else:
+        inputs[changed] += 1
+    error = (
+        "canonical/hash revalidation"
+        if changed == "canonical_bytes"
+        else "replay inputs do not match"
+    )
+    with pytest.raises(ValueError, match=error):
+        _prepare_frozen_frame(scene, **inputs, stored_canonical=canonical)
+    assert scene.compiled_plan is plan
+    assert scene.compiled_plan.frame is compiled
+
+
+@pytest.mark.parametrize("changed", ("camera", "labels", "clipmap"))
+def test_replay_mismatch_fails_before_render(frozen_frame_scene, changed, monkeypatch, tmp_path):
+    from forge3d.chronos import _prepare_frozen_frame
+
+    source = frozen_frame_scene
+    compiled = _prepare_frozen_frame(
+        source, 3, 11, 4, label_events={("labels", "peak"): (1, 10)}, label_fade_frames=4
+    )
+    manifest = FlythroughManifest(
+        base_seed=11, samples=4, frames=(_frame_record(compiled, 3),)
+    )
+    recipe = source.recipe
+    if changed == "camera":
+        recipe = replace(
+            recipe, camera=replace(recipe.camera, distance=recipe.camera.distance + 1.0)
+        )
+    elif changed == "labels":
+        recipe = replace(recipe, layers=())
+    else:
+        metadata = dict(recipe.terrain.metadata)
+        metadata["clipmap"] = dict(metadata["clipmap"], morph_range=0.5)
+        recipe = replace(recipe, terrain=replace(recipe.terrain, metadata=metadata))
+
+    def unexpected_render(*_args, **_kwargs):
+        pytest.fail("replay rendered mismatched frozen inputs")
+
+    monkeypatch.setattr(f3d.MapScene, "render", unexpected_render)
+    output = tmp_path / "replay.png"
+    with pytest.raises(ValueError, match="replay inputs do not match"):
+        manifest.replay_frame(f3d.MapScene(recipe), 3, output)
+    assert not output.exists()
+
+
 def _rec709_luminance(rgba: np.ndarray) -> np.ndarray:
     rgb = rgba[..., :3].astype(np.float64) / 255.0
     return 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
@@ -568,6 +793,52 @@ def _path_free_scene(scene: "f3d.MapScene") -> dict:
     for name in ("path", "directory", "filename"):
         value["recipe"]["output"].pop(name, None)
     return value
+
+
+def test_accepted_labels_reads_frozen_plan_after_inspection_view_edits(tmp_path):
+    from forge3d.chronos import _accepted_labels
+    from _sutura_recipes import build_scene
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    compiled = scene.compile_plan()
+    expected = {
+        (str(layer_id), str(label.label_id)): label.to_dict()
+        for layer_id, plan in compiled.label_plans.items()
+        for label in plan.accepted
+    }
+    assert expected
+    scene.compiled_label_plans = {}
+    actual = {key: label.to_dict() for key, label in _accepted_labels(scene).items()}
+    assert actual == expected
+
+
+@pytest.mark.parametrize("unknown_elevation", [float("nan"), float("inf"), -float("inf")])
+def test_label_payload_only_normalizes_unknown_terrain_elevation(tmp_path, unknown_elevation):
+    import math
+    from forge3d.chronos import _canonical_json_text, _label_payload
+    from _sutura_recipes import build_scene
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    label = scene.compile_plan().label_plans["labels"].accepted[0]
+    assert _canonical_json_text(_label_payload(label), "labels") == _canonical_json_text(
+        label.to_dict(), "labels"
+    ), "finite label payloads must retain their canonical bytes"
+    label.candidate.terrain_sample["elevation"] = unknown_elevation
+    label.candidate.details["visibility_gates"] = [
+        {"kind": "occlusion", "terrain_sample": {"elevation": unknown_elevation}}
+    ]
+    payload = _label_payload(label)
+    assert payload["candidate"]["terrain_sample"]["elevation"] is None
+    assert not math.isfinite(label.candidate.terrain_sample["elevation"])
+    assert payload["candidate"]["details"]["visibility_gates"][0]["terrain_sample"]["elevation"] is None
+    assert not math.isfinite(
+        label.candidate.details["visibility_gates"][0]["terrain_sample"]["elevation"]
+    )
+    _canonical_json_text(payload, "labels")
+
+    label.candidate.anchor = (float("nan"), 0.0, 0.0)
+    with pytest.raises(ValueError, match="NaN|infinite"):
+        _canonical_json_text(_label_payload(label), "labels")
 
 
 def test_frame_free_cache_context_preserves_existing_bytes(monkeypatch, tmp_path):
@@ -712,6 +983,23 @@ def test_different_cameras_do_not_share_cache_entry(tmp_path):
     reason="CHRONOS physical render runs only in the GPU golden lane",
 )
 class TestFlythroughPhysical:
+    def test_nodata_label_candidates_render_and_replay(self, tmp_path):
+        from _sutura_recipes import build_scene
+
+        scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+        terrain_path = Path(scene.recipe.terrain.path)
+        heightmap = np.load(terrain_path)
+        heightmap[:heightmap.shape[0] // 4] = np.nan
+        np.save(terrain_path, heightmap)
+        output_dir = tmp_path / "nodata_flythrough"
+        manifest = render_flythrough([scene], base_seed=7, samples=1, out_dir=output_dir)
+        assert len(manifest.frames) == 1
+        record = manifest.frame_record(0)
+        rgba = _load_rgba(output_dir / record["image"])
+        assert hashlib.sha256(rgba.tobytes()).hexdigest() == record["pixel_hash"]
+        replay = manifest.replay_frame(scene, 0, tmp_path / "nodata_replay.png")
+        assert replay["pixel_hash"] == record["pixel_hash"]
+
     def test_static_path_hash_identical_and_replay(self, tmp_path):
         if not _physical_render_available():
             pytest.skip("CHRONOS physical render requires GPU-backed native module")
@@ -934,7 +1222,10 @@ class TestFlythroughPhysical:
             )
         )
         appearance = 100
-        fade_end = appearance + 255  # alpha reaches 1.0 on this frame
+        # The sub-code-per-frame gate holds for fades of >= 256 frames; the
+        # short default fade trades it for labels that reach full opacity fast.
+        fade_frames = 256
+        fade_end = appearance + fade_frames - 1  # alpha reaches 1.0 on this frame
         windows = [
             range(appearance - 1, appearance + 5),
             range(appearance + 126, appearance + 131),
@@ -946,7 +1237,13 @@ class TestFlythroughPhysical:
         camera_path = {
             index: (base if index < appearance else labelled) for index in indices
         }
-        manifest = render_flythrough(camera_path, base_seed=5, samples=1, out_dir=tmp_path)
+        manifest = render_flythrough(
+            camera_path,
+            base_seed=5,
+            samples=1,
+            out_dir=tmp_path,
+            label_fade_frames=fade_frames,
+        )
 
         alphas = {}
         codes = {}
@@ -958,6 +1255,10 @@ class TestFlythroughPhysical:
         assert alphas[appearance - 1] == []
         assert alphas[appearance] == [pytest.approx(1.0 / 256.0)]
         assert alphas[fade_end] == [1.0]
+        replay = manifest.replay_frame(
+            labelled, appearance, tmp_path / "replay_custom_fade.png"
+        )
+        assert replay["pixel_hash"] == manifest.frame_record(appearance)["pixel_hash"]
 
         # Rec. 709 luminance in exact integer units of 1/10000 of an 8-bit code
         # (2126 + 7152 + 722 == 10000), so "one code" is compared without float
@@ -1136,3 +1437,83 @@ class TestFlythroughPhysical:
         # instead of rendering from a partial residency.
         with pytest.raises(Exception, match="chronos residency"):
             render_compiled(vt_scene(128, 0.25), 2)
+
+
+def test_reused_compiled_frames_include_current_raster_bytes(monkeypatch, tmp_path):
+    import forge3d.anamnesis as anamnesis
+    from forge3d.chronos import _render_frames
+    from forge3d.helpers.offscreen import save_png_deterministic
+
+    scene = _synthetic_scene()
+    path = tmp_path / "source.png"
+    pixels = np.full((4, 4, 4), 255, dtype=np.uint8)
+    save_png_deterministic(path, pixels)
+    scene.recipe.layers = [f3d.RasterOverlay(layer_id="raster", path=str(path), crs="EPSG:32610")]
+    frame = SimpleNamespace(to_json=lambda: '{"frame":0}')
+    contexts = []
+    def capture(*args, **kwargs):
+        contexts.append(kwargs["render_frame_context"])
+        return SimpleNamespace(frame_blobs=[])
+    monkeypatch.setattr(anamnesis, "render_sequence", capture)
+    def context():
+        _render_frames({0: scene}, {0: frame}, {0: tmp_path / "frame.png"},
+                       certificate_paths=None, cache=tmp_path / "cache")
+    context()
+    pixels[..., 0] = 0
+    save_png_deterministic(path, pixels)
+    context()
+    assert contexts[0] != contexts[1]
+    for value in contexts:
+        decoded = json.loads(value)
+        assert decoded["0"] == frame.to_json()
+        assert decoded["raster_content"]["0"][0]["layer_id"] == "raster"
+    scene.recipe.layers = []
+    context()
+    assert json.loads(contexts[-1]) == {"0": frame.to_json()}
+
+
+@pytest.mark.parametrize("axis", ("primary", "secondary"))
+@pytest.mark.parametrize("storage", ("file", "inline"))
+def test_styled_source_edits_invalidate_reused_chronos_cache(monkeypatch, tmp_path, axis, storage):
+    import forge3d.anamnesis as anamnesis
+    from forge3d.chronos import _render_frames, _scene_json
+    from test_raster_styles import bivariate
+
+    scene = _synthetic_scene()
+    primary, secondary = np.zeros((4, 4), np.float32), np.zeros((4, 4), np.float32)
+    paths = [tmp_path / "primary.npy", tmp_path / "secondary.npy"]
+    for path, values in zip(paths, (primary, secondary)):
+        np.save(path, values)
+    style = bivariate()
+    layer = f3d.RasterOverlay("thematic", style=style,
+        path=paths[0] if storage == "file" else None,
+        secondary_path=paths[1] if storage == "file" else None,
+        data=primary if storage == "inline" else None,
+        secondary_data=secondary if storage == "inline" else None)
+    scene.recipe.layers = [layer]
+    frame = SimpleNamespace(to_json=lambda: '{"frame":0}')
+    contexts = []
+    def capture(*args, **kwargs):
+        contexts.append(kwargs["render_frame_context"])
+        return SimpleNamespace(frame_blobs=[])
+    monkeypatch.setattr(anamnesis, "render_sequence", capture)
+    def context():
+        _render_frames({0: scene}, {0: frame}, {0: tmp_path / "frame.png"},
+                       certificate_paths=None, cache=tmp_path / "cache")
+    original_scene = _scene_json(scene, [])
+    context()
+    context()
+    assert contexts[0] == contexts[1], "unchanged sources must retain the cache identity"
+    changed_index = 0 if axis == "primary" else 1
+    values = (primary, secondary)[changed_index]
+    values.fill(30)
+    if storage == "file":
+        np.save(paths[changed_index], values)
+    context()
+    assert contexts[2] != contexts[0]
+    assert _scene_json(scene, []) != original_scene
+    before = json.loads(contexts[0])["raster_content"]["0"]
+    after = json.loads(contexts[2])["raster_content"]["0"]
+    assert before[changed_index]["source"] == axis
+    assert before[changed_index]["sha256"] != after[changed_index]["sha256"]
+    assert before[1 - changed_index] == after[1 - changed_index]

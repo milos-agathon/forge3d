@@ -21,6 +21,7 @@ impl TerrainScene {
         colormap_view: &wgpu::TextureView,
         colormap_sampler: &wgpu::Sampler,
         overlay_buffer: &wgpu::Buffer,
+        detail_normal_view: Option<&wgpu::TextureView>,
         height_curve_view: &wgpu::TextureView,
         water_mask_view_uploaded: Option<&wgpu::TextureView>,
         height_ao_computed: bool,
@@ -62,6 +63,7 @@ impl TerrainScene {
                 colormap_view,
                 colormap_sampler,
                 overlay_buffer,
+                detail_normal_view,
                 height_curve_view,
                 water_mask_view_uploaded,
                 height_ao_computed,
@@ -174,7 +176,7 @@ impl TerrainScene {
             );
         }
 
-        let water_reflection_uniforms = if reflection_settings.enabled {
+        let mut water_reflection_uniforms = if reflection_settings.enabled {
             let view_arr: [[f32; 4]; 4] = view_matrix.to_cols_array_2d();
             let mirrored_view =
                 compute_mirrored_view_matrix(view_arr, reflection_settings.water_plane_height);
@@ -193,6 +195,7 @@ impl TerrainScene {
         } else {
             WaterReflectionUniforms::disabled()
         };
+        water_reflection_uniforms = water_reflection_uniforms.with_optics(&params.water_optics);
         self.queue.write_buffer(
             &self.water_reflection_uniform_buffer,
             0,

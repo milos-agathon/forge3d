@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from ._native import NATIVE_AVAILABLE, get_native_module, native_import_error
+from ._native import get_native_module, get_native_symbol, native_import_error
 
 _REMEDIATION_NATIVE = (
     "Reinstall the compiled extension (pip install --force-reinstall forge3d) "
@@ -20,19 +20,8 @@ _REMEDIATION_ADAPTER = (
 )
 
 
-def _native_functions() -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
-    native = get_native_module()
-    if native is None:
-        return None, None, None
-    return (
-        getattr(native, "enumerate_adapters", None),
-        getattr(native, "device_probe", None),
-        getattr(native, "get_device", None),
-    )
-
-
 def enumerate_adapters() -> List[Dict]:
-    native_enum, native_probe, _ = _native_functions()
+    native_enum = get_native_symbol("enumerate_adapters")
     if callable(native_enum):
         try:
             adapters = native_enum()
@@ -63,7 +52,7 @@ def device_probe(backend: Optional[str] = None) -> Dict:
 
     Every non-``"ok"`` status includes ``reason`` and ``remediation`` fields.
     """
-    _, native_probe, _ = _native_functions()
+    native_probe = get_native_symbol("device_probe")
     if not callable(native_probe):
         import_error = native_import_error()
         reason = (
@@ -132,40 +121,10 @@ def determinism_probe() -> Dict:
 
 
 def has_gpu() -> bool:
-    if not NATIVE_AVAILABLE:
+    if get_native_module() is None:
         return False
     adapters = enumerate_adapters()
     if adapters:
         return True
     probe = device_probe()
     return isinstance(probe, dict) and probe.get("status") == "ok"
-
-
-def get_device() -> Any:
-    _, _, native_get_device = _native_functions()
-    if callable(native_get_device):
-        try:
-            return native_get_device()
-        except Exception:
-            pass
-
-    class MockDevice:
-        def __init__(self) -> None:
-            self.name = "Fallback CPU Device"
-            self.backend = "cpu"
-            self.limits = {"max_texture_dimension": 16384}
-
-        def create_virtual_texture(self, *args: Any, **kwargs: Any) -> "MockVirtualTexture":
-            del args, kwargs
-            return MockVirtualTexture()
-
-    return MockDevice()
-
-
-class MockVirtualTexture:
-    def __init__(self) -> None:
-        self.width = 0
-        self.height = 0
-
-    def bind(self, *_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("Virtual textures require a GPU backend")

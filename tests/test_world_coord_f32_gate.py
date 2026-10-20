@@ -31,8 +31,9 @@ SANCTIONED_DD_SPLITS = {
 }
 
 # The db06b15f freeze below is the reviewed baseline the TERMINUS reader,
-# ANAMNESIS, and HELIOS records describe; LATER_REVIEWED_TRANSITIONS chains it
-# to the current EXPECTED_CONVERSION_COUNT/SHA256.
+# ANAMNESIS, and HELIOS records describe. LATER_REVIEWED_TRANSITIONS records
+# subsequent source deltas; the release ledger bridges its historical entries
+# to the common post-CHRONOS base of TESSELLA and SPLAT-FUSED.
 REVIEWED_BASELINE_COUNT = 1545
 # The previous 1438-site freeze already covered the reviewed ANAMNESIS,
 # TESSELLA, and first SIDERA transitions described below. The d8313007 base
@@ -78,12 +79,33 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # attribute narrowing, sky-bake normalisation, variance telemetry, and the
 # signature of the Anchor-routed PointCloudFrame::to_scene); see the
 # `splat_fused` ledger record, which is pending owner review.
+# Main-side freeze (reached through `nephele_main_sync.main_side`):
+# Milos approved the combined freeze: the existing SPLAT-FUSED record plus
+# exactly six TESSELLA test casts added and two oracle casts removed. Both
+# historical records retain their own endpoints; the combined gate bridges
+# their shared 1,821-site base to the 1,832-site SUTURA base.
+# SUTURA adds four final screen depth/texture UV conversions and keeps
+# world/camera projection in f64; see its exact ledger transition.
+# Texture layout changes one existing integer-size statistics operand; the
+# exact ledger transition restores the prior freeze without adding casts.
+# W18 viewport replacement adds ten u32 dimension/reciprocal/projection-scale
+# conversions. Its exact transition reverses to the prior texture-layout freeze;
+# no world-coordinate narrowing or scanner exemption is added.
+# Scanner unchanged.
+MAIN_FREEZE_COUNT = 1846
+MAIN_FREEZE_SHA256 = "f4fb63ad9529ceaaff94b99fe68f0c2454e706d019e93c669b77a82fdc52eace"
+# NEPHELE-side freeze (reached through `nephele_main_sync.nephele_side`):
 # The merged tree carries CHRONOS, NEPHELE, and SPLAT-FUSED; each ledger record
 # below stays exact against its own base. `nephele_main_integration` (pending
 # owner review) records the sites no earlier record covers, and this freeze is
 # its result.
-EXPECTED_CONVERSION_COUNT = 1905
-EXPECTED_CONVERSION_SHA256 = "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdbe1f76cd94"
+NEPHELE_FREEZE_COUNT = 1905
+NEPHELE_FREEZE_SHA256 = "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdbe1f76cd94"
+# Merging main into PR #172 combines both freezes. `nephele_main_sync`
+# (pending owner review) records, per changed file, the exact ordered sites
+# on each side; undoing one side restores the other freeze exactly.
+EXPECTED_CONVERSION_COUNT = 1929
+EXPECTED_CONVERSION_SHA256 = "101c2b57a12d622383b11a29dbe1387c988e62aacf1afd55897fcb54e14fed5c"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -439,12 +461,33 @@ REVIEWED_DIFFERENTIA_INVENTORY_TRANSITION = {
     ),
 }
 
+REVIEWED_TESSELLA_INVENTORY_TRANSITION = {
+    "base_count": 1821,
+    "base_digest": "1b17f3f2ac765a98e747d2bc7ef067aa8fb746a5d2bcf693189586f9b5c1d0c8",
+    "result_count": 1825,
+    "result_digest": "0a99a0b7f915ca8c2650d33bf52f5ff7b6144748cb5ab778a54399b563077264",
+    "added_sites": (
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 1, "let min = Vec2::new(-1024.0 + x as f32 * 256.0, -1024.0 + y as f32 * 256.0)"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 2, "let min = Vec2::new(-1024.0 + x as f32 * 256.0, -1024.0 + y as f32 * 256.0)"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 3, "let angle = (state as f32 / u32::MAX as f32) * std::f32::consts::TAU"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 4, "let angle = (state as f32 / u32::MAX as f32) * std::f32::consts::TAU"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 5, "let radius = 900.0 + (state as f32 / u32::MAX as f32) * 900.0"),
+        ("src/terrain/clipmap/gpu_lod/tests.rs", "gpu_and_cpu_select_identical_tile_sets_for_1000_cameras", "as_f32", 6, "let radius = 900.0 + (state as f32 / u32::MAX as f32) * 900.0"),
+    ),
+    "removed_sites": (
+        ("src/terrain/renderer/visibility_buffer.rs", "<module>", "as_f32", 7, "} let point = glam::vec2(pixel.0 as f32 + 0.5, pixel.1 as f32 + 0.5)"),
+        ("src/terrain/renderer/visibility_buffer.rs", "<module>", "as_f32", 8, "} let point = glam::vec2(pixel.0 as f32 + 0.5, pixel.1 as f32 + 0.5)"),
+    ),
+}
+
 # Transitions reviewed after the db06b15f freeze, in merge order. Earlier
 # records (TERMINUS reader, ANAMNESIS, HELIOS) describe that frozen tree; a
-# site they recorded may only disappear or reappear through one of these.
+# site they recorded may only disappear or reappear through one of these or
+# the intervening release ledger, which remains an immutable historical record.
 LATER_REVIEWED_TRANSITIONS = (
     REVIEWED_PROMETHEUS_INVENTORY_TRANSITION,
     REVIEWED_DIFFERENTIA_INVENTORY_TRANSITION,
+    REVIEWED_TESSELLA_INVENTORY_TRANSITION,
 )
 
 
@@ -560,6 +603,226 @@ def _function_body(rel: str, function: str) -> str:
     raise AssertionError(f"missing function {rel}::{function}")
 
 
+
+def _undo_viewport_resize_transition(sites):
+    transition = _ledger_data()["viewer_viewport_resize"]
+    added = set(map(tuple, transition["added"]))
+    assert len(added) == 10
+    assert transition["removed"] == []
+    for site in added:
+        assert sites.count(site) == 1, f"resize conversion missing or duplicated: {site}"
+    restored = [site for site in sites if site not in added]
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+    return restored
+
+
+def test_viewport_resize_inventory_transition_is_exact():
+    transition = _ledger_data()["viewer_viewport_resize"]
+    previous = _ledger_data()["texture_layout_stats"]
+    assert transition["review"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        previous["result_count"], previous["result_digest"],
+    )
+    expected_added = [       (       'src/core/screen_space_effects/ssao/mod.rs',
+                'install_resize',
+                'as_f32',
+                1,
+                'self.settings.proj_scale *= prepared.height as f32 / self.height as '
+                'f32'),
+        (       'src/core/screen_space_effects/ssao/mod.rs',
+                'install_resize',
+                'as_f32',
+                2,
+                'self.settings.proj_scale *= prepared.height as f32 / self.height as '
+                'f32'),
+        (       'src/core/screen_space_effects/ssao/mod.rs',
+                'install_resize',
+                'as_f32',
+                3,
+                'self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / '
+                'self.height as f32]'),
+        (       'src/core/screen_space_effects/ssao/mod.rs',
+                'install_resize',
+                'as_f32',
+                4,
+                'self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / '
+                'self.height as f32]'),
+        (       'src/core/screen_space_effects/ssgi/resize.rs',
+                'install_resize',
+                'as_f32',
+                1,
+                'self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as '
+                'f32]'),
+        (       'src/core/screen_space_effects/ssgi/resize.rs',
+                'install_resize',
+                'as_f32',
+                2,
+                'self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as '
+                'f32]'),
+        (       'src/core/screen_space_effects/ssr/resize.rs',
+                'install_resize',
+                'as_f32',
+                1,
+                'self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / '
+                'self.height as f32]'),
+        (       'src/core/screen_space_effects/ssr/resize.rs',
+                'install_resize',
+                'as_f32',
+                2,
+                'self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / '
+                'self.height as f32]'),
+        (       'src/core/taa.rs',
+                'install_resize',
+                'as_f32',
+                1,
+                'self.settings.resolution = [self.width as f32, self.height as f32]'),
+        (       'src/core/taa.rs',
+                'install_resize',
+                'as_f32',
+                2,
+                'self.settings.resolution = [self.width as f32, self.height as f32]')]
+    assert list(map(tuple, transition["added"])) == expected_added
+    sites = _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    assert (MAIN_FREEZE_COUNT, MAIN_FREEZE_SHA256) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    _undo_viewport_resize_transition(sites)
+    # Every added operand comes from u32 viewport state, never a world pose.
+    for rel in (
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "src/core/screen_space_effects/ssgi/resize.rs",
+        "src/core/screen_space_effects/ssr/resize.rs",
+        "src/core/taa.rs",
+    ):
+        body = _function_body(rel, "install_resize")
+        assert "width" in body and "height" in body
+        assert not re.search(r"\b(?:f64|DVec[234]|DMat[234])\b", body)
+def _undo_scene_pick_assembly_transition(sites):
+    """Reverse only the two screen-coordinate casts moved with scene collection.
+
+    Freeze hashes stay unchanged. Missing, duplicated or changed casts fail
+    before any historical inventory is reconstructed.
+    """
+    old_context = (
+        "} } if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) { "
+        "if let Some(label) = self.label_manager.get_label(label_id) { "
+        "let mut attributes = std::collections::HashMap::new()"
+    )
+    new_context = (
+        "let label_hit = self .label_manager "
+        ".pick_at(screen_pos.0 as f32, screen_pos.1 as f32) "
+        ".and_then(|id| self.label_manager.get_label(id))"
+    )
+    replacements = {
+        ("src/viewer/input/scene_picking.rs", "collect_scene_picks", "as_f32", occurrence, new_context):
+        ("src/viewer/input/viewer_input.rs", "pick_at_screen", "as_f32", occurrence, old_context)
+        for occurrence in (1, 2)
+    }
+    for new, old in replacements.items():
+        assert sites.count(new) == 1 and old not in sites
+    # Retain the scanner's path-component order and source-occurrence order.
+    # The moved casts preceded every other cast in viewer_input.rs.
+    restored = [site for site in sites if site not in replacements]
+    first_viewer_cast = next(
+        index for index, site in enumerate(restored)
+        if site[0] == "src/viewer/input/viewer_input.rs"
+    )
+    return (
+        restored[:first_viewer_cast]
+        + list(replacements.values())
+        + restored[first_viewer_cast:]
+    )
+
+
+def test_scene_pick_assembly_moves_only_the_two_screen_coordinate_casts():
+    sites = _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
+    assert (len(sites), _inventory_digest(sites)) == (
+        MAIN_FREEZE_COUNT, MAIN_FREEZE_SHA256,
+    )
+
+
+def _undo_texture_layout_stats_transition(sites):
+    transition = _ledger_data()["texture_layout_stats"]
+    old, = map(tuple, transition["removed"])
+    new, = map(tuple, transition["added"])
+    assert sites.count(new) == 1 and old not in sites
+    return [old if site == new else site for site in sites]
+
+
+def test_reviewed_texture_layout_stats_transition_is_exact():
+    transition = _ledger_data()["texture_layout_stats"]
+    previous = _ledger_data()["csm_layout_context"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        previous["result_count"], previous["result_digest"],
+    )
+    assert transition["review"]
+    assert len(transition["removed"]) == len(transition["added"]) == 1
+    old, = map(tuple, transition["removed"])
+    new, = map(tuple, transition["added"])
+    prefix = ("src/core/texture_format.rs", "calculate_compression_ratio", "as_f32", 1)
+    assert old == (*prefix, "let rgba8_size = (w * h * 4) as f32")
+    assert new == (*prefix,
+        "let rgba8_size = crate::core::texture_layout::resident_2d_size(w, h, TextureFormat::Rgba8Unorm) as f32",
+    )
+    # The changed operand remains unsigned texture-size telemetry, not world data.
+    assert re.search(
+        r"^pub\(crate\) fn resident_2d_size\(width: u32, height: u32, "
+        r"format: TextureFormat\) -> u64 \{",
+        _read("src/core/texture_layout.rs"),
+        re.M,
+    )
+    sites = _undo_viewport_resize_transition(
+        _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
+    )
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    viewport = _ledger_data()["viewer_viewport_resize"]
+    assert (viewport["base_count"], viewport["base_digest"]) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    restored = _undo_texture_layout_stats_transition(sites)
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+
+
+def test_reviewed_csm_layout_context_transition_is_exact():
+    transition = _ledger_data()["csm_layout_context"]
+    sutura = _ledger_data()["sutura"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        sutura["result_count"], sutura["result_digest"],
+    )
+    assert transition["review"]
+    assert len(transition["removed"]) == len(transition["added"]) == 1
+    old, = map(tuple, transition["removed"])
+    new, = map(tuple, transition["added"])
+    assert old[:4] == new[:4] == (
+        "src/core/shadow_mapping/system.rs", "update_uniforms", "as_f32", 1,
+    )
+    assert old[4].replace(
+        "light_view: self.light_view_matrix.to_cols_array_2d()",
+        "light_view: self.light_view_matrix.to_cols_array()",
+    ) == new[4]
+    sites = _undo_texture_layout_stats_transition(
+        _undo_viewport_resize_transition(
+            _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
+        )
+    )
+    assert sites.count(new) == 1 and old not in sites
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    restored = [old if site == new else site for site in sites]
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+
 def test_exact_production_conversion_inventory_is_frozen():
     sites = conversion_inventory()
     digest = _inventory_digest(sites)
@@ -644,7 +907,10 @@ def test_reviewed_helios_inventory_transition_is_exact():
 def test_historical_transition_ledger_and_current_freeze_are_consistent():
     previous_count = REVIEWED_BASELINE_COUNT
     previous_digest = REVIEWED_BASELINE_SHA256
-    for transition in LATER_REVIEWED_TRANSITIONS:
+    assert LATER_REVIEWED_TRANSITIONS[-1] is REVIEWED_TESSELLA_INVENTORY_TRANSITION
+    # The release ledger bridges the historical 1643-site endpoint to CHRONOS;
+    # the final post-CHRONOS transition is checked separately below.
+    for transition in LATER_REVIEWED_TRANSITIONS[:-1]:
         added = transition["added_sites"]
         removed = transition["removed_sites"]
         assert transition["base_count"] == previous_count
@@ -760,9 +1026,16 @@ def test_release_1_39_terrain_inventory_transition_is_exact():
     assert len(set(added)) == len(added) and len(set(removed)) == len(removed)
     assert not set(added) & set(removed)
     assert transition["base_count"] + len(added) - len(removed) == transition["result_count"]
-    # Reconstruct the #194 result inventory by undoing the SPLAT-FUSED and
-    # 1.40 CHRONOS records.
+    # Reconstruct the #194 result inventory by undoing TESSELLA, SPLAT-FUSED
+    # and 1.40 CHRONOS without changing any historical record.
     current = collections.Counter(conversion_inventory())
+    tessella = REVIEWED_TESSELLA_INVENTORY_TRANSITION
+    for site in tessella["added_sites"]:
+        assert current[site] == 1
+        current[site] -= 1
+    for site in tessella["removed_sites"]:
+        assert current[site] == 0
+        current[site] += 1
     splat = _ledger_data()["splat_fused"]
     assert not splat["removed"]
     for site in map(tuple, splat["added"]):
@@ -783,9 +1056,10 @@ def test_release_1_39_terrain_inventory_transition_is_exact():
 def test_release_1_40_chronos_inventory_transition_is_exact():
     transition = _ledger_data()["release_1_40_chronos"]
     splat = _ledger_data()["splat_fused"]
+    tessella = REVIEWED_TESSELLA_INVENTORY_TRANSITION
     assert (transition["result_count"], transition["result_digest"]) == (
         splat["base_count"], splat["base_digest"]
-    )
+    ) == (tessella["base_count"], tessella["base_digest"])
     assert transition["review"]
     added = list(map(tuple, transition["added"]))
     removed = list(map(tuple, transition["removed"]))
@@ -814,6 +1088,30 @@ def test_release_1_40_chronos_inventory_transition_is_exact():
     for site in removed:
         assert current[site] == 0, f"recorded removal still present: {site}"
 
+
+def test_tessella_inventory_transition_is_exact():
+    transition = LATER_REVIEWED_TRANSITIONS[-1]
+    assert transition is REVIEWED_TESSELLA_INVENTORY_TRANSITION
+    chronos = _ledger_data()["release_1_40_chronos"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        chronos["result_count"], chronos["result_digest"]
+    )
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1825, "0a99a0b7f915ca8c2650d33bf52f5ff7b6144748cb5ab778a54399b563077264"
+    )
+    added = transition["added_sites"]
+    removed = transition["removed_sites"]
+    assert len(added) == len(set(added)) == 6
+    assert len(removed) == len(set(removed)) == 2
+    assert not set(added) & set(removed)
+    assert transition["base_count"] + len(added) - len(removed) == transition["result_count"]
+    assert {site[0] for site in added} == {"src/terrain/clipmap/gpu_lod/tests.rs"}
+    assert {site[0] for site in removed} == {"src/terrain/renderer/visibility_buffer.rs"}
+    current = collections.Counter(conversion_inventory())
+    for site in added:
+        assert current[site] == 1, f"recorded addition missing or duplicated: {site}"
+    for site in removed:
+        assert current[site] == 0, f"recorded removal still present: {site}"
 
 def test_splat_fused_inventory_transition_is_exact():
     transition = _ledger_data()["splat_fused"]
@@ -846,6 +1144,28 @@ def test_splat_fused_inventory_transition_is_exact():
     current = collections.Counter(conversion_inventory())
     for site in added:
         assert current[site] > 0, f"recorded addition missing: {site}"
+
+
+def test_tessella_and_splat_combined_freeze_is_exact():
+    tessella = REVIEWED_TESSELLA_INVENTORY_TRANSITION
+    splat = _ledger_data()["splat_fused"]
+    assert (tessella["base_count"], tessella["base_digest"]) == (
+        splat["base_count"], splat["base_digest"]
+    )
+    tessella_added = set(tessella["added_sites"])
+    tessella_removed = set(tessella["removed_sites"])
+    splat_added = set(map(tuple, splat["added"]))
+    assert len(splat_added) == 7 and not splat["removed"]
+    assert not (tessella_added | tessella_removed) & splat_added
+    assert _ledger_data()["sutura"]["base_count"] == (
+        tessella["base_count"] + len(tessella_added) - len(tessella_removed)
+        + len(splat_added)
+    )
+    current = collections.Counter(conversion_inventory())
+    for site in tessella_added | splat_added:
+        assert current[site] == 1, f"recorded addition missing or duplicated: {site}"
+    for site in tessella_removed:
+        assert current[site] == 0, f"recorded removal still present: {site}"
 
 
 def test_mensura_transition_leaves_one_world_cast_in_the_typed_anchor_exit():
@@ -909,7 +1229,7 @@ def test_each_viewer_world_route_calls_its_active_anchor_in_the_same_function():
         ("src/labels/mod.rs", "update_with_camera_anchored"): "anchor.to_render_f32(",
         ("src/viewer/terrain/render/screen/setup.rs", "build_screen_render_state"): "frame.anchor.to_render_f32(",
         ("src/viewer/terrain/render/offscreen/setup.rs", "build_snapshot_render_state"): "frame.anchor.to_render_f32(",
-        ("src/viewer/input/viewer_input.rs", "pick_at_screen"): ".to_world_from_render_f64(",
+        ("src/viewer/input/scene_picking.rs", "assemble_scene_picks"): ".to_world_from_render_f64(",
     }
     for (rel, function), required_call in routes.items():
         body = re.sub(r"\s+", "", _function_body(rel, function))
@@ -954,17 +1274,67 @@ def _undo_reviewed_transition(current, transition):
     return current
 
 
+def _undo_sync_side(sites, side):
+    """Restore one branch's exact inventory from the merged tree.
+
+    Each changed file's ordered merged sites must match the record exactly;
+    they are replaced by that branch's ordered sites for the same file. Files
+    keep the scanner's sorted-path order, so the digest is reproduced exactly.
+    """
+    files = _ledger_data()["nephele_main_sync"][side]["files"]
+    by_file = {}
+    for site in sites:
+        by_file.setdefault(site[0], []).append(site)
+    for rel, change in files.items():
+        assert by_file.get(rel, []) == list(map(tuple, change["result"])), f"{side} sync drift in {rel}"
+        by_file[rel] = list(map(tuple, change["base"]))
+    # Match the scanner's `sorted(Path)` file order, not plain string order.
+    return [site for rel in sorted(by_file, key=Path) for site in by_file[rel]]
+
+
+def _main_side_inventory():
+    return _undo_sync_side(conversion_inventory(), "main_side")
+
+
+def _nephele_side_inventory():
+    return _undo_sync_side(conversion_inventory(), "nephele_side")
+
+
+def test_nephele_main_sync_restores_both_branch_inventories_exactly():
+    record = _ledger_data()["nephele_main_sync"]
+    assert record["review"].startswith("APPROVED by Milos")
+    current = conversion_inventory()
+    assert (len(current), _inventory_digest(current)) == (
+        record["result_count"], record["result_digest"],
+    ) == (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256)
+    for side in ("main_side", "nephele_side"):
+        restored = _undo_sync_side(current, side)
+        assert (len(restored), _inventory_digest(restored)) == (
+            record[side]["base_count"], record[side]["base_digest"],
+        )
+        for change in record[side]["files"].values():
+            added = collections.Counter(map(tuple, change["result"])) - collections.Counter(
+                map(tuple, change["base"])
+            )
+            # No merged-in conversion narrows an absolute world coordinate.
+            assert all(site[0] != SANCTIONED for site in added), added
+    nephele = _ledger_data()["nephele_main_integration"]
+    assert (record["nephele_side"]["base_count"], record["nephele_side"]["base_digest"]) == (
+        nephele["result_count"], nephele["result_digest"],
+    ) == (NEPHELE_FREEZE_COUNT, NEPHELE_FREEZE_SHA256)
+
+
 def _reviewed_inventory():
     """Current inventory with the pending integration record undone."""
     return _undo_reviewed_transition(
-        collections.Counter(conversion_inventory()), _ledger_data()["nephele_main_integration"]
+        collections.Counter(_nephele_side_inventory()), _ledger_data()["nephele_main_integration"]
     )
 
 
 def test_nephele_main_integration_record_reaches_the_current_freeze():
     transition = _ledger_data()["nephele_main_integration"]
     assert (transition["result_count"], transition["result_digest"]) == (
-        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256
+        NEPHELE_FREEZE_COUNT, NEPHELE_FREEZE_SHA256
     )
     assert transition["review"].startswith("APPROVED by Milos")
     added = collections.Counter(map(tuple, transition["added"]))
@@ -1004,3 +1374,285 @@ def test_nephele_reviewed_inventory_transition_is_exact():
         assert current[site] == 0, f"NEPHELE removal still present: {site}"
         current[site] += count
     assert sum(current.values()) == transition["base_count"]
+
+
+def test_sutura_screen_output_inventory_transition_is_exact():
+    sutura = _ledger_data()["sutura"]
+    assert (sutura["base_count"], sutura["base_digest"]) == (
+        1832,
+        "92a2b5e256294968b4a5340b1235973633e175d71c9de640b32421322f3f3245",
+    )
+    expected_added = [
+        ("src/terrain/render_params/projection.rs", "<module>", "as_f32", 1,
+         "*target = target.min(z as f32)"),
+        ("src/terrain/render_params/py_api.rs", "<module>", "as_f32", 1,
+         "projected[2] = f64::from(projected[2] as f32)"),
+        ("src/terrain/render_params/py_api.rs", "unproject_terrain_depth", "as_f32", 1,
+         "uv[[row, col, 0]] = (world.x / world.w / f64::from(self.terrain_span) + 0.5) as f32"),
+        ("src/terrain/render_params/py_api.rs", "unproject_terrain_depth", "as_f32", 2,
+         "uv[[row, col, 1]] = (world.y / world.w / f64::from(self.terrain_span) + 0.5) as f32"),
+    ]
+    assert list(map(tuple, sutura["added"])) == expected_added
+    assert sutura["removed"] == []
+    assert sutura["result_count"] == sutura["base_count"] + len(expected_added)
+    csm = _ledger_data()["csm_layout_context"]
+    assert (sutura["result_count"], sutura["result_digest"]) == (
+        csm["base_count"], csm["base_digest"],
+    )
+    texture = _ledger_data()["texture_layout_stats"]
+    assert (csm["result_count"], csm["result_digest"]) == (
+        texture["base_count"], texture["base_digest"],
+    )
+    viewport = _ledger_data()["viewer_viewport_resize"]
+    assert (texture["result_count"], texture["result_digest"]) == (
+        viewport["base_count"], viewport["base_digest"],
+    )
+    assert (MAIN_FREEZE_COUNT, MAIN_FREEZE_SHA256) == (
+        viewport["result_count"], viewport["result_digest"],
+    )
+    sites = _undo_texture_layout_stats_transition(
+        _undo_viewport_resize_transition(
+            _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
+        )
+    )
+    counts = collections.Counter(sites)
+    for site in expected_added:
+        assert counts[site] == 1, f"screen output addition missing or duplicated: {site}"
+    # Reverse only the separately checked CSM context transition before
+    # reconstructing the historical SUTURA input inventory.
+    old_csm, = map(tuple, csm["removed"])
+    new_csm, = map(tuple, csm["added"])
+    sites = [old_csm if site == new_csm else site for site in sites]
+    baseline = [site for site in sites if site not in expected_added]
+    assert (len(baseline), _inventory_digest(baseline)) == (
+        sutura["base_count"], sutura["base_digest"],
+    )
+
+
+def _sky_lighting_conversion_relocations():
+    solar = (
+        "let solar_direction = night::horizontal_direction( "
+        "f64::from(sun.azimuth.value() as f32), "
+        "f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+    )
+    moon = (
+        "( night::horizontal_direction(moon.azimuth.value(), moon.altitude.value()) "
+        ".as_vec3() .to_array(), night::normalized_moonlight( "
+        "observation.moon_phase.phase_angle.value(), moon.altitude.value(), ), )"
+    )
+    owner = "src/viewer/sky_lighting.rs"
+    previous = "src/viewer/state/viewer_helpers/core.rs"
+    return {
+        (owner, "observe", "as_f32", 1, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_f32",
+            1,
+            "let azimuth = sun.azimuth.value() as f32",
+        ),
+        (owner, "observe", "as_f32", 2, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_f32",
+            2,
+            "let elevation = sun.altitude.value() as f32",
+        ),
+        (owner, "observe", "as_vec", 1, solar): (
+            previous,
+            "sync_astro_observation",
+            "as_vec",
+            1,
+            "self.sky_sun_direction_ws = crate::astro::night::horizontal_direction(f64::from(azimuth), f64::from(elevation)) .as_vec3() .to_array()",
+        ),
+        (owner, "observe", "as_vec", 2, moon): (
+            previous,
+            "sync_astro_observation",
+            "as_vec",
+            2,
+            "self.lit_sun_direction_ws = crate::astro::night::horizontal_direction( moon.azimuth.value(), moon.altitude.value(), ) .as_vec3() .to_array()",
+        ),
+    }
+
+
+def _undo_sky_lighting_transition(sites):
+    """Re-own four existing angle/unit-direction sites, preserving every freeze.
+
+    No conversion is excluded or added. The raw scanner is unchanged; missing,
+    duplicated, altered or additional owner conversions fail before restoring
+    the historical source order. Absolute world positions are not involved.
+    """
+    replacements = _sky_lighting_conversion_relocations()
+    owner_sites = [site for site in sites if site[0] == "src/viewer/sky_lighting.rs"]
+    assert owner_sites == list(replacements)
+    for new, old in replacements.items():
+        assert sites.count(new) == 1 and old not in sites
+    restored = [site for site in sites if site not in replacements]
+    # These four casts followed both existing lit-uniform enum casts in core.rs.
+    anchor = [
+        index
+        for index, site in enumerate(restored)
+        if site[:4]
+        == (
+            "src/viewer/state/viewer_helpers/core.rs",
+            "update_lit_uniform",
+            "as_f32",
+            2,
+        )
+    ]
+    assert len(anchor) == 1
+    index = anchor[0] + 1
+    return restored[:index] + list(replacements.values()) + restored[index:]
+
+
+def test_sky_lighting_relocation_is_exact_and_preserves_inventory_size():
+    sites = _main_side_inventory()
+    restored = _undo_sky_lighting_transition(sites)
+    assert len(restored) == len(sites)
+    added = collections.Counter(sites) - collections.Counter(restored)
+    removed = collections.Counter(restored) - collections.Counter(sites)
+    replacements = _sky_lighting_conversion_relocations()
+    assert added == collections.Counter(replacements.keys())
+    assert removed == collections.Counter(replacements.values())
+    # Existing historical checks independently prove the entire restored freeze.
+    _inventory_before_water_optics()
+
+
+def test_sky_lighting_relocation_rejects_missing_duplicate_changed_and_extra_sites():
+    import pytest
+
+    replacements = _sky_lighting_conversion_relocations()
+    sites = list(replacements)
+    sites.append(
+        (
+            "src/viewer/state/viewer_helpers/core.rs",
+            "update_lit_uniform",
+            "as_f32",
+            2,
+            "existing debug-mode cast",
+        )
+    )
+    first = sites[0]
+    changed = (*first[:4], "changed conversion")
+    extra = (
+        "src/viewer/sky_lighting.rs",
+        "observe",
+        "as_f32",
+        3,
+        "world_position.x as f32",
+    )
+    for mutated in (sites[1:], sites + [first], [changed] + sites[1:], sites + [extra]):
+        with pytest.raises(AssertionError):
+            _undo_sky_lighting_transition(mutated)
+
+
+def _inventory_before_water_optics():
+    """Check both approved branch inventories without replacing either freeze."""
+    water = _ledger_data()["water_optics"]
+    viewport = _ledger_data()["viewer_viewport_resize"]
+    sites = _undo_sky_lighting_transition(_main_side_inventory())
+    normalized = _undo_scene_pick_assembly_transition(sites)
+    water_added = set(map(tuple, water["added"]))
+    viewport_added = set(map(tuple, viewport["added"]))
+    assert len(water_added) == 10 and water["removed"] == []
+    assert len(viewport_added) == 10 and viewport["removed"] == []
+    assert water_added.isdisjoint(viewport_added)
+    for site in water_added | viewport_added:
+        assert normalized.count(site) == 1, f"reviewed conversion missing or duplicated: {site}"
+    historical_water = [site for site in normalized if site not in viewport_added]
+    assert (len(historical_water), _inventory_digest(historical_water)) == (
+        water["result_count"], water["result_digest"],
+    )
+    baseline = [site for site in sites if site not in water_added]
+    normalized_main = _undo_scene_pick_assembly_transition(baseline)
+    assert (len(normalized_main), _inventory_digest(normalized_main)) == (
+        MAIN_FREEZE_COUNT, MAIN_FREEZE_SHA256,
+    )
+    return baseline
+
+
+def test_water_optics_inventory_transition_is_exact():
+    transition = _ledger_data()["water_optics"]
+    texture = _ledger_data()["texture_layout_stats"]
+    assert transition["review"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        texture["result_count"], texture["result_digest"],
+    )
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1846, 'f833522fa331012743ce728548a7f63fb114335de11c2aab7985c90ab9192a62',
+    )
+    expected_added = [
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            1,
+            'n.map(|v| (f64::from(v) / length) as f32)',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            2,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            3,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            4,
+            '[n.x as f32, n.y as f32, n.z as f32]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            5,
+            'let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/surface.rs',
+            'upload_water_surface',
+            'as_f32',
+            6,
+            'let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            1,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            2,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            3,
+            'self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]',
+        ],
+        [
+            'src/terrain/renderer/water_reflection/uniforms.rs',
+            'with_optics',
+            'as_f32',
+            4,
+            'self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]',
+        ],
+    ]
+    assert transition["added"] == expected_added
+    assert transition["removed"] == []
+    assert transition["result_count"] == transition["base_count"] + len(expected_added)
+    _inventory_before_water_optics()

@@ -824,7 +824,7 @@ def test_set_sun_handler_is_live_not_print_only():
     # The sky pass must read the observation-driven sun direction, and the sun
     # disc/scattering must fade on the declared ramp rather than stepping to
     # zero at altitude 0 (which pops a frame before the sky starts darkening).
-    assert "self.sky_sun_direction_ws" in frame_setup
+    assert "self.sky_lighting.solar_direction()" in frame_setup
     assert "SUN_FADE_START_DEG" in frame_setup and "SUN_FADE_END_DEG" in frame_setup
     assert "smoothstep(SUN_FADE_START_DEG, SUN_FADE_END_DEG, solar_altitude_deg)" in frame_setup
     helpers = (
@@ -835,9 +835,14 @@ def test_set_sun_handler_is_live_not_print_only():
         / "viewer_helpers"
         / "core.rs"
     ).read_text(encoding="utf-8")
-    assert "lit_sun_direction_ws[1] > 0.0" in helpers
-    assert "crate::astro::night::horizontal_direction" in helpers
-    assert "self.lit_sun_intensity = 1.0" in helpers
+    state = (ROOT / "src" / "viewer" / "sky_lighting.rs").read_text(encoding="utf-8")
+    assert "self.light_direction[1] > 0.0" in state
+    assert "night::horizontal_direction" in state
+    assert "self.daylight_intensity = 1.0" in state
+    assert "self.sky_lighting.effective_intensity()" in helpers
+    assert "self.sky_lighting.terrain_sun()" in helpers
+    assert "self.sky_lighting.observe(observation)" in helpers
+    assert "self.sky_lighting.set_manual_sun(" in "".join(helpers.split())
     scene_command = (
         Path(__file__).parents[1]
         / "src"
@@ -848,7 +853,13 @@ def test_set_sun_handler_is_live_not_print_only():
     lit_sun = scene_command.split("ViewerCmd::SetLitSun", 1)[1].split(
         "ViewerCmd::SetLitIbl", 1
     )[0]
-    assert "viewer.sync_terrain_sun_to_lit()" in lit_sun
+    assert "viewer.apply_lit_sun_intensity(*v)" in lit_sun
+    intensity_adapter = helpers.split("fn apply_lit_sun_intensity(", 1)[1].split(
+        "fn attach_terrain_lighting(", 1
+    )[0]
+    assert "self.sky_lighting.set_intensity(intensity)" in intensity_adapter
+    assert "self.update_lit_uniform()" in intensity_adapter
+    assert "self.sync_terrain_sun_to_lit()" in intensity_adapter
     terrain_command = (
         Path(__file__).parents[1]
         / "src"
@@ -859,7 +870,21 @@ def test_set_sun_handler_is_live_not_print_only():
     load_handler = terrain_command.split("ViewerCmd::LoadTerrain", 1)[1].split(
         "ViewerCmd::SetTerrainCamera", 1
     )[0]
-    assert "viewer.sync_terrain_sun_to_lit()" in load_handler
+    assert "viewer.attach_terrain_lighting()" in load_handler
+    attachment_adapter = helpers.split("fn attach_terrain_lighting(", 1)[1].split(
+        "fn apply_manual_sun(", 1
+    )[0]
+    assert "self.sky_lighting.reset_terrain_source()" in attachment_adapter
+    assert "self.update_lit_uniform()" in attachment_adapter
+    assert "self.sync_terrain_sun_to_lit()" in attachment_adapter
+
+    scene_review = (
+        Path(__file__).parents[1] / "src" / "viewer" / "scene_review.rs"
+    ).read_text(encoding="utf-8")
+    preset_handler = scene_review.split("fn apply_scene_review_preset", 1)[1].split(
+        "fn review_label_world_points", 1
+    )[0]
+    assert "self.apply_manual_sun(" in preset_handler
 
     viewer = (Path(__file__).parents[1] / "python" / "forge3d" / "viewer.py").read_text(
         encoding="utf-8"

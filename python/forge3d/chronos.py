@@ -9,6 +9,7 @@ from the stored compiled data alone.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -33,6 +34,10 @@ _VT_FAMILY_SLOTS = {"albedo": 0, "normal": 1, "mask": 2}
 # The terrain clipmap rejects more rings than its checked LOD shift range
 # (src/terrain/clipmap/level.rs).
 _CLIPMAP_MAX_RINGS = 31
+# Frames a label takes to fade in after it is first placed and to fade out
+# before it leaves. Matches the native default; every compiled scene records
+# the value explicitly so it is covered by the scene and label-set hashes.
+_DEFAULT_LABEL_FADE_FRAMES = 8
 
 
 def _native():
@@ -96,7 +101,7 @@ def _prepare_frame_scene(
 
 def _accepted_labels(frame_scene: MapScene) -> dict[tuple[str, str], Any]:
     accepted: dict[tuple[str, str], Any] = {}
-    for layer_id, plan in frame_scene.compiled_label_plans.items():
+    for layer_id, plan in frame_scene._compiled_plan_for_current_recipe().label_plans.items():
         for label in getattr(plan, "accepted", ()) or ():
             accepted[(str(layer_id), str(label.label_id))] = label
     return accepted
@@ -130,6 +135,28 @@ def _label_timeline_events(
     return events
 
 
+def _label_payload(label: Any) -> dict[str, Any]:
+    """Encode unknown sampled elevations as null without altering decisions."""
+    payload = copy.deepcopy(label.to_dict())
+    for candidate in [payload.get("candidate"), *(payload.get("candidates") or ())]:
+        if not isinstance(candidate, Mapping):
+            continue
+        samples = [candidate.get("terrain_sample")]
+        details = candidate.get("details")
+        if isinstance(details, Mapping):
+            samples.extend(
+                gate.get("terrain_sample")
+                for gate in details.get("visibility_gates", ()) or ()
+                if isinstance(gate, Mapping)
+            )
+        for sample in samples:
+            if isinstance(sample, dict):
+                elevation = sample.get("elevation")
+                if isinstance(elevation, float) and not math.isfinite(elevation):
+                    sample["elevation"] = None
+    return payload
+
+
 def _label_records(
     keys: Sequence[tuple[str, str]],
     accepted: Mapping[tuple[str, str], Any],
@@ -147,7 +174,7 @@ def _label_records(
                 "visible": visible,
                 "appearance_frame": appearance_frame,
                 "disappearance_frame": disappearance_frame,
-                "payload": label.to_dict() if visible else {},
+                "payload": _label_payload(label) if visible else {},
             }
         )
     return records
@@ -232,7 +259,23 @@ def _render_size(recipe: Any) -> tuple[int, int]:
     return (max(64, int(output.width)), max(64, int(output.height)))
 
 
-def _scene_json(frame_scene: MapScene, label_records: list[dict[str, Any]]) -> str:
+def _validate_label_fade_frames(label_fade_frames: Any) -> int:
+    if isinstance(label_fade_frames, bool) or not isinstance(label_fade_frames, int):
+        raise TypeError("render_flythrough label_fade_frames= must be an int")
+    if label_fade_frames < 1:
+        raise ValueError(
+            f"render_flythrough label_fade_frames= must be >= 1, got {label_fade_frames}"
+        )
+    return int(label_fade_frames)
+
+
+def _scene_json(
+    frame_scene: MapScene,
+    label_records: list[dict[str, Any]],
+    label_fade_frames: int = _DEFAULT_LABEL_FADE_FRAMES,
+) -> str:
+    from ._map_scene_rasters import raster_content_hashes
+
     recipe_dict = frame_scene.recipe.to_dict()
     output_dict = recipe_dict.get("output")
     if isinstance(output_dict, Mapping):
@@ -241,15 +284,66 @@ def _scene_json(frame_scene: MapScene, label_records: list[dict[str, Any]]) -> s
         }
     scene_value = {
         "labels": label_records,
+        "label_fade_frames": int(label_fade_frames),
         "clipmap": _clipmap_descriptor(frame_scene.recipe),
         "virtual_texture": _vt_descriptor(frame_scene.recipe, _render_size(frame_scene.recipe)),
         "scene": recipe_dict,
     }
+    raster_content = raster_content_hashes(frame_scene.recipe)
+    if raster_content:
+        scene_value["raster_content"] = raster_content
     return _canonical_json_text(scene_value, "chronos scene")
 
 
 def _camera_json(frame_scene: MapScene) -> str:
     return _canonical_json_text(frame_scene.recipe.camera.to_dict(), "chronos camera")
+
+
+def _prepare_frozen_frame(
+    frame_scene: MapScene,
+    frame_index: int,
+    base_seed: int,
+    samples: int,
+    *,
+    label_events: Mapping[tuple[str, str], tuple[int | None, int | None]],
+    label_fade_frames: int = _DEFAULT_LABEL_FADE_FRAMES,
+    stored_canonical: str | None = None,
+) -> Any:
+    """Compile and attach a frozen frame using the caller's label timeline.
+
+    Labels come from the already compiled scene plan. Replay attaches the
+    validated stored native frame only after recompilation matches its exact
+    canonical bytes; a mismatch leaves the scene plan untouched.
+    """
+    f3d = _native()
+    stored = (
+        f3d.CompiledFrame.from_json(stored_canonical)
+        if stored_canonical is not None
+        else None
+    )
+
+    def events_for(layer_id: str, label_id: str, _visible: bool):
+        return label_events[(layer_id, label_id)]
+
+    label_records = _label_records(
+        tuple(label_events), _accepted_labels(frame_scene), events_for
+    )
+    compiled = f3d.compile_frame(
+        int(frame_index),
+        base_seed,
+        samples,
+        _camera_json(frame_scene),
+        _scene_json(frame_scene, label_records, label_fade_frames),
+    )
+    if stored is not None:
+        if compiled.to_json() != stored_canonical:
+            raise ValueError(
+                "CHRONOS replay inputs do not match the stored compiled frame "
+                f"for frame_index {frame_index}"
+            )
+        compiled = stored
+    frame_scene.compiled_plan = replace(frame_scene.compiled_plan, frame=compiled)
+    return compiled
 
 
 def _frame_png_name(frame_index: int) -> str:
@@ -299,10 +393,17 @@ def _render_frames(
     # Destination paths are where bytes land, not what is rendered.
     cache_recipe = frame_scenes[indices[0]].to_dict()
     cache_recipe["recipe"]["output"]["path"] = None
-    context = canonical_json_bytes(
-        {str(index): compiled_frames[index].to_json() for index in indices},
-        error_context="CHRONOS cache context",
-    )
+    from ._map_scene_rasters import raster_content_hashes
+
+    frame_context = {str(index): compiled_frames[index].to_json() for index in indices}
+    raster_content = {
+        str(index): identities
+        for index in indices
+        if (identities := raster_content_hashes(frame_scenes[index].recipe))
+    }
+    if raster_content:
+        frame_context["raster_content"] = raster_content
+    context = canonical_json_bytes(frame_context, error_context="CHRONOS cache context")
     sequence = render_sequence(
         cache_recipe,
         frames=indices,
@@ -495,9 +596,11 @@ class FlythroughManifest:
         f3d = _native()
         record = self.frame_record(frame_index)
         canonical = str(record["compiled_frame"])
-        compiled = f3d.CompiledFrame.from_json(canonical)
-        stored_labels = (
-            (json.loads(canonical).get("scene") or {}).get("labels") or []
+        stored_scene = json.loads(canonical).get("scene") or {}
+        stored_labels = stored_scene.get("labels") or []
+        stored_fade = stored_scene.get("label_fade_frames")
+        label_fade_frames = (
+            _DEFAULT_LABEL_FADE_FRAMES if stored_fade is None else int(stored_fade)
         )
         stored_events = {
             (str(item["layer_id"]), str(item["label_id"])): (
@@ -511,24 +614,15 @@ class FlythroughManifest:
         frame_scene = _prepare_frame_scene(
             scene, int(frame_index), self.base_seed, self.samples, out_path
         )
-        accepted = _accepted_labels(frame_scene)
-
-        def events_for(layer_id: str, label_id: str, _visible: bool):
-            return stored_events.get((layer_id, label_id), (None, None))
-
-        label_records = _label_records(sorted(stored_events), accepted, events_for)
-        camera_json = _camera_json(frame_scene)
-        scene_json = _scene_json(frame_scene, label_records)
-        candidate = f3d.compile_frame(
-            int(frame_index), self.base_seed, self.samples, camera_json, scene_json
+        compiled = _prepare_frozen_frame(
+            frame_scene,
+            int(frame_index),
+            self.base_seed,
+            self.samples,
+            label_events=stored_events,
+            label_fade_frames=label_fade_frames,
+            stored_canonical=canonical,
         )
-        if candidate.to_json() != canonical:
-            raise ValueError(
-                "CHRONOS replay inputs do not match the stored compiled frame "
-                f"for frame_index {frame_index}"
-            )
-        plan = frame_scene.compiled_plan
-        frame_scene.compiled_plan = replace(plan, frame=compiled)
         frame_scene.render(str(out_path))
         rgba = _decode_png_rgba(out_path)
         provenance = json.loads(f3d.render_compiled_frame(compiled, rgba))
@@ -548,6 +642,7 @@ def render_flythrough(
     out_dir: str | Path,
     certificate: bool = False,
     cache: "str | os.PathLike[str] | None" = None,
+    label_fade_frames: int = _DEFAULT_LABEL_FADE_FRAMES,
 ) -> FlythroughManifest:
     """Render a deterministic CHRONOS flythrough to ``out_dir``.
 
@@ -567,9 +662,18 @@ def render_flythrough(
     ANAMNESIS cache directory; a hit replays the stored frame bytes for the
     identical compiled frame, and the pixel hash is still recomputed from the
     written PNG. ``certificate=True`` always renders fresh.
+
+    ``label_fade_frames`` is how many frames a label takes to fade in after it
+    is first placed and to fade out before the frame it leaves; outside those
+    frames it is drawn at full opacity. A label that moves to another layer
+    fades out and in again. The value is part of each compiled frame, so it
+    changes the frame hashes and cache keys. Each fade step changes alpha by
+    ``1 / label_fade_frames``; use 256 or more to keep every step below one
+    8-bit code.
     """
     if not isinstance(certificate, bool):
         raise TypeError("render_flythrough certificate= must be a bool")
+    label_fade_frames = _validate_label_fade_frames(label_fade_frames)
     f3d = _native()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -589,40 +693,29 @@ def render_flythrough(
     sorted_indices = [index for index, _ in items]
 
     frame_scenes: dict[int, MapScene] = {}
-    accepted_maps: dict[int, dict[tuple[str, str], Any]] = {}
     per_frame_keys: dict[int, set] = {}
     for index, source in items:
         frame_scene = _prepare_frame_scene(
             source, index, base_seed, samples, out_dir / _frame_png_name(index)
         )
-        accepted = _accepted_labels(frame_scene)
         frame_scenes[index] = frame_scene
-        accepted_maps[index] = accepted
-        per_frame_keys[index] = set(accepted.keys())
+        per_frame_keys[index] = set(_accepted_labels(frame_scene))
 
     events = _label_timeline_events(per_frame_keys, sorted_indices)
     all_keys = sorted({key for keys in per_frame_keys.values() for key in keys})
 
     compiled_by_index: dict[int, Any] = {}
     for index in sorted_indices:
-        frame_scene = frame_scenes[index]
-
-        def events_for(layer_id: str, label_id: str, visible: bool, _i: int = index):
-            if not visible:
-                return (None, None)
-            return events.get((layer_id, label_id), {}).get(_i, (None, None))
-
-        label_records = _label_records(all_keys, accepted_maps[index], events_for)
-        compiled = f3d.compile_frame(
+        compiled_by_index[index] = _prepare_frozen_frame(
+            frame_scenes[index],
             index,
             int(base_seed),
             int(samples),
-            _camera_json(frame_scene),
-            _scene_json(frame_scene, label_records),
+            label_events={
+                key: events[key].get(index, (None, None)) for key in all_keys
+            },
+            label_fade_frames=label_fade_frames,
         )
-        plan = frame_scene.compiled_plan
-        frame_scene.compiled_plan = replace(plan, frame=compiled)
-        compiled_by_index[index] = compiled
 
     png_paths = {index: out_dir / _frame_png_name(index) for index in sorted_indices}
     with _shared_terrain_render_context():

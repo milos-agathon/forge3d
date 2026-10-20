@@ -6,6 +6,69 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.44.0] - 2026-10-15
+
+### Added
+- Opt-in physical terrain water optics accept caller-provided surface heights, Z-up normals, linear RGB colour and roughness. Water uses Fresnel sky/local terrain reflection, sun glint and terrain shadows; omitting optics preserves the existing procedural water appearance (#233).
+
+### Changed
+- Share internal ownership of compiled map plans, flythrough preparation, GPU readback/timing, offline accumulation, terrain tile scheduling and viewer render targets. Viewer resize replaces the affected targets together; scene picking assembles all sources before selection.
+
+### Removed
+- `CompressedImage::from_ktx2`, `from_ktx2_data`, `from_dds` and `from_dds_data` have been removed. They had no callers and always failed with a `format_unsupported` degradation, while the remaining KTX2 container loader lives in `src/loaders/ktx2`. KTX2 container loading is now owned solely by that loader, which gains round-trip, sRGB-mapping, malformed-input and unsupported-supercompression tests. DDS remains unimplemented and no longer advertises a public entry point.
+- `loaders::ktx2::BasisTranscoder`, `Ktx2Loader::with_target_formats`, the zero-block `compress_etc2_rgb`/`compress_etc2_rgba` placeholders, and the no-op `generate_mip_levels` stub have been removed. `compress_rgba_to_format` now wires `Bc4RUnorm` to the real `bc4::encode_channel` codec, and refuses ETC2, unencoded formats, and unimplemented multi-mip uploads loudly with structured degradations instead of fabricating zeroed blocks or leaving GPU mip levels uninitialized.
+- `forge3d.get_device()` and its `MockDevice`/`MockVirtualTexture` fallbacks are gone. No native `get_device` symbol ever existed, so the function always returned a fabricated CPU device; `device_probe()`, `enumerate_adapters()` and `engine_info()` report the real adapter instead. `forge3d.io.upload_dem_to_gpu()` and the `DEMData.texture_view` field are also removed: the function called a non-existent `_gpu.device()` and always raised `AttributeError`, and the field was never read.
+- `path_tracing::mesh::upload_mesh_and_bvh` is removed. It had no caller and wrote 40-byte `BvhNode` records into a buffer that the wavefront shaders read at a 48-byte stride; `build_mesh_atlas` is the correct upload path. `path_tracing::mesh::{create_mesh_bind_group, create_mesh_bind_group_layout}` are also removed: neither had a caller, and `compute/setup.rs` builds the group-1 layout it needs inline. `GpuMesh` stays for now: its `triangle_density` holds two of the frozen world-coordinate f32 narrowing sites, so removing the type requires an owner-approved inventory update.
+
+### Fixed
+- GPU frame and timing readback wait for completed mappings, avoiding premature fence retirement when Metal work exceeds wgpu 0.19's internal blocking-wait timeout.
+- Package the DEM detail-normal encoder so P6 generation works from installed wheels; retain the source-tree encoder CLI and its path conventions.
+- DEM detail-normal maps are decoded, uploaded and sampled by native terrain rendering. CLI/JSON settings, row orientation and distance fade controls reach the renderer; zero strength preserves existing output (#224).
+- Terrain upload no longer computes an unused full-resolution CPU coarse-AO texture. Explicit AO consumers and debug mode 28 retain their existing computation (#225).
+- Restore thematic-raster validation helper imports after the compiled-plan ownership refactor, retain OBLIQUA camera-wrapper assertions against the shared native lookup, and isolate the Windows viewport test's event loop from other viewer fixtures.
+- Texture accounting and transfers share one internal layout module. Public format-based size estimates now use format block geometry: R16Unorm/Snorm use 2 bytes per texel (previously 4), Rgba16Unorm/Snorm use 8 (previously 4), Stencil8 uses 1 (previously 4), and ASTC uses each format's actual block dimensions (previously always 4×4). For example, a 13×11 ASTC B12x12 level now counts 32 bytes instead of 192. Descriptor-based accounting and ledger budget enforcement are unchanged; resident sizes remain estimates of allocation bytes, without driver overhead.
+- `CompressedImage::calculate_gpu_size` uses format geometry for formats absent from the registry instead of an RGBA8 fallback. A 13×11 ASTC B8x5 image with three mips now counts 128 bytes instead of 716. Caller-constructed `TextureFormatInfo` records retain sizing from their own layout fields.
+- HDR uploads accept tight rows of any valid width; queue writes do not require encoder-copy row padding. Their existing budget check now rejects already-over-budget usage without subtraction underflow. Height textures retain their existing allocation ceiling, using the registry's shared budget constant.
+- KTX2 loading maps `vkFormat` codes to the correct wgpu formats. Previously BC2 loaded as BC3, BC7 as BC6H, ETC2 RGB as BC7 and ASTC 6x5 as ETC2 RGB, so those textures were decoded as the wrong format. The table now covers the core BC1–BC7, ETC2/EAC, ASTC LDR and 8-bit RGBA/BGRA codes, unknown codes are still rejected, and `CompressedImage::is_srgb` follows the mapped format.
+
+## [1.43.0] - 2026-10-12
+### Compatibility
+- CHRONOS labels now fade in and out over 8 frames instead of 256, so compiled frames, pixel hashes and cache keys for flythroughs with labels change. Pass `label_fade_frames=256` to `render_flythrough` to keep the old fade.
+- SUTURA raster imagery now contributes terrain albedo before lighting, rather than being pasted over the finished frame. Terrain-raster scenes therefore have a new shaded look; their committed references have been refreshed.
+
+### Added
+- SUTURA 3D overlays: terrain-UV raster draping and vectors projected through the terrain camera, with terrain occlusion and perspective-aware world widths (#209).
+- Ordered multipass `MapScene` composition: `RenderPassSpec` / `RenderPassInput` passes with blend modes, opacity and sRGB-correct alpha, saved in version 4 composition bundles that `MapScene.load_bundle` reads. Scenes without passes still write and read version 3 bundles unchanged (#220).
+- `forge3d.chronos.render_flythrough(label_fade_frames=...)` sets how many frames a label takes to fade in and out. The value is recorded in each compiled frame and covered by its hashes. With the old fixed 256-frame fade, labels that entered or left a short shot stayed faint for most of it (#222).
+- Opt-in world labels through `LabelLayer(metadata={"coordinate_space": "world"})`. Their anchors and geometry follow the terrain camera; existing screen-coordinate labels keep their behavior.
+
+### Changed
+- Refreshed the terrain-raster reference images for terrain-albedo draping.
+- Added the single-rebase, world-coordinate f32, and anchoring-boundary gates to the fast PR contract lane.
+
+### Fixed
+- Line and curved labels now space glyphs by their advances. Produced glyph origins were glyph centres, so each glyph was drawn half its own advance late ("Si lver Ri ver"). Produced candidate bounds now reserve each glyph's rotated font line box, using the `font_metrics` (units per em, ascender, descender) that `ShapedText.to_dict()` now reports, and `layout_label_candidates` accepts optional `ascent`/`descent` in em.
+- MSDF text takes each atlas texel's median before bilinear filtering, so single-channel values in glyph padding no longer draw stray halo beside glyphs.
+- Renewed four expired hardware-adapter `tests/UNRUN.toml` exemptions to 2026-11-10 (owner-approved).
+- Require completed green full CI on the exact release SHA before every publish job; narrower manual acceptance scopes cannot qualify. Explicit dry runs only build/test artifacts, and same-HEAD full CI dispatches now pass candidate materialization.
+- Record missing optional Metal hardware as an explicit ABSENT diagnostic, without running GPU controls or failing the job; genuine probe errors remain failures and the diagnostic remains outside Full Acceptance.
+- Keep GPU-heavy globe constructor checks in physical ORBIS acceptance while the hosted Windows software-adapter lane records explicit omissions. Full Python jobs retain their 35-minute timeout and save per-test timings, skip reasons and JUnit evidence.
+- Route D02 physical raster-style tests to required zero-skip NVIDIA acceptance with unchanged adapter and pixel assertions. Linux/Windows software-adapter Python matrices record their three-case deselection and reason in a notice and job summary; macOS retains the tests and Full Acceptance requires D02 hardware execution.
+- Refresh the ORBIS Rainier NVIDIA Vulkan golden after the stable render drift that appeared between `452fadd3` and `3a6ec9f8`, most likely from the deterministic ORBIS arithmetic barriers in `026dc54f`. The gated ORBIS test was not part of that commit's byte-identity check; this was not GPU-bisected and PR #201 is not excluded. Owner-approved pixels; SSIM 0.995 and mean-difference 2.0 gates are unchanged.
+- `tests/test_m06_single_rebase_contract.py` re-freezes the viewer `Anchor` inventory with the three SPLAT-FUSED sites that landed in 1.41.0 without a ledger entry, so the fail-closed coordinate-safety gate was red on `main`: `src/splat/load.rs::read_chunk` (3DGS PLY reader, zero-origin scene frame) and `src/splat/stream.rs::PointCloudFrame::anchor` (COPC/LiDAR frame with a caller-supplied georeferenced origin). Both are stand-alone splat readers, not viewer anchor mutations.
+- Unsupported styled raster combinations now report a structured route diagnostic for each affected layer during validation, before rendering.
+- Curved labels now emit screen-space glyph rotations in radians and reserve their rotated screen bounds, keeping text such as “Silver River” upright along its path.
+
+## [1.42.0] - 2026-10-06
+### Added
+- Population and thematic rasters through public `MapScene` styles: `RasterHeightSurfaceStyle` turns population values into a continuous native height/shade surface, `CategoricalRasterStyle` maps class IDs to colours and class legends, and `BivariateRasterStyle` classifies two aligned rasters into a 3×3 palette with labelled axes. A thematic overlay can colour a population height surface. Units, nodata masks and bin-boundary semantics remain explicit; styled scenes retain canonical bundle round trips. Existing unstyled defaults and serialization are preserved. See `docs/guides/thematic_raster_styles.md` and `examples/mapscene_thematic_rasters.py`. (#210)
+
+### Changed
+- Bumped the package and PyPI version to `1.42.0`.
+
+### Fixed
+- Corrected the release version for population and thematic styles, which were initially published under the existing `1.41.0` entry. Restored that entry's original date and contents; the published `1.41.0` tag and package files are unchanged.
+
 ## [1.41.0] - 2026-10-04
 ### Added
 - SPLAT-FUSED: `forge3d.render_fused` path-traces 3D Gaussian splats, a COPC LiDAR point cloud and DEM terrain in one ReSTIR pass, so each representation shadows the others: a splat-captured tree shadows the terrain, a ridge shadows the splats and the LiDAR. `forge3d.load_gaussian_splats` reads 3DGS `.ply` files into a `GaussianSplatCloud`. Behind the new `splat-fusion` Cargo feature, which the wheel enables. See `docs/splat-fused.md`.

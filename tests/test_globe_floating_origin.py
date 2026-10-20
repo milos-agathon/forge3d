@@ -16,6 +16,7 @@ from PIL import Image
 
 import forge3d as f3d
 from tests._ssim import ssim
+from _terrain_runtime import _running_on_unsupported_hosted_windows_ci
 
 
 RAINIER = Path(__file__).parents[1] / "assets" / "tif" / "dem_rainier.tif"
@@ -28,6 +29,16 @@ ORBIS_GOLDEN = (
     / "orbis_rainier_ground.nvidia-vulkan.png"
 )
 ORBIS_SELECTED = os.environ.get("FORGE3D_RUN_ORBIS_GPU") == "1"
+# Reuse the terrain lane's explicit hosted-Windows policy. The physical
+# NVIDIA lane opts in with FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN=1.
+_HOSTED_WINDOWS_GLOBE_SKIP = pytest.mark.skipif(
+    _running_on_unsupported_hosted_windows_ci(),
+    reason=(
+        "hosted Windows software-adapter lane omits GPU-heavy GlobeScene "
+        "construction (nightly WARP constructor intervals: 629s and 646s); "
+        "covered by physical NVIDIA Vulkan ORBIS acceptance"
+    ),
+)
 # The physical baseline has 36 RGB colors and an 88.20% non-modal fraction since
 # globe shading builds its height normals in each fragment's east/north/up frame
 # at metric scale (the flat Y-up normal was ~1000x over-steep and left the ground
@@ -157,6 +168,8 @@ def test_target_outside_source_coverage_is_diagnostic():
     assert str(RAINIER) in text
 
 
+@pytest.mark.offscreen
+@_HOSTED_WINDOWS_GLOBE_SKIP
 def test_snapshot_and_metrics_fail_closed_before_descent():
     scene = f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier")
     with pytest.raises(RuntimeError, match="snapshot.*render"):
@@ -165,11 +178,15 @@ def test_snapshot_and_metrics_fail_closed_before_descent():
         scene.metrics()
 
 
+@pytest.mark.offscreen
+@_HOSTED_WINDOWS_GLOBE_SKIP
 def test_constructor_accepts_declared_pathlike_source():
     scene = f3d.GlobeScene(RAINIER, RAINIER_LON, RAINIER_LAT, "Mount Rainier")
     assert scene.source == str(RAINIER)
 
 
+@pytest.mark.offscreen
+@_HOSTED_WINDOWS_GLOBE_SKIP
 def test_failed_later_overview_seed_leaves_scene_state_unchanged():
     from forge3d.cog import CogDataset
 
@@ -202,12 +219,16 @@ def test_failed_later_overview_seed_leaves_scene_state_unchanged():
     "waypoints",
     [[], [(RAINIER_LON, RAINIER_LAT, float("nan"))], [(181.0, 0.0, 1.0)]],
 )
+@pytest.mark.offscreen
+@_HOSTED_WINDOWS_GLOBE_SKIP
 def test_custom_waypoints_are_validated_before_render(waypoints):
     scene = f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier")
     with pytest.raises(ValueError):
         scene.scripted_descent(waypoints)
 
 
+@pytest.mark.offscreen
+@_HOSTED_WINDOWS_GLOBE_SKIP
 def test_entire_custom_path_is_validated_before_any_render():
     scene = f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier")
     with pytest.raises(ValueError, match="coverage"):
@@ -221,6 +242,8 @@ def test_entire_custom_path_is_validated_before_any_render():
         scene.snapshot()
 
 
+@pytest.mark.offscreen
+@_HOSTED_WINDOWS_GLOBE_SKIP
 def test_extreme_altitude_rejects_without_mutating_scene():
     scene = f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier")
     with pytest.raises(ValueError, match="altitude.*9000000") as caught:
@@ -252,6 +275,8 @@ def test_earth_texture_is_validated_before_gpu(texture, error, message):
         f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier", earth_texture=texture)
 
 
+@pytest.mark.offscreen
+@_HOSTED_WINDOWS_GLOBE_SKIP
 def test_oblique_camera_distance_is_bounded_before_render():
     scene = f3d.GlobeScene(str(RAINIER), RAINIER_LON, RAINIER_LAT, "Mount Rainier")
     with pytest.raises(ValueError, match="from its target.*maximum"):

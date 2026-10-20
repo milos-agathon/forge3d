@@ -102,4 +102,5 @@ pub struct TerrainRenderParams {
     pub(crate) python_object: Py<PyAny>,
     pub(crate) media: Option<Py<crate::media_py::PyMedium>>,
     pub(crate) decoded: DecodedTerrainSettings,
+    pub(crate) water_optics: WaterOpticsSettingsNative,
 }

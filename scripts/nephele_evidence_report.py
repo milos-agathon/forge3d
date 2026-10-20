@@ -55,10 +55,16 @@ SHA256_RE = re.compile(r"[0-9a-f]{64}")
 # Rgba32F albedo (owner-approved by code inspection, not re-measured).
 # shader_sources.rs: main ec003e90/c93b653e add only cfg(splat-fusion) fused
 # kernel assembly and drop one alternative from the tap-count test above.
+# PR #172 main sync (owner-approved 2026-10-20, code inspection, not re-measured):
+# main 1da913f0 renames the CHRONOS re-export to DEFAULT_LABEL_FADE_FRAMES
+# (terrain/mod.rs); main e8e9b119/d8200e4e/0d7bee07 reformat test assertions and
+# add the cfg(test) CSM layout module (shader_sources.rs); main a7a99274 submits
+# the GPU timing encoder through the timer instead of resolve + queue.submit
+# (render_terrain.rs). None changes the reference transport.
 REFERENCE_SOURCE_ALLOWLIST = {
-    "src/terrain/mod.rs": "4562b11c06b55edc88265f4b31a5a088261b574b18ec55619b9394a56e8e3377",
-    "src/shader_sources.rs": "156f2b121f286f8bf5f32fe333edbacac0bce0a1f731e11853458705b4fab1db",
-    "src/path_tracing/hybrid_compute/render_terrain.rs": "90a271018cbb579b621a7a8f2d013031f62ef484b4944ae98098f05945100dc3",
+    "src/terrain/mod.rs": "f47115f0ebbe80350b927d5075d8cadf4ef63fb411584a9b656004307dbcfa92",
+    "src/shader_sources.rs": "0742c246b9ba1f44671121900b5893bec0051dc3995be11441758e1b72c801c0",
+    "src/path_tracing/hybrid_compute/render_terrain.rs": "ecb7ab3112de270f5db4f056b827998788ae2754e92e1ee2272159b3a9b95f6f",
     "src/path_tracing/hybrid_compute/terrain_heightfield.rs": "da6e5c5027b98f3845ea5d7e02819ef1528d6fa0a3c2b48dc3badd12aeefeeed",
 }
 

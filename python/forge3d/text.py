@@ -6,7 +6,7 @@ from pathlib import Path
 import hashlib
 from typing import Mapping, Sequence
 
-from ._native import get_native_module
+from ._native import get_native_module, get_native_symbol
 
 
 class TextShapingError(ValueError):
@@ -15,8 +15,8 @@ class TextShapingError(ValueError):
         self.diagnostics = diagnostics
 
 
-_native = get_native_module()
-ShapedText = getattr(_native, "ShapedText", object)
+# Exported types retain their import-time identities.
+ShapedText = get_native_symbol("ShapedText", object)
 
 
 def shape(
@@ -27,6 +27,7 @@ def shape(
     language: str | None = None,
     features: Mapping[str, bool] | None = None,
 ) -> ShapedText:
+    _native = get_native_module()
     fonts = [str(Path(font)) for font in font_chain]
     for font in fonts:
         if not Path(font).is_file():
@@ -62,6 +63,7 @@ def rasterize_shaped_run(
     origin: tuple[float, float] = (0.0, 0.0),
     line_ranges: Sequence[tuple[int, int]] | None = None,
 ):
+    _native = get_native_module()
     return _native.rasterize_shaped_run(
         shaped, width, height, origin, line_ranges
     )
@@ -74,8 +76,13 @@ def bake_msdf_atlas(
     px_range: float = 8.0,
     padding: int = 4,
 ):
+    _native = get_native_module()
     fonts = [str(Path(font)) for font in font_chain]
-    if hasattr(_native, "ShapedText") and isinstance(charset, ShapedText):
+    native_shaped_type = get_native_symbol("ShapedText")
+    if (
+        (native_shaped_type is not None and isinstance(charset, native_shaped_type))
+        or (ShapedText is not object and isinstance(charset, ShapedText))
+    ):
         shaped_payload = charset.to_dict()
         actual_sources = [str(source) for source in shaped_payload.get("font_sources", ())]
         actual_hashes = [str(value) for value in shaped_payload.get("font_sha256", ())]

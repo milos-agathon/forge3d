@@ -2,7 +2,7 @@ use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::viewer::Viewer;
 
 impl Viewer {
-    pub(super) fn present_sky_output(
+    pub(crate) fn present_sky_output(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,

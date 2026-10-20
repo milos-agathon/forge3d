@@ -65,5 +65,8 @@ pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResu
         )?)?;
     }
 
+    m.add_function(wrap_pyfunction!(mesh_build_bvh_cpu, m)?)?;
+    m.add_function(wrap_pyfunction!(mesh_upload_gpu, m)?)?;
+
     Ok(())
 }

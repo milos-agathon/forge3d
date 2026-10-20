@@ -25,8 +25,10 @@ mod native_overlays;
 mod native_postfx;
 mod native_probes;
 mod native_vt;
+mod native_water;
 mod parse;
 mod private_impl;
+mod projection;
 mod py_api;
 
 use native_effects::{
@@ -50,6 +52,7 @@ use native_postfx::{
 };
 pub(crate) use native_probes::{ProbeSettingsNative, ReflectionProbeSettingsNative};
 pub(crate) use native_vt::{TerrainVTSettingsNative, VTLayerFamilyNative};
+pub(crate) use native_water::WaterOpticsSettingsNative;
 
 pub use core::{DecodedTerrainSettings, TerrainRenderParams};
 pub use native_lighting::{AddressModeNative, FilterModeNative};

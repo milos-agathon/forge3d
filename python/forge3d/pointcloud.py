@@ -24,7 +24,10 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
+from typing import Protocol as _Protocol
 import numpy as np
+
+from . import _pointcloud_octree as _octree
 
 
 @dataclass
@@ -94,6 +97,16 @@ class OctreeNode:
     point_count: int
     spacing: float
     children: List[OctreeKey] = field(default_factory=list)
+
+
+class _PointCloudHierarchy(_Protocol):
+    """Spatial facts required by LOD traversal, without decoding capabilities."""
+
+    def root_node(self) -> OctreeNode:
+        ...
+
+    def children(self, key: OctreeKey) -> List[OctreeNode]:
+        ...
 
 
 @dataclass
@@ -385,57 +398,28 @@ class CopcDataset:
 
     def children(self, key: OctreeKey) -> List[OctreeNode]:
         """Get child nodes."""
-        children = []
-        for octant in range(8):
-            child_key = key.child(octant)
-            if str(child_key) in self._hierarchy:
-                entry = self._hierarchy[str(child_key)]
-                bounds = self._bounds_for_key(child_key)
-                spacing = self._info.get("spacing", 1.0) / (2 ** child_key.depth)
-                children.append(OctreeNode(
-                    key=child_key,
-                    bounds=bounds,
-                    point_count=entry["point_count"],
-                    spacing=spacing,
-                ))
-        return children
+        return _octree.child_nodes(key, self._hierarchy, self._node_for_key)
+
+    def _node_for_key(self, key: OctreeKey) -> OctreeNode:
+        entry = self._hierarchy[str(key)]
+        return OctreeNode(
+            key=key,
+            bounds=self._bounds_for_key(key),
+            point_count=entry["point_count"],
+            spacing=self._info.get("spacing", 1.0) / (2 ** key.depth),
+        )
 
     def _bounds_for_key(self, key: OctreeKey) -> OctreeBounds:
         """Compute bounds for a key."""
-        if not self._root_bounds:
-            return OctreeBounds((0, 0, 0), (1, 1, 1))
-
-        min_pt = list(self._root_bounds.min)
-        max_pt = list(self._root_bounds.max)
-
-        for d in range(key.depth):
-            shift = key.depth - d - 1
-            mid = [(min_pt[i] + max_pt[i]) / 2 for i in range(3)]
-
-            if (key.x >> shift) & 1:
-                min_pt[0] = mid[0]
-            else:
-                max_pt[0] = mid[0]
-
-            if (key.y >> shift) & 1:
-                min_pt[1] = mid[1]
-            else:
-                max_pt[1] = mid[1]
-
-            if (key.z >> shift) & 1:
-                min_pt[2] = mid[2]
-            else:
-                max_pt[2] = mid[2]
-
-        return OctreeBounds(tuple(min_pt), tuple(max_pt))
+        return _octree.bounds_for_key(self._root_bounds, key)
 
     def read_points(self, key: OctreeKey | None = None, budget: int | None = None) -> PointData:
         """Read decoded points for a COPC node through the native decoder."""
-        from ._native import NATIVE_AVAILABLE, get_native_module
+        from ._native import get_native_module
 
-        if not NATIVE_AVAILABLE:
-            raise RuntimeError("CopcDataset.read_points requires the compiled native extension")
         native = get_native_module()
+        if native is None:
+            raise RuntimeError("CopcDataset.read_points requires the compiled native extension")
         fn = getattr(native, "copc_read_node_points", None)
         if fn is None:
             raise RuntimeError("native copc_read_node_points is unavailable")
@@ -526,50 +510,20 @@ class EptDataset:
 
     def children(self, key: OctreeKey) -> List[OctreeNode]:
         """Get child nodes."""
-        children = []
-        for octant in range(8):
-            child_key = key.child(octant)
-            if str(child_key) in self._hierarchy:
-                point_count = self._hierarchy[str(child_key)]
-                bounds = self._bounds_for_key(child_key)
-                span = self._info.get("span", 128)
-                spacing = bounds.size()[0] / span
-                children.append(OctreeNode(
-                    key=child_key,
-                    bounds=bounds,
-                    point_count=point_count,
-                    spacing=spacing,
-                ))
-        return children
+        return _octree.child_nodes(key, self._hierarchy, self._node_for_key)
+
+    def _node_for_key(self, key: OctreeKey) -> OctreeNode:
+        bounds = self._bounds_for_key(key)
+        return OctreeNode(
+            key=key,
+            bounds=bounds,
+            point_count=self._hierarchy[str(key)],
+            spacing=bounds.size()[0] / self._info.get("span", 128),
+        )
 
     def _bounds_for_key(self, key: OctreeKey) -> OctreeBounds:
         """Compute bounds for a key."""
-        if not self._root_bounds:
-            return OctreeBounds((0, 0, 0), (1, 1, 1))
-
-        min_pt = list(self._root_bounds.min)
-        max_pt = list(self._root_bounds.max)
-
-        for d in range(key.depth):
-            shift = key.depth - d - 1
-            mid = [(min_pt[i] + max_pt[i]) / 2 for i in range(3)]
-
-            if (key.x >> shift) & 1:
-                min_pt[0] = mid[0]
-            else:
-                max_pt[0] = mid[0]
-
-            if (key.y >> shift) & 1:
-                min_pt[1] = mid[1]
-            else:
-                max_pt[1] = mid[1]
-
-            if (key.z >> shift) & 1:
-                min_pt[2] = mid[2]
-            else:
-                max_pt[2] = mid[2]
-
-        return OctreeBounds(tuple(min_pt), tuple(max_pt))
+        return _octree.bounds_for_key(self._root_bounds, key)
 
 
 def open_laz(path: str | Path) -> LazDataset:
@@ -579,11 +533,11 @@ def open_laz(path: str | Path) -> LazDataset:
 
 def read_laz_point_attributes(path: str | Path, sample_count: int = 3) -> Dict[str, Any]:
     """Read native LAS/LAZ sample attributes including intensity and classification."""
-    from ._native import NATIVE_AVAILABLE, get_native_module
+    from ._native import get_native_module
 
-    if not NATIVE_AVAILABLE:
-        raise RuntimeError("read_laz_point_attributes requires the compiled native extension")
     native = get_native_module()
+    if native is None:
+        raise RuntimeError("read_laz_point_attributes requires the compiled native extension")
     fn = getattr(native, "read_laz_point_attributes", None)
     if fn is None:
         raise RuntimeError("native read_laz_point_attributes is unavailable")
@@ -667,10 +621,14 @@ class PointCloudRenderer:
 
     def get_visible_nodes(
         self,
-        dataset: CopcDataset | EptDataset,
+        dataset: _PointCloudHierarchy,
         camera_position: Tuple[float, float, float],
     ) -> List[VisibleNode]:
-        """Get visible nodes within point budget."""
+        """Get visible nodes using only ``root_node()`` and ``children(key)``.
+
+        Any dataset supplying these spatial facts can participate in traversal;
+        point decoding remains a separate, format-specific capability.
+        """
         root = dataset.root_node()
         result = []
         total_points = 0

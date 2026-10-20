@@ -12,6 +12,22 @@ import numpy as np
 from .certificate import _captured_cpu_render
 
 
+def categorical_legend(palette, labels, *, units="") -> dict:
+    """Class swatches in ascending source-ID order; colors are display RGBA8."""
+    return {"kind": "categorical", "units": units, "entries": [
+        {"class_id": int(k), "label": labels[k], "rgba": list(palette[k])}
+        for k in sorted(palette)
+    ], "nodata_rgba": [0, 0, 0, 0]}
+
+
+def bivariate_legend(style) -> dict:
+    """Palette rows increase along y, columns along x; preserve bin closure."""
+    return {"kind": "bivariate", "palette": style["palette"], "right_inclusive": style["right"],
+            "x_axis": {"label": style["x_label"], "units": style["x_units"], "bins": style["x_bins"], "labels": style["x_labels"]},
+            "y_axis": {"label": style["y_label"], "units": style["y_units"], "bins": style["y_bins"], "labels": style["y_labels"]},
+            "nodata_rgba": [0, 0, 0, 0]}
+
+
 def _linear_to_srgb(rgb: np.ndarray) -> np.ndarray:
     """Convert linear RGB values in [0, 1] to display sRGB."""
     return np.where(

@@ -11,15 +11,8 @@ import numpy as np
 
 from .geometry import MeshBuffers, _mesh_from_py, _mesh_to_py  # internal helpers
 
-try:
-    from . import _forge3d
-except ImportError:  # pragma: no cover - handled in tests via skip
-    _forge3d = None  # type: ignore[assignment]
+from ._native import require_native_module as _ensure_native
 
-
-def _ensure_native() -> None:
-    if _forge3d is None:  # pragma: no cover - import guard
-        raise RuntimeError("forge3d native module is not available; build the extension first")
 
 
 # ========== DEM (Digital Elevation Model) Loading ==========
@@ -44,8 +37,6 @@ class DEMData:
         (x_resolution, y_resolution) in CRS units
     bounds : Optional[Tuple[float, float, float, float]]
         (minx, miny, maxx, maxy) bounding box in CRS units
-    texture_view : Optional[Any]
-        GPU texture view (populated when uploaded to GPU)
     stats : Dict[str, float]
         Statistics: mean, std, min, max, median, etc.
     """
@@ -56,7 +47,6 @@ class DEMData:
     transform: Optional[Any] = None
     resolution: Tuple[float, float] = (1.0, 1.0)
     bounds: Optional[Tuple[float, float, float, float]] = None
-    texture_view: Optional[Any] = None
     stats: Dict[str, float] = None  # type: ignore
 
     def __post_init__(self):
@@ -380,7 +370,6 @@ def load_dem(
         transform=transform,
         resolution=resolution,
         bounds=(bounds.left, bounds.bottom, bounds.right, bounds.top) if bounds else None,
-        texture_view=None,
         stats=calculate_dem_stats(data, nodata),
     )
 
@@ -431,57 +420,8 @@ def load_dem_from_array(
         transform=None,
         resolution=(1.0, 1.0),
         bounds=None,
-        texture_view=None,
         stats=calculate_dem_stats(data, nodata),
     )
-
-
-def upload_dem_to_gpu(dem: DEMData, session: Optional[Any] = None) -> DEMData:
-    """Upload DEM data to GPU as a texture.
-
-    Parameters
-    ----------
-    dem : DEMData
-        DEM data to upload
-    session : Optional[Session]
-        GPU session (uses global context if None)
-
-    Returns
-    -------
-    DEMData
-        Same DEM with texture_view populated
-
-    Notes
-    -----
-    This creates an R32Float texture on the GPU for use in shaders.
-    """
-    _ensure_native()
-
-    # Ensure data is C-contiguous float32
-    data = np.ascontiguousarray(dem.data, dtype=np.float32)
-
-    # Get GPU context
-    if session is not None:
-        _device = session.device
-        _queue = session.queue
-    else:
-        # Use global context
-        from . import _gpu
-        _gpu.device()
-        _gpu.queue()
-
-    # Create texture using native module
-    height, width = data.shape
-
-    # For now, store the data and mark as ready for upload.
-    dem.texture_view = {
-        "data": data,
-        "width": width,
-        "height": height,
-        "format": "R32Float",
-    }
-
-    return dem
 
 
 @dataclass
@@ -590,7 +530,7 @@ def load_obj(
     - Faces are triangulated on import.
     - MTL parsing is minimal: `Kd`, `Ka`, `Ks`, and `map_Kd` are supported.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     result = _forge3d.io_import_obj_py(str(path))
     # result is a dict with keys: mesh, materials, groups
     mesh = _mesh_from_py(result["mesh"])  # type: ignore[arg-type]
@@ -660,7 +600,7 @@ def save_obj(
     - If materials are provided, mtllib/usemtl statements are emitted and a .mtl is written.
     - Groups are emitted as g/o prior to the corresponding faces.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     mats_payload = None
     if materials is not None:
@@ -708,7 +648,7 @@ def save_stl(mesh: MeshBuffers, path: str, *, validate: bool = False) -> bool:
     bool
         Watertightness result if `validate=True`, otherwise False.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     return bool(_forge3d.io_export_stl_py(str(path), payload, bool(validate)))
 
@@ -731,7 +671,7 @@ def import_osm_buildings_extrude(
     height_key: Optional[str]
         Custom key in each feature dict to read the height from.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     # Minimal sanity conversion: ensure coords are float32 (N,2)
     conv: list[dict] = []
     for f in features:
@@ -767,7 +707,7 @@ def import_osm_buildings_from_geojson(
     height_key: Optional[str]
         Name of a property field to read height from (fallback to "height" when None).
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     result = _forge3d.import_osm_buildings_from_geojson_py(
         str(geojson), float(default_height), height_key
     )
@@ -788,7 +728,7 @@ def import_gltf(
     with_materials: bool, default False
         If True, also return material summaries and per-imported-primitive material indices.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     if with_materials:
         result = _forge3d.io_import_gltf_with_materials_py(str(path))
         mesh = _mesh_from_py(result["mesh"])  # type: ignore[arg-type]

@@ -10,10 +10,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-try:
-    from . import _forge3d
-except ImportError:  # pragma: no cover - handled in tests via skip
-    _forge3d = None  # type: ignore[assignment]
+from ._native import require_native_module as _ensure_native
 
 
 @dataclass
@@ -35,11 +32,6 @@ class MeshBuffers:
         if self.indices.ndim == 2:
             return int(self.indices.shape[0])
         return int(self.indices.size // 3)
-
-
-def _ensure_native() -> None:
-    if _forge3d is None:  # pragma: no cover - import guard
-        raise RuntimeError("forge3d native module is not available; build the extension first")
 
 
 def _to_float32(array: np.ndarray, expected_cols: int) -> np.ndarray:
@@ -112,7 +104,7 @@ def _mesh_to_py(mesh: MeshBuffers) -> Dict[str, Any]:
 def extrude_polygon(polygon: np.ndarray, height: float, cap_uv_scale: float = 1.0) -> MeshBuffers:
     """Extrude a planar polygon into a prism mesh."""
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     poly = _to_float32(np.asarray(polygon), 2)
     result = _forge3d.geometry_extrude_polygon_py(poly, float(height), float(cap_uv_scale))
     return _mesh_from_py(result)  # type: ignore[arg-type]
@@ -121,7 +113,7 @@ def extrude_polygon(polygon: np.ndarray, height: float, cap_uv_scale: float = 1.
 def primitive_mesh(kind: str, **kwargs: Any) -> MeshBuffers:
     """Generate a unit primitive mesh (plane, box, sphere, cylinder, cone, torus)."""
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     params: Dict[str, Any] = {}
     for key in (
         "resolution",
@@ -142,7 +134,7 @@ def primitive_mesh(kind: str, **kwargs: Any) -> MeshBuffers:
 def validate_mesh(positions: np.ndarray, indices: np.ndarray) -> Dict[str, Any]:
     """Run topology validation on a mesh."""
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     pos = _to_float32(positions, 3)
     idx = _to_uint32(indices)
     return _forge3d.geometry_validate_mesh_py(pos, idx)
@@ -158,7 +150,7 @@ def weld_mesh(
 ) -> Tuple[MeshBuffers, np.ndarray, int]:
     """Weld vertices within the provided tolerances and recompute normals."""
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     pos = _to_float32(positions, 3)
     idx = _to_uint32(indices)
     uv_array = None
@@ -188,7 +180,7 @@ def center_mesh(
     Returns the transformed mesh and the original center.
     """
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     target_tuple = None if target is None else (float(target[0]), float(target[1]), float(target[2]))
     transformed_dict, previous_center = _forge3d.geometry_transform_center_py(payload, target_tuple)
@@ -206,7 +198,7 @@ def scale_mesh(
     Returns the transformed mesh and whether winding was flipped.
     """
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     scale_tuple = (float(scale[0]), float(scale[1]), float(scale[2]))
     pivot_tuple = None if pivot is None else (float(pivot[0]), float(pivot[1]), float(pivot[2]))
@@ -220,7 +212,7 @@ def flip_mesh_axis(mesh: MeshBuffers, axis: int) -> Tuple[MeshBuffers, bool]:
     Returns the transformed mesh and whether winding was flipped.
     """
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     transformed_dict, flipped = _forge3d.geometry_transform_flip_axis_py(payload, int(axis))
     return _mesh_from_py(transformed_dict), bool(flipped)
@@ -232,7 +224,7 @@ def swap_mesh_axes(mesh: MeshBuffers, axis_a: int, axis_b: int) -> Tuple[MeshBuf
     Returns the transformed mesh and whether winding was flipped.
     """
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     transformed_dict, flipped = _forge3d.geometry_transform_swap_axes_py(
         payload,
@@ -245,7 +237,7 @@ def swap_mesh_axes(mesh: MeshBuffers, axis_a: int, axis_b: int) -> Tuple[MeshBuf
 def mesh_bounds(mesh: MeshBuffers) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     """Return the axis-aligned bounding box of the mesh as ``(min, max)`` arrays."""
 
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     bounds = _forge3d.geometry_transform_bounds_py(payload)
     if bounds is None:
@@ -262,7 +254,7 @@ def unwrap_planar(mesh: MeshBuffers, axis: int = 2) -> MeshBuffers:
 
     Generates UVs in [0,1] based on the mesh AABB projected onto the remaining axes.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     out = _forge3d.uv_planar_unwrap_py(payload, int(axis))
     return _mesh_from_py(out)  # type: ignore[arg-type]
@@ -278,7 +270,7 @@ def instance_mesh(mesh: MeshBuffers, transforms: np.ndarray) -> MeshBuffers:
     transforms: (N,16) float32
         Row-major 4x4 transforms; one per instance.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     arr = np.asarray(transforms, dtype=np.float32)
     if arr.ndim != 2 or arr.shape[1] != 16:
@@ -295,7 +287,7 @@ def gpu_instancing_available() -> bool:
     - In CPU-only environments, this will typically return False.
     - When available, GPU instancing enables per-instance transforms with indirect draws.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     fn = getattr(_forge3d, "gpu_instancing_available_py", None)
     if fn is None:
         return False
@@ -341,7 +333,7 @@ def instance_mesh_gpu_render(
     - Requires the crate to be built with Cargo feature ``enable-gpu-instancing``.
     - In environments without GPU support, prefer the CPU ``instance_mesh`` and external rendering.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     _ = cache
     fn = getattr(_forge3d, "geometry_instance_mesh_gpu_render_py", None)
     if fn is None:
@@ -375,7 +367,7 @@ def generate_thick_polyline(
 
     width_world ≈ pixel_width * (2*z*tan(fov_y/2) / H)
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     arr = _to_float32(np.asarray(path, dtype=np.float32), 3)
     out = _forge3d.geometry_generate_thick_polyline_py(
         arr, float(width_world), float(depth_offset), str(join_style), float(miter_limit)
@@ -388,7 +380,7 @@ def unwrap_spherical(mesh: MeshBuffers) -> MeshBuffers:
 
     Projects vertices onto a sphere and computes UVs from (phi, theta).
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     out = _forge3d.uv_spherical_unwrap_py(payload)
     return _mesh_from_py(out)  # type: ignore[arg-type]
@@ -413,7 +405,7 @@ def subdivide_mesh(
     - Crease edges (and boundaries if ``preserve_boundary``) keep mid-edge points and edge-aware smoothing.
     - UVs are interpolated with the same weights; normals are recomputed.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     crease_arr = None
     if creases is not None:
@@ -446,7 +438,7 @@ def displace_heightmap(
     uv_space: bool
         If True, sample the heightmap using vertex UVs; otherwise sample over the mesh XY bounds.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     hm = np.asarray(heightmap, dtype=np.float32)
     if hm.ndim != 2:
@@ -465,7 +457,7 @@ def displace_procedural(mesh: MeshBuffers, amplitude: float = 1.0, frequency: fl
     frequency: float
         Frequency in world units.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     out = _forge3d.geometry_displace_procedural_py(payload, float(amplitude), float(frequency))
     return _mesh_from_py(out)  # type: ignore[arg-type]
@@ -493,7 +485,7 @@ def generate_ribbon(
     join_style: one of {"miter", "bevel", "round"}.
     miter_limit: clamps miter length at sharp angles.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     arr = _to_float32(np.asarray(path, dtype=np.float32), 3)
     js = None
     if join_styles is not None:
@@ -521,7 +513,7 @@ def generate_tube(
     radial_segments: number of segments around the tube (>=3).
     cap_ends: add end caps if True.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     arr = _to_float32(np.asarray(path, dtype=np.float32), 3)
     out = _forge3d.geometry_generate_tube_py(arr, float(radius_start), float(radius_end), int(radial_segments), bool(cap_ends))
     return _mesh_from_py(out)  # type: ignore[arg-type]
@@ -532,14 +524,14 @@ def generate_tangents(mesh: MeshBuffers) -> np.ndarray:
 
     Requires valid UVs and normals for best results. `w` encodes handedness (+1/-1).
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     return _forge3d.geometry_generate_tangents_py(payload)
 
 
 def attach_tangents(mesh: MeshBuffers) -> MeshBuffers:
     """Generate and attach tangents to the mesh, returning a new mesh with `tangents` field set."""
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     out = _forge3d.geometry_attach_tangents_py(payload)
     return _mesh_from_py(out)  # type: ignore[arg-type]
@@ -569,7 +561,7 @@ def subdivide_adaptive(
     preserve_boundary: bool
         Treat boundary edges as creases.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     crease_arr = None
     if creases is not None:
@@ -592,7 +584,7 @@ def simplify_mesh(mesh: MeshBuffers, target_ratio: float) -> MeshBuffers:
 
     Uses QEM edge-collapse. Normals are recomputed; UVs are best-effort.
     """
-    _ensure_native()
+    _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
     result = _forge3d.geometry_simplify_mesh_py(payload, float(target_ratio))
     return _mesh_from_py(result)

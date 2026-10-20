@@ -317,6 +317,7 @@ def _native_shape_label_glyphs(
             _stable_font_source(path) for path in payload.get("font_sources", font_paths)
         ],
         "font_sha256": list(payload.get("font_sha256", ())),
+        "font_metrics": [dict(item) for item in payload.get("font_metrics", ())],
     }
     return glyphs, details
 
@@ -483,6 +484,29 @@ def _native_layout_label_candidates() -> Any | None:
     return getattr(native, "layout_label_candidates", None)
 
 
+def _font_line_box(font_metrics: Any) -> tuple[float, float] | None:
+    """Largest (ascent, descent) in em across the shaped font chain."""
+    if not isinstance(font_metrics, Sequence) or isinstance(font_metrics, (str, bytes)):
+        return None
+    ascent = descent = None
+    for item in font_metrics:
+        if not isinstance(item, Mapping):
+            return None
+        units = _number(item.get("units_per_em"), default=0.0)
+        if units <= 0.0:
+            return None
+        # Font units: ascender above the baseline, descender below (negative).
+        item_ascent = _number(item.get("ascender"), default=float("nan")) / units
+        item_descent = -_number(item.get("descender"), default=float("nan")) / units
+        if not (math.isfinite(item_ascent) and math.isfinite(item_descent)):
+            return None
+        ascent = item_ascent if ascent is None else max(ascent, item_ascent)
+        descent = item_descent if descent is None else max(descent, item_descent)
+    if ascent is None or descent is None or ascent + descent <= 0.0:
+        return None
+    return ascent, descent
+
+
 def _produce_geometry_authority(
     record: Mapping[str, Any],
     *,
@@ -493,6 +517,8 @@ def _produce_geometry_authority(
     typography: Mapping[str, Any] | None,
     camera: Any,
     viewport_size: tuple[float, float],
+    glyph_atlas: Any = None,
+    font_line_box: tuple[float, float] | None = None,
 ) -> Mapping[str, Any] | None:
     """Produce a ``geometry_authority`` payload for a line/curved label.
 
@@ -532,12 +558,12 @@ def _produce_geometry_authority(
             try:
                 try:
                     projected = projector(
-                        (float(coords[0]), float(coords[1]), float(coords[2])),
+                        tuple(float(value) for value in point),
                         viewport=viewport_size,
                     )
                 except TypeError:
                     projected = projector(
-                        (float(coords[0]), float(coords[1]), float(coords[2]))
+                        tuple(float(value) for value in point)
                     )
             except Exception:
                 return None
@@ -575,10 +601,50 @@ def _produce_geometry_authority(
             positioned_glyphs=[dict(glyph) for glyph in positioned],
             font_size=font_size,
             tracking=tracking,
+            **(
+                {"ascent": font_line_box[0], "descent": font_line_box[1]}
+                if font_line_box
+                else {}
+            ),
         )
     except Exception:
         return None
-    return payload if isinstance(payload, Mapping) else None
+    if not isinstance(payload, Mapping):
+        return None
+    if record.get("projected_depth_convention") == "normalized_device_depth":
+        # Reserve the actual atlas quads, including padding and rotation, before
+        # decluttering. The native producer's half-font-size baseline envelope
+        # cannot contain ascenders, atlas padding or arbitrary glyph rotations.
+        from pathlib import Path
+        from .text_atlas import default_latin_atlas_paths, load_atlas_metrics
+        _, metrics_path = default_latin_atlas_paths()
+        atlas = dict(glyph_atlas) if isinstance(glyph_atlas, Mapping) else {}
+        custom_metrics = atlas.get("metrics_path") or atlas.get("source_path")
+        if atlas.get("image_path") and custom_metrics and Path(str(atlas["image_path"])).exists() and Path(str(custom_metrics)).exists():
+            metrics_path = Path(str(custom_metrics))
+        metrics = load_atlas_metrics(metrics_path)
+        atlas_size = float(metrics["font_size"])
+        scale = font_size/atlas_size
+        for candidate in payload.get("candidates", ()):
+            corners = []
+            anchor = candidate["anchor"]
+            for glyph in candidate.get("positioned_glyphs", ()):
+                if not bool(glyph.get("has_outline", True)):
+                    continue
+                metric = metrics["glyphs_by_id"].get(f"{glyph['font_index']}:{glyph['glyph_id']}")
+                if metric is None:
+                    return None
+                origin = glyph["origin"]
+                rotation = float(glyph.get("rotation",0.0))
+                c,s = math.cos(rotation),math.sin(rotation)
+                for dx in (float(metric["ox"])*scale,(float(metric["ox"])+float(metric["w"]))*scale):
+                    for dy in (float(metric["oy"])*scale,(float(metric["oy"])+float(metric["h"]))*scale):
+                        corners.append((anchor[0]+origin[0]*font_size+dx*c-dy*s,
+                                        anchor[1]+origin[1]*font_size+dx*s+dy*c))
+            if corners:
+                candidate["bounds"] = [min(p[0] for p in corners),min(p[1] for p in corners),
+                                       max(p[0] for p in corners),max(p[1] for p in corners)]
+    return payload
 
 
 _SUPPORTED_DEPTH_CONVENTIONS = frozenset(
@@ -1742,6 +1808,8 @@ class LabelPlan:
             glyph_sequence, shaping_details = _shape_label_glyphs(
                 text, glyph_atlas, record.get("line_ranges")
             )
+            # Font metrics size produced line boxes; they are not persisted.
+            font_line_box = _font_line_box(shaping_details.pop("font_metrics", None))
 
             if not text.strip():
                 rejected.append(
@@ -1836,6 +1904,8 @@ class LabelPlan:
                     typography=typography,
                     camera=camera,
                     viewport_size=viewport_size,
+                    glyph_atlas=glyph_atlas,
+                    font_line_box=font_line_box,
                 )
                 if produced is not None:
                     record["geometry_authority"] = produced
@@ -1973,19 +2043,6 @@ class LabelPlan:
                 )
                 candidate = candidates[0]
             elif geometry_type_key == "polygon":
-                if requires_projection:
-                    diagnostics.append(_projection_diagnostic(label_id))
-                    rejected.append(
-                        RejectedLabel(
-                            label_id=label_id,
-                            source_id=source_id,
-                            reason="missing_projection_authority",
-                            diagnostic_refs=["label_projection_authority_missing"],
-                            ordering_key=ordering_key,
-                            details={"required": "projected polygon candidates"},
-                        )
-                    )
-                    continue
                 polygon_candidates = _polygon_label_candidates(
                     label_id=label_id,
                     geometry=geometry,
@@ -2004,6 +2061,21 @@ class LabelPlan:
                     )
                     continue
                 candidate, candidates = polygon_candidates
+                if callable(getattr(camera, "project", None)) and getattr(camera, "projection_authority", None) in {"deterministic", "authoritative"}:
+                    for item in candidates:
+                        anchor = camera.project(item.anchor[:2])
+                        item.anchor = tuple(anchor)
+                        item.bounds = (anchor[0], anchor[1], anchor[0], anchor[1])
+                    record["projection_authority"] = "deterministic_camera_projection"
+                    record["projected_depth_convention"] = "normalized_device_depth"
+                    record["projected_depth_domain"] = [0.0, 1.0]
+                elif requires_projection:
+                    diagnostics.append(_projection_diagnostic(label_id))
+                    rejected.append(RejectedLabel(label_id=label_id, source_id=source_id,
+                        reason="missing_projection_authority", diagnostic_refs=["label_projection_authority_missing"],
+                        ordering_key=ordering_key))
+                    continue
+
                 x, y, z = candidate.anchor
                 screen_bounds = list(candidate.bounds or [x, y, x, y])
                 world_bounds = [x, y, z, x, y, z]

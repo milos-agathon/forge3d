@@ -36,6 +36,7 @@ pub struct MaterialLayerSettingsNative {
     pub normal_path: Option<String>,
     pub roughness_path: Option<String>,
     pub mask_path: Option<String>,
+    pub albedo_path: Option<String>,
     // Snow layer
     pub snow_enabled: bool,
     pub snow_altitude_min: f32,
@@ -72,6 +73,7 @@ impl Default for MaterialLayerSettingsNative {
             normal_path: None,
             roughness_path: None,
             mask_path: None,
+            albedo_path: None,
             snow_enabled: false,
             snow_altitude_min: 2000.0,
             snow_altitude_blend: 500.0,
@@ -116,6 +118,12 @@ pub struct DetailSettingsNative {
     pub fade_start: f32,
     /// Distance at which detail is fully faded (world units)
     pub fade_end: f32,
+    /// Linear RGB tangent-space normal map in terrain UV coordinates.
+    pub detail_normal_path: Option<String>,
+    /// Metadata for the precomputed DEM residual (not a runtime blur).
+    pub detail_sigma_px: f32,
+    /// DEM normal strength, independent of the procedural normal strength.
+    pub detail_strength: f32,
 }
 
 #[cfg(feature = "extension-module")]
@@ -128,6 +136,9 @@ impl Default for DetailSettingsNative {
             albedo_noise: 0.1,
             fade_start: 50.0,
             fade_end: 200.0,
+            detail_normal_path: None,
+            detail_sigma_px: 3.0,
+            detail_strength: 0.0,
         }
     }
 }

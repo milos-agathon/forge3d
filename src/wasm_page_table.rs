@@ -7,6 +7,8 @@ mod height_loader;
 #[path = "terrain/page_table/readers.rs"]
 #[allow(dead_code)]
 mod readers;
+#[path = "terrain/page_table/scheduler.rs"]
+mod scheduler;
 
 pub use common::CoalescePolicy;
 pub use gpu::{

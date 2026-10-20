@@ -52,12 +52,15 @@ pub struct Viewer {
     pub(crate) queue: Arc<Queue>,
     pub(crate) adapter: Arc<Adapter>,
     pub(crate) config: SurfaceConfiguration,
+    /// Failed window extent; only a new resize event retries target preparation.
+    pub(crate) failed_window_resize: Option<winit::dpi::PhysicalSize<u32>>,
     pub(crate) camera: CameraController,
     /// Sole persistent anchor owned by the interactive viewer.
     pub(crate) camera_anchor: Anchor,
     /// Immutable pose/anchor copied at the latest frame boundary.
     pub(crate) frame_camera: Option<FrameCamera>,
     pub(crate) camera_rebase_count: u64,
+    /// IPC counter for anchor-rebase invalidations, excluding viewport changes.
     pub(crate) history_invalidation_count: u64,
     pub(crate) last_vector_source_delta: [f64; 3],
     pub(crate) last_vector_packed_delta: [f32; 3],
@@ -139,13 +142,7 @@ pub struct Viewer {
     pub(crate) gi_ssgi_weight: f32,
     pub(crate) gi_ssr_weight: f32,
     // Lit params (exposed via :lit-* commands)
-    pub(crate) lit_sun_direction_ws: [f32; 3],
-    pub(crate) sky_sun_direction_ws: [f32; 3],
-    pub(crate) lit_sun_intensity: f32,
-    pub(crate) lit_directional_scale: f32,
-    pub(crate) astro_observation_active: bool,
-    pub(crate) astro_observation_revision: u64,
-    pub(crate) astro_terrain_revision: u64,
+    pub(super) sky_lighting: super::sky_lighting::SkyLightingState,
     pub(crate) lit_ibl_intensity: f32,
     pub(crate) lit_use_ibl: bool,
     pub(crate) lit_ibl_rotation_deg: f32,
@@ -205,8 +202,6 @@ pub struct Viewer {
     pub(crate) night_instances: TrackedBuffer,
     pub(crate) night_bind_group: BindGroup,
     pub(crate) _night_moon_texture: TrackedTexture,
-    pub(crate) night_instance_count: u32,
-    pub(crate) astro_night_revision: u64,
     pub(crate) sky_bg0_cache: RefCell<Option<BindGroup>>,
     pub(crate) sky_bg1_cache: RefCell<Option<BindGroup>>,
     pub(crate) sky_present_bg_cache: RefCell<Option<BindGroup>>,

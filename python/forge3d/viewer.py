@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import re
@@ -24,12 +23,15 @@ if TYPE_CHECKING:
     from .media import Medium
 
 from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
+from ._viewer_transport import forget_connection as _forget_connection
+from ._viewer_transport import send_command as _transport_command
 from .diagnostics import (
     Diagnostic,
     experimental_feature_diagnostic,
     missing_glyphs_diagnostic,
     placeholder_fallback_diagnostic,
 )
+from .vector_line import VectorLineLayer
 from .viewer_contract import (
     NormalizedExtent,
     VectorOverlayVertex,
@@ -222,23 +224,7 @@ class ViewerHandle:
         if self._socket is None:
             raise ViewerError("Not connected to viewer")
         
-        # Send NDJSON request
-        request = json.dumps(cmd) + "\n"
-        self._socket.sendall(request.encode("utf-8"))
-        
-        # Read response line
-        response_data = b""
-        while b"\n" not in response_data:
-            chunk = self._socket.recv(4096)
-            if not chunk:
-                raise ViewerError("Connection closed by viewer")
-            response_data += chunk
-        
-        line = response_data.split(b"\n")[0].decode("utf-8")
-        try:
-            response = json.loads(line)
-        except json.JSONDecodeError as e:
-            raise ViewerError(f"Invalid JSON response: {e}")
+        response = _transport_command(self._socket, cmd, error_type=ViewerError)
         
         if not response.get("ok", False):
             error_msg = response.get("error", "Unknown error")
@@ -805,6 +791,26 @@ class ViewerHandle:
         self._ensure_label_api_state()["label_ids"].add(created_id)
         return created_id
 
+    def add_vector_line(
+        self,
+        line: VectorLineLayer,
+    ) -> int:
+        """Submit a local line's width/halo/cap/join geometry with native drape.
+
+        See :class:`forge3d.VectorLineLayer` for world units and supported values.
+        All geometry and styling validation completes before IPC submission.
+        """
+        if not isinstance(line, VectorLineLayer):
+            raise TypeError("line must be a VectorLineLayer")
+        config = line.to_overlay_config()
+        return self.add_vector_overlay(
+            config.name, [vertex.to_array() for vertex in config.vertices],
+            config.indices, primitive=config.primitive.value, drape=config.drape,
+            drape_offset=config.drape_offset, opacity=config.opacity,
+            depth_bias=config.depth_bias, line_width=config.line_width,
+            point_size=config.point_size, z_order=config.z_order,
+        )
+
     def add_vector_overlay(
         self,
         name: str,
@@ -1170,21 +1176,28 @@ class ViewerHandle:
         """Set camera field of view in degrees."""
         self._send_command({"cmd": "set_fov", "deg": float(deg)})
     
-    def set_sun(self, azimuth_deg: float, elevation_deg: float) -> None:
-        """Set sun direction (azimuth and elevation in degrees)."""
+    def set_sun(
+        self,
+        azimuth_deg: float,
+        elevation_deg: float,
+        intensity: Optional[float] = None,
+    ) -> None:
+        """Set sun direction (azimuth and elevation in degrees) and optional intensity."""
         command = {
             "cmd": "lit_sun",
             "azimuth_deg": float(azimuth_deg),
             "elevation_deg": float(elevation_deg),
         }
         self._send_command(command)
-        self._send_command({
+        terrain_command: Dict[str, Any] = {
             "cmd": "set_terrain_sun",
             "azimuth_deg": command["azimuth_deg"],
             "elevation_deg": command["elevation_deg"],
-            "intensity": 1.0,
             "source": "manual_angles",
-        })
+        }
+        if intensity is not None:
+            terrain_command["intensity"] = float(intensity)
+        self._send_command(terrain_command)
 
     def set_sun_time(self, solar_time: "Any", intensity: float = 1.0) -> None:
         """Set the terrain sun from a :class:`forge3d.geo.SolarTime`."""
@@ -1407,6 +1420,7 @@ class ViewerHandle:
                     self._socket.close()
                 except Exception:
                     pass
+                _forget_connection(self._socket)
                 self._socket = None
             if self._process is not None:
                 try:

@@ -656,15 +656,6 @@ impl Viewer {
                 if let Some(fov) = fov_deg {
                     terrain.cam_fov_deg = fov.clamp(10.0, 120.0);
                 }
-                if let Some(azimuth) = sun_azimuth {
-                    terrain.sun_azimuth_deg = azimuth;
-                }
-                if let Some(elevation) = sun_elevation {
-                    terrain.sun_elevation_deg = elevation.clamp(-90.0, 90.0);
-                }
-                if let Some(intensity) = sun_intensity {
-                    terrain.sun_intensity = intensity.max(0.0);
-                }
                 if let Some(value) = ambient {
                     terrain.ambient = value.clamp(0.0, 1.0);
                 }
@@ -684,6 +675,12 @@ impl Viewer {
                     terrain.water_color = value;
                 }
             }
+        }
+        if let Some((azimuth, elevation, intensity)) =
+            self.sky_lighting
+                .requested_manual_sun(sun_azimuth, sun_elevation, sun_intensity)
+        {
+            self.apply_manual_sun(azimuth, elevation, Some(intensity));
         }
 
         if let Some(cfg) = sky {

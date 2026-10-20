@@ -21,6 +21,7 @@ from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
+from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle, RasterStyleResult as RasterStyleResult
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .north_arrow import NorthArrow, NorthArrowConfig
 from .scale_bar import ScaleBar, ScaleBarConfig
@@ -47,6 +48,7 @@ from .terrain_params import (
     FogSettings,
     ReflectionSettings,
     WaterSettings,
+    WaterOpticsSettings,
     CloudSettings,
     HeightAoSettings,
     ScreenSpaceSettings,
@@ -79,7 +81,7 @@ from .diagnostics import (
     RenderFailurePolicy,
     SeverityPolicy,
     SupportMatrixEntry,
-    ValidationReport,
+    ValidationReport as ValidationReport,
     crs_mismatch_diagnostic,
     estimated_gpu_memory_diagnostic,
     memory_tracking_completeness_report,
@@ -108,6 +110,8 @@ from .label_plan import (
     RejectedLabel,
 )
 from .map_scene import (
+    RenderPassInput as RenderPassInput,
+    RenderPassSpec as RenderPassSpec,
     CompiledScenePlan as CompiledScenePlan,
     FontAtlas as FontAtlas,
     FontFallbackRange as FontFallbackRange,
@@ -155,6 +159,7 @@ from .style import (
     validate_style_support,
     vector_overlay_configs_from_style,
 )
+from .vector_line import VectorLineLayer as VectorLineLayer, VectorLineStyleError as VectorLineStyleError
 from . import smoke
 from . import verify
 from .path_tracing import ExperimentalSyntheticOutput, render_terrain_poster
@@ -505,7 +510,7 @@ class Scene:
     def set_native_text_alpha(self, alpha: float) -> None: ...
     def add_native_text_rect(self, x: float, y: float, w: float, h: float, r: float, g: float, b: float, a: float) -> None: ...
     def add_native_text_rect_uv(self, x: float, y: float, w: float, h: float, u0: float, v0: float, u1: float, v1: float, r: float, g: float, b: float, a: float) -> None: ...
-    def add_native_text_rect_uv_halo(self, x: float, y: float, w: float, h: float, u0: float, v0: float, u1: float, v1: float, r: float, g: float, b: float, a: float, halo_r: float, halo_g: float, halo_b: float, halo_a: float, halo_width: float) -> None: ...
+    def add_native_text_rect_uv_halo(self, x: float, y: float, w: float, h: float, u0: float, v0: float, u1: float, v1: float, r: float, g: float, b: float, a: float, halo_r: float, halo_g: float, halo_b: float, halo_a: float, halo_width: float, rotation: float = 0.0) -> None: ...
     def clear_native_text(self) -> None: ...
     def set_native_text_atlas(self, atlas: np.ndarray, channels: int | None = ..., smoothing: float | None = ...) -> None: ...
 
@@ -580,6 +585,8 @@ class OverlayLayer:
     blend_mode: str
     domain: Tuple[float, float]
     @staticmethod
+    def from_raster_rgba(rgba: np.ndarray, strength: float = ...) -> OverlayLayer: ...
+    @staticmethod
     def from_colormap1d(
         colormap: Colormap1D,
         strength: float = ...,
@@ -593,6 +600,11 @@ class OverlayLayer:
     def kind(self) -> str: ...
 
 class TerrainRenderParams:
+    """Decode a terrain configuration, including its typed DetailSettings.
+
+    DEM detail normals require enabled=True, detail_normal_path and positive
+    detail_strength. detail_sigma_px is metadata for the precomputed map.
+    """
     size_px: Tuple[int, int]
     render_scale: float
     msaa_samples: int
@@ -623,6 +635,9 @@ class TerrainRenderParams:
     vt_upload_budget_bytes: int
     media: media.Medium | None
     def __init__(self, params: Any) -> None: ...
+    def project_terrain_points(self, points: Sequence[Sequence[float]]) -> list[Optional[list[float]]]: ...
+    def project_terrain_depth(self, heightmap: np.ndarray, size_px: Tuple[int, int], nodata_height_below: Optional[float] = None) -> np.ndarray: ...
+    def unproject_terrain_depth(self, depth: np.ndarray) -> np.ndarray: ...
     @property
     def light(self) -> Any: ...
     @property
@@ -1029,6 +1044,7 @@ class TerrainRenderer:
         camera_ecef: Tuple[float, float, float],
         max_uploads: int = ...,
     ) -> Dict[str, Any]: ...
+    def _wait_height_streaming(self) -> None: ...
     def height_streaming_stats(self) -> Dict[str, Any]: ...
 
 class OfflineProgress:
@@ -1121,6 +1137,22 @@ class SdfSceneBuilder:
 
 def mesh_generate_cube_tbn() -> Dict[str, Any]: ...
 def mesh_generate_plane_tbn(width: int, height: int) -> Dict[str, Any]: ...
+
+# --- Mesh BVH construction and GPU upload (forge3d.mesh) ---
+
+def mesh_build_bvh_cpu(vertices: np.ndarray, indices: np.ndarray, method: str = ..., max_leaf_size: int = ...) -> Dict[str, Any]: ...
+def mesh_upload_gpu(vertices: np.ndarray, indices: np.ndarray, tri_indices: np.ndarray, nodes: np.ndarray) -> "GpuMeshHandle": ...
+
+class GpuMeshHandle:
+    @property
+    def gpu_memory_bytes(self) -> int: ...
+    @property
+    def vertex_count(self) -> int: ...
+    @property
+    def triangle_count(self) -> int: ...
+    @property
+    def node_count(self) -> int: ...
+    def __repr__(self) -> str: ...
 
 # Vector Picking & OIT helpers
 def set_point_shape_mode(mode: int) -> None: ...
@@ -1701,6 +1733,8 @@ def layout_label_candidates(
     font_size: float,
     arc_fractions: Sequence[float] | None = ...,
     tracking: float = ...,
+    ascent: float | None = ...,
+    descent: float | None = ...,
 ) -> Dict[str, Any] | None: ...
 
 # AEQUITAS: PT-vs-raster perceptual adjudication pair

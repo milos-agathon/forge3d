@@ -21,6 +21,7 @@ and deterministic review bundles.
 | Typed MapScene recipe | `underdeveloped` | `MapScene`, `SceneRecipe`, terrain, raster, vector, label, point-cloud, building-intent, camera, lighting, output, and map-furniture recipe objects are public. |
 | `MapScene.validate` | `supported` | Returns deterministic structured reports with source-data, CRS, style, glyph, label-plan, memory, support-status, VT, 3D Tiles, and building diagnostics where applicable. |
 | `MapScene.render` PNG/EXR path | `supported` | Fixture-backed `.npy`/GeoTIFF terrain, PNG/GeoTIFF raster, inline vector, label, and scalar building recipes render through the GPU-terrain path when the native backend is available; when it is not, render raises `MapSceneNativeUnavailable` with structured diagnostic blocks. Unsupported layer paths still block with typed diagnostics. |
+| `MapScene.render_passes` image composition | `supported` | Named color/relief/overlay RGBA snapshots, explicit order and alpha/color-space semantics, multiply/screen/alpha-over, and compiled bundle replay through a Python compositor. See [ordered composition](ordered_map_composition.md). |
 | `OutputSpec` offline controls | `supported` | `samples`, `denoiser`, `aovs`, and `hdr` are public MapScene output fields. AOV and EXR writes use the native `numpy_to_exr` writer when requested. |
 | Named MapScene presets | `supported` | `LightingPreset(name="rainier_showcase")` resolves camera, sun, IBL, renderer settings, and reproducibility defaults from `forge3d.presets`. |
 | `recipe_manifest` | `supported` | `forge3d.recipe_manifest(scene)` returns a deterministic JSON-safe recipe manifest for bundles, CI, and review tooling. |
@@ -46,6 +47,54 @@ placeholder pixels.
 records the recipe, diagnostics, support summaries, label plans, source
 references, camera, lighting, output, render backend, and renderability status
 through the public Python API.
+
+`MapScene.compile_plan()` creates a detached `CompiledScenePlan` containing
+the recipe identity, diagnostics, label placement, and occlusion decisions.
+The private scene compiler owns validation, compilation, restoration, and
+recipe-change invalidation. `validate()` refreshes diagnostics using an
+unchanged compiled plan's frozen labels; loading a bundle restores its saved
+decisions without freshly planning labels. Rendering and bundle saving reuse
+that plan until the serialized recipe changes. Explicit `compile_plan()`
+always rebuilds it. The mutable `compiled_label_plans` dictionary remains an
+inspection view; editing it does not change the frozen plan.
+
+`CompiledScenePlan.label_plans` owns private decision snapshots and returns
+detached `LabelPlan` copies when read. Editing those values or their nested
+fields cannot change the decisions used for rendering or bundle serialization.
+Snapshots normalize negative zero and retain non-finite terrain-sample metadata
+from DEM nodata, including unused candidates. Compilation and native rendering
+remain available for those scenes. Manifest and bundle serialization still
+reject non-finite values, and restoration verifies the same finite-JSON
+contract; the snapshot does not relax that separate boundary.
+`last_validation_report` reads the compiler's latest report, including render
+and bundle diagnostics. Attaching a native frame to the same plan preserves
+that latest report. CHRONOS also reads labels from the frozen plan.
+Its finite JSON frame payload represents unknown sampled elevations as `null`;
+label positions, bounds, glyph data, and other frame fields retain their strict
+non-finite checks. This encoding does not mutate the in-memory label snapshot.
+
+Label-layer IDs must be unique: validation, compilation, and restoration raise
+`ValueError` for duplicate IDs. After `validate()` succeeds on a changed recipe,
+`compiled_plan` is `None` until compilation, rendering, or bundle saving creates
+a new plan. Failed validation or compilation leaves the previous state intact;
+rendering and saving still refuse to reuse it for a changed recipe.
+
+`load_bundle()` raises `ValueError` if a saved compiled plan has a different
+recipe identity or omits a required label layer. It never silently attaches
+saved decisions to an edited recipe. Older bundles without a compiled-plan file
+retain their existing recompile path.
+
+Composition bundles also retain the serialized shape/dtype descriptor of an
+unstyled in-memory terrain array, so restoration keeps its original recipe
+identity and saved render passes. This descriptor does not reconstruct terrain
+samples: `TerrainSource.data` remains `None` when no values were persisted.
+
+Version 3 restoration relies on stable serialized recipe identity. A future
+serializer that changes that identity needs a supported migration before those
+saved decisions can be restored. The loader rejects a mismatch rather than
+silently recompiling a persisted plan. Fresh writers normalize negative zero,
+so standalone label JSON and its checksum can differ from older writers that
+emitted `-0.0`; the numeric decisions and rendered output are unchanged.
 
 ## Canonical Examples
 
@@ -80,3 +129,65 @@ Use the linked guides as the support contract for MVP review:
 - `guides/virtual_texturing_support_matrix`
 - `guides/large_scene_support`
 - `guides/competitive_positioning`
+
+## Terrain-aligned overlays
+
+`RasterOverlay` is sampled by the native terrain shader in terrain UV in screen,
+mesh and clipmap views. It changes terrain albedo, so lighting applies to the
+imagery and the footprint follows camera target and pose changes. Render metadata
+reports `raster_overlay_backend = "native_terrain_uv"`. An absent input preserves
+the existing terrain pixels. Source file bytes participate in CHRONOS and
+MapScene cache identity, including edits made at the same path.
+
+PNG imagery without bounds covers the terrain tile. To give it a smaller
+footprint, supply `metadata={"bounds": [west, south, east, north]}` in the terrain
+CRS. For an ungeoreferenced terrain array these bounds use local metres, east
+and north from the tile centre. GeoTIFF imagery uses its own CRS, transform and
+nodata mask and requires a georeferenced terrain grid. Missing, corrupt or
+unalignable imagery blocks with diagnostics before output pixels.
+
+In 3D views, inline vectors and labels with
+`LabelLayer.metadata={"coordinate_space": "world"}` use the same terrain camera.
+This opt-in supports automatic point, line and area placement. Existing label
+coordinates remain screen coordinates in every camera mode; an omitted setting
+or `"coordinate_space": "screen"` preserves that convention. Serialized projected
+anchors and geometry authority remain authoritative with either setting.
+World coordinates use the terrain CRS when its grid/bounds are
+specified, or tile-centred east/north metres otherwise. An omitted elevation
+places an anchor on the terrain; an explicit third coordinate is an absolute
+terrain elevation. Line/ring edges sample the DEM cell spacing before projection.
+Screen views retain their existing normalized/pixel coordinate behavior.
+
+World labels are projected during `compile_plan()`. Line labels use the native
+positioned-glyph geometry authority along their draped path; area labels project
+the centroid and visual-centre candidates through the terrain camera. The native
+text compositor follows each glyph's rotation, and generated line-label bounds
+include the atlas quads before candidate selection. The native CPU DEM depth
+proxy, candidate selection and visibility decisions are frozen in
+the compiled manifest; rendering consumes them. Explicit projected anchors and
+frozen plans retain their authority, including on terrain with nodata gaps.
+World-unit strokes resolve transverse screen width along the path through the
+perspective camera. Both vector compositors test depth; polygon fills also check
+the visible terrain UV against the original footprint and holes. Precise vector
+styles retain their declared Python compositor. Invalid/out-of-footprint world
+geometry produces blocking validation diagnostics before drawing.
+
+The `globe` camera-mode option uses the actual MapScene terrain camera rather
+than rejecting projected overlays by option name. MapScene currently supplies
+an array-backed terrain surface: without a globe streaming runtime the native
+clipmap is flat. This does not certify geodetic COG globe-streaming overlays.
+
+The low-level `MaterialLayerSettings.albedo_path` accepts a straight-alpha RGBA
+map alongside the existing normal, roughness and mask paths.
+`TerrainRenderParams.project_terrain_points(points)` projects records of
+`[u, v, terrain_height, elevation_offset]` to `[pixel_x, pixel_y, normalized_depth]`
+using the native mesh/flat-clipmap camera and height transform. Points behind the
+camera return `None`; non-finite inputs are rejected. The result is a list of
+three-element lists or `None`.
+
+`project_terrain_depth(heightmap, size_px, nodata_height_below=None)` compiles a
+float32 device-depth image from finite DEM triangles on the CPU, keeping only two
+projected grid rows in memory. Fully nodata triangles leave depth at 1.
+`unproject_terrain_depth(depth)` recovers the visible terrain UV for each pixel;
+background pixels have NaN UV. These methods use the same native camera as point
+projection and do not render a GPU frame.

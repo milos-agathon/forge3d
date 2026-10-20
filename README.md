@@ -61,6 +61,22 @@ with f3d.open_viewer_async(terrain_path=dem_path, width=1440, height=900) as vie
 `fetch_dem` pulls the elevation model, the viewer opens a real window you can orbit,
 and `snapshot` writes the frame at whatever resolution you ask for.
 
+## Population and thematic rasters
+
+You can now turn a population raster into a continuous raised, shaded surface,
+give each land-cover class its own colour, or show two variables together with
+a **3×3 colour matrix**. For example, height can show population density while
+colour shows how it has changed.
+
+`RasterHeightSurfaceStyle`, `CategoricalRasterStyle` and `BivariateRasterStyle`
+plug into `MapScene` using prepared arrays or local raster files. Missing cells
+stay empty, units and class boundaries remain explicit, and the styles return
+legend data with the labels and ranges needed to explain the map. You can save
+and reload the styled scene through the existing scene-bundle workflow.
+
+See the [raster styling guide](https://github.com/milos-agathon/forge3d/blob/main/docs/guides/thematic_raster_styles.md)
+and the [runnable public-API example](https://github.com/milos-agathon/forge3d/blob/main/examples/mapscene_thematic_rasters.py).
+
 ---
 
 ## Made with forge3d

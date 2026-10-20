@@ -13,8 +13,8 @@ impl Viewer {
         if self.fog_half_res_enabled {
             self.ensure_half_res_fog_bind_groups(gi);
             let bg2_half = self.fog_bg2_half_cache.borrow();
-            let gx = ((self.config.width / 2) + 7) / 8;
-            let gy = ((self.config.height / 2) + 7) / 8;
+            let gx = (self.fog_output_half.width() + 7) / 8;
+            let gy = (self.fog_output_half.height() + 7) / 8;
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("viewer.fog.raymarch.half"),
@@ -41,8 +41,8 @@ impl Viewer {
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::Extent3d {
-                    width: self.config.width.max(1) / 2,
-                    height: self.config.height.max(1) / 2,
+                    width: self.fog_output_half.width(),
+                    height: self.fog_output_half.height(),
                     depth_or_array_layers: 1,
                 },
             );

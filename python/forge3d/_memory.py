@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-from ._native import NATIVE_AVAILABLE, get_native_module
+from ._native import get_native_symbol
 
 MEMORY_LIMIT_BYTES: int = 512 * 1024 * 1024  # 512 MiB budget for host-visible memory
 BUDGET_POLICY: str = "enforce"
@@ -96,8 +96,7 @@ def _fallback_metrics() -> Dict[str, float]:
 
 def memory_metrics() -> Dict[str, float]:
     """Return a snapshot of tracked memory usage."""
-    native = get_native_module() if NATIVE_AVAILABLE else None
-    native_fn = getattr(native, "global_memory_metrics", None) if native else None
+    native_fn = get_native_symbol("global_memory_metrics")
     if callable(native_fn):
         try:
             metrics = dict(native_fn())
@@ -142,8 +141,7 @@ def set_budget_policy(policy: str) -> str:
     if policy not in {"enforce", "warn"}:
         raise ValueError("Unknown memory budget policy; expected 'enforce' or 'warn'")
 
-    native = get_native_module() if NATIVE_AVAILABLE else None
-    native_fn = getattr(native, "set_memory_budget_policy", None) if native else None
+    native_fn = get_native_symbol("set_memory_budget_policy")
     if callable(native_fn):
         policy = str(native_fn(policy))
 
@@ -152,8 +150,7 @@ def set_budget_policy(policy: str) -> str:
 
 
 def get_budget_policy() -> str:
-    native = get_native_module() if NATIVE_AVAILABLE else None
-    native_fn = getattr(native, "get_memory_budget_policy", None) if native else None
+    native_fn = get_native_symbol("get_memory_budget_policy")
     if callable(native_fn):
         return str(native_fn())
     return BUDGET_POLICY

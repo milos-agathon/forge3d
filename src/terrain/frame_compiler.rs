@@ -6,9 +6,12 @@ use sha2::{Digest, Sha256};
 use crate::core::resource_tracker::{register_buffer_explicit, ResourceHandle};
 use crate::terrain::accumulation::frame_seed;
 
-/// Fixed label-fade interval in frame counts: 256 fade steps keep the largest
-/// possible alpha quantization error strictly below one 8-bit step (< 1/255).
-pub const LABEL_FADE_FRAMES: u64 = 256;
+/// Label-fade interval in frames when the scene does not set
+/// `label_fade_frames`: short enough that a label entering or leaving a short
+/// shot is at full opacity for almost all of the time it is placed. Each fade
+/// step moves alpha by 1/N, so a fade below one 8-bit step per frame needs
+/// N >= 256.
+pub const DEFAULT_LABEL_FADE_FRAMES: u64 = 8;
 
 pub const COMPILED_FRAME_SCHEMA: &str = "forge3d.chronos.compiled_frame/1";
 
@@ -164,6 +167,7 @@ fn label_alpha(
     frame_index: u64,
     appearance_frame: Option<u64>,
     disappearance_frame: Option<u64>,
+    fade_frames: u64,
 ) -> f64 {
     if !visible
         || appearance_frame.is_some_and(|appearance| frame_index < appearance)
@@ -171,7 +175,7 @@ fn label_alpha(
     {
         return 0.0;
     }
-    let fade = LABEL_FADE_FRAMES as f64;
+    let fade = fade_frames as f64;
     let mut alpha = 1.0f64;
     if let Some(appearance) = appearance_frame {
         alpha = alpha.min((frame_index as f64 - appearance as f64 + 1.0) / fade);
@@ -186,6 +190,13 @@ fn parse_labels(
     scene: &Map<String, Value>,
     frame_index: u64,
 ) -> Result<(Vec<FrozenLabel>, Value), String> {
+    let fade_frames = match scene.get("label_fade_frames") {
+        None | Some(Value::Null) => DEFAULT_LABEL_FADE_FRAMES,
+        Some(v) => match v.as_u64() {
+            Some(frames) if frames >= 1 => frames,
+            _ => return Err("scene.label_fade_frames must be null or an integer >= 1".to_string()),
+        },
+    };
     let mut labels = Vec::new();
     if let Some(list) = scene.get("labels") {
         let items = list
@@ -227,7 +238,13 @@ fn parse_labels(
                 }
             }
             let payload = normalize_value(obj.get("payload").unwrap_or(&Value::Null))?;
-            let alpha = label_alpha(visible, frame_index, appearance_frame, disappearance_frame);
+            let alpha = label_alpha(
+                visible,
+                frame_index,
+                appearance_frame,
+                disappearance_frame,
+                fade_frames,
+            );
             labels.push(FrozenLabel {
                 layer_id,
                 label_id,
@@ -857,11 +874,19 @@ mod tests {
             .unwrap();
             compiled.payload()["labels"][0]["alpha"].as_f64().unwrap()
         };
-        assert!((alpha_at(10) - 1.0 / 256.0).abs() < 1e-12);
+        assert!((alpha_at(10) - 1.0 / 8.0).abs() < 1e-12);
         assert_eq!(alpha_at(9), 0.0);
         assert_eq!(alpha_at(20), 0.0);
         assert_eq!(alpha_at(265), 0.0);
-        assert!((alpha_at(15) - 5.0 / 256.0).abs() < 1e-12);
+        assert!((alpha_at(15) - 5.0 / 8.0).abs() < 1e-12);
+        let long_fade_alpha_at = |frame: u64| -> f64 {
+            let mut scene = scene_with_labels(labels.clone());
+            scene["label_fade_frames"] = json!(256);
+            let compiled = FrameCompiler::compile_values(frame, 0, 1, &camera(), &scene).unwrap();
+            compiled.payload()["labels"][0]["alpha"].as_f64().unwrap()
+        };
+        assert!((long_fade_alpha_at(10) - 1.0 / 256.0).abs() < 1e-12);
+        assert!((long_fade_alpha_at(15) - 5.0 / 256.0).abs() < 1e-12);
         let persistent = json!([{
             "layer_id": "l", "label_id": "p", "visible": true,
             "appearance_frame": 10, "disappearance_frame": null, "payload": {}
@@ -939,7 +964,7 @@ mod tests {
         assert_eq!(set.labels.len(), 1);
         assert_eq!(set.labels[0].layer_id, "l");
         assert_eq!(set.labels[0].label_id, "p");
-        assert_eq!(set.labels[0].alpha, 1.0 / 256.0);
+        assert_eq!(set.labels[0].alpha, 1.0 / 8.0);
         let labels_bytes = canonical_json_bytes(&compiled.payload()["labels"]).unwrap();
         assert_eq!(set.hash_hex, sha256_hex(&labels_bytes));
         assert_eq!(
@@ -961,6 +986,50 @@ mod tests {
             FrameCompiler::compile_values(999, 0, 1, &camera(), &scene_with_labels(labels))
                 .unwrap();
         assert_eq!(compiled.payload()["labels"][0]["alpha"].as_f64(), Some(1.0));
+    }
+
+    #[test]
+    fn test_label_fade_frames_contract() {
+        let labels = json!([{
+            "layer_id": "l", "label_id": "p", "visible": true,
+            "appearance_frame": null, "disappearance_frame": 100, "payload": {}
+        }]);
+        let alpha_at = |frame: u64, fade: Value| -> f64 {
+            let mut scene = scene_with_labels(labels.clone());
+            scene["label_fade_frames"] = fade;
+            let compiled = FrameCompiler::compile_values(frame, 0, 1, &camera(), &scene).unwrap();
+            compiled.payload()["labels"][0]["alpha"].as_f64().unwrap()
+        };
+        // Default fade: a label leaving at frame 100 is fully opaque until the
+        // last DEFAULT_LABEL_FADE_FRAMES frames before it leaves.
+        assert_eq!(alpha_at(90, Value::Null), 1.0);
+        assert_eq!(alpha_at(92, Value::Null), 1.0);
+        assert!((alpha_at(99, Value::Null) - 1.0 / 8.0).abs() < 1e-12);
+        assert_eq!(alpha_at(98, json!(1)), 1.0);
+        assert_eq!(alpha_at(99, json!(1)), 1.0);
+        // The fade length is part of the compiled scene, so it changes the hash.
+        let compile = |fade: Value| {
+            let mut scene = scene_with_labels(labels.clone());
+            scene["label_fade_frames"] = fade;
+            FrameCompiler::compile_values(95, 0, 1, &camera(), &scene).unwrap()
+        };
+        let short = compile(json!(8));
+        let long = compile(json!(256));
+        assert_ne!(short.payload()["scene_hash"], long.payload()["scene_hash"]);
+        assert_ne!(
+            short.payload()["label_set_hash"],
+            long.payload()["label_set_hash"]
+        );
+        let restored = CompiledFrame::from_canonical(long.canonical_json()).unwrap();
+        assert_eq!(restored.canonical_json(), long.canonical_json());
+        for bad in [json!(0), json!(-1), json!(2.5), json!("8")] {
+            let mut scene = scene_with_labels(labels.clone());
+            scene["label_fade_frames"] = bad;
+            let err = FrameCompiler::compile_values(0, 0, 1, &camera(), &scene)
+                .err()
+                .unwrap();
+            assert!(err.contains("label_fade_frames"), "{err}");
+        }
     }
 
     #[test]

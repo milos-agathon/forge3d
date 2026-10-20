@@ -78,20 +78,79 @@ def test_viewer_bind_group_cache_is_invalidated_with_resources() -> None:
         encoding="utf-8"
     )
     resize = (ROOT / "src/viewer/state/resize.rs").read_text(encoding="utf-8")
+    targets = (ROOT / "src/viewer/render_targets.rs").read_text(encoding="utf-8")
+    assert "PreparedViewportTargets::prepare(self, width, height)?.install(self)" in resize
+    prepare = targets[targets.index("fn prepare_with("):targets.index("pub(crate) fn install(")]
+    assert "borrow_mut()" not in prepare
+    assert "invalidate_viewport_histories" not in prepare
     ibl = (ROOT / "src/viewer/state/viewer_helpers/ibl.rs").read_text(
         encoding="utf-8"
     )
 
     assert "lit_bind_group_cache.borrow().is_some()" in cache
     assert "comp_bind_group_cache.borrow().contains_key" in cache
-    assert "lit_bind_group_cache.borrow_mut().take()" in resize
-    assert "comp_bind_group_cache.borrow_mut().clear()" in resize
+    assert "lit_bind_group_cache.borrow_mut().take()" in targets
+    assert "comp_bind_group_cache.borrow_mut().clear()" in targets
     for cache in (
         "sky_bg0_cache",
+        "sky_present_bg_cache",
         "fog_bg0_cache",
         "fog_bg2_cache",
         "fog_bg2_half_cache",
         "fog_upsample_bg_cache",
     ):
-        assert f"{cache}.borrow_mut().take()" in resize
+        assert f"{cache}.borrow_mut().take()" in targets
     assert "lit_bind_group_cache.borrow_mut().take()" in ibl
+
+
+# Deleted duplicate KTX2/DDS loaders. KTX2 container loading is owned solely by
+# `src/loaders/ktx2`; a second, always-failing parser in
+# `core::compressed_textures` (or a duplicate `CompressedImage::from_*` wrapper)
+# must trip this gate, not just the original path. Only the duplicate-parser
+# symbols are banned: names a real mipmap, ETC2 or Basis implementation would
+# naturally reuse are deliberately left out.
+FORBIDDEN_KTX2_DDS_SYMBOLS = re.compile(
+    r"\bparse_ktx2_header\b|\bextract_ktx2_texture_data\b"
+    r"|\bparse_dds_header\b|\bextract_dds_texture_data\b"
+    r"|\bfrom_ktx2_data\b|\bfrom_dds_data\b"
+)
+
+KTX2_DDS_DELETED_FILES = [
+    "src/core/compressed_textures/parsing.rs",
+]
+
+
+def test_dead_ktx2_dds_duplicate_loaders_do_not_return() -> None:
+    survivors = [path for path in KTX2_DDS_DELETED_FILES if (ROOT / path).exists()]
+    assert survivors == [], f"deleted KTX2/DDS duplicate loader survived: {survivors}"
+
+    hits = []
+    for path in (ROOT / "src").rglob("*.rs"):
+        text = path.read_text(encoding="utf-8")
+        for i, line in enumerate(text.splitlines(), 1):
+            if FORBIDDEN_KTX2_DDS_SYMBOLS.search(line) and not line.lstrip().startswith("//"):
+                hits.append(f"{path.relative_to(ROOT).as_posix()}:{i}")
+    assert hits == [], (
+        "a second KTX2/DDS parser returned; KTX2 loading is owned solely by "
+        f"src/loaders/ktx2: {hits}"
+    )
+
+
+# `forge3d.mesh.build_bvh_cpu` and `upload_mesh` must build the real Rust BVH and
+# upload tracked GPU buffers. Only the retired mock's distinctive phrases are
+# banned: bare identifiers a real estimator or builder could reuse (for example
+# `estimated_leaves`) are deliberately left out, so this gate cannot fail a
+# correct future implementation with a misleading message.
+FORBIDDEN_MESH_MOCK_MARKERS = (
+    "for now return mock data",
+    "Mock BVH statistics",
+    "In real implementation, this would call Rust code",
+)
+
+
+def test_forge3d_mesh_bvh_is_not_mocked() -> None:
+    source = (ROOT / "python/forge3d/mesh.py").read_text(encoding="utf-8")
+    hits = [marker for marker in FORBIDDEN_MESH_MOCK_MARKERS if marker in source]
+    assert hits == [], f"retired mesh BVH mocks returned: {hits}"
+    assert "mesh_build_bvh_cpu" in source
+    assert "mesh_upload_gpu" in source

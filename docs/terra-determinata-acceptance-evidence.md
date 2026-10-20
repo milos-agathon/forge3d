@@ -388,9 +388,9 @@ Windows jobs were cancelled in both runs, and remain cancelled in the record:
 
 | Follow-up | Scheduled-main job | PR-head job | Observed existing failure |
 |---|---:|---:|---|
-| Visual Goldens NVIDIA / ORBIS SSIM — open | 111170313814 | 111293788855 | Same sole failing test: `test_orbis_ground_snapshot_matches_committed_nvidia_vulkan_golden`; SSIM 0.993359476432247 below existing 0.995 threshold; 39 passed in each historical run; not rechecked on current main |
+| Visual Goldens NVIDIA / ORBIS SSIM — fixed locally; full CI pending | 111170313814 | 111293788855 | Historical SSIM 0.993359476432247 below unchanged 0.995 threshold. Fresh NVIDIA Vulkan render on 2026-10-07 reproduces it byte for byte using current-main sources; see the nightly-recovery follow-up below. Owner approved the replacement on 2026-10-07; all 40 ORBIS tests pass locally with no skips; fresh SSIM 1.0 / mean difference 0.0. Full CI pending. |
 | TESSELLA — fixed on main by PR #207 | 111170313895 | 111293788945 | Historical failures: five streaming-budget tests and one missing CPU BVH oracle. Merged PR #207 fixes them; run 37160548024, job 111315204953 passed |
-| Windows Python matrix — open | Four jobs listed above | Four jobs listed above | All four versions cancelled in both runs; not rechecked on current main |
+| Windows Python matrix — local correction prepared; hosted verification pending | Four jobs listed above | Four jobs listed above | Constructor-only tests stalled the hosted software lane. Nine GPU-heavy constructor cases now follow the explicit hosted-Windows terrain policy; the 35-minute timeout is unchanged. Fresh hosted matrix and WARP durations remain unrun. |
 | SUBSTRATIA optional Metal | 111170820518 | 111294523382 | `terrain-ci-probe: ABSENT — no CI-safe hardware adapter on this runner`, before tests |
 | Full Acceptance Summary | 111180391817 | 111308284181 | failure in both completed runs; no whole-run-green claim |
 
@@ -414,9 +414,9 @@ verification results. Saved records: `pr207-main-fix-run.json` and
 `pr207-tessella-job.json`. The run tested the PR #207 head before its merge;
 the merged fix is now on main.
 
-**ORBIS SSIM and Windows Python cancellations remain open follow-ups. Neither
-has been rechecked on current main.** Their baseline results are historical,
-not current-main failures or passes. Optional Metal remains out of scope.
+**ORBIS SSIM and Windows Python cancellations remain open follow-ups.** ORBIS
+was rechecked on 2026-10-07 as recorded below; Windows cancellations have not
+yet been rechecked. Optional Metal was out of scope for this TERRA closeout.
 No unrelated follow-up was fixed by this TERRA session, no other roadmap node
 or work item was edited for it, and no executable test or gate was weakened.
 
@@ -486,3 +486,103 @@ marked complete locally, contingent on PR #206 merge. The updated report is
 authorized for publication to the PR branch; scoped CI on that report-only
 head is the remaining merge-readiness check. **Milos must merge PR #206** to
 complete integration. No merge is performed by this session.
+
+
+## Nightly recovery follow-up — 2026-10-07
+
+The nightly-recovery task reopens the ORBIS snapshot mismatch without changing
+its SSIM >= 0.995 or mean absolute difference <= 2.0 gates.
+The committed golden is
+`tests/golden/terrain/orbis_rainier_ground.nvidia-vulkan.png`, SHA-256
+`f5403fc907803bb8e7cf120994dc4fa217f457c7f93010facdaedffcd6116872`.
+
+| Physical NVIDIA Vulkan image | Source SHA | SSIM against committed golden | Mean absolute difference | PNG SHA-256 |
+|---|---|---:|---:|---|
+| [October 2 nightly](https://github.com/milos-agathon/forge3d/actions/runs/36988450150), restored `visual-gpu-evidence` artifact | `452fadd3a639f1f3f8bcbd9d3a4fb42aca7a2c81` | 1.0 | 0.0 | `f5403fc907803bb8e7cf120994dc4fa217f457c7f93010facdaedffcd6116872` |
+| [October 3 nightly](https://github.com/milos-agathon/forge3d/actions/runs/37110762671), restored `visual-gpu-evidence` artifact | `3a6ec9f83f36919f79a1b79b5740bee267cd1b58` | 0.993359476432247 | 0.19443766276041666 | `dde6d8d708928899cf5dbe67b82783ce3632a5c1fc5facb554552837cd379c7a` |
+| [October 6 nightly](https://github.com/milos-agathon/forge3d/actions/runs/37444443735), restored `visual-gpu-evidence` artifact | `9f14e648cbf9e7e2f071d5c47b2eecad18f3180c` | 0.993359476432247 | 0.19443766276041666 | `dde6d8d708928899cf5dbe67b82783ce3632a5c1fc5facb554552837cd379c7a` |
+| Fresh October 7 local render with current-main native/Python/build sources | `0c245cbf466cb6bc455db7b04858950dfeb87c5e` | 0.993359476432247 | 0.19443766276041666 | `dde6d8d708928899cf5dbe67b82783ce3632a5c1fc5facb554552837cd379c7a` |
+
+All image comparisons were recomputed with `tests._ssim.ssim`; the October 3,
+October 6 and fresh October 7 PNGs are byte-identical, not merely within a
+visual tolerance. The drift appeared between `452fadd3` and `3a6ec9f8`, most
+likely from the ORBIS arithmetic barriers in [commit 026dc54f](https://github.com/milos-agathon/forge3d/commit/026dc54f25f53db3749298d2104883a71b279003)
+(PR #200): it adds deterministic barriers to the ORBIS height samples, metric
+normal calculation and normal-vector arithmetic in `terrain_pbr_pom.wgsl`.
+That commit's byte-identity checks did not cover the gated ORBIS test.
+This attribution comes from the image transition and source trace, not a GPU
+bisect. The nearby PR #201 changes planetary LOD selection and is not excluded. Reverting the arithmetic barriers would undo an
+intentional determinism change; no shader or threshold was changed.
+
+The fresh render used the official `v1.42.0` Windows wheel, built from tag SHA
+`043a032cf00bee20a2299514484f811de8a53e9f`. `git diff --quiet` proved equality
+with current main for `src`, `python`, `Cargo.toml`, `Cargo.lock` and
+`pyproject.toml`; intervening PR #213 only changes the anchor inventory test and
+changelog. The adapter probe records NVIDIA GeForce RTX 3070, Vulkan,
+DiscreteGpu, vendor 4318, driver 610.60, and `software_fallback=false`.
+The installed wheel runs in an isolated environment in
+`C:/tmp/forge3d-nightly-full/artifacts/nightly-full/venv`.
+
+Validation used `FORGE3D_NO_BOOTSTRAP=1`,
+`FORGE3D_TEST_INSTALLED_WHEEL=1`, `FORGE3D_RUN_ORBIS_GPU=1`,
+`FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN=1`, `WGPU_BACKEND=vulkan`, and a recorded
+`FORGE3D_EXPECTED_ADAPTER_PROBE`. The 32 floating-origin tests produced 31
+passes and the single expected golden failure, with no skips. The first
+combined run also encountered eight unrestored Swiss DEM fixture failures;
+after restoring that tracked LFS object, all eight quality tests passed with
+no skips. The Rainier and Swiss DEMs were restored using `git lfs checkout`.
+Together these results cover the 40 selected ORBIS tests before the approved
+golden update; this is not a claim that an unchanged full-suite invocation passed.
+
+Local evidence is retained under `artifacts/nightly-full/`: historical CI
+artifacts, `current-main/orbis/orbis-rainier-ground.actual.png`, adapter probe,
+metrics, JUnit files, complete logs with `--durations=30`, and
+`orbis-approval.json`. On 2026-10-07 Milos approved replacing the golden with
+the `dde6d8d7...` image and committing it locally only, with unchanged
+thresholds and the attribution caveat above. No full CI, next-nightly or
+release-gate success is claimed by this follow-up.
+
+
+After the approved golden replacement, the exact physical selection
+`python -m pytest tests/test_globe_floating_origin.py tests/test_orbis_globe_quality.py --durations=30 -v --tb=short`
+passed **40 tests, zero skips, in 101.01 seconds**. The environment and adapter
+are the same as above. The fresh render matches the approved golden at
+SSIM **1.0** and mean absolute difference **0.0**; the gates remain **0.995**
+and **2.0**. Evidence is in `approved-golden-orbis.log` and
+`approved-golden/orbis/{junit.xml,orbis-metrics.json}` under the local evidence
+directory. This closes the snapshot mismatch locally; a full CI and next
+scheduled nightly are still required by the nightly-recovery task.
+
+
+### Hosted Windows constructor follow-up
+
+The 2026-10-06 Windows Python 3.12 job
+[112211794230](https://github.com/milos-agathon/forge3d/actions/runs/37444443735/job/112211794230)
+logged the last pre-GPU diagnostic at 10:05:12.2406302 UTC, then completed
+`test_snapshot_and_metrics_fail_closed_before_descent` at 10:15:41.4582329 UTC
+(**629.2176027 seconds**) and `test_constructor_accepts_declared_pathlike_source`
+at 10:26:27.3727706 UTC (**645.9145377 seconds**). These are measured log
+intervals, not `pytest --durations` output. Both tests only construct a
+`GlobeScene`; no frame is rendered. Its constructor eagerly constructs
+`TerrainRenderer` and its pipelines. Thus construction is the demonstrated
+bottleneck; pipeline compilation on WARP is the likely internal cost, not a
+separately measured stage.
+
+Seven functions (nine parameterized cases) that initialize a real globe now
+use `offscreen` and the existing hosted-Windows terrain guard. This omits the
+GPU-heavy cases only on GitHub-hosted Windows without the explicit hardware
+opt-in, with a recorded reason naming the software adapter cost and the
+physical NVIDIA Vulkan acceptance that retains their coverage. Pure pre-GPU
+validation tests still run. Linux, macOS, local runs and the opted-in physical
+NVIDIA lane retain the constructor checks.
+
+Local policy validation recorded all nine skips in 0.19 seconds, with no globe
+constructed; this simulated the hosted policy on this physical machine and
+is **not** WARP execution. The same nine cases pass on the explicit NVIDIA
+Vulkan lane. Workflow/policy tests passed (43 tests). Full Python jobs now run
+with `--durations=30 -rs --junitxml=python-full-junit.xml`, append measured
+completion/skip/duration information to their summary and upload the JUnit
+report even when pytest fails. A missing report is explicitly `ABSENT`.
+The timeout remains 35 minutes. Fresh hosted 3.10–3.13 full runs, their
+`--durations=30` results and completion within that timeout are still required;
+local-only authorization does not permit publishing these workflow changes.

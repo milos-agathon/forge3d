@@ -8,6 +8,7 @@ mod height_loader;
 mod overlay_loader;
 mod queue;
 mod readers;
+mod scheduler;
 
 pub use common::CoalescePolicy;
 pub use gpu::{
@@ -17,3 +18,6 @@ pub use height_loader::{AsyncTileLoader, RequestTicket, TileLoadTerminal, MAX_LO
 pub use overlay_loader::{AsyncOverlayLoader, OverlayTileData};
 pub use queue::AsyncTileQueue;
 pub use readers::{FileHeightReader, FileOverlayReader, HeightRead, HeightReader, OverlayReader};
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod loader_tests;

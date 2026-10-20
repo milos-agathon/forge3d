@@ -73,8 +73,7 @@ impl TerrainScene {
         let cache = if media_enabled { None } else { cache };
 
         self.prepare_frame_lighting(decoded)?;
-        let mut height_inputs =
-            self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
+        let mut height_inputs = self.upload_height_inputs(heightmap, water_mask, params)?;
         self.prepare_geometry(
             params,
             &height_inputs.heightmap_data,
@@ -137,6 +136,9 @@ impl TerrainScene {
             &height_inputs.heightmap_data,
             height_inputs.width,
             height_inputs.height,
+            &super::water_reflection::WaterReflectionUniforms::disabled()
+                .with_optics(&params.water_optics),
+            height_inputs.water_mask_max,
         )
         .map_err(anyhow::Error::msg)?;
         let prepared_bytes = bytemuck::cast_slice(&uniforms).to_vec();
@@ -281,7 +283,6 @@ impl TerrainScene {
         let leaf_keys = BTreeMap::from([(handles.height, source_key)]);
         let mut shadow_setup = None;
         let mut material_vt_started = false;
-        let mut timing_needs_resolve = false;
         let mut hzb_frame_staged = false;
         let mut visibility_frame_staged = false;
         let mut staged_lod_selection = None;
@@ -338,7 +339,6 @@ impl TerrainScene {
                             ts_end(&mut timing, context.encoder(), scope, 0);
                             Ok::<_, anyhow::Error>(setup)
                         })?;
-                        timing_needs_resolve = true;
                         shadow_setup = Some(setup);
                         let payload = if capture_output && decoded.shadow.enabled {
                             let depth = execution.read_texture_tight(
@@ -534,7 +534,6 @@ impl TerrainScene {
                                 return Err(error);
                             }
                         }
-                        timing_needs_resolve = true;
                         Ok(GraphPassOutcome::Executed(if capture_output {
                             let payload = execution.read_texture_tight(
                                 handles.beauty,
@@ -603,7 +602,6 @@ impl TerrainScene {
                             )?;
                             Ok::<_, anyhow::Error>(())
                         })?;
-                        timing_needs_resolve = true;
                         Ok(GraphPassOutcome::Executed(Vec::new()))
                     }
                     ("nephele.media.composite", GraphPassAction::Execute { .. }) => {
@@ -654,12 +652,8 @@ impl TerrainScene {
                             if material_vt_started {
                                 self.stage_material_vt_feedback_readback(encoder)?;
                             }
-                            if let Some(timing) = timing.as_mut() {
-                                timing.resolve_queries(encoder);
-                            }
                             Ok::<_, anyhow::Error>(())
                         })?;
-                        timing_needs_resolve = false;
                         Ok(GraphPassOutcome::Executed(if capture_output {
                             let payload = execution.read_texture_tight(
                                 handles.resolved,
@@ -703,14 +697,8 @@ impl TerrainScene {
                                 1,
                                 wgpu::TextureAspect::All,
                             )?;
-                            if timing_needs_resolve {
-                                if let Some(timing) = timing.as_mut() {
-                                    timing.resolve_queries(context.encoder());
-                                }
-                            }
                             Ok::<_, anyhow::Error>(())
                         })?;
-                        timing_needs_resolve = false;
                         Ok(GraphPassOutcome::Restored)
                     }
                     (label, _) => Err(anyhow!("unexpected native terrain graph pass {label:?}")),

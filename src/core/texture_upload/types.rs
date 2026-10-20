@@ -25,10 +25,8 @@ impl HdrFormat {
     }
 
     pub fn bytes_per_pixel(self) -> usize {
-        match self {
-            HdrFormat::Rgba16Float => 8,
-            HdrFormat::Rgba32Float => 16,
-        }
+        crate::core::texture_layout::FormatLayout::new(self.to_wgpu()).resident_bytes_per_block
+            as usize
     }
 
     pub fn name(self) -> &'static str {
@@ -67,7 +65,11 @@ impl HdrTexture {
     }
 
     pub fn size_bytes(&self) -> usize {
-        self.pixel_count() * self.format.bytes_per_pixel()
+        crate::core::texture_layout::resident_2d_size(
+            self.width,
+            self.height,
+            self.format.to_wgpu(),
+        ) as usize
     }
 
     pub fn create_sampler(

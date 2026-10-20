@@ -114,6 +114,9 @@ def _layout(layer: Any, layer_type: str) -> Mapping[str, Any]:
 
 
 def _point_to_pixel(point: Sequence[Any], width: int, height: int) -> tuple[int, int]:
+    if getattr(point, "terrain_projected", False):
+        # Preserve the native viewport convention through the vector bridge.
+        return type(point)((float(point[0]), float(point[1])))
     x = float(point[0]) if len(point) > 0 else 0.0
     y = float(point[1]) if len(point) > 1 else 0.0
     px = int(round(x * (width - 1))) if 0.0 <= x <= 1.0 else int(round(x)) % max(1, width)

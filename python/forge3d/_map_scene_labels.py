@@ -478,6 +478,7 @@ def _label_plan_from_layer(
     *,
     recipe: "SceneRecipe",
     terrain: "TerrainSource",
+    projection_context: dict[str, Any] | None = None,
 ) -> Any:
     from .label_plan import LabelPlan
 
@@ -491,15 +492,62 @@ def _label_plan_from_layer(
         raise TypeError("LabelLayer.plan must be a LabelPlan or LabelPlan-compatible mapping")
 
     keepouts = tuple(recipe.map_furniture.keepouts or ()) if recipe.map_furniture is not None else ()
+    from . import map_scene as ms
+    from ._map_scene_projection import TerrainProjector
+    camera = recipe.camera
     terrain_sampler = _terrain_occlusion_sampler(layer, recipe=recipe, terrain=terrain)
+    # Existing inline labels use screen coordinates even with a 3D terrain camera.
+    # World placement is additive and explicit; do not reinterpret old recipes.
+    coordinate_space = (layer.metadata or {}).get("coordinate_space", "screen")
+    if coordinate_space not in {"screen", "world"}:
+        raise ValueError("LabelLayer.metadata.coordinate_space must be 'screen' or 'world'")
+    world_projection = coordinate_space == "world" and ms._is_3d_camera_mode(
+        ms._mapscene_effective_camera_mode(recipe))
+    needs_projection = world_projection and any(
+        record.get("projected_anchor") is None and record.get("geometry_authority") is None
+        for record in layer.labels or ())
+    if needs_projection:
+        context = projection_context if projection_context is not None else {}
+        camera = context.get("projector")
+        if camera is None:
+            camera = context["projector"] = TerrainProjector(recipe, layer_id=layer.layer_id, crs=getattr(layer, "crs", None))
+        if terrain_sampler is not None and not isinstance(terrain_sampler, _DepthOcclusionSampler):
+            depth = context.get("depth")
+            if depth is None:
+                depth = camera.depth_image()
+                if projection_context is not None:
+                    from ._native import get_native_module
+                    context["depth_reservation"] = get_native_module()._reserve_label_depth_host_allocation(
+                        depth.nbytes, "mapscene.shared_label_depth")
+                    context["depth"] = depth
+            terrain_sampler = _DepthOcclusionSampler(
+                depth, viewport_size=_recipe_output_size(recipe),
+                bias=_label_occlusion_bias(layer), source="mapscene_camera_terrain_proxy",
+                authoritative=False, depth_convention="normalized_device_depth", depth_domain=(0.0, 1.0),
+            )
     labels = _labels_with_terrain_occlusion(
         layer.labels or (),
         enabled=terrain_sampler is not None,
     )
     try:
+        if needs_projection:
+            for record in labels:
+                if record.get("projected_anchor") is not None or record.get("geometry_authority") is not None:
+                    continue
+                geometry = record.get("geometry", {})
+                coords = geometry.get("coordinates", record.get("position", record.get("world_pos")))
+                kind = str(geometry.get("type", "Point")).lower()
+                if kind == "point" and coords is not None:
+                    record["projected_anchor"] = list(camera.project(coords))
+                elif kind == "linestring" and coords is not None:
+                    record["geometry"] = dict(geometry, coordinates=camera.world_path(coords))
+                elif kind != "polygon":
+                    raise ValueError("world labels require Point, LineString or Polygon geometry")
+                record["projected_depth_convention"] = "normalized_device_depth"
+                record["projected_depth_domain"] = [0.0, 1.0]
         return LabelPlan.compile(
             labels=labels,
-            camera=recipe.camera,
+            camera=camera,
             viewport=recipe.output,
             terrain=terrain_sampler if terrain_sampler is not None else terrain,
             keepouts=keepouts,

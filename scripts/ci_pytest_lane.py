@@ -33,6 +33,7 @@ FAST_LANE_FILES = [
     "tests/test_install_smoke.py",
     "tests/test_license.py",
     "tests/test_api_contracts.py",
+    "tests/test_native_capabilities.py",
     "tests/test_solar_spa.py",
     "tests/test_capability_negotiation.py",
     "tests/test_budget_enforce.py",
@@ -40,6 +41,7 @@ FAST_LANE_FILES = [
     "tests/test_device_init_failure.py",
     "tests/test_allocation_gate.py",
     "tests/test_dead_render_structure_gate.py",
+    "tests/test_mesh_bvh.py",
     "tests/test_pipeline_validation_gate.py",
     "tests/test_degradation_behavior.py",
     "tests/test_certificate_verifier.py",
@@ -50,6 +52,9 @@ FAST_LANE_FILES = [
     "tests/test_no_silent_degradation.py",
     "tests/test_substratia_evidence_report.py",
     "tests/test_orbis_task6_contracts.py",
+    "tests/test_m06_single_rebase_contract.py",
+    "tests/test_world_coord_f32_gate.py",
+    "tests/test_m06_anchoring_boundary.py",
 ]
 
 

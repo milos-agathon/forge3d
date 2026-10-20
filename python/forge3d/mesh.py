@@ -8,16 +8,24 @@ Provides functions for:
 """
 
 from typing import Dict, List, Tuple, Any
+import struct
+import time
 import numpy as np
 import warnings
 
-try:
-    from . import _forge3d
-    # Check if TBN functions are available (gated by feature flag)
-    _HAS_TBN = hasattr(_forge3d, 'mesh_generate_cube_tbn')
-except ImportError:
-    _forge3d = None
-    _HAS_TBN = False
+from ._native import get_native_symbol
+
+# Packed layout of one CPU BvhNode (repr(C) + Pod): aabb_min f32 x3, left u32,
+# aabb_max f32 x3, right u32, flags u32, pad u32. "<" keeps the struct module
+# from adding alignment padding, so this is exactly 40 bytes.
+_BVH_NODE_BYTES = 40
+_BVH_NODE_STRUCT = struct.Struct("<3f I 3f I I I")
+
+
+def __getattr__(name):
+    if name == "_HAS_TBN":
+        return has_tbn_support()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def generate_cube_tbn() -> Tuple[List[Dict[str, Any]], List[int], List[Dict[str, Any]]]:
@@ -52,8 +60,9 @@ def generate_cube_tbn() -> Tuple[List[Dict[str, Any]], List[int], List[Dict[str,
     RuntimeError
         If TBN generation feature is not enabled
     """
-    if _HAS_TBN:
-        result = _forge3d.mesh_generate_cube_tbn()
+    native_fn = get_native_symbol("mesh_generate_cube_tbn")
+    if native_fn is not None:
+        result = native_fn()
         return result['vertices'], result['indices'], result['tbn_data']
     # Pure-Python fallback: 6 faces, 4 vertices per face (no sharing)
     vertices: List[Dict[str, Any]] = []
@@ -132,8 +141,9 @@ def generate_plane_tbn(width: int, height: int) -> Tuple[List[Dict[str, Any]], L
     RuntimeError
         If TBN generation feature is not enabled
     """
-    if _HAS_TBN:
-        result = _forge3d.mesh_generate_plane_tbn(width, height)
+    native_fn = get_native_symbol("mesh_generate_plane_tbn")
+    if native_fn is not None:
+        result = native_fn(width, height)
         return result['vertices'], result['indices'], result['tbn_data']
     if width < 2 or height < 2:
         raise ValueError("width and height must be >= 2")
@@ -288,7 +298,7 @@ def has_tbn_support() -> bool:
     bool
         True if TBN generation functions are available
     """
-    return _HAS_TBN
+    return get_native_symbol("mesh_generate_cube_tbn") is not None
 
 
 # ============================================================================
@@ -394,26 +404,159 @@ def make_mesh(vertices: np.ndarray, indices: np.ndarray) -> Dict[str, Any]:
     }
 
 
-def build_bvh_cpu(mesh: Dict[str, Any], method: str = "median") -> Dict[str, Any]:
+def _python_build_bvh(
+    vertices: np.ndarray,
+    indices: np.ndarray,
+    max_leaf_size: int,
+) -> Dict[str, Any]:
+    """Median-split BVH build used when the native extension is unavailable.
+
+    Mirrors `accel::cpu_bvh::build_bvh_cpu`: split on the longest parent-AABB
+    axis at the median centroid, partition by swapping past-the-median triangles
+    to the end, and emit children before their parent. The packed node layout is
+    identical, so a handle built here uploads through the same native path.
+    """
+    start_time = time.perf_counter()
+
+    tri = np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+    points = np.asarray(vertices, dtype=np.float32)
+    v0, v1, v2 = points[tri[:, 0]], points[tri[:, 1]], points[tri[:, 2]]
+    tri_min = np.minimum(np.minimum(v0, v1), v2).tolist()
+    tri_max = np.maximum(np.maximum(v0, v1), v2).tolist()
+    centroids = ((v0 + v1 + v2) / np.float32(3.0)).tolist()
+
+    triangle_count = int(tri.shape[0])
+    order = list(range(triangle_count))
+    nodes: List[Tuple[List[float], int, List[float], int, int]] = []
+    leaf_count = 0
+    max_depth = 0
+
+    def compute_bounds(first: int, count: int) -> Tuple[List[float], List[float]]:
+        low = [float("inf"), float("inf"), float("inf")]
+        high = [float("-inf"), float("-inf"), float("-inf")]
+        for position in range(first, first + count):
+            triangle = order[position]
+            amin = tri_min[triangle]
+            amax = tri_max[triangle]
+            for axis in range(3):
+                if amin[axis] < low[axis]:
+                    low[axis] = amin[axis]
+                if amax[axis] > high[axis]:
+                    high[axis] = amax[axis]
+        return low, high
+
+    def find_split(first: int, count: int, aabb):
+        if count < 2:
+            return None
+        extent = [aabb[1][axis] - aabb[0][axis] for axis in range(3)]
+        if extent[0] > extent[1] and extent[0] > extent[2]:
+            axis = 0
+        elif extent[1] > extent[2]:
+            axis = 1
+        else:
+            axis = 2
+        values = sorted(centroids[order[position]][axis] for position in range(first, first + count))
+        return axis, values[len(values) // 2]
+
+    def partition(first: int, count: int, axis: int, split_position: float) -> int:
+        left = first
+        right = first + count
+        while left < right:
+            if centroids[order[left]][axis] < split_position:
+                left += 1
+            else:
+                right -= 1
+                order[left], order[right] = order[right], order[left]
+        return left
+
+    def build(first: int, count: int, aabb, depth: int) -> int:
+        nonlocal leaf_count, max_depth
+        max_depth = max(max_depth, depth)
+        split = None if count <= max_leaf_size or depth > 64 else find_split(first, count, aabb)
+        if split is not None:
+            axis, split_position = split
+            split_index = partition(first, count, axis, split_position)
+            left_count = split_index - first
+            right_count = count - left_count
+            if left_count == 0 or right_count == 0:
+                split = None
+        if split is None:
+            leaf_count += 1
+            index = len(nodes)
+            nodes.append((aabb[0], first, aabb[1], count, 1))
+            return index
+
+        left_aabb = compute_bounds(first, left_count)
+        right_aabb = compute_bounds(split_index, right_count)
+        left_child = build(first, left_count, left_aabb, depth + 1)
+        right_child = build(split_index, right_count, right_aabb, depth + 1)
+        index = len(nodes)
+        nodes.append((aabb[0], left_child, aabb[1], right_child, 0))
+        return index
+
+    root_aabb = compute_bounds(0, triangle_count)
+    build(0, triangle_count, root_aabb, 0)
+
+    packed = np.zeros((len(nodes), _BVH_NODE_BYTES), dtype=np.uint8)
+    for index, node in enumerate(nodes):
+        aabb_min, left, aabb_max, right, flags = node
+        _BVH_NODE_STRUCT.pack_into(
+            packed, index * _BVH_NODE_BYTES,
+            aabb_min[0], aabb_min[1], aabb_min[2], left,
+            aabb_max[0], aabb_max[1], aabb_max[2], right,
+            flags, 0,
+        )
+
+    build_time_ms = (time.perf_counter() - start_time) * 1000.0
+    return {
+        'method': "median",
+        'triangle_count': triangle_count,
+        'node_count': len(nodes),
+        'internal_count': len(nodes) - leaf_count,
+        'max_depth': max_depth,
+        'leaf_count': leaf_count,
+        'avg_leaf_size': (triangle_count / leaf_count) if leaf_count else 0.0,
+        'build_time_ms': build_time_ms,
+        'memory_usage_bytes': len(nodes) * _BVH_NODE_BYTES + triangle_count * 4,
+        'world_aabb_min': list(root_aabb[0]),
+        'world_aabb_max': list(root_aabb[1]),
+        'tri_indices': np.asarray(order, dtype=np.uint32),
+        'nodes': packed.reshape(-1),
+    }
+
+
+def build_bvh_cpu(
+    mesh: Dict[str, Any],
+    method: str = "median",
+    max_leaf_size: int = 4,
+) -> Dict[str, Any]:
     """
     Build BVH acceleration structure on CPU using specified method.
 
     Args:
         mesh: Mesh dictionary from make_mesh()
         method: BVH construction method, currently only "median" supported
+        max_leaf_size: Maximum triangles per leaf node
 
     Returns:
         Dictionary representing the BVH with keys:
         - 'method': construction method used
         - 'triangle_count': number of triangles
-        - 'node_count': number of BVH nodes
+        - 'node_count': number of BVH nodes actually built
+        - 'internal_count': number of internal nodes
         - 'max_depth': maximum tree depth
         - 'leaf_count': number of leaf nodes
         - 'avg_leaf_size': average triangles per leaf
         - 'build_time_ms': construction time in milliseconds
-        - 'memory_usage_bytes': estimated memory usage
+        - 'memory_usage_bytes': bytes held by the packed nodes and triangle order
         - 'world_aabb_min': world bounding box minimum
         - 'world_aabb_max': world bounding box maximum
+        - 'tri_indices': uint32 array with the triangle order referenced by leaves
+        - 'nodes': flat uint8 array of packed 40-byte BvhNode records
+
+    The native Rust builder (`accel::cpu_bvh`) is used when the compiled
+    extension is present; otherwise an equivalent median-split build runs in pure
+    Python. Both paths return the same keys and the same packed node layout.
 
     Raises:
         ValueError: If mesh is invalid or method is unsupported
@@ -425,41 +568,28 @@ def build_bvh_cpu(mesh: Dict[str, Any], method: str = "median") -> Dict[str, Any
     if method != "median":
         raise ValueError(f"Unsupported BVH method '{method}'; only 'median' is supported")
 
+    if int(max_leaf_size) < 1:
+        raise ValueError("max_leaf_size must be at least 1")
+
     triangle_count = mesh['triangle_count']
     if triangle_count == 0:
         raise ValueError("Cannot build BVH for mesh with no triangles")
 
-    # This would call into Rust via PyO3, but for now return mock data
-    # In the real implementation, this would call the Rust BVH builder
-    import time
-    start_time = time.time()
+    native_build = get_native_symbol("mesh_build_bvh_cpu")
+    if callable(native_build):
+        result = dict(
+            native_build(
+                mesh['vertices'],
+                mesh['indices'],
+                method,
+                int(max_leaf_size),
+            )
+        )
+        result['nodes'] = np.asarray(result['nodes'], dtype=np.uint8)
+        result['tri_indices'] = np.asarray(result['tri_indices'], dtype=np.uint32)
+        return result
 
-    # Mock BVH statistics - in real implementation this comes from Rust
-    build_time_ms = (time.time() - start_time) * 1000
-
-    # Estimate nodes needed (binary tree with max 4 triangles per leaf)
-    estimated_leaves = max(1, (triangle_count + 3) // 4)
-    estimated_nodes = estimated_leaves * 2 - 1  # Binary tree property
-
-    # Mock world AABB calculation
-    vertices = mesh['vertices']
-    world_aabb_min = np.min(vertices, axis=0)
-    world_aabb_max = np.max(vertices, axis=0)
-
-    bvh = {
-        'method': method,
-        'triangle_count': triangle_count,
-        'node_count': estimated_nodes,
-        'max_depth': max(1, int(np.log2(estimated_nodes)) + 1),
-        'leaf_count': estimated_leaves,
-        'avg_leaf_size': triangle_count / estimated_leaves,
-        'build_time_ms': build_time_ms,
-        'memory_usage_bytes': estimated_nodes * 32 + triangle_count * 4,  # Rough estimate
-        'world_aabb_min': world_aabb_min.tolist(),
-        'world_aabb_max': world_aabb_max.tolist(),
-    }
-
-    return bvh
+    return _python_build_bvh(mesh['vertices'], mesh['indices'], int(max_leaf_size))
 
 
 class MeshHandle:
@@ -474,7 +604,18 @@ class MeshHandle:
         """Internal constructor - use upload_mesh() instead."""
         self._mesh = mesh_data
         self._bvh = bvh_data
-        self._uploaded = True
+        self._native = None
+        self._gpu_memory_bytes = 0
+
+    @property
+    def uploaded(self) -> bool:
+        """True once the mesh and BVH live in tracked GPU buffers."""
+        return self._native is not None
+
+    @property
+    def gpu_memory_bytes(self) -> int:
+        """Bytes of tracked GPU memory held by the uploaded mesh, index, BVH and descriptor buffers."""
+        return int(self._gpu_memory_bytes)
 
     @property
     def triangle_count(self) -> int:
@@ -513,7 +654,8 @@ class MeshHandle:
 
     def __repr__(self) -> str:
         return (f"MeshHandle(triangles={self.triangle_count}, "
-                f"vertices={self.vertex_count}, nodes={self.node_count})")
+                f"vertices={self.vertex_count}, nodes={self.node_count}, "
+                f"uploaded={self.uploaded})")
 
 
 def upload_mesh(mesh: Dict[str, Any], bvh: Dict[str, Any]) -> MeshHandle:
@@ -544,9 +686,30 @@ def upload_mesh(mesh: Dict[str, Any], bvh: Dict[str, Any]) -> MeshHandle:
             f"mesh={mesh['triangle_count']}, bvh={bvh['triangle_count']}"
         )
 
-    # In real implementation, this would call Rust code to upload to GPU
-    # For now, just create a handle with the data
+    tri_indices = bvh.get('tri_indices')
+    nodes = bvh.get('nodes')
+    if tri_indices is None or nodes is None:
+        raise ValueError(
+            "bvh is missing 'tri_indices'/'nodes'; rebuild it with build_bvh_cpu()"
+        )
+
+    native_upload = get_native_symbol("mesh_upload_gpu")
+    if not callable(native_upload):
+        raise RuntimeError(
+            "GPU mesh upload requires the compiled forge3d extension; rebuild it "
+            "with: maturin develop --release"
+        )
+
+    native_handle = native_upload(
+        np.ascontiguousarray(mesh['vertices'], dtype=np.float32),
+        np.ascontiguousarray(mesh['indices'], dtype=np.uint32),
+        np.ascontiguousarray(np.asarray(tri_indices, dtype=np.uint32).reshape(-1)),
+        np.ascontiguousarray(np.asarray(nodes, dtype=np.uint8).reshape(-1)),
+    )
+
     handle = MeshHandle(mesh, bvh)
+    handle._native = native_handle
+    handle._gpu_memory_bytes = int(native_handle.gpu_memory_bytes)
 
     return handle
 
@@ -664,6 +827,8 @@ def mesh_info(handle: MeshHandle) -> Dict[str, Any]:
         'triangle_count': handle.triangle_count,
         'vertex_count': handle.vertex_count,
         'bvh_node_count': handle.node_count,
+        'uploaded': handle.uploaded,
+        'gpu_memory_bytes': handle.gpu_memory_bytes,
         'world_bounds': {
             'min': aabb_min.tolist(),
             'max': aabb_max.tolist(),

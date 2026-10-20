@@ -3,7 +3,8 @@
 use super::format::{
     crc32, parse_prefix, write_prefix, ContainerHeader, PageIndexEntry, FLAG_BASE_ONLY,
     PAGE_FLAG_BASE_ONLY, PAGE_FLAG_GPU_DIRECT, PAGE_FLAG_GPU_FAST, PAGE_FLAG_PROGRESSIVE,
-    PAGE_MAGIC, PREDICTOR_LORENZO, PREDICTOR_PLANE, PREDICTOR_PREVIOUS_LOD, VERSION,
+    PAGE_HEADER_LEN, PAGE_MAGIC, PREDICTOR_LORENZO, PREDICTOR_PLANE, PREDICTOR_PREVIOUS_LOD,
+    VERSION,
 };
 use super::predict::{
     decode_residual_tokens, encode_residual_tokens, fit_least_squares_plane, lorenzo_prefix_safe,
@@ -12,8 +13,6 @@ use super::predict::{
 };
 use super::rans::RansEncoded;
 use super::{F3dzError, F3dzResult};
-
-pub(crate) const PAGE_HEADER_LEN: usize = 56;
 
 #[derive(Clone, Debug)]
 pub struct EncodeOptions {

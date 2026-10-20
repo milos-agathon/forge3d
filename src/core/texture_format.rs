@@ -13,7 +13,9 @@ use super::texture_format_defs::all_format_definitions;
 pub struct TextureFormatInfo {
     pub format: TextureFormat,
     pub is_compressed: bool,
+    /// Legacy name: bytes per texel for plain formats, bytes per block for compressed formats.
     pub bytes_per_pixel: u32,
+    /// Square-block width used to size this record when compressed.
     pub block_size: u32,
     pub channels: u32,
     pub bit_depth: u32,
@@ -22,15 +24,17 @@ pub struct TextureFormatInfo {
 }
 
 impl TextureFormatInfo {
-    /// Calculate texture size in bytes
+    /// Size one 2D mip using this record's layout fields, without row padding.
+    /// Registry fields derive from the format; caller-constructed records may
+    /// override them without changing the format identifier.
     pub fn calculate_size(&self, width: u32, height: u32) -> u64 {
-        if self.is_compressed {
-            let blocks_x = (width + self.block_size - 1) / self.block_size;
-            let blocks_y = (height + self.block_size - 1) / self.block_size;
-            (blocks_x as u64) * (blocks_y as u64) * (self.bytes_per_pixel as u64)
-        } else {
-            (width as u64) * (height as u64) * (self.bytes_per_pixel as u64)
-        }
+        crate::core::texture_layout::record_2d_size(
+            width,
+            height,
+            self.is_compressed,
+            self.bytes_per_pixel,
+            self.block_size,
+        )
     }
 
     /// Check if format is suitable for a given use case
@@ -129,7 +133,8 @@ impl TextureFormatRegistry {
 
     /// Calculate compression ratio compared to RGBA8
     pub fn calculate_compression_ratio(&self, format: TextureFormat, w: u32, h: u32) -> f32 {
-        let rgba8_size = (w * h * 4) as f32;
+        let rgba8_size =
+            crate::core::texture_layout::resident_2d_size(w, h, TextureFormat::Rgba8Unorm) as f32;
         self.get_format_info(format)
             .map(|info| rgba8_size / info.calculate_size(w, h) as f32)
             .unwrap_or(1.0)

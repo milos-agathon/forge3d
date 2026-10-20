@@ -394,8 +394,9 @@ class TestCogDataclasses:
             def __init__(self, *args):
                 captured["args"] = args
 
-        monkeypatch.setattr(cog, "_COG_AVAILABLE", True)
-        monkeypatch.setattr(cog, "_CogDatasetNative", FakeNativeCogDataset)
+        from forge3d import _native
+        from types import SimpleNamespace
+        monkeypatch.setattr(_native, "NATIVE_MODULE", SimpleNamespace(CogDataset=FakeNativeCogDataset))
 
         ds = cog.CogDataset(
             "file:///tmp/test.tif",

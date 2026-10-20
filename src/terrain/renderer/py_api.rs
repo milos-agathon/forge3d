@@ -171,6 +171,7 @@ fn terrain_cache_options<'py>(
         params.decoded().materials.normal_path.as_ref(),
         params.decoded().materials.roughness_path.as_ref(),
         params.decoded().materials.mask_path.as_ref(),
+        params.decoded().materials.albedo_path.as_ref(),
     ] {
         match path {
             Some(path) => {
@@ -1759,6 +1760,21 @@ impl TerrainRenderer {
         let focus =
             camera.normalize() * crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
         self.stream_height_tiles_globe_focus(py, camera, focus, max_uploads)
+    }
+
+    /// Test-only completion barrier for submitted uploads and pending reads.
+    /// Streaming and rendering retain their nonblocking production paths.
+    fn _wait_height_streaming(&mut self, py: Python<'_>) -> PyResult<()> {
+        let device = self.scene.device.clone();
+        let runtime = self.scene.height_streaming.as_mut();
+        py.allow_threads(move || {
+            device.poll(wgpu::Maintain::Wait);
+            if let Some(runtime) = runtime {
+                runtime.wait_for_loader_for_test()?;
+            }
+            Ok::<(), String>(())
+        })
+        .map_err(PyRuntimeError::new_err)
     }
 
     /// BOP-P2-02: current streaming stats without advancing the stream.

@@ -185,13 +185,11 @@ impl WavefrontScheduler {
             // queue entries and invalidate the consumed-prefix bookkeeping
             // (see the removal note in dispatch.rs).
         }
-        // Resolve on this frame's final encoder: the end timestamp was written
-        // on an encoder already submitted (or on this one), so the resolved
-        // range is complete once this submit lands.
         if let Some((t, _, _)) = timing.as_mut() {
-            t.resolve(&mut encoder);
+            t.submit(&self.queue, encoder);
+        } else {
+            self.queue.submit(std::iter::once(encoder.finish()));
         }
-        self.queue.submit(std::iter::once(encoder.finish()));
         self.frame_index += 1;
         Ok(iterations_executed)
     }

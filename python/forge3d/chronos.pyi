@@ -39,4 +39,5 @@ def render_flythrough(
     out_dir: str | Path,
     certificate: bool = ...,
     cache: str | os.PathLike[str] | None = ...,
+    label_fade_frames: int = ...,
 ) -> FlythroughManifest: ...

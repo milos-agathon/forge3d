@@ -105,6 +105,7 @@ def test_public_payload_keeps_integer_conformance_and_adds_positioning_provenanc
         "legal_breaks",
         "font_sources",
         "font_sha256",
+        "font_metrics",
         "runs",
         "line_ranges",
         "positioned_glyphs",
@@ -131,6 +132,10 @@ def test_public_payload_keeps_integer_conformance_and_adds_positioning_provenanc
     }
     assert payload["font_sources"]
     assert all(len(digest) == 64 for digest in payload["font_sha256"])
+    assert len(payload["font_metrics"]) == len(payload["font_sha256"])
+    metrics = payload["font_metrics"][0]
+    assert set(metrics) == {"units_per_em", "ascender", "descender"}
+    assert metrics["units_per_em"] > 0 and metrics["ascender"] > 0 > metrics["descender"]
 
 
 def test_rtl_glyphs_remain_logical_until_line_ranges_are_known():

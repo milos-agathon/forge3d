@@ -1,17 +1,11 @@
 use super::parser;
 use super::types::*;
+use super::vk_format::vk_format_to_wgpu;
 use crate::core::compressed_textures::CompressedImage;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
-/// KTX2 loader with transcoding support
-pub struct Ktx2Loader {
-    /// Enable transcoding support
-    _transcoding_enabled: bool,
-    /// Supported target formats
-    _target_formats: Vec<wgpu::TextureFormat>,
-    /// Optional Basis transcoder (not wired yet).
-    _basis_transcoder: Option<BasisTranscoder>,
-}
+/// KTX2 container loader.
+pub struct Ktx2Loader;
 
 impl Default for Ktx2Loader {
     fn default() -> Self {
@@ -22,20 +16,7 @@ impl Default for Ktx2Loader {
 impl Ktx2Loader {
     /// Create new KTX2 loader
     pub fn new() -> Self {
-        Self {
-            _transcoding_enabled: true,
-            _target_formats: Self::default_target_formats(),
-            _basis_transcoder: None,
-        }
-    }
-
-    /// Create loader with specific target formats
-    pub fn with_target_formats(formats: Vec<wgpu::TextureFormat>) -> Self {
-        Self {
-            _transcoding_enabled: true,
-            _target_formats: formats,
-            _basis_transcoder: None,
-        }
+        Self
     }
 
     /// Load KTX2 file
@@ -76,7 +57,7 @@ impl Ktx2Loader {
         let texture_data = self.extract_texture_data(&mut reader, &header, &level_indices)?;
 
         // Convert to WGPU format
-        let wgpu_format = self.vk_format_to_wgpu(header.vk_format)?;
+        let wgpu_format = vk_format_to_wgpu(header.vk_format)?;
 
         Ok(CompressedImage {
             data: texture_data,
@@ -84,7 +65,7 @@ impl Ktx2Loader {
             height: header.pixel_height,
             mip_levels: header.level_count,
             format: wgpu_format,
-            is_srgb: self.is_srgb_format(header.vk_format),
+            is_srgb: wgpu_format.is_srgb(),
             source_format: "KTX2".to_string(),
         })
     }
@@ -159,76 +140,5 @@ impl Ktx2Loader {
             "ZLIB supercompression decoding is not implemented; the texture cannot be decoded",
         );
         Err("ZLIB decompression not implemented".to_string())
-    }
-
-    /// Convert Vulkan format to WGPU format
-    fn vk_format_to_wgpu(&self, vk_format: u32) -> Result<wgpu::TextureFormat, String> {
-        match vk_format {
-            // BC formats
-            131 => Ok(wgpu::TextureFormat::Bc1RgbaUnorm),
-            132 => Ok(wgpu::TextureFormat::Bc1RgbaUnormSrgb),
-            135 => Ok(wgpu::TextureFormat::Bc3RgbaUnorm),
-            136 => Ok(wgpu::TextureFormat::Bc3RgbaUnormSrgb),
-            139 => Ok(wgpu::TextureFormat::Bc4RUnorm),
-            141 => Ok(wgpu::TextureFormat::Bc5RgUnorm),
-            145 => Ok(wgpu::TextureFormat::Bc6hRgbUfloat),
-            147 => Ok(wgpu::TextureFormat::Bc7RgbaUnorm),
-            148 => Ok(wgpu::TextureFormat::Bc7RgbaUnormSrgb),
-
-            // ETC2 formats (using correct KTX2 format values)
-            163 => Ok(wgpu::TextureFormat::Etc2Rgb8Unorm),
-            164 => Ok(wgpu::TextureFormat::Etc2Rgb8UnormSrgb),
-            151 => Ok(wgpu::TextureFormat::Etc2Rgba8Unorm),
-            152 => Ok(wgpu::TextureFormat::Etc2Rgba8UnormSrgb),
-
-            // Basic formats
-            37 => Ok(wgpu::TextureFormat::Rgba8Unorm),
-            43 => Ok(wgpu::TextureFormat::Rgba8UnormSrgb),
-            44 => Ok(wgpu::TextureFormat::Bgra8Unorm),
-
-            _ => Err(format!("Unsupported Vulkan format: {}", vk_format)),
-        }
-    }
-
-    /// Check if format is sRGB
-    fn is_srgb_format(&self, vk_format: u32) -> bool {
-        matches!(
-            vk_format,
-            43 | 132 | 136 | 148 | 152 | 164 // sRGB variants
-        )
-    }
-
-    /// Get default target formats for transcoding
-    fn default_target_formats() -> Vec<wgpu::TextureFormat> {
-        vec![
-            wgpu::TextureFormat::Bc7RgbaUnorm,
-            wgpu::TextureFormat::Bc3RgbaUnorm,
-            wgpu::TextureFormat::Bc1RgbaUnorm,
-            wgpu::TextureFormat::Etc2Rgba8Unorm,
-            wgpu::TextureFormat::Rgba8Unorm,
-        ]
-    }
-}
-
-/// Stub for Basis Universal transcoder.
-pub struct BasisTranscoder {
-    // Transcoder state
-}
-
-impl BasisTranscoder {
-    /// Initialize transcoder
-    pub fn new() -> Result<Self, String> {
-        Ok(Self {})
-    }
-
-    /// Transcode to target format
-    pub fn transcode(
-        &self,
-        _data: &[u8],
-        _target_format: wgpu::TextureFormat,
-        _width: u32,
-        _height: u32,
-    ) -> Result<Vec<u8>, String> {
-        Err("Basis Universal transcoding not implemented".to_string())
     }
 }

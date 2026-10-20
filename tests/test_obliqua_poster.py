@@ -142,7 +142,7 @@ def test_poster_tiles_match_exact_grid(monkeypatch):
             "reservoir_m_max": 0,
         }
 
-    monkeypatch.setattr(pt, "_NATIVE", native)
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(native, name, None))
     monkeypatch.setattr(pt, "hybrid_render_terrain_reference", fake)
     _disable_capture(monkeypatch)
     result = pt.render_terrain_poster(
@@ -189,7 +189,7 @@ def test_poster_independent_convergence(monkeypatch):
             "reservoir_m_max": 0,
         }
 
-    monkeypatch.setattr(pt, "_NATIVE", native)
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(native, name, None))
     monkeypatch.setattr(pt, "hybrid_render_terrain_reference", fake)
     _disable_capture(monkeypatch)
     with pytest.raises(RuntimeError, match="converg"):
@@ -214,7 +214,7 @@ def test_poster_per_tile_peak_is_not_global(monkeypatch):
             "reservoir_m_max": 0,
         }
 
-    monkeypatch.setattr(pt, "_NATIVE", native)
+    monkeypatch.setattr(pt, "get_native_symbol", lambda name: getattr(native, name, None))
     monkeypatch.setattr(pt, "hybrid_render_terrain_reference", fake)
     _disable_capture(monkeypatch)
     result = pt.render_terrain_poster(np.zeros((4, 4), np.float32), 8, 8, tile=4)

@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.41.0"
+__version__ = "1.44.0"
 version = __version__
 
 import numpy as np
@@ -42,7 +42,6 @@ from ._gpu import (
     device_probe,
     has_gpu,
     determinism_probe,
-    get_device,
 )
 from .mem import (
     memory_metrics,
@@ -53,6 +52,8 @@ from .mem import (
     override_memory_limit,
 )
 
+# Class/function re-exports and exception identities are import-time bindings.
+# Runtime capability dispatch resolves through _native at the point of use.
 _NATIVE_MODULE = _get_native_module()
 
 # -----------------------------------------------------------------------------
@@ -219,7 +220,10 @@ def __getattr__(name: str):
         globals()[name] = module
         return module
     if name in _NATIVE_ONLY_EXPORTS:
-        if _NATIVE_MODULE is None:
+        native = _get_native_module()
+        if native is not None and hasattr(native, name):
+            return getattr(native, name)
+        if native is None:
             cause = native_import_error()
             detail = (
                 f"the compiled extension forge3d._forge3d failed to import: {cause!r}"
@@ -260,6 +264,7 @@ from .terrain_params import (
     FogSettings,
     ReflectionSettings,
     WaterSettings,
+    WaterOpticsSettings,
     CloudSettings,
     HeightAoSettings,
     ScreenSpaceSettings,
@@ -504,6 +509,7 @@ from . import media
 # -----------------------------------------------------------------------------
 from .map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
 from .legend import Legend, LegendConfig
+from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .north_arrow import NorthArrow, NorthArrowConfig
 from .graticule import GraticuleSpec, generate_graticule
@@ -604,6 +610,8 @@ from .buildings import (
     material_from_name,
 )
 
+from .vector_line import VectorLineLayer, VectorLineStyleError
+
 # -----------------------------------------------------------------------------
 # Mapbox Style Spec Import
 # -----------------------------------------------------------------------------
@@ -675,6 +683,8 @@ from .label_plan import (
 # Typed MapScene recipe contract
 # -----------------------------------------------------------------------------
 from .map_scene import (
+    RenderPassInput,
+    RenderPassSpec,
     CompiledScenePlan,
     FontAtlas,
     FontFallbackRange,
@@ -722,6 +732,10 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
+    "RasterHeightSurfaceStyle",
+    "CategoricalRasterStyle",
+    "BivariateRasterStyle",
+    "RasterStyleResult",
     "terrain",
     "VTStore",
     "open_vt_store",
@@ -846,6 +860,7 @@ __all__ = [
     "FogSettings",
     "ReflectionSettings",
     "WaterSettings",
+    "WaterOpticsSettings",
     "CloudSettings",
     "HeightAoSettings",
     "ScreenSpaceSettings",
@@ -878,7 +893,6 @@ __all__ = [
     # GPU utilities
     "has_gpu",
     "determinism_probe",
-    "get_device",
     "enumerate_adapters",
     "device_probe",
     "native_import_error",
@@ -991,6 +1005,8 @@ __all__ = [
     "parse_color",
     "validate_style_support",
     "vector_overlay_configs_from_style",
+    "VectorLineLayer",
+    "VectorLineStyleError",
     "label_layer_contracts_from_style",
     "paint_to_vector_style",
     "layout_to_label_style",
@@ -1037,6 +1053,8 @@ __all__ = [
     "PriorityClass",
     "RejectedLabel",
     # Typed MapScene recipe contract
+    "RenderPassInput",
+    "RenderPassSpec",
     "MapScene",
     "MapSceneNativeUnavailable",
     "MapSceneTextLayoutError",

@@ -388,6 +388,10 @@ def _warm_streaming_to_full_residency(renderer, center: tuple[float, float]) -> 
             (center[0], STREAM_ALTITUDE_M, center[1]),
             max_uploads=STREAM_TOTAL_TILES,
         )
+        # A warm-up step must allow pending reads and submitted uploads to
+        # complete. Tight CPU polling can exhaust the unchanged step budget
+        # before either asynchronous worker gets scheduled on a busy runner.
+        renderer._wait_height_streaming()
         steps += 1
         # The reader and GPU completion run asynchronously. Yield the polling
         # thread while keeping the existing step and residency requirements.

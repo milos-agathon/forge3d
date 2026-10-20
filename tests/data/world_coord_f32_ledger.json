@@ -1998,6 +1998,258 @@
   ],
   "removed": []
  },
+ "sutura": {
+   "base_count": 1832,
+   "base_digest": "92a2b5e256294968b4a5340b1235973633e175d71c9de640b32421322f3f3245",
+   "result_count": 1836,
+   "result_digest": "ccb80f7e3e4ab82a4cc6e2bb83c0acfd0681a078ea16017db46d70341f5e1fb4",
+   "added": [
+     [
+       "src/terrain/render_params/projection.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "*target = target.min(z as f32)"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "projected[2] = f64::from(projected[2] as f32)"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "unproject_terrain_depth",
+       "as_f32",
+       1,
+       "uv[[row, col, 0]] = (world.x / world.w / f64::from(self.terrain_span) + 0.5) as f32"
+     ],
+     [
+       "src/terrain/render_params/py_api.rs",
+       "unproject_terrain_depth",
+       "as_f32",
+       2,
+       "uv[[row, col, 1]] = (world.y / world.w / f64::from(self.terrain_span) + 0.5) as f32"
+     ]
+   ],
+   "removed": [],
+   "base_commit": "9f14e648cbf9e7e2f071d5c47b2eecad18f3180c",
+   "review": "Parent source review removed six early f32 casts. The remaining four conversions store final normalized device depth for f32 GPU/proxy comparisons and normalized texture UVs for screen pixels. Source world coordinates are made terrain-relative in Python f64; local coordinates and camera projection remain f64. No absolute world coordinate is narrowed. Existing historical records are unchanged."
+ },
+ "csm_layout_context": {
+  "base_count": 1836,
+  "base_digest": "ccb80f7e3e4ab82a4cc6e2bb83c0acfd0681a078ea16017db46d70341f5e1fb4",
+  "result_count": 1836,
+  "result_digest": "3d58d0cb7decfff40b2c22299813cb565fc3ecdbed2afa1f0559a52855cfb489",
+  "added": [
+    [
+      "src/core/shadow_mapping/system.rs",
+      "update_uniforms",
+      "as_f32",
+      1,
+      "light_direction: Vec4::new( self.light_direction.x, self.light_direction.y, self.light_direction.z, 0.0, ) .to_array(), light_view: self.light_view_matrix.to_cols_array(), cascades: cascade_data, cascade_count: self.cascades.len().min(4) as u32, pcf_kernel_size: self.config.pcf_quality as u32, depth_bias: self.config.depth_bias, slope_bias: self.config.slope_bias, shadow_map_size: self.config.shadow_map_size as f32, debug_mode: self.config.debug_mode, evsm_positive_exp: 40.0, evsm_negative_exp: 5.0, peter_panning_offset: 0.001, enable_unclipped_depth: 0, depth_clip_factor: 1.0, technique: 1, technique_flags: 0, _padding1: [0.0"
+    ]
+  ],
+  "removed": [
+    [
+      "src/core/shadow_mapping/system.rs",
+      "update_uniforms",
+      "as_f32",
+      1,
+      "light_direction: Vec4::new( self.light_direction.x, self.light_direction.y, self.light_direction.z, 0.0, ) .to_array(), light_view: self.light_view_matrix.to_cols_array_2d(), cascades: cascade_data, cascade_count: self.cascades.len().min(4) as u32, pcf_kernel_size: self.config.pcf_quality as u32, depth_bias: self.config.depth_bias, slope_bias: self.config.slope_bias, shadow_map_size: self.config.shadow_map_size as f32, debug_mode: self.config.debug_mode, evsm_positive_exp: 40.0, evsm_negative_exp: 5.0, peter_panning_offset: 0.001, enable_unclipped_depth: 0, depth_clip_factor: 1.0, technique: 1, technique_flags: 0, _padding1: [0.0"
+    ]
+  ],
+  "source_commit": "f7581b9c08a351d3db2f7d28cf2b3285d7d80fd2",
+  "review": "Main PR #216 changes the adjacent light_view matrix packing from to_cols_array_2d() to to_cols_array(). All 1836 narrowing operations and operands are unchanged. Reversing this exact single statement-context replacement restores the prior frozen digest; every historical ledger record is preserved."
+},
+ "texture_layout_stats": {
+  "base_count": 1836,
+  "base_digest": "3d58d0cb7decfff40b2c22299813cb565fc3ecdbed2afa1f0559a52855cfb489",
+  "result_count": 1836,
+  "result_digest": "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12",
+  "removed": [
+   [
+    "src/core/texture_format.rs",
+    "calculate_compression_ratio",
+    "as_f32",
+    1,
+    "let rgba8_size = (w * h * 4) as f32"
+   ]
+  ],
+  "added": [
+   [
+    "src/core/texture_format.rs",
+    "calculate_compression_ratio",
+    "as_f32",
+    1,
+    "let rgba8_size = crate::core::texture_layout::resident_2d_size(w, h, TextureFormat::Rgba8Unorm) as f32"
+   ]
+  ],
+  "source_commit": "5f8252672cdaff08dad8c6fb3cd0eb4a4c1c41be",
+  "review": "Architecture item 30 replaces one existing integer-byte-count-to-f32 statistics operand in TextureFormatRegistry::calculate_compression_ratio with the shared resident_2d_size helper. The operands are u32 texture dimensions and the helper result is a u64 allocation-size estimate; no f64/world-position value or new narrowing primitive is introduced. Count remains 1836. Reversing this exact single-site replacement restores the preceding CSM freeze; all historical records and scanner coverage are retained."
+ },
+  "viewer_viewport_resize": {
+    "base_count": 1836,
+    "base_digest": "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12",
+    "result_count": 1846,
+    "result_digest": "f4fb63ad9529ceaaff94b99fe68f0c2454e706d019e93c669b77a82fdc52eace",
+    "added": [
+      [
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "install_resize",
+        "as_f32",
+        1,
+        "self.settings.proj_scale *= prepared.height as f32 / self.height as f32"
+      ],
+      [
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "install_resize",
+        "as_f32",
+        2,
+        "self.settings.proj_scale *= prepared.height as f32 / self.height as f32"
+      ],
+      [
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "install_resize",
+        "as_f32",
+        3,
+        "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssao/mod.rs",
+        "install_resize",
+        "as_f32",
+        4,
+        "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssgi/resize.rs",
+        "install_resize",
+        "as_f32",
+        1,
+        "self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssgi/resize.rs",
+        "install_resize",
+        "as_f32",
+        2,
+        "self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssr/resize.rs",
+        "install_resize",
+        "as_f32",
+        1,
+        "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+        "src/core/screen_space_effects/ssr/resize.rs",
+        "install_resize",
+        "as_f32",
+        2,
+        "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+        "src/core/taa.rs",
+        "install_resize",
+        "as_f32",
+        1,
+        "self.settings.resolution = [self.width as f32, self.height as f32]"
+      ],
+      [
+        "src/core/taa.rs",
+        "install_resize",
+        "as_f32",
+        2,
+        "self.settings.resolution = [self.width as f32, self.height as f32]"
+      ]
+    ],
+    "removed": [],
+    "review": "Milos explicitly approved these exact ten additions on 14 October 2026 for PR #243. The operands are u32 viewport width/height values used for reciprocal resolution, SSAO projection scale and TAA resolution. No f64/world-position narrowing or scanner exemption is introduced. Removing these exact ten occurrence-locked sites restores the prior texture-layout freeze; all historical records and rejecting probes remain intact.",
+    "source_commit": "c4acb6b941c34f85c9a4d6e1e8c616aee5dec3ad"
+  },
+  "water_optics": {
+    "base_count": 1836,
+    "base_digest": "46c5b8e3306d02b20bd8e6661b1a0446f12d8af7073179dca110bd833ccefa12",
+    "result_count": 1846,
+    "result_digest": "f833522fa331012743ce728548a7f63fb114335de11c2aab7985c90ab9192a62",
+    "added": [
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        1,
+        "n.map(|v| (f64::from(v) / length) as f32)"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        2,
+        "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        3,
+        "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        4,
+        "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        5,
+        "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/surface.rs",
+        "upload_water_surface",
+        "as_f32",
+        6,
+        "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/uniforms.rs",
+        "with_optics",
+        "as_f32",
+        1,
+        "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/uniforms.rs",
+        "with_optics",
+        "as_f32",
+        2,
+        "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/uniforms.rs",
+        "with_optics",
+        "as_f32",
+        3,
+        "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+        "src/terrain/renderer/water_reflection/uniforms.rs",
+        "with_optics",
+        "as_f32",
+        4,
+        "self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]"
+      ]
+    ],
+    "removed": [],
+    "review": "2026-10-13: Milos instructed completing a green and mergeable PR after this exact ten-site inventory transition was presented. Six conversions encode normalized normal components; four convert boolean flags losslessly to 0 or 1. No world-coordinate cast is added, no site is removed, and every preceding ledger record and rejecting probe is retained. Rebased after main PR #234: the base is its texture_layout_stats result; the same ten additions give 1846 sites (owner-approved 2026-10-13)."
+  },
  "nephele_main_integration": {
   "base_count": 1888,
   "base_digest": "ec8a15bb2dc79d3f65ea8b1c3ba4f53f39ec48ca496727ea5dc9a748c646bdf0",
@@ -2337,5 +2589,1452 @@
     "let point = origin + direction * (start + (i as f32 + 0.5) * step)"
    ]
   ]
+ },
+ "nephele_main_sync": {
+  "result_count": 1929,
+  "result_digest": "101c2b57a12d622383b11a29dbe1387c988e62aacf1afd55897fcb54e14fed5c",
+  "main_side": {
+   "source_commit": "696a0ff2a2a150503344321f824f0bd1e22af56c",
+   "base_count": 1856,
+   "base_digest": "bd31cb70466826afdfb900d4fb492895aa68d297727f0084a95ab1722c52d9de",
+   "files": {
+    "src/media/density.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "3] = std::array::from_fn(|axis| unit[axis].clamp(0.0, 1.0) * grid.dimensions[axis] as f32 - 0.5)"
+      ],
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "let displacement = [ p[0] - (base[0] + x) as f32, p[1] - (base[1] + y) as f32, p[2] - (base[2] + z) as f32, ]"
+      ],
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       3,
+       "let displacement = [ p[0] - (base[0] + x) as f32, p[1] - (base[1] + y) as f32, p[2] - (base[2] + z) as f32, ]"
+      ],
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       4,
+       "let displacement = [ p[0] - (base[0] + x) as f32, p[1] - (base[1] + y) as f32, p[2] - (base[2] + z) as f32, ]"
+      ],
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       5,
+       "let feature = [ cell[0] as f32 + unit_float(h), cell[1] as f32 + unit_float(mix64(h)), cell[2] as f32 + unit_float(mix64(mix64(h))), ]"
+      ],
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       6,
+       "let feature = [ cell[0] as f32 + unit_float(h), cell[1] as f32 + unit_float(mix64(h)), cell[2] as f32 + unit_float(mix64(mix64(h))), ]"
+      ],
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       7,
+       "let feature = [ cell[0] as f32 + unit_float(h), cell[1] as f32 + unit_float(mix64(h)), cell[2] as f32 + unit_float(mix64(mix64(h))), ]"
+      ],
+      [
+       "src/media/density.rs",
+       "unit_float",
+       "as_f32",
+       1,
+       "((value >> 40) as f32) * (1.0 / (1u32 << 24) as f32)"
+      ],
+      [
+       "src/media/density.rs",
+       "unit_float",
+       "as_f32",
+       2,
+       "((value >> 40) as f32) * (1.0 / (1u32 << 24) as f32)"
+      ],
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       8,
+       "(unit[axis] * self.dimensions[axis] as f32) .floor() .min((self.dimensions[axis] - 1) as f32) as u32"
+      ],
+      [
+       "src/media/density.rs",
+       "<module>",
+       "as_f32",
+       9,
+       "(unit[axis] * self.dimensions[axis] as f32) .floor() .min((self.dimensions[axis] - 1) as f32) as u32"
+      ],
+      [
+       "src/media/density.rs",
+       "trilinear_outward_upper",
+       "as_f32",
+       1,
+       "let mut rounded = exact_upper as f32"
+      ]
+     ]
+    },
+    "src/media/lighting.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/media/lighting.rs",
+       "new",
+       "as_f32",
+       1,
+       "let represented = pdf as f32"
+      ],
+      [
+       "src/media/lighting.rs",
+       "texel_pdf",
+       "as_f32",
+       1,
+       "(self.probabilities[index] / self.solid_angles[index]) as f32"
+      ],
+      [
+       "src/media/lighting.rs",
+       "<module>",
+       "f64_helper",
+       1,
+       "} [ ((phi / TAU) * self.width as f64) .floor() .min((self.width - 1) as f64) as u32, ((theta / PI) * self.height as f64) .floor() .min((self.height - 1) as f64) as u32, ] } fn texel_direction(&self, x: usize, y: usize, u_theta: f64, u_phi: f64) -> [f32"
+      ],
+      [
+       "src/media/lighting.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "[ (sin_theta * phi.cos()) as f32, cos_theta as f32, (sin_theta * phi.sin()) as f32, ]"
+      ],
+      [
+       "src/media/lighting.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "[ (sin_theta * phi.cos()) as f32, cos_theta as f32, (sin_theta * phi.sin()) as f32, ]"
+      ],
+      [
+       "src/media/lighting.rs",
+       "<module>",
+       "as_f32",
+       3,
+       "[ (sin_theta * phi.cos()) as f32, cos_theta as f32, (sin_theta * phi.sin()) as f32, ]"
+      ]
+     ]
+    },
+    "src/media/model.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/media/model.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "(f64::from(incident.0[channel]) * f64::from(self.sigma_s.0[channel]) * f64::from(density) * phase * f64::from(distance) * (-optical_depth).exp()) as f32"
+      ]
+     ]
+    },
+    "src/media/tests.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/media/tests.rs",
+       "grid_majorant_bounds_interpolation_and_boundaries",
+       "as_f32",
+       1,
+       "[ -1.0 + 2.0 * x as f32 / 24.0, -2.0 + 4.0 * y as f32 / 12.0, -3.0 + 6.0 * z as f32 / 12.0, ]"
+      ],
+      [
+       "src/media/tests.rs",
+       "grid_majorant_bounds_interpolation_and_boundaries",
+       "as_f32",
+       2,
+       "[ -1.0 + 2.0 * x as f32 / 24.0, -2.0 + 4.0 * y as f32 / 12.0, -3.0 + 6.0 * z as f32 / 12.0, ]"
+      ],
+      [
+       "src/media/tests.rs",
+       "grid_majorant_bounds_interpolation_and_boundaries",
+       "as_f32",
+       3,
+       "[ -1.0 + 2.0 * x as f32 / 24.0, -2.0 + 4.0 * y as f32 / 12.0, -3.0 + 6.0 * z as f32 / 12.0, ]"
+      ],
+      [
+       "src/media/tests.rs",
+       "environment_boundaries_share_the_sample_pdf_measure",
+       "as_f32",
+       1,
+       "let radiance = (0..32) .map(|index| Rgb::new([index as f32 + 1.0"
+      ],
+      [
+       "src/media/tests.rs",
+       "integrated_reference_is_deterministic_and_unbiased_for_vacuum_environment",
+       "as_f32",
+       1,
+       "*sum += value / sample_count as f32"
+      ]
+     ]
+    },
+    "src/media/tracking.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/media/tracking.rs",
+       "uniform",
+       "as_f32",
+       1,
+       "(((value >> 41) as f32) + 0.5) * (1.0 / (1u32 << 23) as f32)"
+      ],
+      [
+       "src/media/tracking.rs",
+       "uniform",
+       "as_f32",
+       2,
+       "(((value >> 41) as f32) + 0.5) * (1.0 / (1u32 << 23) as f32)"
+      ]
+     ]
+    },
+    "src/media_py.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/media_py.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "let (eye, camera_view, _) = crate::terrain::build_orbit_view_proj( target, radius, phi_deg, theta_deg, fov_y_deg, full_viewport[0] as f32 / full_viewport[1] as f32, clip.0, clip.1, )"
+      ],
+      [
+       "src/media_py.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "let (eye, camera_view, _) = crate::terrain::build_orbit_view_proj( target, radius, phi_deg, theta_deg, fov_y_deg, full_viewport[0] as f32 / full_viewport[1] as f32, clip.0, clip.1, )"
+      ]
+     ]
+    },
+    "src/path_tracing/hybrid_compute/media_reference.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/path_tracing/hybrid_compute/media_reference.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "} let aspect = full_viewport[0] as f32 / full_viewport[1] as f32"
+      ],
+      [
+       "src/path_tracing/hybrid_compute/media_reference.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "} let aspect = full_viewport[0] as f32 / full_viewport[1] as f32"
+      ],
+      [
+       "src/path_tracing/hybrid_compute/media_reference.rs",
+       "<module>",
+       "as_f32",
+       3,
+       "} } } } } let scale = 1.0 / samples_per_pixel as f32"
+      ],
+      [
+       "src/path_tracing/hybrid_compute/media_reference.rs",
+       "<module>",
+       "as_f32",
+       4,
+       "glam::Vec2::new( (2.0 * (x as f32 + 0.5) / full_viewport[0] as f32 - 1.0) * aspect * tan_half_fov, (1.0 - 2.0 * (y as f32 + 0.5) / full_viewport[1] as f32) * tan_half_fov, )"
+      ],
+      [
+       "src/path_tracing/hybrid_compute/media_reference.rs",
+       "<module>",
+       "as_f32",
+       5,
+       "glam::Vec2::new( (2.0 * (x as f32 + 0.5) / full_viewport[0] as f32 - 1.0) * aspect * tan_half_fov, (1.0 - 2.0 * (y as f32 + 0.5) / full_viewport[1] as f32) * tan_half_fov, )"
+      ],
+      [
+       "src/path_tracing/hybrid_compute/media_reference.rs",
+       "<module>",
+       "as_f32",
+       6,
+       "glam::Vec2::new( (2.0 * (x as f32 + 0.5) / full_viewport[0] as f32 - 1.0) * aspect * tan_half_fov, (1.0 - 2.0 * (y as f32 + 0.5) / full_viewport[1] as f32) * tan_half_fov, )"
+      ],
+      [
+       "src/path_tracing/hybrid_compute/media_reference.rs",
+       "<module>",
+       "as_f32",
+       7,
+       "glam::Vec2::new( (2.0 * (x as f32 + 0.5) / full_viewport[0] as f32 - 1.0) * aspect * tan_half_fov, (1.0 - 2.0 * (y as f32 + 0.5) / full_viewport[1] as f32) * tan_half_fov, )"
+      ]
+     ]
+    },
+    "src/terrain/renderer/aov.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/terrain/renderer/aov.rs",
+       "render_internal_with_aov_presentation",
+       "as_f32",
+       1,
+       "} let uniforms = self.build_uniforms( params, decoded, height_inputs.width as f32, height_inputs.height as f32, )?"
+      ],
+      [
+       "src/terrain/renderer/aov.rs",
+       "render_internal_with_aov_presentation",
+       "as_f32",
+       2,
+       "} let uniforms = self.build_uniforms( params, decoded, height_inputs.width as f32, height_inputs.height as f32, )?"
+      ]
+     ]
+    },
+    "src/terrain/renderer/bind_groups/terrain_pass.rs": {
+     "base": [
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       1,
+       "[ config.bottom_radius_m, config.top_radius_m, dimensions.scattering_height as f32, dimensions.scattering_nu as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       2,
+       "[ config.bottom_radius_m, config.top_radius_m, dimensions.scattering_height as f32, dimensions.scattering_nu as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       3,
+       "0.0 }, materials.wetness_subsurface_strength, ], wetness_sss_tint: [ materials.wetness_subsurface_tint[0], materials.wetness_subsurface_tint[1], materials.wetness_subsurface_tint[2], 0.0, ], variation_params0: [ variation.macro_scale, variation.detail_scale, variation.octaves.clamp(1, 8) as f32, if variation_enabled { 1.0"
+      ]
+     ],
+     "result": [
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       1,
+       "[ config.bottom_radius_m, config.top_radius_m, dimensions.scattering_height as f32, dimensions.scattering_nu as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       2,
+       "[ config.bottom_radius_m, config.top_radius_m, dimensions.scattering_height as f32, dimensions.scattering_nu as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       3,
+       "0.0 }, media_grid.visible_width() as f32, media_grid.visible_height() as f32, media_grid.depth as f32, ], media_depth: { let mut values = media_depth.wgsl_params()"
+      ],
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       4,
+       "0.0 }, media_grid.visible_width() as f32, media_grid.visible_height() as f32, media_grid.depth as f32, ], media_depth: { let mut values = media_depth.wgsl_params()"
+      ],
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       5,
+       "0.0 }, media_grid.visible_width() as f32, media_grid.visible_height() as f32, media_grid.depth as f32, ], media_depth: { let mut values = media_depth.wgsl_params()"
+      ],
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       6,
+       "values[3] = super::super::media::FROXEL_OFF_AXIS_BORDER as f32"
+      ],
+      [
+       "src/terrain/renderer/bind_groups/terrain_pass.rs",
+       "create_terrain_pass_bind_groups",
+       "as_f32",
+       7,
+       "0.0 }, materials.wetness_subsurface_strength, ], wetness_sss_tint: [ materials.wetness_subsurface_tint[0], materials.wetness_subsurface_tint[1], materials.wetness_subsurface_tint[2], 0.0, ], variation_params0: [ variation.macro_scale, variation.detail_scale, variation.octaves.clamp(1, 8) as f32, if variation_enabled { 1.0"
+      ]
+     ]
+    },
+    "src/terrain/renderer/draw/mod.rs": {
+     "base": [
+      [
+       "src/terrain/renderer/draw/mod.rs",
+       "render_internal",
+       "as_f32",
+       1,
+       "let uniforms = self.build_uniforms( params, decoded, height_inputs.width as f32, height_inputs.height as f32, )?"
+      ],
+      [
+       "src/terrain/renderer/draw/mod.rs",
+       "render_internal",
+       "as_f32",
+       2,
+       "let uniforms = self.build_uniforms( params, decoded, height_inputs.width as f32, height_inputs.height as f32, )?"
+      ]
+     ],
+     "result": [
+      [
+       "src/terrain/renderer/draw/mod.rs",
+       "render_internal",
+       "as_f32",
+       1,
+       "} let uniforms = self.build_uniforms( params, decoded, height_inputs.width as f32, height_inputs.height as f32, )?"
+      ],
+      [
+       "src/terrain/renderer/draw/mod.rs",
+       "render_internal",
+       "as_f32",
+       2,
+       "} let uniforms = self.build_uniforms( params, decoded, height_inputs.width as f32, height_inputs.height as f32, )?"
+      ]
+     ]
+    },
+    "src/terrain/renderer/media.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "origin_xz: render_origin_xz, spacing_xz: [ render_span_xz[0] / dimensions.0.saturating_sub(1).max(1) as f32, render_span_xz[1] / dimensions.1.saturating_sub(1).max(1) as f32, ], height_offset: height_min, height_scale: z_scale,"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "origin_xz: render_origin_xz, spacing_xz: [ render_span_xz[0] / dimensions.0.saturating_sub(1).max(1) as f32, render_span_xz[1] / dimensions.1.saturating_sub(1).max(1) as f32, ], height_offset: height_min, height_scale: z_scale,"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       3,
+       "sum.map(|value| (value / count) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       4,
+       "let spacing_xz = [ terrain_span / dimensions.0.saturating_sub(1).max(1) as f32, terrain_span / dimensions.1.saturating_sub(1).max(1) as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       5,
+       "let spacing_xz = [ terrain_span / dimensions.0.saturating_sub(1).max(1) as f32, terrain_span / dimensions.1.saturating_sub(1).max(1) as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       6,
+       "let origin_xz = [ -0.5 * dimensions.0.saturating_sub(1) as f32 * spacing_xz[0], -0.5 * dimensions.1.saturating_sub(1) as f32 * spacing_xz[1], ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       7,
+       "let origin_xz = [ -0.5 * dimensions.0.saturating_sub(1) as f32 * spacing_xz[0], -0.5 * dimensions.1.saturating_sub(1) as f32 * spacing_xz[1], ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "termination_integration_steps",
+       "as_f32",
+       1,
+       "} let max_slice = (froxel_depth - 1) as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       8,
+       "} } mean.map(|value| (value / count as f64) as f32 * env_maps.intensity.max(0.0))"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "prepare_realtime_media_for_terrain",
+       "as_f32",
+       1,
+       "let width = ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "prepare_realtime_media_for_terrain",
+       "as_f32",
+       2,
+       "let height = ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "encode_attached_realtime_media_inject_with_matrices",
+       "as_f32",
+       1,
+       "let expected_viewport = ( ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "encode_attached_realtime_media_inject_with_matrices",
+       "as_f32",
+       2,
+       "let expected_viewport = ( ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       9,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       10,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       11,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       12,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       13,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       14,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       15,
+       "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       16,
+       "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       17,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       18,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       19,
+       "let centre = uv * visible + glam::Vec2::splat(FROXEL_OFF_AXIS_BORDER as f32 - 0.5)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       20,
+       "let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       21,
+       "let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       22,
+       "let step = segment_length / steps as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       23,
+       "let point = origin + direction * (start + (i as f32 + 0.5) * step)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "sun_integration_steps",
+       "as_f32",
+       1,
+       "direction[axis].abs() * dimensions[axis].saturating_sub(1) as f32 / (bounds.max[axis] - bounds.min[axis])"
+      ]
+     ]
+    },
+    "src/terrain/renderer/shadows/render.rs": {
+     "base": [
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "let step = (far_plane - near_plane) / cascade_count as f32"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "fallback.push((near_plane + step * i as f32).min(far_plane))"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       3,
+       "let texel_size = (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       4,
+       "self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       5,
+       "let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       6,
+       "light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, height_exag, height_min, height_max], grid_params: [SHADOW_GRID_RES as f32, 0.0, 0.0, 0.0], height_curve,"
+      ]
+     ],
+     "result": [
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "let step = (far_plane - near_plane) / cascade_count as f32"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "fallback.push((near_plane + step * i as f32).min(far_plane))"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       3,
+       "let texel_size = (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       4,
+       "self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       5,
+       "let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32"
+      ],
+      [
+       "src/terrain/renderer/shadows/render.rs",
+       "<module>",
+       "as_f32",
+       6,
+       "light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, height_exag, height_min, height_max], grid_params: [ SHADOW_GRID_RES as f32, if y_up { 1.0"
+      ]
+     ]
+    },
+    "src/viewer/terrain/post_process.rs": {
+     "base": [
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply_from_input",
+       "as_f32",
+       1,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply_from_input",
+       "as_f32",
+       2,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply_from_input",
+       "as_f32",
+       3,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply_from_input",
+       "as_f32",
+       4,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply",
+       "as_f32",
+       1,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply",
+       "as_f32",
+       2,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply",
+       "as_f32",
+       3,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply",
+       "as_f32",
+       4,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ]
+     ],
+     "result": [
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply_from_input_internal",
+       "as_f32",
+       1,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [ vignette_softness, if tonemap_linear_hdr { 1.0"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply_from_input_internal",
+       "as_f32",
+       2,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [ vignette_softness, if tonemap_linear_hdr { 1.0"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply_from_input_internal",
+       "as_f32",
+       3,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [ vignette_softness, if tonemap_linear_hdr { 1.0"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply_from_input_internal",
+       "as_f32",
+       4,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [ vignette_softness, if tonemap_linear_hdr { 1.0"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply",
+       "as_f32",
+       1,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply",
+       "as_f32",
+       2,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply",
+       "as_f32",
+       3,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ],
+      [
+       "src/viewer/terrain/post_process.rs",
+       "apply",
+       "as_f32",
+       4,
+       "screen_dims: [ width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32, ], lens_params: [ distortion, chromatic_aberration, vignette_strength, vignette_radius, ], lens_params2: [vignette_softness, 0.0, 0.0, 0.0],"
+      ]
+     ]
+    },
+    "src/viewer/terrain/render/offscreen/setup.rs": {
+     "base": [
+      [
+       "src/viewer/terrain/render/offscreen/setup.rs",
+       "build_snapshot_render_state",
+       "as_f32",
+       1,
+       "0.0 }, ], ibl_params: self.terrain_ibl_uniform_params(), camera_pos: [eye.x, eye.y, eye.z, 1.0], lens_params: [ self.pbr_config.lens_effects.vignette_strength, self.pbr_config.lens_effects.vignette_radius, self.pbr_config.lens_effects.vignette_softness, 0.0, ], screen_dims: [width as f32, height as f32, 0.0, 0.0], overlay_params: [ if self.pbr_config.overlay.enabled { 1.0"
+      ],
+      [
+       "src/viewer/terrain/render/offscreen/setup.rs",
+       "build_snapshot_render_state",
+       "as_f32",
+       2,
+       "0.0 }, ], ibl_params: self.terrain_ibl_uniform_params(), camera_pos: [eye.x, eye.y, eye.z, 1.0], lens_params: [ self.pbr_config.lens_effects.vignette_strength, self.pbr_config.lens_effects.vignette_radius, self.pbr_config.lens_effects.vignette_softness, 0.0, ], screen_dims: [width as f32, height as f32, 0.0, 0.0], overlay_params: [ if self.pbr_config.overlay.enabled { 1.0"
+      ]
+     ],
+     "result": [
+      [
+       "src/viewer/terrain/render/offscreen/setup.rs",
+       "build_snapshot_render_state",
+       "as_f32",
+       1,
+       "0.0 }, ], screen_dims: [width as f32, height as f32, 1.0, cam_radius * 10.0], overlay_params: [ if self.pbr_config.overlay.enabled { 1.0"
+      ],
+      [
+       "src/viewer/terrain/render/offscreen/setup.rs",
+       "build_snapshot_render_state",
+       "as_f32",
+       2,
+       "0.0 }, ], screen_dims: [width as f32, height as f32, 1.0, cam_radius * 10.0], overlay_params: [ if self.pbr_config.overlay.enabled { 1.0"
+      ]
+     ]
+    },
+    "src/viewer/terrain/render/screen/setup.rs": {
+     "base": [
+      [
+       "src/viewer/terrain/render/screen/setup.rs",
+       "build_screen_render_state",
+       "as_f32",
+       1,
+       "0.0 }, ], ibl_params: self.terrain_ibl_uniform_params(), camera_pos: [eye.x, eye.y, eye.z, 1.0], lens_params: [ self.pbr_config.lens_effects.vignette_strength, self.pbr_config.lens_effects.vignette_radius, self.pbr_config.lens_effects.vignette_softness, 0.0, ], screen_dims: [width as f32, height as f32, 0.0, 0.0], overlay_params: [ if self.pbr_config.overlay.enabled { 1.0"
+      ],
+      [
+       "src/viewer/terrain/render/screen/setup.rs",
+       "build_screen_render_state",
+       "as_f32",
+       2,
+       "0.0 }, ], ibl_params: self.terrain_ibl_uniform_params(), camera_pos: [eye.x, eye.y, eye.z, 1.0], lens_params: [ self.pbr_config.lens_effects.vignette_strength, self.pbr_config.lens_effects.vignette_radius, self.pbr_config.lens_effects.vignette_softness, 0.0, ], screen_dims: [width as f32, height as f32, 0.0, 0.0], overlay_params: [ if self.pbr_config.overlay.enabled { 1.0"
+      ]
+     ],
+     "result": [
+      [
+       "src/viewer/terrain/render/screen/setup.rs",
+       "build_screen_render_state",
+       "as_f32",
+       1,
+       "0.0 }, ], screen_dims: [width as f32, height as f32, 1.0, cam_radius * 10.0], overlay_params: [ if self.pbr_config.overlay.enabled { 1.0"
+      ],
+      [
+       "src/viewer/terrain/render/screen/setup.rs",
+       "build_screen_render_state",
+       "as_f32",
+       2,
+       "0.0 }, ], screen_dims: [width as f32, height as f32, 1.0, cam_radius * 10.0], overlay_params: [ if self.pbr_config.overlay.enabled { 1.0"
+      ]
+     ]
+    },
+    "src/viewer/terrain/volume_density.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/viewer/terrain/volume_density.rs",
+       "atlas_metadata_maps_local_endpoints_to_region_texel_centers",
+       "as_f32",
+       1,
+       "let atlas_axis = atlas.dimensions[axis] as f32"
+      ],
+      [
+       "src/viewer/terrain/volume_density.rs",
+       "atlas_metadata_maps_local_endpoints_to_region_texel_centers",
+       "as_f32",
+       2,
+       "(report.atlas_offset[axis] as f32 + 0.5) / atlas_axis"
+      ],
+      [
+       "src/viewer/terrain/volume_density.rs",
+       "atlas_metadata_maps_local_endpoints_to_region_texel_centers",
+       "as_f32",
+       3,
+       "let last_center = first_center + report.resolution[axis].saturating_sub(1) as f32 / atlas_axis"
+      ]
+     ]
+    }
+   }
+  },
+  "nephele_side": {
+   "source_commit": "07043845956c49ef2b9556b2368626f6e0d97bc8",
+   "base_count": 1905,
+   "base_digest": "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdbe1f76cd94",
+   "files": {
+    "src/core/screen_space_effects/ssao/mod.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/core/screen_space_effects/ssao/mod.rs",
+       "install_resize",
+       "as_f32",
+       1,
+       "self.settings.proj_scale *= prepared.height as f32 / self.height as f32"
+      ],
+      [
+       "src/core/screen_space_effects/ssao/mod.rs",
+       "install_resize",
+       "as_f32",
+       2,
+       "self.settings.proj_scale *= prepared.height as f32 / self.height as f32"
+      ],
+      [
+       "src/core/screen_space_effects/ssao/mod.rs",
+       "install_resize",
+       "as_f32",
+       3,
+       "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+       "src/core/screen_space_effects/ssao/mod.rs",
+       "install_resize",
+       "as_f32",
+       4,
+       "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ]
+     ]
+    },
+    "src/core/screen_space_effects/ssgi/resize.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/core/screen_space_effects/ssgi/resize.rs",
+       "install_resize",
+       "as_f32",
+       1,
+       "self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32]"
+      ],
+      [
+       "src/core/screen_space_effects/ssgi/resize.rs",
+       "install_resize",
+       "as_f32",
+       2,
+       "self.settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32]"
+      ]
+     ]
+    },
+    "src/core/screen_space_effects/ssr/resize.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/core/screen_space_effects/ssr/resize.rs",
+       "install_resize",
+       "as_f32",
+       1,
+       "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ],
+      [
+       "src/core/screen_space_effects/ssr/resize.rs",
+       "install_resize",
+       "as_f32",
+       2,
+       "self.settings.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32]"
+      ]
+     ]
+    },
+    "src/core/shadow_mapping/system.rs": {
+     "base": [
+      [
+       "src/core/shadow_mapping/system.rs",
+       "update_cascades",
+       "as_f32",
+       1,
+       "self.cascades = generate_cascades( &self.cascade_config, self.light_direction, camera_view, camera_projection, self.config.shadow_map_size as f32, )"
+      ],
+      [
+       "src/core/shadow_mapping/system.rs",
+       "update_uniforms",
+       "as_f32",
+       1,
+       "light_direction: Vec4::new( self.light_direction.x, self.light_direction.y, self.light_direction.z, 0.0, ) .to_array(), light_view: self.light_view_matrix.to_cols_array_2d(), cascades: cascade_data, cascade_count: self.cascades.len().min(4) as u32, pcf_kernel_size: self.config.pcf_quality as u32, depth_bias: self.config.depth_bias, slope_bias: self.config.slope_bias, shadow_map_size: self.config.shadow_map_size as f32, debug_mode: self.config.debug_mode, evsm_positive_exp: 40.0, evsm_negative_exp: 5.0, peter_panning_offset: 0.001, enable_unclipped_depth: 0, depth_clip_factor: 1.0, technique: 1, technique_flags: 0, _padding1: [0.0"
+      ]
+     ],
+     "result": [
+      [
+       "src/core/shadow_mapping/system.rs",
+       "update_cascades",
+       "as_f32",
+       1,
+       "self.cascades = generate_cascades( &self.cascade_config, self.light_direction, camera_view, camera_projection, self.config.shadow_map_size as f32, )"
+      ],
+      [
+       "src/core/shadow_mapping/system.rs",
+       "update_uniforms",
+       "as_f32",
+       1,
+       "light_direction: Vec4::new( self.light_direction.x, self.light_direction.y, self.light_direction.z, 0.0, ) .to_array(), light_view: self.light_view_matrix.to_cols_array(), cascades: cascade_data, cascade_count: self.cascades.len().min(4) as u32, pcf_kernel_size: self.config.pcf_quality as u32, depth_bias: self.config.depth_bias, slope_bias: self.config.slope_bias, shadow_map_size: self.config.shadow_map_size as f32, debug_mode: self.config.debug_mode, evsm_positive_exp: 40.0, evsm_negative_exp: 5.0, peter_panning_offset: 0.001, enable_unclipped_depth: 0, depth_clip_factor: 1.0, technique: 1, technique_flags: 0, _padding1: [0.0"
+      ]
+     ]
+    },
+    "src/core/taa.rs": {
+     "base": [
+      [
+       "src/core/taa.rs",
+       "new",
+       "as_f32",
+       1,
+       "resolution: [width as f32, height as f32], ..Default::default()"
+      ],
+      [
+       "src/core/taa.rs",
+       "new",
+       "as_f32",
+       2,
+       "resolution: [width as f32, height as f32], ..Default::default()"
+      ],
+      [
+       "src/core/taa.rs",
+       "resize",
+       "as_f32",
+       1,
+       "self.settings.resolution = [width as f32, height as f32]"
+      ],
+      [
+       "src/core/taa.rs",
+       "resize",
+       "as_f32",
+       2,
+       "self.settings.resolution = [width as f32, height as f32]"
+      ]
+     ],
+     "result": [
+      [
+       "src/core/taa.rs",
+       "new",
+       "as_f32",
+       1,
+       "resolution: [width as f32, height as f32], ..Default::default()"
+      ],
+      [
+       "src/core/taa.rs",
+       "new",
+       "as_f32",
+       2,
+       "resolution: [width as f32, height as f32], ..Default::default()"
+      ],
+      [
+       "src/core/taa.rs",
+       "install_resize",
+       "as_f32",
+       1,
+       "self.settings.resolution = [self.width as f32, self.height as f32]"
+      ],
+      [
+       "src/core/taa.rs",
+       "install_resize",
+       "as_f32",
+       2,
+       "self.settings.resolution = [self.width as f32, self.height as f32]"
+      ],
+      [
+       "src/core/taa.rs",
+       "resize",
+       "as_f32",
+       1,
+       "self.settings.resolution = [width as f32, height as f32]"
+      ],
+      [
+       "src/core/taa.rs",
+       "resize",
+       "as_f32",
+       2,
+       "self.settings.resolution = [width as f32, height as f32]"
+      ]
+     ]
+    },
+    "src/core/texture_format.rs": {
+     "base": [
+      [
+       "src/core/texture_format.rs",
+       "calculate_compression_ratio",
+       "as_f32",
+       1,
+       "let rgba8_size = (w * h * 4) as f32"
+      ],
+      [
+       "src/core/texture_format.rs",
+       "calculate_compression_ratio",
+       "as_f32",
+       2,
+       "self.get_format_info(format) .map(|info| rgba8_size / info.calculate_size(w, h) as f32) .unwrap_or(1.0)"
+      ]
+     ],
+     "result": [
+      [
+       "src/core/texture_format.rs",
+       "calculate_compression_ratio",
+       "as_f32",
+       1,
+       "let rgba8_size = crate::core::texture_layout::resident_2d_size(w, h, TextureFormat::Rgba8Unorm) as f32"
+      ],
+      [
+       "src/core/texture_format.rs",
+       "calculate_compression_ratio",
+       "as_f32",
+       2,
+       "self.get_format_info(format) .map(|info| rgba8_size / info.calculate_size(w, h) as f32) .unwrap_or(1.0)"
+      ]
+     ]
+    },
+    "src/terrain/render_params/projection.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/terrain/render_params/projection.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "*target = target.min(z as f32)"
+      ]
+     ]
+    },
+    "src/terrain/render_params/py_api.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/terrain/render_params/py_api.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "projected[2] = f64::from(projected[2] as f32)"
+      ],
+      [
+       "src/terrain/render_params/py_api.rs",
+       "unproject_terrain_depth",
+       "as_f32",
+       1,
+       "uv[[row, col, 0]] = (world.x / world.w / f64::from(self.terrain_span) + 0.5) as f32"
+      ],
+      [
+       "src/terrain/render_params/py_api.rs",
+       "unproject_terrain_depth",
+       "as_f32",
+       2,
+       "uv[[row, col, 1]] = (world.y / world.w / f64::from(self.terrain_span) + 0.5) as f32"
+      ]
+     ]
+    },
+    "src/terrain/renderer/water_reflection/surface.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       1,
+       "n.map(|v| (f64::from(v) / length) as f32)"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       2,
+       "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       3,
+       "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       4,
+       "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       5,
+       "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       6,
+       "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+      ]
+     ]
+    },
+    "src/terrain/renderer/water_reflection/uniforms.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/terrain/renderer/water_reflection/uniforms.rs",
+       "with_optics",
+       "as_f32",
+       1,
+       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/uniforms.rs",
+       "with_optics",
+       "as_f32",
+       2,
+       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/uniforms.rs",
+       "with_optics",
+       "as_f32",
+       3,
+       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/uniforms.rs",
+       "with_optics",
+       "as_f32",
+       4,
+       "self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]"
+      ]
+     ]
+    },
+    "src/viewer/input/scene_picking.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/viewer/input/scene_picking.rs",
+       "collect_scene_picks",
+       "as_f32",
+       1,
+       "let label_hit = self .label_manager .pick_at(screen_pos.0 as f32, screen_pos.1 as f32) .and_then(|id| self.label_manager.get_label(id))"
+      ],
+      [
+       "src/viewer/input/scene_picking.rs",
+       "collect_scene_picks",
+       "as_f32",
+       2,
+       "let label_hit = self .label_manager .pick_at(screen_pos.0 as f32, screen_pos.1 as f32) .and_then(|id| self.label_manager.get_label(id))"
+      ]
+     ]
+    },
+    "src/viewer/input/viewer_input.rs": {
+     "base": [
+      [
+       "src/viewer/input/viewer_input.rs",
+       "pick_at_screen",
+       "as_f32",
+       1,
+       "} } if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) { if let Some(label) = self.label_manager.get_label(label_id) { let mut attributes = std::collections::HashMap::new()"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "pick_at_screen",
+       "as_f32",
+       2,
+       "} } if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) { if let Some(label) = self.label_manager.get_label(label_id) { let mut attributes = std::collections::HashMap::new()"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       1,
+       "let new_x = position.x as f32"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       2,
+       "let new_y = position.y as f32"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       3,
+       "MouseScrollDelta::LineDelta(_x, y) => *y * 3.0, MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.02,"
+      ]
+     ],
+     "result": [
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       1,
+       "let new_x = position.x as f32"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       2,
+       "let new_y = position.y as f32"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       3,
+       "MouseScrollDelta::LineDelta(_x, y) => *y * 3.0, MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.02,"
+      ]
+     ]
+    },
+    "src/viewer/sky_lighting.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/viewer/sky_lighting.rs",
+       "observe",
+       "as_f32",
+       1,
+       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+      ],
+      [
+       "src/viewer/sky_lighting.rs",
+       "observe",
+       "as_f32",
+       2,
+       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+      ],
+      [
+       "src/viewer/sky_lighting.rs",
+       "observe",
+       "as_vec",
+       1,
+       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+      ],
+      [
+       "src/viewer/sky_lighting.rs",
+       "observe",
+       "as_vec",
+       2,
+       "( night::horizontal_direction(moon.azimuth.value(), moon.altitude.value()) .as_vec3() .to_array(), night::normalized_moonlight( observation.moon_phase.phase_angle.value(), moon.altitude.value(), ), )"
+      ]
+     ]
+    },
+    "src/viewer/state/viewer_helpers/core.rs": {
+     "base": [
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "update_lit_uniform",
+       "as_f32",
+       1,
+       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "update_lit_uniform",
+       "as_f32",
+       2,
+       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "sync_astro_observation",
+       "as_f32",
+       1,
+       "let azimuth = sun.azimuth.value() as f32"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "sync_astro_observation",
+       "as_f32",
+       2,
+       "let elevation = sun.altitude.value() as f32"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "sync_astro_observation",
+       "as_vec",
+       1,
+       "self.sky_sun_direction_ws = crate::astro::night::horizontal_direction(f64::from(azimuth), f64::from(elevation)) .as_vec3() .to_array()"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "sync_astro_observation",
+       "as_vec",
+       2,
+       "self.lit_sun_direction_ws = crate::astro::night::horizontal_direction( moon.azimuth.value(), moon.altitude.value(), ) .as_vec3() .to_array()"
+      ]
+     ],
+     "result": [
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "update_lit_uniform",
+       "as_f32",
+       1,
+       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "update_lit_uniform",
+       "as_f32",
+       2,
+       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
+      ]
+     ]
+    }
+   }
+  },
+  "review": "APPROVED by Milos (2026-10-19) in the PR #172 main-sync session. Merging main into PR #172 combines two frozen inventories. Each side lists, per file, the exact ordered conversion sites before and after the merge; undoing one side restores the other branch's exact inventory and digest. No conversion is excluded and the scanner is unchanged."
  }
 }

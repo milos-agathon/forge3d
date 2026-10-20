@@ -84,9 +84,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         ViewerCmd::SetLitSun(v) => {
-            viewer.lit_sun_intensity = (*v).max(0.0);
-            viewer.update_lit_uniform();
-            viewer.sync_terrain_sun_to_lit();
+            viewer.apply_lit_sun_intensity(*v);
             true
         }
         ViewerCmd::SetLitIbl(v) => {

@@ -1926,12 +1926,10 @@ impl HybridPathTracer {
             }
             if time_this_frame {
                 timing.end(&mut enc, publish_scope, 1);
-                // Resolve on frame 0's encoder: the gbuffer scope's stamps
-                // were written on the already-submitted gbuffer encoder, so
-                // the resolved range is complete once this submit lands.
-                timing.resolve(&mut enc);
+                timing.submit(queue, enc);
+            } else {
+                queue.submit([enc.finish()]);
             }
-            queue.submit([enc.finish()]);
             frames += 1;
 
             let window_full = frames.is_multiple_of(WELFORD_WINDOW);

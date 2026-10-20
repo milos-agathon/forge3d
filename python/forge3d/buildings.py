@@ -33,11 +33,7 @@ from .diagnostics import (
 )
 
 # Try to import native module
-try:
-    from ._native import get_native_module as _get_native_module
-    _NATIVE = _get_native_module()
-except ImportError:
-    _NATIVE = None
+from ._native import get_native_symbol
 
 
 def _record_empty_geometry_degradation() -> None:
@@ -188,8 +184,9 @@ def infer_roof_type(properties: dict[str, Any]) -> str:
         roof = infer_roof_type({"building:roof:shape": "gabled"})
         assert roof == "gabled"
     """
-    if _NATIVE is not None and hasattr(_NATIVE, "infer_roof_type_py"):
-        return _NATIVE.infer_roof_type_py(json.dumps(properties))
+    native_fn = get_native_symbol("infer_roof_type_py")
+    if native_fn is not None:
+        return native_fn(json.dumps(properties))
 
     # Fallback Python implementation
     # Check explicit roof tags
@@ -242,8 +239,9 @@ def material_from_tags(tags: dict[str, Any]) -> BuildingMaterial:
         mat = material_from_tags({"building:material": "brick"})
         assert mat.albedo[0] > mat.albedo[2]  # Brick is reddish
     """
-    if _NATIVE is not None and hasattr(_NATIVE, "material_from_tags_py"):
-        result = _NATIVE.material_from_tags_py(json.dumps(tags))
+    native_fn = get_native_symbol("material_from_tags_py")
+    if native_fn is not None:
+        result = native_fn(json.dumps(tags))
         return BuildingMaterial.from_dict(result)
 
     # Fallback: return default
@@ -260,8 +258,9 @@ def material_from_name(name: str) -> BuildingMaterial:
     Returns:
         BuildingMaterial with preset PBR properties
     """
-    if _NATIVE is not None and hasattr(_NATIVE, "material_from_name_py"):
-        result = _NATIVE.material_from_name_py(name)
+    native_fn = get_native_symbol("material_from_name_py")
+    if native_fn is not None:
+        result = native_fn(name)
         return BuildingMaterial.from_dict(result)
 
     # Fallback presets
@@ -313,8 +312,9 @@ def add_buildings(
         geojson_str = f.read()
 
     # Try native implementation
-    if _NATIVE is not None and hasattr(_NATIVE, "import_osm_buildings_from_geojson_py"):
-        result = _NATIVE.import_osm_buildings_from_geojson_py(
+    native_fn = get_native_symbol("import_osm_buildings_from_geojson_py")
+    if native_fn is not None:
+        result = native_fn(
             geojson_str, default_height, height_key
         )
         # Result is a dict with positions, normals, uvs, indices
@@ -422,8 +422,9 @@ def add_buildings_cityjson(
         data = f.read()
 
     # Try native implementation
-    if _NATIVE is not None and hasattr(_NATIVE, "parse_cityjson_py"):
-        result = _NATIVE.parse_cityjson_py(data)
+    native_fn = get_native_symbol("parse_cityjson_py")
+    if native_fn is not None:
+        result = native_fn(data)
 
         meta = result.get("metadata", {})
         crs_epsg = meta.get("crs_epsg")

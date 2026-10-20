@@ -20,6 +20,9 @@ EXPECTED_ANCHOR_INVENTORY = {
     ("src/scene/core/constructor.rs", "new_impl", "constructor", 1),
     ("src/scene/mod.rs", "<module>", "storage", 1),
     ("src/scene/py_api/base.rs", "set_camera_look_at", "rebase_call", 1),
+    ("src/splat/load.rs", "read_chunk", "constructor", 1),
+    ("src/splat/stream.rs", "anchor", "constructor", 1),
+    ("src/splat/stream.rs", "anchor", "rebase_call", 1),
     ("src/terrain/clipmap/globe.rs", "<module>", "storage", 1),
     ("src/terrain/clipmap/globe.rs", "anchor_at", "constructor", 1),
     ("src/terrain/clipmap/globe.rs", "anchor_at", "rebase_call", 1),
@@ -64,6 +67,14 @@ LOCAL_NON_VIEWER_JUSTIFICATIONS = {
     ("src/py_types/pointcloud.rs", "create_gpu_buffer"): "caller-supplied standalone point-buffer anchor",
     ("src/scene/core/constructor.rs", "new_impl"): "offscreen Scene owns its separate signed ABI",
     ("src/scene/mod.rs", "<module>"): "offscreen Scene persistent anchor",
+    (
+        "src/splat/load.rs",
+        "read_chunk",
+    ): "3DGS PLY reader narrows positions through a zero-origin scene anchor",
+    (
+        "src/splat/stream.rs",
+        "anchor",
+    ): "COPC/LiDAR frame owns its caller-supplied georeferenced origin",
     (
         "src/terrain/clipmap/globe.rs",
         "<module>",

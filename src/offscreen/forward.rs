@@ -428,9 +428,10 @@ pub fn render_forward_hdr_recorded<R: ForwardRecorder + ?Sized>(
                         encode_forward_recorded(&mut encoder, targets, clear, draws);
                         if let Some((t, _)) = timing.as_mut() {
                             t.end(&mut encoder, timing_scope, draws.len() as u32);
-                            t.resolve(&mut encoder);
+                            t.submit(queue, encoder);
+                        } else {
+                            queue.submit(std::iter::once(encoder.finish()));
                         }
-                        queue.submit(std::iter::once(encoder.finish()));
                         let pixels = crate::core::hdr::read_hdr_texture(
                             device,
                             queue,
@@ -494,9 +495,10 @@ pub fn render_forward_hdr_recorded<R: ForwardRecorder + ?Sized>(
     })?;
     if let Some((t, _)) = timing.as_mut() {
         t.end(&mut encoder, timing_scope, draws.len() as u32);
-        t.resolve(&mut encoder);
+        t.submit(queue, encoder);
+    } else {
+        queue.submit(std::iter::once(encoder.finish()));
     }
-    queue.submit(std::iter::once(encoder.finish()));
     let result = graph.execute_with_barriers("offscreen.readback", |barriers| {
         if barriers.is_empty() {
             return Err(RenderError::Render(

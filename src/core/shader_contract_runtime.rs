@@ -40,6 +40,8 @@ pub(crate) struct RuntimeContractObservation {
     pub contract: String,
     pub checked_bindings: Vec<RuntimeBindingCheck>,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclusion_reason: Option<String>,
 }
 
 impl RuntimeContractObservation {
@@ -60,6 +62,7 @@ impl RuntimeContractObservation {
             contract: contract.to_string(),
             checked_bindings: Vec::new(),
             status: "passed".to_string(),
+            exclusion_reason: None,
         }
     }
 
@@ -134,8 +137,31 @@ impl RuntimeContractObservation {
         });
     }
 
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn exclude_input(&mut self, name: &str, binding: u32, value: f32, reason: &str) {
+        // Exclusion is a proof-domain result, never a waiver of failed safety checks.
         if self.status == "passed" {
+            self.status = "excluded".to_string();
+        }
+        self.exclusion_reason = Some(match self.exclusion_reason.take() {
+            Some(previous) => format!("{previous}; {reason}"),
+            None => reason.to_string(),
+        });
+        self.checked_bindings.push(RuntimeBindingCheck {
+            name: name.to_string(),
+            kind: "proof_domain".to_string(),
+            binding: Some(binding),
+            observed_min: Some(value),
+            observed_max: Some(value),
+            allowed_min: Some(0.0),
+            allowed_max: Some(0.0),
+            length: None,
+            status: "excluded".to_string(),
+            alarm: None,
+        });
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.status == "passed" || self.status == "excluded" {
             return Ok(());
         }
         Err(self
@@ -197,6 +223,20 @@ pub(crate) fn last_observations() -> Vec<RuntimeContractObservation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excluded_domain_is_nonfatal_but_never_hides_safety_failure() {
+        let mut observation = RuntimeContractObservation::new(
+            "scene", "pipeline", "module", "path", "entry", "contract",
+        );
+        observation.exclude_input("water.optics.x", 0, 1.0, "physical optics unproven");
+        assert_eq!(observation.status, "excluded");
+        assert!(observation.validate().is_ok());
+        observation.check_range("uniform", "water.color", Some(0), -1.0, 1.0, 0.0, 1.0);
+        observation.exclude_input("water.optics.x", 0, 1.0, "physical optics unproven");
+        assert_eq!(observation.status, "failed");
+        assert!(observation.validate().is_err());
+    }
 
     #[test]
     fn failed_range_marks_observation_failed() {

@@ -229,3 +229,34 @@ def test_nvidia_vulkan_terrain_constructor_child_smoke() -> None:
         f"exit={result.returncode} ({exit_hex}) stdout={result.stdout!r} "
         f"stderr={result.stderr!r}"
     )
+
+
+@pytest.mark.parametrize("host, actions, override, expected", [
+    ("Windows", "true", None, True),
+    ("Windows", "true", "1", False),
+    ("Windows", "false", None, False),
+    ("Linux", "true", None, False),
+])
+def test_globe_constructor_marks_follow_hosted_windows_policy(monkeypatch, host, actions, override, expected):
+    import runpy
+    from pathlib import Path
+
+    monkeypatch.setenv("GITHUB_ACTIONS", actions)
+    monkeypatch.setattr(terrain_runtime.platform, "system", lambda: host)
+    monkeypatch.delenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", raising=False)
+    if override is not None:
+        monkeypatch.setenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", override)
+    module = runpy.run_path(str(Path(__file__).with_name("test_globe_floating_origin.py")))
+    for name in (
+        "test_snapshot_and_metrics_fail_closed_before_descent",
+        "test_constructor_accepts_declared_pathlike_source",
+        "test_failed_later_overview_seed_leaves_scene_state_unchanged",
+        "test_custom_waypoints_are_validated_before_render",
+        "test_entire_custom_path_is_validated_before_any_render",
+        "test_extreme_altitude_rejects_without_mutating_scene",
+        "test_oblique_camera_distance_is_bounded_before_render",
+    ):
+        marks = module[name].pytestmark
+        skip = next(mark for mark in marks if mark.name == "skipif")
+        assert skip.args == (expected,)
+        assert any(mark.name == "offscreen" for mark in marks)

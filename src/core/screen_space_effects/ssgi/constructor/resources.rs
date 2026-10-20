@@ -25,33 +25,93 @@ pub(super) fn create_textures(
     width: u32,
     height: u32,
     material_format: TextureFormat,
+    half_res: bool,
 ) -> RenderResult<ConstructorResources> {
+    let viewport = create_viewport_textures(device, width, height, material_format, half_res)?;
+    let env_texture = tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some("ssgi_env_cube"),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+    )?;
+    let env_view = env_texture.create_view(&TextureViewDescriptor {
+        label: Some("ssgi_env_cube_view"),
+        format: Some(TextureFormat::Rgba8Unorm),
+        dimension: Some(TextureViewDimension::Cube),
+        aspect: TextureAspect::All,
+        base_mip_level: 0,
+        mip_level_count: None,
+        base_array_layer: 0,
+        array_layer_count: None,
+    });
+
+    Ok(ConstructorResources {
+        viewport,
+        env_texture,
+        env_view,
+        env_sampler: device.create_sampler(&SamplerDescriptor::default()),
+        linear_sampler: device.create_sampler(&SamplerDescriptor {
+            label: Some("ssgi.linear.sampler"),
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            ..Default::default()
+        }),
+    })
+}
+
+pub(in super::super) fn create_viewport_textures(
+    device: &Device,
+    width: u32,
+    height: u32,
+    material_format: TextureFormat,
+    half_res: bool,
+) -> RenderResult<ViewportTextures> {
+    let (trace_width, trace_height) = if half_res {
+        ((width / 2).max(1), (height / 2).max(1))
+    } else {
+        (width, height)
+    };
     let (ssgi_hit, ssgi_hit_view) = rgba16_texture(
         device,
         "ssgi_hit",
-        width,
-        height,
+        trace_width,
+        trace_height,
         TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
     )?;
     let (ssgi_texture, ssgi_view) = rgba16_texture(
         device,
         "ssgi_texture",
-        width,
-        height,
+        trace_width,
+        trace_height,
         TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
     )?;
     let (ssgi_history, ssgi_history_view) = rgba16_texture(
         device,
         "ssgi_history",
-        width,
-        height,
+        trace_width,
+        trace_height,
         TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC,
     )?;
     let (ssgi_filtered, ssgi_filtered_view) = rgba16_texture(
         device,
         "ssgi_filtered",
-        width,
-        height,
+        trace_width,
+        trace_height,
         TextureUsages::STORAGE_BINDING
             | TextureUsages::TEXTURE_BINDING
             | TextureUsages::COPY_SRC
@@ -92,35 +152,7 @@ pub(super) fn create_textures(
         scene_history[1].create_view(&TextureViewDescriptor::default()),
     ];
 
-    let env_texture = tracked_create_texture(
-        device,
-        &TextureDescriptor {
-            label: Some("ssgi_env_cube"),
-            size: Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 6,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        },
-    )?;
-    let env_view = env_texture.create_view(&TextureViewDescriptor {
-        label: Some("ssgi_env_cube_view"),
-        format: Some(TextureFormat::Rgba8Unorm),
-        dimension: Some(TextureViewDimension::Cube),
-        aspect: TextureAspect::All,
-        base_mip_level: 0,
-        mip_level_count: None,
-        base_array_layer: 0,
-        array_layer_count: None,
-    });
-
-    Ok(ConstructorResources {
+    Ok(ViewportTextures {
         ssgi_hit,
         ssgi_hit_view,
         ssgi_texture,
@@ -135,19 +167,6 @@ pub(super) fn create_textures(
         ssgi_composited_view,
         scene_history,
         scene_history_views,
-        env_texture,
-        env_view,
-        env_sampler: device.create_sampler(&SamplerDescriptor::default()),
-        linear_sampler: device.create_sampler(&SamplerDescriptor {
-            label: Some("ssgi.linear.sampler"),
-            mag_filter: FilterMode::Linear,
-            min_filter: FilterMode::Linear,
-            mipmap_filter: FilterMode::Linear,
-            address_mode_u: AddressMode::ClampToEdge,
-            address_mode_v: AddressMode::ClampToEdge,
-            address_mode_w: AddressMode::ClampToEdge,
-            ..Default::default()
-        }),
     })
 }
 

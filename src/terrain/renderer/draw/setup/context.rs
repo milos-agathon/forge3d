@@ -15,6 +15,7 @@ pub(in crate::terrain::renderer) struct UploadedHeightInputs {
     pub(in crate::terrain::renderer) heightmap_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) _water_mask_texture: Option<Arc<TrackedTexture>>,
     pub(in crate::terrain::renderer) water_mask_view_uploaded: Option<wgpu::TextureView>,
+    pub(in crate::terrain::renderer) water_mask_max: f32,
 }
 
 pub(in crate::terrain::renderer) struct MaterialMapResources {
@@ -22,6 +23,8 @@ pub(in crate::terrain::renderer) struct MaterialMapResources {
     normal_view: wgpu::TextureView,
     _roughness_texture: TrackedTexture,
     roughness_view: wgpu::TextureView,
+    _albedo_texture: TrackedTexture,
+    albedo_view: wgpu::TextureView,
     _mask_texture: TrackedTexture,
     mask_view: wgpu::TextureView,
     sampler: wgpu::Sampler,
@@ -37,6 +40,8 @@ pub(in crate::terrain::renderer) struct PreparedMaterials {
     pub(in crate::terrain::renderer) fallback_colormap_view: Option<wgpu::TextureView>,
     pub(in crate::terrain::renderer) material_maps: MaterialMapResources,
     pub(in crate::terrain::renderer) terrain_trace_albedo: [f32; 3],
+    _detail_normal_texture: Option<TrackedTexture>,
+    pub(in crate::terrain::renderer) detail_normal_view: Option<wgpu::TextureView>,
 }
 
 impl PreparedMaterials {
@@ -72,6 +77,10 @@ impl PreparedMaterials {
         &self.material_maps.roughness_view
     }
 
+    pub(in crate::terrain::renderer) fn material_albedo_view(&self) -> &wgpu::TextureView {
+        &self.material_maps.albedo_view
+    }
+
     pub(in crate::terrain::renderer) fn material_mask_view(&self) -> &wgpu::TextureView {
         &self.material_maps.mask_view
     }
@@ -86,16 +95,64 @@ impl TerrainScene {
         &mut self,
         heightmap: PyReadonlyArray2<f32>,
         water_mask: Option<PyReadonlyArray2<f32>>,
-        terrain_data_revision: Option<u64>,
+        params: &crate::terrain::render_params::TerrainRenderParams,
     ) -> Result<UploadedHeightInputs> {
         let heightmap_array = heightmap.as_array();
+        if params.water_optics.physical
+            && water_mask.is_some()
+            && !is_mesh_camera_mode(&params.camera_mode)
+        {
+            return Err(anyhow!(
+                "physical water optics currently requires a mesh camera"
+            ));
+        }
+        if params.water_optics.physical {
+            if let Some(mask) = water_mask.as_ref() {
+                let mask_array = mask.as_array();
+                if mask_array.shape() != heightmap_array.shape()
+                    || mask_array
+                        .iter()
+                        .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+                {
+                    return Err(anyhow!(
+                        "physical water mask must be finite, in [0, 1], and match heightmap"
+                    ));
+                }
+            }
+        }
         let (height, width) = (heightmap_array.shape()[0], heightmap_array.shape()[1]);
         if width == 0 || height == 0 {
             return Err(anyhow!("Heightmap dimensions must be > 0"));
         }
+        if params.water_optics.physical {
+            for (name, shape) in [
+                (
+                    "height",
+                    params
+                        .water_optics
+                        .surface_height
+                        .as_ref()
+                        .map(|r| (r.len(), r[0].len())),
+                ),
+                (
+                    "normals",
+                    params
+                        .water_optics
+                        .surface_normals
+                        .as_ref()
+                        .map(|r| (r.len(), r[0].len())),
+                ),
+            ] {
+                if shape.is_some_and(|s| s != (height, width)) {
+                    return Err(anyhow!(
+                        "water {name} grid must match heightmap ({height}, {width})"
+                    ));
+                }
+            }
+        }
 
         let mut heightmap_data = Vec::with_capacity(width * height);
-        let terrain_data_hash = if let Some(revision) = terrain_data_revision {
+        let terrain_data_hash = if let Some(revision) = params.terrain_data_revision {
             // Caller-managed revisions let probe preparation skip per-sample hashing.
             for value in heightmap_array.iter() {
                 heightmap_data.push(*value);
@@ -120,8 +177,16 @@ impl TerrainScene {
             &heightmap_data,
         )?);
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.compute_coarse_ao_from_heightmap(width as u32, height as u32, &heightmap_data)?;
+        if self.coarse_ao_required(params) {
+            self.compute_coarse_ao_from_heightmap(width as u32, height as u32, &heightmap_data)?;
+        } else {
+            // Release a previous render's AO rather than retaining stale samples.
+            // The existing white fallback remains bound when coarse AO is unused.
+            self.coarse_ao_view = None;
+            self.coarse_ao_texture = None;
+        }
 
+        let mut water_mask_max = 0.0;
         let (water_mask_texture, water_mask_view_uploaded) = if let Some(mask) = water_mask {
             let mask_array = mask.as_array();
             if mask_array.shape() == heightmap_array.shape() {
@@ -145,8 +210,15 @@ impl TerrainScene {
                     100.0 * water_count as f64 / (width * height) as f64,
                     has_gradient
                 );
-                let tex =
-                    self.upload_water_mask_texture(width as u32, height as u32, &mask_bytes)?;
+                let tex = if params.water_optics.physical {
+                    let mask_values: Vec<f32> =
+                        mask_bytes.iter().map(|v| f32::from(*v) / 255.0).collect();
+                    self.upload_water_surface(width as u32, height as u32, params, &mask_values)?
+                        .0
+                } else {
+                    self.upload_water_mask_texture(width as u32, height as u32, &mask_bytes)?
+                };
+                water_mask_max = f32::from(mask_bytes.iter().copied().max().unwrap_or(0)) / 255.0;
                 let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
                 (Some(Arc::new(tex)), Some(view))
             } else {
@@ -171,6 +243,7 @@ impl TerrainScene {
             heightmap_view,
             _water_mask_texture: water_mask_texture,
             water_mask_view_uploaded,
+            water_mask_max,
         })
     }
 
@@ -190,6 +263,22 @@ impl TerrainScene {
             PyRuntimeError::new_err(format!("Failed to prepare material textures: {err:#}"))
         })?;
         let material_maps = self.prepare_material_map_resources(&decoded.materials)?;
+        let detail_map = if decoded.detail.enabled && decoded.detail.detail_strength > 0.0 {
+            Some(
+                self.upload_material_map_texture(
+                    decoded.detail.detail_normal_path.as_deref(),
+                    [128, 128, 255, 255],
+                    "terrain.detail_normal",
+                )
+                .map_err(|err| anyhow!("detail_normal_path: {err:#}"))?,
+            )
+        } else {
+            None
+        };
+        let (detail_normal_texture, detail_normal_view) = match detail_map {
+            Some((texture, view)) => (Some(texture), Some(view)),
+            None => (None, None),
+        };
 
         let shading_uniforms =
             self.build_shading_uniforms(material_set, gpu_materials.as_ref(), params, decoded)?;
@@ -251,6 +340,8 @@ impl TerrainScene {
                         material.base_color[2],
                     ]
                 }),
+            _detail_normal_texture: detail_normal_texture,
+            detail_normal_view,
         })
     }
 
@@ -258,6 +349,11 @@ impl TerrainScene {
         &self,
         materials: &crate::terrain::render_params::MaterialLayerSettingsNative,
     ) -> Result<MaterialMapResources> {
+        let (albedo_texture, albedo_view) = self.upload_material_map_texture(
+            materials.albedo_path.as_deref(),
+            [0, 0, 0, 0],
+            "terrain.material_maps.albedo",
+        )?;
         let (normal_texture, normal_view) = self.upload_material_map_texture(
             materials.normal_path.as_deref(),
             [128, 128, 255, 255],
@@ -284,6 +380,8 @@ impl TerrainScene {
             ..Default::default()
         });
         Ok(MaterialMapResources {
+            _albedo_texture: albedo_texture,
+            albedo_view,
             _normal_texture: normal_texture,
             normal_view,
             _roughness_texture: roughness_texture,

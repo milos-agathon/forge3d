@@ -63,7 +63,7 @@ impl Viewer {
             pass.set_bind_group(1, &cache.camera_bind_group, &[]);
             pass.dispatch_workgroups((width + 7) / 8, (height + 7) / 8, 1);
         }
-        if self.night_instance_count > 0 {
+        if self.sky_lighting.night_instance_count() > 0 {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewer.night.snapshot.overlay"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -81,7 +81,7 @@ impl Viewer {
             pass.set_pipeline(&self.night_pipeline);
             pass.set_bind_group(0, &self.night_bind_group, &[]);
             pass.set_bind_group(1, &cache.camera_bind_group, &[]);
-            pass.draw(0..6, 0..self.night_instance_count);
+            pass.draw(0..6, 0..self.sky_lighting.night_instance_count());
         }
         true
     }

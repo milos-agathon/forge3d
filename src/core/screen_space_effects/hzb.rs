@@ -17,6 +17,13 @@ pub struct HzbPyramid {
     pipe_down: ComputePipeline,
 }
 
+pub(crate) struct PreparedHzbTargets {
+    tex: TrackedTexture,
+    mip_count: u32,
+    width: u32,
+    height: u32,
+}
+
 impl HzbPyramid {
     pub(crate) fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
         Self::new_with_copy_entry(device, width, height, "cs_copy")
@@ -26,14 +33,28 @@ impl HzbPyramid {
         Self::new_with_copy_entry(device, width, height, "cs_copy_max_reduce")
     }
 
-    fn new_with_copy_entry(
+    pub(crate) fn prepare_resize(
+        &self,
         device: &Device,
         width: u32,
         height: u32,
-        copy_entry: &str,
-    ) -> RenderResult<Self> {
-        use crate::core::mipmap::calculate_mip_levels;
-        let mip_count = calculate_mip_levels(width, height).max(1);
+    ) -> RenderResult<PreparedHzbTargets> {
+        Self::allocate_targets(device, width, height)
+    }
+
+    pub(crate) fn install_resize(&mut self, prepared: PreparedHzbTargets) {
+        self.tex = prepared.tex;
+        self.mip_count = prepared.mip_count;
+        self.width = prepared.width;
+        self.height = prepared.height;
+    }
+
+    fn allocate_targets(
+        device: &Device,
+        width: u32,
+        height: u32,
+    ) -> RenderResult<PreparedHzbTargets> {
+        let mip_count = crate::core::mipmap::calculate_mip_levels(width, height).max(1);
         let tex = tracked_create_texture(
             device,
             &TextureDescriptor {
@@ -53,6 +74,22 @@ impl HzbPyramid {
                 view_formats: &[],
             },
         )?;
+        Ok(PreparedHzbTargets {
+            tex,
+            mip_count,
+            width,
+            height,
+        })
+    }
+
+    fn new_with_copy_entry(
+        device: &Device,
+        width: u32,
+        height: u32,
+        copy_entry: &str,
+    ) -> RenderResult<Self> {
+        let PreparedHzbTargets { tex, mip_count, .. } =
+            Self::allocate_targets(device, width, height)?;
 
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,

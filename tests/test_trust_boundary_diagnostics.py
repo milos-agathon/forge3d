@@ -63,7 +63,7 @@ def test_load_native_records_root_cause(monkeypatch):
 
 def test_missing_native_symbol_message_includes_root_cause(monkeypatch):
     boom = ImportError("DLL load failed: The specified module could not be found")
-    monkeypatch.setattr(f3d, "_NATIVE_MODULE", None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     monkeypatch.setattr(native_mod, "NATIVE_IMPORT_ERROR", boom)
 
     with pytest.raises(AttributeError) as excinfo:
@@ -76,7 +76,7 @@ def test_missing_native_symbol_message_includes_root_cause(monkeypatch):
 
 
 def test_missing_native_symbol_without_cause_mentions_not_built(monkeypatch):
-    monkeypatch.setattr(f3d, "_NATIVE_MODULE", None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     monkeypatch.setattr(native_mod, "NATIVE_IMPORT_ERROR", None)
 
     with pytest.raises(AttributeError, match="is not built"):
@@ -87,7 +87,7 @@ def test_feature_gated_symbol_message_mentions_cargo_feature(monkeypatch):
     class _FakeNative:
         pass  # deliberately lacks every symbol
 
-    monkeypatch.setattr(f3d, "_NATIVE_MODULE", _FakeNative())
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", _FakeNative())
 
     with pytest.raises(AttributeError) as excinfo:
         f3d.__getattr__("copc_read_node_points")
@@ -104,7 +104,7 @@ def test_unknown_attribute_still_plain_attribute_error():
 
 def test_hasattr_probe_stays_false_not_raising(monkeypatch):
     """hasattr() probes across the repo must keep returning False, not raise."""
-    monkeypatch.setattr(f3d, "_NATIVE_MODULE", None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     monkeypatch.setattr(native_mod, "NATIVE_IMPORT_ERROR", None)
     monkeypatch.delitem(f3d.__dict__, "Scene", raising=False)
     assert hasattr(f3d, "Scene") is False
@@ -122,7 +122,7 @@ def _assert_diagnostic_fields(probe: dict, expected_status: str) -> None:
 
 
 def test_device_probe_native_missing(monkeypatch):
-    monkeypatch.setattr(gpu_mod, "get_native_module", lambda: None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     probe = gpu_mod.device_probe()
     _assert_diagnostic_fields(probe, "native_missing")
     assert "maturin develop" in probe["remediation"]
@@ -130,7 +130,7 @@ def test_device_probe_native_missing(monkeypatch):
 
 def test_device_probe_native_missing_preserves_import_error(monkeypatch):
     boom = ImportError("simulated missing DLL")
-    monkeypatch.setattr(gpu_mod, "get_native_module", lambda: None)
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", None)
     monkeypatch.setattr(native_mod, "NATIVE_IMPORT_ERROR", boom)
     probe = gpu_mod.device_probe()
     _assert_diagnostic_fields(probe, "native_missing")
@@ -144,9 +144,8 @@ def test_device_probe_probe_error(monkeypatch):
             raise RuntimeError("simulated driver crash")
 
         enumerate_adapters = None
-        get_device = None
 
-    monkeypatch.setattr(gpu_mod, "get_native_module", lambda: _BrokenNative())
+    monkeypatch.setattr(native_mod, "NATIVE_MODULE", _BrokenNative())
     probe = gpu_mod.device_probe()
     _assert_diagnostic_fields(probe, "probe_error")
     assert "simulated driver crash" in probe["reason"]
@@ -238,3 +237,55 @@ def test_engine_info_reports_fallback_honesty():
     assert "software_fallback" in info
     assert isinstance(info["software_fallback"], bool)
     assert "device_type" in info
+
+
+# ---------------------------------------------------------------------------
+# No fabricated device: the GPU surface reports probes, not a fake object
+# ---------------------------------------------------------------------------
+
+
+def test_public_package_exposes_no_fabricated_device():
+    """`get_device()` always returned a fake CPU device; it must not return."""
+    assert "get_device" not in f3d.__all__
+    assert not hasattr(f3d, "get_device")
+    assert not hasattr(gpu_mod, "get_device")
+    assert not hasattr(gpu_mod, "MockDevice")
+    assert not hasattr(gpu_mod, "MockVirtualTexture")
+
+
+@pytest.mark.skipif(not NATIVE_AVAILABLE, reason="native extension not available")
+def test_native_module_never_had_a_get_device_symbol():
+    """The retired probe targeted a symbol that does not exist; lock that fact."""
+    assert not hasattr(native_mod.get_native_module(), "get_device")
+
+
+def test_gpu_surface_still_reports_real_probes():
+    probe = f3d.device_probe()
+    assert isinstance(probe, dict) and "status" in probe
+    assert isinstance(f3d.enumerate_adapters(), list)
+    assert isinstance(f3d.has_gpu(), bool)
+
+
+# ---------------------------------------------------------------------------
+# DEMData keeps no dangling GPU promise
+# ---------------------------------------------------------------------------
+
+
+def test_io_dem_surface_has_no_broken_gpu_upload():
+    from dataclasses import fields
+
+    from forge3d import io as io_mod
+
+    assert not hasattr(io_mod, "upload_dem_to_gpu")
+    assert "texture_view" not in {field.name for field in fields(io_mod.DEMData)}
+
+
+def test_load_dem_from_array_still_loads():
+    import numpy as np
+
+    from forge3d import io as io_mod
+
+    dem = io_mod.load_dem_from_array(np.arange(16, dtype=np.float32).reshape(4, 4))
+    assert dem.data.shape == (4, 4)
+    assert dem.domain[1] > dem.domain[0]
+

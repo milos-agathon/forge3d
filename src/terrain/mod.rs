@@ -65,7 +65,7 @@ pub use accumulation::{frame_seed, AccumulationBuffer, AccumulationConfig, Jitte
 
 pub(crate) mod camera_mode;
 pub mod frame_compiler;
-pub use frame_compiler::{CompiledFrame, FrameCompiler, FrozenLabelSet, LABEL_FADE_FRAMES};
+pub use frame_compiler::{CompiledFrame, FrameCompiler, FrozenLabelSet, DEFAULT_LABEL_FADE_FRAMES};
 
 // M2: Bloom post-processing for terrain offline rendering
 pub mod bloom_processor;

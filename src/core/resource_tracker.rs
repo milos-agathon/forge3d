@@ -935,6 +935,33 @@ pub fn tracked_create_buffer_init(
     })
 }
 
+#[cfg(all(test, windows))]
+thread_local! {
+    static TEXTURE_FAILURE: std::cell::RefCell<(Option<&'static str>, usize)> = const { std::cell::RefCell::new((None, 0)) };
+}
+
+/// Thread-local fault injection at the actual tracked allocation boundary.
+#[cfg(all(test, windows))]
+pub(crate) struct TextureAllocationFailure((Option<&'static str>, usize));
+
+#[cfg(all(test, windows))]
+impl TextureAllocationFailure {
+    pub(crate) fn for_label(label: &'static str) -> Self {
+        Self(TEXTURE_FAILURE.with(|state| state.replace((Some(label), 0))))
+    }
+
+    pub(crate) fn attempts(&self) -> usize {
+        TEXTURE_FAILURE.with(|state| state.borrow().1)
+    }
+}
+
+#[cfg(all(test, windows))]
+impl Drop for TextureAllocationFailure {
+    fn drop(&mut self) {
+        TEXTURE_FAILURE.with(|state| state.replace(self.0));
+    }
+}
+
 /// Create a texture and record it in the registry + allocation ledger.
 ///
 /// Textures are device-local; the 512 MiB host-visible budget does not apply,
@@ -944,6 +971,17 @@ pub fn tracked_create_texture(
     device: &wgpu::Device,
     desc: &TextureDescriptor<'_>,
 ) -> Result<TrackedTexture, RenderError> {
+    #[cfg(all(test, windows))]
+    if TEXTURE_FAILURE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.1 += 1;
+        state.0.is_some() && state.0 == desc.label
+    }) {
+        return Err(RenderError::Budget(format!(
+            "injected texture failure: {:?}",
+            desc.label
+        )));
+    }
     let call_site = caller_site!();
     let label = desc
         .label
@@ -958,31 +996,10 @@ pub fn tracked_create_texture(
     })
 }
 
-/// Exact byte size of every subresource described by a texture descriptor.
+/// Resident accounting estimate for every mip, layer/depth slice and sample.
+/// Excludes transfer-row padding and implementation-specific driver overhead.
 pub fn calculate_texture_descriptor_size(desc: &TextureDescriptor<'_>) -> u64 {
-    let (block_width, block_height) = desc.format.block_dimensions();
-    let bytes_per_block = desc
-        .format
-        .block_copy_size(None)
-        .map(u64::from)
-        .unwrap_or_else(|| calculate_texture_size(block_width, block_height, desc.format));
-    let mut total = 0u64;
-    for mip in 0..desc.mip_level_count {
-        let width = (desc.size.width >> mip).max(1);
-        let height = match desc.dimension {
-            wgpu::TextureDimension::D1 => 1,
-            _ => (desc.size.height >> mip).max(1),
-        };
-        let layers_or_depth = match desc.dimension {
-            wgpu::TextureDimension::D3 => (desc.size.depth_or_array_layers >> mip).max(1),
-            _ => desc.size.depth_or_array_layers,
-        };
-        let blocks = u64::from(width.div_ceil(block_width))
-            .saturating_mul(u64::from(height.div_ceil(block_height)))
-            .saturating_mul(u64::from(layers_or_depth));
-        total = total.saturating_add(blocks.saturating_mul(bytes_per_block));
-    }
-    total.saturating_mul(u64::from(desc.sample_count))
+    crate::core::texture_layout::resident_descriptor_size(desc)
 }
 
 #[cfg(test)]

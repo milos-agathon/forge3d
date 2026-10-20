@@ -23,6 +23,7 @@ import pytest
 
 import forge3d as f3d
 import forge3d.map_scene as map_scene
+import forge3d._map_scene_compiler as scene_compiler
 from forge3d import recipe_manifest as rm
 from forge3d._map_scene_validation import (
     classify_layer,
@@ -31,7 +32,10 @@ from forge3d._map_scene_validation import (
 )
 
 from _sutura_recipes import RECIPE_NAMES, _write_raster_overlay, build_scene
-from _terrain_runtime import terrain_rendering_available
+from _terrain_runtime import (
+    _running_on_unsupported_hosted_windows_ci,
+    terrain_rendering_available,
+)
 
 PACKAGE_ROOT = Path(f3d.__file__).resolve().parent
 
@@ -192,6 +196,338 @@ def test_bundle_roundtrip_bitexact(tmp_path):
     assert rm.manifest_to_json(rm.manifest_from_dict(rm.manifest_to_dict(compiled.manifest))) == text
 
 
+@pytest.mark.parametrize("validate_first", [False, True])
+def test_validation_preserves_compiled_decisions_and_attached_frame(
+    tmp_path, monkeypatch, validate_first
+):
+    from dataclasses import replace
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    if validate_first:
+        scene.validate()
+    compiled = replace(scene.compile_plan(), frame=object())
+    scene.compiled_plan = compiled
+    frozen = rm.manifest_to_json(compiled.manifest)
+
+    def unexpected_planning(*_args, **_kwargs):
+        pytest.fail("validation of an unchanged compiled recipe must reuse frozen labels")
+
+    monkeypatch.setattr(scene_compiler, "_label_plan_from_layer", unexpected_planning)
+    report = scene.validate()
+
+    assert scene.compiled_plan is compiled
+    assert scene._compiled_plan_for_current_recipe() is compiled
+    assert scene.last_validation_report is report
+    assert _report_bytes(report) == _report_bytes(compiled.validation_report)
+    assert rm.manifest_to_json(scene.compiled_plan.manifest) == frozen
+
+
+def test_restored_plan_validation_and_save_never_replan(tmp_path, monkeypatch):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    scene.save_bundle(tmp_path / "original")
+    original_path = Path(scene.last_bundle_path) / "scene" / "compiled_plan.json"
+    frozen_bytes = original_path.read_bytes()
+    frozen_labels = scene.compiled_label_plans["labels"].to_dict()
+
+    def unexpected_planning(*_args, **_kwargs):
+        pytest.fail("persisted-plan restoration and validation must not freshly plan labels")
+
+    monkeypatch.setattr(scene_compiler, "_label_plan_from_layer", unexpected_planning)
+    loaded = f3d.MapScene.load_bundle(Path(scene.last_bundle_path))
+    restored = loaded.compiled_plan
+    report = loaded.validate()
+    assert loaded.compiled_plan is restored
+    assert loaded.compiled_label_plans["labels"].to_dict() == frozen_labels
+    assert _report_bytes(report) == _report_bytes(restored.validation_report)
+    loaded.save_bundle(tmp_path / "restored")
+    saved_path = Path(loaded.last_bundle_path) / "scene" / "compiled_plan.json"
+    assert saved_path.read_bytes() == frozen_bytes
+
+
+def test_validate_invalidates_plan_after_recipe_mutation(tmp_path):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    original = scene.compile_plan()
+    scene.recipe.layers = ()
+    report = scene.validate()
+
+    assert scene.compiled_plan is None
+    assert scene.compiled_label_plans == {}
+    current = scene._compiled_plan_for_current_recipe()
+    assert current.recipe_hash != original.recipe_hash
+    assert current.recipe_hash == map_scene._stable_hash(scene.recipe.to_dict())
+    assert current.label_plans == {}
+    assert _report_bytes(current.validation_report) == _report_bytes(report)
+
+
+def test_restoration_rejects_missing_frozen_labels_without_publishing(tmp_path):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    compiled = scene.compile_plan()
+    manifest = rm.manifest_from_json(rm.manifest_to_json(compiled.manifest))
+    manifest.compiled_label_plans = {}
+
+    with pytest.raises(ValueError, match="Compiled plan missing label layer 'labels'"):
+        scene._rehydrate_compiled_plan(manifest)
+    assert scene.compiled_plan is compiled
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_mutable_label_inspection_view_cannot_change_frozen_plan(tmp_path, restore):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    compiled = scene.compile_plan()
+    if restore:
+        compiled = scene._rehydrate_compiled_plan(
+            rm.manifest_from_json(rm.manifest_to_json(compiled.manifest))
+        )
+    frozen = compiled.label_plans["labels"].to_dict()
+    scene.compiled_label_plans["labels"].accepted.clear()
+    scene.compiled_label_plans = {}
+
+    assert scene._compiled_plan_for_current_recipe() is compiled
+    assert compiled.label_plans["labels"].to_dict() == frozen
+    scene.validate()
+    assert scene.compiled_label_plans["labels"].to_dict() == frozen
+
+
+def test_failed_compilation_does_not_publish_partial_state(tmp_path, monkeypatch):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    compiled = scene.compile_plan()
+    report = scene.last_validation_report
+    labels = scene.compiled_label_plans
+    scene.recipe.camera.azimuth_deg += 1.0
+
+    def failed_validation(*_args, **_kwargs):
+        raise ValueError("label validation failed")
+
+    monkeypatch.setattr(scene_compiler, "_atlas_glyph_set", failed_validation)
+    with pytest.raises(ValueError, match="label validation failed"):
+        scene.compile_plan()
+    assert scene.compiled_plan is compiled
+    assert scene.last_validation_report is report
+    assert scene.compiled_label_plans is labels
+    with pytest.raises(ValueError, match="label validation failed"):
+        scene._compiled_plan_for_current_recipe()
+
+
+def test_compilation_detaches_a_supplied_mutable_label_plan(tmp_path):
+    from dataclasses import replace
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    supplied = scene.compile_plan().label_plans["labels"]
+    scene.recipe.layers = tuple(
+        replace(layer, plan=supplied) if isinstance(layer, f3d.LabelLayer) else layer
+        for layer in scene.recipe.layers
+    )
+    compiled = scene.compile_plan()
+    frozen = compiled.label_plans["labels"].to_dict()
+    supplied.accepted.clear()
+
+    assert compiled.label_plans["labels"].to_dict() == frozen
+    assert compiled.manifest.compiled_label_plans["labels"] == frozen
+
+
+@pytest.mark.parametrize("operation", ["compile", "validate", "restore"])
+def test_duplicate_label_ids_fail_without_publishing(tmp_path, operation):
+    from dataclasses import replace
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    original = scene.compile_plan()
+    original_report = scene.last_validation_report
+    original_labels = scene.compiled_label_plans
+    layer = next(layer for layer in scene.recipe.layers if isinstance(layer, f3d.LabelLayer))
+    scene.recipe.layers += (replace(layer, labels=tuple(layer.labels[:1])),)
+    manifest = rm.manifest_from_json(rm.manifest_to_json(original.manifest))
+    # An older compiler could persist ambiguous IDs. Match its recipe identity
+    # so restoration must reject the duplicate itself, rather than a stale ID.
+    manifest.recipe_id = f"mapscene-compiled-{map_scene._stable_hash(scene.recipe.to_dict())[:16]}"
+
+    with pytest.raises(ValueError, match="Duplicate label layer id 'labels'"):
+        if operation == "compile":
+            scene.compile_plan()
+        elif operation == "validate":
+            scene.validate()
+        else:
+            scene._rehydrate_compiled_plan(manifest)
+    assert scene.compiled_plan is original
+    assert scene.last_validation_report is original_report
+    assert scene.compiled_label_plans is original_labels
+
+
+@pytest.mark.parametrize("tampered_file", ["mapscene_recipe.json", "compiled_plan.json"])
+def test_bundle_rejects_mismatched_compiled_recipe_identity(tmp_path, tampered_file):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    scene.save_bundle(tmp_path / "identity")
+    path = Path(scene.last_bundle_path) / "scene" / tampered_file
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if tampered_file == "mapscene_recipe.json":
+        payload["camera"]["azimuth_deg"] += 1.0
+    else:
+        payload["recipe_id"] = "mapscene-compiled-tampered"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Compiled plan recipe identity"):
+        f3d.MapScene.load_bundle(Path(scene.last_bundle_path))
+
+
+def test_restoration_identity_failure_preserves_previous_state(tmp_path):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    original = scene.compile_plan()
+    original_report = scene.last_validation_report
+    original_labels = scene.compiled_label_plans
+    manifest = rm.manifest_from_json(rm.manifest_to_json(original.manifest))
+    scene.recipe.camera.azimuth_deg += 1.0
+
+    with pytest.raises(ValueError, match="Compiled plan recipe identity"):
+        scene._rehydrate_compiled_plan(manifest)
+    assert scene.compiled_plan is original
+    assert scene.last_validation_report is original_report
+    assert scene.compiled_label_plans is original_labels
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_public_compiled_labels_cannot_mutate_frozen_decisions(tmp_path, restore):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    compiled = scene.compile_plan()
+    if restore:
+        compiled = scene._rehydrate_compiled_plan(
+            rm.manifest_from_json(rm.manifest_to_json(compiled.manifest))
+        )
+    frozen = compiled.label_plans["labels"].to_dict()
+    accessed = compiled.label_plans["labels"]
+    accessed.accepted[0].candidate.anchor = (999.0, 999.0, 999.0)
+    accessed.accepted[0].typography["font_size"] = 999.0
+    accessed.accepted.clear()
+    accessed.rejected.clear()
+    accessed.diagnostics.clear()
+    accessed.bounds.clear()
+
+    assert compiled.label_plans["labels"].to_dict() == frozen
+    assert compiled.manifest.compiled_label_plans["labels"] == frozen
+    assert scene._compiled_plan_for_current_recipe() is compiled
+
+
+def test_failed_validation_preserves_all_previous_state(tmp_path, monkeypatch):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    original = scene.compile_plan()
+    original_report = scene.last_validation_report
+    original_labels = scene.compiled_label_plans
+    scene.recipe.camera.azimuth_deg += 1.0
+
+    def failed_validation(*_args, **_kwargs):
+        raise ValueError("label validation failed")
+
+    monkeypatch.setattr(scene_compiler, "_atlas_glyph_set", failed_validation)
+    with pytest.raises(ValueError, match="label validation failed"):
+        scene.validate()
+    assert scene.compiled_plan is original
+    assert scene.last_validation_report is original_report
+    assert scene.compiled_label_plans is original_labels
+    with pytest.raises(ValueError, match="label validation failed"):
+        scene._compiled_plan_for_current_recipe()
+
+
+def test_last_validation_report_has_one_compiler_owner(tmp_path):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    assert scene.last_validation_report is None
+    report = scene.validate()
+    assert scene._compiler.report is report
+    assert scene.last_validation_report is report
+    assert "last_validation_report" not in vars(scene)
+    saved_report = scene.save_bundle(tmp_path / "report_owner")
+    assert scene._compiler.report is saved_report
+    loaded = f3d.MapScene.load_bundle(Path(scene.last_bundle_path))
+    assert loaded.last_validation_report is loaded._compiler.report
+    assert _report_bytes(loaded.last_validation_report) == _report_bytes(saved_report)
+
+
+def test_every_bundle_file_roundtrips_byte_identically(tmp_path):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    scene.save_bundle(tmp_path / "all_bundle_bytes")
+    bundle_path = Path(scene.last_bundle_path)
+
+    def bundle_bytes():
+        return {
+            path.relative_to(bundle_path).as_posix(): path.read_bytes()
+            for path in bundle_path.rglob("*") if path.is_file()
+        }
+
+    before = bundle_bytes()
+    loaded = f3d.MapScene.load_bundle(bundle_path)
+    loaded.save_bundle(bundle_path)
+    assert bundle_bytes() == before
+
+
+def test_nodata_candidates_compile_and_render_without_relaxing_manifest_json(tmp_path):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    terrain_path = Path(scene.recipe.terrain.path)
+    heightmap = np.load(terrain_path)
+    # Reproduce the reviewed clipped-DEM case: its top quarter is nodata.
+    heightmap[:heightmap.shape[0] // 4] = np.nan
+    np.save(terrain_path, heightmap)
+
+    compiled = scene.compile_plan()
+    labels = compiled.label_plans["labels"]
+    assert any(
+        np.isnan(candidate.terrain_sample.get("elevation", 0.0))
+        for label in labels.accepted
+        for candidate in label.candidates
+    ), "the regression requires an unselected candidate sampling nodata"
+    output_path = tmp_path / "nodata_labels.png"
+    try:
+        report = scene.render(str(output_path))
+    except f3d.MapSceneNativeUnavailable as exc:
+        if not _running_on_unsupported_hosted_windows_ci():
+            raise
+        _assert_structured_block(exc)
+        assert not output_path.exists(), "a blocked render must not write pixels"
+    else:
+        assert report.status == "ok"
+        assert scene.last_render_backend == "gpu_terrain"
+        assert _load_png_rgba(output_path).shape == (64, 96, 4)
+    assert scene.compiled_plan is compiled
+    # In-memory candidate metadata and persisted finite JSON are different
+    # boundaries. Preserve the existing manifest rejection contract.
+    with pytest.raises(ValueError, match="NaN|infinite"):
+        rm.manifest_to_json(compiled.manifest)
+
+
+@pytest.mark.parametrize("nonfinite", [float("nan"), float("inf"), -float("inf")])
+def test_restore_rejects_nonfinite_saved_metadata_without_publishing(tmp_path, nonfinite):
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    report = scene.save_bundle(tmp_path / "nonfinite_saved")
+    compiled = scene.compiled_plan
+    inspected = scene.compiled_label_plans
+    path = Path(scene.last_bundle_path) / "scene" / "compiled_plan.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    sample = payload["compiled_label_plans"]["labels"]["accepted"][0]["candidates"][0]["terrain_sample"]
+    sample["elevation"] = nonfinite
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="NaN|infinite"):
+        f3d.MapScene.load_bundle(Path(scene.last_bundle_path))
+    with pytest.raises(ValueError, match="NaN|infinite"):
+        scene._rehydrate_compiled_plan(rm.manifest_from_dict(payload))
+    assert scene.compiled_plan is compiled
+    assert scene.last_validation_report is report
+    assert scene.compiled_label_plans is inspected
+
+
+def test_frame_attachment_preserves_latest_report(tmp_path):
+    from dataclasses import replace
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    plan = scene.compile_plan()
+    report = scene.save_bundle(tmp_path / "frame_report")
+    assert report.supported_features["mapscene.save_bundle"] == "supported"
+    attached = replace(plan, frame=object())
+    scene.compiled_plan = attached
+    assert scene.compiled_plan is attached
+    assert scene.last_validation_report is report
+    assert scene._compiler.report is report
+    replacement_report = f3d.ValidationReport(supported_features={"replacement.plan": "supported"})
+    scene.compiled_plan = replace(attached, validation_report=replacement_report)
+    assert scene.last_validation_report is replacement_report
+
+
 def test_bundle_version_v2_read_path_recompiles(tmp_path):
     from forge3d.bundle import BUNDLE_VERSION
 
@@ -264,8 +600,8 @@ def test_render_recompiles_stale_plan_after_recipe_mutation(tmp_path, monkeypatc
     assert compiled.recipe_hash != stale_hash
 
 
-def test_raster_overlay_reports_python_compositor_or_blocks(tmp_path, monkeypatch):
-    """Loaded rasters name the CPU compositor; missing data blocks."""
+def test_raster_overlay_requires_native_drape_or_blocks(tmp_path, monkeypatch):
+    """Missing sources and renderers that omit the drape must block before pixels."""
     def fake_terrain(_recipe, _heightmap, **_kwargs):
         rgba = np.zeros((64, 96, 4), dtype=np.uint8)
         rgba[..., 3] = 255
@@ -322,11 +658,12 @@ def test_raster_overlay_reports_python_compositor_or_blocks(tmp_path, monkeypatc
             )
         ],
     )
-    report = scene.render(str(tmp_path / "raster.png"))
-
-    assert scene.last_render_metadata["raster_overlay_backend"] == "python_resample_composite"
-    assert scene.last_render_metadata["raster_overlay_layer_count"] == 1
-    assert report.supported_features["mapscene.raster_overlay_composite"] == "supported"
+    output = tmp_path / "raster.png"
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as excinfo:
+        scene.render(str(output))
+    _assert_structured_block(excinfo.value)
+    assert "terrain-UV raster drape" in str(excinfo.value)
+    assert not output.exists()
 
 
 def test_load_bundle_rejects_future_bundle_version(tmp_path):
@@ -343,7 +680,9 @@ def test_load_bundle_rejects_future_bundle_version(tmp_path):
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
-    with pytest.raises(ValueError, match=rf"999 > supported version {BUNDLE_VERSION}"):
+    from forge3d.bundle import COMPOSITION_BUNDLE_VERSION
+
+    with pytest.raises(ValueError, match=rf"999 > supported version {COMPOSITION_BUNDLE_VERSION}"):
         f3d.MapScene.load_bundle(bundle_path)
 
 

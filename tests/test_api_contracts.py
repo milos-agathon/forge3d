@@ -25,6 +25,21 @@ from forge3d._native import NATIVE_AVAILABLE, get_native_module
 from _toml_compat import load_toml
 
 
+def test_d04_python_composition_public_surface():
+    from forge3d.map_scene import RenderPassInput, RenderPassSpec
+
+    for name, value in (("RenderPassInput", RenderPassInput), ("RenderPassSpec", RenderPassSpec)):
+        assert name in f3d.__all__ and getattr(f3d, name) is value
+    assert callable(f3d.MapScene.render_passes)
+
+
+def test_d02_native_raster_overlay_constructor_registered():
+    native = get_native_module()
+    assert callable(native.OverlayLayer.from_raster_rgba)
+    for name in ("RasterHeightSurfaceStyle", "CategoricalRasterStyle", "BivariateRasterStyle", "RasterStyleResult"):
+        assert name in f3d.__all__ and hasattr(f3d, name)
+
+
 # ---------------------------------------------------------------------------
 # Skip entire module when native extension is absent (e.g., pure-Python CI)
 # ---------------------------------------------------------------------------
@@ -131,6 +146,8 @@ class TestNativeModuleSymbols:
         # SPLAT-FUSED: structure-of-arrays Gaussian splat cloud
         "GaussianSplatCloud",
         "CompiledFrame",
+        # forge3d.mesh: real CPU BVH build + tracked GPU mesh upload handle
+        "GpuMeshHandle",
     ]
 
     def test_registered_classes_exist(self):
@@ -214,6 +231,9 @@ class TestNativeModuleSymbols:
         # P0.4: TBN mesh generation
         "mesh_generate_cube_tbn",
         "mesh_generate_plane_tbn",
+        # CPU BVH construction and tracked GPU mesh upload for forge3d.mesh
+        "mesh_build_bvh_cpu",
+        "mesh_upload_gpu",
         # CARTOGRAPHER-PRIME: bounded-optimal label declutter
         "_reserve_label_depth_host_allocation",
         "declutter",
@@ -825,6 +845,7 @@ class TestPackageLevelApiContracts:
         "Session",
         "TerrainRenderer",
         "TerrainRenderParams",
+        "WaterOpticsSettings",
         "Colormap1D",
         "MaterialSet",
         "IBL",
@@ -836,6 +857,8 @@ class TestPackageLevelApiContracts:
         "native_import_error",
         "open_viewer",
         "open_viewer_async",
+        "VectorLineLayer",
+        "VectorLineStyleError",
         "render_offscreen_rgba",
         "numpy_to_png",
         "png_to_numpy",
@@ -1448,6 +1471,23 @@ class TestSsgiSsrSettingsWiring:
 
     def test_terrain_params_exposes_terrain_shading_model(self):
         assert hasattr(_native.TerrainRenderParams, "terrain_shading_model")
+
+    def test_terrain_camera_projection_registered_and_stubbed(self):
+        import ast
+        from pathlib import Path
+        import forge3d
+
+        assert forge3d.TerrainRenderParams is _native.TerrainRenderParams
+        assert callable(_native.TerrainRenderParams.project_terrain_points)
+        assert callable(_native.TerrainRenderParams.project_terrain_depth)
+        assert callable(_native.TerrainRenderParams.unproject_terrain_depth)
+        stub = Path(forge3d.__file__).with_name("__init__.pyi")
+        module = ast.parse(stub.read_text(encoding="utf-8"))
+        params = next(node for node in module.body
+                      if isinstance(node, ast.ClassDef) and node.name == "TerrainRenderParams")
+        methods={node.name for node in params.body if isinstance(node,ast.FunctionDef)}
+        assert {"project_terrain_points","project_terrain_depth","unproject_terrain_depth"}<=methods
+
 
 
 # ===========================================================================

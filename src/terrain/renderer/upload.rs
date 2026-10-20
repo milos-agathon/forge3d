@@ -5,22 +5,33 @@ use crate::terrain::render_params;
 /// Must match `ORBIS_GLOBE_FRAME_FLAG_OFFSET` in `terrain_pbr_pom.wgsl`.
 pub(super) const ORBIS_GLOBE_FRAME_FLAG_OFFSET: f32 = 10.0;
 
+fn color_debug_modes(params_debug_mode: u32) -> (i32, i32) {
+    let env_debug_mode = std::env::var("VF_COLOR_DEBUG_MODE")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
+    let debug_mode = if params_debug_mode > 0 {
+        params_debug_mode as i32
+    } else {
+        env_debug_mode
+    };
+    (env_debug_mode, debug_mode)
+}
+
 impl TerrainScene {
+    pub(super) fn coarse_ao_required(&self, params: &render_params::TerrainRenderParams) -> bool {
+        // Binding 12 is read only by weighted coarse AO and DBG_RAW_SSAO (28).
+        // Use the same parameter/environment precedence as the shading uniform.
+        params.ao_weight > 0.0 || color_debug_modes(params.debug_mode).1 == 28
+    }
+
     pub(super) fn extract_overlay_binding(
         &self,
         params: &render_params::TerrainRenderParams,
         offline_hdr_output: bool,
     ) -> OverlayBinding {
         let overlays = params.overlays();
-        let env_debug_mode = std::env::var("VF_COLOR_DEBUG_MODE")
-            .ok()
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(0);
-        let debug_mode = if params.debug_mode > 0 {
-            params.debug_mode as i32
-        } else {
-            env_debug_mode
-        };
+        let (env_debug_mode, debug_mode) = color_debug_modes(params.debug_mode);
         let debug_mode_f = if (100..=113).contains(&debug_mode)
             || (40..=42).contains(&debug_mode)
             || (50..=53).contains(&debug_mode)
@@ -124,11 +135,17 @@ impl TerrainScene {
                     } else {
                         0.0
                     },
+                    0.0,
+                ],
+                params7: [
+                    detail.detail_strength,
                     if params.terrain_shading_model == "lambert_physical" {
                         1.0
                     } else {
                         0.0
                     },
+                    0.0,
+                    0.0,
                 ],
             },
             lut: None,
@@ -137,6 +154,13 @@ impl TerrainScene {
         pyo3::Python::with_gil(|py| {
             for overlay_py in overlays {
                 let overlay_ref = overlay_py.borrow(py);
+                if let Some(lut) = overlay_ref.raster_lut() {
+                    binding.uniform.params0 = [0.0, 1.0, overlay_ref.strength_value(), 0.0];
+                    binding.uniform.params1[0] = 1.0;
+                    binding.uniform.params6[3] = 1.0;
+                    binding.lut = Some(lut);
+                    break;
+                }
                 if let Some(colormap) = overlay_ref.colormap_clone() {
                     let domain = overlay_ref.domain_tuple();
                     let range = domain.1 - domain.0;
