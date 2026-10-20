@@ -462,3 +462,6 @@ landuse/landuse/glad_cropland_2019.tif
 !.claude/skills/map-maker/references/
 .claude/skills/map-maker/references/*
 !.claude/skills/map-maker/references/recipes.md
+
+# Understand-Anything knowledge graph (generated, ~1.4 MB, not source)
+.ua/
