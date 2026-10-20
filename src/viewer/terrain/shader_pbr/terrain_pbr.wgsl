@@ -929,10 +929,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if linear_hdr_output {
             color = max(overlay.rgb, vec3<f32>(0.0)) * preserve_linear * exposure;
         } else {
-            let preserve_display = pow(
-                aces_tonemap(preserve_linear * exposure),
-                vec3<f32>(1.0 / 2.2),
+            // Without media the lighting carries only intensity: a coloured
+            // light ratio (warm sun, blue sky fill) must not shift the hue of
+            // a preserved categorical overlay.
+            let preserve_luminance = max(
+                dot(preserve_linear, vec3<f32>(0.2126, 0.7152, 0.0722)),
+                0.0,
             );
+            let preserve_display = pow(
+                aces_tonemap(vec3<f32>(preserve_luminance * exposure)),
+                vec3<f32>(1.0 / 2.2),
+            ).x;
             let overlay_display_rgb = pow(
                 max(overlay.rgb, vec3<f32>(0.0)),
                 vec3<f32>(1.0 / 2.2),
