@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
 import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -122,7 +124,35 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+_FIXTURE_TEMPLATE: dict[str, object] = {}
+
+
 def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
+    """Give each test a private copy of one session-built evidence fixture.
+
+    Building the tracked repository and synthetic evidence dominates these
+    tests (two git commits, the RR producer, mask generation). The template is
+    built once into its own directory; each test receives independent copies
+    of the repository (with its git history), the evidence tree and the
+    installed native file, so mutations never leak between tests.
+    """
+    if "root" not in _FIXTURE_TEMPLATE:
+        root = Path(tempfile.mkdtemp(prefix="nephele-evidence-template-"))
+        atexit.register(shutil.rmtree, root, ignore_errors=True)
+        _FIXTURE_TEMPLATE["head"] = _build_fixture(root)[2]
+        _FIXTURE_TEMPLATE["root"] = root
+    root = _FIXTURE_TEMPLATE["root"]
+    for name in ("repo", "evidence", "installed"):
+        shutil.copytree(root / name, tmp_path / name)
+    repo, artifact = tmp_path / "repo", tmp_path / "evidence"
+    runtime_path = artifact / "installed-wheel-runtime.json"
+    runtime = _load(runtime_path)
+    runtime["installed_native_path"] = str(tmp_path / "installed/_forge3d.pyd")
+    _json(runtime_path, runtime)
+    return repo, artifact, _FIXTURE_TEMPLATE["head"]
+
+
+def _build_fixture(tmp_path: Path) -> tuple[Path, Path, str]:
     repo, artifact = tmp_path / "repo", tmp_path / "evidence"
     fixture = repo / "tests/nephele/fixture"
     artifact.mkdir(parents=True)

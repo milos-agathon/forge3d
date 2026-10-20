@@ -427,9 +427,18 @@ def _git(repo_root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+# Commits that `git cat-file -e` already proved exist in a repository. Git
+# objects are immutable, so a proven commit stays valid; failures are never
+# recorded and therefore fail again on every call.
+_PROVEN_COMMITS: set[tuple[str, str]] = set()
+
+
 def _tracked_blob(repo_root: Path, commit: str, path: Path) -> bytes:
     relative = path.resolve().relative_to(repo_root.resolve()).as_posix()
-    _git(repo_root, "cat-file", "-e", f"{commit}^{{commit}}")
+    proven = (str(repo_root.resolve()), commit)
+    if proven not in _PROVEN_COMMITS:
+        _git(repo_root, "cat-file", "-e", f"{commit}^{{commit}}")
+        _PROVEN_COMMITS.add(proven)
     try:
         return subprocess.run(
             ["git", "-C", str(repo_root), "show", f"{commit}:{relative}"],
@@ -1645,7 +1654,7 @@ def _gate1(
     except OSError as exc: _fail("artifact_error",f"heterogeneous comparator raw samples are missing: {exc}")
     if len(raw_bits)!=(COMPARATOR_SAMPLES+7)//8 or hashlib.sha256(raw_bits).hexdigest()!=raw_output["sha256"]:
         _fail("provenance_error", "heterogeneous comparator raw sample artifact is missing or corrupt")
-    survivors=sum(byte.bit_count() for byte in raw_bits)
+    survivors=int.from_bytes(raw_bits,"little").bit_count()
     if comparator["samples"]!={"count":COMPARATOR_SAMPLES,"sum":survivors,"sum_squares":survivors}:
         _fail("schema_error", "heterogeneous comparator accumulator differs from raw Bernoulli samples")
     comparator_stats = _stats(comparator["samples"], "heterogeneous_comparator.samples", exact_count=100_000_000, support=(0.0, 1.0))
