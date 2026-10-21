@@ -1117,6 +1117,11 @@ mod tests {
         let context = match crate::core::gpu::try_ctx() {
             Ok(context) => context,
             Err(error) => {
+                assert_ne!(
+                    std::env::var("FORGE3D_REQUIRE_F3DZ_GPU").as_deref(),
+                    Ok("1"),
+                    "physical F3DZ GPU was required, but context creation failed: {error}"
+                );
                 eprintln!("GPU identity test skipped: {error}");
                 return;
             }
