@@ -135,15 +135,21 @@ class TestFormatHierarchies:
         assert node.spacing == 0.625
 
     def test_hierarchy_loading_rules(self, tmp_path):
-        counts = {"0-0-0-0": 20, "1-0-0-0": 10, "1-1-0-0": 0, "1-0-1-0": -1}
+        counts = {"0-0-0-0": 20, "1-0-0-0": 10, "1-1-0-0": 0}
         copc_path = tmp_path / "cloud.copc.laz"
         _write_copc_hierarchy(copc_path, counts)
         ept_path = _write_ept_hierarchy(tmp_path / "ept", counts)
-        for dataset in (CopcDataset(copc_path), EptDataset(ept_path)):
-            assert dataset.node_count == 2
-            assert [str(node.key) for node in dataset.children(OctreeKey.root())] == ["1-0-0-0"]
-        # COPC page references remain format metadata; Python currently loads only
-        # its root page. EPT's recursive page loading is exercised by the fixture.
+        copc, ept = CopcDataset(copc_path), EptDataset(ept_path)
+        # COPC retains empty hierarchy nodes so their descendants stay reachable.
+        assert copc.node_count == 3
+        assert [str(node.key) for node in copc.children(OctreeKey.root())] == [
+            "1-0-0-0", "1-1-0-0"]
+        assert ept.node_count == 2
+        assert [str(node.key) for node in ept.children(OctreeKey.root())] == ["1-0-0-0"]
+        # A -1 entry is a page reference, not an ignorable point-count sentinel.
+        _write_copc_hierarchy(copc_path, {**counts, "1-0-1-0": -1})
+        with pytest.raises(ValueError, match="Invalid COPC hierarchy page extent"):
+            CopcDataset(copc_path)
 
     def test_missing_root_entry_and_empty_hierarchy(self, tmp_path):
         counts = {"1-1-0-0": 10}
@@ -160,36 +166,46 @@ class TestFormatHierarchies:
         assert empty.root_node().point_count == 0
         assert empty.children(OctreeKey.root()) == []
 
-    @pytest.mark.parametrize("budget,max_depth,viewport,expected", [
-        (150, 0, 1080.0, ["0-0-0-0"]),
-        (30, 1, 1080.0, ["1-0-0-1", "1-1-0-1", "1-0-1-1"]),
+    @pytest.mark.parametrize("budget,max_depth,viewport,expected,ept_expected", [
+        (150, 0, 1080.0, ["0-0-0-0"], ["0-0-0-0"]),
+        (30, 1, 1080.0, ["1-0-0-1", "1-1-0-1", "1-0-1-1"],
+         ["0-0-0-0", "1-0-0-1"]),
         (150, 1, 1080.0, ["1-0-0-1", "1-1-0-1", "1-0-1-1", "1-1-1-1",
-                          "1-0-0-0", "1-1-0-0", "1-0-1-0", "1-1-1-0"]),
+                          "1-0-0-0", "1-1-0-0", "1-0-1-0", "1-1-1-0"],
+         ["0-0-0-0", "1-0-0-1", "1-1-0-1", "1-0-1-1", "1-1-1-1",
+          "1-0-0-0", "1-1-0-0", "1-0-1-0", "1-1-1-0"]),
         (150, 2, 1080.0, ["1-0-0-1", "1-0-1-1", "1-1-1-1", "1-0-0-0",
-                          "1-1-0-0", "1-0-1-0", "1-1-1-0", "2-3-1-3", "2-2-0-2"]),
-        (30, 2, 1080.0, ["1-0-0-1", "1-0-1-1", "1-1-1-1"]),
-        (150, 2, 1.0, ["0-0-0-0"]),
+                          "1-1-0-0", "1-0-1-0", "1-1-1-0", "2-3-1-3", "2-2-0-2"],
+         ["0-0-0-0", "1-0-0-1", "1-1-0-1", "1-0-1-1", "1-1-1-1",
+          "1-0-0-0", "1-1-0-0", "1-0-1-0", "1-1-1-0", "2-3-1-3", "2-2-0-2"]),
+        (30, 2, 1080.0, ["1-0-0-1", "1-0-1-1", "1-1-1-1"],
+         ["0-0-0-0", "1-0-0-1"]),
+        (150, 2, 1.0, ["0-0-0-0"], ["0-0-0-0"]),
     ])
     def test_selected_nodes_and_budget_order(self, equivalent_datasets, budget, max_depth,
-                                            viewport, expected):
+                                            viewport, expected, ept_expected):
         renderer = PointCloudRenderer(point_budget=budget, max_depth=max_depth,
                                       viewport_height=viewport)
         copc_nodes, ept_nodes = [
             renderer.get_visible_nodes(dataset, (0.0, 20.0, 10.0))
             for dataset in equivalent_datasets
         ]
-        assert copc_nodes == ept_nodes
         assert [str(node.key) for node in copc_nodes] == expected
-        assert sum(node.point_count for node in copc_nodes) <= budget
+        assert [str(node.key) for node in ept_nodes] == ept_expected
+        common = {str(node.key): node for node in copc_nodes}
+        for node in ept_nodes:
+            if str(node.key) in common:
+                assert node == common[str(node.key)]
+        for nodes in (copc_nodes, ept_nodes):
+            assert sum(node.point_count for node in nodes) <= budget
 
-    def test_inside_node_preserves_existing_budget_policy(self, equivalent_datasets):
-        # Existing traversal can select a whole high-priority node over budget
-        # when the camera lies inside it; extraction must keep that policy.
+    def test_inside_node_obeys_strict_budget(self, equivalent_datasets):
+        # Being inside a node must not bypass the point budget.
         renderer = PointCloudRenderer(point_budget=5, max_depth=2)
         for dataset in equivalent_datasets:
             nodes = renderer.get_visible_nodes(dataset, (0.0, 20.0, -8.0))
-            assert [str(node.key) for node in nodes] == ["1-0-0-0"]
-            assert sum(node.point_count for node in nodes) == 10
+            assert nodes == []
+            assert sum(node.point_count for node in nodes) <= 5
 
     def test_large_offset_midpoint_bounds(self, tmp_path):
         bounds = OctreeBounds((1e16, -1e16, 0.1), (1e16 + 16, -1e16 + 16, 0.9))
