@@ -45,7 +45,7 @@ pub struct CameraKeyframe {
 pub struct InvalidKeyframeTime;
 
 impl std::fmt::Display for InvalidKeyframeTime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "keyframe time must be finite and representable as f32")
     }
 }
