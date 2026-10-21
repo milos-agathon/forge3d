@@ -20,6 +20,9 @@ pub(in crate::terrain) struct TerrainMediaGraphHandles {
     pub(in crate::terrain) radiance_provider: ResourceHandle,
     pub(in crate::terrain) extinction: ResourceHandle,
     pub(in crate::terrain) light_transmittance: ResourceHandle,
+    pub(in crate::terrain) world_medium: ResourceHandle,
+    pub(in crate::terrain) world_sun: ResourceHandle,
+    pub(in crate::terrain) surface_cloudlight: ResourceHandle,
     pub(in crate::terrain) in_scatter: ResourceHandle,
     pub(in crate::terrain) integrated: ResourceHandle,
     pub(in crate::terrain) transmittance: ResourceHandle,
@@ -223,6 +226,29 @@ pub(super) fn build_terrain_render_graph(
             depth_or_array_layers: media.froxel_grid.depth,
         });
         let light_transmittance = builder.add_resource(light);
+        let world_resource = |name, resource_type| {
+            let mut resource = texture_resource(
+                name, resource_type, wgpu::TextureFormat::Rgba16Float,
+                media.froxel_grid.depth, media.froxel_grid.depth,
+                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+                false, false,
+            );
+            resource.extent = Some(wgpu::Extent3d {
+                width: media.froxel_grid.depth, height: media.froxel_grid.depth,
+                depth_or_array_layers: media.froxel_grid.depth,
+            });
+            resource
+        };
+        let world_medium = builder.add_resource(world_resource("nephele.media.world.medium", ResourceType::SampledTexture));
+        let world_sun = builder.add_resource(world_resource("nephele.media.world.sun", ResourceType::SampledTexture));
+        let surface_cloudlight = builder.add_resource(texture_resource(
+            "nephele.media.surface.cloudlight", ResourceType::SampledTexture,
+            wgpu::TextureFormat::Rgba16Float, internal_width, internal_height,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            false, false,
+        ));
         let mut scatter = texture_resource(
             "nephele.media.froxel.in_scatter",
             ResourceType::SampledTexture,
@@ -290,6 +316,9 @@ pub(super) fn build_terrain_render_graph(
             radiance_provider,
             extinction,
             light_transmittance,
+            world_medium,
+            world_sun,
+            surface_cloudlight,
             in_scatter,
             integrated,
             transmittance,
@@ -349,6 +378,15 @@ pub(super) fn build_terrain_render_graph(
         }
         Ok(())
     })?;
+    if let Some(m) = media_handles {
+        builder.add_pass("nephele.media.cloudlight", PassType::Compute, |pass| {
+            pass.read(height).read(prepared).read(m.world_medium)
+                .write(m.world_sun).write(m.surface_cloudlight)
+                .pipeline_descriptor(pipeline_material("nephele.media.cloudlight", color_format, aov))
+                .uniform_bytes(declarations.forward.clone());
+            Ok(())
+        })?;
+    }
     let forward_label = if aov {
         "terrain.forward_aov"
     } else {
@@ -372,6 +410,7 @@ pub(super) fn build_terrain_render_graph(
             // segment before the view-ray integration exists. Forward setup also
             // populates the directional linear-HDR radiance consumed by injection.
             pass.read(m.light_transmittance)
+                .read(m.surface_cloudlight)
                 .write(m.scene_depth)
                 .write(m.radiance_provider);
         }
@@ -539,6 +578,8 @@ mod tests {
                 .position(|candidate| candidate == label)
                 .unwrap()
         };
+        assert!(position("terrain.prepare") < position("nephele.media.cloudlight"));
+        assert!(position("nephele.media.cloudlight") < position("terrain.forward"));
         assert!(position("terrain.forward") < position("nephele.media.inject"));
         assert!(position("nephele.media.inject") < position("nephele.media.integrate"));
         assert!(position("nephele.media.integrate") < position("nephele.media.composite"));
@@ -576,6 +617,8 @@ mod tests {
                 .position(|candidate| candidate == label)
                 .unwrap()
         };
+        assert!(position("terrain.prepare") < position("nephele.media.cloudlight"));
+        assert!(position("nephele.media.cloudlight") < position("terrain.forward_aov"));
         assert!(position("terrain.forward_aov") < position("nephele.media.inject"));
         assert!(position("nephele.media.inject") < position("nephele.media.integrate"));
         assert!(position("nephele.media.integrate") < position("nephele.media.composite"));
@@ -625,6 +668,10 @@ mod tests {
 
         let mut plan = g.plan;
         plan.execute_with_barriers("terrain.prepare", |_| {
+            Ok::<(), crate::core::error::RenderError>(())
+        })
+        .unwrap();
+        plan.execute_with_barriers("nephele.media.cloudlight", |_| {
             Ok::<(), crate::core::error::RenderError>(())
         })
         .unwrap();

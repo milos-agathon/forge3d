@@ -832,7 +832,7 @@ impl TerrainScene {
         )?;
         let graph_shadow = graph_bundle.handles.shadow;
         let mut graph = graph_bundle.plan;
-        debug_assert_eq!(graph.labels.len(), if media_enabled { 8 } else { 4 });
+        debug_assert_eq!(graph.labels.len(), if media_enabled { 9 } else { 4 });
         let mut timing = self.take_render_timing();
         let height_inputs = graph.execute_with_barriers("terrain.prepare", |_barriers| {
             self.prepare_frame_lighting(decoded)?;
@@ -1029,6 +1029,11 @@ impl TerrainScene {
         )?;
         ts_end(&mut timing, &mut encoder, sun_vis_scope, 0);
 
+        if media_enabled {
+            graph.execute_with_barriers("nephele.media.cloudlight", |_barriers| {
+                self.encode_attached_surface_cloudlight(&mut encoder, params, &decoded)
+            })?;
+        }
         let shadow_setup = graph.execute_with_barriers("terrain.shadow", |_barriers| {
             let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
             let setup = self.prepare_shadow_setup(

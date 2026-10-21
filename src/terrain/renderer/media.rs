@@ -31,6 +31,8 @@ pub(super) struct MediaUniforms {
     pub(super) scattering: [f32; 4],
     pub(super) terrain_albedo: [f32; 4],
     pub(super) diffuse_ibl: [f32; 4],
+    pub(super) world_min: [f32; 4],
+    pub(super) world_max: [f32; 4],
 }
 
 pub(super) const FROXEL_TILE_SIZE_PX: u32 = 8;
@@ -323,12 +325,19 @@ struct RealtimeTerrainTrace {
     query_group: wgpu::BindGroup,
     sun_hits: TrackedBuffer,
     phase_hits: TrackedBuffer,
+    world_sun: CloudlightDispatch,
+    surface_cloudlight: CloudlightDispatch,
     _terrain_uniform: TrackedBuffer,
     _curvature_uniform: TrackedBuffer,
     _pyramid: crate::path_tracing::hybrid_compute::terrain_heightfield::TerrainMinMaxPyramid,
     terrain_identity: u64,
     query_count: u64,
     allocation_bytes: u64,
+}
+
+struct CloudlightDispatch {
+    pipeline: wgpu::ComputePipeline,
+    groups: [wgpu::BindGroup; 4],
 }
 
 struct TerminationReadback {
@@ -390,11 +399,20 @@ pub(super) struct TerrainMediaResources {
     pub(super) blue_noise_identity: u64,
     pub(super) extinction: Arc<TrackedTexture>,
     pub(super) single_scatter: TrackedTexture,
+    /// Phase-independent sun source; alpha stores the camera-direction phase.
+    /// A continuation must evaluate this source for its own direction.
+    pub(super) single_sun: TrackedTexture,
     /// Spatially filtered single scatter consumed by multiple scatter and integration.
     pub(super) single_filtered: TrackedTexture,
     pub(super) in_scatter: Arc<TrackedTexture>,
     /// RGB transmittance over the complete canonical medium/sun segment.
     pub(super) light_transmittance: Arc<TrackedTexture>,
+    /// Canonical full-domain sun transmittance (RGB) and physical density (A).
+    pub(super) world_medium: Arc<TrackedTexture>,
+    pub(super) world_sun: Arc<TrackedTexture>,
+    pub(super) surface_cloudlight: Arc<TrackedTexture>,
+    world_min: [f32; 4],
+    world_max: [f32; 4],
     pub(super) integrated: Arc<TrackedTexture>,
     pub(super) transmittance: Arc<TrackedTexture>,
     pub(super) cloud_shadow: Arc<TrackedTexture>,
@@ -406,6 +424,7 @@ pub(super) struct TerrainMediaResources {
     pub(super) history_depth_next: Arc<TrackedTexture>,
     pub(super) blue_noise: TrackedTexture,
     pub(super) uniforms: TrackedBuffer,
+    cloudlight_uniforms: TrackedBuffer,
     pub(super) pipelines: RealtimeMediaPipelines,
     terrain_trace: Option<RealtimeTerrainTrace>,
     single_scatter_dispatches: u64,
@@ -511,6 +530,31 @@ impl ViewerMediaPass {
         self.resources
             .light_transmittance
             .create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    pub(crate) fn surface_cloudlight_view(&self) -> wgpu::TextureView {
+        self.resources.surface_cloudlight.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    pub(crate) fn prepare_surface_cloudlight(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        sun_radiance: [f32; 3],
+    ) -> crate::core::error::RenderResult<()> {
+        let frame = self.prepared_frame.ok_or_else(|| {
+            crate::core::error::RenderError::render("viewer cloud light requires a prepared frame")
+        })?;
+        let uniforms = self.resources.cloudlight_uniforms(
+            frame.camera_position, frame.inverse_view_projection, frame.sun_direction,
+            sun_radiance, true,
+        );
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("nephele.viewer.surface_cloudlight.encoder"),
+        });
+        self.resources.encode_cloudlight(queue, &mut encoder, uniforms)?;
+        queue.submit(Some(encoder.finish()));
+        Ok(())
     }
 
     pub(crate) fn prepare_viewer_frame(
@@ -745,6 +789,8 @@ impl ViewerMediaPass {
                 self.resources.diffuse_ibl[2],
                 0.0,
             ],
+            world_min: self.resources.world_min,
+            world_max: self.resources.world_max,
         };
         self.resources.prepare_and_encode_inject(
             device,
@@ -921,10 +967,42 @@ impl TerrainMediaResources {
             wgpu::TextureFormat::Rgba16Float,
             froxel_usage,
         )?;
+        let (single_sun, single_sun_bytes) = tracked_texture(
+            device,
+            "nephele.media.froxel.single_sun",
+            grid.extent(),
+            wgpu::TextureDimension::D3,
+            wgpu::TextureFormat::Rgba16Float,
+            froxel_usage,
+        )?;
         let (light_transmittance, light_bytes) = tracked_texture(
             device,
             "nephele.media.froxel.light_transmittance",
             grid.extent(),
+            wgpu::TextureDimension::D3,
+            wgpu::TextureFormat::Rgba16Float,
+            froxel_usage,
+        )?;
+        // Use the live transport's depth resolution on each world-space axis.
+        // Unlike a view frustum, this grid covers the complete bounded medium,
+        // including cloud light arriving at terrain from outside the viewport.
+        let world_extent = wgpu::Extent3d {
+            width: grid.depth,
+            height: grid.depth,
+            depth_or_array_layers: grid.depth,
+        };
+        let (world_medium, world_medium_bytes) = tracked_texture(
+            device,
+            "nephele.media.world.medium",
+            world_extent,
+            wgpu::TextureDimension::D3,
+            wgpu::TextureFormat::Rgba16Float,
+            froxel_usage,
+        )?;
+        let (world_sun, world_sun_bytes) = tracked_texture(
+            device,
+            "nephele.media.world.sun",
+            world_extent,
             wgpu::TextureDimension::D3,
             wgpu::TextureFormat::Rgba16Float,
             froxel_usage,
@@ -934,6 +1012,14 @@ impl TerrainMediaResources {
             height: viewport.1,
             depth_or_array_layers: 1,
         };
+        let (surface_cloudlight, surface_cloudlight_bytes) = tracked_texture(
+            device,
+            "nephele.media.surface.cloudlight",
+            out,
+            wgpu::TextureDimension::D2,
+            wgpu::TextureFormat::Rgba16Float,
+            output_usage,
+        )?;
         let (integrated, c) = tracked_texture(
             device,
             "nephele.media.aov.in_scatter",
@@ -1063,6 +1149,15 @@ impl TerrainMediaResources {
                 mapped_at_creation: false,
             },
         )?;
+        let cloudlight_uniforms = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("nephele.media.cloudlight.uniforms"),
+                size: std::mem::size_of::<MediaUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         Ok(Self {
             grid,
             viewport,
@@ -1071,7 +1166,12 @@ impl TerrainMediaResources {
                 + b
                 + single_bytes
                 + single_filtered_bytes
+                + single_sun_bytes
                 + light_bytes
+                + world_medium_bytes
+                + world_sun_bytes
+                + surface_cloudlight_bytes
+                + std::mem::size_of::<MediaUniforms>() as u64
                 + c
                 + d
                 + e
@@ -1083,7 +1183,7 @@ impl TerrainMediaResources {
                 + j
                 + k
                 + provider_bytes,
-            density_device_local_bytes: a,
+            density_device_local_bytes: a + world_medium_bytes,
             staging_bytes: u64::from(grid.width)
                 * u64::from(grid.height)
                 * u64::from(grid.depth)
@@ -1108,9 +1208,15 @@ impl TerrainMediaResources {
             blue_noise_identity,
             extinction: Arc::new(extinction),
             single_scatter,
+            single_sun,
             single_filtered,
             in_scatter: Arc::new(in_scatter),
             light_transmittance: Arc::new(light_transmittance),
+            world_medium: Arc::new(world_medium),
+            world_sun: Arc::new(world_sun),
+            surface_cloudlight: Arc::new(surface_cloudlight),
+            world_min: [0.0; 4],
+            world_max: [1.0, 1.0, 1.0, 0.0],
             integrated: Arc::new(integrated),
             transmittance: Arc::new(transmittance),
             cloud_shadow: Arc::new(cloud_shadow),
@@ -1122,6 +1228,7 @@ impl TerrainMediaResources {
             history_depth_next: Arc::new(history_depth_next),
             blue_noise,
             uniforms,
+            cloudlight_uniforms,
             pipelines,
             terrain_trace: None,
             single_scatter_dispatches: 0,
@@ -1282,6 +1389,7 @@ impl TerrainMediaResources {
             },
             self.grid.extent(),
         );
+        self.upload_world_medium(queue, medium, sun_direction, &mut f16_flush)?;
         self.density_froxel_count = density_froxel_count;
         self.f16_flush = f16_flush;
         self.sun_transmittance_diagnostic = sun_transmittance_diagnostic;
@@ -1293,6 +1401,69 @@ impl TerrainMediaResources {
         self.phase = medium.phase();
         self.depth_transform = depth;
         Ok(identity)
+    }
+
+    fn upload_world_medium(
+        &mut self,
+        queue: &wgpu::Queue,
+        medium: &crate::media::Medium,
+        sun_direction: glam::Vec3,
+        flush: &mut F16FlushDiagnostic,
+    ) -> crate::core::error::RenderResult<()> {
+        let bounds = match medium.density() {
+            crate::media::DensityField::Grid3D(field) => Some(field.transform().bounds),
+            crate::media::DensityField::PerlinWorley(field) => Some(field.transform.bounds),
+            // An unbounded absorbing medium has no incident sun at infinity.
+            // The homogeneous slab/viewer continuation contract is unchanged.
+            crate::media::DensityField::Homogeneous(_) => None,
+        };
+        let n = self.grid.depth;
+        let count = u64::from(n).pow(3);
+        let _staging = tracked_host_allocation(count * 8, "nephele.media.staging.world_medium")?;
+        let mut texels = Vec::with_capacity(count as usize * 4);
+        self.world_min = [0.0; 4];
+        self.world_max = [1.0, 1.0, 1.0, 0.0];
+        if let Some(bounds) = bounds {
+            self.world_min = [bounds.min[0], bounds.min[1], bounds.min[2], 1.0];
+            self.world_max = [bounds.max[0], bounds.max[1], bounds.max[2], 0.0];
+            let minimum = glam::Vec3::from_array(bounds.min);
+            let span = glam::Vec3::from_array(bounds.max) - minimum;
+            for z in 0..n {
+                for y in 0..n {
+                    for x in 0..n {
+                        let unit = glam::Vec3::from_array([x, y, z].map(|v| v as f32 + 0.5))
+                            / n as f32;
+                        let world = minimum + span * unit;
+                        let (sun_t, _) =
+                            canonical_sun_transmittance(medium, world, sun_direction, None)?;
+                        texels.extend(sun_t.map(|v| half::f16::from_f32(v).to_bits()));
+                        texels.push(required_positive_f16(
+                            medium.density().physical_density(world.to_array()),
+                            "world density",
+                            flush,
+                        )?);
+                    }
+                }
+            }
+        } else {
+            texels.resize(count as usize * 4, 0);
+        }
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.world_medium,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&texels),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(n * 8),
+                rows_per_image: Some(n),
+            },
+            wgpu::Extent3d { width: n, height: n, depth_or_array_layers: n },
+        );
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1497,6 +1668,43 @@ impl TerrainMediaResources {
                 buffer_entry(12, &phase_hits),
             ],
         });
+        let world_medium = self.world_medium.create_view(&wgpu::TextureViewDescriptor::default());
+        let world_sun_view = self.world_sun.create_view(&wgpu::TextureViewDescriptor::default());
+        let surface_view = self.surface_cloudlight.create_view(&wgpu::TextureViewDescriptor::default());
+        let cloud_dispatch = |entry, label, entries: &[_]| {
+            let pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some(label), layout: None, module: &shader, entry_point: entry,
+                },
+            ).map_err(crate::core::error::RenderError::render)?;
+            let empty = |group| device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label), layout: &pipeline.get_bind_group_layout(group), entries: &[],
+            });
+            let group0 = empty(0);
+            let group1 = empty(1);
+            let group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label), layout: &pipeline.get_bind_group_layout(2),
+                entries: &[
+                    texture_entry(1, height_binding), texture_entry(2, minmax_binding),
+                    buffer_entry(3, &terrain_buffer), buffer_entry(10, &curvature_buffer),
+                ],
+            });
+            let group3 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label), layout: &pipeline.get_bind_group_layout(3), entries,
+            });
+            Ok::<_, crate::core::error::RenderError>(CloudlightDispatch {
+                pipeline, groups: [group0, group1, group2, group3],
+            })
+        };
+        let world_sun = cloud_dispatch(
+            "main_nephele_world_sun", "nephele.media.world_sun.pipeline",
+            &[buffer_entry(8, &self.cloudlight_uniforms), texture_entry(13, &world_medium), texture_entry(14, &world_sun_view)],
+        )?;
+        let surface_cloudlight = cloud_dispatch(
+            "main_nephele_surface_cloudlight", "nephele.media.surface_cloudlight.pipeline",
+            &[buffer_entry(8, &self.cloudlight_uniforms), texture_entry(15, &world_sun_view), texture_entry(16, &surface_view)],
+        )?;
         if let Some(previous) = self.terrain_trace.take() {
             self.device_local_bytes = self
                 .device_local_bytes
@@ -1516,6 +1724,8 @@ impl TerrainMediaResources {
             query_group,
             sun_hits,
             phase_hits,
+            world_sun,
+            surface_cloudlight,
             _terrain_uniform: terrain_buffer,
             _curvature_uniform: curvature_buffer,
             _pyramid: pyramid,
@@ -1524,6 +1734,61 @@ impl TerrainMediaResources {
             allocation_bytes,
         });
         Ok(())
+    }
+
+    fn encode_cloudlight(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        uniforms: MediaUniforms,
+    ) -> crate::core::error::RenderResult<()> {
+        let trace = self.terrain_trace.as_ref().ok_or_else(|| {
+            crate::core::error::RenderError::render("cloud light requires production terrain_trace")
+        })?;
+        queue.write_buffer(&self.cloudlight_uniforms, 0, bytemuck::bytes_of(&uniforms));
+        let n = self.grid.depth.div_ceil(4);
+        for (dispatch, label, workgroups) in [
+            (&trace.world_sun, "nephele.media.world_sun.pipeline", [n, n, n]),
+            (&trace.surface_cloudlight, "nephele.media.surface_cloudlight.pipeline", [self.viewport.0.div_ceil(8), self.viewport.1.div_ceil(8), 1]),
+        ] {
+            crate::core::shader_registry::record_shader_use(label);
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(label), timestamp_writes: None,
+            });
+            pass.set_pipeline(&dispatch.pipeline);
+            for (index, group) in dispatch.groups.iter().enumerate() {
+                pass.set_bind_group(index as u32, group, &[]);
+            }
+            pass.dispatch_workgroups(workgroups[0], workgroups[1], workgroups[2]);
+        }
+        Ok(())
+    }
+
+    fn cloudlight_uniforms(
+        &self,
+        camera: glam::Vec3,
+        inverse_view_projection: glam::Mat4,
+        sun_direction: glam::Vec3,
+        sun_radiance: [f32; 3],
+        terrain_occlusion: bool,
+    ) -> MediaUniforms {
+        let mut uniforms = MediaUniforms::zeroed();
+        uniforms.inv_view_proj = inverse_view_projection.to_cols_array_2d();
+        uniforms.camera = [camera.x, camera.y, camera.z, 0.0];
+        uniforms.sun = [sun_direction.x, sun_direction.y, sun_direction.z, 0.0];
+        uniforms.sun_radiance = [sun_radiance[0], sun_radiance[1], sun_radiance[2], 1.0];
+        uniforms.sigma_s[..3].copy_from_slice(&self.sigma_s);
+        uniforms.sigma_t[..3].copy_from_slice(&self.sigma_t);
+        uniforms.depth = self.depth_transform.wgsl_params();
+        uniforms.viewport = [self.viewport.0, self.viewport.1, 0, 0];
+        let (g, hg) = match self.phase {
+            crate::media::Phase::Isotropic => (0.0, 0.0),
+            crate::media::Phase::HenyeyGreenstein { g } => (g, 1.0),
+        };
+        uniforms.scattering = [f32::from(terrain_occlusion), 1.0, g, hg];
+        uniforms.world_min = self.world_min;
+        uniforms.world_max = self.world_max;
+        uniforms
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1554,6 +1819,9 @@ impl TerrainMediaResources {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let single_filtered = self
             .single_filtered
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let single_sun = self
+            .single_sun
             .create_view(&wgpu::TextureViewDescriptor::default());
         let in_scatter = self
             .in_scatter
@@ -1618,7 +1886,10 @@ impl TerrainMediaResources {
             let single_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("nephele.media.inject.single.group1"),
                 layout: &self.pipelines.inject_single.get_bind_group_layout(1),
-                entries: &[texture_entry(0, &single_scatter)],
+                entries: &[
+                    texture_entry(0, &single_scatter),
+                    texture_entry(2, &single_sun),
+                ],
             });
             let multiple_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("nephele.media.inject.multiple.group0"),
@@ -1641,6 +1912,7 @@ impl TerrainMediaResources {
                 entries: &[
                     texture_entry(0, &extinction),
                     texture_entry(9, &single_filtered),
+                    texture_entry(10, &single_sun),
                 ],
             });
             let filter_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2573,6 +2845,9 @@ impl crate::terrain::renderer::TerrainScene {
             resources.light_transmittance.clone(),
         )?;
         execution.bind_texture(handles.in_scatter, resources.in_scatter.clone())?;
+        execution.bind_texture(handles.world_medium, resources.world_medium.clone())?;
+        execution.bind_texture(handles.world_sun, resources.world_sun.clone())?;
+        execution.bind_texture(handles.surface_cloudlight, resources.surface_cloudlight.clone())?;
         execution.bind_texture(handles.integrated, resources.integrated.clone())?;
         execution.bind_texture(handles.transmittance, resources.transmittance.clone())?;
         execution.bind_texture(handles.cloud_shadow, resources.cloud_shadow.clone())?;
@@ -2711,6 +2986,28 @@ impl crate::terrain::renderer::TerrainScene {
         Ok(())
     }
 
+    pub(super) fn encode_attached_surface_cloudlight(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
+    ) -> crate::core::error::RenderResult<()> {
+        let resources = self.media_resources.lock().map_err(|_| {
+            crate::core::error::RenderError::render("media_resources mutex poisoned")
+        })?;
+        let Some(resources) = resources.as_ref() else { return Ok(()); };
+        let (camera, view, projection) = Self::build_camera_matrices(params);
+        let sun_direction = terrain_light_direction(&params.camera_mode, decoded.light.direction);
+        let occlusion = *self.media_terrain_occlusion_enabled.lock().map_err(|_| {
+            crate::core::error::RenderError::render("media terrain-occlusion control mutex poisoned")
+        })?;
+        let uniforms = resources.cloudlight_uniforms(
+            camera, (projection * view).inverse(), sun_direction,
+            decoded.light.color.map(|v| v * decoded.light.intensity), occlusion,
+        );
+        resources.encode_cloudlight(self.queue.as_ref(), encoder, uniforms)
+    }
+
     pub(super) fn encode_attached_realtime_media_inject_for_terrain(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -2842,6 +3139,8 @@ impl crate::terrain::renderer::TerrainScene {
                 resources.diffuse_ibl[2],
                 0.0,
             ],
+            world_min: resources.world_min,
+            world_max: resources.world_max,
         };
         resources
             .prepare_and_encode_inject(
@@ -4747,7 +5046,7 @@ mod tests")
     fn shaders_validate_and_compute_call_graphs_use_manual_shadows() {
         assert_compute_call_graph_safe(include_str!("../../shaders/nephele_froxel.wgsl"));
         let trace_adapter = include_str!("../../shaders/nephele_realtime_terrain_trace.wgsl");
-        assert_eq!(trace_adapter.matches(" = terrain_trace(").count(), 2);
+        assert_eq!(trace_adapter.matches(" = terrain_trace(").count(), 5);
         let assembled = format!(
             "{}\n{trace_adapter}",
             crate::shader_sources::hybrid_kernel()

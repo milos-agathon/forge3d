@@ -1,6 +1,6 @@
 // Deterministic view-frustum froxels. Rust FroxelDepthTransform uses the same
 // distance(u)=near*exp(log(far/near)*u) mapping.
-struct MediaUniforms { view_proj:mat4x4<f32>, inv_view_proj:mat4x4<f32>, previous_view_proj:mat4x4<f32>, view:mat4x4<f32>, camera:vec4<f32>, sun:vec4<f32>, sun_radiance:vec4<f32>, sigma_s:vec4<f32>, sigma_t:vec4<f32>, depth:vec4<f32>, grid:vec4<u32>, viewport:vec4<u32>, scattering:vec4<f32>, terrain_albedo:vec4<f32>, diffuse_ibl:vec4<f32> }
+struct MediaUniforms { view_proj:mat4x4<f32>, inv_view_proj:mat4x4<f32>, previous_view_proj:mat4x4<f32>, view:mat4x4<f32>, camera:vec4<f32>, sun:vec4<f32>, sun_radiance:vec4<f32>, sigma_s:vec4<f32>, sigma_t:vec4<f32>, depth:vec4<f32>, grid:vec4<u32>, viewport:vec4<u32>, scattering:vec4<f32>, terrain_albedo:vec4<f32>, diffuse_ibl:vec4<f32>, world_min:vec4<f32>, world_max:vec4<f32> }
 struct NepheleTerrainHit { point_t:vec4<f32>, normal_hit:vec4<f32> }
 // Prefix-exact mirror of crate::shadows::CsmUniforms. The trailing fields are
 // intentionally omitted because this pass reads only the prefix below.
@@ -22,6 +22,7 @@ struct Csm { light_direction:vec4<f32>, light_view:mat4x4<f32>, cascades:array<C
 @group(0) @binding(8) var<storage,read> phase_terrain_hits:array<NepheleTerrainHit>;
 @group(1) @binding(0) var froxel_single_scatter:texture_storage_3d<rgba16float,write>;
 @group(1) @binding(1) var froxel_in_scatter:texture_storage_3d<rgba16float,write>;
+@group(1) @binding(2) var froxel_sun_source_out:texture_storage_3d<rgba16float,write>;
 @group(2) @binding(0) var froxel_extinction:texture_3d<f32>;
 @group(2) @binding(1) var froxel_scatter:texture_3d<f32>;
 // Authoritative WebGPU depth. World distance is reconstructed through the
@@ -34,6 +35,7 @@ struct Csm { light_direction:vec4<f32>, light_view:mat4x4<f32>, cascades:array<C
 @group(2) @binding(7) var out_cloud_shadow:texture_storage_2d<rgba16float,write>;
 @group(2) @binding(8) var out_optical_depth:texture_storage_2d<rgba16float,write>;
 @group(2) @binding(9) var froxel_single_source:texture_3d<f32>;
+@group(2) @binding(10) var froxel_sun_source:texture_3d<f32>;
 @group(3) @binding(0) var terrain_linear_hdr:texture_2d<f32>;
 @group(3) @binding(1) var media_integrated_hdr:texture_2d<f32>;
 @group(3) @binding(2) var media_transmittance:texture_2d<f32>;
@@ -87,7 +89,34 @@ fn manual_csm_visibility(world:vec3<f32>,normal:vec3<f32>)->f32 {
 }
 fn terminal_radiance(hit:NepheleTerrainHit,direction:vec3<f32>,occlusion:bool)->vec3<f32>{if(hit.normal_hit.w<0.5||!occlusion){return directional_radiance(direction);}let n=normalize(hit.normal_hit.xyz);let sun_t=clamp(textureLoad(canonical_light_transmittance,froxel_coord(hit.point_t.xyz),0).rgb,vec3<f32>(0.0),vec3<f32>(1.0));let sun=max(dot(n,normalize(media.sun.xyz)),0.0)*manual_csm_visibility(hit.point_t.xyz,n)*media.sun_radiance.rgb*media.sun_radiance.a*sun_t;let diffuse=max(media.diffuse_ibl.rgb,vec3<f32>(0.0));return max(media.terrain_albedo.rgb,vec3<f32>(0.0))*(sun+diffuse)*0.3183098861837907;}
 fn continuation_transmittance(world:vec3<f32>,direction:vec3<f32>,reach:f32)->vec3<f32>{let step=reach/f32(media.grid.z);var tau=vec3<f32>(0.0);for(var i=0u;i<media.grid.z;i=i+1u){let c=froxel_coord(world+direction*((f32(i)+0.5)*step));tau+=max(textureLoad(canonical_extinction,c,0).rgb,vec3<f32>(0.0))*step;}return exp(-tau);}
-@compute @workgroup_size(4,4,4) fn cs_nephele_inject_single(@builtin(global_invocation_id) id:vec3<u32>){if(any(id>=media.grid.xyz)){return;}let canonical=textureLoad(canonical_extinction,vec3<i32>(id),0);let density=max(canonical.a,0.0);if(!(density>0.0)){textureStore(froxel_single_scatter,id,vec4<f32>(0.0));return;}let world=froxel_world(id);let incident=normalize(world-media.camera.xyz);let continuation=phase_direction(incident,id);let index=trace_index(id);let enabled=media.scattering.x>0.5;let sun_visible=!enabled||sun_terrain_hits[index].normal_hit.w<0.5;let light_t=clamp(textureLoad(canonical_light_transmittance,vec3<i32>(id),0).rgb,vec3<f32>(0.0),vec3<f32>(1.0));let direct=media.sigma_s.rgb*density*phase_value(dot(incident,normalize(media.sun.xyz)))*media.sun_radiance.rgb*media.sun_radiance.a*f32(sun_visible)*light_t;let hit=phase_terrain_hits[index];let reaches_terrain=enabled&&hit.normal_hit.w>0.5;let reach=select(media.depth.y,min(hit.point_t.w,media.depth.y),reaches_terrain);let phase_pdf=phase_value(dot(incident,continuation));let environment=media.sigma_s.rgb*density*(phase_pdf/max(phase_pdf,1e-20))*continuation_transmittance(world,continuation,reach)*terminal_radiance(hit,continuation,enabled);textureStore(froxel_single_scatter,id,vec4<f32>(direct+environment,0.0));}
+@compute @workgroup_size(4,4,4)
+fn cs_nephele_inject_single(@builtin(global_invocation_id) id:vec3<u32>) {
+    if(any(id>=media.grid.xyz)){return;}
+    let canonical=textureLoad(canonical_extinction,vec3<i32>(id),0);
+    let density=max(canonical.a,0.0);
+    if(!(density>0.0)){
+        textureStore(froxel_single_scatter,id,vec4<f32>(0.0));
+        textureStore(froxel_sun_source_out,id,vec4<f32>(0.0));
+        return;
+    }
+    let world=froxel_world(id);
+    let incident=normalize(world-media.camera.xyz);
+    let continuation=phase_direction(incident,id);
+    let index=trace_index(id);
+    let enabled=media.scattering.x>0.5;
+    let sun_visible=!enabled||sun_terrain_hits[index].normal_hit.w<0.5;
+    let light_t=clamp(textureLoad(canonical_light_transmittance,vec3<i32>(id),0).rgb,vec3<f32>(0.0),vec3<f32>(1.0));
+    let sun_source=media.sigma_s.rgb*density*media.sun_radiance.rgb*media.sun_radiance.a*f32(sun_visible)*light_t;
+    let camera_phase=phase_value(dot(incident,normalize(media.sun.xyz)));
+    let direct=sun_source*camera_phase;
+    textureStore(froxel_sun_source_out,id,vec4<f32>(sun_source,camera_phase));
+    let hit=phase_terrain_hits[index];
+    let reaches_terrain=enabled&&hit.normal_hit.w>0.5;
+    let reach=select(media.depth.y,min(hit.point_t.w,media.depth.y),reaches_terrain);
+    let phase_pdf=phase_value(dot(incident,continuation));
+    let environment=media.sigma_s.rgb*density*(phase_pdf/max(phase_pdf,1e-20))*continuation_transmittance(world,continuation,reach)*terminal_radiance(hit,continuation,enabled);
+    textureStore(froxel_single_scatter,id,vec4<f32>(direct+environment,0.0));
+}
 // Each froxel's single-scatter source comes from one stochastic continuation
 // direction drawn from an 8x8 blue-noise tile, so neighbouring froxels differ
 // strongly and the periodic tile shows as a crosshatch. A 3x3 tent across
@@ -95,7 +124,62 @@ fn continuation_transmittance(world:vec3<f32>,direction:vec3<f32>,reach:f32)->ve
 // averages nine decorrelated estimates before multiple scattering and
 // integration consume the source.
 @compute @workgroup_size(4,4,4) fn cs_nephele_filter_single(@builtin(global_invocation_id) id:vec3<u32>){if(any(id>=media.grid.xyz)){return;}let centre=vec3<i32>(id);if(!(max(textureLoad(froxel_extinction,centre,0).r,max(textureLoad(froxel_extinction,centre,0).g,textureLoad(froxel_extinction,centre,0).b))>0.0)){textureStore(froxel_single_scatter,id,vec4<f32>(0.0));return;}let limit=vec2<i32>(media.grid.xy)-vec2<i32>(1);var sum=vec3<f32>(0.0);var weight=0.0;for(var dy=-1;dy<=1;dy=dy+1){for(var dx=-1;dx<=1;dx=dx+1){let c=vec3<i32>(clamp(centre.xy+vec2<i32>(dx,dy),vec2<i32>(0),limit),centre.z);let ext=textureLoad(froxel_extinction,c,0).rgb;if(max(ext.r,max(ext.g,ext.b))>0.0){let w=f32((2-abs(dx))*(2-abs(dy)));sum+=w*max(textureLoad(froxel_single_source,c,0).rgb,vec3<f32>(0.0));weight+=w;}}}textureStore(froxel_single_scatter,id,vec4<f32>(sum/max(weight,1.0),0.0));}
-@compute @workgroup_size(4,4,4) fn cs_nephele_inject_multiple(@builtin(global_invocation_id) id:vec3<u32>){if(any(id>=media.grid.xyz)){return;}let canonical=textureLoad(canonical_extinction,vec3<i32>(id),0);let density=max(canonical.a,0.0);let single=max(textureLoad(froxel_single_source,vec3<i32>(id),0).rgb,vec3<f32>(0.0));if(!(density>0.0)){textureStore(froxel_in_scatter,id,vec4<f32>(single,0.0));return;}let world=froxel_world(id);let incident=normalize(world-media.camera.xyz);let continuation=phase_direction(incident,id);let hit=phase_terrain_hits[trace_index(id)];let reaches_terrain=media.scattering.x>0.5&&hit.normal_hit.w>0.5;let reach=select(media.depth.y,min(hit.point_t.w,media.depth.y),reaches_terrain);let step=reach/f32(media.grid.z);var t=vec3<f32>(1.0);var gathered=vec3<f32>(0.0);for(var i=0u;i<media.grid.z;i=i+1u){let sample_world=world+continuation*((f32(i)+0.5)*step);let c=froxel_coord(sample_world);let ext=max(textureLoad(froxel_extinction,c,0).rgb,vec3<f32>(0.0));let source=max(textureLoad(froxel_single_source,c,0).rgb,vec3<f32>(0.0));let st=exp(-ext*step);gathered+=t*source*(vec3<f32>(1.0)-st)/max(ext,vec3<f32>(1e-6));t*=st;}let pdf=phase_value(dot(incident,continuation));let multiple=media.sigma_s.rgb*density*(phase_value(dot(incident,continuation))/max(pdf,1e-20))*gathered;textureStore(froxel_in_scatter,id,vec4<f32>(single+multiple,dot(multiple,vec3<f32>(0.2126,0.7152,0.0722))));}
+// Match the existing single-source tent exactly, but evaluate its direct sun
+// term in the gathered ray's direction. A camera-direction radiance field is
+// not a direction-independent source for anisotropic multiple scattering.
+fn continuation_source(centre:vec3<i32>, direction:vec3<f32>)->vec3<f32> {
+    let limit=vec2<i32>(media.grid.xy)-vec2<i32>(1);
+    let phase=phase_value(dot(direction,normalize(media.sun.xyz)));
+    var camera_sun=vec3<f32>(0.0);
+    var gathered_sun=vec3<f32>(0.0);
+    var weight=0.0;
+    for(var dy=-1;dy<=1;dy=dy+1){
+        for(var dx=-1;dx<=1;dx=dx+1){
+            let c=vec3<i32>(clamp(centre.xy+vec2<i32>(dx,dy),vec2<i32>(0),limit),centre.z);
+            let ext=textureLoad(froxel_extinction,c,0).rgb;
+            if(max(ext.r,max(ext.g,ext.b))>0.0){
+                let w=f32((2-abs(dx))*(2-abs(dy)));
+                let sun=textureLoad(froxel_sun_source,c,0);
+                camera_sun+=w*sun.rgb*sun.a;
+                gathered_sun+=w*sun.rgb*phase;
+                weight+=w;
+            }
+        }
+    }
+    let filtered=textureLoad(froxel_single_source,centre,0).rgb;
+    let environment=max(filtered-camera_sun/max(weight,1.0),vec3<f32>(0.0));
+    return environment+gathered_sun/max(weight,1.0);
+}
+
+@compute @workgroup_size(4,4,4)
+fn cs_nephele_inject_multiple(@builtin(global_invocation_id) id:vec3<u32>) {
+    if(any(id>=media.grid.xyz)){return;}
+    let canonical=textureLoad(canonical_extinction,vec3<i32>(id),0);
+    let density=max(canonical.a,0.0);
+    let single=max(textureLoad(froxel_single_source,vec3<i32>(id),0).rgb,vec3<f32>(0.0));
+    if(!(density>0.0)){textureStore(froxel_in_scatter,id,vec4<f32>(single,0.0));return;}
+    let world=froxel_world(id);
+    let incident=normalize(world-media.camera.xyz);
+    let continuation=phase_direction(incident,id);
+    let hit=phase_terrain_hits[trace_index(id)];
+    let reaches_terrain=media.scattering.x>0.5&&hit.normal_hit.w>0.5;
+    let reach=select(media.depth.y,min(hit.point_t.w,media.depth.y),reaches_terrain);
+    let step=reach/f32(media.grid.z);
+    var t=vec3<f32>(1.0);
+    var gathered=vec3<f32>(0.0);
+    for(var i=0u;i<media.grid.z;i=i+1u){
+        let sample_world=world+continuation*((f32(i)+0.5)*step);
+        let c=froxel_coord(sample_world);
+        let ext=max(textureLoad(froxel_extinction,c,0).rgb,vec3<f32>(0.0));
+        let source=continuation_source(c,continuation);
+        let st=exp(-ext*step);
+        gathered+=t*source*(vec3<f32>(1.0)-st)/max(ext,vec3<f32>(1e-6));
+        t*=st;
+    }
+    let pdf=phase_value(dot(incident,continuation));
+    let multiple=media.sigma_s.rgb*density*(phase_value(dot(incident,continuation))/max(pdf,1e-20))*gathered;
+    textureStore(froxel_in_scatter,id,vec4<f32>(single+multiple,dot(multiple,vec3<f32>(0.2126,0.7152,0.0722))));
+}
 @compute @workgroup_size(8,8,1)
 fn cs_nephele_integrate(@builtin(global_invocation_id) gid:vec3<u32>) {
     let pixel=gid.xy;

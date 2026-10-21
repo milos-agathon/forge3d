@@ -35,7 +35,8 @@ It executes the historical round-2 `nephele_first_order.py` with its original
 omitted. It writes the exact patched program into the scratch directory and
 records that program's hash. The historical tool is unchanged.
 
-Run from the repository root (the scratch directory is ignored):
+Run from the repository root (keep the scratch directory unstaged; some file
+extensions inside it are ignored, but the directory itself is not):
 
 ```powershell
 gh run download 39517423981 --repo milos-agathon/forge3d `

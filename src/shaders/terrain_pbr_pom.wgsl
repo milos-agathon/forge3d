@@ -767,6 +767,9 @@ var aether_accumulated_scattering_tex: texture_3d<f32>;
 @group(4) @binding(3)
 var nephele_light_transmittance_tex: texture_3d<f32>;
 
+@group(4) @binding(4)
+var nephele_surface_cloudlight_tex: texture_2d<f32>;
+
 fn nephele_same_medium_direct_transmittance(screen_position: vec2<f32>, distance_m: f32) -> vec3<f32> {
     if (fog_uniforms.media_params.x < 0.5) { return vec3<f32>(1.0); }
     let dimensions = max(vec3<f32>(textureDimensions(nephele_light_transmittance_tex)), vec3<f32>(1.0));
@@ -5559,8 +5562,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         var shaded = vec3<f32>(0.0);
 
         if (is_physical_water) {
-            shaded = shade_physical_water(input.world_position, uv, shading_normal, view_dir,
-                                          light_dir, albedo, roughness, f0, shadow_visibility);
+            shaded = det_barrier3(shade_physical_water(input.world_position, uv, shading_normal, view_dir,
+                                          light_dir, albedo, roughness, f0, shadow_visibility));
         } else if (is_water) {
             // Water: specular-dominant shading (minimal diffuse, strong reflections)
             // Fresnel is already baked into eval_ibl via fresnel_schlick_roughness
@@ -5657,9 +5660,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // Water color: keep a stable artist-tunable blue tint while local/global
             // reflections come from the blended probe + planar + IBL path above.
             shaded =
-                det_barrier3(det_barrier3(reflective) +
+                det_barrier3(det_barrier3(det_barrier3(reflective) +
                 WATER_BASE_TINT * WATER_BASE_TINT_SCALE) +
-                det_barrier3(det_barrier3(water_scatter) * WATER_SCATTER_SCALE);
+                det_barrier3(det_barrier3(water_scatter) * WATER_SCATTER_SCALE));
 
         } else if (lambert_physical) {
             // OD-9c physical terrain surface. The planar/Y-up normal is the
@@ -5712,7 +5715,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
                 )),
                 vec3<f32>(PI),
             );
-            shaded = det_barrier3(direct_radiance) + det_barrier3(environment_radiance);
+            shaded = det_barrier3(det_barrier3(direct_radiance) + det_barrier3(environment_radiance));
         } else {
             // ══════════════════════════════════════════════════════════════════════
             // P2-S4: Terrain Lighting Composition (structure locked per spec)
@@ -5844,11 +5847,20 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             let spec_capped = min(spec_contrib, albedo * 0.20);
 
             // Final terrain shading
-            shaded = det_barrier3(det_barrier3(lit_albedo) + spec_capped) + det_barrier3(terrain_sss * same_medium_direct_t);
+            shaded = det_barrier3(det_barrier3(det_barrier3(lit_albedo) + spec_capped) + det_barrier3(terrain_sss * same_medium_direct_t));
         }
 
+        // Sunlight single-scattered by the canonical medium and incident on
+        // this terrain hit. The field stores irradiance; apply the actual
+        // material's Lambert BRDF once, before exposure and camera transport.
+        if (!is_water && fog_uniforms.media_params.x > 0.5) {
+            let dimensions = vec2<i32>(textureDimensions(nephele_surface_cloudlight_tex));
+            let pixel = clamp(vec2<i32>(input.clip_position.xy), vec2<i32>(0), dimensions - 1);
+            let irradiance = max(textureLoad(nephele_surface_cloudlight_tex, pixel, 0).rgb, vec3<f32>(0.0));
+            shaded = shaded + det_barrier3(det_div3(albedo, vec3<f32>(PI)) * irradiance);
+        }
         let exposure = max(u_shading.light_params.w, 0.0);
-        shaded = det_barrier3(shaded) * exposure;
+        shaded = det_barrier3(det_barrier3(shaded) * exposure);
 
         // P2: Apply atmospheric fog after exposure, before tonemap
         // When fog_density = 0, this is a no-op preserving P1 output

@@ -580,6 +580,12 @@ impl TerrainScene {
                         })?;
                         Ok(GraphPassOutcome::Restored)
                     }
+                    ("nephele.media.cloudlight", GraphPassAction::Execute { .. }) => {
+                        execution.run_pass("nephele.media.cloudlight", |context| {
+                            self.encode_attached_surface_cloudlight(context.encoder(), params, decoded)
+                        })?;
+                        Ok(GraphPassOutcome::Executed(Vec::new()))
+                    }
                     ("nephele.media.inject", GraphPassAction::Execute { .. }) => {
                         execution.run_pass("nephele.media.inject", |context| {
                             self.encode_attached_realtime_media_inject_for_terrain(

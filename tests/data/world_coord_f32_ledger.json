@@ -2591,8 +2591,8 @@
   ]
  },
  "nephele_main_sync": {
-  "result_count": 1929,
-  "result_digest": "101c2b57a12d622383b11a29dbe1387c988e62aacf1afd55897fcb54e14fed5c",
+  "result_count": 1931,
+  "result_digest": "3d7e2b08e7e456a558dbed3817c47effd05804eac820df704a3b84f0cf504dee",
   "main_side": {
    "source_commit": "696a0ff2a2a150503344321f824f0bd1e22af56c",
    "base_count": 1856,
@@ -3030,6 +3030,20 @@
        "as_f32",
        3,
        "sum.map(|value| (value / count) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "upload_world_medium",
+       "as_f32",
+       1,
+       "let unit = glam::Vec3::from_array([x, y, z].map(|v| v as f32 + 0.5)) / n as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "upload_world_medium",
+       "as_f32",
+       2,
+       "let unit = glam::Vec3::from_array([x, y, z].map(|v| v as f32 + 0.5)) / n as f32"
       ],
       [
        "src/terrain/renderer/media.rs",
@@ -4032,9 +4046,435 @@
        "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
       ]
      ]
+    },
+    "src/terrain/renderer/media.rs": {
+     "base": [
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "origin_xz: render_origin_xz, spacing_xz: [ render_span_xz[0] / dimensions.0.saturating_sub(1).max(1) as f32, render_span_xz[1] / dimensions.1.saturating_sub(1).max(1) as f32, ], height_offset: height_min, height_scale: z_scale,"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "origin_xz: render_origin_xz, spacing_xz: [ render_span_xz[0] / dimensions.0.saturating_sub(1).max(1) as f32, render_span_xz[1] / dimensions.1.saturating_sub(1).max(1) as f32, ], height_offset: height_min, height_scale: z_scale,"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       3,
+       "sum.map(|value| (value / count) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       4,
+       "let spacing_xz = [ terrain_span / dimensions.0.saturating_sub(1).max(1) as f32, terrain_span / dimensions.1.saturating_sub(1).max(1) as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       5,
+       "let spacing_xz = [ terrain_span / dimensions.0.saturating_sub(1).max(1) as f32, terrain_span / dimensions.1.saturating_sub(1).max(1) as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       6,
+       "let origin_xz = [ -0.5 * dimensions.0.saturating_sub(1) as f32 * spacing_xz[0], -0.5 * dimensions.1.saturating_sub(1) as f32 * spacing_xz[1], ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       7,
+       "let origin_xz = [ -0.5 * dimensions.0.saturating_sub(1) as f32 * spacing_xz[0], -0.5 * dimensions.1.saturating_sub(1) as f32 * spacing_xz[1], ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "termination_integration_steps",
+       "as_f32",
+       1,
+       "} let max_slice = (froxel_depth - 1) as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       8,
+       "} } mean.map(|value| (value / count as f64) as f32 * env_maps.intensity.max(0.0))"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "prepare_realtime_media_for_terrain",
+       "as_f32",
+       1,
+       "let width = ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "prepare_realtime_media_for_terrain",
+       "as_f32",
+       2,
+       "let height = ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "encode_attached_realtime_media_inject_with_matrices",
+       "as_f32",
+       1,
+       "let expected_viewport = ( ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "encode_attached_realtime_media_inject_with_matrices",
+       "as_f32",
+       2,
+       "let expected_viewport = ( ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       9,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       10,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       11,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       12,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       13,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       14,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       15,
+       "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       16,
+       "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       17,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       18,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       19,
+       "let centre = uv * visible + glam::Vec2::splat(FROXEL_OFF_AXIS_BORDER as f32 - 0.5)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       20,
+       "let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       21,
+       "let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       22,
+       "let step = segment_length / steps as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       23,
+       "let point = origin + direction * (start + (i as f32 + 0.5) * step)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "sun_integration_steps",
+       "as_f32",
+       1,
+       "direction[axis].abs() * dimensions[axis].saturating_sub(1) as f32 / (bounds.max[axis] - bounds.min[axis])"
+      ]
+     ],
+     "result": [
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       1,
+       "origin_xz: render_origin_xz, spacing_xz: [ render_span_xz[0] / dimensions.0.saturating_sub(1).max(1) as f32, render_span_xz[1] / dimensions.1.saturating_sub(1).max(1) as f32, ], height_offset: height_min, height_scale: z_scale,"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       2,
+       "origin_xz: render_origin_xz, spacing_xz: [ render_span_xz[0] / dimensions.0.saturating_sub(1).max(1) as f32, render_span_xz[1] / dimensions.1.saturating_sub(1).max(1) as f32, ], height_offset: height_min, height_scale: z_scale,"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       3,
+       "sum.map(|value| (value / count) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "upload_world_medium",
+       "as_f32",
+       1,
+       "let unit = glam::Vec3::from_array([x, y, z].map(|v| v as f32 + 0.5)) / n as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "upload_world_medium",
+       "as_f32",
+       2,
+       "let unit = glam::Vec3::from_array([x, y, z].map(|v| v as f32 + 0.5)) / n as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       4,
+       "let spacing_xz = [ terrain_span / dimensions.0.saturating_sub(1).max(1) as f32, terrain_span / dimensions.1.saturating_sub(1).max(1) as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       5,
+       "let spacing_xz = [ terrain_span / dimensions.0.saturating_sub(1).max(1) as f32, terrain_span / dimensions.1.saturating_sub(1).max(1) as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       6,
+       "let origin_xz = [ -0.5 * dimensions.0.saturating_sub(1) as f32 * spacing_xz[0], -0.5 * dimensions.1.saturating_sub(1) as f32 * spacing_xz[1], ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       7,
+       "let origin_xz = [ -0.5 * dimensions.0.saturating_sub(1) as f32 * spacing_xz[0], -0.5 * dimensions.1.saturating_sub(1) as f32 * spacing_xz[1], ]"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "termination_integration_steps",
+       "as_f32",
+       1,
+       "} let max_slice = (froxel_depth - 1) as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       8,
+       "} } mean.map(|value| (value / count as f64) as f32 * env_maps.intensity.max(0.0))"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "prepare_realtime_media_for_terrain",
+       "as_f32",
+       1,
+       "let width = ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "prepare_realtime_media_for_terrain",
+       "as_f32",
+       2,
+       "let height = ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "encode_attached_realtime_media_inject_with_matrices",
+       "as_f32",
+       1,
+       "let expected_viewport = ( ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "encode_attached_realtime_media_inject_with_matrices",
+       "as_f32",
+       2,
+       "let expected_viewport = ( ((params.size_px.0 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, ((params.size_px.1 as f32 * params.render_scale.clamp(0.25, 4.0)) .round() .max(1.0)) as u32, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       9,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       10,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       11,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       12,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       13,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       14,
+       "let uv = glam::Vec2::new( (id[0] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.x, (id[1] as f32 + 0.5 - FROXEL_OFF_AXIS_BORDER as f32) / visible.y, )"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       15,
+       "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       16,
+       "camera + ray * depth.distance_at_unit((id[2] as f32 + 0.5) / grid.depth as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       17,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       18,
+       "let visible = glam::Vec2::new(grid.visible_width() as f32, grid.visible_height() as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       19,
+       "let centre = uv * visible + glam::Vec2::splat(FROXEL_OFF_AXIS_BORDER as f32 - 0.5)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       20,
+       "let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       21,
+       "let limit = glam::Vec2::new((grid.width - 2) as f32, (grid.height - 2) as f32)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       22,
+       "let step = segment_length / steps as f32"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "<module>",
+       "as_f32",
+       23,
+       "let point = origin + direction * (start + (i as f32 + 0.5) * step)"
+      ],
+      [
+       "src/terrain/renderer/media.rs",
+       "sun_integration_steps",
+       "as_f32",
+       1,
+       "direction[axis].abs() * dimensions[axis].saturating_sub(1) as f32 / (bounds.max[axis] - bounds.min[axis])"
+      ]
+     ]
     }
    }
   },
-  "review": "APPROVED by Milos (2026-10-19) in the PR #172 main-sync session. Merging main into PR #172 combines two frozen inventories. Each side lists, per file, the exact ordered conversion sites before and after the merge; undoing one side restores the other branch's exact inventory and digest. No conversion is excluded and the scanner is unchanged."
+  "review": "APPROVED by Milos (2026-10-19) in the PR #172 main-sync session. Merging main into PR #172 combines two frozen inventories. Each side lists, per file, the exact ordered conversion sites before and after the merge; undoing one side restores the other branch's exact inventory and digest. No conversion is excluded and the scanner is unchanged.; APPROVED by Milos on 2026-10-21 (second \"All approved\" in release task): cloudlight adds only two integer-cell normalization casts in upload_world_medium; exact endpoints and both historical inventories retained."
  }
 }

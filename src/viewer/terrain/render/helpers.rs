@@ -60,6 +60,9 @@ impl ViewerTerrainScene {
                 z_scale,
                 terrain.revision,
             )?;
+            pass.prepare_surface_cloudlight(
+                self.device.as_ref(), self.queue.as_ref(), [terrain.sun_intensity; 3],
+            )?;
             Ok(())
         })();
         self.canonical_media_pass = Some(pass);
@@ -481,6 +484,8 @@ impl ViewerTerrainScene {
                     .expect("media transmittance fallback was created")
                     .create_view(&wgpu::TextureViewDescriptor::default())
             });
+        let media_cloudlight_view = self.canonical_media_pass.as_ref()
+            .map(crate::terrain::realtime_media::ViewerMediaPass::surface_cloudlight_view);
 
         // Get overlay view and sampler from stack
         // ensure_fallback_texture() guarantees composite_view is Some (either actual composite or RGBA fallback)
@@ -682,6 +687,12 @@ impl ViewerTerrainScene {
                         binding: 16,
                         resource: wgpu::BindingResource::TextureView(
                             &media_light_transmittance_view,
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 17,
+                        resource: wgpu::BindingResource::TextureView(
+                            media_cloudlight_view.as_ref().unwrap_or(ibl_brdf_view),
                         ),
                     },
                 ],

@@ -104,8 +104,8 @@ NEPHELE_FREEZE_SHA256 = "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdb
 # Merging main into PR #172 combines both freezes. `nephele_main_sync`
 # (pending owner review) records, per changed file, the exact ordered sites
 # on each side; undoing one side restores the other freeze exactly.
-EXPECTED_CONVERSION_COUNT = 1929
-EXPECTED_CONVERSION_SHA256 = "101c2b57a12d622383b11a29dbe1387c988e62aacf1afd55897fcb54e14fed5c"
+EXPECTED_CONVERSION_COUNT = 1931
+EXPECTED_CONVERSION_SHA256 = "3d7e2b08e7e456a558dbed3817c47effd05804eac820df704a3b84f0cf504dee"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"

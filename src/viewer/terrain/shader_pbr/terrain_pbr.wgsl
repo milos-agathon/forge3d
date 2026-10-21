@@ -43,6 +43,7 @@ struct Uniforms {
 @group(0) @binding(14) var envSampler: sampler;
 @group(0) @binding(15) var brdfLUT: texture_2d<f32>;
 @group(0) @binding(16) var canonical_light_transmittance: texture_3d<f32>;
+@group(0) @binding(17) var surface_cloudlight: texture_2d<f32>;
 
 fn same_medium_direct_transmittance(world: vec3<f32>) -> vec3<f32> {
     if u.lens_params.w <= 0.5 {
@@ -913,6 +914,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
               + ground_bounce
               + indirect_light
               + rim_light * same_medium_direct_t;
+    if (u.lens_params.w > 0.5 && !is_water) {
+        let dimensions = vec2<i32>(textureDimensions(surface_cloudlight));
+        let pixel = clamp(vec2<i32>(in.position.xy), vec2<i32>(0), dimensions - 1);
+        color += albedo * textureLoad(surface_cloudlight, pixel, 0).rgb * 0.3183098861837907;
+    }
 
     let linear_hdr_output = u.lens_params.w > 0.5;
     if preserve_overlay_active {

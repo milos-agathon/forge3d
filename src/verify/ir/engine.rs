@@ -11,7 +11,7 @@ pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x32c0_583b_cf1a_f865;
 // Updated from the assembled terrain module whenever its source changes.
 // Main (WATER-OPTICS + MAP-DETAIL-NORMAL) merged with NEPHELE media terrain source
 // (PR #172 main sync, owner-approved 2026-10-19).
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xffa4_448a_20d6_e60a;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x895b_b1d3_8454_97e1;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {
