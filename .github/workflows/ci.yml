@@ -159,7 +159,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -922,7 +921,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
@@ -2822,7 +2820,6 @@ jobs:
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       FORGE3D_NEPHELE_LANE: windows-nvidia-vulkan
       FORGE3D_NEPHELE_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      FORGE3D_NEPHELE_REFERENCE_WHEEL_DIR: tests/nephele/acceptance-runtime/reference-wheel
       WGPU_BACKEND: vulkan
       WGPU_BACKENDS: vulkan
     steps:
@@ -2874,25 +2871,17 @@ jobs:
         run: |
           python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/adapter-probe-raw.json" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/adapter-probe.log"
           exit $LASTEXITCODE
-      - name: Bind candidate, retained reference, source, adapter, fixture, and clean state
-        shell: pwsh
-        run: |
-          $referenceWheelDir = Join-Path $env:GITHUB_WORKSPACE $env:FORGE3D_NEPHELE_REFERENCE_WHEEL_DIR
-          $referenceWheels = @(Get-ChildItem -LiteralPath $referenceWheelDir -File -Filter '*.whl' -ErrorAction Stop)
-          if ($referenceWheels.Count -ne 1) { throw "expected exactly one retained NEPHELE reference wheel, found $($referenceWheels.Count)" }
-          python -m scripts.run_media_physical_capture prepare --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" --wheel-dir dist --reference-wheel-dir "$referenceWheelDir" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/prepare.log"
-          exit $LASTEXITCODE
       - name: Execute exhaustive statistical and shader producers
         shell: pwsh
         run: |
-          python -m scripts.run_media_physical_capture produce --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/producer.log"
+          python -m scripts.nephele_acceptance produce --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/producer.log"
           exit $LASTEXITCODE
       - name: Capture two independent clean physical runs and ablations
         shell: pwsh
         run: |
-          python -m scripts.run_media_physical_capture render --run-label a --capture-primary --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/render-a.log"
+          python -m scripts.nephele_acceptance render --run-label a --capture-primary --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/render-a.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m scripts.run_media_physical_capture render --run-label b --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/render-b.log"
+          python -m scripts.nephele_acceptance render --run-label b --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/render-b.log"
           exit $LASTEXITCODE
       - name: Run exactly six zero-skip NEPHELE physical cases
         shell: pwsh
@@ -2904,10 +2893,10 @@ jobs:
           $verifyCode = $LASTEXITCODE
           if ($pytestCode -ne 0) { exit $pytestCode }
           exit $verifyCode
-      - name: Verify all raw evidence and immutable identities
+      - name: Evaluate all six physical acceptance gates
         shell: pwsh
         run: |
-          python scripts/nephele_evidence_report.py "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/evidence-verifier.log"
+          python -m scripts.nephele_acceptance report --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/evidence-verifier.log"
           exit $LASTEXITCODE
       - name: Record physical lane RAN and verifier PASS
         id: nephele-pass

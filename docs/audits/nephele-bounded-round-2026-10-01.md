@@ -1,5 +1,9 @@
 # NEPHELE bounded remediation round — 2026-10-01
 
+Historical raw evidence removed by the trim remains available at `d5507249`. Use `git show d5507249:docs/audits/nephele-bounded-round-2026-10-01.md` to retrieve this summary and follow its evidence paths at that revision.
+
+Historical raw evidence removed by the trim remains available at `d5507249`. Use `git show d5507249:docs/audits/nephele-bounded-round-2026-10-01.md` to retrieve this summary and follow its evidence paths at that revision.
+
 > **Round 2 update (same day):** the sky-attenuation change described below was reverted, and B1 reproduces 1,546/1,558. A validated first-order split identified the best-defined missing term, but G4's terrain-occlusion-ablation SSIM (0.958, limit 0.80) and G3 (sky-only, 91.69%) already fail independently of it, so the fix was chosen but not implemented and NEPHELE stays NOT_PROVEN (owner sign-off recorded below). The hosted-Linux segfault came from a wgpu-core 0.19 wait defect and is fixed. See [Round 2](#round-2--revert-first-order-split-and-hosted-linux-crash). The sections before Round 2 record round 1 as it happened.
 
 **Round complete; physical acceptance NOT_PROVEN. NEPHELE remains unreleased and targets 1.41.0.** G3 and G4 still fail after the two lighting changes and the conditional shadow-mask diagnosis. The authorized stop rule has been applied: no further quality changes, fixture edits, H1 dispatch or H2 sequencing in this round.

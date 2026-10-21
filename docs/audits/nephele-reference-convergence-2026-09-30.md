@@ -1,5 +1,7 @@
 # NEPHELE reference convergence measurements, 2026-09-30
 
+Historical raw evidence removed by the trim remains available at `d5507249`. Use `git show d5507249:docs/audits/nephele-reference-convergence-2026-09-30.md` to retrieve this summary and follow its evidence paths at that revision.
+
 These are reference-versus-reference noise measurements, **not G3/G4 physical
 acceptance**. The tracked exact-prefix convergence record passed every unchanged
 criterion at 640 spp; the fixture is CONVERGED/APPROVED from source `6a4ae50a`.

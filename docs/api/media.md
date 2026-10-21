@@ -225,7 +225,17 @@ the report gives the resulting measured k = tau sqrt(N/V) and approximate
 false-failure probability. These are uncertainty reports, not new gates.
 The registry `wgpu-hal` is used without a vendored patch (OD-3 a).
 
-Physical evidence retains reference wheels under
-`reference-wheel/<wheel-sha256>/<original-filename>`. Candidate wheels remain
-at the archive root, so two builds of the same package version cannot overwrite
-each other. Both retain their original filenames and verified native bytes.
+Physical acceptance uses `python -m scripts.nephele_acceptance` with a shared
+`--artifact-dir`: run `produce`, then `render --run-label a --capture-primary`
+and `render --run-label b` in separate processes, then `report --head-sha <sha>`.
+The producer executes the statistical samples and the repository-wide shader
+analyzer; the captures record frames, AOVs, ablations, and native diagnostics.
+The report evaluates all six gates against the tracked reference fixture and
+writes `verification-report.json` and `lane-ran.json` only when all gates pass.
+A failed gate writes `verification-error.json` and returns a failing exit code.
+CI also runs the six physical pytest cases and checks that none were skipped.
+
+The compact flow does not retain or verify reference wheels, a wheel/source
+provenance hash chain, reference-source staleness, convergence records, or Git-tag
+provenance. Reference arrays and the exact camera contract remain tracked.
+Gate 5 retains the shader analyzer and Rust naga validation.

@@ -1,5 +1,7 @@
 # NEPHELE Gate 4 measurement — 2026-10-21
 
+Historical raw evidence removed by the trim remains available at `d5507249`. Use `git show d5507249:docs/audits/nephele-gate4-measurement-2026-10-21.md` to retrieve this summary and follow its evidence paths at that revision.
+
 **Physical acceptance remains NOT_PROVEN; release is blocked.** This note
 records the requested Gate 4 diagnosis and a new CPU prediction of the chosen
 terrain-lighting term. No renderer, test, gate, policy, pin, golden, frozen

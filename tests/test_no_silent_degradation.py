@@ -480,7 +480,7 @@ def test_e_validation_profiles_are_exhaustive_and_honest():
     fast_lane = set(ci_pytest_lane.fast_lane_files())
     expected_fast = {
         "tests/test_aether_acceptance_evidence.py",
-        "tests/test_nephele_evidence_report.py",
+        "tests/test_nephele_acceptance.py",
         "tests/test_nephele_fixture_contracts.py",
         "tests/test_nephele_public_api.py",
         "tests/test_install_smoke.py",
@@ -906,18 +906,6 @@ def test_substratia_physical_evidence_is_exact_head_and_cannot_be_bypassed():
     assert "FORGE3D_RUN_METAL_DIAGNOSTIC" in metal_diagnostic
     assert "continue-on-error: true" in metal_diagnostic
     assert "test-substratia-gpu," not in acceptance.split("\n    runs-on:", 1)[0]
-
-
-def test_nephele_provenance_lanes_fetch_complete_reference_history():
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    wheel_workflow = (ROOT / ".github/workflows/test-python-wheel.yml").read_text(encoding="utf-8")
-    for job in (
-        _workflow_job(workflow, "test-fast-contract"),
-        _workflow_job(workflow, "test-python-slow"),
-        _workflow_job(wheel_workflow, "test"),
-    ):
-        checkout = job.split("uses: actions/checkout@v4", 1)[1].split("\n      - ", 1)[0]
-        assert re.search(r"^\s+fetch-depth:\s+0\s*$", checkout, re.MULTILINE)
 
 
 def test_nephele_physical_exclusion_is_one_hosted_site_and_six_required_gates():

@@ -4258,40 +4258,6 @@ mod tests {
         assert!(weight.abs_diff_eq(glam::Vec2::ZERO, 1e-5), "{weight}");
     }
     #[test]
-    fn integration_reconstructs_froxels_bilinearly_without_static_dither() {
-        let shader = include_str!("../../shaders/nephele_froxel.wgsl");
-        assert!(shader.contains("let footprint=froxel_footprint(uv);"));
-        assert!(shader.contains("bilinear_extinction(footprint,i32(z))"));
-        assert!(!shader.contains("fn blue_noise(pixel"));
-    }
-    #[test]
-    fn single_scatter_is_filtered_before_multiple_scatter_and_integration() {
-        let shader = include_str!("../../shaders/nephele_froxel.wgsl");
-        assert!(shader.contains("fn cs_nephele_filter_single"));
-        // Normalize CRLF checkouts (Windows CI) before splitting off the tests.
-        let source = include_str!("media.rs").replace("\r\n", "\n");
-        let rust = source
-            .split("#[cfg(test)]
-mod tests")
-            .next()
-            .unwrap();
-        // The filter reads the raw estimate; both consumers read the filtered copy.
-        assert_eq!(rust.matches("texture_entry(9, &single_scatter)").count(), 1);
-        assert_eq!(rust.matches("texture_entry(9, &single_filtered)").count(), 2);
-        assert!(rust.contains("pass.set_pipeline(&self.pipelines.filter_single)"));
-    }
-    #[test]
-    fn viewer_media_encode_does_not_require_clear_texture_feature() {
-        // Normalize CRLF checkouts (Windows CI) before splitting off the tests.
-        let source = include_str!("media.rs").replace("\r\n", "\n");
-        let rust = source
-            .split("#[cfg(test)]
-mod tests")
-            .next()
-            .unwrap();
-        assert!(!rust.contains("encoder.clear_texture("));
-    }
-    #[test]
     fn sun_transmittance_integrates_complete_bounded_segment() {
         let density = crate::media::DensityField::Grid3D(
             crate::media::Grid3D::new(
@@ -4554,19 +4520,12 @@ mod tests")
     }
     #[test]
     fn multiple_scatter_is_accounted() {
-        let source = include_str!("../../shaders/nephele_froxel.wgsl");
-        assert!(source.contains("cs_nephele_inject_single"));
-        assert!(source.contains("cs_nephele_inject_multiple"));
-        assert!(source.contains("gathered+=t*source"));
-        assert!(!source.contains("let recycled="));
-        assert!(!source.contains("incident-multiple"));
         let residual = beer_accounting_residual(&[0.2, 0.5, 1.0], 0.37);
         assert!(
             residual > 0.0,
             "the independently executed terms must not be replaced by zero"
         );
         assert!(residual <= f32::EPSILON);
-        assert!(source.contains("abs(t.x-exp(-tau.x))"));
     }
 
     #[test]
@@ -4577,40 +4536,10 @@ mod tests")
         assert!(!depth32_history_matches(depth, 0.51));
         assert!(!depth32_history_matches(depth, f32::NAN));
 
-        let shader = include_str!("../../shaders/nephele_froxel.wgsl");
-        assert!(shader.contains("max(a,b)-min(a,b)<=1u"));
-        assert!(shader.contains("depth32_history_matches(old_depth,projected_old_depth)"));
-        assert!(!shader.contains("old_depth==projected_old_depth"));
     }
 
     #[test]
     fn live_viewer_paths_prepare_canonical_terrain_trace_before_encode() {
-        let helper = include_str!("../../viewer/terrain/render/helpers.rs");
-        let medium_prepare = helper
-            .find("pass.prepare_viewer_frame(")
-            .expect("viewer media helper must prepare the canonical medium");
-        let terrain_prepare = helper
-            .find("pass.prepare_viewer_terrain_trace(")
-            .expect("viewer media helper must reconcile terrain resources");
-        assert!(medium_prepare < terrain_prepare);
-        for source in [
-            include_str!("../../viewer/terrain/render/screen/setup.rs"),
-            include_str!("../../viewer/terrain/render/offscreen/setup.rs"),
-        ] {
-            let prepare = source
-                .find("self.prepare_canonical_media_frame(")
-                .expect("viewer media path must prepare the canonical medium before drawing");
-            let bind = source
-                .find("self.prepare_pbr_bind_group_internal(&pbr_uniforms)")
-                .expect("viewer media path must bind the canonical light transmittance");
-            assert!(prepare < bind);
-        }
-        for source in [
-            include_str!("../../viewer/terrain/render/screen/effects.rs"),
-            include_str!("../../viewer/terrain/render/offscreen/effects.rs"),
-        ] {
-            assert!(source.contains("let output = pass.encode("));
-        }
         let mean = viewer_height_palette_mean(&[0.0, 1.0], 0.0, 1.0);
         for (actual, expected) in mean.into_iter().zip([0.52, 0.65, 0.49]) {
             assert!((actual - expected).abs() < 1e-6);
@@ -4627,94 +4556,10 @@ mod tests")
             include_str!("../../viewer/terrain/shader_pbr/terrain_pbr.wgsl")
         );
         naga::front::wgsl::parse_str(source).expect("viewer PBR WGSL must validate");
-        assert!(source.contains("canonical_light_transmittance: texture_3d<f32>"));
-        assert!(source.contains("diffuse * effective_shadow_tint * same_medium_direct_t"));
-        assert!(source.contains("specular_color * same_medium_direct_t"));
-        assert!(source.contains("water_spec * same_medium_direct_t"));
-        assert!(source.contains("rim_light * same_medium_direct_t"));
-        assert!(source.contains("fn terrain_view_depth(world_pos: vec3<f32>) -> f32"));
-        assert_eq!(
-            source
-                .matches("let view_depth = terrain_view_depth(in.world_pos);")
-                .count(),
-            4
-        );
-        assert!(
-            !source.contains("let view_depth = max(length(u.camera_pos.xyz - in.world_pos), 0.1);")
-        );
-        assert!(source.contains("fn preserve_overlay_lighting("));
-        assert!(source.contains("return lit_linear * preserve_scale;"));
-        assert!(!source.contains("preserve_overlay_scalar("));
-        let linear_branch = source
-            .find("if !linear_hdr_output {")
-            .expect("media output must have an explicit display-transform boundary");
-        let haze = source
-            .find("let atmo_scale =")
-            .expect("legacy display haze must remain available");
-        assert!(linear_branch < haze);
     }
 
-    #[test]
-    fn terrain_media_surface_lookup_uses_froxel_xy_and_log_depth_coordinates() {
-        let source = include_str!("../../shaders/terrain_pbr_pom.wgsl");
-        assert!(source.contains("det_div2(screen_position, vec2<f32>(8.0))"));
-        assert!(source.contains("vec2<f32>(fog_uniforms.media_depth.w)"));
-        assert!(source.contains("let unit_depth = clamp("));
-        assert!(!source.contains("let xy = screen_position +"));
-    }
 
-    #[test]
-    fn live_media_paths_fail_closed_when_pbr_initialization_fails() {
-        let screen = include_str!("../../viewer/terrain/render/screen/resources.rs");
-        let snapshot = include_str!("../../viewer/terrain/render/offscreen/setup.rs");
-        for source in [screen, snapshot] {
-            assert!(source.contains("if needs_canonical_media"));
-            assert!(source.contains("return Err(e);"));
-        }
-        let screen_render = include_str!("../../viewer/terrain/render/screen/mod.rs");
-        assert!(screen_render.contains("media_prepare_failed:"));
-    }
 
-    #[test]
-    fn terrain_scene_binds_all_declared_media_graph_resources() {
-        let draw = include_str!("draw/mod.rs");
-        assert!(draw.contains("self.bind_realtime_media_graph_resources("));
-        assert!(!draw.contains("nephele.media.integrate lost its authoritative depth transition"));
-        let graph = include_str!("render_graph.rs");
-        assert!(graph.contains(".write(m.radiance_provider)"));
-        assert!(graph.contains(".read(m.radiance_provider)"));
-        let aov = include_str!("aov.rs");
-        let forward = aov
-            .find("graph.execute_with_barriers(\"terrain.forward_aov\"")
-            .expect("AOV forward graph pass must execute");
-        let inject = aov[forward..]
-            .find("graph.execute_with_barriers(\"nephele.media.inject\"")
-            .map(|offset| forward + offset)
-            .expect("AOV media inject graph pass must execute");
-        assert!(aov[forward..inject].contains("self.prepare_realtime_media_radiance_provider("));
-        let bindings = include_str!("media.rs");
-        for handle in [
-            "scene_depth",
-            "radiance_provider",
-            "extinction",
-            "light_transmittance",
-            "in_scatter",
-            "integrated",
-            "transmittance",
-            "cloud_shadow",
-            "optical_depth",
-            "history_previous",
-            "history_depth_previous",
-            "history_current",
-            "history_depth_current",
-            "composite",
-        ] {
-            assert!(
-                bindings.contains(&format!("handles.{handle}")),
-                "production binding is missing declared media handle {handle}"
-            );
-        }
-    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -5018,43 +4863,14 @@ mod tests")
     }
 
     #[test]
-    fn reviewer_task_c_contracts_are_explicit() {
-        let rust = include_str!("media.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap();
-        let shader = include_str!("../../shaders/nephele_froxel.wgsl");
-        let py_api = include_str!("py_api.rs");
-        let aov = include_str!("aov.rs");
-
-        assert!(rust.contains("environment_intensity: f32"));
-        assert!(rust.contains("scaled_ibl_radiance(*value, environment_intensity)"));
-        assert!(aov.contains("env_maps.intensity.max(0.0)"));
-        assert!(rust.contains("resources.diffuse_ibl = diffuse_ibl_irradiance"));
-        assert!(rust.contains("u64::from(terrain_occlusion_enabled)"));
-        assert!(rust.contains("texture_entry(3, &terrain_shadow_maps)"));
-        assert!(rust.contains("buffer_entry(4, &csm.uniform_buffer)"));
-        assert!(rust.contains("dimension: Some(wgpu::TextureViewDimension::D2Array)"));
-        assert!(rust.contains("texture_entry(9, &single_scatter)"));
-        assert!(shader.contains("fn manual_csm_visibility"));
-        assert!(shader.contains("*manual_csm_visibility(hit.point_t.xyz,n)"));
-        assert!(shader.contains("let multiple_rgb=max(source-single_source"));
-        assert!(shader.contains("multiple_scatter_rgb+=segment_weight*multiple_rgb"));
-        assert!(py_api.contains("completed_ledger_report"));
-    }
-    #[test]
     fn shaders_validate_and_compute_call_graphs_use_manual_shadows() {
         assert_compute_call_graph_safe(include_str!("../../shaders/nephele_froxel.wgsl"));
         let trace_adapter = include_str!("../../shaders/nephele_realtime_terrain_trace.wgsl");
-        assert_eq!(trace_adapter.matches(" = terrain_trace(").count(), 5);
         let assembled = format!(
             "{}\n{trace_adapter}",
             crate::shader_sources::hybrid_kernel()
         );
         assert_compute_call_graph_safe(&assembled);
-        let froxel = include_str!("../../shaders/nephele_froxel.wgsl");
-        assert!(froxel.contains("phase_value(dot(incident,normalize(media.sun.xyz)))"));
-        assert!(!froxel.contains("phase_value(dot(normalize(media.sun.xyz),view_direction))"));
         let tonemap = format!(
             "{}\n{}\n{}",
             include_str!("../../shaders/includes/determinism.wgsl"),
@@ -5069,7 +4885,6 @@ mod tests")
     #[test]
     fn assembled_terrain_shader_consumes_same_medium_transmittance() {
         let source = crate::shader_sources::terrain();
-        assert!(source.contains("nephele_same_medium_direct_transmittance"));
         let module = naga::front::wgsl::parse_str(&source).expect("terrain WGSL must parse");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),

@@ -1,5 +1,7 @@
 # NEPHELE cloud-light candidate — 2026-10-21
 
+Historical raw evidence removed by the trim remains available at `a8a96c47`. Use `git show a8a96c47:docs/audits/nephele-cloudlight-candidate-2026-10-21.md` to retrieve this summary and follow its evidence paths at that revision.
+
 **NVIDIA physical acceptance FAILED; not release ready.** Implementation
 `d5507249a2327d183edf0bb3ff11dcb83a773333` was committed, pushed, and physically
 captured. Full acceptance, merge, tags, and publication have not been performed.

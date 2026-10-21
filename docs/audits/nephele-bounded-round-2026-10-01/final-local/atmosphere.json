@@ -1,5 +1,0 @@
-{
-  "environment_intensity": 0.25,
-  "kind": "analytic_clear_sky",
-  "schema": "forge3d.nephele.atmosphere_input/1"
-}

@@ -9,7 +9,6 @@ import hashlib
 import json
 import os
 import subprocess
-import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -18,24 +17,11 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/nephele/fixture"
-MANIFEST = ROOT / "tests/nephele/fixture-manifest.json"
 DEM_WIDTH = DEM_HEIGHT = 16
 WIDTH = HEIGHT = 64  # TerrainRenderParams' physical minimum and tracked full viewport.
 VIEWPORT_WIDTH = VIEWPORT_HEIGHT = 64
 CROP_X = CROP_Y = 0
 REFERENCE_SEED = 0x4E455048
-SCENE_INPUT_FILES = {
-    "camera": "camera.json",
-    "terrain_dem": "terrain-dem.npy",
-    "terrain": "terrain.json",
-    "medium": "medium.json",
-    "sun": "sun.json",
-    "atmosphere": "atmosphere.json",
-    "material": "material.json",
-    "exposure": "exposure.json",
-    "tonemap": "tonemap.json",
-    "crop": "crop.json",
-}
 
 
 def _json(path: Path, value: Any) -> None:
@@ -58,116 +44,6 @@ def _source_revision() -> str:
         capture_output=True,
         text=True,
     ).stdout.strip()
-
-
-def _require_clean_tracked_revision() -> None:
-    required = [
-        "scripts/generate_media_fixture.py",
-        "scripts/nephele_fixture_masks.py",
-        "scripts/record_media_reference_convergence.py",
-        *_reference_source_inputs().keys(),
-        *[f"tests/nephele/fixture/{name}" for name in SCENE_INPUT_FILES.values()],
-    ]
-    subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "--error-unmatch", "--", *required],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    status = subprocess.run(
-        ["git", "-C", str(ROOT), "status", "--porcelain=v1", "--untracked-files=all"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    if status:
-        raise RuntimeError("acceptance reference generation requires a clean tracked revision")
-
-
-def _reference_source_inputs() -> dict[str, str]:
-    paths = [
-        Path("scripts/generate_media_fixture.py"),
-        Path("python/forge3d/media.py"),
-        Path("src/media_py.rs"),
-        Path("src/path_tracing/hybrid_compute/media_reference.rs"),
-        Path("src/path_tracing/hybrid_compute/terrain_heightfield.rs"),
-        Path("src/path_tracing/hybrid_compute/render_terrain.rs"),
-        Path("src/terrain/camera.rs"),
-        Path("src/terrain/mod.rs"),
-        Path("src/shader_sources.rs"),
-        Path("src/shaders/hybrid_terrain_traversal.wgsl"),
-        Path("src/shaders/nephele_terrain_trace_adapter.wgsl"),
-        *sorted(path.relative_to(ROOT) for path in (ROOT / "src/media").glob("*.rs")),
-    ]
-    return {path.as_posix(): _sha256(ROOT / path) for path in paths}
-
-
-def _terrain_media_reference_module_source() -> bytes:
-    inputs = (
-        ("src/shaders/sdf_primitives.wgsl", False),
-        ("src/shaders/sdf_operations.wgsl", True),
-        ("src/shaders/hybrid_traversal.wgsl", True),
-        ("src/shaders/hybrid_terrain_traversal.wgsl", True),
-        ("src/shaders/atmosphere/prometheus_spectral_reference.wgsl", False),
-        ("src/shaders/hybrid_kernel.wgsl", True),
-    )
-    assembled = []
-    for relative, strip in inputs:
-        source = (ROOT / relative).read_text(encoding="utf-8")
-        if strip:
-            source = "\n".join(
-                line for line in source.splitlines()
-                if not line.lstrip().startswith("#include")
-            )
-        assembled.append(source)
-    hybrid_kernel = "\n".join(assembled).encode("utf-8")
-    query_shader = (ROOT / "src/shaders/nephele_terrain_trace_adapter.wgsl").read_bytes()
-    return hybrid_kernel + b"\n" + query_shader
-
-
-def _scene_input_records() -> dict[str, dict[str, str]]:
-    return {role: _record(name) for role, name in SCENE_INPUT_FILES.items()}
-
-
-def _scene_input_hashes() -> dict[str, str]:
-    return {role: record["sha256"] for role, record in _scene_input_records().items()}
-
-
-def _color_pipeline(scene: dict[str, dict[str, str]]) -> dict[str, str]:
-    return {
-        "linear_input": "linear-sRGB",
-        "tonemap": "aces-fitted",
-        "output_encoding": "IEC 61966-2-1 sRGB",
-        "quantization": "round-to-nearest uint8",
-        "exposure": scene["exposure"]["sha256"],
-        "tonemap_contract": scene["tonemap"]["sha256"],
-        "crop": scene["crop"]["sha256"],
-    }
-
-
-def _fixture_manifest_record(
-    *,
-    converged: bool,
-    provenance: dict[str, Any],
-    scene: dict[str, dict[str, str]],
-    files: dict[str, dict[str, str]],
-    mask_generator: dict[str, str],
-    mask_rules: dict[str, str],
-    fixture_id: str = "nephele-cloud-over-terrain-v2",
-    revision: int = 2,
-) -> dict[str, Any]:
-    return {
-        "schema": "forge3d.nephele.fixture_manifest/3",
-        "status": "APPROVED" if converged else "UNRESOLVED",
-        "fixture_id": fixture_id,
-        "revision": revision,
-        "source_revision": provenance["source_revision"],
-        "color_pipeline": _color_pipeline(scene),
-        "scene_inputs": scene,
-        "files": files,
-        "mask_generator": mask_generator,
-        "mask_rules": mask_rules,
-    }
 
 
 def _scene_inputs() -> tuple[np.ndarray, np.ndarray]:
@@ -397,43 +273,10 @@ DIAGNOSTIC_FIELDS = {
 }
 
 
-def _native_runtime_record(wheel: Path | None, source_revision: str) -> dict[str, str] | None:
-    if wheel is None:
-        return None
-    from forge3d.media import _native_module
-
-    wheel = wheel.resolve()
-    if not wheel.is_file():
-        raise ValueError(f"native wheel does not exist: {wheel}")
-    with zipfile.ZipFile(wheel) as archive:
-        members = [
-            name for name in archive.namelist()
-            if name.startswith("forge3d/_forge3d")
-            and Path(name).suffix.lower() in {".so", ".dylib", ".pyd"}
-        ]
-        if len(members) != 1:
-            raise ValueError("native wheel must contain exactly one forge3d native member")
-        member = members[0]
-        member_bytes = archive.read(member)
-    native_path = Path(_native_module().__file__).resolve()
-    native_sha256 = _sha256(native_path)
-    if hashlib.sha256(member_bytes).hexdigest() != native_sha256:
-        raise ValueError("imported forge3d native module does not match the supplied wheel")
-    return {
-        "source_revision": source_revision,
-        "wheel_filename": wheel.name,
-        "wheel_sha256": _sha256(wheel),
-        "wheel_native_member": member,
-        "native_sha256": native_sha256,
-    }
-
-
 def _render_reference(
     terrain: np.ndarray,
     density: np.ndarray,
     samples_per_pixel: int,
-    native_wheel: Path | None,
-    diagnostic: bool,
     requested_workers: int | None,
 ) -> None:
     tiles = _spatial_tiles()
@@ -522,37 +365,12 @@ def _render_reference(
         or diagnostics["energy_accounting_residual"] is not None
     ):
         raise RuntimeError("reference diagnostics violate the exact runtime invariants")
-    source_revision = _source_revision()
-    native_runtime = _native_runtime_record(native_wheel, str(diagnostics["source_revision"]))
-    acceptance_eligible = not diagnostic and native_runtime is not None
-    if acceptance_eligible and diagnostics["source_revision"] != source_revision:
-        raise RuntimeError("reference native runtime source revision differs from the clean checkout")
     _json(FIXTURE / "reference-provenance.json", {
-        "schema": "forge3d.nephele.reference_provenance/2",
-        "acceptance_eligible": acceptance_eligible,
-        "diagnostic_reason": None if acceptance_eligible else "explicit diagnostic generation; cannot seed acceptance convergence",
+        "schema": "forge3d.nephele.reference_provenance/3",
         "algorithm": "integrated-hybrid-terrain-spectral-ratio-delta-tracking-surface-env-mis-v3",
         "samples_per_pixel": samples_per_pixel,
         "seed": REFERENCE_SEED,
-        "sample_identity": {
-            "algorithm": "per-pixel-absolute-sample-index-v1",
-            "seed": REFERENCE_SEED,
-            "range": [0, samples_per_pixel],
-        },
-        "spatial_tiles": tiles,
-        "runtime_partition": {
-            "kind": "process_pool_max_workers",
-            "value": worker_count,
-        },
-        "source_revision": source_revision,
-        "source_inputs": _reference_source_inputs(),
-        "scene_inputs": _scene_input_hashes(),
-        "assembled_sources": {
-            "terrain_media_reference_module_sha256": hashlib.sha256(
-                _terrain_media_reference_module_source()
-            ).hexdigest(),
-        },
-        "native_runtime": native_runtime,
+        "source_revision": _source_revision(),
         "camera_contract": camera_contract,
         "full_viewport": [VIEWPORT_WIDTH, VIEWPORT_HEIGHT],
         "crop": [CROP_X, CROP_Y, WIDTH, HEIGHT],
@@ -560,100 +378,20 @@ def _render_reference(
     })
 
 
-def _manifest() -> None:
+def main() -> int:
     from scripts.nephele_fixture_masks import generate_masks
 
-    generate_masks(FIXTURE, FIXTURE / "mask-rules.json", FIXTURE)
-    scene = _scene_input_records()
-    files = {role: _record(name) for role, name in {
-        "reference_rgb": "reference-rgb.npy", "reference_transmittance": "reference-transmittance.npy",
-        "reference_in_scatter": "reference-in-scatter.npy", "reference_cloud_shadow_aov": "reference-cloud-shadow-aov.npy",
-        "reference_optical_depth": "reference-optical-depth.npy", "sky_cloud_mask": "sky-cloud-mask.npy",
-        "godray_roi_mask": "godray-roi-mask.npy", "terrain_mask": "terrain-mask.npy",
-        "cloud_shadow_mask": "cloud-shadow-mask.npy", "shaft_mask": "shaft-mask.npy",
-        "reference_terrain_slice": "reference-terrain-slice.npy",
-        "reference_terrain_hit": "reference-terrain-hit.npy",
-        "reference_media_lighting_visibility": "reference-media-lighting-visibility.npy",
-    }.items()}
-    generator = ROOT / "scripts/nephele_fixture_masks.py"
-    convergence_path = FIXTURE / "reference-convergence.json"
-    convergence = json.loads(convergence_path.read_text(encoding="utf-8")) if convergence_path.is_file() else {}
-    provenance = json.loads((FIXTURE / "reference-provenance.json").read_text(encoding="utf-8"))
-    converged = (
-        provenance.get("acceptance_eligible") is True
-        and
-        convergence.get("status") == "CONVERGED"
-        and convergence.get("final", {}).get("rgb_sha256") == _sha256(FIXTURE / "reference-rgb.npy")
-        and convergence.get("generator_sha256") == _sha256(ROOT / "scripts/record_media_reference_convergence.py")
-    )
-    if not converged:
-        _json(convergence_path, {
-            "schema": "forge3d.nephele.reference_convergence/2",
-            "status": "UNRESOLVED",
-            "criterion": "actual downstream Gate 3 and approved Gate 4 metrics over exact identical reference-derived masks",
-            "nested_prefix": False,
-            "final": {
-                "samples_per_pixel": provenance["samples_per_pixel"],
-                "rgb_path": "tests/nephele/fixture/reference-rgb.npy",
-                "rgb_sha256": _sha256(FIXTURE / "reference-rgb.npy"),
-                "provenance_path": "tests/nephele/fixture/reference-provenance.json",
-                "provenance_sha256": _sha256(FIXTURE / "reference-provenance.json"),
-            },
-            "next_samples_per_pixel_if_unresolved": (
-                provenance["samples_per_pixel"] * 2
-                if provenance.get("acceptance_eligible") is True else None
-            ),
-            "generator": "scripts/record_media_reference_convergence.py",
-            "generator_sha256": _sha256(ROOT / "scripts/record_media_reference_convergence.py"),
-        })
-    _json(MANIFEST, _fixture_manifest_record(
-        converged=converged,
-        provenance=provenance,
-        scene=scene,
-        files=files,
-        mask_generator={
-            "path": generator.relative_to(ROOT).as_posix(),
-            "sha256": _sha256(generator),
-        },
-        mask_rules={
-            "path": (FIXTURE / "mask-rules.json").relative_to(ROOT).as_posix(),
-            "sha256": _sha256(FIXTURE / "mask-rules.json"),
-        },
-    ))
-
-
-def _record(name: str) -> dict[str, str]:
-    path = FIXTURE / name
-    return {"path": path.relative_to(ROOT).as_posix(), "artifact": name, "sha256": _sha256(path)}
-
-
-def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples-per-pixel", type=int, required=True)
-    parser.add_argument("--native-wheel", type=Path)
-    parser.add_argument("--diagnostic", action="store_true")
     parser.add_argument("--workers", type=int)
     args = parser.parse_args()
     if args.samples_per_pixel < 1:
         parser.error("--samples-per-pixel must be positive")
     if args.workers is not None and args.workers < 1:
         parser.error("--workers must be positive")
-    if not args.diagnostic and args.native_wheel is None:
-        parser.error("acceptance reference generation requires --native-wheel")
-    if not args.diagnostic:
-        _require_clean_tracked_revision()
     terrain, density = _scene_inputs()
-    if not args.diagnostic:
-        _require_clean_tracked_revision()
-    _render_reference(
-        terrain,
-        density,
-        args.samples_per_pixel,
-        args.native_wheel,
-        args.diagnostic,
-        args.workers,
-    )
-    _manifest()
+    _render_reference(terrain, density, args.samples_per_pixel, args.workers)
+    generate_masks(FIXTURE, FIXTURE / "mask-rules.json", FIXTURE)
     return 0
 
 

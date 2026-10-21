@@ -1,5 +1,7 @@
 # NEPHELE first deterministic physical terrain remediation (historical)
 
+Historical raw evidence removed by the trim remains available at `d5507249`. Use `git show d5507249:docs/audits/nephele-physical-terrain-2026-09-30.md` to retrieve this summary and follow its evidence paths at that revision.
+
 Status: **deterministic remediation verified; clean H1 FAILED at Gate 3; physical acceptance NOT_PROVEN**. Worktree: `D:/forge3d/.worktrees/nephele-172-completion`, branch `codex/20-nephele`. The final source is `aeda3a8e4d7ba927d23cc978ad3c4678e6e79039`; its exact CI wheel was installed and checked locally after the clean H1 campaign. Historical dirty-tree evidence is labeled separately.
 
 The later [bounded round](nephele-bounded-round-2026-10-01.md) supersedes this snapshot for the current source, pin and B1–B9 measurements. The evidence below remains the historical `aeda3a8e` campaign.
