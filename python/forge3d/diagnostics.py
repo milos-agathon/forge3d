@@ -246,6 +246,18 @@ def unsupported_style_field_diagnostic(
     )
 
 
+def unsupported_style_filter_diagnostic(layer_id: str, reason: str) -> Diagnostic:
+    return Diagnostic(
+        code="unsupported_style_filter",
+        severity="warning",
+        message="Style layer uses an unsupported or malformed filter.",
+        remediation="Use supported legacy or expression filter operators and operands.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        details={"reason": reason},
+    )
+
+
 def unsupported_style_layer_type_diagnostic(layer_id: str, layer_type: str) -> Diagnostic:
     return Diagnostic(
         code="unsupported_style_layer_type",
@@ -1060,6 +1072,7 @@ __all__ = [
     "unavailable_terrain_sampler_diagnostic",
     "unsupported_instancing_path_diagnostic",
     "unsupported_style_field_diagnostic",
+    "unsupported_style_filter_diagnostic",
     "unsupported_style_layer_type_diagnostic",
     "unsupported_texture_format_diagnostic",
     "unsupported_tile_feature_diagnostic",
