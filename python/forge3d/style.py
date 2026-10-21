@@ -33,6 +33,7 @@ from .diagnostics import (
     ValidationReport,
     experimental_feature_diagnostic,
     unsupported_style_field_diagnostic,
+    unsupported_style_filter_diagnostic,
     unsupported_style_layer_type_diagnostic,
 )
 
@@ -362,6 +363,13 @@ def validate_style_support(style: StyleSpec | dict[str, Any]) -> ValidationRepor
                 diagnostics.append(diag)
                 diagnostic_codes.append(diag.code)
 
+        if layer.filter is not None:
+            reason = _filter_support_error(layer.filter)
+            if reason:
+                diag = unsupported_style_filter_diagnostic(layer_id, reason)
+                diagnostics.append(diag)
+                diagnostic_codes.append(diag.code)
+
         layer_summaries.append(
             LayerSummary(
                 layer_id=layer_id,
@@ -666,7 +674,7 @@ def apply_style(
     ]
 
     for feature in features:
-        props = feature.get("properties", {})
+        props = _filter_properties(feature)
         
         # Find first matching layer
         for layer in layers:
@@ -784,7 +792,7 @@ def vector_overlay_configs_from_style(
 
     overlays = []
     for feature_index, feature in enumerate(features):
-        props = feature.get("properties", {})
+        props = _filter_properties(feature)
         for layer in layers:
             if not layer.matches_filter(props):
                 continue
@@ -990,54 +998,125 @@ def _hue_to_rgb(p: float, q: float, t: float) -> float:
     return p
 
 
+def _filter_support_error(expr, *, operand=False):
+    if not isinstance(expr, list):
+        return None if operand else "expected an operator array"
+    if not expr or not isinstance(expr[0], str):
+        return "expected a nonempty operator array"
+    op = expr[0]
+    legacy = {"==", "eq", "!=", "neq", "<", "<=", ">", ">=", "all", "any", "none", "!", "not", "has", "!has", "in", "!in"}
+    expressions = {"get", "has", "at", "length", "interpolate", "interpolate-hcl", "interpolate-lab", "step", "match", "case", "coalesce", "==", "!=", "<", "<=", ">", ">=", "all", "any", "!", "+", "-", "*", "/", "%", "^", "abs", "ceil", "floor", "round", "min", "max", "ln", "log10", "log2", "sin", "cos", "tan", "sqrt", "concat", "downcase", "upcase", "to-number", "to-string", "to-boolean", "typeof", "rgb", "rgba", "zoom", "geometry-type", "literal"}
+    if op not in (expressions if operand else legacy):
+        return f"unsupported filter operator: {op}"
+    if op == "literal":
+        return None if len(expr) == 2 else "literal requires one operand"
+    if op in {"all", "any", "none", "!", "not"}:
+        if op in {"!", "not"} and len(expr) != 2:
+            return f"{op} requires one subfilter"
+        for sub in expr[1:]:
+            reason = _filter_support_error(sub)
+            if reason:
+                return reason
+        return None
+    if op in {"==", "eq", "!=", "neq", "<", "<=", ">", ">="} and len(expr) != 3:
+        return f"{op} requires two operands"
+    if op in {"get", "has", "!has"} and (len(expr) != 2 or not isinstance(expr[1], str)):
+        return f"{op} requires a property name"
+    # Legacy values (including arrays) are literals; only expression operands recurse.
+    if operand or (len(expr) > 1 and isinstance(expr[1], list)):
+        for index, sub in enumerate(expr[1:], 1):
+            if op.startswith("interpolate") and index == 1:
+                continue  # Interpolation mode is a descriptor, not an expression.
+            if op == "match" and index >= 2 and index % 2 == 0:
+                continue  # Match labels are literal values.
+            reason = _filter_support_error(sub, operand=True)
+            if reason:
+                return reason
+    return None
+
+
 def _evaluate_filter(expr: list, props: dict[str, Any]) -> bool:
-    """Evaluate a Mapbox filter expression against feature properties."""
-    if not expr:
-        return True
+    """Evaluate a legacy filter, reporting malformed or unsupported filters."""
+    # Expression comparisons use an expression operand instead of a property name.
+    if isinstance(expr, list) and len(expr) > 1 and isinstance(expr[0], str) and isinstance(expr[1], list) and expr[0] not in {"all", "any", "none", "!", "not"}:
+        import warnings
+        from .style_expressions import EvalContext, evaluate
+        try:
+            if expr[0] in {"==", "!=", "<", "<=", ">", ">="} and len(expr) != 3:
+                raise ValueError("comparison requires two operands")
+            def validate(value):
+                if not isinstance(value, list) or not value:
+                    return
+                if value[0] == "get" and (len(value) not in (2,3) or not isinstance(value[1],str)):
+                    raise ValueError("get requires a property name")
+                if value[0] != "literal":
+                    for child in value[1:]:
+                        validate(child)
+            validate(expr)
+            result = evaluate(expr, EvalContext(properties=props, geometry_type=props.get("$type")))
+            if not isinstance(result, bool):
+                raise ValueError("filter expression must evaluate to a boolean")
+            return result
+        except (ValueError, TypeError, IndexError, KeyError) as exc:
+            warnings.warn(f"Invalid style filter: {exc}", RuntimeWarning, stacklevel=2)
+            return False
+    import operator
+    import warnings
 
-    op = expr[0] if expr else None
+    def invalid(message):
+        warnings.warn(f"Invalid style filter: {message}", RuntimeWarning, stacklevel=3)
+        return False
 
-    if op == "==" or op == "eq":
-        if len(expr) != 3:
-            return True
-        key = expr[1]
-        expected = expr[2]
-        return props.get(key) == expected
+    if not isinstance(expr, list) or not expr or not isinstance(expr[0], str):
+        return invalid("expected a nonempty operator array")
+    op = expr[0]
+    comparisons = {"==": operator.eq, "eq": operator.eq, "!=": operator.ne,
+                   "neq": operator.ne, "<": operator.lt, "<=": operator.le,
+                   ">": operator.gt, ">=": operator.ge}
+    if op in comparisons:
+        if len(expr) != 3 or not isinstance(expr[1], str):
+            return invalid(f"{op} requires a property name and value")
+        actual, expected = props.get(expr[1]), expr[2]
+        if op in {"<", "<=", ">", ">="} and (actual is None or type(actual) is not type(expected)
+                and not (isinstance(actual, (int,float)) and isinstance(expected, (int,float)))):
+            return False
+        try:
+            return comparisons[op](actual, expected)
+        except TypeError:
+            return False
+    if op in {"all", "any", "none"}:
+        if not all(isinstance(sub, list) for sub in expr[1:]):
+            return invalid(f"{op} requires subfilters")
+        values = [_evaluate_filter(sub, props) for sub in expr[1:]]
+        return all(values) if op == "all" else (not any(values) if op == "none" else any(values))
+    if op in {"has", "!has"}:
+        if len(expr) != 2 or not isinstance(expr[1], str):
+            return invalid(f"{op} requires a property name")
+        present = expr[1] in props
+        return present if op == "has" else not present
+    if op in {"!", "not"}:
+        if len(expr) != 2 or not isinstance(expr[1], list):
+            return invalid(f"{op} requires a subfilter")
+        return not _evaluate_filter(expr[1], props)
+    if op in {"in", "!in"}:
+        if len(expr) < 3 or not isinstance(expr[1], str):
+            return invalid(f"{op} requires a property name and values")
+        present = props.get(expr[1]) in expr[2:]
+        return present if op == "in" else not present
+    return invalid(f"unsupported operator {op!r}")
 
-    elif op == "!=" or op == "neq":
-        if len(expr) != 3:
-            return True
-        key = expr[1]
-        expected = expr[2]
-        return props.get(key) != expected
 
-    elif op == "all":
-        return all(_evaluate_filter(sub, props) for sub in expr[1:] if isinstance(sub, list))
+def _filter_properties(feature: dict[str, Any]) -> dict[str, Any]:
+    props = dict(feature.get("properties") or {})
+    geometry_type = (feature.get("geometry") or {}).get("type")
+    props["$type"] = {"MultiPoint":"Point", "MultiLineString":"LineString",
+                      "MultiPolygon":"Polygon"}.get(geometry_type, geometry_type)
+    if "id" in feature:
+        props["$id"] = feature["id"]
+    else:
+        props.pop("$id", None)
+    return props
 
-    elif op == "any":
-        return any(_evaluate_filter(sub, props) for sub in expr[1:] if isinstance(sub, list))
-
-    elif op == "has":
-        if len(expr) != 2:
-            return True
-        return expr[1] in props
-
-    elif op == "!" or op == "not":
-        if len(expr) != 2:
-            return True
-        if isinstance(expr[1], list):
-            return not _evaluate_filter(expr[1], props)
-        return True
-
-    elif op == "in":
-        if len(expr) < 3:
-            return True
-        key = expr[1]
-        val = props.get(key)
-        return val in expr[2:]
-
-    # Unknown operators pass through
-    return True
 
 
 # === SPRITE ATLAS API ===
