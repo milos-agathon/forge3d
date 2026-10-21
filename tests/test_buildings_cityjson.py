@@ -357,3 +357,24 @@ def test_sample_cityjson_dataset_contains_renderable_geometry():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_native_cityjson_skips_unsupported_building_with_diagnostic(tmp_path):
+    from forge3d import _forge3d
+    from forge3d.buildings import add_buildings_cityjson
+    source = {"type":"CityJSON", "version":"1.1",
+        "vertices":[[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]],
+        "CityObjects": {
+            "cube":{"type":"Building", "geometry":[{"type":"Solid", "lod":"1", "boundaries":[[
+                [[0,1,2,3]],[[4,5,6,7]],[[0,1,5,4]],[[1,2,6,5]],[[2,3,7,6]],[[3,0,4,7]]]]}]},
+            "unsupported":{"type":"Building", "geometry":[{"type":"Unknown", "lod":"3", "boundaries":[]}]}}}
+    data = json.dumps(source).encode()
+    result = _forge3d.parse_cityjson_py(data)
+    assert result["building_count"] == 1
+    assert result["buildings"][0]["id"] == "cube"
+    assert result["metadata"]["skipped_buildings"] == [{"id":"unsupported", "reason":"no supported geometry"}]
+    path = tmp_path / "mixed.json"
+    path.write_bytes(data)
+    layer = add_buildings_cityjson(path)
+    assert layer.building_count == 1
+    assert layer.skipped_buildings == result["metadata"]["skipped_buildings"]

@@ -99,6 +99,8 @@ pub struct CityJsonMeta {
     pub translate: [f64; 3],
     /// Geographic extent [minx, miny, minz, maxx, maxy, maxz]
     pub extent: Option<[f64; 6]>,
+    /// Buildings omitted because none of their geometry types are supported.
+    pub skipped_buildings: Vec<HashMap<String, String>>,
 }
 
 impl Default for CityJsonMeta {
@@ -109,6 +111,7 @@ impl Default for CityJsonMeta {
             scale: [1.0, 1.0, 1.0],
             translate: [0.0, 0.0, 0.0],
             extent: None,
+            skipped_buildings: Vec::new(),
         }
     }
 }

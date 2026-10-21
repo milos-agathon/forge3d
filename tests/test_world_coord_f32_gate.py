@@ -1416,11 +1416,46 @@ def test_sky_lighting_relocation_rejects_missing_duplicate_changed_and_extra_sit
             _undo_sky_lighting_transition(mutated)
 
 
+def _undo_p1_inventory_transitions(sites):
+    """Reverse only the owner-reviewed, exact per-file P1 conversion records."""
+    import json
+
+    by_path = collections.defaultdict(list)
+    for site in sites:
+        by_path[site[0]].append(site)
+    for path in sorted((ROOT / "tests/data/world_coord_f32_p1").glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        for rel, transition in record["files"].items():
+            expected = list(map(tuple, transition["after"]))
+            assert by_path[rel] == expected, f"unreviewed P1 conversion change: {rel}"
+            by_path[rel] = list(map(tuple, transition["before"]))
+    return [site for file_sites in by_path.values() for site in file_sites]
+
+
+def test_p1_inventory_rejects_missing_duplicate_changed_and_extra_sites():
+    import json
+    import pytest
+
+    sites = conversion_inventory()
+    for path in sorted((ROOT / "tests/data/world_coord_f32_p1").glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        for rel, transition in record["files"].items():
+            first = tuple(transition["after"][0])
+            index = sites.index(first)
+            changed = (*first[:4], "unreviewed world-position cast")
+            for mutated in (sites[:index] + sites[index + 1:],
+                            sites[:index] + [first] + sites[index:],
+                            sites[:index] + [changed] + sites[index + 1:],
+                            sites + [changed]):
+                with pytest.raises(AssertionError):
+                    _undo_p1_inventory_transitions(mutated)
+
+
 def _inventory_before_water_optics():
     """Check both approved branch inventories without replacing either freeze."""
     water = _ledger_data()["water_optics"]
     viewport = _ledger_data()["viewer_viewport_resize"]
-    sites = _undo_sky_lighting_transition(conversion_inventory())
+    sites = _undo_sky_lighting_transition(_undo_p1_inventory_transitions(conversion_inventory()))
     normalized = _undo_scene_pick_assembly_transition(sites)
     water_added = set(map(tuple, water["added"]))
     viewport_added = set(map(tuple, viewport["added"]))
