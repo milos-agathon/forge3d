@@ -78,7 +78,8 @@ zero stale disabled-shadow comments. Acceptance Clippy passed in 2m 22s.
 The five froxel entry points also passed standalone Naga validation. Rust
 source, its f32 conversion inventory and the pinned terrain shader are
 unchanged; their existing proof is retained for those identical inputs.
-Corrected-sampler GPU execution remains unrun.
+Corrected-sampler GPU execution is recorded below; it did not pass physical
+acceptance.
 
 A separate CPU reconstruction reproduces the current capture's regional
 in-scatter to about 0.001 mean absolute RGB error. A scalar higher-order
@@ -93,3 +94,45 @@ is the larger deficit: 0.0218626 in the reference estimate versus about
 The remaining bounded investigation therefore measures environment angular
 visibility and valid-air source reconstruction. It changes no acceptance
 threshold or frozen input.
+
+## Corrected-sampler NVIDIA result and owner scope decision
+
+Run [39580065706](https://github.com/milos-agathon/forge3d/actions/runs/39580065706)
+executed `68cc04e9ab87de3d90e92e76a8690e016e5d759b` on NVIDIA GeForce RTX
+3070, Vulkan, NVIDIA 610.60. Checkout and both capture diagnostics identify
+that exact SHA. Fast Contract and the Windows wheel passed. The physical
+suite recorded **4 passed, 2 failed, zero skipped**: Gates 1, 2, 5 and 6
+passed; Gates 3 and 4 failed. Full Acceptance Summary failed.
+
+| Metric | Measured | Required |
+| --- | ---: | ---: |
+| B1 sky/cloud DeltaE2000 pass fraction | 0.7127659574468085 | >= 0.95 |
+| God-ray reference SSIM | 0.9916001251541653 | > 0.95 |
+| G4a shadowed-terrain DeltaE2000 pass fraction | 0.7109826589595376 | >= 0.95 |
+| Medium-ablation changed fraction | 0.3215661103979461 | >= 0.10 |
+| G4b signed mean linear luminance response | 0.019629758417801648 | reference +/-20% |
+| G4b relative error | 0.4739690738875221 | <= 0.20 |
+| G4b SSIM diagnostic | 0.9894866614716061 | diagnostic only |
+
+All 14 canonical fixture/mask NPY files are byte-identical to `ac739096`.
+The approved policy and acceptance implementation are also unchanged. The
+sampler correction fixes the joint-CDF defect but does not fix the visual
+acceptance failures; no native pass is inferred from its CPU properties.
+
+The [measurement JSON](nephele-phase-cdf-nvidia-2026-10-21.json) records the
+test outcomes, exact metrics, fixture hashes and raw artifact hashes. Its
+[CPU-only reproducer](nephele-phase-cdf-nvidia-2026-10-21.py) reads the
+downloaded artifact and the existing gate functions; it performs no render.
+
+Milos answered **"Keep the current bounded scope"** on 2026-10-21 in response
+to the coupled environment/multiple-scattering proposal. That expansion is
+not authorized and is not started. No further renderer, test, gate, pin,
+golden or reference changes follow from these measurements.
+
+Release remains blocked by the observed physical failures. Full-scope CI
+has not been dispatched on this failing candidate, and this task has not
+merged the PR, pushed either release tag or published to PyPI. The new
+candidate's local installed-wheel fast lane and full Rust verification were
+not repeated after the shader-only change; the preceding exact-head proof
+above applies to `ac739096`, while the shader checks and NVIDIA execution
+above cover the sampling correction. No local GPU tests ran.
