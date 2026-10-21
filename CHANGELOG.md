@@ -6,6 +6,23 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.46.0] - Unreleased
+
+> Release pending. NEPHELE's Gate 3 and Gate 4 physical acceptance is NOT_PROVEN (OD-10, `docs/audits/nephele-bounded-round-2026-10-01.md`), and publishing requires a green Full Acceptance Summary on the release commit. Tag `v1.46.0` and set this date only after both gates pass on the NVIDIA Vulkan lane.
+
+### Added
+- NEPHELE participating media coupled to terrain (#172). `forge3d.media.Medium` validates one canonical medium (RGB absorption and scattering, density, isotropic or Henyey-Greenstein phase) that the reference path tracer and real-time terrain rendering share; `Medium.grid3d` describes a bounded heterogeneous density grid.
+- `forge3d.media.render_volumetric_reference` path-traces a medium over a heightmap as the reference the real-time path is measured against.
+- `TerrainRenderParams.media` attaches a medium to terrain renders (`None` keeps the previous path), with transmittance, in-scatter, cloud-shadow and optical-depth AOVs and capture diagnostics.
+- `terrain_shading_model="lambert_physical"` opts terrain into physically based Lambert shading; `"stylized"` remains the default.
+- `ViewerHandle.set_media(...)` attaches or removes a medium in the interactive viewer, with uniform ambient sky radiance and a configurable froxel depth-slice count.
+
+### Changed
+- Viewer volumetric density volumes reject unknown presets instead of silently rendering `valley_fog`; use `valley_fog`, `plume` or `localized_haze`.
+
+### Fixed
+- Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Waits for all GPU work in the native library now last until the device has really finished; on the GL backend they keep wgpu's own wait, because GL defers freeing objects still in use. Some waits are unchanged: waits for one specific submission in the vector code and the fence tracker (`src/core/fence_tracker.rs`), the frozen offline reference/hybrid path-tracer sources, the `policies` benchmark binary (`bench/upload_policies/policies.rs`), and three resource-tracker unit tests. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
+
 ## [1.45.0] - 2026-10-19
 
 ### Added
@@ -112,12 +129,6 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Bumped the package and PyPI version to `1.41.0`.
 - AETHER's spectral closure (DeltaE2000 < 2 at all 189 sky samples, terrain saturation falloff within 10%, and the GPU sunset golden) now runs on the physical NVIDIA Vulkan CI runner and is required for full acceptance. Hosted CI has no physical Metal adapter, so the Metal-only gate never ran there. Thresholds are unchanged; Metal remains supported. Adds `tests/golden/atmosphere/aether_gpu_sunset_sweep.nvidia-vulkan.png`. Owner decision, 2026-10-01.
 - CI: AETHER's offline-bake tests now run even when the preceding workspace `cargo test` step fails.
-
-### Planned for 1.41.0
-- NEPHELE (#172) is unreleased. Its typed spatial media, weighted RGB reference, terrain-coupled froxels, AOVs and diagnostics require Gate 3 and Gate 4 physical acceptance before delivery.
-
-### Fixed
-- Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Waits for all GPU work in the native library now last until the device has really finished; on the GL backend they keep wgpu's own wait, because GL defers freeing objects still in use. Some waits are unchanged: waits for one specific submission in the vector code and the fence tracker (`src/core/fence_tracker.rs`), the frozen offline reference/hybrid path-tracer sources, the `policies` benchmark binary (`bench/upload_policies/policies.rs`), and three resource-tracker unit tests. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
 
 ## [1.40.1] - 2026-10-01
 ### Changed
