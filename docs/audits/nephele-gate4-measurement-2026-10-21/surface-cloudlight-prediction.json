@@ -1,0 +1,23 @@
+{
+  "schema": "forge3d.nephele.surface_cloudlight_prediction/1",
+  "kind": "offline prediction; not a renderer or GPU measurement",
+  "quadrature_directions": 192,
+  "g4a_existing": 0.596660244059088,
+  "g4a_predicted_with_physical_term": 0.6217084136159281,
+  "mean_added_linear_rgb_on_shadowed_terrain": [
+    0.01894084840264767,
+    0.0177817112656979,
+    0.015831278971434277
+  ],
+  "sky_pixels_byte_identical": true,
+  "input_sha256": {
+    "realtime-rgb": "a819571cb24d0bafebd45b006c28c5350384aeffdff2b00b7e2018e2f935999e",
+    "reference-rgb": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "transmittance": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    "terrain-mask": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "cloud-shadow-mask": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    "sky-cloud-mask": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2"
+  },
+  "surface_cloudlight_sha256": "99406ab05d37919833ae45aa8fec516a1d9c33e4171ae6c9df0dd5fa7f998c20",
+  "tool_sha256": "4d9a45e2faa7ad663f08809545b5472ae5f39a14c9b862357eaa3a2dd3f2f677"
+}

@@ -1,0 +1,87 @@
+{
+  "schema": "forge3d.nephele.gate4_diagnosis/1",
+  "ci_run": 39517423981,
+  "captured_head": "d38758e183c522dfb660805987d751f5a6263b24",
+  "reference_estimate": "first-order camera single-scatter delta added to decoded 640-spp reference; not a regenerated ablated reference",
+  "quadrature_directions": 96,
+  "camera_steps": 48,
+  "FO_STEPS_environment": null,
+  "numpy_version": "2.5.1",
+  "historical_tool_sha256": "92310bb21a62aa47faeaadbf4626145d7b70160c81a6b04a0c184f6548933ddf",
+  "patched_tool_sha256": "b07b14e2da1ca6e0cee94ac9e74e4593d6e49de73d6db876038e5f607c734e07",
+  "measurement_tool_sha256": "58061bfc857c0310a524ebb0d06101e54c26c8983da47b56fdf2ef45d688861e",
+  "input_sha256": {
+    "reference-rgb": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "realtime-rgb": "a819571cb24d0bafebd45b006c28c5350384aeffdff2b00b7e2018e2f935999e",
+    "terrain-occlusion-disabled-rgb": "a542b79a2b6342fa2e2b60ef38ec850ded5ff69182416f518573d88dc505c303",
+    "cloud-shadow-mask": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    "terrain-mask": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "sky-cloud-mask": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    "godray-roi-mask": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20"
+  },
+  "fixture_sha256": {
+    "atmosphere.json": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47",
+    "camera.json": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1",
+    "cloud-shadow-mask.npy": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    "crop.json": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04",
+    "exposure.json": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31",
+    "godray-roi-mask.npy": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+    "mask-rules.json": "48a16b48747151e06b01669e91d7ed9e21c612aa87baddf1071f56f484681008",
+    "material.json": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789",
+    "medium.json": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9",
+    "reference-cloud-shadow-aov-spp320.npy": "04dd3fc04c71f6269c481451404c1df81e5d63537c6d81efdf4ae4fbf99cceff",
+    "reference-cloud-shadow-aov.npy": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667",
+    "reference-convergence.json": "5f9a1c4d6a3187a22a785929c0b4850fd7f87feb6698523df81d7832a486c9ce",
+    "reference-in-scatter-spp320.npy": "d778b1a58e930677e40b2e1d0210da857fac4b620e51c316e0170b5f8ecea856",
+    "reference-in-scatter.npy": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e",
+    "reference-media-lighting-visibility-spp320.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    "reference-media-lighting-visibility.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    "reference-optical-depth-spp320.npy": "ee7fa9a309077021ac05c8df91b110421c59eb6c74c37b6f0c7d023dae16c31b",
+    "reference-optical-depth.npy": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6",
+    "reference-provenance-spp320.json": "13ec3a4f8c0419440ee2c33e2888e1cd6bf55de0f1a99da11a7844db03b7657a",
+    "reference-provenance.json": "9650034250479e286b1455d7c19df8c971cd845f996a346bb63456975023979b",
+    "reference-rgb-spp320.npy": "faed5d5f8d5aec7ede7d30c7f8363e24737825ddf8393207b3f33d6038807dac",
+    "reference-rgb.npy": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "reference-terrain-hit-spp320.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "reference-terrain-hit.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "reference-terrain-slice-spp320.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    "reference-terrain-slice.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    "reference-transmittance-spp320.npy": "922c7305e0fe0d0f2260446a0f6e26747023ca2ca05533f087569f250d3382fd",
+    "reference-transmittance.npy": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20",
+    "shaft-mask.npy": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177",
+    "sky-cloud-mask.npy": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    "sun.json": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02",
+    "terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+    "terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "terrain.json": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315",
+    "tonemap.json": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034"
+  },
+  "gate3": {
+    "sky_fraction_delta_e2000_lt_2_5": 0.9558707643814027,
+    "godray_ssim": 0.982692300851118
+  },
+  "gate4a": {
+    "pixels": 1557,
+    "fraction_delta_e2000_lt_2": 0.596660244059088,
+    "mean_lab_error": [
+      -1.0288392073416592,
+      -0.10954255712048984,
+      -1.2070155674417498
+    ],
+    "failing_pixels_too_dark_fraction": 0.8455414012738853,
+    "tile_mean_removed_fraction_delta_e76_lt_2": 0.9556840077071291
+  },
+  "gate4b": {
+    "roi_xyxy": [
+      0,
+      48,
+      64,
+      64
+    ],
+    "realtime_ablation_ssim": 0.9899496567490726,
+    "reference_first_order_ablation_ssim": 0.970583423239794,
+    "reference_first_order_mean_linear_luminance_change": 0.03731673831968643,
+    "realtime_mean_linear_luminance_change": 0.01710810664709675,
+    "realtime_to_reference_first_order_change_ratio": 0.4584566448582505
+  }
+}
