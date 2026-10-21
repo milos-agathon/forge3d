@@ -26,7 +26,7 @@
     "digest": "3d7e2b08e7e456a558dbed3817c47effd05804eac820df704a3b84f0cf504dee"
   },
   "base_commit": "38a30db0f0ff829225a28064253862ad6db3db4e",
-  "status": "OWNER_APPROVED_RUST_CPU_CHECKS_PASSED_GPU_ACCEPTANCE_NOT_PROVEN",
+  "status": "NVIDIA_PHYSICAL_ACCEPTANCE_FAILED_NOT_RELEASE_READY",
   "source_sha256": {
     "src/shaders/nephele_froxel.wgsl": "368cefd80f1808c832c8cc39cab1a03aeeab909643871575bd10b50291a5a7a8",
     "src/shaders/nephele_realtime_terrain_trace.wgsl": "d4a6ea45f49120979d7c449c490d308f64f0dd87158bd05ca9b6e323fd3551c4",
@@ -66,8 +66,37 @@
     "render_graph_tests": {
       "passed": 3
     },
-    "head_wheel": "NOT_RUN",
-    "python_fast_lane": "NOT_RUN",
-    "nvidia_physical": "NOT_RUN"
+    "head_wheel": "PASS: clean exact-head checkout, dev profile, embedded full source revision verified",
+    "python_fast_lane": "Hosted complete Fast Contract PASS; local entire lane NOT_RUN pending GPU-device-test decision",
+    "nvidia_physical": {
+      "run_id": 39545456967,
+      "status": "FAIL at Gate 3; six setup errors, zero skips",
+      "measurement": "nephele-cloudlight-capture-2026-10-21.json"
+    },
+    "focused_python": {
+      "passed": 33,
+      "skipped": 0,
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_TEST_INSTALLED_WHEEL": "1"
+      },
+      "files": [
+        "tests/test_world_coord_f32_gate.py",
+        "tests/test_pipeline_validation_gate.py"
+      ]
+    },
+    "pr_core_success": "PASS on implementation commit"
+  },
+  "implementation_commit": "d5507249a2327d183edf0bb3ff11dcb83a773333",
+  "wheel_provenance": {
+    "head_sha": "d5507249a2327d183edf0bb3ff11dcb83a773333",
+    "cargo_embedded_source_revision": "d5507249a2327d183edf0bb3ff11dcb83a773333",
+    "wheel_sha256": "aea619f97cbc54cbc323889b946c19e5b91d1c390e1a831e2e90c907d6a4a1d0",
+    "native_sha256": "3d3b938c7342249b82a91361ddaf44b1ef3273e4ee80834c6f5ddb5641640b5a",
+    "profile": "dev",
+    "cargo_target_dir": "D:\\forge3d\\.worktrees\\pr172-release-verify\\target",
+    "python_version": "Python 3.13.14",
+    "package_version": "1.46.0",
+    "local_gpu_tests": "NOT_RUN"
   }
 }

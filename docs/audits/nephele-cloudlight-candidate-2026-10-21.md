@@ -1,7 +1,8 @@
 # NEPHELE cloud-light candidate — 2026-10-21
 
-**Local candidate; physical acceptance NOT_PROVEN.** No new GPU render, B1/G4
-measurement, head-wheel fast lane, full CI, merge, tag, or publication is claimed.
+**NVIDIA physical acceptance FAILED; not release ready.** Implementation
+`d5507249a2327d183edf0bb3ff11dcb83a773333` was committed, pushed, and physically
+captured. Full acceptance, merge, tags, and publication have not been performed.
 
 Milos's message “All approved” approved the preceding requests to push the
 measurement audit and expand the physical-lighting diagnosis. Audit commit
@@ -38,9 +39,9 @@ been applied. No subagents were used.
 The existing unbounded homogeneous transport path is retained. The new surface
 sun term is evaluated for bounded heterogeneous media. The legacy diagnostic
 `terrain_trace_queries` still counts the froxel sun/continuation queries; it
-does not count the new cloud-light kernels. Actual GPU cost and visual quality
-remain unmeasured. In particular, adding the saved terrain term alone predicted
-only 62.17% G4a; the multiple-scatter direction correction needs physical proof.
+does not count the new cloud-light kernels. Total GPU cost was not measured.
+The physical capture below failed acceptance. Adding the saved terrain term
+alone had predicted only 62.17% G4a; the combined candidate measured 74.89%.
 
 Implementation is in `src/terrain/renderer/media.rs`,
 `src/shaders/nephele_froxel.wgsl`,
@@ -52,7 +53,7 @@ records SHA-256 hashes of the Git blob bytes and approved pin/ledger values.
 ## Owner approval and applied integration updates
 
 Milos approved this exact package on 2026-10-21 with the second “All approved”
-reply. Items 1–4 are applied; item 5 follows the required CPU validation:
+reply. Items 1–5 were completed, including the approved NVIDIA dispatch:
 
 1. Update `PINNED_TERRAIN_SOURCE_HASH` in `src/verify/ir/engine.rs` from
    `0xffa4448a20d6e60a` to **`0x895bb1d3845497e1`**. The candidate includes six
@@ -90,7 +91,14 @@ The gate, policy, and Python gate tests remain unchanged.
 
 All local Cargo commands use
 `CARGO_TARGET_DIR=D:/forge3d/.worktrees/pr172-sync-main/target`.
-The head-wheel build and Python fast lane follow this implementation commit.
+A dev-profile abi3 Windows wheel was built from a clean checkout of the exact
+implementation commit, with a separate worktree-specific target directory.
+It installed and imported as 1.46.0 in an isolated Python 3.13.14 environment.
+The native build output confirms the embedded full source revision.
+With `FORGE3D_NO_BOOTSTRAP=1 FORGE3D_TEST_INSTALLED_WHEEL=1`, focused
+`test_world_coord_f32_gate.py` and `test_pipeline_validation_gate.py` checks
+passed: **33 passed, zero skipped**. This is not the entire local fast lane.
+The complete hosted Fast Contract and PR Core Success passed on the same head.
 The fast lane includes a GPU-device memory test; a CPU-only local selection
 needs the owner's requested exception, with the complete lane retained in CI.
 
@@ -145,3 +153,53 @@ cast delta to the two grid-index conversions. A standalone Naga diagnostic on
 Windows needed a normal Rust worker thread instead of the smaller platform main
 thread stack. These are proposals for future tool/documentation guidance; no
 agent contract, skill, or inventory scanner was modified.
+
+## NVIDIA capture result
+
+Run [39545456967](https://github.com/milos-agathon/forge3d/actions/runs/39545456967)
+used NVIDIA GeForce RTX 3070 / Vulkan / driver 610.60. Producers and both
+independent captures completed. The shared physical-case setup rejected Gate 3;
+all six cases therefore errored in setup, with zero skips. No physical gate-case
+pass or Full Acceptance Summary pass is claimed.
+
+| Measurement | Earlier capture | Candidate | Required |
+| --- | ---: | ---: | ---: |
+| B1 sky fraction with DeltaE2000 < 2.5 | 95.5871% | 83.1363% | >= 95% |
+| Godray SSIM against reference | 0.982692 | 0.989971 | > 0.95 |
+| G4a shadowed-terrain fraction with DeltaE2000 < 2 | 59.6660% | 74.8876% | >= 95% |
+| G4b realtime ablation SSIM | 0.989950 | 0.987554 | < 0.80 (unchanged gate) |
+| Realtime ablation / accepted first-order reference response | 45.8457% | 49.8495% | Owner tolerance unset |
+
+The candidate's mean linear luminance response is 0.018602208951602937, versus
+accepted reference estimate 0.03731673831968643 (relative error
+0.5015049602609736). These G4 values are diagnostics calculated from the raw
+capture; the production verifier stopped at Gate 3. All 34 shared frozen input
+files, optical-depth output, and transmittance output are byte-identical to the
+earlier artifact. The mean shadowed-terrain Lab error is
+`[0.538553, -0.128885, -1.131776]`.
+
+The [measurement tool](nephele-cloudlight-capture-2026-10-21.py) reuses the
+already accepted first-order response rather than repeating that CPU proof.
+Its [output JSON](nephele-cloudlight-capture-2026-10-21.json) includes the exact
+input hashes. Reproduce with the two downloaded artifacts:
+
+```powershell
+python docs/audits/nephele-cloudlight-capture-2026-10-21.py --artifact-dir .release-evidence/2026-10-21/ci-39545456967 --baseline-artifact-dir .release-evidence/2026-10-21/ci-39517423981 --output docs/audits/nephele-cloudlight-capture-2026-10-21.json
+```
+
+The phase sign agrees with the historical first-order tool. The sky camera
+in-scattering mean RGB fell from `[0.282403, 0.258618, 0.227771]` to
+`[0.278813, 0.255469, 0.225203]`; the reference is
+`[0.298821, 0.270100, 0.233472]`. The direction correction is consequently not
+a sufficient transport fix. No gain or ROI-specific correction was added.
+
+Two remaining structural questions are visible in the existing path:
+`froxel_coord` clamps arbitrary world points to camera-field cells, including
+continuation rays, and `encode_inject` dispatches a single multiple-scatter pass
+that gathers the single-scatter field. Their contribution to the remaining
+error has not been isolated. Replacing that continuation transport or adding
+higher scattering orders would materially expand beyond this approved
+candidate. A bounded investigation was proposed to Milos; no further transport
+implementation, invented iteration cap, or new pin/test/gate change was made.
+The separate G4b tolerance and local fast-lane GPU-device-test decisions remain
+pending. Full CI was not started on this known failing physical candidate.
