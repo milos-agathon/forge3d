@@ -131,7 +131,8 @@ impl TilesetTraverser {
         );
 
         let refine = tile.effective_refine(parent_refine);
-        let should_refine = sse > self.sse_threshold && !tile.children.is_empty();
+        let should_refine =
+            depth < self.max_depth && sse > self.sse_threshold && !tile.children.is_empty();
 
         if should_refine {
             // Need higher LOD - traverse children
@@ -249,6 +250,28 @@ mod tests {
     use super::*;
     use crate::tiles3d::tileset::Tileset;
     use std::path::PathBuf;
+
+    #[test]
+    fn depth_limit_retains_parent_content() {
+        let tileset = Tileset::from_json(
+            r#"{
+            "asset":{"version":"1.0"},"geometricError":1000,
+            "root":{"boundingVolume":{"sphere":[0,0,0,1]},"geometricError":1000,
+            "refine":"REPLACE","content":{"uri":"root.pnts"},
+            "children":[{"boundingVolume":{"sphere":[0,0,0,1]},"geometricError":0,
+            "content":{"uri":"child.pnts"}}]}}
+        "#,
+            PathBuf::from("."),
+        )
+        .unwrap();
+        let visible = TilesetTraverser::new(1.0).with_max_depth(0).visible_tiles(
+            &tileset,
+            DVec3::new(0.0, 0.0, 10.0),
+            None,
+        );
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].depth, 0);
+    }
 
     #[test]
     fn test_traverser_default() {
