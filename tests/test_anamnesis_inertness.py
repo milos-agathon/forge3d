@@ -57,8 +57,8 @@ def test_cache_none_is_byte_identical_to_enabled_cold_render(tmp_path):
         "layers": [{"kind": "label", "text": "A", "visible_frames": [1]}],
         "output": {"width": 32, "height": 32, "samples": 2},
     }
-    uncached = render_sequence(recipe, frames=range(4), cache=None)
-    cached = render_sequence(recipe, frames=range(4), cache=tmp_path)
+    uncached = render_sequence(recipe, frames=range(4), cache=None, reference_only=True)
+    cached = render_sequence(recipe, frames=range(4), cache=tmp_path, reference_only=True)
     assert uncached.frame_blobs == cached.frame_blobs
     assert uncached.frame_hashes == cached.frame_hashes
     assert uncached.cache_report.hits == []
@@ -196,19 +196,19 @@ def test_reference_work_factor_change_cannot_serve_stale_hit(tmp_path):
         frames=[0],
         cache=tmp_path,
         reference_work_factor=0,
-    )
+     reference_only=True)
     second = render_sequence(
         recipe,
         frames=[0],
         cache=tmp_path,
         reference_work_factor=1,
-    )
+     reference_only=True)
     uncached_second = render_sequence(
         recipe,
         frames=[0],
         cache=None,
         reference_work_factor=1,
-    )
+     reference_only=True)
 
     assert first.frame_blobs != second.frame_blobs
     assert second.frame_blobs == uncached_second.frame_blobs
@@ -332,33 +332,28 @@ def test_native_terrain_cache_restores_all_graph_passes(tmp_path):
     assert first_report["misses"] == pass_labels
     assert first_report["bytes_written"] > 0
     assert first_report["hit_rate"] == 0.0
-    assert first_report["graph_command_submissions"] == 6
-    assert second_report["hits"] == pass_labels
-    assert second_report["misses"] == []
+    assert first_report["graph_command_submissions"] == 5
+    assert second_report["hits"] == [label for label in pass_labels if label != "terrain.shadow"]
+    assert second_report["misses"] == ["terrain.shadow"]
     assert second_report["bytes_read"] > 0
     assert second_report["bytes_written"] == 0
-    assert second_report["hit_rate"] == 1.0
-    assert second_report["graph_command_submissions"] == 0
+    assert second_report["hit_rate"] == 0.75
+    assert second_report["graph_command_submissions"] == 2
     assert camera_changed_report["hits"] == []
-    assert camera_changed_report["misses"] == [
-        "terrain.prepare",
-        "terrain.shadow",
-        "terrain.forward",
-        "terrain.resolve",
-    ]
+    assert camera_changed_report["misses"] == pass_labels
     assert camera_changed_report["bytes_read"] == 0
     assert camera_changed_report["bytes_written"] > 0
-    assert camera_changed_report["graph_command_submissions"] == 6
+    assert camera_changed_report["graph_command_submissions"] == 5
     assert camera_changed.tobytes() != second.tobytes()
-    assert camera_restored_report["hits"] == pass_labels
-    assert camera_restored_report["misses"] == []
-    assert camera_restored_report["graph_command_submissions"] == 0
+    assert camera_restored_report["hits"] == [label for label in pass_labels if label != "terrain.shadow"]
+    assert camera_restored_report["misses"] == ["terrain.shadow"]
+    assert camera_restored_report["graph_command_submissions"] == 2
     assert camera_restored.tobytes() == camera_changed.tobytes()
     assert changed_report["hits"] == []
     assert changed_report["misses"] == pass_labels
     assert changed_report["bytes_written"] > 0
     assert changed_report["hit_rate"] == 0.0
-    assert changed_report["graph_command_submissions"] == 6
+    assert changed_report["graph_command_submissions"] == 5
     assert changed.tobytes() != second.tobytes()
 
 

@@ -336,63 +336,9 @@ impl TerrainScene {
                             Vec::new()
                         }))
                     }
-                    ("terrain.shadow", GraphPassAction::Restore { blob, .. }) => {
-                        let layers = if decoded.shadow.enabled {
-                            shadow_layers
-                        } else {
-                            0
-                        };
-                        let payload = super::anamnesis::require_blob(
-                            blob,
-                            super::anamnesis::BlobKind::ShadowDepth32,
-                            shadow_width,
-                            shadow_width,
-                            layers,
-                        )?;
-                        let restored_depth = if decoded.shadow.enabled {
-                            Some(super::anamnesis::decode_depth_rle(
-                                payload,
-                                shadow_width as usize
-                                    * shadow_width as usize
-                                    * shadow_layers as usize
-                                    * 4,
-                            )?)
-                        } else {
-                            None
-                        };
-                        let setup = execution.run_pass("terrain.shadow", |context| {
-                            let setup = self.prepare_shadow_setup(
-                                context.encoder(),
-                                params,
-                                decoded,
-                                &height_inputs.heightmap_view,
-                                &height_curve_view,
-                                height_inputs.width,
-                                height_inputs.height,
-                            )?;
-                            context.discard_encoder();
-                            if decoded.shadow.enabled {
-                                let restored_depth =
-                                    restored_depth.as_deref().ok_or_else(|| {
-                                        anyhow!(
-                                            "enabled shadow restoration has no decoded depth bytes"
-                                        )
-                                    })?;
-                                restore_texture(
-                                    context,
-                                    handles.shadow,
-                                    restored_depth,
-                                    shadow_width,
-                                    shadow_width,
-                                    shadow_layers,
-                                    wgpu::TextureAspect::DepthOnly,
-                                )?;
-                            }
-                            Ok::<_, anyhow::Error>(setup)
-                        })?;
-                        shadow_setup = Some(setup);
-                        Ok(GraphPassOutcome::Restored)
-                    }
+                    ("terrain.shadow", GraphPassAction::Restore { .. }) => Err(anyhow!(
+                        "terrain.shadow must be recomputed: Depth32Float upload is unsupported"
+                    )),
                     (
                         "terrain.forward",
                         GraphPassAction::Execute {
