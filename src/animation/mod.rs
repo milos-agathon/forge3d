@@ -41,6 +41,23 @@ pub struct CameraKeyframe {
     pub target: Option<[f64; 3]>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidKeyframeTime;
+
+impl std::fmt::Display for InvalidKeyframeTime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "keyframe time must be finite and representable as f32")
+    }
+}
+impl std::error::Error for InvalidKeyframeTime {}
+
+fn checked_time(time: f64) -> Result<f32, InvalidKeyframeTime> {
+    if !time.is_finite() || !(time as f32).is_finite() {
+        return Err(InvalidKeyframeTime);
+    }
+    Ok(time as f32)
+}
+
 impl CameraKeyframe {
     pub fn new(
         time: f32,
@@ -73,15 +90,16 @@ impl CameraKeyframe {
         radius: f64,
         fov: f64,
         target: Option<(f64, f64, f64)>,
-    ) -> Self {
-        Self::new(
-            time as f32,
+    ) -> PyResult<Self> {
+        Ok(Self::new(
+            checked_time(time)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
             phi as f32,
             theta as f32,
             radius,
             fov as f32,
             target.map(|value| [value.0, value.1, value.2]),
-        )
+        ))
     }
 
     #[getter]
@@ -221,19 +239,28 @@ impl CameraAnimation {
     }
 
     fn sort_keyframes(keyframes: &mut [CameraKeyframe]) {
-        keyframes.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        keyframes.sort_by(|a, b| a.time.total_cmp(&b.time));
     }
 
     /// Add a keyframe. Keyframes are sorted by time automatically.
-    pub fn add_keyframe(&mut self, keyframe: CameraKeyframe) {
+    pub fn add_keyframe(&mut self, keyframe: CameraKeyframe) -> Result<(), InvalidKeyframeTime> {
+        checked_time(f64::from(keyframe.time))?;
         self.keyframes.push(keyframe);
         Self::sort_keyframes(&mut self.keyframes);
+        Ok(())
     }
 
     /// Replace all keyframes. The new list is sorted by time automatically.
-    pub fn replace_keyframes(&mut self, mut keyframes: Vec<CameraKeyframe>) {
+    pub fn replace_keyframes(
+        &mut self,
+        mut keyframes: Vec<CameraKeyframe>,
+    ) -> Result<(), InvalidKeyframeTime> {
+        for keyframe in &keyframes {
+            checked_time(f64::from(keyframe.time))?;
+        }
         Self::sort_keyframes(&mut keyframes);
         self.keyframes = keyframes;
+        Ok(())
     }
 
     /// Remove all keyframes.
@@ -368,14 +395,16 @@ mod tests {
     #[test]
     fn earth_scale_targets_keep_submillimetre_offsets() {
         let mut animation = CameraAnimation::new();
-        animation.add_keyframe(CameraKeyframe::new(
-            0.0,
-            0.0,
-            45.0,
-            1_000.000_25,
-            45.0,
-            Some([6_378_137.000_25, 0.0, 0.0]),
-        ));
+        animation
+            .add_keyframe(CameraKeyframe::new(
+                0.0,
+                0.0,
+                45.0,
+                1_000.000_25,
+                45.0,
+                Some([6_378_137.000_25, 0.0, 0.0]),
+            ))
+            .unwrap();
         let state = animation.evaluate(0.0).unwrap();
         assert_eq!(state.radius, 1_000.000_25);
         let recovered = state.target.unwrap()[0] - 6_378_137.0;
@@ -401,15 +430,17 @@ impl CameraAnimation {
         radius: f64,
         fov: f64,
         target: Option<(f64, f64, f64)>,
-    ) {
+    ) -> PyResult<()> {
         self.add_keyframe(CameraKeyframe::new(
-            time as f32,
+            checked_time(time)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
             phi as f32,
             theta as f32,
             radius,
             fov as f32,
             target.map(|value| [value.0, value.1, value.2]),
-        ));
+        ))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
     /// Return a copy of the keyframes in sorted time order.
@@ -431,8 +462,8 @@ impl CameraAnimation {
             let keyframe = item.extract::<PyRef<'_, CameraKeyframe>>()?;
             updated.push(*keyframe);
         }
-        self.replace_keyframes(updated);
-        Ok(())
+        self.replace_keyframes(updated)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
     /// Remove all keyframes.
@@ -470,5 +501,27 @@ impl CameraAnimation {
             self.keyframes.len(),
             self.duration()
         )
+    }
+}
+
+#[cfg(test)]
+mod time_validation_tests {
+    use super::*;
+    #[test]
+    fn invalid_times_leave_animation_unchanged() {
+        let frame = |t| CameraKeyframe::new(t, 0.0, 45.0, 100.0, 60.0, None);
+        let mut animation = CameraAnimation::new();
+        animation.add_keyframe(frame(2.0)).unwrap();
+        for time in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(animation.add_keyframe(frame(time)).is_err());
+            assert!(animation
+                .replace_keyframes(vec![frame(1.0), frame(time)])
+                .is_err());
+            assert_eq!(animation.keyframes().len(), 1);
+            assert_eq!(animation.keyframes()[0].time, 2.0);
+        }
+        assert!(checked_time(f64::MAX).is_err());
+        animation.add_keyframe(frame(1.0)).unwrap();
+        assert_eq!(animation.keyframes()[0].time, 1.0);
     }
 }
