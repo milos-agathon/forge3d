@@ -287,55 +287,54 @@ pub fn import_osm_buildings_from_geojson_py(
             .get("coordinates")
             .ok_or_else(|| PyValueError::new_err("geometry missing coordinates"))?;
 
-        let mut push_ring = |ring_coords: &JsonValue| -> PyResult<()> {
-            // ring_coords: array of positions, we take as exterior ring
-            let arr = ring_coords
+        let mut push_polygon = |coordinates: &JsonValue| -> PyResult<()> {
+            let arrays = coordinates
                 .as_array()
-                .ok_or_else(|| PyValueError::new_err("ring is not an array"))?;
-            let mut ring: Vec<[f32; 2]> = Vec::with_capacity(arr.len());
-            for pos in arr {
-                let p = pos
+                .ok_or_else(|| PyValueError::new_err("polygon must be an array of rings"))?;
+            let mut rings = Vec::new();
+            for ring in arrays {
+                let positions = ring
                     .as_array()
-                    .ok_or_else(|| PyValueError::new_err("position must be array"))?;
-                if p.len() < 2 {
-                    continue;
+                    .ok_or_else(|| PyValueError::new_err("ring must be an array"))?;
+                let mut parsed = Vec::new();
+                for position in positions {
+                    let values = position
+                        .as_array()
+                        .ok_or_else(|| PyValueError::new_err("position must be an array"))?;
+                    if values.len() < 2 {
+                        return Err(PyValueError::new_err("position needs two coordinates"));
+                    }
+                    let coordinate = |i: usize| -> PyResult<f32> {
+                        let value = values[i]
+                            .as_f64()
+                            .ok_or_else(|| PyValueError::new_err("coordinate must be numeric"))?;
+                        if !value.is_finite() || !(value as f32).is_finite() {
+                            return Err(PyValueError::new_err(
+                                "coordinate must be finite and representable",
+                            ));
+                        }
+                        Ok(value as f32)
+                    };
+                    parsed.push([coordinate(0)?, coordinate(1)?]);
                 }
-                let x = p[0].as_f64().unwrap_or(0.0) as f32;
-                let y = p[1].as_f64().unwrap_or(0.0) as f32;
-                ring.push([x, y]);
+                rings.push(parsed);
             }
-            if ring.len() >= 3 {
-                let mut opts = ExtrudeOptions::default();
-                opts.height = h;
-                let mesh = extrude_polygon_with_options(&ring, opts)
-                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                meshes.push(mesh);
-            }
+            let mesh = crate::geometry::extrude_rings(&rings, h)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            meshes.push(mesh);
             Ok(())
         };
-
         match gtype {
-            "Polygon" => {
-                // coordinates: [ [ [x,y], ... ] , [hole] ... ]
-                if let Some(rings) = coords.as_array() {
-                    if let Some(outer) = rings.first() {
-                        push_ring(outer)?;
-                    }
-                }
-            }
+            "Polygon" => push_polygon(coords)?,
             "MultiPolygon" => {
-                // coordinates: [ [ [ [x,y], ... ], [hole] ... ], [ ... ] ]
-                if let Some(polys) = coords.as_array() {
-                    for poly in polys {
-                        if let Some(rings) = poly.as_array() {
-                            if let Some(outer) = rings.first() {
-                                push_ring(outer)?;
-                            }
-                        }
-                    }
+                let polygons = coords
+                    .as_array()
+                    .ok_or_else(|| PyValueError::new_err("MultiPolygon must be an array"))?;
+                for polygon in polygons {
+                    push_polygon(polygon)?;
                 }
             }
-            _ => { /* skip other geometry types */ }
+            _ => {}
         }
     }
 

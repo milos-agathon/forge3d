@@ -18,7 +18,7 @@ pub fn parse_cityjson(data: &[u8]) -> CityJsonResult<(Vec<BuildingGeom>, CityJso
         ));
     }
 
-    let meta = CityJsonMeta {
+    let mut meta = CityJsonMeta {
         version: root
             .get("version")
             .and_then(|v| v.as_str())
@@ -28,9 +28,10 @@ pub fn parse_cityjson(data: &[u8]) -> CityJsonResult<(Vec<BuildingGeom>, CityJso
         scale: parse_transform(&root).0,
         translate: parse_transform(&root).1,
         extent: parse_extent(&root),
+        skipped_buildings: Vec::new(),
     };
     let vertices = parse_vertices(&root, &meta)?;
-    let buildings = parse_city_objects(&root, &vertices)?;
+    let buildings = parse_city_objects(&root, &vertices, &mut meta)?;
 
     Ok((buildings, meta))
 }
@@ -120,6 +121,7 @@ fn parse_vertices(root: &JsonValue, meta: &CityJsonMeta) -> CityJsonResult<Vec<[
 fn parse_city_objects(
     root: &JsonValue,
     vertices: &[[f64; 3]],
+    meta: &mut CityJsonMeta,
 ) -> CityJsonResult<Vec<BuildingGeom>> {
     let objects = root
         .get("CityObjects")
@@ -133,6 +135,15 @@ fn parse_city_objects(
             continue;
         }
 
+        if let Some(geoms) = obj.get("geometry").and_then(|g| g.as_array()) {
+            if !geoms.is_empty() && select_best_geometry(geoms).1.is_none() {
+                meta.skipped_buildings.push(HashMap::from([
+                    ("id".to_string(), id.clone()),
+                    ("reason".to_string(), "no supported geometry".to_string()),
+                ]));
+                continue;
+            }
+        }
         if let Some(building) = parse_building(id, obj, vertices)? {
             buildings.push(building);
         }
@@ -183,6 +194,10 @@ fn parse_building(
     if let Some(geom) = best_geom {
         building.lod = best_lod;
         parse_geometry(&mut building, geom, vertices)?;
+    } else {
+        return Err(CityJsonError::new(format!(
+            "Building {id} has no supported geometry"
+        )));
     }
 
     if building.is_empty() {
@@ -235,6 +250,12 @@ fn select_best_geometry(geoms: &[JsonValue]) -> (u8, Option<&JsonValue>) {
     let mut best_lod = 0u8;
 
     for geom in geoms {
+        if !matches!(
+            geom.get("type").and_then(|v| v.as_str()),
+            Some("Solid" | "MultiSolid" | "CompositeSolid" | "MultiSurface" | "CompositeSurface")
+        ) {
+            continue;
+        }
         let lod_str = geom
             .get("lod")
             .and_then(|l| l.as_str().or_else(|| l.as_f64().map(|_| "")))

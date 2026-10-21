@@ -129,6 +129,7 @@ class BuildingLayer:
     buildings: list[Building] = field(default_factory=list)
     crs_epsg: int | None = None
     source_format: str = "unknown"
+    skipped_buildings: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def building_count(self) -> int:
@@ -460,6 +461,7 @@ def add_buildings_cityjson(
             buildings=buildings,
             crs_epsg=crs_epsg,
             source_format="cityjson",
+            skipped_buildings=list(meta.get("skipped_buildings", [])),
         )
 
     # Fallback: basic JSON parsing

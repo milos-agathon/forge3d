@@ -128,10 +128,11 @@ pub fn generate_unit_box() -> MeshBuffers {
         (-Vec3::Z, Vec3::Y, Vec3::X, Vec3::new(0.5, -0.5, -0.5)), // -Z
     ];
 
-    for &(normal_axis, up_axis, right_axis, origin) in &faces {
+    for &(normal_axis, up_axis, right_axis, _) in &faces {
         let normal = normal_axis.normalize();
         let right = right_axis.normalize();
         let up = up_axis.normalize();
+        let origin = (normal - right - up) * 0.5;
         let corners = [origin, origin + right, origin + right + up, origin + up];
         let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         let base = mesh.vertex_count() as u32;
@@ -430,5 +431,29 @@ mod tests {
     fn torus_not_empty() {
         let mesh = generate_torus(8, 6, 0.35, 0.15);
         assert!(!mesh.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod box_surface_tests {
+    use super::*;
+    #[test]
+    fn box_covers_six_cube_faces_and_is_closed() {
+        let mesh = generate_unit_box();
+        let mut edges = std::collections::HashMap::new();
+        for (p, n) in mesh.positions.iter().zip(&mesh.normals) {
+            assert!(p.iter().all(|v| v.abs() == 0.5));
+            let axis = n.iter().position(|v| v.abs() == 1.0).unwrap();
+            assert_eq!(p[axis], n[axis] * 0.5);
+        }
+        for tri in mesh.indices.chunks_exact(3) {
+            for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
+                let corner = |i: u32| mesh.positions[i as usize].map(|v| (v * 2.0) as i32);
+                let mut pair = [corner(a), corner(b)];
+                pair.sort();
+                *edges.entry(pair).or_insert(0) += 1;
+            }
+        }
+        assert!(edges.values().all(|&count| count == 2));
     }
 }
