@@ -54,16 +54,17 @@ def main():
         display = np.where(value <= 0.04045, value / 12.92, ((value + 0.055) / 1.055) ** 2.4)
         return np.interp(display, aces_y, aces_x)
 
-    accepted_path = root / "docs/audits/nephele-gate4-measurement-2026-10-21/measurement.json"
+    accepted_path = root / "tests/nephele/gate4-policy.json"
     accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
-    reference_change = accepted["gate4b"]["reference_first_order_mean_linear_luminance_change"]
+    accepted_reference = accepted["occlusion_response"]["reference"]
+    reference_change = accepted_reference["mean_linear_luminance_change"]
     luminance = np.array([0.2126, 0.7152, 0.0722])
     change = float(((linear(disabled) - linear(realtime)) @ luminance)[crop].mean())
-    delta = delta_e_2000(realtime, reference)
+    delta = delta_e_2000(srgb_to_lab(realtime), srgb_to_lab(reference))
     lab = srgb_to_lab(realtime) - srgb_to_lab(reference)
     report = {
         "head_sha": (artifact / "checked-out-head.txt").read_text(encoding="utf-8-sig").strip(),
-        "gate_verifier_result": "FAIL at Gate 3; these are diagnostic measurements",
+        "gate_verifier_result": "Diagnostic measurements; consult the CI run for its acceptance verdict",
         "frozen_input_files_byte_identical": sorted(fixed),
         "sky_fraction_delta_e2000_lt_2_5": float((delta[sky] < 2.5).mean()),
         "godray_ssim": ssim(reference[crop], realtime[crop], data_range=255.0),
@@ -82,8 +83,10 @@ def main():
         "input_sha256": {name: hashlib.sha256((artifact / (name + ".npy")).read_bytes()).hexdigest()
                          for name in ("reference-rgb", "realtime-rgb", "terrain-occlusion-disabled-rgb",
                                       "sky-cloud-mask", "cloud-shadow-mask", "terrain-mask", "godray-roi-mask")},
-        "accepted_reference_report_sha256": hashlib.sha256(accepted_path.read_bytes()).hexdigest(),
-        "measurement_tool_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "accepted_reference_report_sha256": accepted_reference["source_git_blob_sha256"],
+        "reference_policy_sha256": hashlib.sha256(accepted_path.read_bytes()).hexdigest(),
+        "measurement_tool_sha256": hashlib.sha256(Path(__file__).read_bytes().replace(b"\r\n", b"\n")).hexdigest(),
+        "measurement_tool_hash_convention": "LF-normalized Git source text",
     }
     args.output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({key: value for key, value in report.items()

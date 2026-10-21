@@ -1829,6 +1829,8 @@ impl TerrainMediaResources {
         let radiance_provider = self
             .radiance_provider
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let world_medium = self.world_medium.create_view(&wgpu::TextureViewDescriptor::default());
+        let world_sun = self.world_sun.create_view(&wgpu::TextureViewDescriptor::default());
         let terrain_shadow_maps = csm.shadow_maps.create_view(&wgpu::TextureViewDescriptor {
             label: Some("nephele.media.terrain-shadow-maps"),
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -1881,6 +1883,7 @@ impl TerrainMediaResources {
                     texture_entry(6, &radiance_provider),
                     buffer_entry(7, &trace.sun_hits),
                     buffer_entry(8, &trace.phase_hits),
+                    texture_entry(9, &world_medium),
                 ],
             });
             let single_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1899,6 +1902,8 @@ impl TerrainMediaResources {
                     texture_entry(1, &extinction),
                     texture_entry(2, &blue_noise),
                     buffer_entry(8, &trace.phase_hits),
+                    texture_entry(9, &world_medium),
+                    texture_entry(10, &world_sun),
                 ],
             });
             let multiple_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {

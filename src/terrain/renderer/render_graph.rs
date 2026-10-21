@@ -426,6 +426,8 @@ pub(super) fn build_terrain_render_graph(
                 .read(m.radiance_provider)
                 .read(m.extinction)
                 .read(m.light_transmittance)
+                .read(m.world_medium)
+                .read(m.world_sun)
                 .write(m.in_scatter)
                 .pipeline_descriptor(pipeline_material("nephele.media.inject", color_format, aov))
                 .uniform_bytes(media.resource_version.to_le_bytes().to_vec());
@@ -627,6 +629,8 @@ mod tests {
         assert!(g.plan.barriers_before("nephele.media.inject").is_empty());
         let forward = g.plan.pass("terrain.forward_aov").unwrap();
         let inject = g.plan.pass("nephele.media.inject").unwrap();
+        assert!(inject.reads.contains(&media.world_medium));
+        assert!(inject.reads.contains(&media.world_sun));
         assert!(g
             .plan
             .pass("terrain.forward_aov")

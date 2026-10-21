@@ -43,7 +43,7 @@ sun term is evaluated for bounded heterogeneous media. The legacy diagnostic
 `terrain_trace_queries` still counts the froxel sun/continuation queries; it
 does not count the new cloud-light kernels. Total GPU cost was not measured.
 The physical capture below failed acceptance. Adding the saved terrain term
-alone had predicted only 62.17% G4a; the combined candidate measured 74.89%.
+alone had predicted only 62.17% G4a; the combined candidate measured 67.31%.
 
 Implementation is in `src/terrain/renderer/media.rs`,
 `src/shaders/nephele_froxel.wgsl`,
@@ -166,9 +166,9 @@ pass or Full Acceptance Summary pass is claimed.
 
 | Measurement | Earlier capture | Candidate | Required |
 | --- | ---: | ---: | ---: |
-| B1 sky fraction with DeltaE2000 < 2.5 | 95.5871% | 83.1363% | >= 95% |
+| B1 sky fraction with DeltaE2000 < 2.5 | 95.5871% | 94.1686% | >= 95% |
 | Godray SSIM against reference | 0.982692 | 0.989971 | > 0.95 |
-| G4a shadowed-terrain fraction with DeltaE2000 < 2 | 59.6660% | 74.8876% | >= 95% |
+| G4a shadowed-terrain fraction with DeltaE2000 < 2 | 59.6660% | 67.3089% | >= 95% |
 | G4b realtime ablation SSIM | 0.989950 | 0.987554 | < 0.80 (unchanged gate) |
 | Realtime ablation / accepted first-order reference response | 45.8457% | 49.8495% | Owner tolerance unset |
 
@@ -205,3 +205,26 @@ candidate. A bounded investigation was proposed to Milos; no further transport
 implementation, invented iteration cap, or new pin/test/gate change was made.
 The separate G4b tolerance and local fast-lane GPU-device-test decisions remain
 pending. Full CI was not started on this known failing physical candidate.
+
+## Further owner decisions
+
+Milos answered “Yes to both” after the explicit questions about (1) investigating
+continuation rays outside the camera froxel field and missing higher scattering
+orders, and (2) omitting only
+`test_600mib_host_visible_raises_named_budget_error` from the local CPU fast lane
+while retaining the complete lane in CI. Both are approved. This authorizes the
+bounded transport investigation and that exact local test selection; it does
+not establish a new G4b relative-error percentage. The existing SSIM criterion
+is preserved while the transport investigation proceeds.
+
+## Diagnostic correction
+
+The first capture diagnostic passed uint8 RGB directly to the CIELAB-only
+`delta_e_2000` helper. It reported incorrect candidate B1/G4a percentages.
+The tool now converts sRGB to Lab before evaluating DeltaE2000, matching the
+production gate. The corrected candidate values are B1 94.1686% and G4a
+67.3089%; both still fail 95%. The baseline values, SSIM and linear ablation
+response are unaffected. The capture JSON has been regenerated. Its accepted
+reference now comes from the owner-approved policy because the approved
+refactor removed the old audit measurement from the working tree; the policy
+records that historical measurement by immutable Git revision and blob hash.

@@ -20,6 +20,9 @@ struct Csm { light_direction:vec4<f32>, light_view:mat4x4<f32>, cascades:array<C
 @group(0) @binding(6) var prepared_sky_radiance:texture_2d<f32>;
 @group(0) @binding(7) var<storage,read> sun_terrain_hits:array<NepheleTerrainHit>;
 @group(0) @binding(8) var<storage,read> phase_terrain_hits:array<NepheleTerrainHit>;
+// Full bounded-medium fields shared with the terrain cloud-light prepass.
+@group(0) @binding(9) var world_medium:texture_3d<f32>;
+@group(0) @binding(10) var world_sun_source:texture_3d<f32>;
 @group(1) @binding(0) var froxel_single_scatter:texture_storage_3d<rgba16float,write>;
 @group(1) @binding(1) var froxel_in_scatter:texture_storage_3d<rgba16float,write>;
 @group(1) @binding(2) var froxel_sun_source_out:texture_storage_3d<rgba16float,write>;
@@ -88,7 +91,49 @@ fn manual_csm_visibility(world:vec3<f32>,normal:vec3<f32>)->f32 {
     return visible/max(samples,1.0);
 }
 fn terminal_radiance(hit:NepheleTerrainHit,direction:vec3<f32>,occlusion:bool)->vec3<f32>{if(hit.normal_hit.w<0.5||!occlusion){return directional_radiance(direction);}let n=normalize(hit.normal_hit.xyz);let sun_t=clamp(textureLoad(canonical_light_transmittance,froxel_coord(hit.point_t.xyz),0).rgb,vec3<f32>(0.0),vec3<f32>(1.0));let sun=max(dot(n,normalize(media.sun.xyz)),0.0)*manual_csm_visibility(hit.point_t.xyz,n)*media.sun_radiance.rgb*media.sun_radiance.a*sun_t;let diffuse=max(media.diffuse_ibl.rgb,vec3<f32>(0.0));return max(media.terrain_albedo.rgb,vec3<f32>(0.0))*(sun+diffuse)*0.3183098861837907;}
-fn continuation_transmittance(world:vec3<f32>,direction:vec3<f32>,reach:f32)->vec3<f32>{let step=reach/f32(media.grid.z);var tau=vec3<f32>(0.0);for(var i=0u;i<media.grid.z;i=i+1u){let c=froxel_coord(world+direction*((f32(i)+0.5)*step));tau+=max(textureLoad(canonical_extinction,c,0).rgb,vec3<f32>(0.0))*step;}return exp(-tau);}
+// Unlike a camera froxel address, this query is zero outside the physical
+// medium. Trilinear weights follow the canonical texel-centre convention.
+fn world_field(field:texture_3d<f32>,world:vec3<f32>)->vec4<f32> {
+    if(any(world<media.world_min.xyz)||any(world>media.world_max.xyz)){return vec4<f32>(0.0);}
+    let dimensions=vec3<i32>(textureDimensions(field));
+    let coordinate=(world-media.world_min.xyz)/(media.world_max.xyz-media.world_min.xyz)*vec3<f32>(dimensions)-0.5;
+    let base=vec3<i32>(floor(coordinate));
+    let f=fract(coordinate);
+    var result=vec4<f32>(0.0);
+    for(var z=0;z<2;z=z+1){for(var y=0;y<2;y=y+1){for(var x=0;x<2;x=x+1){
+        let offset=vec3<i32>(x,y,z);
+        let w=mix(vec3<f32>(1.0)-f,f,vec3<f32>(offset));
+        result+=textureLoad(field,clamp(base+offset,vec3<i32>(0),dimensions-1),0)*w.x*w.y*w.z;
+    }}}
+    return result;
+}
+fn continuation_interval(world:vec3<f32>,direction:vec3<f32>,reach:f32)->vec2<f32> {
+    if(media.world_min.w<0.5){return vec2<f32>(0.0,reach);}
+    var begin=0.0;
+    var end=reach;
+    for(var axis=0u;axis<3u;axis=axis+1u){
+        if(direction[axis]==0.0){
+            if(world[axis]<media.world_min[axis]||world[axis]>media.world_max[axis]){return vec2<f32>(0.0);}
+        }else{
+            let a=(media.world_min[axis]-world[axis])/direction[axis];
+            let b=(media.world_max[axis]-world[axis])/direction[axis];
+            begin=max(begin,min(a,b));end=min(end,max(a,b));
+        }
+    }
+    return vec2<f32>(begin,max(begin,end));
+}
+fn continuation_extinction(world:vec3<f32>)->vec3<f32> {
+    if(media.world_min.w<0.5){return max(textureLoad(canonical_extinction,froxel_coord(world),0).rgb,vec3<f32>(0.0));}
+    return media.sigma_t.rgb*max(world_field(world_medium,world).a,0.0);
+}
+fn continuation_transmittance(world:vec3<f32>,direction:vec3<f32>,reach:f32)->vec3<f32> {
+    let interval=continuation_interval(world,direction,reach);
+    let steps=media.grid.z;
+    let step=(interval.y-interval.x)/f32(steps);
+    var tau=vec3<f32>(0.0);
+    for(var i=0u;i<steps;i=i+1u){tau+=continuation_extinction(world+direction*(interval.x+(f32(i)+0.5)*step))*step;}
+    return exp(-tau);
+}
 @compute @workgroup_size(4,4,4)
 fn cs_nephele_inject_single(@builtin(global_invocation_id) id:vec3<u32>) {
     if(any(id>=media.grid.xyz)){return;}
@@ -127,19 +172,22 @@ fn cs_nephele_inject_single(@builtin(global_invocation_id) id:vec3<u32>) {
 // Match the existing single-source tent exactly, but evaluate its direct sun
 // term in the gathered ray's direction. A camera-direction radiance field is
 // not a direction-independent source for anisotropic multiple scattering.
-fn continuation_source(centre:vec3<i32>, direction:vec3<f32>)->vec3<f32> {
+fn continuation_source(centre:vec3<i32>, direction:vec3<f32>, world:vec3<f32>)->vec3<f32> {
     let limit=vec2<i32>(media.grid.xy)-vec2<i32>(1);
     let phase=phase_value(dot(direction,normalize(media.sun.xyz)));
     var camera_sun=vec3<f32>(0.0);
     var gathered_sun=vec3<f32>(0.0);
+    var cached_density=0.0;
     var weight=0.0;
     for(var dy=-1;dy<=1;dy=dy+1){
         for(var dx=-1;dx<=1;dx=dx+1){
             let c=vec3<i32>(clamp(centre.xy+vec2<i32>(dx,dy),vec2<i32>(0),limit),centre.z);
-            let ext=textureLoad(froxel_extinction,c,0).rgb;
+            let extinction=textureLoad(froxel_extinction,c,0);
+            let ext=extinction.rgb;
             if(max(ext.r,max(ext.g,ext.b))>0.0){
                 let w=f32((2-abs(dx))*(2-abs(dy)));
                 let sun=textureLoad(froxel_sun_source,c,0);
+                cached_density+=w*extinction.a;
                 camera_sun+=w*sun.rgb*sun.a;
                 gathered_sun+=w*sun.rgb*phase;
                 weight+=w;
@@ -148,7 +196,13 @@ fn continuation_source(centre:vec3<i32>, direction:vec3<f32>)->vec3<f32> {
     }
     let filtered=textureLoad(froxel_single_source,centre,0).rgb;
     let environment=max(filtered-camera_sun/max(weight,1.0),vec3<f32>(0.0));
-    return environment+gathered_sun/max(weight,1.0);
+    if(media.world_min.w<0.5){return environment+gathered_sun/max(weight,1.0);}
+    // Keep the existing directional environment cache, expressed per density.
+    // Sun radiance and extinction use the full world field along this ray.
+    let density=max(world_field(world_medium,world).a,0.0);
+    var environment_source=vec3<f32>(0.0);
+    if(cached_density>0.0){environment_source=environment*(density/(cached_density/max(weight,1.0)));}
+    return environment_source+world_field(world_sun_source,world).rgb*phase;
 }
 
 @compute @workgroup_size(4,4,4)
@@ -164,14 +218,16 @@ fn cs_nephele_inject_multiple(@builtin(global_invocation_id) id:vec3<u32>) {
     let hit=phase_terrain_hits[trace_index(id)];
     let reaches_terrain=media.scattering.x>0.5&&hit.normal_hit.w>0.5;
     let reach=select(media.depth.y,min(hit.point_t.w,media.depth.y),reaches_terrain);
-    let step=reach/f32(media.grid.z);
+    let interval=continuation_interval(world,continuation,reach);
+    let steps=media.grid.z;
+    let step=(interval.y-interval.x)/f32(steps);
     var t=vec3<f32>(1.0);
     var gathered=vec3<f32>(0.0);
-    for(var i=0u;i<media.grid.z;i=i+1u){
-        let sample_world=world+continuation*((f32(i)+0.5)*step);
+    for(var i=0u;i<steps;i=i+1u){
+        let sample_world=world+continuation*(interval.x+(f32(i)+0.5)*step);
         let c=froxel_coord(sample_world);
-        let ext=max(textureLoad(froxel_extinction,c,0).rgb,vec3<f32>(0.0));
-        let source=continuation_source(c,continuation);
+        let ext=continuation_extinction(sample_world);
+        let source=continuation_source(c,continuation,sample_world);
         let st=exp(-ext*step);
         gathered+=t*source*(vec3<f32>(1.0)-st)/max(ext,vec3<f32>(1e-6));
         t*=st;

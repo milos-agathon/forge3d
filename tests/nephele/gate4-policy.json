@@ -17,5 +17,26 @@
     "kind": "per_pixel_pass_fraction",
     "minimum_fraction": 0.95
   },
-  "definition": "At least 95% of reference-cloud-shadowed terrain pixels must have DeltaE2000 strictly below 2.0. approved_revision identifies the branch reviewed when the owner gave this decision; owner_record identifies the approval source."
+  "definition": "At least 95% of reference-cloud-shadowed terrain pixels must have DeltaE2000 strictly below 2.0. approved_revision identifies the branch reviewed when the owner gave this decision; owner_record identifies the approval source.",
+  "occlusion_response": {
+    "status": "APPROVED",
+    "approved_by": "Milos",
+    "approved_revision": "eb31252206699f2fbd462f727317c6d733917a3d",
+    "owner_record": {
+      "date": "2026-10-21",
+      "source": "Explicit owner reply: Approve +/-20% relative error, in the forge3d 1.46.0 release chat"
+    },
+    "metric": "mean_roi_signed_linear_luminance_change",
+    "maximum_relative_error": 0.20,
+    "reference": {
+      "kind": "owner_accepted_first_order_estimate",
+      "mean_linear_luminance_change": 0.03731673831968643,
+      "source_revision": "a8a96c4739c15895bf38772b6aaaea8f9596ff96",
+      "source_path": "docs/audits/nephele-gate4-measurement-2026-10-21/measurement.json",
+      "source_git_blob_sha256": "bd5bbcd1d77ca2d875c45ff81c205c7662a7cdeb5bc03ef2dbcd11e412d50eef",
+      "roi_mask_sha256": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+      "inverse_mapping": "Original audit numerical inverse sRGB + ACES, linear samples 0..64 inclusive with 2000001 samples"
+    },
+    "definition": "The signed mean linear luminance increase when terrain occlusion is disabled in the frozen god-ray ROI must differ from the owner-accepted first-order estimate by at most 20% of that estimate. SSIM is diagnostic only. G4a and the medium-ablation criterion are unchanged."
+  }
 }

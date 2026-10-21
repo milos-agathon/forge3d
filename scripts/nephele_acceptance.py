@@ -423,6 +423,21 @@ def gate3(artifact: Path) -> dict[str, Any]:
     })
 
 
+def _inverse_display_aces(rgb: np.ndarray) -> np.ndarray:
+    """Use the unchanged numerical inverse used for the accepted reference."""
+    aces_x = np.linspace(0.0, 64.0, 2_000_001)
+    aces_y = np.clip((aces_x * (2.51 * aces_x + 0.03)) /
+                     (aces_x * (2.43 * aces_x + 0.59) + 0.14), 0, 1)
+    value = rgb.astype(np.float64) / 255.0
+    display = np.where(value <= 0.04045, value / 12.92, ((value + 0.055) / 1.055) ** 2.4)
+    return np.interp(display, aces_y, aces_x)
+
+
+def _occlusion_response(realtime: np.ndarray, disabled: np.ndarray) -> float:
+    delta = _inverse_display_aces(disabled) - _inverse_display_aces(realtime)
+    return float((delta @ np.array([0.2126, 0.7152, 0.0722])).mean())
+
+
 def gate4(artifact: Path) -> dict[str, Any]:
     """Cloud shadows on terrain, plus medium and terrain-occlusion ablations."""
     policy = _load("gate4-policy.json", ROOT / "tests/nephele")
@@ -433,15 +448,29 @@ def gate4(artifact: Path) -> dict[str, Any]:
     shadow_fraction = float(np.mean(shadow < 2.0))
     no_medium = delta_e_2000(srgb_to_lab(_rgb(artifact, "medium-disabled-rgb.npy")), srgb_to_lab(realtime))
     changed = float(np.mean(no_medium[terrain] > 5.0))
-    occlusion_ssim = ssim(*_roi(realtime, _rgb(artifact, "terrain-occlusion-disabled-rgb.npy")), data_range=255.0)
+    disabled = _rgb(artifact, "terrain-occlusion-disabled-rgb.npy")
+    occlusion_ssim = ssim(*_roi(realtime, disabled), data_range=255.0)
+    response_policy = policy["occlusion_response"]
+    expected = response_policy["reference"]["mean_linear_luminance_change"]
+    tolerance = response_policy["maximum_relative_error"]
+    observed = _occlusion_response(*_roi(realtime, disabled))
+    relative_error = abs(observed - expected) / expected
     metrics = {"shadow_delta_e_pass_fraction": shadow_fraction, "medium_ablation_changed_fraction": changed,
-               "terrain_occlusion_ablation_ssim": occlusion_ssim, "shadow_pixels": int(shadow.size)}
+               "terrain_occlusion_ablation_ssim": occlusion_ssim, "shadow_pixels": int(shadow.size),
+               "terrain_occlusion_mean_linear_luminance_change": observed,
+               "terrain_occlusion_reference_mean_linear_luminance_change": expected,
+               "terrain_occlusion_response_relative_error": relative_error,
+               "terrain_occlusion_maximum_relative_error": tolerance}
     return _result(metrics, {
         f"owner-approved policy ({policy['approved_by']}, {policy['owner_record']['date']})":
             policy["status"] == "APPROVED" and policy["aggregation"]["kind"] == "per_pixel_pass_fraction",
         f"cloud-shadow terrain DeltaE2000 < 2 on >= {minimum:.0%} of pixels": shadow.size > 0 and shadow_fraction >= minimum,
         "removing the medium changes >= 10% of terrain pixels by DeltaE > 5": changed >= 0.10,
-        "disabling terrain occlusion drops god-ray ROI SSIM below 0.80": occlusion_ssim < 0.80,
+        "owner-approved physical occlusion-response policy":
+            response_policy["status"] == "APPROVED" and bool(response_policy["approved_by"])
+            and expected > 0 and math.isfinite(expected) and tolerance >= 0 and math.isfinite(tolerance),
+        f"terrain occlusion response matches accepted reference within {tolerance:.0%}":
+            math.isfinite(relative_error) and relative_error <= tolerance,
     })
 
 

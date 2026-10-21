@@ -1,6 +1,6 @@
 {
   "head_sha": "d5507249a2327d183edf0bb3ff11dcb83a773333",
-  "gate_verifier_result": "FAIL at Gate 3; these are diagnostic measurements",
+  "gate_verifier_result": "Diagnostic measurements; consult the CI run for its acceptance verdict",
   "frozen_input_files_byte_identical": [
     "atmosphere.json",
     "camera.json",
@@ -10,24 +10,14 @@
     "godray-roi-mask.npy",
     "material.json",
     "medium.json",
-    "reference-cloud-shadow-aov-spp320.npy",
     "reference-cloud-shadow-aov.npy",
-    "reference-convergence.json",
-    "reference-in-scatter-spp320.npy",
     "reference-in-scatter.npy",
-    "reference-media-lighting-visibility-spp320.npy",
     "reference-media-lighting-visibility.npy",
-    "reference-optical-depth-spp320.npy",
     "reference-optical-depth.npy",
-    "reference-provenance-spp320.json",
     "reference-provenance.json",
-    "reference-rgb-spp320.npy",
     "reference-rgb.npy",
-    "reference-terrain-hit-spp320.npy",
     "reference-terrain-hit.npy",
-    "reference-terrain-slice-spp320.npy",
     "reference-terrain-slice.npy",
-    "reference-transmittance-spp320.npy",
     "reference-transmittance.npy",
     "shaft-mask.npy",
     "sky-cloud-mask.npy",
@@ -37,9 +27,9 @@
     "terrain.json",
     "tonemap.json"
   ],
-  "sky_fraction_delta_e2000_lt_2_5": 0.8313632781717888,
+  "sky_fraction_delta_e2000_lt_2_5": 0.9416863672182821,
   "godray_ssim": 0.9899707204281153,
-  "g4a_fraction_delta_e2000_lt_2": 0.7488760436737315,
+  "g4a_fraction_delta_e2000_lt_2": 0.6730892742453436,
   "shadow_mean_lab_error": [
     0.5385527980303026,
     -0.12888457449381988,
@@ -77,5 +67,7 @@
     "godray-roi-mask": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20"
   },
   "accepted_reference_report_sha256": "bd5bbcd1d77ca2d875c45ff81c205c7662a7cdeb5bc03ef2dbcd11e412d50eef",
-  "measurement_tool_sha256": "0ab1b61aba6d1cc21cf3d5f29df56d2eb0de16e86fd5f38a3353e2dc4ea56918"
+  "reference_policy_sha256": "0c742788fa0a4a6b0cf2cfc97fd540916128b0e7a6c1b7ac1716947738c76f69",
+  "measurement_tool_sha256": "7fe9d5d6ab872fc419d0ca84a24606ae91f587ef762779acb409f1fa47456bd6",
+  "measurement_tool_hash_convention": "LF-normalized Git source text"
 }

@@ -41,6 +41,16 @@ def test_comparator_matches_the_analytic_column_mean_for_a_uniform_medium() -> N
     assert abs(acceptance.comparator_survival(medium, samples) - expected) < 4 * se
 
 
+def _physical_ablation(reference: np.ndarray, response_scale: float = 1.0) -> np.ndarray:
+    policy = json.loads((acceptance.ROOT / "tests/nephele/gate4-policy.json").read_text(encoding="utf-8"))
+    expected = policy["occlusion_response"]["reference"]["mean_linear_luminance_change"]
+    linear = np.maximum(acceptance._inverse_display_aces(reference) + expected * response_scale, 0)
+    mapped = np.clip((linear * (2.51 * linear + 0.03)) /
+                     (linear * (2.43 * linear + 0.59) + 0.14), 0, 1)
+    srgb = np.where(mapped <= 0.0031308, mapped * 12.92, 1.055 * mapped ** (1 / 2.4) - 0.055)
+    return np.rint(np.clip(srgb, 0, 1) * 255).astype(np.uint8)
+
+
 def _synthetic_artifact(tmp_path: Path) -> Path:
     rng = np.random.default_rng(7)
     slab = json.loads((acceptance.ROOT / "tests/nephele/homogeneous-slab.json").read_text(encoding="utf-8"))
@@ -64,7 +74,7 @@ def _synthetic_artifact(tmp_path: Path) -> Path:
     for name in ("realtime-rgb.npy", "froxel-frame-run-a.npy", "froxel-frame-run-b.npy"):
         np.save(tmp_path / name, reference)
     np.save(tmp_path / "medium-disabled-rgb.npy", np.zeros_like(reference))
-    np.save(tmp_path / "terrain-occlusion-disabled-rgb.npy", 255 - reference)
+    np.save(tmp_path / "terrain-occlusion-disabled-rgb.npy", _physical_ablation(reference))
     slices = np.load(FIXTURE / "reference-terrain-slice.npy")
     termination = np.floor(np.clip(np.where(np.isfinite(slices), slices, 0), 0, 63)).astype(np.float32)
     shaft = np.load(FIXTURE / "shaft-mask.npy")
@@ -105,9 +115,22 @@ def test_consistent_evidence_passes(artifact: Path, name: str) -> None:
 
 
 def test_gate4_reports_each_failed_criterion(artifact: Path) -> None:
-    # Identical shadows pass; the inverted ablation drops SSIM; the black
-    # no-medium frame changes every terrain pixel.
+    # Identical shadows pass; the ablation has the accepted physical response;
+    # the black no-medium frame changes every terrain pixel.
     assert acceptance.gate4(artifact)["failures"] == []
+
+
+@pytest.mark.parametrize("response_scale", [0.0, -1.0, 0.5, 1.5])
+def test_gate4_rejects_missing_reversed_and_out_of_band_response(
+    tmp_path: Path, artifact: Path, response_scale: float,
+) -> None:
+    broken = tmp_path / "broken"
+    shutil.copytree(artifact, broken)
+    reference = np.load(broken / "realtime-rgb.npy")
+    np.save(broken / "terrain-occlusion-disabled-rgb.npy", _physical_ablation(reference, response_scale))
+    result = acceptance.gate4(broken)
+    assert result["failures"] == ["terrain occlusion response matches accepted reference within 20%"]
+    assert result["metrics"]["terrain_occlusion_response_relative_error"] > 0.20
 
 
 def test_failures_are_named(tmp_path: Path, artifact: Path) -> None:
@@ -116,7 +139,7 @@ def test_failures_are_named(tmp_path: Path, artifact: Path) -> None:
     np.save(broken / "froxel-frame-run-b.npy", np.zeros((64, 64, 3), dtype=np.uint8))
     np.save(broken / "terrain-occlusion-disabled-rgb.npy", np.load(broken / "realtime-rgb.npy"))
     assert "frames bitwise identical" in acceptance.gate6(broken)["failures"]
-    assert acceptance.gate4(broken)["failures"] == ["disabling terrain occlusion drops god-ray ROI SSIM below 0.80"]
+    assert acceptance.gate4(broken)["failures"] == ["terrain occlusion response matches accepted reference within 20%"]
     for name in ("verification-report.json", "lane-ran.json"):
         (broken / name).write_text("{}", encoding="utf-8")
     assert not acceptance.report(broken, "0" * 40)
