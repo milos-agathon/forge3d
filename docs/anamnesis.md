@@ -13,6 +13,11 @@ keys every output from:
 - crate version, full Git SHA, locked Naga version, and the preprocessed WGSL
   tree identity.
 
+Frame output requires a `render_frame` callback or `pass_executors`. Without either,
+execution raises an explicit unavailable error. `reference_only=True` (CLI
+`--reference-only`) explicitly selects digest-only reference output; it does not
+render images. `dry_run=True` only plans execution.
+
 Unknown opaque-renderer state is never guessed. A `render_frame` callback must
 provide both `render_frame_fingerprint` and `render_frame_context`, and its
 output key includes the complete pixel-affecting recipe projection. Structured
@@ -54,7 +59,7 @@ The store defaults to `.forge3d/cache`. Use:
 python -m forge3d.anamnesis explain <key>
 python -m forge3d.anamnesis verify
 python -m forge3d.anamnesis gc <max_bytes>
-python -m forge3d.anamnesis render-sequence recipe.json --frames 600
+python -m forge3d.anamnesis render-sequence recipe.json --frames 600 --reference-only
 ```
 
 `explain` reconstructs and checks each pass key and recursively follows its

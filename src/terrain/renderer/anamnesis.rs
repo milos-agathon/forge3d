@@ -224,6 +224,8 @@ pub(super) fn encode_depth_rle(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(encoded)
 }
 
+// Retained as the independent round-trip oracle for stored depth encoding.
+#[cfg(test)]
 pub(super) fn decode_depth_rle(encoded: &[u8], expected_bytes: usize) -> Result<Vec<u8>> {
     if !encoded.len().is_multiple_of(8) || !expected_bytes.is_multiple_of(4) {
         return Err(anyhow!("invalid depth32 RLE alignment"));

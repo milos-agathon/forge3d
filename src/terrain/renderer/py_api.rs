@@ -89,11 +89,13 @@ fn terrain_cache_options<'py>(
     state.extend_from_slice(b"forge3d.terrain.native-inputs/v2\0");
     state.extend_from_slice(&(params_bytes.len() as u64).to_le_bytes());
     state.extend_from_slice(&params_bytes);
-    let material_bytes = material_set.anamnesis_bytes().map_err(|error| {
-        PyRuntimeError::new_err(format!(
-            "failed to identify terrain material source: {error}"
-        ))
-    })?;
+    let material_bytes = material_set
+        .anamnesis_bytes(&scene.device, &scene.queue)
+        .map_err(|error| {
+            PyRuntimeError::new_err(format!(
+                "failed to identify terrain material source: {error}"
+            ))
+        })?;
     append_content_digest(&mut state, b"material-set", &material_bytes);
     let ibl_bytes = env_maps
         .anamnesis_bytes()

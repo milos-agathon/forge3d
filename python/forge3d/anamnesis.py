@@ -225,6 +225,7 @@ class SequenceResult:
     observed_recompute: list[tuple[int, str]]
     elapsed_seconds: float
     pass_keys: dict[str, str] = field(default_factory=dict)
+    reference_only: bool = False
 
     @property
     def prediction_matches(self) -> bool:
@@ -931,13 +932,16 @@ def render_sequence(
     pass_executor_contexts: Mapping[str, bytes] | None = None,
     capabilities: Mapping[str, Any] | None = None,
     reference_work_factor: int = 0,
+    reference_only: bool = False,
 ) -> SequenceResult:
     """Render a deterministic frame sequence through a Merkle pass graph.
 
     The predicted recompute set is calculated before any pass executes and is
     asserted equal to observed misses. Supplying ``cache=None`` executes every
     pass and performs no cache I/O. A real renderer may be supplied for final
-    frame bytes; cache hits skip that call entirely.
+    frame bytes; cache hits skip that call entirely. Without an executor,
+    ``reference_only=True`` is required for digest-only reference output;
+    those bytes are not rendered images. ``dry_run`` only plans execution.
     """
     started = time.perf_counter()
     payload = _recipe_payload(recipe)
@@ -949,6 +953,9 @@ def render_sequence(
     camera = payload.get("camera", {})
     state = dict(payload.get("anamnesis_state", {}) or {})
     executors = dict(pass_executors or {})
+    if render_frame is None and not executors and not reference_only and not dry_run:
+        raise RuntimeError("No frame renderer is available; supply render_frame/pass_executors or explicitly select reference_only=True for digest-only output")
+
     executor_fingerprints = dict(pass_executor_fingerprints or {})
     executor_contexts = dict(pass_executor_contexts or {})
     if render_frame is not None and executors:
@@ -1258,6 +1265,7 @@ def render_sequence(
         observed_recompute=observed,
         elapsed_seconds=time.perf_counter() - started,
         pass_keys=current_manifest,
+        reference_only=reference_only,
     )
 
 
@@ -1371,6 +1379,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--cache", default=".forge3d/cache")
     parser.add_argument("--frames", type=int, default=600)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--reference-only", action="store_true", help="Produce reference digests, not rendered frames")
     args = parser.parse_args(argv)
     if args.command == "explain":
         if not args.value:
@@ -1390,6 +1399,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
             frames=range(args.frames),
             cache=args.cache,
             dry_run=args.dry_run,
+            reference_only=args.reference_only,
         )
         print(
             json.dumps(
@@ -1397,6 +1407,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
                     "predicted_recompute": result.predicted_recompute,
                     "observed_recompute": result.observed_recompute,
                     "prediction_matches": result.prediction_matches,
+                    "reference_only": result.reference_only,
                     "cache_report": result.cache_report.to_dict(),
                 },
                 sort_keys=True,

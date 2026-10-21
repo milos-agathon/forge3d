@@ -98,6 +98,12 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
             view_formats: &[],
         },
     )?;
+    let texel_bytes = color_format.block_copy_size(None).ok_or_else(|| {
+        crate::core::error::RenderError::Render(
+            "Unsupported water reflection fallback format".into(),
+        )
+    })?;
+    let fallback_pixel = vec![0u8; texel_bytes as usize];
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &water_reflection_fallback_texture,
@@ -105,10 +111,10 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &[0u8; 4],
+        &fallback_pixel,
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: Some(4),
+            bytes_per_row: Some(texel_bytes),
             rows_per_image: Some(1),
         },
         wgpu::Extent3d {
@@ -130,4 +136,25 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
         water_reflection_size: (water_reflection_resolution, water_reflection_resolution),
         water_reflection_fallback_view,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rgba16float_fallback_upload_is_valid() {
+        let context = crate::core::gpu::try_ctx().expect("physical GPU required");
+        assert!(!context.software_fallback, "physical GPU required");
+        context
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let _resources = super::create_water_reflection_init_resources(
+            &context.device,
+            &context.queue,
+            wgpu::TextureFormat::Rgba16Float,
+        )
+        .unwrap();
+        context.queue.submit(std::iter::empty());
+        context.device.poll(wgpu::Maintain::Wait);
+        assert!(pollster::block_on(context.device.pop_error_scope()).is_none());
+    }
 }
