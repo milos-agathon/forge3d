@@ -52,7 +52,14 @@ impl BoundingVolume {
             Self::Box(b) => DVec3::new(b.data[0], b.data[1], b.data[2]),
             Self::Sphere(s) => DVec3::new(s.sphere[0], s.sphere[1], s.sphere[2]),
             Self::Region(r) => {
-                let lon = (r.region[0] + r.region[2]) / 2.0;
+                let span = if r.region[2] < r.region[0] {
+                    r.region[2] - r.region[0] + std::f64::consts::TAU
+                } else {
+                    r.region[2] - r.region[0]
+                };
+                let lon = (r.region[0] + span / 2.0 + std::f64::consts::PI)
+                    .rem_euclid(std::f64::consts::TAU)
+                    - std::f64::consts::PI;
                 let lat = (r.region[1] + r.region[3]) / 2.0;
                 // 3D Tiles region heights are ellipsoidal metres per spec §8.
                 let height = Height::<Ellipsoidal>::new((r.region[4] + r.region[5]) / 2.0);
@@ -76,7 +83,11 @@ impl BoundingVolume {
                 // east-west arc shrinks with cos(latitude); use the region's
                 // central latitude and the half-diagonal of the box.
                 const R: f64 = 6_378_137.0;
-                let d_lon = (r.region[2] - r.region[0]).abs();
+                let d_lon = if r.region[2] < r.region[0] {
+                    r.region[2] - r.region[0] + std::f64::consts::TAU
+                } else {
+                    r.region[2] - r.region[0]
+                };
                 let d_lat = (r.region[3] - r.region[1]).abs();
                 let d_h = (r.region[5] - r.region[4]).abs();
                 let lat_c = (r.region[1] + r.region[3]) / 2.0;
@@ -122,16 +133,16 @@ impl BoundingVolume {
     pub fn intersects_frustum(&self, view_proj: &DMat4) -> bool {
         let center = self.center();
         let radius = self.radius();
-        let clip = *view_proj * center.extend(1.0);
-        if clip.w <= 0.0 {
-            return radius > clip.z.abs();
-        }
-        let ndc = clip.truncate() / clip.w;
-        let margin = radius / clip.w;
-        ndc.x.abs() <= 1.0 + margin
-            && ndc.y.abs() <= 1.0 + margin
-            && ndc.z >= -margin
-            && ndc.z <= 1.0 + margin
+        // wgpu clip space: -w <= x,y <= w and 0 <= z <= w.
+        // Pull each half-space back to world space before comparing its radius.
+        let rows = view_proj.transpose();
+        let x = rows.x_axis;
+        let y = rows.y_axis;
+        let z = rows.z_axis;
+        let w = rows.w_axis;
+        [w + x, w - x, w + y, w - y, z, w - z]
+            .iter()
+            .all(|plane| plane.dot(center.extend(1.0)) >= -radius * plane.truncate().length())
     }
 
     /// True unless this is a `Region` carrying a non-finite or out-of-range
@@ -183,6 +194,32 @@ mod tests {
 
     fn region(r: [f64; 6]) -> BoundingVolume {
         BoundingVolume::Region(BoundingRegion { region: r })
+    }
+
+    #[test]
+    fn scaled_frustum_retains_intersecting_sphere() {
+        let projection = DMat4::from_scale(DVec3::new(10.0, 1.0, 1.0));
+        let sphere = |x| {
+            BoundingVolume::Sphere(BoundingSphere {
+                sphere: [x, 0.0, 0.5, 0.15],
+            })
+        };
+        assert!(sphere(0.2).intersects_frustum(&projection));
+        assert!(!sphere(0.3).intersects_frustum(&projection));
+    }
+
+    #[test]
+    fn dateline_region_uses_short_eastward_span() {
+        let r = region([
+            179_f64.to_radians(),
+            0.0,
+            -179_f64.to_radians(),
+            0.0,
+            0.0,
+            0.0,
+        ]);
+        assert!((r.center().x + 6_378_137.0).abs() < 1e-8);
+        assert!((r.radius() - 1_f64.to_radians() * 6_378_137.0).abs() < 1e-8);
     }
 
     #[test]

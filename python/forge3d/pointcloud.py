@@ -347,33 +347,41 @@ class CopcDataset:
                     max=(center[0] + halfsize, center[1] + halfsize, center[2] + halfsize),
                 )
 
-                # Load root hierarchy
-                f.seek(self._info["root_hier_offset"])
-                hier_data = f.read(self._info["root_hier_size"])
-                self._parse_hierarchy(hier_data)
+                self._load_hierarchy_pages(f)
+
+    def _load_hierarchy_pages(self, stream):
+        """Follow hierarchy page references and reject cycles or truncated pages."""
+        pending = [(self._info["root_hier_offset"], self._info["root_hier_size"])]
+        seen = set()
+        stream.seek(0, 2)
+        file_size = stream.tell()
+        while pending:
+            offset, size = pending.pop()
+            if (offset, size) in seen:
+                raise ValueError("Duplicate or cyclic COPC hierarchy page")
+            seen.add((offset, size))
+            if size <= 0 or size % 32 or offset < 0 or offset + size > file_size:
+                raise ValueError("Invalid COPC hierarchy page extent")
+            stream.seek(offset)
+            pending.extend(self._parse_hierarchy(stream.read(size)))
 
     def _parse_hierarchy(self, data: bytes):
-        """Parse hierarchy page."""
-        entry_size = 32
-        count = len(data) // entry_size
-
-        for i in range(count):
-            off = i * entry_size
-            d = int.from_bytes(data[off:off+4], "little", signed=True)
-            x = int.from_bytes(data[off+4:off+8], "little", signed=True)
-            y = int.from_bytes(data[off+8:off+12], "little", signed=True)
-            z = int.from_bytes(data[off+12:off+16], "little", signed=True)
-            file_offset = int.from_bytes(data[off+16:off+24], "little")
-            byte_size = int.from_bytes(data[off+24:off+28], "little", signed=True)
-            point_count = int.from_bytes(data[off+28:off+32], "little", signed=True)
-
-            if d >= 0 and point_count > 0:
+        """Parse one complete hierarchy page and return child page references."""
+        import struct
+        if len(data) % 32:
+            raise ValueError("Truncated COPC hierarchy page")
+        pages = []
+        for d, x, y, z, offset, size, count in struct.iter_unpack("<iiiiQii", data):
+            if d < 0 or count < -1 or size < 0:
+                raise ValueError("Invalid COPC hierarchy entry")
+            if count == -1:
+                pages.append((offset, size))
+            else:
                 key = f"{d}-{x}-{y}-{z}"
-                self._hierarchy[key] = {
-                    "offset": file_offset,
-                    "byte_size": byte_size,
-                    "point_count": point_count,
-                }
+                if key in self._hierarchy:
+                    raise ValueError("Duplicate COPC hierarchy node")
+                self._hierarchy[key] = {"offset": offset, "byte_size": size, "point_count": count}
+        return pages
 
     @property
     def total_points(self) -> int:
@@ -643,17 +651,20 @@ class PointCloudRenderer:
                 continue
 
             if total_points + node.point_count > self.point_budget:
-                if priority < 1.0:
-                    continue
+                # Whole nodes are indivisible here; omit any node that does not fit.
+                continue
 
             screen_size = self._compute_screen_size(node.bounds, camera_position)
             children = dataset.children(node.key)
 
-            if screen_size > 1.0 and children and node.key.depth < self.max_depth:
+            refining = screen_size > 1.0 and children and node.key.depth < self.max_depth
+            if refining:
                 for child in children:
                     child_priority = self._compute_priority(child.bounds, camera_position)
                     candidates.append((child, child_priority))
-            else:
+            if not refining or isinstance(dataset, EptDataset):
+                if total_points + node.point_count > self.point_budget:
+                    continue
                 total_points += node.point_count
                 result.append(VisibleNode(
                     key=node.key,

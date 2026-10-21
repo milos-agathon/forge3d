@@ -41,10 +41,17 @@ class BoundingVolume:
         elif self.volume_type == "box":
             return (self.data[0], self.data[1], self.data[2])
         elif self.volume_type == "region":
-            lon = (self.data[0] + self.data[2]) / 2
-            lat = (self.data[1] + self.data[3]) / 2
-            h = (self.data[4] + self.data[5]) / 2
-            return (lon, lat, h)
+            west, south, east, north, low, high = self.data
+            span = east - west if east >= west else east - west + 2 * np.pi
+            lon = (west + span / 2 + np.pi) % (2 * np.pi) - np.pi
+            lat = (south + north) / 2
+            h = (low + high) / 2
+            a = 6378137.0
+            e2 = (1 / 298.257223563) * (2 - 1 / 298.257223563)
+            n = a / np.sqrt(1 - e2 * np.sin(lat)**2)
+            return ((n + h) * np.cos(lat) * np.cos(lon),
+                    (n + h) * np.cos(lat) * np.sin(lon),
+                    (n * (1 - e2) + h) * np.sin(lat))
         return (0.0, 0.0, 0.0)
 
     def radius(self) -> float:
@@ -55,6 +62,12 @@ class BoundingVolume:
             y = np.linalg.norm(self.data[6:9])
             z = np.linalg.norm(self.data[9:12])
             return np.sqrt(x*x + y*y + z*z)
+        elif self.volume_type == "region":
+            west, south, east, north, low, high = self.data
+            span = east - west if east >= west else east - west + 2 * np.pi
+            half_ew = span / 2 * 6378137.0 * np.cos((south + north) / 2)
+            half_ns = (north - south) / 2 * 6378137.0
+            return float(np.sqrt(half_ew**2 + half_ns**2 + ((high - low) / 2)**2))
         return 1.0
 
 
@@ -347,7 +360,7 @@ class Tiles3dRenderer:
         world_bounds = _transform_bounding_volume(tile.bounding_volume, world_transform)
         sse = self.compute_sse(tile.geometric_error, world_bounds, camera_pos)
         refine = tile.refine or parent_refine
-        should_refine = sse > self.sse_threshold and tile.children
+        should_refine = depth < self.max_depth and sse > self.sse_threshold and tile.children
 
         if should_refine:
             if refine == "REPLACE":
@@ -492,7 +505,11 @@ def decode_pnts(data: bytes) -> Dict[str, Any]:
     if version != 1:
         raise ValueError(f"Unsupported PNTS version: {version}")
 
-    ft_json_len = int.from_bytes(data[12:16], "little")
+    declared_length = int.from_bytes(data[8:12], "little")
+    lengths = [int.from_bytes(data[i:i + 4], "little") for i in (12, 16, 20, 24)]
+    if declared_length != len(data) or 28 + sum(lengths) != declared_length:
+        raise ValueError("Invalid PNTS section lengths")
+    ft_json_len = lengths[0]
     offset = 28
     ft_json = json.loads(data[offset:offset + ft_json_len].decode("utf-8"))
     offset += ft_json_len
@@ -500,7 +517,22 @@ def decode_pnts(data: bytes) -> Dict[str, Any]:
     ft_bin_len = int.from_bytes(data[16:20], "little")
     ft_bin = data[offset:offset + ft_bin_len]
 
-    points_length = ft_json.get("POINTS_LENGTH", 0)
+    points_length = ft_json.get("POINTS_LENGTH")
+    if type(points_length) is not int or points_length < 0:
+        raise ValueError("Invalid PNTS POINTS_LENGTH")
+    for semantic, stride in (("POSITION", 12), ("POSITION_QUANTIZED", 6),
+                             ("RGB", 3), ("RGBA", 4), ("RGB565", 2),
+                             ("NORMAL", 12), ("NORMAL_OCT16P", 2)):
+        if semantic in ft_json:
+            descriptor = ft_json[semantic]
+            start = descriptor.get("byteOffset") if isinstance(descriptor, dict) else None
+            if type(start) is not int or start < 0 or start + points_length * stride > ft_bin_len:
+                raise ValueError(f"Invalid PNTS {semantic} payload length or offset")
+    if "POSITION" not in ft_json and "POSITION_QUANTIZED" not in ft_json:
+        raise ValueError("PNTS is missing positions")
+
+    if "POSITION_QUANTIZED" in ft_json:
+        raise ValueError("POSITION_QUANTIZED is unsupported by the Python PNTS decoder")
 
     # Extract positions
     positions = np.zeros((points_length, 3), dtype=np.float64)
