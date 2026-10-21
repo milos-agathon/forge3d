@@ -2,7 +2,15 @@
 # Canonical routine Rust lint gate used by local hooks and pull-request CI.
 # Keep this to the extension/default architectural surface; exhaustive feature
 # linting is an explicit acceptance concern below.
-forge3d-clippy = "clippy --workspace --all-targets --features extension-module,default,cog_streaming,shader-contract-asserts -- -D warnings"
+#
+# `splat-fusion` is part of the ROUTINE surface, not the exhaustive one: the
+# fused code and its acceptance test are `#![cfg(feature = "splat-fusion")]`,
+# so without this flag the routine gate never compiles them. A new field on
+# `FusedRenderDesc` then broke `tests/test_splat_fusion_occlusion.rs` and
+# only surfaced in the nightly matrix, long after the routine PR gate had gone
+# green. Compiling the feature here is what makes "PR Core Success" mean
+# something for the fused path.
+forge3d-clippy = "clippy --workspace --all-targets --features extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion -- -D warnings"
 
 # Explicit acceptance/release lint gate. This mirrors the supported portable
 # feature matrix without requiring system-PROJ from `--all-features`.

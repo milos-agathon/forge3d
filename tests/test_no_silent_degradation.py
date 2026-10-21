@@ -233,6 +233,15 @@ def test_c_every_feature_referenced_and_ci_list_curated():
 
     # Routine linting stays deliberately small. Explicit acceptance linting
     # covers the portable surface plus extension-module without system PROJ.
+    #
+    # `splat-fusion` is in the routine set because the routine lane is the
+    # only lane that compiles ALL TARGETS, and the fused acceptance test is
+    # `#![cfg(feature = "splat-fusion")]`. Without the feature the routine
+    # gate never compiled that test, so a new field on `FusedRenderDesc`
+    # broke it and only surfaced in the nightly matrix — long after
+    # "PR Core Success" had gone green. The portable CI feature set already
+    # names `splat-fusion` for the same reason (its own comment says the
+    # fused integrator is compiled on every portable lane).
     aliases = load_toml(ROOT / ".cargo" / "config.toml")["alias"]
     routine = _cargo_alias_features(aliases["forge3d-clippy"])
     acceptance = _cargo_alias_features(aliases["forge3d-clippy-acceptance"])
@@ -241,6 +250,7 @@ def test_c_every_feature_referenced_and_ci_list_curated():
         "extension-module",
         "cog_streaming",
         "shader-contract-asserts",
+        "splat-fusion",
     }, (
         f"routine clippy expanded beyond the small contract: {sorted(routine)}"
     )
