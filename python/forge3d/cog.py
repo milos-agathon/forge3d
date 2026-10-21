@@ -322,6 +322,9 @@ class CogDatasetFallback:
         data = self._src.read(
             1,
             window=window,
+            boundless=True,
+            fill_value=self._src.nodata if self._src.nodata is not None else np.nan,
+            out_dtype="float32",
             out_shape=(tile_size, tile_size),
         ).astype(np.float32)
         

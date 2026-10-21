@@ -198,7 +198,7 @@ fn ellipsoids_equivalent(
 /// stable error rather than guess.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EpsgCrsKind {
-    /// EPSG:4326 — the one geographic CRS with geodesic/dateline support.
+    /// EPSG:4326 â€” the one geographic CRS with geodesic/dateline support.
     GeographicWgs84,
     /// A known geographic (degree-axis) CRS other than EPSG:4326.
     Geographic,
@@ -229,6 +229,27 @@ pub(crate) fn epsg_crs_kind(code: u32) -> EpsgCrsKind {
     }
 }
 
+/// Authority metadata is intentionally restricted to supported, identified EPSG codes.
+pub(crate) fn native_crs_metadata(
+    spec: &CrsSpec,
+) -> GisResult<(&'static str, &'static str, Option<f64>)> {
+    let code = spec.authority.as_ref().and_then(|(name, code)| {
+        name.eq_ignore_ascii_case("EPSG")
+            .then(|| code.parse::<u32>().ok())
+            .flatten()
+    });
+    match code {
+        Some(4326 | 4979) => Ok(("geographic", "yx", None)),
+        Some(4978) => Ok(("geocentric", "xyz", Some(1.0))),
+        Some(code) if crate::geo::projections::epsg_projection_definition(code).is_some() => {
+            Ok(("projected", "xy", Some(1.0)))
+        }
+        _ => Err(GisError::BackendUnavailable(
+            "Unknown CRS authority axis order and unit".to_string(),
+        )),
+    }
+}
+
 pub fn canonical_label(spec: &CrsSpec) -> GisResult<String> {
     if let Some(projection) = spec.projection {
         return Ok(format!("forge3d:{projection:?}"));
@@ -254,7 +275,7 @@ pub fn transform_bounds(
 }
 
 /// Transform bounds by densifying each edge into `densify` segments before
-/// reprojecting — required for correctness under any projection with curved
+/// reprojecting â€” required for correctness under any projection with curved
 /// parallels/meridians, where the extremum of an edge lies between corners.
 pub fn transform_bounds_densified(
     bounds: RasterBounds,
@@ -676,7 +697,7 @@ pub fn transform_point3(
 /// (src/geo/projections) via the authoritative `epsg_projection_definition`
 /// table (4326 geographic, plus 3857, WGS84 UTM zones, 3395, 2154, 5070, 5041,
 /// and 5042), or an explicit `CrsSpec.projection`. Anything else is an explicit
-/// `BackendUnavailable` — the engine never silently passes coordinates through.
+/// `BackendUnavailable` â€” the engine never silently passes coordinates through.
 pub fn transform_point(x: f64, y: f64, src: &CrsSpec, dst: &CrsSpec) -> GisResult<(f64, f64)> {
     use crate::geo::projections::{epsg_projection_definition, ProjError, ProjectionDefinition};
 
@@ -783,7 +804,7 @@ pub fn transform_point(x: f64, y: f64, src: &CrsSpec, dst: &CrsSpec) -> GisResul
         spec.projection
             .or_else(|| code.and_then(epsg_projection_definition))
     };
-    // Route through geographic WGS84: src → 4326 → dst.
+    // Route through geographic WGS84: src â†’ 4326 â†’ dst.
     let (lon, lat) = if let Some(projection) = resolve(src, src_code) {
         projection.inverse(x, y).map_err(map_err)?
     } else if src_code == Some(4326) {
@@ -860,11 +881,52 @@ impl CrsTransform {
         // domain limits, e.g. UTM-south coordinates outside Web Mercator's
         // latitude range.)
         transform_pair_supported(&src, &dst)?;
+        if !always_xy {
+            native_crs_metadata(&src)?;
+            native_crs_metadata(&dst)?;
+        }
         Ok(Self {
             src,
             dst,
             axis_order_policy: if always_xy { "always_xy" } else { "native" }.to_string(),
         })
+    }
+    fn ordered_xy(&self, spec: &CrsSpec, x: f64, y: f64) -> GisResult<(f64, f64)> {
+        if self.axis_order_policy == "native" && native_crs_metadata(spec)?.1 == "yx" {
+            Ok((y, x))
+        } else {
+            Ok((x, y))
+        }
+    }
+
+    pub(crate) fn apply_point(&self, x: f64, y: f64) -> GisResult<(f64, f64)> {
+        let (x, y) = self.ordered_xy(&self.src, x, y)?;
+        let (x, y) = transform_point(x, y, &self.src, &self.dst)?;
+        self.ordered_xy(&self.dst, x, y)
+    }
+
+    pub(crate) fn apply_point3(&self, x: f64, y: f64, z: f64) -> GisResult<(f64, f64, f64)> {
+        let (x, y) = self.ordered_xy(&self.src, x, y)?;
+        let (x, y, z) = transform_point3(x, y, z, &self.src, &self.dst)?;
+        let (x, y) = self.ordered_xy(&self.dst, x, y)?;
+        Ok((x, y, z))
+    }
+
+    pub(crate) fn apply_bounds(
+        &self,
+        bounds: (f64, f64, f64, f64),
+    ) -> GisResult<(f64, f64, f64, f64)> {
+        validate_bounds_tuple(bounds, false)?;
+        let (left, bottom) = self.ordered_xy(&self.src, bounds.0, bounds.1)?;
+        let (right, top) = self.ordered_xy(&self.src, bounds.2, bounds.3)?;
+        let out = transform_bounds(
+            validate_bounds_tuple((left, bottom, right, top), false)?,
+            &self.src,
+            &self.dst,
+        )?;
+        let (left, bottom) = self.ordered_xy(&self.dst, out.left, out.bottom)?;
+        let (right, top) = self.ordered_xy(&self.dst, out.right, out.top)?;
+        Ok((left, bottom, right, top))
     }
 }
 
@@ -933,18 +995,15 @@ impl CrsTransform {
     }
 
     fn transform_point(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
-        transform_point(x, y, &self.src, &self.dst).map_err(Into::into)
+        self.apply_point(x, y).map_err(Into::into)
     }
 
     fn transform_point3(&self, x: f64, y: f64, z: f64) -> PyResult<(f64, f64, f64)> {
-        transform_point3(x, y, z, &self.src, &self.dst).map_err(Into::into)
+        self.apply_point3(x, y, z).map_err(Into::into)
     }
 
     fn transform_bounds(&self, bounds: (f64, f64, f64, f64)) -> PyResult<(f64, f64, f64, f64)> {
-        let bounds = validate_bounds_tuple(bounds, false)?;
-        transform_bounds(bounds, &self.src, &self.dst)
-            .map(|bounds| bounds.tuple())
-            .map_err(Into::into)
+        self.apply_bounds(bounds).map_err(Into::into)
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -971,6 +1030,55 @@ mod tests {
         let proj = spec(code);
         let (e, n) = transform_point(lon, lat, &wgs84, &proj).expect("forward");
         transform_point(e, n, &proj, &wgs84).expect("inverse")
+    }
+
+    #[test]
+    fn authority_axis_order_points_bounds_and_inverse() {
+        for always_xy in [true, false] {
+            let forward =
+                CrsTransform::new(spec("EPSG:4326"), spec("EPSG:3857"), always_xy).unwrap();
+            let inverse =
+                CrsTransform::new(spec("EPSG:3857"), spec("EPSG:4326"), always_xy).unwrap();
+            let input = if always_xy { (10., 2.) } else { (2., 10.) };
+            let xy = forward.apply_point(input.0, input.1).unwrap();
+            let expected =
+                transform_point(10., 2., &spec("EPSG:4326"), &spec("EPSG:3857")).unwrap();
+            assert_eq!(xy, expected);
+            let back = inverse.apply_point(xy.0, xy.1).unwrap();
+            assert!((back.0 - input.0).abs() < 1e-9 && (back.1 - input.1).abs() < 1e-9);
+            let bounds = if always_xy {
+                (10., 1., 20., 2.)
+            } else {
+                (1., 10., 2., 20.)
+            };
+            let out = forward.apply_bounds(bounds).unwrap();
+            let min = transform_point(10., 1., &spec("EPSG:4326"), &spec("EPSG:3857")).unwrap();
+            let max = transform_point(20., 2., &spec("EPSG:4326"), &spec("EPSG:3857")).unwrap();
+            assert_eq!(out, (min.0, min.1, max.0, max.1));
+            let back = inverse.apply_bounds(out).unwrap();
+            for (a, b) in [back.0, back.1, back.2, back.3]
+                .into_iter()
+                .zip([bounds.0, bounds.1, bounds.2, bounds.3])
+            {
+                assert!((a - b).abs() < 1e-9);
+            }
+            let to_ecef =
+                CrsTransform::new(spec("EPSG:4979"), spec("EPSG:4978"), always_xy).unwrap();
+            let from_ecef =
+                CrsTransform::new(spec("EPSG:4978"), spec("EPSG:4979"), always_xy).unwrap();
+            let xyz = to_ecef.apply_point3(input.0, input.1, 123.).unwrap();
+            let expected =
+                transform_point3(10., 2., 123., &spec("EPSG:4979"), &spec("EPSG:4978")).unwrap();
+            assert_eq!(xyz, expected);
+            let back = from_ecef.apply_point3(xyz.0, xyz.1, xyz.2).unwrap();
+            assert!(
+                (back.0 - input.0).abs() < 1e-9
+                    && (back.1 - input.1).abs() < 1e-9
+                    && (back.2 - 123.).abs() < 1e-6
+            );
+        }
+        assert!(CrsTransform::new(spec("EPSG:4269"), spec("EPSG:4269"), false).is_err());
+        assert!(CrsTransform::new(spec("EPSG:4269"), spec("EPSG:4269"), true).is_ok());
     }
 
     #[test]
