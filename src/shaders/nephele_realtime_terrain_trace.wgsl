@@ -59,7 +59,10 @@ fn nephele_rank(id: vec3<u32>, salt: u32) -> f32 {
 
 fn nephele_phase_direction(incident: vec3<f32>, id: vec3<u32>) -> vec3<f32> {
     let u1 = nephele_rank(id, 0u);
-    let u2 = nephele_rank(id, 1u);
+    // Match the froxel consumer's 2D CDF stratification. A neighbouring
+    // blue-noise rank is strongly anti-correlated with the first coordinate.
+    let rank = u32(u1 * 64.0);
+    let u2 = f32(reverseBits(rank)) / 4294967296.0 + 0.5 / 64.0;
     var cos_theta = 1.0 - 2.0 * u1;
     if (nephele.scattering.w >= 0.5) {
         let g = nephele.scattering.z;

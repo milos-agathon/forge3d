@@ -65,7 +65,10 @@ fn phase_rank(id:vec3<u32>,salt:u32)->f32{let tile=vec2<u32>(textureDimensions(b
 fn trace_index(id:vec3<u32>)->u32{return id.x+media.grid.x*(id.y+media.grid.y*id.z);}
 fn direction_uv(direction:vec3<f32>)->vec2<f32>{let d=normalize(direction);return vec2<f32>(atan2(d.z,d.x)*0.15915494309189535+0.5,acos(clamp(d.y,-1.0,1.0))*0.3183098861837907);}
 fn directional_radiance(direction:vec3<f32>)->vec3<f32>{let dims=vec2<u32>(textureDimensions(prepared_sky_radiance));let uv=direction_uv(direction);let p=min(vec2<u32>(uv*vec2<f32>(dims)),dims-1u);return max(textureLoad(prepared_sky_radiance,vec2<i32>(p),0).rgb,vec3<f32>(0.0));}
-fn phase_direction(incident:vec3<f32>,id:vec3<u32>)->vec3<f32>{let u1=phase_rank(id,0u);let u2=phase_rank(id,1u);var ct=1.0-2.0*u1;if(media.scattering.w>=0.5&&abs(media.scattering.z)>1e-4){let g=media.scattering.z;let ratio=(1.0-g*g)/(1.0-g+2.0*g*u1);ct=clamp((1.0+g*g-ratio*ratio)/(2.0*g),-1.0,1.0);}let st=sqrt(max(0.0,1.0-ct*ct));let phi=6.283185307179586*u2;let helper=select(vec3<f32>(1.0,0.0,0.0),vec3<f32>(0.0,1.0,0.0),abs(incident.y)<0.999);let tangent=normalize(cross(helper,incident));let bitangent=cross(incident,tangent);return normalize(tangent*(cos(phi)*st)+bitangent*(sin(phi)*st)+incident*ct);}
+// A shifted blue-noise texel anti-correlates the two CDF coordinates. Reverse
+// the existing rank bits instead: the 64 ranks cover all 8x8 joint CDF cells.
+// The power-of-two scale converts the u32 radical inverse exactly to [0,1).
+fn phase_direction(incident:vec3<f32>,id:vec3<u32>)->vec3<f32>{let u1=phase_rank(id,0u);let rank=u32(u1*64.0);let u2=f32(reverseBits(rank))/4294967296.0+0.5/64.0;var ct=1.0-2.0*u1;if(media.scattering.w>=0.5&&abs(media.scattering.z)>1e-4){let g=media.scattering.z;let ratio=(1.0-g*g)/(1.0-g+2.0*g*u1);ct=clamp((1.0+g*g-ratio*ratio)/(2.0*g),-1.0,1.0);}let st=sqrt(max(0.0,1.0-ct*ct));let phi=6.283185307179586*u2;let helper=select(vec3<f32>(1.0,0.0,0.0),vec3<f32>(0.0,1.0,0.0),abs(incident.y)<0.999);let tangent=normalize(cross(helper,incident));let bitangent=cross(incident,tangent);return normalize(tangent*(cos(phi)*st)+bitangent*(sin(phi)*st)+incident*ct);}
 fn manual_csm_visibility(world:vec3<f32>,normal:vec3<f32>)->f32 {
     let cascade_count=min(csm.cascade_count,4u);
     if(cascade_count==0u){return 1.0;}
