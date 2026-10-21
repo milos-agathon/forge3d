@@ -1104,7 +1104,12 @@ def save_bundle(
 
 
 def load_bundle(path: str | Path, verify_checksums: bool = True) -> LoadedBundle:
-    """[Pro] Load a scene bundle from disk."""
+    """[Pro] Load a scene bundle from disk.
+
+    Verification requires every checksum-listed file to exist and match.
+    ``verify_checksums=False`` skips integrity checks, including missing-file
+    checks; optional missing assets retain the reader's normal absent policy.
+    """
 
     _check_pro_access("Scene bundle load")
     bundle_path = Path(path)
@@ -1118,7 +1123,17 @@ def load_bundle(path: str | Path, verify_checksums: bool = True) -> LoadedBundle
     if verify_checksums:
         for rel_path, expected_hash in manifest.checksums.items():
             file_path = bundle_path / rel_path
-            if file_path.exists() and _compute_sha256(file_path) != expected_hash:
+            try:
+                file_path.resolve().relative_to(bundle_path.resolve())
+            except ValueError as exc:
+                raise ValueError(f"Checksum path escapes bundle: {rel_path}") from exc
+            if not file_path.is_file():
+                raise ValueError(f"Missing checksum file: {rel_path}")
+            try:
+                actual_hash = _compute_sha256(file_path)
+            except OSError as exc:
+                raise ValueError(f"Unreadable checksum file: {rel_path}") from exc
+            if actual_hash != expected_hash:
                 raise ValueError(f"Checksum mismatch for {rel_path}")
 
     dem_file: Path | None = None
