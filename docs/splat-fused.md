@@ -80,13 +80,16 @@ partly cloudy, fetched once into the dataset cache) passed through
 normalises the HDRI's exposure on load and clamps its sun disc so it reads
 as a bright blob instead of an IBL firefly; `--hdr PATH` supplies any
 `.hdr/.rgbe/.exr`, `--hdr none` forces the analytic Hosek-Wilkie sky
-(turbidity 5, ground albedo 0.35), and `--hdr-rotation DEG` places the
-HDRI's sun. Map views keep the cartographic NW light (az 215 / el 45).
+(hero: turbidity 5, ground albedo 0.35; map views: 2.5 / 0.2), and
+`--hdr-rotation DEG` places the HDRI's sun. Map views keep the
+cartographic NW light (az 215 / el 45).
 Distance is rendered as aerial perspective: the same exponential height fog
 that dims sun rays also blends distant surfaces toward the sky colour
-(`--fog` density, default 4e-4, and `--fog-falloff`, default 1.5e-3, both
-0 for the fixture), so far ridges recede into haze instead of ending at a
-hard silhouette. Every other knob is overridable with
+(`--fog` density, default 4e-4, and `--fog-falloff`, default 1.5e-3), so
+far ridges recede into haze instead of ending at a hard silhouette. The fog
+is off only on the top-down plan view, where every ray points down
+through the whole camera altitude and the haze would mute the hypsometric
+edges; the fixture scene carries it like any other view. Every other knob is overridable with
 `--sun-azimuth/--sun-elevation/--sun-color/--sky-intensity/
 --sky-turbidity/--sky-ground-albedo/--exposure`. Reruns with the same seed
 reproduce the beauty and the sheet byte for byte.

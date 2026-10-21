@@ -567,6 +567,19 @@ def test_render_fused_single_representations_and_options():
     foggy = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.02, **common)
     lit = (terrain_only.transmittance[..., 0] > 0.99) & (terrain_only.hit_kind == splat.HIT_TERRAIN)
     assert foggy.direct[lit].mean() < 0.9 * terrain_only.direct[lit].mean()
+    # ...and the AERIAL branch changes the BEAUTY, not only the sun beam: the
+    # radiance of the same pixels must differ, and it must differ in the
+    # pixels the fog reaches (the far ones). Before this assertion the aerial
+    # perspective was proven only by a source-text check on the assembled
+    # shader, so a change that left the pixels alone would have passed.
+    clear = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.0, **common)
+    assert not np.array_equal(clear.rgba, foggy.rgba), "fog did not change the beauty"
+    assert not np.array_equal(clear.radiance, foggy.radiance), "fog did not change the radiance"
+    changed = np.abs(clear.radiance - foggy.radiance).sum(axis=-1) > 1e-6
+    assert changed.any(), "no pixel moved under the fog"
+    # The fog-off path is the base line: same scene, same bytes, every time.
+    again_clear = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.0, **common)
+    np.testing.assert_array_equal(clear.rgba, again_clear.rgba)
     # The working set must fit the pool under the exact policy.
     with pytest.raises(f3d.MemoryBudgetExceeded, match="residency pool"):
         splat.render_fused(

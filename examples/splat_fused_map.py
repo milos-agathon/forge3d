@@ -1160,9 +1160,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="sky/ambient intensity (default 0.35; 0.6 map views; 1.4 hero; "
                              "scales the HDRI too)")
     render.add_argument("--sky-turbidity", type=float, default=None,
-                        help="Hosek-Wilkie turbidity (default 2.5; 4.0 hero)")
+                        help="Hosek-Wilkie turbidity (default 2.5; 5.0 hero)")
     render.add_argument("--sky-ground-albedo", type=float, default=None,
-                        help="sky-model ground albedo (default 0.2; 0.5 hero for a hazy horizon band)")
+                        help="sky-model ground albedo (default 0.2; 0.35 hero for a hazy horizon band)")
     render.add_argument("--hdr", default="auto", metavar="PATH",
                         help="equirect HDRI (.hdr/.rgbe/.exr) as the sky; 'auto' uses the CC0 "
                              "daytime preset for --dem renders (analytic sky for the fixture), "
@@ -1179,7 +1179,7 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--aovs", action="store_true",
                         help="add hit-kind / depth / transmittance inset panels")
     render.add_argument("--no-contours", action="store_true",
-                        help="skip the elevation-contour overlay on --dem plan views")
+                        help="skip the elevation-contour overlay on --dem top/high views")
     render.add_argument("--tile", nargs=2, type=int, default=None, metavar=("W", "H"),
                         help="render in seamless tiles of this size (large frames, low memory)")
     render.add_argument("--animate", type=int, default=0, metavar="N",
@@ -1313,13 +1313,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         origin = (0.0, 0.0, 0.0)
         if manifest and pc_path.resolve() == (FIXTURE_DIR / manifest["copc_file"]).resolve():
             origin = tuple(manifest["copc_origin"])
-        try:
+        # FusedPointCloud only records the path; the file is opened inside the
+        # render, so a missing file has to be caught HERE for the "continuing
+        # without LiDAR" promise to mean anything.
+        if Path(pc_path).exists():
             pointcloud = splat.FusedPointCloud(path=pc_path, origin=origin, z_up=True)
             lidar_meta = {"count": int(manifest.get("copc_point_count", 0)) if manifest else 0}
             lidar_desc = f"{pc_path.name} - origin ({origin[0]:.0f}, {origin[1]:.0f}, {origin[2]:.0f})"
             print(f"[pointcloud] {pc_path.name}: origin={origin}")
-        except Exception as exc:
-            print(f"[pointcloud] failed to load {pc_path.name}: {exc}; continuing without LiDAR")
+        else:
+            print(f"[pointcloud] {pc_path.name} not found; continuing without LiDAR")
     if pointcloud is None:
         lidar_desc = None
 
@@ -1352,6 +1355,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         v is not None for v in (args.azimuth, args.elevation, args.distance, args.target)
     )
     view_label = args.view
+    if (args.origin is None) != (args.look_at is None):
+        print(
+            "error: --origin and --look-at must be given together "
+            "(a camera needs both)",
+            file=sys.stderr,
+        )
+        return 2
     if args.origin is not None and args.look_at is not None:
         camera = splat.FusedCamera(
             origin=tuple(args.origin),
@@ -1454,6 +1464,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    if hdr_path is None and args.hdr_rotation:
+        print(
+            "error: --hdr-rotation needs an environment to rotate "
+            "(--hdr PATH, or --hdr auto on a --dem render)",
+            file=sys.stderr,
+        )
+        return 2
+    if hdr_path is not None and Path(hdr_path).suffix.lower() not in (
+        ".hdr",
+        ".rgbe",
+        ".exr",
+    ):
+        print(
+            f"error: --hdr must be a .hdr, .rgbe or .exr file, got {hdr_path}",
+            file=sys.stderr,
+        )
+        return 2
     env_desc = "Hosek-Wilkie analytic sky"
     if hdr_path is not None:
         env_desc = f"{Path(hdr_path).name} (rot {args.hdr_rotation:.0f} deg)"
@@ -1500,9 +1527,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # An HDRI replaces the analytic sky (its exposure is normalised on
         # load, so sky_intensity scales it like the Hosek-Wilkie bake).
         env_map=hdr_path,
-        env_rotation_deg=args.hdr_rotation,
+        # The rotation only means something with an environment: the seam
+        # rejects a rotation without one, and a default run has no HDRI.
+        env_rotation_deg=args.hdr_rotation if hdr_path is not None else 0.0,
         # Aerial perspective: distant terrain recedes into the sky colour
-        # instead of ending at a hard silhouette. Off for the fixture.
+        # instead of ending at a hard silhouette.
         fog_density=fog_density,
         fog_height_falloff=fog_falloff,
         # A derived swath gets a pulse-sized radius (0.7 x along-spacing) so
@@ -1553,9 +1582,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"[hits] miss={hits[0]:,} terrain={hits[3]:,} splat={hits[4]:,} lidar={hits[5]:,}")
 
     # ---- sheet -----------------------------------------------------------
-    layers = [k for k in (3, 4, 5) if hits[k] > 0]
-    if hits[0] > 0:
-        layers.append(0)
     legend_hits = [(k, hits[k]) for k in (3, 4, 5) if hits[k] > 0]
     if hits[0] > 0:
         legend_hits.append((0, hits[0]))
@@ -1747,13 +1773,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"[report] {report_path}")
 
     if args.certificate:
-        cert = getattr(result, "certificate", None)
-        if cert is not None:
-            cert_path = out_dir / "certificate.json"
-            cert_path.write_text(
-                json.dumps(cert, indent=2) if isinstance(cert, (dict, list)) else str(cert)
-            )
-            print(f"[certificate] {cert_path}")
+        # The certificate is a render-provenance record, not a render result:
+        # it is read back from the diagnostics module, not off the image.
+        from forge3d.diagnostics import render_certificate
+
+        cert_path = out_dir / "certificate.json"
+        cert_path.write_text(json.dumps(render_certificate(sign=False), indent=2))
+        print(f"[certificate] {cert_path}")
 
     print("[done]")
     return 0
