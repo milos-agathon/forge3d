@@ -30,22 +30,25 @@ def _transform_points(points: Sequence[Any], from_crs: str, to_crs: str) -> list
 def transform_geometry(geometry: Mapping[str, Any], from_crs: str, to_crs: str) -> dict[str, Any]:
     """Transform a GeoJSON-like Point, LineString, or Polygon geometry."""
 
-    if _same_crs(from_crs, to_crs):
-        return dict(geometry)
     geometry_type = str(geometry.get("type", ""))
-    coordinates = geometry.get("coordinates")
-    if geometry_type == "Point" and _is_point(coordinates):
-        return {"type": geometry_type, "coordinates": _transform_points([coordinates], from_crs, to_crs)[0]}
-    if geometry_type == "LineString" and isinstance(coordinates, Sequence) and not isinstance(coordinates, (str, bytes)):
-        points = [point for point in coordinates if _is_point(point)]
-        return {"type": geometry_type, "coordinates": _transform_points(points, from_crs, to_crs)}
-    if geometry_type == "Polygon" and isinstance(coordinates, Sequence) and not isinstance(coordinates, (str, bytes)):
-        rings = []
-        for ring in coordinates:
-            if isinstance(ring, Sequence) and not isinstance(ring, (str, bytes)):
-                rings.append(_transform_points([point for point in ring if _is_point(point)], from_crs, to_crs))
-        return {"type": geometry_type, "coordinates": rings}
-    return dict(geometry)
+    if geometry_type == "GeometryCollection":
+        return {**geometry, "geometries": [transform_geometry(g, from_crs, to_crs)
+                                           for g in geometry.get("geometries", [])]}
+    depths = {"Point": 0, "MultiPoint": 1, "LineString": 1,
+              "MultiLineString": 2, "Polygon": 2, "MultiPolygon": 3}
+    if geometry_type not in depths:
+        raise ValueError(f"Unsupported geometry type: {geometry_type}")
+
+    def transform(value, depth):
+        if depth == 0:
+            if not _is_point(value):
+                raise ValueError("Invalid geometry position")
+            return _transform_points([value], from_crs, to_crs)[0]
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            raise ValueError("Invalid geometry coordinates")
+        return [transform(child, depth - 1) for child in value]
+
+    return {**geometry, "coordinates": transform(geometry.get("coordinates"), depths[geometry_type])}
 
 
 def transform_features(
@@ -197,8 +200,12 @@ def reproject_dem_to_target(
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with rasterio.open(out_path, "w", **profile) as dst:
                 dst.write(destination, 1)
+                dst.scales = src.scales[:1]
+                dst.offsets = src.offsets[:1]
             written_path = str(out_path)
         metadata = _grid_metadata(target_crs, transform, width, height, nodata)
+        metadata["scales"] = list(src.scales[:1])
+        metadata["offsets"] = list(src.offsets[:1])
         metadata.update(
             {
                 "source_crs": str(src.crs),
@@ -248,6 +255,12 @@ def resample_raster_to_grid(
                 init_dest_nodata=True,
                 resampling=_resampling_method(resampling),
             )
+        validity = np.zeros((height, width), dtype=np.uint8)
+        source_validity = np.min(src.read_masks(), axis=0)
+        reproject(source=source_validity, destination=validity,
+                  src_transform=src.transform, src_crs=src.crs, src_nodata=0,
+                  dst_transform=transform, dst_crs=target_crs, dst_nodata=0,
+                  resampling=_resampling_method("nearest"))
         profile = src.profile.copy()
         profile.update(
             driver="GTiff",
@@ -263,8 +276,12 @@ def resample_raster_to_grid(
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with rasterio.open(out_path, "w", **profile) as dst:
                 dst.write(destination)
+                dst.scales = src.scales
+                dst.offsets = src.offsets
             written_path = str(out_path)
         metadata = _grid_metadata(target_crs, transform, width, height, nodata)
+        metadata["scales"] = list(src.scales)
+        metadata["offsets"] = list(src.offsets)
         metadata.update(
             {
                 "source_crs": str(src.crs),
@@ -274,7 +291,7 @@ def resample_raster_to_grid(
             }
         )
     array = destination[0] if destination.shape[0] == 1 else destination
-    return {"array": array, "metadata": metadata, "profile": profile, "path": written_path}
+    return {"array": array, "validity_mask": validity > 0, "metadata": metadata, "profile": profile, "path": written_path}
 
 
 def alignment_residual(

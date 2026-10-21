@@ -557,6 +557,13 @@ def write_raster(
     )
 
 
+def _crs_metadata(value: str | int | dict[str, Any]) -> dict[str, Any]:
+    native = _require_native()
+    if not hasattr(native, "_crs_metadata"):
+        raise ValueError("Native CRS metadata is unavailable")
+    return native._crs_metadata(value)
+
+
 def parse_crs(value: str | int | dict[str, Any]):
     """Parse a CRS literal without inspecting dataset metadata."""
     return _require_native().parse_crs(value)
@@ -1069,6 +1076,7 @@ __all__ = [
     "classify_raster",
     "write_raster",
     "parse_crs",
+    "_crs_metadata",
     "inspect_crs",
     "raster_crs",
     "assign_crs",
