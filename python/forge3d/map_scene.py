@@ -333,7 +333,7 @@ def _resize_nearest_rgba(image: Any, target_shape: Sequence[int] | None) -> Any:
     return np.ascontiguousarray(image[sample_y[:, None], sample_x[None, :]])
 
 
-def _raster_to_rgba8(data: Any) -> Any:
+def _raster_to_rgba8(data: Any, validity_mask: Any = None) -> Any:
     import numpy as np
 
     arr = np.asarray(data)
@@ -347,22 +347,21 @@ def _raster_to_rgba8(data: Any) -> Any:
         raise ValueError("MapScene raster overlay must have 1, 3, or 4 bands")
 
     arr = arr.astype(np.float32, copy=False)
-    finite = arr[np.isfinite(arr)]
+    valid = np.all(np.isfinite(arr), axis=2)
+    if validity_mask is not None:
+        valid &= np.asarray(validity_mask, dtype=bool)
+    color = arr[..., :3] if arr.shape[2] == 4 else arr
+    finite = color[valid]
     if finite.size and (float(finite.min()) < 0.0 or float(finite.max()) > 255.0):
-        lo = float(finite.min())
-        hi = float(finite.max())
-        arr = (arr - lo) * (255.0 / max(hi - lo, 1.0e-8))
-    arr = np.clip(arr, 0.0, 255.0).astype(np.uint8)
-
+        lo, hi = float(finite.min()), float(finite.max())
+        color = (color - lo) * (255.0 / max(hi - lo, 1.0e-8))
+    color = np.where(valid[..., None], color, 0)
+    color = np.clip(color, 0.0, 255.0).astype(np.uint8)
     rgba = np.empty((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
-    if arr.shape[2] == 1:
-        rgba[..., :3] = arr[..., :1]
-        rgba[..., 3] = 255
-    elif arr.shape[2] == 3:
-        rgba[..., :3] = arr
-        rgba[..., 3] = 255
-    else:
-        rgba[...] = arr
+    rgba[..., :3] = color
+    alpha = arr[..., 3] if arr.shape[2] == 4 else np.full(valid.shape, 255)
+    rgba[..., 3] = np.clip(np.where(valid, alpha, 0), 0, 255).astype(np.uint8)
+
     return np.ascontiguousarray(rgba)
 
 
@@ -411,13 +410,14 @@ def _load_native_raster_overlay(
                 resampling=resampling,
                 dst_nodata=metadata.get("dst_nodata", metadata.get("nodata")),
             )
-            values = result["array"]
-            if values.ndim == 3:
-                values = np.moveaxis(values, 0, -1)
-            overlay = _raster_to_rgba8(values)
+            samples = result["array"]
+            if samples.ndim == 3:
+                samples = np.moveaxis(samples, 0, -1)
+            overlay = _raster_to_rgba8(samples, result["validity_mask"])
         else:
             with rasterio.open(path) as src:
-                overlay = _raster_to_rgba8(np.moveaxis(src.read(), 0, -1))
+                overlay = _raster_to_rgba8(np.moveaxis(src.read(), 0, -1),
+                                           np.min(src.read_masks(), axis=0) > 0)
     return _resize_nearest_rgba(overlay, target_shape)
 
 
@@ -1936,7 +1936,7 @@ def _render_terrain_renderer_result_impl(
         source_map = None
         contributing_tiles = None
         if emit_provenance:
-            # VERITAS: co-emitted at composite time — the source map and the
+            # VERITAS: co-emitted at composite time â€” the source map and the
             # image describe the same frame. No silent fallback: a missing
             # source-id AOV here is a hard error.
             if aov_frame is None or not getattr(aov_frame, "has_source_id", False):
@@ -4189,7 +4189,14 @@ class TerrainSource:
             import numpy as np
 
             arr = np.asarray(self.data)
-            data_summary = {"shape": list(arr.shape), "dtype": str(arr.dtype)}
+            if arr.dtype.kind not in "biuf":
+                raise ValueError("Terrain samples must be real numeric values")
+            canonical = np.array(arr, dtype=arr.dtype.newbyteorder("<"), order="C", copy=True)
+            canonical[canonical == 0] = 0  # Canonical positive zero.
+            if canonical.dtype.kind == "f":
+                canonical[np.isnan(canonical)] = np.nan  # One quiet-NaN representation per dtype.
+            data_summary = {"shape": list(arr.shape), "dtype": str(canonical.dtype),
+                            "sha256": hashlib.sha256(canonical.tobytes()).hexdigest()}
         result = {
             "kind": "terrain_source",
             "path": _path_to_str(self.path),
@@ -5514,6 +5521,18 @@ def _preset_override_diagnostic(lighting: LightingPreset) -> Diagnostic | None:
     )
 
 
+def _bundle_layer_filename(layer_id: str) -> str:
+    import unicodedata
+    value = str(layer_id)
+    reserved = {"terrain", "con", "prn", "aux", "nul", "conin$", "conout$", *(f"com{i}" for i in "¹²³"), *(f"lpt{i}" for i in "¹²³"), *(f"com{i}" for i in range(1,10)), *(f"lpt{i}" for i in range(1,10))}
+    if (not value or value in {".", ".."} or any(c in value for c in "/\\:")
+            or any(unicodedata.category(c) == "Cc" for c in value)
+            or value.endswith((".", " ")) or value.casefold() == "terrain"
+            or value.split(".", 1)[0].rstrip(" ").casefold() in reserved - {"terrain"}):
+        raise ValueError(f"Unsafe or reserved bundle layer ID: {value!r}")
+    return value
+
+
 class MapScene:
     def __init__(
         self,
@@ -6120,7 +6139,7 @@ class MapScene:
         provenance_paths: dict[str, str] = {}
         if emit_provenance:
             # VERITAS: seal the frame's provenance and write the sibling
-            # artifacts next to the rendered image. No silent fallback — a
+            # artifacts next to the rendered image. No silent fallback â€” a
             # render that could not produce the source map already raised.
             if native_result.source_map is None or native_result.contributing_tiles is None:
                 raise RuntimeError(
@@ -6141,7 +6160,7 @@ class MapScene:
                     native_result.source_map,
                     native_result.contributing_tiles,
                     provenance_signing_key,
-                    # The exact published image bytes — target_path was
+                    # The exact published image bytes â€” target_path was
                     # already written above, so the seal binds what a
                     # verifier will read back from disk.
                     target_path.read_bytes(),
@@ -6295,6 +6314,10 @@ class MapScene:
 
     def _write_bundle_json(self, bundle_path: Path, rel_path: str, payload: Any, checksums: dict[str, str]) -> None:
         file_path = bundle_path / rel_path
+        try:
+            file_path.resolve().relative_to(bundle_path.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Bundle output escapes bundle: {rel_path}") from exc
         file_path.parent.mkdir(parents=True, exist_ok=True)
         with file_path.open("w", encoding="utf-8") as handle:
             json.dump(_json_safe(payload), handle, indent=2, sort_keys=True)
@@ -6344,6 +6367,12 @@ class MapScene:
         return result
 
     def save_bundle(self, path: str | Path) -> ValidationReport:
+        names = []
+        for layer in self.recipe.layers:
+            raw_id = getattr(layer, "layer_id", getattr(layer, "name", "layer"))
+            names.append(_bundle_layer_filename(_layer_id(layer, "layer") if raw_id is None else raw_id))
+        if len({name.casefold() for name in names}) != len(names):
+            raise ValueError("Bundle layer IDs collide as filenames")
         compiled = self._compiled_plan_for_current_recipe()
         report = self._report_with_feature(compiled.validation_report, "mapscene.save_bundle", "supported")
         bundle_path = self._bundle_path(path)
@@ -6405,7 +6434,7 @@ class MapScene:
             layer_type = str(layer.to_dict().get("kind")) if hasattr(layer, "to_dict") else type(layer).__name__
             self._write_bundle_json(
                 bundle_path,
-                f"scene/layer_sources/{_layer_id(layer, 'layer')}.json",
+                f"scene/layer_sources/{_bundle_layer_filename(_layer_id(layer, 'layer'))}.json",
                 self._source_payload(layer, _layer_id(layer, "layer"), layer_type),
                 checksums,
             )
@@ -6420,13 +6449,13 @@ class MapScene:
                 if plan is not None:
                     self._write_bundle_json(
                         bundle_path,
-                        f"scene/label_plans/{layer_id}.json",
+                        f"scene/label_plans/{_bundle_layer_filename(layer_id)}.json",
                         plan.to_dict(),
                         checksums,
                     )
                 self._write_bundle_json(
                     bundle_path,
-                    f"scene/label_sources/{layer_id}.json",
+                    f"scene/label_sources/{_bundle_layer_filename(layer_id)}.json",
                     self._label_source_payload(layer, layer_id),
                     checksums,
                 )

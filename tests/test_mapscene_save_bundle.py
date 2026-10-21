@@ -172,3 +172,35 @@ def test_save_bundle_preserves_missing_asset_diagnostics_without_renderability(t
     assert review["renderable"] is False
     assert review["render_status"] == "blocked_by_diagnostics"
     assert codes == ["missing_external_asset", "missing_external_asset"]
+
+
+def test_bundle_rejects_unsafe_layer_ids_before_writing(tmp_path):
+    import pytest
+    for name in ("../../../escaped", "/absolute", "C:\\outside", "a/b", "a\\b", "terrain", "CON"):
+        scene = _label_scene()
+        scene.recipe.layers[0].layer_id = name
+        with pytest.raises(ValueError, match="bundle layer ID"):
+            scene.save_bundle(tmp_path / "rejected.forge3d")
+        assert not (tmp_path / "rejected.forge3d").exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ordinary_bundle_layer_ids_remain_deterministic(tmp_path):
+    for index, name in enumerate(("labels.cities", "roads 2024", "Straßen")):
+        scene = _label_scene()
+        scene.recipe.layers[0].layer_id = name
+        first, second = tmp_path / f"{index}-a", tmp_path / f"{index}-b"
+        scene.save_bundle(first)
+        scene.save_bundle(second)
+        files = lambda root: {str(p.relative_to(root)):p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        assert files(first) == files(second)
+
+
+def test_bundle_rejects_reserved_extensions_and_controls(tmp_path):
+    import pytest
+    for name in ("", ".", "..", "NUL.txt", "cOm1.json", "COM¹.txt", "lpt²", "CONIN$", "CON .txt", "trail.", "trail ", "a:b", "a\x00b", "a\x1fb"):
+        scene = _label_scene()
+        scene.recipe.layers[0].layer_id = name
+        with pytest.raises(ValueError, match="bundle layer ID"):
+            scene.save_bundle(tmp_path / "bad")
+        assert not (tmp_path / "bad").exists()

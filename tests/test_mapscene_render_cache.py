@@ -218,3 +218,40 @@ def test_compiled_chronos_frame_changes_context_for_same_recipe(monkeypatch, tmp
         "scene": _path_free_scene(scene),
         "chronos_frame": '{"frame":0}',
     }
+
+
+def test_elevation_mutations_invalidate_plan_and_callback_cache(fake_renderer,tmp_path):
+    scene = _scene(tmp_path / "frame.png")
+    cache = tmp_path / "cache"
+    scene.render(cache=cache)
+    original = scene.compiled_plan.recipe_hash
+    scene.recipe.terrain.data[0,0] = 3
+    scene.render(cache=cache)
+    assert scene.compiled_plan.recipe_hash != original
+    assert scene.last_render_metadata["cache_hit"] is False
+    second = scene.compiled_plan.recipe_hash
+    scene.recipe = replace(scene.recipe,terrain=replace(scene.recipe.terrain,data=np.ones((4,4),np.float32)))
+    scene.render(cache=cache)
+    assert scene.compiled_plan.recipe_hash != second
+    assert scene.last_render_metadata["cache_hit"] is False
+    scene.render(path=str(tmp_path / "other.png"),cache=cache)
+    assert scene.last_render_metadata["cache_hit"] is True
+    assert len(fake_renderer)==3
+
+
+def test_terrain_identity_canonical_zero_nan_payloads_and_location():
+    identity = lambda a: f3d.TerrainSource(data=a).to_dict()
+    assert identity(np.array([[0.]], np.float32)) == identity(np.array([[-0.]], np.float32))
+    a = np.array([[0x7fc00001, 0x3f800000]], dtype=np.uint32).view(np.float32)
+    b = np.array([[0x7fffffff, 0x3f800000]], dtype=np.uint32).view(np.float32)
+    assert identity(a) == identity(b)
+    assert identity(a) != identity(a[:, ::-1])
+    assert identity(np.array([[np.inf]])) != identity(np.array([[-np.inf]]))
+
+
+def test_nan_hole_terrain_compiles_and_renders(tmp_path):
+    scene = _scene(tmp_path / "nan.png")
+    scene.recipe.terrain.data[1, 1] = np.nan
+    scene.compile_plan()
+    scene.render()
+    assert (tmp_path / "nan.png").is_file()
