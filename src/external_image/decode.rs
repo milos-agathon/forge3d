@@ -26,62 +26,108 @@ pub fn decode_image_file(
     }
 }
 
-/// Decode PNG file to RGBA8 data.
-///
-/// Note: This is a simulation - real implementation would use png crate.
-pub fn decode_png_file(
+fn decode_file(
     path: &Path,
-    _config: &ImageImportConfig,
+    config: &ImageImportConfig,
+    format: image::ImageFormat,
 ) -> RenderResult<(Vec<u8>, u32, u32, ImageSourceFormat)> {
-    let _file =
-        File::open(path).map_err(|e| RenderError::io(format!("Failed to open PNG file: {}", e)))?;
-
-    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("test");
-
-    let (width, height) = if filename.contains("large") {
-        (512, 512)
-    } else if filename.contains("small") {
-        (64, 64)
-    } else {
-        (256, 256)
+    let reader =
+        image::ImageReader::with_format(std::io::BufReader::new(File::open(path)?), format);
+    let image = reader
+        .decode()
+        .map_err(|e| RenderError::io(format!("Invalid image: {e}")))?;
+    let source = match (format, image.color()) {
+        (image::ImageFormat::Jpeg, _) => ImageSourceFormat::JpegRgb,
+        (_, image::ColorType::L8 | image::ColorType::L16) => ImageSourceFormat::PngGrayscale,
+        (_, image::ColorType::Rgb8 | image::ColorType::Rgb16) => ImageSourceFormat::PngRgb,
+        _ => ImageSourceFormat::PngRgba,
     };
-
-    let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
-    for y in 0..height {
-        for x in 0..width {
-            let r = ((x * 255) / width) as u8;
-            let g = ((y * 255) / height) as u8;
-            let b = ((x ^ y) * 255 / (width | height)) as u8;
-            let a = 255u8;
-            rgba_data.extend_from_slice(&[r, g, b, a]);
+    let (width, height) = (image.width(), image.height());
+    if width > config.max_dimension || height > config.max_dimension {
+        return Err(RenderError::Upload(
+            "Image exceeds configured maximum dimensions".into(),
+        ));
+    }
+    let mut rgba = image.into_rgba8().into_raw();
+    if config.premultiply_alpha {
+        for pixel in rgba.chunks_exact_mut(4) {
+            let alpha = u16::from(pixel[3]);
+            for channel in &mut pixel[..3] {
+                *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+            }
         }
     }
-
-    Ok((rgba_data, width, height, ImageSourceFormat::PngRgba))
+    Ok((rgba, width, height, source))
 }
 
-/// Decode JPEG file to RGBA8 data.
-///
-/// Note: This is a simulation - real implementation would use jpeg crate.
+pub fn decode_png_file(
+    path: &Path,
+    config: &ImageImportConfig,
+) -> RenderResult<(Vec<u8>, u32, u32, ImageSourceFormat)> {
+    decode_file(path, config, image::ImageFormat::Png)
+}
+
 pub fn decode_jpeg_file(
     path: &Path,
-    _config: &ImageImportConfig,
+    config: &ImageImportConfig,
 ) -> RenderResult<(Vec<u8>, u32, u32, ImageSourceFormat)> {
-    let _file = File::open(path)
-        .map_err(|e| RenderError::io(format!("Failed to open JPEG file: {}", e)))?;
+    decode_file(path, config, image::ImageFormat::Jpeg)
+}
 
-    let (width, height) = (128, 128);
-
-    let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
-    for y in 0..height {
-        for x in 0..width {
-            let r = ((x + y) * 255 / (width + height)) as u8;
-            let g = ((x * y) * 255 / (width * height)) as u8;
-            let b = (((x as u32).saturating_sub(y as u32)) * 255 / width) as u8;
-            let a = 255u8;
-            rgba_data.extend_from_slice(&[r, g, b, a]);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn actual_png_jpeg_and_invalid_bytes() {
+        let dir = std::env::temp_dir().join(format!("forge3d-image-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for extension in ["png", "jpg"] {
+            let path = dir.join(format!("small.{extension}"));
+            // Neutral grayscale avoids chroma subsampling ambiguity; rows and columns vary.
+            let source = image::RgbImage::from_fn(16, 16, |x, y| {
+                let v = (32 + x * 8 + y * 4) as u8;
+                image::Rgb([v, v, v])
+            });
+            if extension == "jpg" {
+                image::codecs::jpeg::JpegEncoder::new_with_quality(
+                    File::create(&path).unwrap(),
+                    100,
+                )
+                .encode_image(&source)
+                .unwrap();
+            } else {
+                source.save(&path).unwrap();
+            }
+            let (pixels, w, h, _) =
+                decode_image_file(&path, &ImageImportConfig::default()).unwrap();
+            assert_eq!((w, h), (16, 16));
+            for (pixel, expected) in pixels.chunks_exact(4).zip(source.pixels()) {
+                for channel in 0..3 {
+                    if extension == "png" {
+                        assert_eq!(pixel[channel], expected[channel]);
+                    } else {
+                        assert!(
+                            pixel[channel].abs_diff(expected[channel]) <= 2,
+                            "JPEG quality-100 grayscale DCT quantization tolerance"
+                        );
+                    }
+                }
+                assert_eq!(pixel[3], 255);
+            }
+            std::fs::write(&path, b"invalid image").unwrap();
+            assert!(decode_image_file(&path, &ImageImportConfig::default()).is_err());
         }
+        let path = dir.join("alpha.png");
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([100, 80, 60, 128]))
+            .save(&path)
+            .unwrap();
+        let config = ImageImportConfig {
+            premultiply_alpha: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            decode_image_file(&path, &config).unwrap().0,
+            [50, 40, 30, 128]
+        );
     }
-
-    Ok((rgba_data, width, height, ImageSourceFormat::JpegRgb))
 }

@@ -96,6 +96,7 @@ from .diagnostics import (
     unavailable_cache_lod_stats_diagnostic,
     unsupported_instancing_path_diagnostic,
     unsupported_style_field_diagnostic,
+    unsupported_style_filter_diagnostic,
     unsupported_style_layer_type_diagnostic,
     unsupported_texture_format_diagnostic,
     validate_label_support,

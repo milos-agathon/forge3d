@@ -105,7 +105,7 @@ NEPHELE_FREEZE_SHA256 = "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdb
 # (pending owner review) records, per changed file, the exact ordered sites
 # on each side; undoing one side restores the other freeze exactly.
 EXPECTED_CONVERSION_COUNT = 1931
-EXPECTED_CONVERSION_SHA256 = "3d7e2b08e7e456a558dbed3817c47effd05804eac820df704a3b84f0cf504dee"
+EXPECTED_CONVERSION_SHA256 = "eb22339b6de627ada37d1f0068d7306bfa152ae339997d7c6ee106dee09951a8"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -1545,11 +1545,46 @@ def test_sky_lighting_relocation_rejects_missing_duplicate_changed_and_extra_sit
             _undo_sky_lighting_transition(mutated)
 
 
+def _undo_p1_inventory_transitions(sites):
+    """Reverse only the owner-reviewed, exact per-file P1 conversion records."""
+    import json
+
+    by_path = collections.defaultdict(list)
+    for site in sites:
+        by_path[site[0]].append(site)
+    for path in sorted((ROOT / "tests/data/world_coord_f32_p1").glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        for rel, transition in record["files"].items():
+            expected = list(map(tuple, transition["after"]))
+            assert by_path[rel] == expected, f"unreviewed P1 conversion change: {rel}"
+            by_path[rel] = list(map(tuple, transition["before"]))
+    return [site for file_sites in by_path.values() for site in file_sites]
+
+
+def test_p1_inventory_rejects_missing_duplicate_changed_and_extra_sites():
+    import json
+    import pytest
+
+    sites = _main_side_inventory()
+    for path in sorted((ROOT / "tests/data/world_coord_f32_p1").glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        for rel, transition in record["files"].items():
+            first = tuple(transition["after"][0])
+            index = sites.index(first)
+            changed = (*first[:4], "unreviewed world-position cast")
+            for mutated in (sites[:index] + sites[index + 1:],
+                            sites[:index] + [first] + sites[index:],
+                            sites[:index] + [changed] + sites[index + 1:],
+                            sites + [changed]):
+                with pytest.raises(AssertionError):
+                    _undo_p1_inventory_transitions(mutated)
+
+
 def _inventory_before_water_optics():
     """Check both approved branch inventories without replacing either freeze."""
     water = _ledger_data()["water_optics"]
     viewport = _ledger_data()["viewer_viewport_resize"]
-    sites = _undo_sky_lighting_transition(_main_side_inventory())
+    sites = _undo_sky_lighting_transition(_undo_p1_inventory_transitions(_main_side_inventory()))
     normalized = _undo_scene_pick_assembly_transition(sites)
     water_added = set(map(tuple, water["added"]))
     viewport_added = set(map(tuple, viewport["added"]))

@@ -1,0 +1,39 @@
+{
+  "review": "Milos approved on 2026-10-21: exact P1 narrowing-site changes; preserve historical freezes and raw scanner.",
+  "files": {
+    "src/import/cityjson/geometry.rs": {
+      "before": [
+        [
+          "src/import/cityjson/geometry.rs",
+          "compute_normals",
+          "f64_helper",
+          1,
+          "} } Ok(()) } pub(super) fn compute_normals(positions: &[f64], indices: &[u32]) -> Vec<f32> { let vertex_count = positions.len() / 3"
+        ],
+        [
+          "src/import/cityjson/geometry.rs",
+          "<module>",
+          "f64_helper",
+          1,
+          "drop_axis, origin, normal, }) } fn project(&self, point: [f64"
+        ]
+      ],
+      "after": [
+        [
+          "src/import/cityjson/geometry.rs",
+          "compute_normals",
+          "f64_helper",
+          1,
+          "return Err(CityJsonError::new(format!( ))) } } Ok(()) } pub(super) fn compute_normals(positions: &[f64], indices: &[u32]) -> Vec<f32> { let vertex_count = positions.len() / 3"
+        ],
+        [
+          "src/import/cityjson/geometry.rs",
+          "<module>",
+          "f64_helper",
+          1,
+          "drop_axis, origin, normal, }) } fn project(&self, point: [f64"
+        ]
+      ]
+    }
+  }
+}

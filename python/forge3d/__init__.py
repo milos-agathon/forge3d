@@ -207,7 +207,7 @@ class _NativeSymbolMissing(AttributeError):
     instead of erroring; ``from forge3d import Scene`` still surfaces an
     import-flavored failure because the import machinery converts a module
     ``__getattr__`` AttributeError into ImportError. (CPython forbids
-    inheriting from both ImportError and AttributeError — their C-level
+    inheriting from both ImportError and AttributeError â€” their C-level
     instance layouts conflict.)
     """
 
@@ -237,7 +237,7 @@ def __getattr__(name: str):
             )
         raise _NativeSymbolMissing(
             f"forge3d.{name} is not provided by this build of forge3d._forge3d "
-            "(the extension imported, but the symbol is missing — typically the "
+            "(the extension imported, but the symbol is missing â€” typically the "
             "wheel was built without the Cargo feature that provides it). "
             "Rebuild with the matching feature enabled, e.g.: "
             "maturin develop --release --features <feature>"
@@ -661,6 +661,7 @@ from .diagnostics import (
     unavailable_cache_lod_stats_diagnostic,
     unsupported_instancing_path_diagnostic,
     unsupported_style_field_diagnostic,
+    unsupported_style_filter_diagnostic,
     unsupported_style_layer_type_diagnostic,
     unsupported_texture_format_diagnostic,
     validate_label_support,
@@ -1046,6 +1047,7 @@ __all__ = [
     "unavailable_cache_lod_stats_diagnostic",
     "unsupported_instancing_path_diagnostic",
     "unsupported_style_field_diagnostic",
+    "unsupported_style_filter_diagnostic",
     "unsupported_style_layer_type_diagnostic",
     "unsupported_texture_format_diagnostic",
     "validate_label_support",

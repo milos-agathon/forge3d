@@ -373,9 +373,11 @@ pub(super) fn build_terrain_render_graph(
             .write(shadow)
             .pipeline_descriptor(pipeline_material("terrain.shadow", color_format, aov))
             .uniform_bytes(declarations.shadow);
-        if !cacheable {
-            pass.disable_cache("native terrain cache declaration is unavailable for this render");
-        }
+        // Depth32Float cannot be restored by Queue::write_texture. Recompute
+        // this producer explicitly; dependent pass keys still describe its inputs.
+        pass.disable_cache(
+            "Depth32Float shadow resources are recomputed; queue depth uploads are unsupported",
+        );
         Ok(())
     })?;
     if let Some(m) = media_handles {

@@ -15,7 +15,19 @@ pub(super) fn parse_geometry(
     match geom_type {
         "Solid" => parse_solid(building, boundaries, vertices)?,
         "MultiSurface" | "CompositeSurface" => parse_multi_surface(building, boundaries, vertices)?,
-        _ => {}
+        "MultiSolid" | "CompositeSolid" => {
+            let solids = boundaries
+                .as_array()
+                .ok_or_else(|| CityJsonError::new("MultiSolid boundaries not an array"))?;
+            for solid in solids {
+                parse_solid(building, solid, vertices)?;
+            }
+        }
+        _ => {
+            return Err(CityJsonError::new(format!(
+                "Unsupported geometry type: {geom_type}"
+            )))
+        }
     }
 
     Ok(())
@@ -82,11 +94,12 @@ fn parse_solid(
         .as_array()
         .ok_or_else(|| CityJsonError::new("Solid boundaries not an array"))?;
 
-    if let Some(outer_shell) = shells.first() {
-        if let Some(surfaces) = outer_shell.as_array() {
-            for surface in surfaces {
-                parse_surface(building, surface, vertices)?;
-            }
+    for shell in shells {
+        let surfaces = shell
+            .as_array()
+            .ok_or_else(|| CityJsonError::new("Solid shell not an array"))?;
+        for surface in surfaces {
+            parse_surface(building, surface, vertices)?;
         }
     }
 

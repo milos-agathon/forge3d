@@ -2592,11 +2592,11 @@
  },
  "nephele_main_sync": {
   "result_count": 1931,
-  "result_digest": "3d7e2b08e7e456a558dbed3817c47effd05804eac820df704a3b84f0cf504dee",
+  "result_digest": "eb22339b6de627ada37d1f0068d7306bfa152ae339997d7c6ee106dee09951a8",
   "main_side": {
-   "source_commit": "696a0ff2a2a150503344321f824f0bd1e22af56c",
+   "source_commit": "ac22ebf0b2bd7055948c45b95801a90a8bd986ed",
    "base_count": 1856,
-   "base_digest": "bd31cb70466826afdfb900d4fb492895aa68d297727f0084a95ab1722c52d9de",
+   "base_digest": "2047d7a69b66903f3cac7cf5f10291ea285e55816fd2569a6d6d4092384a8afc",
    "files": {
     "src/media/density.rs": {
      "base": [],
@@ -3538,6 +3538,152 @@
    "base_count": 1905,
    "base_digest": "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdbe1f76cd94",
    "files": {
+    "src/animation/mod.rs": {
+     "base": [
+      [
+       "src/animation/mod.rs",
+       "py_new",
+       "as_f32",
+       1,
+       "Self::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )"
+      ],
+      [
+       "src/animation/mod.rs",
+       "py_new",
+       "as_f32",
+       2,
+       "Self::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )"
+      ],
+      [
+       "src/animation/mod.rs",
+       "py_new",
+       "as_f32",
+       3,
+       "Self::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )"
+      ],
+      [
+       "src/animation/mod.rs",
+       "py_new",
+       "as_f32",
+       4,
+       "Self::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )"
+      ],
+      [
+       "src/animation/mod.rs",
+       "frame_count",
+       "as_f32",
+       1,
+       "} (duration * fps as f32).ceil() as u32 + 1"
+      ],
+      [
+       "src/animation/mod.rs",
+       "add_keyframe_py",
+       "as_f32",
+       1,
+       "self.add_keyframe(CameraKeyframe::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "add_keyframe_py",
+       "as_f32",
+       2,
+       "self.add_keyframe(CameraKeyframe::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "add_keyframe_py",
+       "as_f32",
+       3,
+       "self.add_keyframe(CameraKeyframe::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "add_keyframe_py",
+       "as_f32",
+       4,
+       "self.add_keyframe(CameraKeyframe::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "evaluate_py",
+       "as_f32",
+       1,
+       "self.evaluate(time as f32)"
+      ]
+     ],
+     "result": [
+      [
+       "src/animation/mod.rs",
+       "checked_time",
+       "as_f32",
+       1,
+       "if !time.is_finite() || !(time as f32).is_finite() { return Err(InvalidKeyframeTime)"
+      ],
+      [
+       "src/animation/mod.rs",
+       "checked_time",
+       "as_f32",
+       2,
+       "} Ok(time as f32)"
+      ],
+      [
+       "src/animation/mod.rs",
+       "py_new",
+       "as_f32",
+       1,
+       "Ok(Self::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "py_new",
+       "as_f32",
+       2,
+       "Ok(Self::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "py_new",
+       "as_f32",
+       3,
+       "Ok(Self::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "frame_count",
+       "as_f32",
+       1,
+       "} (duration * fps as f32).ceil() as u32 + 1"
+      ],
+      [
+       "src/animation/mod.rs",
+       "add_keyframe_py",
+       "as_f32",
+       1,
+       "self.add_keyframe(CameraKeyframe::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "add_keyframe_py",
+       "as_f32",
+       2,
+       "self.add_keyframe(CameraKeyframe::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "add_keyframe_py",
+       "as_f32",
+       3,
+       "self.add_keyframe(CameraKeyframe::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))"
+      ],
+      [
+       "src/animation/mod.rs",
+       "evaluate_py",
+       "as_f32",
+       1,
+       "self.evaluate(time as f32)"
+      ]
+     ]
+    },
     "src/core/screen_space_effects/ssao/mod.rs": {
      "base": [],
      "result": [
@@ -3753,6 +3899,40 @@
       ]
      ]
     },
+    "src/import/cityjson/geometry.rs": {
+     "base": [
+      [
+       "src/import/cityjson/geometry.rs",
+       "compute_normals",
+       "f64_helper",
+       1,
+       "} } Ok(()) } pub(super) fn compute_normals(positions: &[f64], indices: &[u32]) -> Vec<f32> { let vertex_count = positions.len() / 3"
+      ],
+      [
+       "src/import/cityjson/geometry.rs",
+       "<module>",
+       "f64_helper",
+       1,
+       "drop_axis, origin, normal, }) } fn project(&self, point: [f64"
+      ]
+     ],
+     "result": [
+      [
+       "src/import/cityjson/geometry.rs",
+       "compute_normals",
+       "f64_helper",
+       1,
+       "return Err(CityJsonError::new(format!( ))) } } Ok(()) } pub(super) fn compute_normals(positions: &[f64], indices: &[u32]) -> Vec<f32> { let vertex_count = positions.len() / 3"
+      ],
+      [
+       "src/import/cityjson/geometry.rs",
+       "<module>",
+       "f64_helper",
+       1,
+       "drop_axis, origin, normal, }) } fn project(&self, point: [f64"
+      ]
+     ]
+    },
     "src/terrain/render_params/projection.rs": {
      "base": [],
      "result": [
@@ -3788,262 +3968,6 @@
        "as_f32",
        2,
        "uv[[row, col, 1]] = (world.y / world.w / f64::from(self.terrain_span) + 0.5) as f32"
-      ]
-     ]
-    },
-    "src/terrain/renderer/water_reflection/surface.rs": {
-     "base": [],
-     "result": [
-      [
-       "src/terrain/renderer/water_reflection/surface.rs",
-       "upload_water_surface",
-       "as_f32",
-       1,
-       "n.map(|v| (f64::from(v) / length) as f32)"
-      ],
-      [
-       "src/terrain/renderer/water_reflection/surface.rs",
-       "upload_water_surface",
-       "as_f32",
-       2,
-       "[n.x as f32, n.y as f32, n.z as f32]"
-      ],
-      [
-       "src/terrain/renderer/water_reflection/surface.rs",
-       "upload_water_surface",
-       "as_f32",
-       3,
-       "[n.x as f32, n.y as f32, n.z as f32]"
-      ],
-      [
-       "src/terrain/renderer/water_reflection/surface.rs",
-       "upload_water_surface",
-       "as_f32",
-       4,
-       "[n.x as f32, n.y as f32, n.z as f32]"
-      ],
-      [
-       "src/terrain/renderer/water_reflection/surface.rs",
-       "upload_water_surface",
-       "as_f32",
-       5,
-       "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
-      ],
-      [
-       "src/terrain/renderer/water_reflection/surface.rs",
-       "upload_water_surface",
-       "as_f32",
-       6,
-       "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
-      ]
-     ]
-    },
-    "src/terrain/renderer/water_reflection/uniforms.rs": {
-     "base": [],
-     "result": [
-      [
-       "src/terrain/renderer/water_reflection/uniforms.rs",
-       "with_optics",
-       "as_f32",
-       1,
-       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
-      ],
-      [
-       "src/terrain/renderer/water_reflection/uniforms.rs",
-       "with_optics",
-       "as_f32",
-       2,
-       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
-      ],
-      [
-       "src/terrain/renderer/water_reflection/uniforms.rs",
-       "with_optics",
-       "as_f32",
-       3,
-       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
-      ],
-      [
-       "src/terrain/renderer/water_reflection/uniforms.rs",
-       "with_optics",
-       "as_f32",
-       4,
-       "self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]"
-      ]
-     ]
-    },
-    "src/viewer/input/scene_picking.rs": {
-     "base": [],
-     "result": [
-      [
-       "src/viewer/input/scene_picking.rs",
-       "collect_scene_picks",
-       "as_f32",
-       1,
-       "let label_hit = self .label_manager .pick_at(screen_pos.0 as f32, screen_pos.1 as f32) .and_then(|id| self.label_manager.get_label(id))"
-      ],
-      [
-       "src/viewer/input/scene_picking.rs",
-       "collect_scene_picks",
-       "as_f32",
-       2,
-       "let label_hit = self .label_manager .pick_at(screen_pos.0 as f32, screen_pos.1 as f32) .and_then(|id| self.label_manager.get_label(id))"
-      ]
-     ]
-    },
-    "src/viewer/input/viewer_input.rs": {
-     "base": [
-      [
-       "src/viewer/input/viewer_input.rs",
-       "pick_at_screen",
-       "as_f32",
-       1,
-       "} } if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) { if let Some(label) = self.label_manager.get_label(label_id) { let mut attributes = std::collections::HashMap::new()"
-      ],
-      [
-       "src/viewer/input/viewer_input.rs",
-       "pick_at_screen",
-       "as_f32",
-       2,
-       "} } if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) { if let Some(label) = self.label_manager.get_label(label_id) { let mut attributes = std::collections::HashMap::new()"
-      ],
-      [
-       "src/viewer/input/viewer_input.rs",
-       "handle_input",
-       "as_f32",
-       1,
-       "let new_x = position.x as f32"
-      ],
-      [
-       "src/viewer/input/viewer_input.rs",
-       "handle_input",
-       "as_f32",
-       2,
-       "let new_y = position.y as f32"
-      ],
-      [
-       "src/viewer/input/viewer_input.rs",
-       "handle_input",
-       "as_f32",
-       3,
-       "MouseScrollDelta::LineDelta(_x, y) => *y * 3.0, MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.02,"
-      ]
-     ],
-     "result": [
-      [
-       "src/viewer/input/viewer_input.rs",
-       "handle_input",
-       "as_f32",
-       1,
-       "let new_x = position.x as f32"
-      ],
-      [
-       "src/viewer/input/viewer_input.rs",
-       "handle_input",
-       "as_f32",
-       2,
-       "let new_y = position.y as f32"
-      ],
-      [
-       "src/viewer/input/viewer_input.rs",
-       "handle_input",
-       "as_f32",
-       3,
-       "MouseScrollDelta::LineDelta(_x, y) => *y * 3.0, MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.02,"
-      ]
-     ]
-    },
-    "src/viewer/sky_lighting.rs": {
-     "base": [],
-     "result": [
-      [
-       "src/viewer/sky_lighting.rs",
-       "observe",
-       "as_f32",
-       1,
-       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
-      ],
-      [
-       "src/viewer/sky_lighting.rs",
-       "observe",
-       "as_f32",
-       2,
-       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
-      ],
-      [
-       "src/viewer/sky_lighting.rs",
-       "observe",
-       "as_vec",
-       1,
-       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
-      ],
-      [
-       "src/viewer/sky_lighting.rs",
-       "observe",
-       "as_vec",
-       2,
-       "( night::horizontal_direction(moon.azimuth.value(), moon.altitude.value()) .as_vec3() .to_array(), night::normalized_moonlight( observation.moon_phase.phase_angle.value(), moon.altitude.value(), ), )"
-      ]
-     ]
-    },
-    "src/viewer/state/viewer_helpers/core.rs": {
-     "base": [
-      [
-       "src/viewer/state/viewer_helpers/core.rs",
-       "update_lit_uniform",
-       "as_f32",
-       1,
-       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
-      ],
-      [
-       "src/viewer/state/viewer_helpers/core.rs",
-       "update_lit_uniform",
-       "as_f32",
-       2,
-       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
-      ],
-      [
-       "src/viewer/state/viewer_helpers/core.rs",
-       "sync_astro_observation",
-       "as_f32",
-       1,
-       "let azimuth = sun.azimuth.value() as f32"
-      ],
-      [
-       "src/viewer/state/viewer_helpers/core.rs",
-       "sync_astro_observation",
-       "as_f32",
-       2,
-       "let elevation = sun.altitude.value() as f32"
-      ],
-      [
-       "src/viewer/state/viewer_helpers/core.rs",
-       "sync_astro_observation",
-       "as_vec",
-       1,
-       "self.sky_sun_direction_ws = crate::astro::night::horizontal_direction(f64::from(azimuth), f64::from(elevation)) .as_vec3() .to_array()"
-      ],
-      [
-       "src/viewer/state/viewer_helpers/core.rs",
-       "sync_astro_observation",
-       "as_vec",
-       2,
-       "self.lit_sun_direction_ws = crate::astro::night::horizontal_direction( moon.azimuth.value(), moon.altitude.value(), ) .as_vec3() .to_array()"
-      ]
-     ],
-     "result": [
-      [
-       "src/viewer/state/viewer_helpers/core.rs",
-       "update_lit_uniform",
-       "as_f32",
-       1,
-       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
-      ],
-      [
-       "src/viewer/state/viewer_helpers/core.rs",
-       "update_lit_uniform",
-       "as_f32",
-       2,
-       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
       ]
      ]
     },
@@ -4472,9 +4396,265 @@
        "direction[axis].abs() * dimensions[axis].saturating_sub(1) as f32 / (bounds.max[axis] - bounds.min[axis])"
       ]
      ]
+    },
+    "src/terrain/renderer/water_reflection/surface.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       1,
+       "n.map(|v| (f64::from(v) / length) as f32)"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       2,
+       "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       3,
+       "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       4,
+       "[n.x as f32, n.y as f32, n.z as f32]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       5,
+       "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/surface.rs",
+       "upload_water_surface",
+       "as_f32",
+       6,
+       "let encoded = [ (f64::from(n[0]) / divisor) as f32, (f64::from(n[1]) / divisor) as f32, ]"
+      ]
+     ]
+    },
+    "src/terrain/renderer/water_reflection/uniforms.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/terrain/renderer/water_reflection/uniforms.rs",
+       "with_optics",
+       "as_f32",
+       1,
+       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/uniforms.rs",
+       "with_optics",
+       "as_f32",
+       2,
+       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/uniforms.rs",
+       "with_optics",
+       "as_f32",
+       3,
+       "self.optics = [ u8::from(optics.physical) as f32, u8::from(optics.surface_height.is_some()) as f32, u8::from(optics.color.is_some()) as f32, optics.roughness, ]"
+      ],
+      [
+       "src/terrain/renderer/water_reflection/uniforms.rs",
+       "with_optics",
+       "as_f32",
+       4,
+       "self.water_color = [ color[0], color[1], color[2], u8::from(optics.surface_height.is_some() || optics.surface_normals.is_some()) as f32, ]"
+      ]
+     ]
+    },
+    "src/viewer/input/scene_picking.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/viewer/input/scene_picking.rs",
+       "collect_scene_picks",
+       "as_f32",
+       1,
+       "let label_hit = self .label_manager .pick_at(screen_pos.0 as f32, screen_pos.1 as f32) .and_then(|id| self.label_manager.get_label(id))"
+      ],
+      [
+       "src/viewer/input/scene_picking.rs",
+       "collect_scene_picks",
+       "as_f32",
+       2,
+       "let label_hit = self .label_manager .pick_at(screen_pos.0 as f32, screen_pos.1 as f32) .and_then(|id| self.label_manager.get_label(id))"
+      ]
+     ]
+    },
+    "src/viewer/input/viewer_input.rs": {
+     "base": [
+      [
+       "src/viewer/input/viewer_input.rs",
+       "pick_at_screen",
+       "as_f32",
+       1,
+       "} } if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) { if let Some(label) = self.label_manager.get_label(label_id) { let mut attributes = std::collections::HashMap::new()"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "pick_at_screen",
+       "as_f32",
+       2,
+       "} } if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) { if let Some(label) = self.label_manager.get_label(label_id) { let mut attributes = std::collections::HashMap::new()"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       1,
+       "let new_x = position.x as f32"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       2,
+       "let new_y = position.y as f32"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       3,
+       "MouseScrollDelta::LineDelta(_x, y) => *y * 3.0, MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.02,"
+      ]
+     ],
+     "result": [
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       1,
+       "let new_x = position.x as f32"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       2,
+       "let new_y = position.y as f32"
+      ],
+      [
+       "src/viewer/input/viewer_input.rs",
+       "handle_input",
+       "as_f32",
+       3,
+       "MouseScrollDelta::LineDelta(_x, y) => *y * 3.0, MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.02,"
+      ]
+     ]
+    },
+    "src/viewer/sky_lighting.rs": {
+     "base": [],
+     "result": [
+      [
+       "src/viewer/sky_lighting.rs",
+       "observe",
+       "as_f32",
+       1,
+       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+      ],
+      [
+       "src/viewer/sky_lighting.rs",
+       "observe",
+       "as_f32",
+       2,
+       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+      ],
+      [
+       "src/viewer/sky_lighting.rs",
+       "observe",
+       "as_vec",
+       1,
+       "let solar_direction = night::horizontal_direction( f64::from(sun.azimuth.value() as f32), f64::from(sun.altitude.value() as f32), ) .as_vec3() .to_array()"
+      ],
+      [
+       "src/viewer/sky_lighting.rs",
+       "observe",
+       "as_vec",
+       2,
+       "( night::horizontal_direction(moon.azimuth.value(), moon.altitude.value()) .as_vec3() .to_array(), night::normalized_moonlight( observation.moon_phase.phase_angle.value(), moon.altitude.value(), ), )"
+      ]
+     ]
+    },
+    "src/viewer/state/viewer_helpers/core.rs": {
+     "base": [
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "update_lit_uniform",
+       "as_f32",
+       1,
+       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "update_lit_uniform",
+       "as_f32",
+       2,
+       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "sync_astro_observation",
+       "as_f32",
+       1,
+       "let azimuth = sun.azimuth.value() as f32"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "sync_astro_observation",
+       "as_f32",
+       2,
+       "let elevation = sun.altitude.value() as f32"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "sync_astro_observation",
+       "as_vec",
+       1,
+       "self.sky_sun_direction_ws = crate::astro::night::horizontal_direction(f64::from(azimuth), f64::from(elevation)) .as_vec3() .to_array()"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "sync_astro_observation",
+       "as_vec",
+       2,
+       "self.lit_sun_direction_ws = crate::astro::night::horizontal_direction( moon.azimuth.value(), moon.altitude.value(), ) .as_vec3() .to_array()"
+      ]
+     ],
+     "result": [
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "update_lit_uniform",
+       "as_f32",
+       1,
+       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
+      ],
+      [
+       "src/viewer/state/viewer_helpers/core.rs",
+       "update_lit_uniform",
+       "as_f32",
+       2,
+       "0.0 }, self.lit_brdf as f32, 0.0, self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0, ]"
+      ]
+     ]
     }
    }
   },
-  "review": "APPROVED by Milos (2026-10-19) in the PR #172 main-sync session. Merging main into PR #172 combines two frozen inventories. Each side lists, per file, the exact ordered conversion sites before and after the merge; undoing one side restores the other branch's exact inventory and digest. No conversion is excluded and the scanner is unchanged.; APPROVED by Milos on 2026-10-21 (second \"All approved\" in release task): cloudlight adds only two integer-cell normalization casts in upload_world_medium; exact endpoints and both historical inventories retained."
+  "review": "APPROVED by Milos (2026-10-19) in the PR #172 main-sync session. Merging main into PR #172 combines two frozen inventories. Each side lists, per file, the exact ordered conversion sites before and after the merge; undoing one side restores the other branch's exact inventory and digest. No conversion is excluded and the scanner is unchanged.; APPROVED by Milos on 2026-10-21 (second \"All approved\" in release task): cloudlight adds only two integer-cell normalization casts in upload_world_medium; exact endpoints and both historical inventories retained.; regenerated 2026-10-21 by the Auto-fix merge of main ac22ebf0 with the same per-side method: main's base is that commit's raw inventory (which already carries main's own approved P1 transitions) and NEPHELE's base is unchanged; no conversion is excluded and the scanner is unchanged. Pending owner confirmation."
  }
 }

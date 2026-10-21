@@ -519,6 +519,13 @@ pub fn parse_prefix(data: &[u8]) -> F3dzResult<(ContainerHeader, Vec<PageIndexEn
             page,
             reason: error.to_string(),
         })?;
+        let pages_x = header.width.div_ceil(u32::from(header.tile_size));
+        if entry.page_x != page as u32 % pages_x || entry.page_y != page as u32 / pages_x {
+            return Err(F3dzError::CorruptPage {
+                page,
+                reason: "page index entries must appear once in canonical row-major order".into(),
+            });
+        }
         entries.push(entry);
         offset = end;
     }
@@ -756,6 +763,31 @@ mod tests {
             sample_count: 512,
             nan_count: 3,
         }
+    }
+
+    #[test]
+    fn duplicate_and_reordered_pages_fail_at_common_boundary() {
+        use crate::codec::f3dz::encode::{encode_dem, EncodeOptions};
+        let options = EncodeOptions {
+            tile_size: 2,
+            ..EncodeOptions::new(0.1)
+        };
+        let raw = encode_dem(&[1.0; 8], 4, 2, &options).unwrap();
+        let (header, _) = parse_prefix(&raw).unwrap();
+        let start = header.index_offset as usize;
+        let mut duplicate = raw.clone();
+        put_u32(&mut duplicate, start + PAGE_INDEX_LEN, 0);
+        assert!(matches!(
+            parse_prefix(&duplicate),
+            Err(F3dzError::CorruptPage { .. })
+        ));
+        let mut reordered = raw;
+        put_u32(&mut reordered, start, 1);
+        put_u32(&mut reordered, start + PAGE_INDEX_LEN, 0);
+        assert!(matches!(
+            parse_prefix(&reordered),
+            Err(F3dzError::CorruptPage { .. })
+        ));
     }
 
     #[test]

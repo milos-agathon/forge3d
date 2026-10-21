@@ -1,0 +1,151 @@
+{
+  "review": "Milos approved on 2026-10-21: exact P1 narrowing-site changes; preserve historical freezes and raw scanner.",
+  "files": {
+    "src/animation/mod.rs": {
+      "before": [
+        [
+          "src/animation/mod.rs",
+          "py_new",
+          "as_f32",
+          1,
+          "Self::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )"
+        ],
+        [
+          "src/animation/mod.rs",
+          "py_new",
+          "as_f32",
+          2,
+          "Self::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )"
+        ],
+        [
+          "src/animation/mod.rs",
+          "py_new",
+          "as_f32",
+          3,
+          "Self::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )"
+        ],
+        [
+          "src/animation/mod.rs",
+          "py_new",
+          "as_f32",
+          4,
+          "Self::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )"
+        ],
+        [
+          "src/animation/mod.rs",
+          "frame_count",
+          "as_f32",
+          1,
+          "} (duration * fps as f32).ceil() as u32 + 1"
+        ],
+        [
+          "src/animation/mod.rs",
+          "add_keyframe_py",
+          "as_f32",
+          1,
+          "self.add_keyframe(CameraKeyframe::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "add_keyframe_py",
+          "as_f32",
+          2,
+          "self.add_keyframe(CameraKeyframe::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "add_keyframe_py",
+          "as_f32",
+          3,
+          "self.add_keyframe(CameraKeyframe::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "add_keyframe_py",
+          "as_f32",
+          4,
+          "self.add_keyframe(CameraKeyframe::new( time as f32, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "evaluate_py",
+          "as_f32",
+          1,
+          "self.evaluate(time as f32)"
+        ]
+      ],
+      "after": [
+        [
+          "src/animation/mod.rs",
+          "checked_time",
+          "as_f32",
+          1,
+          "if !time.is_finite() || !(time as f32).is_finite() { return Err(InvalidKeyframeTime)"
+        ],
+        [
+          "src/animation/mod.rs",
+          "checked_time",
+          "as_f32",
+          2,
+          "} Ok(time as f32)"
+        ],
+        [
+          "src/animation/mod.rs",
+          "py_new",
+          "as_f32",
+          1,
+          "Ok(Self::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "py_new",
+          "as_f32",
+          2,
+          "Ok(Self::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "py_new",
+          "as_f32",
+          3,
+          "Ok(Self::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), ))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "frame_count",
+          "as_f32",
+          1,
+          "} (duration * fps as f32).ceil() as u32 + 1"
+        ],
+        [
+          "src/animation/mod.rs",
+          "add_keyframe_py",
+          "as_f32",
+          1,
+          "self.add_keyframe(CameraKeyframe::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "add_keyframe_py",
+          "as_f32",
+          2,
+          "self.add_keyframe(CameraKeyframe::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "add_keyframe_py",
+          "as_f32",
+          3,
+          "self.add_keyframe(CameraKeyframe::new( checked_time(time) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?, phi as f32, theta as f32, radius, fov as f32, target.map(|value| [value.0, value.1, value.2]), )) .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))"
+        ],
+        [
+          "src/animation/mod.rs",
+          "evaluate_py",
+          "as_f32",
+          1,
+          "self.evaluate(time as f32)"
+        ]
+      ]
+    }
+  }
+}

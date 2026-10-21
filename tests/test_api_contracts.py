@@ -295,6 +295,7 @@ class TestNativeModuleSymbols:
         "classify_raster",
         # G-002b: Rust-backed GIS CRS/affine/warp operations
         "parse_crs",
+        "_crs_metadata",
         "inspect_crs",
         "raster_crs",
         "assign_crs",

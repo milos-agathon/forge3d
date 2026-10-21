@@ -40,6 +40,7 @@ pub(crate) fn register_gis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()>
     m.add_function(wrap_pyfunction!(crate::gis::normalize_raster_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::classify_raster_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::parse_crs_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::crs_metadata_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::inspect_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::raster_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::create_crs_transformer_py, m)?)?;

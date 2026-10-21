@@ -55,6 +55,13 @@ class DEMData:
             self.stats = calculate_dem_stats(self.data, self.nodata_value)
 
 
+def _valid_dem_mask(data: np.ndarray, nodata: Optional[float]) -> np.ndarray:
+    valid = np.isfinite(data)
+    if nodata is not None and not np.isnan(nodata):
+        valid &= ~np.isclose(data, nodata, rtol=1e-5)
+    return valid
+
+
 def calculate_dem_stats(data: np.ndarray, nodata: Optional[float] = None) -> Dict[str, float]:
     """Calculate statistics for DEM data.
 
@@ -70,12 +77,7 @@ def calculate_dem_stats(data: np.ndarray, nodata: Optional[float] = None) -> Dic
     Dict[str, float]
         Statistics including min, max, mean, std, median, percentiles
     """
-    # Create mask for valid data
-    if nodata is not None:
-        valid_mask = ~np.isclose(data, nodata, rtol=1e-5)
-        valid_data = data[valid_mask]
-    else:
-        valid_data = data[~np.isnan(data)]
+    valid_data = data[_valid_dem_mask(data, nodata)]
 
     if len(valid_data) == 0:
         return {
@@ -217,11 +219,13 @@ def fill_nodata(data: np.ndarray, nodata: float, method: str = "nearest") -> np.
         Filled elevation data
     """
     # Create mask of nodata pixels
-    nodata_mask = np.isclose(data, nodata, rtol=1e-5)
+    nodata_mask = ~_valid_dem_mask(data, nodata)
 
     if not np.any(nodata_mask):
         return data.copy()
 
+    if np.all(nodata_mask):
+        return data.copy()
     filled = data.copy()
 
     try:
@@ -340,7 +344,7 @@ def load_dem(
 
     # Calculate domain
     if nodata is not None:
-        valid_mask = ~np.isclose(data, nodata, rtol=1e-5)
+        valid_mask = _valid_dem_mask(data, nodata)
         valid_data = data[valid_mask]
         if len(valid_data) > 0:
             domain = (float(np.min(valid_data)), float(np.max(valid_data)))
@@ -349,17 +353,19 @@ def load_dem(
     else:
         domain = (float(np.min(data)), float(np.max(data)))
 
-    # Normalize if requested
+    # Transform only valid samples so the nodata sentinel remains meaningful.
+    valid_mask = np.isfinite(data)
+    if nodata is not None and not np.isnan(nodata):
+        valid_mask &= ~np.isclose(data, nodata, rtol=1e-5)
+    if normalize or target_domain is not None:
+        data = data.astype(np.float64, copy=True)
     if normalize:
-        data = (data - domain[0]) / max(domain[1] - domain[0], 1e-8)
+        data[valid_mask] = (data[valid_mask] - domain[0]) / max(domain[1] - domain[0], 1e-8)
         domain = (0.0, 1.0)
 
-    # Remap to target domain if provided
     if target_domain is not None:
-        # Normalize to [0, 1] first
-        normalized = (data - domain[0]) / max(domain[1] - domain[0], 1e-8)
-        # Remap to target domain
-        data = normalized * (target_domain[1] - target_domain[0]) + target_domain[0]
+        normalized = (data[valid_mask] - domain[0]) / max(domain[1] - domain[0], 1e-8)
+        data[valid_mask] = normalized * (target_domain[1] - target_domain[0]) + target_domain[0]
         domain = target_domain
 
     return DEMData(
@@ -403,7 +409,7 @@ def load_dem_from_array(
 
     if domain is None:
         if nodata is not None:
-            valid_mask = ~np.isclose(data, nodata, rtol=1e-5)
+            valid_mask = _valid_dem_mask(data, nodata)
             valid_data = data[valid_mask]
             if len(valid_data) > 0:
                 domain = (float(np.min(valid_data)), float(np.max(valid_data)))

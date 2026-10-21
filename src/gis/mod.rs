@@ -239,6 +239,18 @@ pub fn inspect_crs_py(source: &Bound<'_, PyAny>) -> PyResult<PyObject> {
 }
 
 #[cfg(feature = "extension-module")]
+#[pyfunction(name = "_crs_metadata")]
+pub fn crs_metadata_py(value: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let spec = extract_required_crs(Some(value))?;
+    let (kind, order, unit) = crs::native_crs_metadata(&spec)?;
+    let result = pyo3::types::PyDict::new_bound(value.py());
+    result.set_item("kind", kind)?;
+    result.set_item("axis_order", order)?;
+    result.set_item("linear_unit_to_meters", unit)?;
+    Ok(result.into())
+}
+
+#[cfg(feature = "extension-module")]
 #[pyfunction(name = "parse_crs")]
 pub fn parse_crs_py(value: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let spec = extract_required_crs(Some(value))?;

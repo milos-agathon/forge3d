@@ -83,9 +83,10 @@ def _overlay_in_terrain_uv(layer, recipe, shape):
             if source.crs is None:
                 raise ValueError('GeoTIFF draping requires source CRS metadata')
             raw = source.read()
-            if not np.isfinite(raw).all():
-                raise ValueError('raster source contains non-finite samples')
-            rgba = _raster_to_rgba8(np.moveaxis(raw, 0, -1))
+            valid = np.min(source.read_masks(), axis=0) > 0
+            if not np.isfinite(raw[:, valid]).all():
+                raise ValueError('raster source contains non-finite valid samples')
+            rgba = _raster_to_rgba8(np.moveaxis(raw, 0, -1), valid)
             # Preserve both nodata and source footprint even for opaque RGB input.
             rgba[..., 3] = np.minimum(rgba[..., 3], source.dataset_mask())
             output = np.zeros((*shape, 4), dtype=np.uint8)

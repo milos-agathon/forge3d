@@ -136,3 +136,37 @@ fn non_axis_aligned_normals_cover_every_vertex() {
         );
     }
 }
+
+#[test]
+fn multisolid_selection_and_unsupported_diagnostic() {
+    let mut source: serde_json::Value = serde_json::from_slice(sample_cityjson()).unwrap();
+    let original = source["CityObjects"]["building1"]["geometry"][0].clone();
+    for kind in ["MultiSolid", "CompositeSolid"] {
+        let mut geom = original.clone();
+        geom["type"] = kind.into();
+        geom["lod"] = "2.2".into();
+        geom["boundaries"] = serde_json::json!([original["boundaries"]]);
+        source["CityObjects"]["building1"]["geometry"] = serde_json::json!([original, geom]);
+        let (buildings, _) = parse_cityjson(&serde_json::to_vec(&source).unwrap()).unwrap();
+        assert_eq!(buildings.len(), 1);
+        assert_eq!(buildings[0].lod, 2);
+    }
+    source["CityObjects"]["building1"]["geometry"] = serde_json::json!([
+        original, {"type":"Unknown","lod":"3","boundaries":[]}
+    ]);
+    let (fallback, _) = parse_cityjson(&serde_json::to_vec(&source).unwrap()).unwrap();
+    assert_eq!(fallback.len(), 1);
+    assert!(!fallback[0].positions.is_empty());
+    source["CityObjects"]["building1"]["geometry"] =
+        serde_json::json!([{"type":"Unknown","lod":"3","boundaries":[]}]);
+    let (buildings, meta) = parse_cityjson(&serde_json::to_vec(&source).unwrap()).unwrap();
+    assert!(buildings.is_empty());
+    assert_eq!(meta.skipped_buildings[0]["id"], "building1");
+    assert_eq!(meta.skipped_buildings[0]["reason"], "no supported geometry");
+    source["CityObjects"]["valid"] = serde_json::json!({"type":"Building", "geometry":[original]});
+    let (buildings, meta) = parse_cityjson(&serde_json::to_vec(&source).unwrap()).unwrap();
+    assert_eq!(buildings.len(), 1);
+    assert_eq!(buildings[0].id, "valid");
+    assert_eq!(meta.skipped_buildings.len(), 1);
+    assert_eq!(meta.skipped_buildings[0]["id"], "building1");
+}
