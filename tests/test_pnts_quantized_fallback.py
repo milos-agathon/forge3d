@@ -9,7 +9,7 @@ def pnts(table, payload):
     return struct.pack("<4s6I", b"pnts", 1, 28 + len(encoded) + len(payload), len(encoded), len(payload), 0, 0) + encoded + payload
 
 def test_quantized_does_not_return_zero_positions(monkeypatch):
-    monkeypatch.setattr(tiles3d, "NATIVE_AVAILABLE", False)
+    monkeypatch.setattr(tiles3d, "get_native_symbol", lambda _name: None)
     data = pnts({"POINTS_LENGTH": 1, "POSITION_QUANTIZED": {"byteOffset": 0},
                  "QUANTIZED_VOLUME_OFFSET": [10,20,30], "QUANTIZED_VOLUME_SCALE": [1,1,1]},
                 struct.pack("<3H", 65535, 0, 0))

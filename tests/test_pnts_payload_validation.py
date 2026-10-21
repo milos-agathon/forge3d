@@ -14,13 +14,13 @@ def pnts(table, payload):
     (1, bytes(12), {"POSITION": {"byteOffset": -1}}),
 ])
 def test_reject_malformed_semantics(monkeypatch, count, payload, extra):
-    monkeypatch.setattr(tiles3d, "NATIVE_AVAILABLE", False)
+    monkeypatch.setattr(tiles3d, "get_native_symbol", lambda _name: None)
     table = {"POINTS_LENGTH": count, "POSITION": {"byteOffset": 0}, **extra}
     with pytest.raises(ValueError, match="PNTS"):
         tiles3d.decode_pnts(pnts(table, payload))
 
 def test_section_lengths_and_valid_payload(monkeypatch):
-    monkeypatch.setattr(tiles3d, "NATIVE_AVAILABLE", False)
+    monkeypatch.setattr(tiles3d, "get_native_symbol", lambda _name: None)
     data = pnts({"POINTS_LENGTH": 1, "POSITION": {"byteOffset": 0}}, struct.pack("<3f", 1,2,3))
     assert tiles3d.decode_pnts(data)["positions"].tolist() == [[1,2,3]]
     with pytest.raises(ValueError, match="PNTS section"):
