@@ -21,22 +21,22 @@
   "occlusion_response": {
     "status": "APPROVED",
     "approved_by": "Milos",
-    "approved_revision": "eb31252206699f2fbd462f727317c6d733917a3d",
+    "approved_revision": "ca4f5bd3dbea63dfc2e9bab7e888c3202a3b1e17",
     "owner_record": {
-      "date": "2026-10-21",
-      "source": "Explicit owner reply: Approve +/-20% relative error, in the forge3d 1.46.0 release chat"
+      "date": "2026-10-22",
+      "source": "Explicit owner replies in the forge3d 1.46.0 release chat: \"Approve +/-20% relative error\" (2026-10-21); \"Use the reference's open-surface rule for G4b. I approve preparing an exact proposal to revise the G4b reference value in gate4-policy.json, for my explicit approval before anything is applied.\" and \"approved\" for this exact block (2026-10-22)"
     },
     "metric": "mean_roi_signed_linear_luminance_change",
     "maximum_relative_error": 0.20,
     "reference": {
-      "kind": "owner_accepted_first_order_estimate",
-      "mean_linear_luminance_change": 0.03731673831968643,
-      "source_revision": "a8a96c4739c15895bf38772b6aaaea8f9596ff96",
-      "source_path": "docs/audits/nephele-gate4-measurement-2026-10-21/measurement.json",
-      "source_git_blob_sha256": "bd5bbcd1d77ca2d875c45ff81c205c7662a7cdeb5bc03ef2dbcd11e412d50eef",
+      "kind": "owner_accepted_open_surface_full_transport_cpu_estimate",
+      "mean_linear_luminance_change": 0.02187741965233074,
+      "source_revision": "52e41c0dde3e7ac39b97380d3d64493090237c0d",
+      "source_path": "docs/audits/nephele-open-surface-transport-2026-10-22.json",
+      "source_git_blob_sha256": "69d04f128784bc272e65ec574ce9878b3f0752a586f20ce3390c86c3b0550caa",
       "roi_mask_sha256": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
-      "inverse_mapping": "Original audit numerical inverse sRGB + ACES, linear samples 0..64 inclusive with 2000001 samples"
+      "inverse_mapping": "None for the reference: linear CPU radiance difference. The runtime response is still measured through the unchanged gate inverse."
     },
-    "definition": "The signed mean linear luminance increase when terrain occlusion is disabled in the frozen god-ray ROI must differ from the owner-accepted first-order estimate by at most 20% of that estimate. SSIM is diagnostic only. G4a and the medium-ablation criterion are unchanged."
+    "definition": "The signed mean linear luminance increase when terrain occlusion is disabled in the frozen god-ray ROI must differ from the owner-accepted open-surface full-transport CPU estimate by at most 20% of that estimate. SSIM is diagnostic only. G4a and the medium-ablation criterion are unchanged."
   }
 }
