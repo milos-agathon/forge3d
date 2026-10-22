@@ -367,6 +367,58 @@ pub(crate) fn splat_ray_gaussian(
     Ok(d.into())
 }
 
+/// The camera, sun, exposure and seed that produced one view's pixels.
+///
+/// A certificate that does not name these cannot tell two renders apart:
+/// the same scene at another size, with the sun somewhere else, or from
+/// another seed produces different pixels under the same signed inputs.
+/// The single-view path records them without a prefix; a sequence prefixes
+/// each view's own set with its index, because its views differ.
+fn record_view_inputs(prefix: &str, view: &SequenceView) {
+    let vec3 = |v: [f32; 3]| format!("{:.6},{:.6},{:.6}", v[0], v[1], v[2]);
+    for (key, value) in [
+        ("cam_origin", vec3(view.cam_origin)),
+        ("cam_look_at", vec3(view.cam_look_at)),
+        ("cam_up", vec3(view.cam_up)),
+        ("fov_y_deg", view.fov_y_deg.to_string()),
+        ("sun_azimuth_deg", view.sun_azimuth_deg.to_string()),
+        ("sun_elevation_deg", view.sun_elevation_deg.to_string()),
+        ("sun_intensity", view.sun_intensity.to_string()),
+        ("sun_color", vec3(view.sun_color)),
+        ("exposure", view.exposure.to_string()),
+        ("seed", view.seed.to_string()),
+    ] {
+        crate::core::certificate::record_input(format!("fused.{prefix}{key}"), value);
+    }
+}
+
+/// The frame and sky the render used, for the signed certificate.
+fn record_render_inputs(
+    width: u32,
+    height: u32,
+    tile: Option<(u32, u32)>,
+    sky_turbidity: f32,
+    sky_ground_albedo: f32,
+    sky_intensity: f32,
+) {
+    for (key, value) in [
+        ("fused.width", width.to_string()),
+        ("fused.height", height.to_string()),
+        (
+            "fused.tile",
+            match tile {
+                Some((w, h)) => format!("{w}x{h}"),
+                None => "none".to_string(),
+            },
+        ),
+        ("fused.sky_turbidity", sky_turbidity.to_string()),
+        ("fused.sky_ground_albedo", sky_ground_albedo.to_string()),
+        ("fused.sky_intensity", sky_intensity.to_string()),
+    ] {
+        crate::core::certificate::record_input(key, value);
+    }
+}
+
 /// Identity of the HDRI a fused render used, for the signed certificate.
 ///
 /// The certificate has to be comparable across machines, so it records the
@@ -891,6 +943,29 @@ pub(crate) fn render_fused(
     ] {
         crate::core::certificate::record_input(key, value);
     }
+    record_render_inputs(
+        width,
+        height,
+        tile_width.zip(tile_height),
+        sky_turbidity,
+        sky_ground_albedo,
+        sky_intensity,
+    );
+    record_view_inputs(
+        "",
+        &SequenceView {
+            cam_origin: [cam_origin.0, cam_origin.1, cam_origin.2],
+            cam_look_at: [cam_look_at.0, cam_look_at.1, cam_look_at.2],
+            cam_up: [cam_up.0, cam_up.1, cam_up.2],
+            fov_y_deg,
+            sun_azimuth_deg,
+            sun_elevation_deg,
+            sun_intensity,
+            sun_color: [sun_color.0, sun_color.1, sun_color.2],
+            exposure,
+            seed,
+        },
+    );
     let out = py.allow_threads(|| -> Result<FusedRenderOutput, crate::core::error::RenderError> {
         let tracer = HybridPathTracer::new_fused()?;
         tracer.render_fused(&FusedRenderDesc {
@@ -1262,6 +1337,20 @@ pub(crate) fn render_fused_sequence(
         ("fused.fog_height_falloff", fog_height_falloff.to_string()),
     ] {
         crate::core::certificate::record_input(key, value);
+    }
+    record_render_inputs(
+        width,
+        height,
+        tile_width.zip(tile_height),
+        sky_turbidity,
+        sky_ground_albedo,
+        sky_intensity,
+    );
+    // Each view has its own camera, sun, exposure and seed, so each gets its
+    // own set: a sequence's views differ from each other, and a certificate
+    // that named only the first could not tell them apart.
+    for (index, view) in views.iter().enumerate() {
+        record_view_inputs(&format!("view{index}."), view);
     }
     let outputs = py.allow_threads(
         || -> Result<Vec<FusedRenderOutput>, crate::core::error::RenderError> {

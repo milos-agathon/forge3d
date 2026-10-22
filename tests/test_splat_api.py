@@ -729,6 +729,75 @@ def test_signed_inputs_identify_the_env_map_without_leaking_the_path(tmp_path):
     assert rotated["fused.env_map"] == recorded
 
 
+def test_the_certificate_identifies_the_render():
+    """Two renders that differ must not share a signed payload.
+
+    The certificate records the scene, but a render is also its frame size,
+    camera, sun, exposure and seed. Without those, two different images
+    from one scene would carry the same signed inputs.
+    """
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    from forge3d.diagnostics import render_certificate
+
+    kwargs = scene_kwargs(manifest())
+    common = dict(samples=2, width=48, height=48, seed=7)
+
+    def inputs(**over):
+        splat.render_fused(**{**kwargs, **common, **over})
+        return dict(render_certificate(sign=False)["inputs"])
+
+    base = inputs()
+    assert base["fused.width"] == "48"
+    assert base["fused.height"] == "48"
+    assert base["fused.tile"] == "none"
+    assert base["fused.sky_intensity"] != ""
+
+    # The frame size.
+    assert inputs(width=64)["fused.width"] != base["fused.width"]
+    # The camera.
+    moved = splat.FusedCamera(origin=(9.0, 52.0, 46.0), look_at=kwargs["camera"].look_at)
+    assert inputs(camera=moved)["fused.cam_origin"] != base["fused.cam_origin"]
+    # The sun.
+    assert inputs(sun_azimuth_deg=10.0)["fused.sun_azimuth_deg"] != base[
+        "fused.sun_azimuth_deg"
+    ]
+    # The exposure and the seed.
+    assert inputs(exposure=9.0)["fused.exposure"] != base["fused.exposure"]
+    assert inputs(seed=999)["fused.seed"] != base["fused.seed"]
+
+
+def test_the_sequence_certificate_records_every_view():
+    """A sequence's views differ from each other, so each must be named."""
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    from forge3d.diagnostics import render_certificate
+
+    kwargs = scene_kwargs(manifest())
+    camera = kwargs["camera"]
+    other = splat.FusedCamera(origin=(9.0, 52.0, 46.0), look_at=camera.look_at)
+    splat.render_fused_sequence(
+        splats=kwargs["splats"],
+        pointcloud=kwargs["pointcloud"],
+        terrain=kwargs["terrain"],
+        views=[
+            splat.FusedView(camera=camera, seed=1),
+            splat.FusedView(camera=other, seed=2),
+        ],
+        samples=2,
+        width=48,
+        height=48,
+    )
+    recorded = render_certificate(sign=False)["inputs"]
+    assert recorded["fused.views"] == "2"
+    assert recorded["fused.view0.seed"] == "1"
+    assert recorded["fused.view1.seed"] == "2"
+    assert recorded["fused.view0.cam_origin"] != recorded["fused.view1.cam_origin"]
+    # The shared part is named once.
+    assert recorded["fused.width"] == "48"
+    assert recorded["fused.sky_intensity"] != ""
+
+
 def test_render_fused_reference_emits_a_certificate():
     if not gpu_available():
         pytest.skip("no usable GPU adapter for the fused render")
