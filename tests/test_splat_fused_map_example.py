@@ -83,6 +83,34 @@ def test_hdr_cache_is_checksum_validated(tmp_path, monkeypatch):
     assert mod._resolve_hdr("auto", use_dem=True) == str(cache)
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        # A camera needs both halves; one alone is a mistake, not a request
+        # for the default camera.
+        ["--look-at", "1", "2", "3"],
+        ["--origin", "1", "2", "3"],
+        # A rotation needs an environment to rotate. "auto" without a --dem
+        # render never names one, and "none" explicitly refuses one.
+        ["--hdr-rotation", "30"],
+        ["--hdr-rotation", "30", "--hdr", "none"],
+        # The HDRI must be a format the seam can read.
+        ["--hdr", "sky.png"],
+        # An explicit point cloud that is not there must not be replaced by a
+        # synthetic one.
+        ["--pointcloud", "missing.copc.laz"],
+    ],
+)
+def test_bad_arguments_exit_with_a_clean_error(tmp_path, argv, capsys):
+    """Every argument error prints ``error: ...`` and exits 2, not a traceback."""
+    mod = _load_module()
+    code = mod.main([*argv, "--out", str(tmp_path / "out")])
+    assert code == 2
+    captured = capsys.readouterr()
+    assert "error:" in captured.err, f"no error message on stderr: {captured.err!r}"
+    assert "Traceback" not in captured.err, "the error was an uncaught traceback"
+
+
 def test_default_run_nonblank_and_deterministic(tmp_path):
     if not gpu_available():
         pytest.skip("no GPU adapter available")
@@ -98,13 +126,31 @@ def test_default_run_nonblank_and_deterministic(tmp_path):
     out2 = tmp_path / "run2"
     for out in (out1, out2):
         subprocess.run(
-            [sys.executable, str(EXAMPLE), "--out", str(out), "--samples", "8"],
+            [
+                sys.executable,
+                str(EXAMPLE),
+                "--out",
+                str(out),
+                "--samples",
+                "8",
+                "--certificate",
+            ],
             check=True,
             env=env,
             cwd=str(REPO),
         )
     # Beauty must be non-blank (not all one color).
     import numpy as np
+
+    # The certificate must be the one the BEAUTY render produced, and it
+    # must be signed. Reading it back from the diagnostics module after the
+    # run would give the LAST render in the process (the last fly-through
+    # frame), not the sheet's.
+    cert_path = out1 / "certificate.json"
+    assert cert_path.exists(), "the certificate was not written"
+    cert = json.loads(cert_path.read_text())
+    assert "signature" in cert, "the certificate was written unsigned"
+    assert cert["inputs"]["fused.seed"] == "7"
 
     # Check non-blank by reading raw PNG bytes size (a blank image would be tiny).
     # Also verify the file exists and is a valid PNG.

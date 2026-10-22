@@ -567,18 +567,36 @@ def test_render_fused_single_representations_and_options():
     foggy = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.02, **common)
     lit = (terrain_only.transmittance[..., 0] > 0.99) & (terrain_only.hit_kind == splat.HIT_TERRAIN)
     assert foggy.direct[lit].mean() < 0.9 * terrain_only.direct[lit].mean()
-    # ...and the AERIAL branch changes the BEAUTY, not only the sun beam: the
-    # radiance of the same pixels must differ, and it must differ in the
-    # pixels the fog reaches (the far ones). Before this assertion the aerial
-    # perspective was proven only by a source-text check on the assembled
-    # shader, so a change that left the pixels alone would have passed.
-    clear = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.0, **common)
-    assert not np.array_equal(clear.rgba, foggy.rgba), "fog did not change the beauty"
-    assert not np.array_equal(clear.radiance, foggy.radiance), "fog did not change the radiance"
-    changed = np.abs(clear.radiance - foggy.radiance).sum(axis=-1) > 1e-6
-    assert changed.any(), "no pixel moved under the fog"
+    # The AERIAL branch, isolated.
+    #
+    # The shadow-ray fog already changes the beauty on its own — it
+    # attenuates the sun term — so comparing a foggy render with a fog-free
+    # one proves nothing about the aerial splice. Render with the sun term at
+    # ZERO instead: the shadow-ray fog then has nothing to attenuate, and the
+    # only thing left that can move the radiance is the aerial perspective.
+    # Delete that splice and these two renders are identical, which is
+    # exactly the regression this assertion has to catch.
+    no_sun = dict(common, sun_intensity=0.0)
+    clear = splat.render_fused(terrain=kwargs["terrain"], **no_sun)
+    aerial = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.02, **no_sun)
+    terrain = clear.hit_kind == splat.HIT_TERRAIN
+    assert terrain.sum() > 100, "no terrain pixels to compare"
+    delta = np.abs(aerial.radiance - clear.radiance).sum(axis=-1)
+    assert delta[terrain].max() > 1e-6, "the aerial perspective did not change the radiance"
+    assert not np.array_equal(clear.rgba, aerial.rgba), (
+        "the aerial perspective did not change the beauty"
+    )
+    # The aerial weight is 1 - transmittance, and the transmittance falls with
+    # the distance to the hit, so the change must grow with the depth AOV.
+    depth = clear.depth[terrain]
+    change = delta[terrain]
+    far = depth >= np.percentile(depth, 75)
+    near = depth <= np.percentile(depth, 25)
+    assert change[far].mean() > change[near].mean(), (
+        "the aerial perspective did not grow with the depth"
+    )
     # The fog-off path is the base line: same scene, same bytes, every time.
-    again_clear = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.0, **common)
+    again_clear = splat.render_fused(terrain=kwargs["terrain"], **no_sun)
     np.testing.assert_array_equal(clear.rgba, again_clear.rgba)
     # The working set must fit the pool under the exact policy.
     with pytest.raises(f3d.MemoryBudgetExceeded, match="residency pool"):

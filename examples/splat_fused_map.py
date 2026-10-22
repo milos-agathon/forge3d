@@ -1207,6 +1207,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     use_dem = bool(args.dem or args.terrain)
+
+    # ---- argument checks, before any data is loaded -----------------------
+    # A camera needs both halves; giving one is a mistake, not a request for
+    # the default camera.
+    if (args.origin is None) != (args.look_at is None):
+        print(
+            "error: --origin and --look-at must be given together "
+            "(a camera needs both)",
+            file=sys.stderr,
+        )
+        return 2
+    # The rotation is checked against what the user ASKED for, not against
+    # the resolved path: "none", and "auto" without a --dem render, never
+    # name an environment. A --dem render's preset may still fail to
+    # download, and that fallback is handled where it happens.
+    if args.hdr_rotation and (
+        args.hdr == "none" or (args.hdr == "auto" and not use_dem)
+    ):
+        print(
+            "error: --hdr-rotation needs an environment to rotate "
+            "(--hdr PATH, or --hdr auto on a --dem render)",
+            file=sys.stderr,
+        )
+        return 2
+    if args.hdr not in ("auto", "none", "preset"):
+        if Path(args.hdr).suffix.lower() not in (".hdr", ".rgbe", ".exr"):
+            print(
+                f"error: --hdr must be a .hdr, .rgbe or .exr file, got {args.hdr}",
+                file=sys.stderr,
+            )
+            return 2
+
     manifest: Dict[str, Any] = {}
     splat_meta: Dict[str, Any] = {}
     lidar_meta: Optional[Dict[str, Any]] = None
@@ -1314,14 +1346,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if manifest and pc_path.resolve() == (FIXTURE_DIR / manifest["copc_file"]).resolve():
             origin = tuple(manifest["copc_origin"])
         # FusedPointCloud only records the path; the file is opened inside the
-        # render, so a missing file has to be caught HERE for the "continuing
-        # without LiDAR" promise to mean anything.
+        # render, so a missing file has to be caught HERE.
         if Path(pc_path).exists():
             pointcloud = splat.FusedPointCloud(path=pc_path, origin=origin, z_up=True)
             lidar_meta = {"count": int(manifest.get("copc_point_count", 0)) if manifest else 0}
             lidar_desc = f"{pc_path.name} - origin ({origin[0]:.0f}, {origin[1]:.0f}, {origin[2]:.0f})"
             print(f"[pointcloud] {pc_path.name}: origin={origin}")
+        elif args.pointcloud is not None:
+            # The user named this file; substituting a synthetic swath for it
+            # would silently ignore their input.
+            print(f"error: --pointcloud not found: {pc_path}", file=sys.stderr)
+            return 2
         else:
+            # The fixture's own COPC file is missing: the derived swath can
+            # stand in for it.
             print(f"[pointcloud] {pc_path.name} not found; continuing without LiDAR")
     if pointcloud is None:
         lidar_desc = None
@@ -1355,13 +1393,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         v is not None for v in (args.azimuth, args.elevation, args.distance, args.target)
     )
     view_label = args.view
-    if (args.origin is None) != (args.look_at is None):
-        print(
-            "error: --origin and --look-at must be given together "
-            "(a camera needs both)",
-            file=sys.stderr,
-        )
-        return 2
     if args.origin is not None and args.look_at is not None:
         camera = splat.FusedCamera(
             origin=tuple(args.origin),
@@ -1464,26 +1495,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    if hdr_path is None and args.hdr_rotation:
-        print(
-            "error: --hdr-rotation needs an environment to rotate "
-            "(--hdr PATH, or --hdr auto on a --dem render)",
-            file=sys.stderr,
-        )
-        return 2
-    if hdr_path is not None and Path(hdr_path).suffix.lower() not in (
-        ".hdr",
-        ".rgbe",
-        ".exr",
-    ):
-        print(
-            f"error: --hdr must be a .hdr, .rgbe or .exr file, got {hdr_path}",
-            file=sys.stderr,
-        )
-        return 2
+    # The preset can still fall back to the analytic sky when the download
+    # fails or the checksum does not match. That is the documented fallback,
+    # so the rotation is dropped with a warning rather than the run dying.
+    hdr_rotation = args.hdr_rotation
+    if hdr_path is None and hdr_rotation:
+        print("[hdr] no environment available; dropping the rotation")
+        hdr_rotation = 0.0
     env_desc = "Hosek-Wilkie analytic sky"
     if hdr_path is not None:
-        env_desc = f"{Path(hdr_path).name} (rot {args.hdr_rotation:.0f} deg)"
+        env_desc = f"{Path(hdr_path).name} (rot {hdr_rotation:.0f} deg)"
     print(f"[sky] {env_desc}")
     # Aerial perspective reads correctly on oblique/hero frames (distant
     # ridges recede). On the top-down plan every ray points down through the
@@ -1527,9 +1548,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # An HDRI replaces the analytic sky (its exposure is normalised on
         # load, so sky_intensity scales it like the Hosek-Wilkie bake).
         env_map=hdr_path,
-        # The rotation only means something with an environment: the seam
-        # rejects a rotation without one, and a default run has no HDRI.
-        env_rotation_deg=args.hdr_rotation if hdr_path is not None else 0.0,
+        # The rotation is the one the user asked for, or zero when the
+        # environment it named turned out to be unavailable.
+        env_rotation_deg=hdr_rotation,
         # Aerial perspective: distant terrain recedes into the sky colour
         # instead of ending at a hard silhouette.
         fog_density=fog_density,
@@ -1566,11 +1587,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         samples=args.samples,
         seed=args.seed,
         return_aovs=True,
-        certificate=args.certificate,
+        # The certificate is captured by the render that produces it, so it
+        # must be asked for HERE and not read back from the diagnostics
+        # module afterwards: that module holds the LAST completed render in
+        # the process, which after a fly-through is the last orbit frame.
+        certificate=(
+            str(out_dir / "certificate.json") if args.certificate else False
+        ),
         tile=tuple(args.tile) if args.tile else None,
         **light_kwargs,
     )
     render_s = time.time() - t0
+    if args.certificate:
+        print(f"[certificate] {out_dir / 'certificate.json'}")
 
     beauty_path = out_dir / "splat_fused_beauty.png"
     f3d.numpy_to_png(beauty_path, result.rgba)
@@ -1771,15 +1800,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     report_path = out_dir / "report.json"
     report_path.write_text(json.dumps(report, indent=2))
     print(f"[report] {report_path}")
-
-    if args.certificate:
-        # The certificate is a render-provenance record, not a render result:
-        # it is read back from the diagnostics module, not off the image.
-        from forge3d.diagnostics import render_certificate
-
-        cert_path = out_dir / "certificate.json"
-        cert_path.write_text(json.dumps(render_certificate(sign=False), indent=2))
-        print(f"[certificate] {cert_path}")
 
     print("[done]")
     return 0
