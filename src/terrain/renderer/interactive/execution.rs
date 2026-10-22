@@ -695,7 +695,8 @@ impl TerrainScene {
 impl TerrainRenderer {
     /// Render the native shared-depth HDR pipeline. Requested unavailable
     /// resources fail before returning a frame; no CPU effect substitutes run.
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, clouds=None, label_batches=None, vector_batches=None, furniture_batches=None, point_batches=None, certificate=None))]
+    /// ANAMNESIS does not yet serialize this graph; a non-None cache is rejected.
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, clouds=None, label_batches=None, vector_batches=None, furniture_batches=None, point_batches=None, certificate=None, cache=None))]
     fn render_interactive<'py>(
         &mut self,
         py: Python<'py>,
@@ -711,7 +712,15 @@ impl TerrainRenderer {
         furniture_batches: Option<Bound<'py, PyAny>>,
         point_batches: Option<Bound<'py, PyAny>>,
         certificate: Option<Bound<'py, PyAny>>,
+        cache: Option<Bound<'py, PyAny>>,
     ) -> PyResult<Py<crate::Frame>> {
+        self.last_anamnesis_report = crate::core::anamnesis::CacheReport::default();
+        self.last_anamnesis_graph_submissions = 0;
+        if cache.as_ref().is_some_and(|value| !value.is_none()) {
+            return Err(PyRuntimeError::new_err(
+                "native terrain ANAMNESIS does not yet serialize the shared-depth HDR graph; use cache=None",
+            ));
+        }
         self.scene
             .validate_material_vt_request(params, material_set.materials().len() as u32)
             .map_err(|error| {

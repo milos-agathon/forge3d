@@ -1416,11 +1416,115 @@ def test_sky_lighting_relocation_rejects_missing_duplicate_changed_and_extra_sit
             _undo_sky_lighting_transition(mutated)
 
 
+def _undo_p1_inventory_transitions(sites):
+    """Reverse only the owner-reviewed, exact per-file P1 conversion records."""
+    import json
+
+    by_path = collections.defaultdict(list)
+    for site in sites:
+        by_path[site[0]].append(site)
+    for path in sorted((ROOT / "tests/data/world_coord_f32_p1").glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        for rel, transition in record["files"].items():
+            expected = list(map(tuple, transition["after"]))
+            assert by_path[rel] == expected, f"unreviewed P1 conversion change: {rel}"
+            by_path[rel] = list(map(tuple, transition["before"]))
+    return [site for file_sites in by_path.values() for site in file_sites]
+
+
+def test_p1_inventory_rejects_missing_duplicate_changed_and_extra_sites():
+    import json
+    import pytest
+
+    sites = conversion_inventory()
+    for path in sorted((ROOT / "tests/data/world_coord_f32_p1").glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        for rel, transition in record["files"].items():
+            first = tuple(transition["after"][0])
+            index = sites.index(first)
+            changed = (*first[:4], "unreviewed world-position cast")
+            for mutated in (sites[:index] + sites[index + 1:],
+                            sites[:index] + [first] + sites[index:],
+                            sites[:index] + [changed] + sites[index + 1:],
+                            sites + [changed]):
+                with pytest.raises(AssertionError):
+                    _undo_p1_inventory_transitions(mutated)
+
+
+def _undo_concordia_transition(sites):
+    """Restore the approved parent inventory without changing historical freezes."""
+    transition = _ledger_data()["concordia"]
+    added = list(map(tuple, transition["added"]))
+    removed = list(map(tuple, transition["removed"]))
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    assert len(set(added)) == len(added) == 19
+    assert len(set(removed)) == len(removed) == 14
+    for site in added:
+        assert sites.count(site) == 1, f"CONCORDIA conversion missing or duplicated: {site}"
+    assert not set(removed).intersection(sites)
+    new_viewport = {site for site in added if site[0] == "src/terrain/renderer/interactive.rs"}
+    assert len(new_viewport) == 5
+    relocated = [site for site in added if site not in new_viewport]
+    replacements = dict(zip(relocated, removed))
+    restored = [replacements.get(site, site) for site in sites if site not in new_viewport]
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+    return restored
+
+
+def test_concordia_inventory_transition_is_exact():
+    transition = _ledger_data()["concordia"]
+    assert transition["review"]
+    assert transition["source_commit"] == "3c6b5665ae827f25698fe350929444461d4164ae"
+    assert (transition["base_count"], transition["base_digest"]) == (
+        1856, "bd31cb70466826afdfb900d4fb492895aa68d297727f0084a95ab1722c52d9de",
+    )
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1861, "2adcb38b0fc9c8883ae174c2f4cd17e6f00aa08fc8614cfd21d743feeb012e89",
+    )
+    sites = _undo_p1_inventory_transitions(conversion_inventory())
+    restored = _undo_concordia_transition(sites)
+    assert collections.Counter(sites) - collections.Counter(restored) == collections.Counter(
+        map(tuple, transition["added"])
+    )
+    assert collections.Counter(restored) - collections.Counter(sites) == collections.Counter(
+        map(tuple, transition["removed"])
+    )
+    body = _function_body("src/terrain/renderer/interactive.rs", "new")
+    assert "let (width, height) = params.size_px;" in body
+    assert "pub size_px: (u32, u32)" in _read("src/terrain/render_params/core.rs")
+    assert not re.search(r"\b(?:f64|DVec[234]|DMat[234])\b", body)
+    _inventory_before_water_optics()
+
+
+def test_concordia_transition_rejects_missing_duplicate_changed_and_extra_sites():
+    import pytest
+
+    sites = _undo_p1_inventory_transitions(conversion_inventory())
+    transition = _ledger_data()["concordia"]
+    for site in map(tuple, transition["added"]):
+        index = sites.index(site)
+        missing = sites[:index] + sites[index + 1:]
+        changed = sites[:index] + [(*site[:4], "world_position.x as f32")] + sites[index + 1:]
+        for mutated in (missing, sites + [site], changed):
+            with pytest.raises(AssertionError):
+                _undo_concordia_transition(mutated)
+    with pytest.raises(AssertionError):
+        _undo_concordia_transition(sites + [(
+            "src/terrain/renderer/interactive.rs", "new", "as_f32", 4,
+            "world_position.x as f32",
+        )])
+
+
 def _inventory_before_water_optics():
     """Check both approved branch inventories without replacing either freeze."""
     water = _ledger_data()["water_optics"]
     viewport = _ledger_data()["viewer_viewport_resize"]
-    sites = _undo_sky_lighting_transition(conversion_inventory())
+    sites = _undo_p1_inventory_transitions(conversion_inventory())
+    sites = _undo_sky_lighting_transition(_undo_concordia_transition(sites))
     normalized = _undo_scene_pick_assembly_transition(sites)
     water_added = set(map(tuple, water["added"]))
     viewport_added = set(map(tuple, viewport["added"]))

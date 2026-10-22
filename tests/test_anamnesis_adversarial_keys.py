@@ -39,7 +39,7 @@ def test_adversarial_key_pairs_are_distinct():
 
 def test_corrupt_blob_is_quarantined_then_recomputed(tmp_path):
     recipe = {"terrain": {"dem": [0, 1]}, "output": {"samples": 1}}
-    render_sequence(recipe, frames=[0], cache=tmp_path)
+    render_sequence(recipe, frames=[0], cache=tmp_path, reference_only=True)
     output_entry = None
     for meta_path in tmp_path.glob("??/*/meta.json"):
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -55,13 +55,13 @@ def test_corrupt_blob_is_quarantined_then_recomputed(tmp_path):
     result = verify(tmp_path)
     assert result["quarantined"] == 1
     assert any((tmp_path / "quarantine").iterdir())
-    rerender = render_sequence(recipe, frames=[0], cache=tmp_path)
+    rerender = render_sequence(recipe, frames=[0], cache=tmp_path, reference_only=True)
     assert (0, "frame.output") in rerender.observed_recompute
 
 
 def test_corrupt_metadata_cannot_bypass_blob_integrity(tmp_path):
     recipe = {"terrain": {"dem": [2, 3]}, "output": {"samples": 1}}
-    render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False)
+    render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False, reference_only=True)
     output_entry = None
     for meta_path in tmp_path.glob("??/*/meta.json"):
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -75,8 +75,8 @@ def test_corrupt_metadata_cannot_bypass_blob_integrity(tmp_path):
     meta_path.write_text(json.dumps(meta, sort_keys=True), encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="prediction mismatch"):
-        render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False)
-    rerender = render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False)
+        render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False, reference_only=True)
+    rerender = render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False, reference_only=True)
     assert (0, "frame.output") in rerender.observed_recompute
     assert any((tmp_path / "quarantine").iterdir())
 
@@ -97,7 +97,7 @@ def test_complete_store_footprint_is_hard_bounded(tmp_path):
         cache=tmp_path,
         max_bytes=max_bytes,
         verify_reads=False,
-    )
+     reference_only=True)
     # A warm read creates the batched cross-language LRU journal; it is a
     # control file and must remain inside the same complete-footprint bound.
     render_sequence(
@@ -106,7 +106,7 @@ def test_complete_store_footprint_is_hard_bounded(tmp_path):
         cache=tmp_path,
         max_bytes=max_bytes,
         verify_reads=False,
-    )
+     reference_only=True)
     assert _complete_footprint(tmp_path) <= max_bytes
 
 
@@ -117,7 +117,7 @@ def test_tiny_budget_rejects_unrepresentable_self_describing_entry(tmp_path):
             frames=[0],
             cache=tmp_path,
             max_bytes=1024,
-        )
+         reference_only=True)
     except ValueError as error:
         assert "max_bytes" in str(error) or "footprint" in str(error)
     else:

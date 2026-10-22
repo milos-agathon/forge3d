@@ -13,6 +13,7 @@ pub fn parse_cityjson_py(data: &Bound<'_, PyBytes>) -> PyResult<PyObject> {
         let result = pyo3::types::PyDict::new_bound(py);
         let meta_dict = pyo3::types::PyDict::new_bound(py);
         meta_dict.set_item("version", &meta.version)?;
+        meta_dict.set_item("skipped_buildings", &meta.skipped_buildings)?;
         meta_dict.set_item("crs_epsg", meta.crs_epsg)?;
         meta_dict.set_item("scale", (meta.scale[0], meta.scale[1], meta.scale[2]))?;
         meta_dict.set_item(

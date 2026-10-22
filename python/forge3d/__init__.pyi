@@ -95,6 +95,7 @@ from .diagnostics import (
     unavailable_cache_lod_stats_diagnostic,
     unsupported_instancing_path_diagnostic,
     unsupported_style_field_diagnostic,
+    unsupported_style_filter_diagnostic,
     unsupported_style_layer_type_diagnostic,
     unsupported_texture_format_diagnostic,
     validate_label_support,
@@ -900,6 +901,7 @@ class TerrainRenderer:
         label_batches: Optional[Sequence[Mapping[str, Any]]] = ..., vector_batches: Optional[Sequence[Mapping[str, Any]]] = None, furniture_batches: Optional[Sequence[Mapping[str, Any]]] = None,
         point_batches: Optional[Sequence[Mapping[str, Any]]] = None,
         certificate: bool | str | PathLikeStr | None = ...,
+        cache: str | PathLikeStr | None = ...,
     ) -> Frame: ...
     def interactive_pipeline_info(self) -> str: ...
     def _interactive_validation_data(self) -> dict[str, Any]: ...

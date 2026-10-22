@@ -219,7 +219,30 @@ pub fn import_obj<P: AsRef<Path>>(path: P) -> Result<ObjImport, RenderError> {
                 }
             }
             "f" => {
-                let verts: Vec<VertexKey> = it.map(parse_vertex_triplet).collect();
+                // OBJ relative indices are relative to the declarations at this face.
+                // Canonicalize before deduplication, not just before vertex lookup.
+                let resolve = |index: i32, count: usize| -> Result<i32, RenderError> {
+                    if index >= 0 {
+                        return Ok(index);
+                    }
+                    let absolute = count as i64 + i64::from(index) + 1;
+                    if absolute <= 0 || absolute > i64::from(i32::MAX) {
+                        return Err(RenderError::Render(format!(
+                            "OBJ index {index} out of bounds at line {line_no}"
+                        )));
+                    }
+                    Ok(absolute as i32)
+                };
+                let verts: Vec<VertexKey> = it
+                    .map(|token| {
+                        let key = parse_vertex_triplet(token);
+                        Ok(VertexKey {
+                            vi: resolve(key.vi, pos.len())?,
+                            vti: resolve(key.vti, tex.len())?,
+                            vni: resolve(key.vni, nor.len())?,
+                        })
+                    })
+                    .collect::<Result<_, RenderError>>()?;
                 if verts.len() < 3 {
                     return Err(RenderError::Render(format!(
                         "OBJ parse error at line {}: face has fewer than 3 vertices",
@@ -393,4 +416,25 @@ pub fn io_import_obj_py(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     out.set_item("o_groups", o_groups)?;
 
     Ok(out.into_py(py))
+}
+
+#[cfg(test)]
+mod relative_index_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_relative_triplets_resolve_at_each_face() {
+        let file =
+            std::env::temp_dir().join(format!("forge3d-relative-{}.obj", std::process::id()));
+        std::fs::write(
+            &file,
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nf -3 -2 -1\nv 10 0 0\nv 11 0 0\nv 10 1 0\nf -3 -2 -1\n",
+        )
+        .unwrap();
+        let imported = import_obj(&file).unwrap();
+        std::fs::remove_file(file).unwrap();
+        assert_eq!(imported.mesh.positions.len(), 6);
+        assert_eq!(imported.mesh.indices, vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(imported.mesh.positions[3], [10.0, 0.0, 0.0]);
+    }
 }

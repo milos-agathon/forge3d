@@ -73,6 +73,28 @@ class ScaleBar:
         """
         if image_width <= 0:
             raise ValueError("image_width must be positive")
+        crs_name = str(getattr(bbox, "crs", "EPSG:4326"))
+        if crs_name.upper() not in {"EPSG:4326", "WGS84", "WGS 84"}:
+            try:
+                from pyproj import CRS
+            except ImportError:
+                try:
+                    from .gis import _crs_metadata
+                    info = _crs_metadata(crs_name)
+                except (ValueError, RuntimeError, ImportError) as exc:
+                    raise ValueError(f"Unknown CRS kind or unit for scale bar: {crs_name}") from exc
+                kind, unit = info["kind"], info["linear_unit_to_meters"]
+            else:
+                try:
+                    crs = CRS.from_user_input(crs_name)
+                except Exception as exc:
+                    raise ValueError(f"Unknown CRS kind or unit for scale bar: {crs_name}") from exc
+                kind = "projected" if crs.is_projected else "geographic" if crs.is_geographic else "unknown"
+                unit = crs.axis_info[0].unit_conversion_factor if crs.is_projected else None
+            if kind == "projected" and not geodesic:
+                return abs(float(bbox.width)) * unit / image_width
+            if kind not in {"geographic", "projected"}:
+                raise ValueError("Scale bar requires a geographic or projected CRS")
         if geodesic:
             endpoints = ((float(bbox.west), float(bbox.center_lat)), (float(bbox.east), float(bbox.center_lat)))
             if str(getattr(bbox, "crs", "EPSG:4326")).upper() not in {"EPSG:4326", "WGS84", "WGS 84"}:
@@ -83,8 +105,8 @@ class ScaleBar:
 
                     transformed = transform_coords(np.asarray(endpoints, dtype=np.float64), str(bbox.crs), "EPSG:4326")
                     endpoints = ((float(transformed[0, 0]), float(transformed[0, 1])), (float(transformed[1, 0]), float(transformed[1, 1])))
-                except Exception:
-                    return abs(float(bbox.width)) / float(image_width)
+                except Exception as exc:
+                    raise ValueError(f"Cannot transform scale-bar CRS to geographic coordinates: {crs_name}") from exc
             try:
                 from pyproj import Geod
 

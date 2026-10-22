@@ -1,0 +1,1 @@
+Generated locally with the existing laz 0.9.3 codec. LAS 1.4, point format 6, 50 compressed points (i,i,i)*0.01 for i=0..49. COPC root page contains an empty root and a page reference; the second page contains an empty depth-1 parent and a depth-2 child carrying all 50 points. No external or private data.

@@ -458,3 +458,16 @@ def test_load_v1_bundle_synthesizes_empty_review_registry(tmp_path: Path):
     assert loaded.scene_state.base.preset["hdr_path"] == str(hdr_path.resolve())
     assert len(loaded.scene_state.base.camera_bookmarks) == 1
     assert loaded.scene_state.base.labels[0]["kind"] == "point"
+
+
+@pytest.mark.parametrize("missing", ["terrain/dem.tif", "scene/state.json", "render/preset.json"])
+def test_checksum_verification_requires_manifest_files(tmp_path, missing):
+    dem = tmp_path / "dem.tif"
+    dem.write_bytes(b"fixture DEM source")
+    path = tmp_path / "integrity.forge3d"
+    save_bundle(path, name="integrity", dem_path=dem, preset={"exposure":1.0})
+    assert load_bundle(path).manifest.name == "integrity"
+    (path / missing).unlink()
+    with pytest.raises(ValueError, match=missing):
+        load_bundle(path)
+    load_bundle(path, verify_checksums=False)

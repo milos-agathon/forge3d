@@ -38,6 +38,8 @@ mod py_bindings;
 
 #[cfg(feature = "extension-module")]
 pub use exact::euclidea_predicate_report_py;
+#[cfg(feature = "extension-module")]
+pub(crate) use extrude::extrude_rings;
 pub use extrude::{extrude_polygon, extrude_polygon_with_options, ExtrudeOptions};
 #[cfg(feature = "extension-module")]
 pub use overlay::euclidea_boolean_fuzz_report_py;

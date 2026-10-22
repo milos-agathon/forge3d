@@ -69,7 +69,7 @@ def _run_mutations(count: int) -> None:
                     "granted": [inputs["capability"].hex()],
                     "naga_capabilities": [inputs["capability"].hex()],
                 },
-            )
+             reference_only=True)
         finally:
             anamnesis.engine_fingerprint = original_engine
         return result.pass_keys[f"{frame}:frame.output"], result.frame_hashes[0]

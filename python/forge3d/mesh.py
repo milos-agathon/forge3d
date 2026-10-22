@@ -370,19 +370,20 @@ def make_mesh(vertices: np.ndarray, indices: np.ndarray) -> Dict[str, Any]:
             "indices must be C-contiguous; use np.ascontiguousarray(indices) to fix."
         )
 
-    # Convert to uint32 if needed
-    if indices.dtype != np.uint32:
-        indices = indices.astype(np.uint32)
-
-    # Validate index ranges
+    # Validate the original values before narrowing: uint64 can wrap to zero.
     vertex_count = len(vertices)
     max_index = np.max(indices) if len(indices) > 0 else 0
+    if indices.size and (np.min(indices) < 0 or max_index > np.iinfo(np.uint32).max):
+        raise RuntimeError("indices must be in the uint32 range (0 to 4294967295)")
 
     if max_index >= vertex_count:
         raise RuntimeError(
             f"indices reference vertex {max_index} but only {vertex_count} vertices exist "
             f"(valid range: 0-{vertex_count-1})"
         )
+
+    if indices.dtype != np.uint32:
+        indices = indices.astype(np.uint32)
 
     triangle_count = len(indices)
 

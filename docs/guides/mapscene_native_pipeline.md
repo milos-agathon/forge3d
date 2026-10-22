@@ -64,7 +64,9 @@ features or a source without an XYZ/depth command stream produce diagnostics.
 The lower-level `TerrainRenderer.render_interactive(material_set, env_maps,
 params, heightmap, water_mask=None, time_seconds=0.0, clouds=None,
 label_batches=None, vector_batches=None, furniture_batches=None,
-point_batches=None, certificate=None)` returns the final `Frame`. Call
+point_batches=None, certificate=None, cache=None)` returns the final `Frame`.
+The native ANAMNESIS cache does not yet serialize the shared-depth HDR graph;
+passing a non-`None` cache raises before rendering. Call
 `interactive_pipeline_info()` for effect enablement, actual stage/resource sizes,
 layer stages, depth convention, history invalidation, fallback models, timestamp
 availability and readback counters. MapScene embeds that data plus the CENSOR

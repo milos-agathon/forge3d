@@ -40,6 +40,35 @@ def test_interactive_native_surface_registered_exported_and_stubbed():
     assert {"render_interactive","interactive_pipeline_info"} <= {node.name for node in renderer.body if isinstance(node,ast.FunctionDef)}
 
 
+def test_interactive_cache_rejects_before_rendering_and_none_renders(tmp_path):
+    require_gpu()
+    from forge3d.determinism import (
+        _canonical_params_config, canonical_heightmap, write_canonical_hdr,
+    )
+
+    hdr_path = tmp_path / "environment.hdr"
+    write_canonical_hdr(str(hdr_path))
+    renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+    inputs = dict(
+        material_set=f3d.MaterialSet.terrain_default(),
+        env_maps=f3d.IBL.from_hdr(str(hdr_path), intensity=1.0),
+        params=f3d.TerrainRenderParams(_canonical_params_config()(64, 64)),
+        heightmap=np.ascontiguousarray(canonical_heightmap(), dtype=np.float32),
+    )
+    before = renderer.interactive_pipeline_info()
+    cache = tmp_path / "native-cache"
+    with pytest.raises(RuntimeError, match="does not yet serialize the shared-depth HDR graph; use cache=None"):
+        renderer.render_interactive(**inputs, cache=cache)
+    assert not cache.exists()
+    assert renderer.interactive_pipeline_info() == before
+    assert renderer.last_anamnesis_cache_report["graph_command_submissions"] == 0
+
+    rgba = renderer.render_interactive(**inputs, cache=None).to_numpy()
+    assert rgba.shape == (64, 64, 4)
+    assert np.any(rgba[..., :3])
+    assert json.loads(renderer.interactive_pipeline_info())["beauty_readbacks"] == 1
+
+
 @pytest.mark.parametrize("effects", [tuple(name for name,on in zip(
     ("ssao","ssgi","ssr","taa","cloud_shadows","volumetrics","height_ao","atmosphere"), flags) if on)
     for flags in itertools.product((False,True),repeat=8) if any(flags[:6])])

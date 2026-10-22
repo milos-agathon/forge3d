@@ -34,9 +34,9 @@ def test_600_frame_incremental_matches_cold_and_recomputes_exact_set(tmp_path):
     modified = copy.deepcopy(original)
     modified["layers"][0]["text"] = "New summit"
 
-    render_sequence(original, cache=warm_store)
-    incremental = render_sequence(modified, cache=warm_store)
-    cold_modified = render_sequence(modified, cache=cold_store)
+    render_sequence(original, cache=warm_store, reference_only=True)
+    incremental = render_sequence(modified, cache=warm_store, reference_only=True)
+    cold_modified = render_sequence(modified, cache=cold_store, reference_only=True)
 
     assert incremental.frame_hashes == cold_modified.frame_hashes
     assert len(incremental.frame_hashes) == 600
@@ -57,7 +57,7 @@ def test_dry_run_predicts_without_writing(tmp_path):
 
 
 def test_explain_reconstructs_recursive_pass_derivation(tmp_path, capsys):
-    result = render_sequence(_recipe("Summit"), frames=[250], cache=tmp_path)
+    result = render_sequence(_recipe("Summit"), frames=[250], cache=tmp_path, reference_only=True)
     key = result.pass_keys["250:frame.output"]
 
     tree = explain(key, tmp_path)
@@ -106,12 +106,12 @@ def test_structured_scheduler_executes_only_changed_passes(tmp_path):
         },
     }
 
-    render_sequence(original, cache=tmp_path / "warm-speed", **options)
+    render_sequence(original, cache=tmp_path / "warm-speed", **options, reference_only=True)
     calls.clear()
-    incremental = render_sequence(modified, cache=tmp_path / "warm-speed", **options)
+    incremental = render_sequence(modified, cache=tmp_path / "warm-speed", **options, reference_only=True)
     incremental_calls = list(calls)
     calls.clear()
-    cold = render_sequence(modified, cache=tmp_path / "cold-speed", **options)
+    cold = render_sequence(modified, cache=tmp_path / "cold-speed", **options, reference_only=True)
 
     assert incremental.frame_hashes == cold.frame_hashes
     assert incremental.prediction_matches
@@ -131,7 +131,7 @@ def test_incremental_elides_unchanged_ancestors_and_batches_lru_touches(
     modified["layers"][0]["text"] = "New summit"
     frames = range(12)
 
-    render_sequence(original, frames=frames, cache=tmp_path, verify_reads=False)
+    render_sequence(original, frames=frames, cache=tmp_path, verify_reads=False, reference_only=True)
     metadata_mtimes = {
         path: path.stat().st_mtime_ns for path in tmp_path.glob("??/*/meta.json")
     }
@@ -148,7 +148,7 @@ def test_incremental_elides_unchanged_ancestors_and_batches_lru_touches(
         frames=frames,
         cache=tmp_path,
         verify_reads=False,
-    )
+     reference_only=True)
 
     # Eleven unchanged terminal frames plus the unchanged accumulation input
     # to the one changed label composite. Shadow/shade ancestors are committed

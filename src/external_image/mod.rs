@@ -55,6 +55,19 @@ pub fn import_image_to_texture(
         )));
     }
 
+    if config.generate_mipmaps {
+        return Err(RenderError::Upload(
+            "External image mipmap generation is unsupported".into(),
+        ));
+    }
+    if !matches!(
+        config.target_format,
+        wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb
+    ) {
+        return Err(RenderError::Upload(
+            "External images require RGBA8 texture format".into(),
+        ));
+    }
     let (rgba_data, width, height, source_format) = decode_image_file(path, &config)?;
 
     if width > config.max_dimension || height > config.max_dimension {
@@ -85,7 +98,7 @@ pub fn import_image_to_texture(
     })
 }
 
-/// Get information about an image file without fully decoding it.
+/// Decode and validate an image file to report its actual dimensions and format.
 pub fn probe_image_info(
     image_path: impl AsRef<Path>,
 ) -> RenderResult<(u32, u32, ImageSourceFormat)> {
@@ -98,33 +111,8 @@ pub fn probe_image_info(
         )));
     }
 
-    let extension = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|s| s.to_lowercase())
-        .ok_or_else(|| RenderError::io("Cannot determine image format from file extension"))?;
-
-    match extension.as_str() {
-        "png" => {
-            let (width, height) = if path
-                .file_name()
-                .unwrap_or_default()
-                .to_str()
-                .unwrap_or("")
-                .contains("large")
-            {
-                (512, 512)
-            } else {
-                (256, 256)
-            };
-            Ok((width, height, ImageSourceFormat::PngRgba))
-        }
-        "jpg" | "jpeg" => Ok((128, 128, ImageSourceFormat::JpegRgb)),
-        _ => Err(RenderError::io(format!(
-            "Unsupported image format: {}",
-            extension
-        ))),
-    }
+    let (_, width, height, format) = decode_image_file(path, &ImageImportConfig::default())?;
+    Ok((width, height, format))
 }
 
 /// Check if external image import is available.
