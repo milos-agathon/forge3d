@@ -86,6 +86,7 @@ pub struct MeshInstancedRenderer {
     pbr_target: (TextureFormat, u32, Option<TextureFormat>),
     pipeline: RenderPipeline,
     shadow_pipeline: Option<RenderPipeline>,
+    shader_label: &'static str,
     uniforms: ScatterBatchUniforms,
     uniforms_buf: TrackedBuffer,
     bind_group: BindGroup,
@@ -162,10 +163,73 @@ impl MeshInstancedRenderer {
         depth_write_enabled: bool,
         shadow_bind_group_layout: Option<&BindGroupLayout>,
     ) -> RenderResult<Self> {
+        Self::new_with_frame_layout(
+            device,
+            color_format,
+            depth_format,
+            sample_count,
+            depth_compare,
+            depth_write_enabled,
+            shadow_bind_group_layout,
+            None,
+        )
+    }
+
+    #[cfg(feature = "extension-module")]
+    pub(crate) fn new_concordia(
+        device: &Device,
+        shadow_layout: &BindGroupLayout,
+        frame_layout: &BindGroupLayout,
+    ) -> RenderResult<Self> {
+        Self::new_with_frame_layout(
+            device,
+            TextureFormat::Rgba16Float,
+            Some(TextureFormat::Depth32Float),
+            1,
+            wgpu::CompareFunction::LessEqual,
+            true,
+            Some(shadow_layout),
+            Some(frame_layout),
+        )
+    }
+
+    fn new_with_frame_layout(
+        device: &Device,
+        color_format: TextureFormat,
+        depth_format: Option<TextureFormat>,
+        sample_count: u32,
+        depth_compare: wgpu::CompareFunction,
+        depth_write_enabled: bool,
+        shadow_bind_group_layout: Option<&BindGroupLayout>,
+        frame_layout: Option<&BindGroupLayout>,
+    ) -> RenderResult<Self> {
+        #[cfg(feature = "extension-module")]
+        let concordia_source;
+        let source = if frame_layout.is_some() {
+            #[cfg(feature = "extension-module")]
+            {
+                concordia_source = crate::terrain::renderer::interactive::shaders::scatter_source()
+                    .map_err(|error| crate::core::error::RenderError::Render(error.to_string()))?;
+                concordia_source.as_str()
+            }
+            #[cfg(not(feature = "extension-module"))]
+            {
+                return Err(crate::core::error::RenderError::Render(
+                    "shared terrain GBuffer requires extension-module".into(),
+                ));
+            }
+        } else {
+            include_str!("../shaders/mesh_instanced.wgsl")
+        };
+        let shader_label = if frame_layout.is_some() {
+            "concordia.scatter.shader"
+        } else {
+            "mesh_instanced_shader"
+        };
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
-            "mesh_instanced_shader",
-            include_str!("../shaders/mesh_instanced.wgsl"),
+            shader_label,
+            source,
         );
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -221,13 +285,30 @@ impl MeshInstancedRenderer {
         let shadow_bind_group =
             Self::create_fallback_shadow_bind_group(device, shadow_bind_group_layout)?;
 
+        let mut layouts = vec![
+            &bind_group_layout,
+            &terrain_bind_group_layout,
+            shadow_bind_group_layout,
+        ];
+        if let Some(frame) = frame_layout {
+            layouts.push(frame);
+        }
+        let targets = if frame_layout.is_some() {
+            crate::core::gbuffer::GBuffer::geometry_targets(color_format).to_vec()
+        } else {
+            vec![Some(ColorTargetState {
+                format: color_format,
+                blend: if color_format == TextureFormat::Rgba32Float {
+                    None
+                } else {
+                    Some(wgpu::BlendState::ALPHA_BLENDING)
+                },
+                write_mask: ColorWrites::ALL,
+            })]
+        };
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("mesh_instanced_pl"),
-            bind_group_layouts: &[
-                &bind_group_layout,
-                &terrain_bind_group_layout,
-                shadow_bind_group_layout,
-            ],
+            bind_group_layouts: &layouts,
             push_constant_ranges: &[],
         });
         let shadow_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -308,16 +389,12 @@ impl MeshInstancedRenderer {
                 },
                 fragment: Some(FragmentState {
                     module: &shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(ColorTargetState {
-                        format: color_format,
-                        blend: if color_format == TextureFormat::Rgba32Float {
-                            None
-                        } else {
-                            Some(wgpu::BlendState::ALPHA_BLENDING)
-                        },
-                        write_mask: ColorWrites::ALL,
-                    })],
+                    entry_point: if frame_layout.is_some() {
+                        "fs_concordia"
+                    } else {
+                        "fs_main"
+                    },
+                    targets: &targets,
                 }),
                 multiview: None,
             },
@@ -468,6 +545,7 @@ impl MeshInstancedRenderer {
             pbr_target: (color_format, sample_count, depth_format),
             pipeline,
             shadow_pipeline,
+            shader_label,
             uniforms,
             uniforms_buf,
             bind_group,
@@ -933,7 +1011,7 @@ impl MeshInstancedRenderer {
             pass.draw_indexed(0..self.index_count, 0, 0..instance_count);
             return;
         }
-        crate::core::shader_registry::record_shader_use("mesh_instanced_shader");
+        crate::core::shader_registry::record_shader_use(self.shader_label);
         // Update uniforms
         queue.write_buffer(&self.uniforms_buf, 0, bytemuck::bytes_of(&self.uniforms));
 
@@ -1061,7 +1139,7 @@ impl MeshInstancedRenderer {
             bytemuck::bytes_of(&u),
         );
 
-        crate::core::shader_registry::record_shader_use("mesh_instanced_shader");
+        crate::core::shader_registry::record_shader_use(self.shader_label);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.shadow_per_draw_bind_groups[slot], &[]);
         pass.set_vertex_buffer(0, vbuf.slice(..));

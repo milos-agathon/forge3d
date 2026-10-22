@@ -15,6 +15,7 @@ pub struct HzbPyramid {
     bgl_down: BindGroupLayout,
     pipe_copy: ComputePipeline,
     pipe_down: ComputePipeline,
+    linear_depth: bool,
 }
 
 pub(crate) struct PreparedHzbTargets {
@@ -26,11 +27,15 @@ pub(crate) struct PreparedHzbTargets {
 
 impl HzbPyramid {
     pub(crate) fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
-        Self::new_with_copy_entry(device, width, height, "cs_copy")
+        Self::new_with_copy_entry(device, width, height, "cs_copy", false)
     }
 
     pub(crate) fn new_max_reduced(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
-        Self::new_with_copy_entry(device, width, height, "cs_copy_max_reduce")
+        Self::new_with_copy_entry(device, width, height, "cs_copy_max_reduce", false)
+    }
+
+    pub(crate) fn new_linear(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
+        Self::new_with_copy_entry(device, width, height, "cs_copy", true)
     }
 
     pub(crate) fn prepare_resize(
@@ -87,14 +92,24 @@ impl HzbPyramid {
         width: u32,
         height: u32,
         copy_entry: &str,
+        linear: bool,
     ) -> RenderResult<Self> {
         let PreparedHzbTargets { tex, mip_count, .. } =
             Self::allocate_targets(device, width, height)?;
 
+        let source = if linear {
+            linear_depth_source()
+        } else {
+            HZB_BUILD_SOURCE.to_owned()
+        };
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
-            "p5.hzb.build.shader",
-            HZB_BUILD_SOURCE,
+            if linear {
+                "concordia.hzb.shader"
+            } else {
+                "p5.hzb.build.shader"
+            },
+            &source,
         );
 
         let bgl_copy = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -104,7 +119,11 @@ impl HzbPyramid {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Depth,
+                        sample_type: if linear {
+                            TextureSampleType::Float { filterable: false }
+                        } else {
+                            TextureSampleType::Depth
+                        },
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -196,6 +215,7 @@ impl HzbPyramid {
             bgl_down,
             pipe_copy,
             pipe_down,
+            linear_depth: linear,
         })
     }
 
@@ -209,7 +229,11 @@ impl HzbPyramid {
         levels: u32,
         reversed_z: bool,
     ) -> RenderResult<()> {
-        crate::core::shader_registry::record_shader_use("p5.hzb.build.shader");
+        crate::core::shader_registry::record_shader_use(if self.linear_depth {
+            "concordia.hzb.shader"
+        } else {
+            "p5.hzb.build.shader"
+        });
         // Copy/reduce depth into HZB level 0.
         let dst0 = self.tex.create_view(&TextureViewDescriptor {
             label: Some("p5.hzb.mip0"),
@@ -334,3 +358,29 @@ impl HzbPyramid {
 #[cfg(test)]
 #[path = "hzb_tests.rs"]
 mod tests;
+
+pub(crate) fn linear_depth_source() -> String {
+    HZB_BUILD_SOURCE
+        .replace(
+            "var depth_in: texture_depth_2d;",
+            "var depth_in: texture_2d<f32>;",
+        )
+        .replace(
+            "textureLoad(depth_in, gid.xy, 0)",
+            "textureLoad(depth_in, gid.xy, 0).r",
+        )
+        .replace(
+            "textureLoad(depth_in, vec2<u32>(x, y), 0)",
+            "textureLoad(depth_in, vec2<u32>(x, y), 0).r",
+        )
+        // Background zero is a miss, not a near-plane occluder. Reduction is
+        // over positive view depth, whose domain extends beyond NDC's [0,1].
+        .replace(
+            "vec4<f32>(depth, 0.0, 0.0, 0.0)",
+            "vec4<f32>(select(depth, 3.402823466e38, depth == 0.0), 0.0, 0.0, 0.0)",
+        )
+        .replace(
+            "select(1.0, 0.0, reversed)",
+            "select(3.402823466e38, 0.0, reversed)",
+        )
+}

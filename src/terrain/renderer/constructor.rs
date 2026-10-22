@@ -539,7 +539,8 @@ impl TerrainScene {
             &device,
             &wgpu::BufferDescriptor {
                 label: Some("orbis.globe.background.uniform"),
-                size: std::mem::size_of::<super::orbis_globe_background::OrbisGlobeUniforms>() as u64,
+                size: std::mem::size_of::<super::orbis_globe_background::OrbisGlobeUniforms>()
+                    as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             },
@@ -552,8 +553,7 @@ impl TerrainScene {
                 1,
                 1,
                 &[9, 24, 31, 255],
-            )
-            ?;
+            )?;
         #[cfg(feature = "enable-globe")]
         let orbis_earth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("orbis.globe.earth-sampler"),
@@ -608,6 +608,10 @@ impl TerrainScene {
         };
 
         Ok(Self {
+            concordia: None,
+            concordia_report: String::new(),
+            concordia_geometry_signature: None,
+            concordia_readbacks: None,
             device,
             queue,
             adapter,
@@ -756,6 +760,8 @@ impl TerrainScene {
             scatter_renderer,
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_renderer_sample_count: 1,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_concordia: false,
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_batches: Vec::new(),
             #[cfg(feature = "enable-gpu-instancing")]

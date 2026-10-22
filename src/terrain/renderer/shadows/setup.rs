@@ -129,6 +129,51 @@ impl TerrainScene {
         heightmap_width: u32,
         heightmap_height: u32,
     ) -> Result<ShadowSetup> {
+        self.prepare_shadow_setup_with_mode(
+            encoder,
+            params,
+            decoded,
+            heightmap_view,
+            height_curve_view,
+            heightmap_width,
+            heightmap_height,
+            false,
+        )
+    }
+
+    pub(in crate::terrain::renderer) fn prepare_interactive_shadow_setup(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
+        heightmap_view: &wgpu::TextureView,
+        height_curve_view: &wgpu::TextureView,
+        heightmap_width: u32,
+        heightmap_height: u32,
+    ) -> Result<ShadowSetup> {
+        self.prepare_shadow_setup_with_mode(
+            encoder,
+            params,
+            decoded,
+            heightmap_view,
+            height_curve_view,
+            heightmap_width,
+            heightmap_height,
+            true,
+        )
+    }
+
+    pub(in crate::terrain::renderer) fn prepare_shadow_setup_with_mode(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
+        heightmap_view: &wgpu::TextureView,
+        height_curve_view: &wgpu::TextureView,
+        heightmap_width: u32,
+        heightmap_height: u32,
+        shared_frame: bool,
+    ) -> Result<ShadowSetup> {
         let phi_rad = params.cam_phi_deg.to_radians();
         let theta_rad = params.cam_theta_deg.to_radians();
         let eye_x = params.cam_target[0] + params.cam_radius * theta_rad.sin() * phi_rad.cos();
@@ -141,7 +186,7 @@ impl TerrainScene {
         let (view_matrix, proj_matrix) =
             if crate::terrain::renderer::is_north_up_camera_mode(&params.camera_mode) {
                 // Fit cascades to the camera that actually renders the frame.
-                let (_, view, proj) = Self::build_camera_matrices(params);
+                let (_, view, proj) = super::super::interactive::camera_matrices(params);
                 (view, proj)
             } else {
                 (
@@ -303,6 +348,7 @@ impl TerrainScene {
                 params.clip.0,
                 shadow_far,
                 height_curve,
+                shared_frame,
             )?;
 
             self.generate_shadow_moments(encoder)?;
@@ -313,7 +359,11 @@ impl TerrainScene {
         };
 
         Ok(ShadowSetup {
-            eye,
+            eye: if shared_frame {
+                super::super::interactive::camera_matrices(params).0
+            } else {
+                eye
+            },
             view_matrix,
             proj_matrix,
             height_exag,

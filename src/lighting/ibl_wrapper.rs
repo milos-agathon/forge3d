@@ -561,3 +561,24 @@ fn downgrade_ibl_quality(quality: crate::core::ibl::IBLQuality) -> crate::core::
         Low => Low,
     }
 }
+
+impl IBL {
+    pub(crate) fn configure_screen_space_environment(
+        &self,
+        device: &wgpu::Device,
+        effects: &mut crate::core::screen_space_effects::ScreenSpaceEffectsManager,
+    ) -> Result<()> {
+        let guard = self
+            .gpu_state
+            .lock()
+            .map_err(|_| anyhow!("IBL GPU state mutex poisoned"))?;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("IBL resources must be prepared before CONCORDIA effects"))?;
+        let (_, environment, _) = state._renderer.textures();
+        let environment =
+            environment.ok_or_else(|| anyhow!("IBL specular environment is unavailable"))?;
+        effects.set_environment_texture(device, environment);
+        Ok(())
+    }
+}

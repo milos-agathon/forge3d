@@ -78,6 +78,14 @@ pub struct GBuffer {
 impl GBuffer {
     /// Create new GBuffer
     pub fn new(device: &Device, config: GBufferConfig) -> RenderResult<Self> {
+        Self::new_with_readback(device, config, false)
+    }
+
+    pub(crate) fn new_with_readback(
+        device: &Device,
+        config: GBufferConfig,
+        readback: bool,
+    ) -> RenderResult<Self> {
         // Create depth texture (single mip; HZB is built into a separate texture)
         let depth_mips = 1u32;
         let depth_texture = tracked_create_texture(
@@ -93,7 +101,13 @@ impl GBuffer {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: config.depth_format,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::RENDER_ATTACHMENT
+                    | if readback {
+                        TextureUsages::COPY_SRC
+                    } else {
+                        TextureUsages::empty()
+                    },
                 view_formats: &[],
             },
         )?;
@@ -188,6 +202,60 @@ impl GBuffer {
             position_view: None,
             config,
         })
+    }
+
+    /// Geometry MRT contract shared by terrain and opaque instanced meshes.
+    /// HDR color + material + normal/roughness + linear depth + velocity uses
+    /// 32 bytes/sample including the aligned layer-kind attachment, within WebGPU's default color-attachment budget.
+    pub(crate) fn geometry_targets(color_format: TextureFormat) -> [Option<ColorTargetState>; 6] {
+        let config = GBufferConfig::default();
+        [
+            color_format,
+            config.material_format,
+            config.normal_format,
+            config.depth_format,
+            config.velocity_format,
+            TextureFormat::R8Uint,
+        ]
+        .map(|format| {
+            Some(ColorTargetState {
+                format,
+                blend: None,
+                write_mask: ColorWrites::ALL,
+            })
+        })
+    }
+
+    pub(crate) fn geometry_attachments<'a>(
+        &'a self,
+        color: &'a TextureView,
+        color_load: LoadOp<Color>,
+        load_geometry: bool,
+        surface_kind: &'a TextureView,
+    ) -> [Option<RenderPassColorAttachment<'a>>; 6] {
+        let attachment = |view, load| {
+            Some(RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: Operations {
+                    load,
+                    store: StoreOp::Store,
+                },
+            })
+        };
+        let geometry_load = if load_geometry {
+            LoadOp::Load
+        } else {
+            LoadOp::Clear(Color::TRANSPARENT)
+        };
+        [
+            attachment(color, color_load),
+            attachment(&self.material_view, geometry_load),
+            attachment(&self.normal_view, geometry_load),
+            attachment(&self.depth_view, geometry_load),
+            attachment(&self.velocity_view, geometry_load),
+            attachment(surface_kind, geometry_load),
+        ]
     }
 
     /// Resize GBuffer

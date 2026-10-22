@@ -1652,6 +1652,23 @@ impl Residency {
         }
     }
 
+    /// Slots available for new requests, after reserving space for pending
+    /// decodes. Touched pages remain pinned, even while the loader is busy.
+    pub(super) fn request_capacity(&self, kind: PageKind, frame: u64, pending: &[u32]) -> usize {
+        let pool = &self.pools[kind as usize];
+        let available = pool
+            .page_in_slot
+            .iter()
+            .zip(&pool.last_used)
+            .filter(|(page, used)| **page == NOT_RESIDENT || **used < frame)
+            .count();
+        let reserved = pending
+            .iter()
+            .filter(|page| self.kind(**page) == kind && self.slot(**page).is_none())
+            .count();
+        available.saturating_sub(reserved)
+    }
+
     /// Give `page` a slot, evicting the least recently used page of the same
     /// kind when the pool is full. Pages used during `frame` are never
     /// evicted: when every slot is pinned by the current frame the working
@@ -2138,6 +2155,30 @@ mod tests {
         // Point pages have no slots in this pool.
         let mut points = Residency::new(vec![PageKind::Points], 1, 0);
         assert_eq!(points.admit(0, 1), None);
+    }
+
+    #[test]
+    fn pending_decodes_reserve_slots_without_evicting_current_frame_pages() {
+        let mut residency = Residency::new(
+            vec![PageKind::Splat, PageKind::Splat, PageKind::Points],
+            2,
+            1,
+        );
+        let pending = [0, 2];
+        assert_eq!(residency.request_capacity(PageKind::Splat, 1, &pending), 1);
+        assert_eq!(residency.request_capacity(PageKind::Points, 1, &pending), 0);
+        residency.admit(1, 1).unwrap();
+        assert_eq!(residency.request_capacity(PageKind::Splat, 1, &pending), 0);
+        assert_eq!(residency.slot(1), Some(0));
+        // An older resident can be reclaimed, but a pending decode still
+        // reserves one slot until it is collected, regardless of I/O speed.
+        assert_eq!(residency.request_capacity(PageKind::Splat, 2, &pending), 1);
+        residency.admit(0, 2).unwrap();
+        assert_eq!(residency.request_capacity(PageKind::Splat, 2, &[2]), 1);
+        residency.touch(1, 2);
+        assert_eq!(residency.request_capacity(PageKind::Splat, 2, &[2]), 0);
+        assert_eq!(residency.stats.evictions, 0);
+        assert_eq!(residency.stats.peak_resident_pages, 2);
     }
 
     #[test]

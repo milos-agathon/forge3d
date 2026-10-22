@@ -3,6 +3,8 @@ use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 pub(in crate::terrain::renderer) struct RenderTargets {
+    pub(in crate::terrain::renderer) concordia:
+        Option<super::super::super::interactive::ConcordiaFrame>,
     pub(in crate::terrain::renderer) internal_texture: Arc<TrackedTexture>,
     pub(in crate::terrain::renderer) internal_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) _msaa_texture: Option<Arc<TrackedTexture>>,
@@ -146,8 +148,8 @@ impl TerrainScene {
             *self
                 .orbis_coverage_pipeline
                 .lock()
-                .map_err(|_| anyhow!("ORBIS coverage pipeline mutex poisoned"))? = Some(
-                Self::create_orbis_coverage_pipeline(
+                .map_err(|_| anyhow!("ORBIS coverage pipeline mutex poisoned"))? =
+                Some(Self::create_orbis_coverage_pipeline(
                     self.device.as_ref(),
                     &self.bind_group_layout,
                     light_buffer.bind_group_layout(),
@@ -157,8 +159,7 @@ impl TerrainScene {
                     &self.water_reflection_bind_group_layout,
                     &self.material_layer_bind_group_layout,
                     self.color_format,
-                ),
-            );
+                ));
         }
         if needs_clipmap
             && effective_msaa == 1
@@ -290,7 +291,10 @@ impl TerrainScene {
 
         #[cfg(feature = "enable-globe")]
         let orbis_coverage_texture = if self.orbis_capture_request.is_some() {
-            anyhow::ensure!(effective_msaa == 1, "ORBIS coverage capture requires one sample");
+            anyhow::ensure!(
+                effective_msaa == 1,
+                "ORBIS coverage capture requires one sample"
+            );
             Some(Arc::new(tracked_create_texture(
                 self.device.as_ref(),
                 &wgpu::TextureDescriptor {
@@ -304,8 +308,7 @@ impl TerrainScene {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::R8Unorm,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::COPY_SRC,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                     view_formats: &[],
                 },
             )?))
@@ -374,6 +377,7 @@ impl TerrainScene {
         assert_msaa_invariants(&invariants, color_format)?;
 
         Ok(RenderTargets {
+            concordia: None,
             internal_texture,
             internal_view,
             _msaa_texture: msaa_texture,

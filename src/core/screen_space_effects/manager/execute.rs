@@ -1,6 +1,26 @@
 use super::*;
 
 impl ScreenSpaceEffectsManager {
+    /// Encode one existing effect at its fixed CONCORDIA stage, preserving the
+    /// manager's enabled set even if pipeline execution fails.
+    pub(crate) fn execute_effect(
+        &mut self,
+        device: &Device,
+        encoder: &mut CommandEncoder,
+        effect: ScreenSpaceEffect,
+        timing: Option<&mut GpuTimingManager>,
+    ) -> RenderResult<()> {
+        if !self.enabled_effects.contains(&effect) {
+            return Err(crate::core::error::RenderError::Render(format!(
+                "requested GPU effect {effect:?} is unavailable"
+            )));
+        }
+        let enabled = std::mem::replace(&mut self.enabled_effects, vec![effect]);
+        let result = self.execute(device, encoder, None, timing);
+        self.enabled_effects = enabled;
+        result
+    }
+
     pub fn execute(
         &mut self,
         device: &Device,

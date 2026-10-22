@@ -52,6 +52,25 @@ pub fn create_fog_resources(
     width: u32,
     height: u32,
 ) -> RenderResult<FogResources> {
+    create_fog_resources_internal(device, width, height, None)
+}
+
+pub(crate) fn create_shared_fog_resources(
+    device: &Arc<Device>,
+    width: u32,
+    height: u32,
+    source: &str,
+    frame_layout: &BindGroupLayout,
+) -> RenderResult<FogResources> {
+    create_fog_resources_internal(device, width, height, Some((source, frame_layout)))
+}
+
+fn create_fog_resources_internal(
+    device: &Arc<Device>,
+    width: u32,
+    height: u32,
+    shared: Option<(&str, &BindGroupLayout)>,
+) -> RenderResult<FogResources> {
     // Fog BGL0: params + camera + depth
     let fog_bgl0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("viewer.fog.bgl0"),
@@ -80,7 +99,9 @@ pub fn create_fog_resources(
                 binding: 2,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    sample_type: wgpu::TextureSampleType::Float {
+                        filterable: shared.is_none(),
+                    },
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
                 },
@@ -196,18 +217,30 @@ pub fn create_fog_resources(
 
     let fog_shader = crate::core::shader_registry::create_labeled_shader_module(
         device,
-        "viewer.fog.shader",
-        include_str!("../../shaders/volumetric.wgsl"),
+        if shared.is_some() {
+            "concordia.froxel.shader"
+        } else {
+            "viewer.fog.shader"
+        },
+        shared
+            .map(|value| value.0)
+            .unwrap_or(include_str!("../../shaders/volumetric.wgsl")),
     );
 
+    let mut raymarch_layouts = vec![&fog_bgl0, &fog_bgl1, &fog_bgl2];
+    let mut froxel_layouts = vec![&fog_bgl0, &fog_bgl1, &fog_bgl2, &fog_bgl3];
+    if let Some((_, frame)) = shared {
+        raymarch_layouts.extend([&fog_bgl3, frame]);
+        froxel_layouts.push(frame);
+    }
     let fog_raymarch_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.fog.raymarch.pl"),
-        bind_group_layouts: &[&fog_bgl0, &fog_bgl1, &fog_bgl2],
+        bind_group_layouts: &raymarch_layouts,
         push_constant_ranges: &[],
     });
     let fog_froxel_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.fog.froxel.pl"),
-        bind_group_layouts: &[&fog_bgl0, &fog_bgl1, &fog_bgl2, &fog_bgl3],
+        bind_group_layouts: &froxel_layouts,
         push_constant_ranges: &[],
     });
 

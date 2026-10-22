@@ -170,7 +170,7 @@ pub(super) fn create_pipelines(
     }
 }
 
-fn sampled_texture_entry(binding: u32) -> BindGroupLayoutEntry {
+pub(super) fn sampled_texture_entry(binding: u32) -> BindGroupLayoutEntry {
     BindGroupLayoutEntry {
         binding,
         visibility: ShaderStages::COMPUTE,
@@ -183,7 +183,7 @@ fn sampled_texture_entry(binding: u32) -> BindGroupLayoutEntry {
     }
 }
 
-fn storage_texture_entry(binding: u32, format: TextureFormat) -> BindGroupLayoutEntry {
+pub(super) fn storage_texture_entry(binding: u32, format: TextureFormat) -> BindGroupLayoutEntry {
     BindGroupLayoutEntry {
         binding,
         visibility: ShaderStages::COMPUTE,
@@ -196,7 +196,7 @@ fn storage_texture_entry(binding: u32, format: TextureFormat) -> BindGroupLayout
     }
 }
 
-fn uniform_entry(binding: u32) -> BindGroupLayoutEntry {
+pub(super) fn uniform_entry(binding: u32) -> BindGroupLayoutEntry {
     BindGroupLayoutEntry {
         binding,
         visibility: ShaderStages::COMPUTE,
@@ -209,7 +209,7 @@ fn uniform_entry(binding: u32) -> BindGroupLayoutEntry {
     }
 }
 
-fn sampler_entry(binding: u32) -> BindGroupLayoutEntry {
+pub(super) fn sampler_entry(binding: u32) -> BindGroupLayoutEntry {
     BindGroupLayoutEntry {
         binding,
         visibility: ShaderStages::COMPUTE,
@@ -218,7 +218,7 @@ fn sampler_entry(binding: u32) -> BindGroupLayoutEntry {
     }
 }
 
-fn create_compute_pipeline(
+pub(super) fn create_compute_pipeline(
     device: &Device,
     label: &str,
     layout: &PipelineLayout,

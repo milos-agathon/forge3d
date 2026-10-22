@@ -3,6 +3,7 @@
 // Draws a fullscreen quad with alpha blending onto the scene color target.
 
 use glam::Mat4;
+use std::sync::Arc;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferDescriptor, BufferUsages,
@@ -63,6 +64,7 @@ pub struct OverlayRenderer {
     pub height_sampler: Sampler,
     // M5: Depth sampler for terrain occlusion
     pub depth_sampler: Sampler,
+    pub(crate) shared_surface_kind: Option<Arc<TextureView>>,
 
     // formats
     pub overlay_format: TextureFormat,
@@ -73,6 +75,22 @@ impl OverlayRenderer {
         device: &Device,
         color_format: TextureFormat,
         height_filterable: bool,
+    ) -> RenderResult<Self> {
+        Self::new_internal(device, color_format, height_filterable, false)
+    }
+
+    pub(crate) fn new_shared_depth(
+        device: &Device,
+        color_format: TextureFormat,
+    ) -> RenderResult<Self> {
+        Self::new_internal(device, color_format, false, true)
+    }
+
+    fn new_internal(
+        device: &Device,
+        color_format: TextureFormat,
+        height_filterable: bool,
+        shared_depth: bool,
     ) -> RenderResult<Self> {
         let uniforms = OverlayUniforms::default();
         let uniform_buffer = tracked_create_buffer(
@@ -145,21 +163,31 @@ impl OverlayRenderer {
                 BindGroupLayoutEntry {
                     binding: 5,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    ty: if shared_depth {
+                        BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: TextureViewDimension::D2,
+                            sample_type: TextureSampleType::Uint,
+                        }
+                    } else {
+                        BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        }
                     },
                     count: None,
                 },
-                // M5: Depth texture for terrain occlusion
+                // Shared GBuffer depth is R32Float, which is not filterable.
                 BindGroupLayoutEntry {
                     binding: 6,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Texture {
                         multisampled: false,
                         view_dimension: TextureViewDimension::D2,
-                        sample_type: TextureSampleType::Float { filterable: true },
+                        sample_type: TextureSampleType::Float {
+                            filterable: !shared_depth,
+                        },
                     },
                     count: None,
                 },
@@ -225,6 +253,28 @@ impl OverlayRenderer {
             },
         )?;
         let dummy_view = dummy_tex.create_view(&TextureViewDescriptor::default());
+        let shared_surface_kind = if shared_depth {
+            let texture = tracked_create_texture(
+                device,
+                &TextureDescriptor {
+                    label: Some("overlay_surface_kind_dummy"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::R8Uint,
+                    usage: TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                },
+            )?;
+            Some(Arc::new(texture.create_view(&Default::default())))
+        } else {
+            None
+        };
 
         // Dummy 1x1 storage buffer for page table when not provided
         let pt_dummy = tracked_create_buffer(
@@ -263,7 +313,10 @@ impl OverlayRenderer {
                 },
                 BindGroupEntry {
                     binding: 5,
-                    resource: pt_dummy.as_entire_binding(),
+                    resource: shared_surface_kind
+                        .as_ref()
+                        .map(|view| wgpu::BindingResource::TextureView(view))
+                        .unwrap_or_else(|| pt_dummy.as_entire_binding()),
                 },
                 // M5: Depth texture is bound at render time; use a dummy view here.
                 BindGroupEntry {
@@ -277,10 +330,19 @@ impl OverlayRenderer {
             ],
         });
 
+        let source = if shared_depth {
+            shared_depth_source()?
+        } else {
+            include_str!("../shaders/overlays.wgsl").to_owned()
+        };
         let module = crate::core::shader_registry::create_labeled_shader_module(
             device,
-            "overlays_shader",
-            include_str!("../shaders/overlays.wgsl"),
+            if shared_depth {
+                "concordia.overlays.shader"
+            } else {
+                "overlays_shader"
+            },
+            &source,
         );
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -329,6 +391,7 @@ impl OverlayRenderer {
             overlay_sampler,
             height_sampler,
             depth_sampler,
+            shared_surface_kind,
             // Contract: the bound overlay texture's storage encoding must match
             // the render target's (unorm target -> unorm texture, srgb target
             // -> srgb texture) so sampled colors pass through overlays.wgsl
@@ -484,7 +547,11 @@ impl OverlayRenderer {
                 },
                 BindGroupEntry {
                     binding: 5,
-                    resource: pt_binding,
+                    resource: self
+                        .shared_surface_kind
+                        .as_ref()
+                        .map(|view| wgpu::BindingResource::TextureView(view))
+                        .unwrap_or(pt_binding),
                 },
                 // M5: Depth texture for terrain occlusion
                 BindGroupEntry {
@@ -521,4 +588,63 @@ impl OverlayRenderer {
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
+}
+
+/// Adapt only missing composition bindings; the authoritative coverage/blend
+/// pass is shared with existing drapes and furniture.
+pub(crate) fn shared_depth_source() -> RenderResult<String> {
+    let mut source = include_str!("../shaders/overlays.wgsl").to_owned();
+    for (before, after) in [
+        (
+            "var<storage, read> PageTable : array<PageTableEntry>;",
+            "var PageTable : texture_2d<u32>;",
+        ),
+        (
+            "arrayLength(&PageTable) > 0u",
+            "textureDimensions(PageTable).x > 0u",
+        ),
+        (
+            "f32(PageTable[0u].slot)",
+            "f32(textureLoad(PageTable, vec2<i32>(0), 0).r)",
+        ),
+    ] {
+        if source.matches(before).count() != 1 {
+            return Err(crate::core::error::RenderError::Render(format!(
+                "overlay surface binding contract missing: {before}"
+            )));
+        }
+        source = source.replacen(before, after, 1);
+    }
+    let begin = source.find("fn is_occluded_by_terrain(").ok_or_else(|| {
+        crate::core::error::RenderError::Render("overlay depth contract missing".into())
+    })?;
+    let end = source[begin..]
+        .find("// M5: Sample overlay")
+        .map(|offset| begin + offset)
+        .ok_or_else(|| {
+            crate::core::error::RenderError::Render("overlay sampling contract missing".into())
+        })?;
+    source.replace_range(begin..end, r#"fn is_occluded_by_terrain(uv: vec2<f32>, unused_depth: f32) -> bool {
+  let dims = textureDimensions(depth_tex);
+  let pixel = min(vec2<u32>(uv * vec2<f32>(dims)), dims - 1u);
+  if (U.depth_params.x < 0.5) { return false; }
+  if (U.depth_params.w > 0.5) {
+    let kind = textureLoad(PageTable, pixel, 0).r;
+    // Ground coverage is authored against the terrain proxy, including ridge
+    // occlusion. Live building/background classification is authoritative:
+    // terrain rounding cannot punch holes or reveal pixels through a wall.
+    return kind != 1u;
+  }
+  let opaque = textureLoad(depth_tex, pixel, 0).r;
+  let authored_dims = textureDimensions(height_tex);
+  let authored = textureLoad(height_tex, min(vec2<u32>(uv * vec2<f32>(authored_dims)), authored_dims-1u), 0).r;
+  let clip = U.view_proj * vec4<f32>(0.0, 0.0, -opaque, 1.0);
+  let ndc = select(1.0, clip.z / clip.w, opaque > 0.0);
+  let rounding = max(abs(ndc), 1.0) * 4.0 * 0.00000011920928955078125;
+  if (opaque <= 0.0) { return false; }
+  return authored > ndc + rounding;
+}
+
+"#);
+    Ok(source)
 }

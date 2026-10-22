@@ -349,6 +349,8 @@ class CloudSettings:
     density: float = 0.5
     shadow_strength: float = 0.35
     quality: str = "medium"
+    shadow_offset_x: float = 0.0
+    shadow_offset_y: float = 0.0
 
     def __post_init__(self) -> None:
         for name in ("coverage", "density", "shadow_strength"):
@@ -356,6 +358,9 @@ class CloudSettings:
                 raise ValueError(f"{name} must be in [0, 1]")
         if str(self.quality) not in {"low", "medium", "high", "ultra"}:
             raise ValueError("quality must be one of: low, medium, high, ultra")
+        for name in ("shadow_offset_x", "shadow_offset_y"):
+            if not math.isfinite(float(getattr(self,name))):
+                raise ValueError(f"{name} must be finite")
 
 
 @dataclass

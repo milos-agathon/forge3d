@@ -103,7 +103,9 @@ def test_mapscene_lighting_settings_reach_terrain_screen_space_params(tmp_path, 
             calls["screen_space"] = config.screen_space
 
     class FakeFrame:
+        size = (64,64)
         def to_numpy(self):
+            calls["reads"] = calls.get("reads",0)+1
             rgba = np.zeros((64, 64, 4), dtype=np.uint8)
             rgba[..., 3] = 255
             return rgba
@@ -112,14 +114,29 @@ def test_mapscene_lighting_settings_reach_terrain_screen_space_params(tmp_path, 
         def __init__(self, _session):
             pass
 
-        def render_terrain_pbr_pom(self, **_kwargs):
+        def render_interactive(self, **kwargs):
+            calls["native_request"] = kwargs
             return FakeFrame()
+
+        def interactive_pipeline_info(self):
+            import json
+            return json.dumps({"backend":"native_concordia", "input_size":[64,64],
+                "output_size":[64,64],"image_readbacks_before_output":0,
+                "beauty_readbacks":calls.get("reads",0)})
 
     monkeypatch.setattr(f3d, "Session", FakeSession)
     monkeypatch.setattr(f3d, "MaterialSet", FakeMaterialSet)
     monkeypatch.setattr(f3d, "IBL", FakeIbl)
     monkeypatch.setattr(f3d, "TerrainRenderParams", FakeParams)
     monkeypatch.setattr(f3d, "TerrainRenderer", FakeTerrainRenderer)
+    from forge3d import _forge3d as native
+    import json
+    monkeypatch.setattr(native, "render_execution_report", lambda: json.dumps({"passes":[
+        {"label":name} for name in ("concordia.ao","concordia.ssr","concordia.temporal")]}))
+    def forbidden(*args, **kwargs):
+        raise AssertionError("parameter forwarding reached the CPU surrogate")
+    monkeypatch.setattr(map_scene,"_apply_mapscene_screen_space",forbidden)
+    monkeypatch.setattr(map_scene,"_apply_mapscene_cloud_shadow",forbidden)
 
     scene.render(str(tmp_path / "screen-space-settings.png"))
 
@@ -135,6 +152,10 @@ def test_mapscene_lighting_settings_reach_terrain_screen_space_params(tmp_path, 
     assert screen_space.temporal_alpha == pytest.approx(0.25)
     assert scene.last_render_metadata["terrain_main_pass_ms"] >= 0.0
     assert scene.last_render_metadata["timing_source"] == "python_perf_counter"
+
+    assert calls["native_request"]["params"] is not None
+    assert calls["reads"] == 1
+    assert scene.last_render_metadata["screen_space_backend"] == "native_concordia"
 
 
 def test_mapscene_screen_space_postfx_modulates_output():
@@ -472,77 +493,22 @@ def test_derive_water_mask_matches_hand_labeled_fixture():
 
 
 def test_mapscene_cloud_shadow_modulates_terrain_output(tmp_path, monkeypatch):
-    scene = f3d.MapScene(
-        terrain=f3d.TerrainSource(
-            data=np.zeros((8, 8), dtype=np.float32),
-            crs="EPSG:32610",
-            metadata={
-                "width": 8,
-                "height": 8,
-                "source_id": "inline-dem",
-                "clouds": {
-                    "enabled": True,
-                    "shadows_enabled": True,
-                    "coverage": 0.7,
-                    "density": 0.5,
-                    "shadow_strength": 0.4,
-                    "quality": "high",
-                    "shadow_offset_x": 0.25,
-                    "shadow_offset_y": 0.10,
-                },
-            },
-        ),
-        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
-        lighting=f3d.LightingPreset(name="daylight"),
-        output=f3d.OutputSpec(width=64, height=64, format="png"),
-    )
-
-    class FakeSession:
-        def __init__(self, *, window=False):
-            pass
-
-    class FakeMaterialSet:
-        @staticmethod
-        def terrain_default():
-            return "material-set"
-
-    class FakeIbl:
-        @staticmethod
-        def from_hdr(_path, intensity=1.0, rotate_deg=0.0, quality="auto"):
-            return "ibl"
-
-    class FakeParams:
-        def __init__(self, _config):
-            pass
-
-    class FakeFrame:
-        def to_numpy(self):
-            rgba = np.full((64, 64, 4), 220, dtype=np.uint8)
-            rgba[..., 3] = 255
-            return rgba
-
-    class FakeTerrainRenderer:
-        def __init__(self, _session):
-            pass
-
-        def render_terrain_pbr_pom(self, **_kwargs):
-            return FakeFrame()
-
-    monkeypatch.setattr(f3d, "Session", FakeSession)
-    monkeypatch.setattr(f3d, "MaterialSet", FakeMaterialSet)
-    monkeypatch.setattr(f3d, "IBL", FakeIbl)
-    monkeypatch.setattr(f3d, "TerrainRenderParams", FakeParams)
-    monkeypatch.setattr(f3d, "TerrainRenderer", FakeTerrainRenderer)
-
-    scene.render(str(tmp_path / "cloud-shadows.png"))
-
-    assert scene.last_render_metadata["cloud_shadow_backend"] == "mapscene_numpy_cloud_shadow"
-    assert scene.last_render_metadata["cloud_shadow_strength"] == pytest.approx(0.4)
-    assert scene.last_render_metadata["cloud_shadow_offset"] == pytest.approx([0.25, 0.10])
-    assert scene.last_validation_report.supported_features["mapscene.cloud_shadows"] == "supported"
-    rendered = f3d.png_to_numpy(str(tmp_path / "cloud-shadows.png"))
-    assert rendered[..., :3].min() < 220
-    assert rendered[..., :3].max() == 220
+    from _concordia_scene import capture, scene
+    settings={"enabled":True,"shadows_enabled":True,"coverage":0.7,"density":0.5,
+        "shadow_strength":0.4,"quality":"high","shadow_offset_x":0.25,"shadow_offset_y":0.10}
+    enabled=scene(effects=("taa","cloud_shadows"),cartography=False,height_ao=False)
+    enabled.recipe.terrain.metadata["clouds"]=settings
+    disabled=scene(effects=("taa",),cartography=False,height_ao=False)
+    def forbidden(*args,**kwargs):
+        raise AssertionError("native cloud rendering called a CPU surrogate")
+    monkeypatch.setattr(map_scene,"_apply_mapscene_cloud_shadow",forbidden)
+    actual,data=capture(enabled)
+    clear,_=capture(disabled)
+    assert actual.metadata["cloud_shadow_backend"] == "native_concordia"
+    assert actual.metadata["cloud_shadow_strength"] == pytest.approx(0.4)
+    assert actual.metadata["cloud_shadow_offset"] == pytest.approx([0.25,0.10])
+    terrain=data["surface_kind"]==1
+    assert np.mean(np.any(actual.rgba[...,:3]!=clear.rgba[...,:3],axis=-1)[terrain]) >= 0.05
 
 
 def test_mapscene_cloud_shadow_offset_changes_pattern():
@@ -710,7 +676,9 @@ def test_mapscene_cloud_settings_reach_terrain_params(tmp_path, monkeypatch):
             calls["clouds"] = config.clouds
 
     class FakeFrame:
+        size=(64,64)
         def to_numpy(self):
+            calls["reads"]=calls.get("reads",0)+1
             rgba = np.zeros((64, 64, 4), dtype=np.uint8)
             rgba[..., 3] = 255
             return rgba
@@ -719,14 +687,26 @@ def test_mapscene_cloud_settings_reach_terrain_params(tmp_path, monkeypatch):
         def __init__(self, _session):
             pass
 
-        def render_terrain_pbr_pom(self, **_kwargs):
+        def render_interactive(self, **kwargs):
+            calls["native_clouds"]=kwargs["clouds"]
             return FakeFrame()
+
+        def interactive_pipeline_info(self):
+            import json
+            cloud=calls["native_clouds"]
+            return json.dumps({"backend":"native_concordia","input_size":[64,64],"output_size":[64,64],
+                "image_readbacks_before_output":0,"beauty_readbacks":calls.get("reads",0),
+                "cloud_parameters":{"coverage":cloud.coverage,"shadow_strength":cloud.shadow_strength,
+                    "offset":[cloud.shadow_offset_x,cloud.shadow_offset_y]}})
 
     monkeypatch.setattr(f3d, "Session", FakeSession)
     monkeypatch.setattr(f3d, "MaterialSet", FakeMaterialSet)
     monkeypatch.setattr(f3d, "IBL", FakeIbl)
     monkeypatch.setattr(f3d, "TerrainRenderParams", FakeParams)
     monkeypatch.setattr(f3d, "TerrainRenderer", FakeTerrainRenderer)
+    import json
+    from forge3d import _forge3d as native
+    monkeypatch.setattr(native,"render_execution_report",lambda: json.dumps({"passes":[{"label":"concordia.cloud_shadows"}]}))
 
     scene.render(str(tmp_path / "cloud-settings.png"))
 
@@ -738,3 +718,6 @@ def test_mapscene_cloud_settings_reach_terrain_params(tmp_path, monkeypatch):
     assert clouds.density == pytest.approx(0.55)
     assert clouds.shadow_strength == pytest.approx(0.4)
     assert clouds.quality == "high"
+
+    assert calls["native_clouds"] == calls["clouds"]
+    assert calls["reads"] == 1
